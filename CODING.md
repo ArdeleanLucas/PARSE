@@ -1,11 +1,14 @@
-# CODING.md — Source Explorer Build Protocol
+# CODING.md — PARSE Build Protocol
 
-> Read this file before ANY code work on source-explorer. Non-negotiable.
+> Read this file before ANY code work on PARSE. Non-negotiable.
 
 ## Project Overview
 
-Build the Source Explorer review tool using parallel `opencode_task` sub-agents.
+**PARSE** — **P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer
 
+Build the PARSE review tool using parallel `opencode_task` sub-agents.
+
+- **Repo**: `TarahAssistant/PARSE` — ALL code pushes go here. No exceptions.
 - **Plan**: `PROJECT_PLAN.md` (full spec, schemas, edge cases)
 - **Interfaces**: `INTERFACES.md` (shared types, events, function signatures — created FIRST)
 - **Lessons**: `tasks/lessons.md` (mistakes to not repeat)
