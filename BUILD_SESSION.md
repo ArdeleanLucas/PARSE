@@ -134,3 +134,72 @@ Final: Full review + test + commit + push
 - **Old modules stay on `window.SourceExplorer`** until Wave 9 migration
 - **Never use Python `wave` module** — use `soundfile`
 - **Never modify `audio/original/`** — working copies only
+
+---
+
+## 🟢 Progress Log — 2026-03-23 Session
+
+**Updated:** 23:10 CET
+
+### Batch 1 Status (Waves 5 + 6 Python)
+
+| Task | File | Status | Notes |
+|------|------|--------|-------|
+| E1 | `js/annotation-store.js` | ⏳ Running (iter 4/5) | Retry after AbortError failures |
+| E2 | `js/annotation-panel.js` | ✅ Done | IPA/ortho/concept UI, RTL ortho field |
+| E3 | `js/project-config.js` | ✅ Done | project.json loader, validation, video-sync-locked save |
+| E4 | `python/generate_peaks.py` | ✅ Done | Full soundfile rewrite, stereo→mono, chunked, MP3 fallback |
+| E5 | `python/normalize_audio.py` | ✅ Done | Two-pass loudnorm, mtime skip, all formats, ffmpeg path resolution |
+| F1 | `python/textgrid_io.py` | ✅ Done | Long+short read, long write, bidirectional roundtrip tested |
+| F2 | `python/elan_export.py` | ✅ Done | ELAN XML, deduped time slots, UTF-8 XML escaping |
+| F3 | `python/csv_export.py` | ✅ Done | Single/all-speakers, UTF-8 BOM, overlap join |
+
+### Batch 2 Status (Wave 6 JS + Wave 7)
+
+| Task | File | Status | Notes |
+|------|------|--------|-------|
+| F4 | `js/import-export.js` | ✅ Done | TextGrid import UI, per-speaker + all-speaker exports, io-complete toast |
+| G1 | `python/video_sync.py` | ⏳ Finalizing | FFT cross-correlation, drift detection, scipy/numpy fallback |
+| G2 | `python/video_clip_extract.py` | ✅ Done | Drift-corrected mapping, dry-run mode, ffprobe bounds check |
+| G3 | `js/video-sync-panel.js` | ✅ Done | 🔴🟡🟢 status indicator, polling flow, lock event |
+
+### Remaining (Next Session)
+
+| Wave | Task | File | Notes |
+|------|------|------|-------|
+| 8 | H1 | `js/onboarding.js` | Project setup wizard (depends on E3 project-config) |
+| 8 | H2 | `review_tool_dev.html` | Add DOM containers for all new v4.0 modules, load new script tags |
+| 8 | H3 | `start_parse.sh` | macOS/Linux launcher (trivial, can do manually) |
+| 8 | H4 | `LICENSE` | MIT (trivial, can do manually) |
+| 9 | I1 | All existing JS | Migrate `window.SourceExplorer` → `window.PARSE`, `se:` → `parse:`, `se-` → `parse-` IDs |
+| 9 | I2 | `js/region-manager.js` | Wire "Assign" button into `parse:annotation-save` flow |
+| 9 | I3 | `js/parse.js` | Wire annotation-panel into panel open/close lifecycle |
+| 9 | I4 | `python/generate_ai_suggestions.py` | Add OpenAI/Ollama provider abstraction |
+
+### Post-Build Checklist (Next Session)
+
+- [ ] `python3 -m py_compile python/*.py`
+- [ ] `node --check js/*.js`
+- [ ] Annotation save/load round-trip test
+- [ ] TextGrid export opens in Praat
+- [ ] `git diff --staged` → review → commit → push to `TarahAssistant/PARSE`
+- [ ] Update `tasks/lessons.md`
+- [ ] Update `memory/2026-03-23.md`
+
+### Session Summary (2026-03-23)
+
+**Built tonight:** 13 new files across Waves 5, 6, and 7
+- `js/annotation-store.js` — annotation data model, persistence, TextGrid/ELAN/CSV/segments export
+- `js/annotation-panel.js` — IPA/ortho/concept UI fields, save/delete, RTL ortho
+- `js/project-config.js` — project.json loader, schema validation, video sync save-back
+- `js/import-export.js` — TextGrid import modal, per-speaker + all-speaker export buttons
+- `js/video-sync-panel.js` — video sync UI, polling flow, 🔴🟡🟢 status, lock
+- `python/generate_peaks.py` — full soundfile rewrite (was wave module)
+- `python/normalize_audio.py` — two-pass ffmpeg loudnorm, mtime skip, all formats
+- `python/textgrid_io.py` — bidirectional Praat TextGrid I/O, long+short read
+- `python/elan_export.py` — ELAN XML .eaf export, deduped time slots
+- `python/csv_export.py` — flat CSV, UTF-8 BOM, overlap join
+- `python/video_sync.py` — FFT cross-correlation, drift detection *(finalizing)*
+- `python/video_clip_extract.py` — drift-corrected clip extraction via ffmpeg
+
+**Blocked pattern:** `opencode_task` hits AbortError in iter 1-2 consistently; workaround = spawn via `sessions_spawn` with `gpt54` model when opencode fails repeatedly.
