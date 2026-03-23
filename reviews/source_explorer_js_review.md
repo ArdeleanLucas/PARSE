@@ -1,4 +1,4 @@
-# Review — `js/source-explorer.js`
+# Review — `js/parse.js`
 
 ## Overall
 

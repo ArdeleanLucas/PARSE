@@ -9,7 +9,7 @@ A browser-based audio review tool for a Southern Kurdish phonetic thesis. It let
 ## Project Structure
 
 ```
-source-explorer/
+parse/
 ├── AGENTS.md              ← you are here
 ├── INTERFACES.md          ← shared types, events, function signatures (READ THIS FIRST)
 ├── PROJECT_PLAN.md        ← architecture, schemas, UI design
@@ -21,7 +21,7 @@ source-explorer/
 │   ├── generate_ai_suggestions.py
 │   └── batch_reextract.py
 ├── js/                    ← browser modules (loaded by HTML)
-│   ├── source-explorer.js       ← panel orchestrator, singleton
+│   ├── parse.js                 ← panel orchestrator, singleton
 │   ├── waveform-controller.js   ← wavesurfer v7, MediaElement + peaks
 │   ├── spectrogram-worker.js    ← Web Worker FFT
 │   ├── transcript-panel.js      ← virtualized list, search, click-to-seek

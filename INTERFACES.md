@@ -16,7 +16,7 @@ window.SourceExplorer = {
 
   // Module references (set by each module's init())
   modules: {
-    panel: null,          // source-explorer.js
+    panel: null,          // parse.js
     waveform: null,       // waveform-controller.js
     transcript: null,     // transcript-panel.js
     suggestions: null,    // suggestions-panel.js
@@ -37,12 +37,12 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 
 ```js
 // Open source explorer for a speaker + concept
-// Fired by: source-explorer.js (when 🔍 button clicked)
+// Fired by: parse.js (when 🔍 button clicked)
 // Listened by: waveform-controller, transcript-panel, suggestions-panel, region-manager
 "se:panel-open" → { speaker: string, conceptId: string, sourceWav: string, lexiconStartSec: number }
 
 // Close source explorer
-// Fired by: source-explorer.js (singleton close, or user collapse)
+// Fired by: parse.js (singleton close, or user collapse)
 // Listened by: all modules (cleanup)
 "se:panel-close" → { speaker: string }
 ```
@@ -76,7 +76,7 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 
 // Region assigned to current concept
 // Fired by: region-manager (when "Assign" button clicked)
-// Listened by: source-explorer.js (update form row indicator)
+// Listened by: parse.js (update form row indicator)
 "se:region-assigned" → { speaker: string, conceptId: string, startSec: number, endSec: number, sourceWav: string, aiSuggestionUsed?: number, aiSuggestionConfidence?: string, aiSuggestionScore?: number }
 ```
 
@@ -108,12 +108,12 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 ```js
 // Toggle fullscreen mode
 // Fired by: fullscreen-mode.js (button or Escape)
-// Listened by: source-explorer.js (reparent panel into overlay)
+// Listened by: parse.js (reparent panel into overlay)
 "se:fullscreen-toggle" → { active: boolean }
 
 // Navigate to next/prev missing concept (within fullscreen)
 // Fired by: fullscreen-mode.js (prev/next buttons)
-// Listened by: source-explorer.js (close current, open next)
+// Listened by: parse.js (close current, open next)
 "se:navigate-concept" → { direction: "prev" | "next", missingOnly: boolean }
 ```
 
@@ -153,7 +153,7 @@ The HTML shell provides these container elements:
 
 ```html
 <div id="se-panel" class="se-panel hidden">
-  <!-- source-explorer.js manages this wrapper -->
+  <!-- parse.js manages this wrapper -->
   <div id="se-header"></div>
   <div id="se-priors"></div>           <!-- suggestions-panel: speaker selector -->
   <div id="se-suggestions"></div>      <!-- suggestions-panel: suggestion cards -->

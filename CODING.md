@@ -15,10 +15,10 @@ Build the PARSE review tool using parallel `opencode_task` sub-agents.
 
 ## Project Directory
 
-All build output goes to: `/home/lucas/.openclaw/workspace/source-explorer/`
+All build output goes to: `/home/lucas/.openclaw/workspace/parse/`
 
 ```
-source-explorer/
+parse/
 ├── CODING.md                  ← you are here
 ├── INTERFACES.md              ← shared types, function sigs, events (created FIRST)
 ├── PROJECT_PLAN.md            ← full spec
@@ -30,7 +30,7 @@ source-explorer/
 │   ├── generate_ai_suggestions.py
 │   └── batch_reextract.py
 ├── js/                        ← JS modules (loaded by HTML)
-│   ├── source-explorer.js     ← panel orchestrator, singleton, state persistence
+│   ├── parse.js               ← panel orchestrator, singleton, state persistence
 │   ├── waveform-controller.js ← wavesurfer init, MediaElement + peaks, nav controls
 │   ├── transcript-panel.js    ← virtualized list, search, click-to-seek, highlight
 │   ├── suggestions-panel.js   ← AI suggestions, positional prior selector, re-ranking
@@ -76,7 +76,7 @@ Each task prompt MUST include:
 
 | Stream | Task | Output Files | Notes |
 |--------|------|--------------|-------|
-| **B1** | JS: panel orchestrator | `js/source-explorer.js` | Singleton logic, open/close, localStorage |
+| **B1** | JS: panel orchestrator | `js/parse.js` | Singleton logic, open/close, localStorage |
 | **B2** | JS: waveform controller | `js/waveform-controller.js` | wavesurfer v7, MediaElement, peaks, AbortController |
 | **B3** | JS: spectrogram worker | `js/spectrogram-worker.js` | Web Worker, FFT, ≤30s cap, greyscale |
 
@@ -145,13 +145,13 @@ Each `opencode_task` prompt includes:
 
 - **Python scripts** — written in sandbox, **executed on Lucas's Windows machine** (they need access to `C:\Users\Lucas\Thesis\`)
 - **JS modules + HTML** — written in sandbox, **deployed to `C:\Users\Lucas\Thesis\`** for dev server
-- **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/source-explorer/`
+- **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/parse/`
 
 ## Post-Build Checklist
 
 After all waves complete:
 1. Review each file for interface compliance
 2. Test HTML shell loads all modules without console errors
-3. Copy entire `source-explorer/` to Lucas's Windows machine
+3. Copy entire `parse/` to Lucas's Windows machine
 4. Run `thesis_server.py` + open `review_tool_dev.html` in Chrome
 5. Verify: waveform loads, transcript renders, suggestions appear, regions work

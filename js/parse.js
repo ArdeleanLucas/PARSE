@@ -1,5 +1,5 @@
 /**
- * source-explorer.js — Source Explorer Panel Orchestrator
+ * parse.js — Source Explorer Panel Orchestrator
  *
  * Singleton panel manager for the Source Explorer feature.
  * Attaches to window.SourceExplorer.modules.panel.

@@ -1,764 +1,868 @@
-# Source Explorer — Detailed Build Plan
+# PARSE — Phonetic Analysis & Review Source Explorer
 
-**Version:** 2.0  
-**Date:** 2026-03-23  
-**Status:** Planning  
-**Author:** Dr-Kurd Agent  
-**Changelog:** v2.0 — incorporated sub-agent review feedback (wavesurfer backend fix, timeline recalibration, schema gaps, fuzzy matching tightening, UX improvements)
+**Version:** 4.0
+**Date:** 2026-03-23
+**Status:** Architecture Redesign — Timestamp-Centric Model
+**License:** MIT
+**Repo:** `TarahAssistant/PARSE`
 
----
-
-## 1. Problem Statement
-
-The current Review Tool (RT) v4.3 plays pre-cut `.wav` segments per concept × speaker. This works for clean data but fails for:
-
-1. **Multi-iteration segments** — file contains several repetitions of the word; reviewer needs to pick the cleanest one (e.g., Fail01 "one", Khan03 "one" with 3+ repetitions)
-2. **Bad cuts** — segment straddles two iterations with no complete word (e.g., Khan01 "one" — half of iteration 1 + half of iteration 2)
-3. **Missing data** — speaker has `?` for a concept, but the word may exist somewhere in the source recording and was just missed by the pipeline (e.g., Fail02: 71/82 missing, Khan04: 81/82 missing)
-4. **Noisy ortho transcriptions** — Whisper repetition artefacts like "ژ ژ ژ ژ ژ" make text unreliable
-5. **Context switching** — manually opening Audacity/Praat per speaker per concept is extremely time-consuming
-
-### Missing data scale
-
-| Speaker | Missing / Total | Source WAVs available |
-|---------|-----------------|----------------------|
-| Fail01  | 6 / 82          | Faili_M_1984.wav |
-| Fail02  | 71 / 82         | SK_Faili_F_1968.wav |
-| Kalh01  | 2 / 82          | Kalh_M_1981.wav |
-| Khan01  | 9 / 82          | REC00002.wav (primary), 2023043001.wav, 20230502_khanaqini_01_02.wav |
-| Khan02  | 1 / 82          | khanaqini_F_1967.wav |
-| Khan03  | 6 / 82          | C0401_audio.wav, C0402_audio.wav, C0403_audio.wav |
-| Khan04  | 81 / 82         | Khanaqin_F_2000.wav |
-| Mand01  | 0 / 82          | Mandali_M_1900_01.wav |
-| Qasr01  | 0 / 82          | Qasrashirin_M_1973.wav |
-| Saha01  | 0 / 82          | Sahana_F_1978.wav |
+**Changelog:**
+- v4.0 — Major architecture redesign: timestamps as core data model, 4-tier Praat-compatible annotations, TextGrid/ELAN/CSV import/export, video sync infrastructure, project config abstraction, AI provider abstraction, onboarding flow, SIL language codes
+- v3.0 — Build complete (14 files), environment inventory, Audio_Working pipeline
+- v2.0 — Wavesurfer backend fix, timeline recalibration, fuzzy matching tightening
 
 ---
 
-## 2. Goals
+## 1. Vision
 
-1. **Eliminate Praat/Audacity context-switching** — all audio review happens inside the RT
-2. **Enable region selection** — reviewer can trim, re-cut, and re-assign segments from within the UI
-3. **AI-assisted concept finding** — for missing/broken items, suggest timestamps where the target word likely occurs based on coarse transcript matching
-4. **Source audio browsing** — waveform + spectrogram + transcript timeline for full source recordings
-5. **Export corrected boundaries** — output JSON of reviewer's trim decisions for batch re-extraction
+PARSE is a browser-based phonetic review tool for linguists working with audio recordings of word lists, interviews, or elicitation sessions. It replaces the Praat/Audacity ↔ spreadsheet workflow with an integrated environment for:
+
+- Browsing full source recordings with waveform + spectrogram + transcript
+- AI-assisted location of target words in long recordings
+- Precise time-stamped segmentation with IPA, orthography, and concept annotations
+- Praat TextGrid / ELAN XML interoperability
+- Video synchronization for recordings with accompanying video
+- Batch export of annotated segments for further analysis
+
+**Design principles:**
+- **Timestamps are the bible** — every annotation is anchored to precise start/end times in the source audio. All downstream operations (Praat export, video clips, segment extraction) derive from timestamps.
+- **Local-first** — all audio processing stays on-machine. No data leaves without explicit user action.
+- **AI-optional** — core functionality works fully offline. AI features (fuzzy matching, video sync refinement) enhance the experience but are not required.
+- **Cross-platform** — runs on Windows, macOS, Linux. No hardcoded paths.
+- **Interoperable** — Praat TextGrid, ELAN XML, and CSV are first-class formats.
 
 ---
 
-## 3. Architecture
+## 2. Problem Statement
 
-### 3.1 Hosting
+Phonetic fieldwork typically produces long recordings (30–200 min) containing embedded word lists. Extracting, segmenting, and annotating individual lexical items requires:
 
-- **Dev RT** — local Python server on `C:\Users\Lucas\Thesis\`, port 8766
-- **Final RT** — GitHub Pages (gh-pages branch), uses only pre-cut corrected segments
-- Source Explorer features are **dev-only** (require local server for source WAV access)
+1. Loading each recording in Praat/Audacity
+2. Manually navigating to each word
+3. Setting boundaries, transcribing IPA and orthography
+4. Exporting segments and annotations separately
 
-### 3.2 File Layout
+For a 10-speaker, 82-concept dataset, this means ~820 manual lookups across ~15 hours of audio. PARSE reduces this to a guided, AI-assisted workflow with persistent annotations and batch export.
 
-```
-C:\Users\Lucas\Thesis\
-├── Audio_Original/                        ← source WAVs (served via HTTP range requests)
-│   ├── Fail01/Faili_M_1984.wav           (varies, 30-200 min each)
-│   ├── Fail02/SK_Faili_F_1968.wav
-│   ├── Kalh01/Kalh_M_1981.wav
-│   ├── Khan01_missing/REC00002.wav       (primary for Khan01)
-│   ├── Khan02_missing/khanaqini_F_1967.wav
-│   ├── Khan03_missing/C0401_audio.wav    (+ C0402, C0403)
-│   ├── Khan04_missing/Khanaqin_F_2000.wav
-│   ├── Mand01/Mandali_M_1900_01.wav
-│   ├── Qasr01/Qasrashirin_M_1973.wav
-│   └── Saha01/Sahana_F_1978.wav
-│
-├── Audio_Processed/                       ← pre-cut segments (existing)
-│   ├── Fail01_process/segments/*.wav
-│   ├── ...
-│
-├── peaks/                                 ← pre-generated waveform peaks (NEW)
-│   ├── Fail01.json
-│   ├── Fail02.json
-│   ├── ...
-│   └── Saha01.json
-│
-├── source_index.json                      ← speaker→WAV mapping, offsets, metadata
-├── coarse_transcripts/                    ← per-speaker transcript JSONs
-│   ├── Fail01.json
-│   ├── ...
-│   └── Saha01.json
-├── ai_suggestions.json                    ← pre-computed concept→speaker candidates
-├── review_data.json                       ← existing (v4)
-├── review_tool_dev.html                   ← dev version with source explorer
-├── review_tool.html                       ← production version (no source explorer)
-├── thesis_server.py                       ← range-request-capable server (NEW)
-└── Start Review Tool.bat                  ← upgraded server script
-```
+### Current thesis dataset
 
-### 3.3 Data Files to Generate
+| Speaker | Missing / Total | Source WAVs |
+|---------|-----------------|-------------|
+| Fail01 | 6 / 82 | Faili_M_1984.wav |
+| Fail02 | 71 / 82 | SK_Faili_F_1968.wav |
+| Kalh01 | 2 / 82 | Kalh_M_1981.wav |
+| Khan01 | 9 / 82 | REC00002.wav + 2 alternates |
+| Khan02 | 1 / 82 | khanaqini_F_1967.wav |
+| Khan03 | 6 / 82 | C0401_audio.wav + 2 alternates |
+| Khan04 | 81 / 82 | Khanaqin_F_2000.wav |
+| Mand01 | 0 / 82 | Mandali_M_1900_01.wav |
+| Qasr01 | 0 / 82 | Qasrashirin_M_1973.wav |
+| Saha01 | 0 / 82 | Sahana_F_1978.wav |
 
-#### `source_index.json`
+---
 
-Maps each speaker to their source WAV(s), metadata, and peaks file.
+## 3. Core Data Model — Timestamp Annotations
+
+### 3.1 The Annotation Layer
+
+Every piece of data in PARSE is anchored to a **time-stamped segment** in a source audio file. This is the primary data structure — not a navigation aid, not metadata. The annotation layer is a Praat TextGrid equivalent stored as JSON internally, with full bidirectional TextGrid import/export.
 
 ```json
 {
+  "version": 1,
+  "project_id": "sk-thesis-2026",
+  "speaker": "Fail01",
+  "source_audio": "audio/working/Fail01/Faili_M_1984.wav",
+  "source_audio_duration_sec": 7200.0,
+  "tiers": {
+    "ipa": {
+      "type": "interval",
+      "display_order": 1,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "jek" },
+        { "start": 541.1, "end": 541.8, "text": "dɪ" }
+      ]
+    },
+    "ortho": {
+      "type": "interval",
+      "display_order": 2,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "یەک" },
+        { "start": 541.1, "end": 541.8, "text": "دی" }
+      ]
+    },
+    "concept": {
+      "type": "interval",
+      "display_order": 3,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "1:one" },
+        { "start": 541.1, "end": 541.8, "text": "2:two" }
+      ]
+    },
+    "speaker": {
+      "type": "interval",
+      "display_order": 4,
+      "intervals": [
+        { "start": 0, "end": 7200.0, "text": "Fail01" }
+      ]
+    }
+  },
+  "metadata": {
+    "language_code": "sdh",
+    "language_name": "Southern Kurdish",
+    "contact_languages": ["fa", "ar", "ckb"],
+    "created": "2026-03-23T21:00:00Z",
+    "modified": "2026-03-23T22:00:00Z"
+  }
+}
+```
+
+### 3.2 Tier Structure (Praat-compatible)
+
+Displayed from top (closest to spectrogram) to bottom:
+
+| Tier | Name | Content | Example |
+|------|------|---------|---------|
+| 1 (top) | `ipa` | IPA transcription | `jek` |
+| 2 | `ortho` | Orthographic form (native script) | `یەک` |
+| 3 | `concept` | Concept ID + English gloss | `1:one` |
+| 4 (bottom) | `speaker` | Speaker ID | `Fail01` |
+
+All four tiers share the same time boundaries for each annotated segment. The speaker tier spans the entire recording as a single interval.
+
+Users can add custom tiers if needed (e.g., `notes`, `morpheme_break`).
+
+### 3.3 File Persistence
+
+Annotations are saved as **JSON files on disk** alongside the project, not in localStorage.
+
+```
+<project_root>/
+  annotations/
+    Fail01.parse.json      ← annotation file per speaker
+    Fail02.parse.json
+    ...
+```
+
+Autosave on every edit. Manual "Save" button also available. localStorage used only as a crash-recovery backup.
+
+### 3.4 Annotation Workflow
+
+1. User opens a speaker in PARSE
+2. Waveform + spectrogram + coarse transcript load
+3. AI suggestions highlight candidate timestamps for each concept
+4. User clicks a suggestion → region created at that timestamp
+5. User adjusts region boundaries by dragging handles
+6. User enters/confirms IPA, orthography, concept in the annotation fields
+7. **Timestamp + all tier data saved atomically** — the segment exists only when saved
+8. Repeat for all concepts × speakers
+
+---
+
+## 4. Project Configuration
+
+### 4.1 `project.json`
+
+Every PARSE project has a configuration file at its root. This decouples PARSE from any specific data layout.
+
+```json
+{
+  "parse_version": "1.0",
+  "project_id": "sk-thesis-2026",
+  "project_name": "Southern Kurdish Bayesian Phylogenetics",
+  "language": {
+    "code": "sdh",
+    "name": "Southern Kurdish",
+    "script": "Arabic",
+    "contact_languages": ["fa", "ar", "ckb"]
+  },
+  "paths": {
+    "audio_original": "audio/original",
+    "audio_working": "audio/working",
+    "annotations": "annotations",
+    "exports": "exports",
+    "peaks": "peaks",
+    "transcripts": "transcripts"
+  },
+  "concepts": {
+    "source": "concepts.csv",
+    "id_column": "concept_id",
+    "label_column": "english",
+    "total": 82
+  },
   "speakers": {
     "Fail01": {
-      "source_wavs": [
+      "source_files": [
         {
-          "filename": "Audio_Original/Fail01/Faili_M_1984.wav",
-          "duration_sec": 7200.0,
-          "file_size_bytes": 635000000,
-          "bit_depth": 16,
-          "sample_rate": 44100,
-          "channels": 1,
-          "lexicon_start_sec": 506,
-          "is_primary": true
+          "filename": "Faili_M_1984.wav",
+          "is_primary": true,
+          "lexicon_start_sec": 506
         }
       ],
-      "peaks_file": "peaks/Fail01.json",
-      "transcript_file": "coarse_transcripts/Fail01.json",
-      "has_csv": true,
-      "notes": "offset_sec and lexicon_start_sec are identical for this speaker"
+      "video_files": [],
+      "has_csv_timestamps": true,
+      "notes": ""
     },
     "Khan01": {
-      "source_wavs": [
+      "source_files": [
         {
-          "filename": "Audio_Original/Khan01_missing/REC00002.wav",
-          "duration_sec": 8580.0,
-          "file_size_bytes": 757000000,
-          "bit_depth": 16,
-          "sample_rate": 44100,
-          "channels": 1,
-          "lexicon_start_sec": 1270,
-          "is_primary": true
+          "filename": "REC00002.wav",
+          "is_primary": true,
+          "lexicon_start_sec": 1270
         },
         {
-          "filename": "Audio_Original/Khan01_missing/2023043001.wav",
-          "duration_sec": 5220.0,
-          "file_size_bytes": 461000000,
-          "bit_depth": 16,
-          "sample_rate": 44100,
-          "channels": 1,
-          "lexicon_start_sec": 1034,
-          "is_primary": false
+          "filename": "2023043001.wav",
+          "is_primary": false,
+          "lexicon_start_sec": 1034
         }
       ],
-      "peaks_file": "peaks/Khan01_REC00002.json",
-      "transcript_file": "coarse_transcripts/Khan01_REC00002.json",
-      "has_csv": true
-    },
-    "Khan03": {
-      "source_wavs": [
+      "video_files": [
         {
-          "filename": "Audio_Original/Khan03_missing/C0401_audio.wav",
-          "duration_sec": 6241.0,
-          "file_size_bytes": 551000000,
-          "bit_depth": 16,
-          "sample_rate": 44100,
-          "channels": 1,
-          "lexicon_start_sec": 465,
-          "is_primary": true
+          "filename": "Khan01_session.mp4",
+          "fps": 60,
+          "sync_status": "unsynced"
         }
       ],
-      "peaks_file": "peaks/Khan03.json",
-      "transcript_file": "coarse_transcripts/Khan03.json",
-      "has_csv": false,
-      "notes": "No CSV — positional prior unavailable. Use Khan01/Khan02 JBIL sequence as reference."
+      "has_csv_timestamps": true
     }
+  },
+  "ai": {
+    "enabled": false,
+    "provider": null,
+    "model": null
+  },
+  "server": {
+    "port": 8766,
+    "host": "0.0.0.0"
   }
 }
 ```
 
-**Schema notes:**
-- `lexicon_start_sec` = where the JBIL word list begins in the recording. For most speakers this equals the previously tracked "offset_sec" (merged into single field for clarity).
-- `bit_depth`, `sample_rate`, `channels` — populated by `ffprobe` during data prep. Any 24-bit or 32-bit float files must be transcoded to 16-bit PCM before use (browser `decodeAudioData()` may silently fail on non-16-bit WAVs).
-- `file_size_bytes` — used by client to warn about long decode times before loading.
+### 4.2 Language Codes
 
-#### `peaks/<Speaker>.json`
+PARSE uses **SIL ISO 639-3** language codes. On setup, the user selects their target language from SIL's registry. The code is stored in `project.json` and used for:
 
-Pre-generated waveform peaks for wavesurfer.js MediaElement backend. Generated by Python script using `wave` + `numpy` (or `audiowaveform` CLI).
+- Whisper language parameter selection
+- AI prompt context ("You are a [language_name] linguistics expert")
+- Future: automated cognate lookup from Wiktionary/Wikipedia
 
-```json
-{
-  "version": 2,
-  "channels": 1,
-  "sample_rate": 44100,
-  "samples_per_pixel": 441,
-  "bits": 16,
-  "length": 16326,
-  "data": [0.0, 0.12, -0.05, 0.34, ...]
-}
+Contact languages (languages that may influence the target) are also stored for AI matching context.
+
+### 4.3 Onboarding Flow
+
+New project setup wizard:
+
+1. **Name your project** → `project_id`, `project_name`
+2. **Select target language** → SIL code picker with search
+3. **Select contact languages** → multi-select from common regional languages
+4. **Add audio files** → file browser, drag-drop, or folder select
+   - User chooses source directory (originals)
+   - User chooses working directory (normalized copies will go here)
+   - PARSE normalizes: 16-bit PCM mono, -16 LUFS, 44.1kHz
+5. **Add speakers** → name each speaker, assign audio files
+6. **Import concepts** → CSV upload or manual entry
+7. **Configure AI (optional)** → select provider, enter API key, test connection
+8. **Generate data** → peaks, coarse transcripts (if Whisper available), AI suggestions
+9. **Done** → project ready for annotation
+
+---
+
+## 5. Audio Format Support
+
+PARSE must handle all common field recording formats without requiring manual conversion.
+
+### 5.1 Supported Input Formats
+
+| Format | Container | Bit Depth | Notes |
+|--------|-----------|-----------|-------|
+| PCM WAV | RIFF | 16-bit | Standard |
+| PCM WAV | RIFF | 24-bit | Common in pro recorders |
+| Float WAV | RIFF (tag 3) | 32-bit | Common in DAWs |
+| PCM WAV | RF64/BWF | Any | Large files (>4GB) |
+| MP3 | MPEG | N/A | Compressed field recordings |
+| FLAC | FLAC | Any | Lossless compressed |
+| M4A/AAC | MP4 | N/A | Phone recordings |
+
+### 5.2 Audio Processing Pipeline
+
+**Python `soundfile` library** (not `wave`) for reading — handles all formats above natively.
+
+For playback: browser `<audio>` element with MediaElement backend handles all formats natively via range requests. No server-side transcoding needed for playback.
+
+For Whisper STT: working copies normalized to 16-bit PCM mono 44.1kHz -16 LUFS via two-pass ffmpeg `loudnorm`. Originals never modified.
+
+For peaks generation: `soundfile` reads any format, normalizes to float32 internally, outputs peaks JSON.
+
+---
+
+## 6. Import / Export
+
+### 6.1 Praat TextGrid Export
+
+Per speaker, export a TextGrid with 4 tiers matching the annotation structure:
+
+```
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0
+xmax = 7200.0
+tiers? <exists>
+size = 4
+item []:
+    item [1]:
+        class = "IntervalTier"
+        name = "IPA"
+        xmin = 0
+        xmax = 7200.0
+        intervals: size = 82
+            intervals [1]:
+                xmin = 506.2
+                xmax = 506.9
+                text = "jek"
+            ...
+    item [2]:
+        class = "IntervalTier"
+        name = "Ortho"
+        ...
+    item [3]:
+        class = "IntervalTier"
+        name = "Concept"
+        ...
+    item [4]:
+        class = "IntervalTier"
+        name = "Speaker"
+        ...
 ```
 
-**Why peaks are needed:** wavesurfer.js v7's default WebAudio backend fetches the *entire* file via `fetch()` + `decodeAudioData()`. For 500MB+ WAVs, this is unusable. The MediaElement backend (`<audio>` element) supports native browser range requests for seeking/playback, but cannot render waveforms from the raw PCM. Pre-generated peaks solve this: the waveform renders from the lightweight peaks JSON while playback uses the `<audio>` element with range requests.
+Output: `exports/<Speaker>.TextGrid`
 
-**Generation:** ~100 samples/sec (samples_per_pixel=441 at 44.1kHz). A 2-hour recording = ~720K peak values ≈ 2–4MB JSON. Acceptable.
+### 6.2 Praat TextGrid Import
 
-#### `coarse_transcripts/<Speaker>.json`
+User selects a `.TextGrid` file and a target speaker.
 
-Reformatted from `alignment/*_coarse.json`. Simplified schema:
+**Options:**
+- **Replace speaker** — delete all existing annotations for this speaker, load from TextGrid
+- **Create new speaker** — import as a new speaker entry with a user-provided name
 
-```json
-{
-  "speaker": "Mand01",
-  "source_wav": "Audio_Original/Mand01/Mandali_M_1900_01.wav",
-  "duration_sec": 11924.0,
-  "segments": [
-    {"start": 0, "end": 3, "text": "سەەە بۊ دەی بەی ەسە جەمش مەێن"},
-    {"start": 15, "end": 18, "text": "نیشن نەتنیشن هەیشنم یەک"},
+PARSE maps TextGrid tiers to internal tiers by name matching (case-insensitive). Unrecognized tiers are imported as custom tiers. Missing tiers are left empty.
+
+### 6.3 ELAN XML Export (.eaf)
+
+Export annotations in ELAN's XML format for users who prefer ELAN over Praat.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<ANNOTATION_DOCUMENT>
+  <HEADER MEDIA_FILE="" TIME_UNITS="milliseconds">
+    <MEDIA_DESCRIPTOR MEDIA_URL="file:///audio/working/Fail01/Faili_M_1984.wav"
+                      MIME_TYPE="audio/x-wav"/>
+  </HEADER>
+  <TIME_ORDER>
+    <TIME_SLOT TIME_SLOT_ID="ts1" TIME_VALUE="506200"/>
+    <TIME_SLOT TIME_SLOT_ID="ts2" TIME_VALUE="506900"/>
     ...
-  ]
-}
+  </TIME_ORDER>
+  <TIER LINGUISTIC_TYPE_REF="default-lt" TIER_ID="IPA">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a1"
+                            TIME_SLOT_REF1="ts1" TIME_SLOT_REF2="ts2">
+        <ANNOTATION_VALUE>jek</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  ...
+</ANNOTATION_DOCUMENT>
 ```
 
-Each segment has `start` (seconds), `end` (seconds), `text` (Kurdish script, romanized by Whisper turbo).
+### 6.4 CSV Export
 
-`duration_sec` at top level = total recording duration (from `ffprobe`), so the client doesn't have to infer it from the last segment's `end` time.
+Flat table for spreadsheet analysis:
 
-Current coarse transcripts: **11 files**, total ~800 segments per speaker (3-second windows every 15 seconds).
+```csv
+speaker,concept_id,concept_en,start_sec,end_sec,duration_sec,ipa,ortho,source_file
+Fail01,1,one,506.2,506.9,0.7,jek,یەک,Faili_M_1984.wav
+Fail01,2,two,541.1,541.8,0.7,dɪ,دی,Faili_M_1984.wav
+```
 
-#### `ai_suggestions.json`
+### 6.5 Segment Audio Export
 
-Pre-computed fuzzy matches for every concept × speaker combination.
+Using annotation timestamps, batch-extract audio clips via ffmpeg:
+
+```
+exports/segments/
+  Fail01_001_one.wav       (506.2–506.9s from source)
+  Fail01_002_two.wav       (541.1–541.8s from source)
+  ...
+```
+
+Lossless extraction (`-c copy` where possible, `-acodec pcm_s16le` otherwise).
+
+---
+
+## 7. AI Integration
+
+### 7.1 Provider Abstraction
+
+AI features are optional. When enabled, PARSE supports multiple providers through a unified interface:
 
 ```json
 {
-  "suggestions": {
-    "1": {
-      "concept_en": "one",
-      "reference_forms": ["jek", "yek", "jak", "yak", "یەک"],
-      "speakers": {
-        "Fail02": [
-          {
-            "source_wav": "Audio_Original/Fail02/SK_Faili_F_1968.wav",
-            "segment_start_sec": 337.2,
-            "segment_end_sec": 340.2,
-            "transcript_text": "نیشن نەتنیشن هەیشنم یەک",
-            "matched_token": "یەک",
-            "confidence": "high",
-            "confidence_score": 0.92,
-            "method": "exact_ortho_match",
-            "note": "timestamp is segment start, not word start — word occurs within 3s window"
-          },
-          {
-            "source_wav": "Audio_Original/Fail02/SK_Faili_F_1968.wav",
-            "segment_start_sec": 892.1,
-            "segment_end_sec": 895.1,
-            "transcript_text": "ئە ئەجەک دو سە",
-            "matched_token": "جەک",
-            "confidence": "medium",
-            "confidence_score": 0.61,
-            "method": "fuzzy_ortho_match"
-          }
-        ],
-        "Khan04": [ ... ]
-      }
-    }
+  "ai": {
+    "enabled": true,
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6",
+    "api_key_env": "PARSE_AI_API_KEY"
   }
 }
 ```
 
-**Matching strategy (for pre-computation):**
+**Supported providers (planned):**
 
-Pre-computation generates **base match scores only** (no positional weighting). Positional re-ranking is applied **client-side** based on the reviewer's selected reference speakers.
+| Provider | Models | Auth |
+|----------|--------|------|
+| Anthropic | claude-sonnet-4-6 | API key |
+| OpenAI | gpt-4o, gpt-4o-mini | API key or OAuth login |
+| Local (Ollama) | any | No auth (localhost) |
 
-1. **Exact orthographic match** — tokenize coarse transcript on whitespace/diacritics, check each token independently against Kurdish reference forms (handles script mixing where Whisper outputs both Arabic-script and romanized forms in the same segment)
-2. **Fuzzy orthographic match** — Levenshtein distance **≤1 for words ≤4 chars**, **≤2 for words >4 chars** (tighter than v1 — prevents near-random matches on short Kurdish words like `یەک`)
-3. **Romanized phonetic match** — normalize IPA from other speakers (e.g., `jek` → regex `[jy][aæeɛ][kgq]`) and match against romanized transcript tokens
+**Current implementation:** Anthropic Sonnet via API key. OpenAI and local support are architecture-ready but not built yet.
 
-**Base confidence scoring (pre-computed, no positional weighting):**
-   - `base_score` 0.70–1.0 = exact ortho match
-   - `base_score` 0.40–0.69 = fuzzy ortho match
-   - `base_score` 0.20–0.39 = phonetic-only match
-   - Below 0.20 = not included in suggestions
+### 7.2 AI-Assisted Fuzzy Matching (Strategy #4)
 
-**Positional re-ranking (client-side):**
-   - Applied on top of `base_score` using reviewer-selected reference speakers
-   - For each concept, the client computes the **median expected timestamp** from selected speakers' known positions (from `positional_anchors`)
-   - Proximity boost: Gaussian-like weight — candidates within ±30s of expected position get up to +0.25 boost; candidates >120s away get no boost
-   - Final `confidence_score` = `base_score` + positional boost (capped at 1.0)
-   - Labels derived from final score: `high` (≥0.80), `medium` (0.50–0.79), `low` (0.20–0.49)
-   - Changing reference speakers instantly re-ranks without reloading
+After strategies 1-3 (exact ortho, Levenshtein, phonetic regex) run offline:
 
-**Positional anchor data (in `ai_suggestions.json`):**
+1. Filter: concepts with only low-confidence (< 0.40) or zero matches
+2. Batch prompt: send ~20 candidate transcript windows per API call with reference forms
+3. AI evaluates: morphological variants, dialectal alternations, Whisper errors
+4. Score: `base_score` 0.10–0.39 for AI matches (lower than rule-based by design)
+5. Cache: results in `ai_suggestions.json`, never re-computed unless transcripts change
+
+**Offline fallback:** Strategies 1-3 work without any AI provider. Users without API access still get exact, fuzzy, and phonetic matches.
+
+### 7.3 AI-Assisted Video Sync Verification
+
+After automated FFT cross-correlation produces an initial offset + drift estimate:
+
+1. Extract ~5 aligned windows from both audio streams
+2. Send to AI: "Do these segments sound aligned? Estimate misalignment if any."
+3. AI suggests corrections → applied to sync parameters
+4. User confirms in UI
+
+**Offline fallback:** FFT cross-correlation works without AI. Manual fine-tune slider available.
+
+### 7.4 Future AI Features (Architecture-Ready, Not Built)
+
+- **Automated cognate lookup** — given a concept and language code, pull reference forms from Wiktionary/academic sources
+- **IPA suggestion** — given an audio segment + orthography, suggest IPA transcription
+- **Quality check** — flag suspicious annotations (duration too short, IPA doesn't match ortho pattern)
+
+---
+
+## 8. Video Synchronization
+
+### 8.1 Overview
+
+Some speakers have video recordings alongside audio. Video and audio were recorded on separate devices with separate clocks, so they are not in sync. PARSE provides tools to align them and extract video clips at annotation timestamps.
+
+### 8.2 Sync Data Model
+
+Per speaker per video file:
+
+```json
+{
+  "video_file": "Khan01_session.mp4",
+  "audio_file": "audio/working/Khan01/REC00002.wav",
+  "fps": 60,
+  "sync": {
+    "status": "synced",
+    "offset_sec": 14.3,
+    "drift_rate": 0.00667,
+    "method": "fft_auto",
+    "ai_verified": true,
+    "locked_at": "2026-03-23T22:00:00Z",
+    "manual_adjustment_sec": 0.0
+  }
+}
+```
+
+### 8.3 Sync Pipeline
+
+**Step 1 — Extract video audio**
+`ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 44100 -ac 1 temp_video_audio.wav`
+
+**Step 2 — FFT cross-correlation**
+Select a ~30s chunk with clear speech (around lexicon start). Cross-correlate the two audio streams to find initial offset. Standard scipy `correlate` + `fftconvolve`.
+
+**Step 3 — Multi-point drift detection**
+Repeat cross-correlation at intervals (every 10 min) along the recording. Linear regression on offset vs time → drift rate. For 60fps video, expect small but measurable drift.
+
+**Step 4 — AI verification (optional)**
+If AI is enabled, send sample aligned windows to the provider for verification.
+
+**Step 5 — UI confirmation**
+Both waveforms displayed stacked. Playback controls for simultaneous listening. Fine-tune slider for manual offset. FPS dropdown for common formats.
+
+**Step 6 — Lock sync**
+User confirms → sync parameters saved to project. All annotation timestamps can now be mapped to video time.
+
+### 8.4 Timestamp Mapping
+
+```
+video_time(wav_time) = (wav_time × (1 + drift_rate/60)) + offset_sec + manual_adjustment_sec
+video_frame(wav_time) = round(video_time(wav_time) × fps)
+```
+
+### 8.5 Video Clip Extraction
+
+Given a synced video and annotation timestamps:
+
+```bash
+ffmpeg -ss <video_start> -to <video_end> -i video.mp4 -c copy exports/clips/Fail01_001_one.mp4
+```
+
+Frame-accurate extraction using the drift-corrected mapping.
+
+### 8.6 FPS Support
+
+User selects video FPS during onboarding or in the video sync panel:
+
+| FPS | Standard |
+|-----|----------|
+| 24 | Cinema |
+| 25 | PAL |
+| 29.97 | NTSC |
+| 30 | Web |
+| 50 | PAL high |
+| 59.94 | NTSC high |
+| 60 | Common smartphones |
+
+FPS is stored per video file in `project.json`.
+
+### 8.7 UI — Video Sync Panel
+
+Shown only for speakers with video files. Visual elements:
+
+- **Status indicator:** 🔴 No video / 🟡 Syncing / 🟢 Synced
+- **Video file selector** — browse or drag-drop
+- **FPS dropdown** — auto-detected from metadata if possible, user override available
+- **"Auto-sync" button** — runs FFT + drift detection + optional AI verification
+- **Dual waveform display** — WAV audio + video audio, stacked, aligned
+- **Playback controls** — play both streams simultaneously for verification
+- **Offset fine-tune slider** — ±5s range, 10ms precision
+- **"Lock sync" button** — saves parameters
+- **"Extract all clips" button** — batch export video clips for all annotated segments
+
+---
+
+## 9. UI Architecture
+
+### 9.1 Panel Layout
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ PARSE — Speaker: Fail01  |  Concept: 1/82 "one"  |  🟢 AI Ready  │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│ ┌── AI Suggestions ────────────────────────────────────────────┐  │
+│ │ Positional prior: [☑ Mand01] [☑ Qasr01] [☐ Fail02⚠]       │  │
+│ │ 🤖 1. ~337s HIGH 0.92 (exact) — "...یەک"             [▶]   │  │
+│ │ 🤖 2. ~892s MED 0.61 (fuzzy) — "...جەک..."           [▶]   │  │
+│ │ 🧠 3. ~1204s LOW 0.28 (llm) — "...یەکەم..."          [▶]   │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│ ┌── Transcript (virtualized) ──────────────────────────────────┐  │
+│ │ 335.0s │ نیشن نەتنیشن هەیشنم یەک                            │  │
+│ │ 350.0s │ دو سە چوار                              ← current  │  │
+│ │ [🔍 Search...]                                                │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│ ┌── Waveform ──────────────────────────────────────────────────┐  │
+│ │ ▁▂▃█▇▅▃▁▁▁▂▅██▇▃▁▁▂▃▅▇█▇▅▃▁▁▁▂▃██▇▅▃▂▁▁▁▂▃▅▇█▇▅▃▁       │  │
+│ │      [========]  ← draggable region                           │  │
+│ │  335s    340s    345s    350s    355s    360s                  │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│ ┌── Spectrogram (≤30s, on-demand) ─────────────────────────────┐  │
+│ │ 5kHz ─┬──────────────────────────────────────────────────── │  │
+│ │       │ [Web Worker FFT — narrow-band/wide-band toggle]      │  │
+│ │ 0Hz ──┴──────────────────────────────────────────────────── │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│ ┌── Annotation ────────────────────────────────────────────────┐  │
+│ │ Region: 337.2s → 338.1s (0.9s)                               │  │
+│ │ IPA:     [  jek          ]                                    │  │
+│ │ Ortho:   [  یەک          ]                                    │  │
+│ │ Concept: [  1:one         ]                                   │  │
+│ │ [✓ Save Annotation]  [▶ Play Region]  [🔄 Loop]              │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│ ◄◄ -30s  ◄ -5s   ▶ Play   +5s ►  +30s ►►   [⛶ Fullscreen]     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 Global Singleton
+
+Only ONE panel open at a time. Opening a new speaker/concept closes the previous one and destroys the wavesurfer instance. Prevents memory blowout from multiple large audio buffers.
+
+### 9.3 Fullscreen Mode
+
+**[⛶ Full]** toggles a modal overlay filling the viewport. Same controls plus:
+- Prev/Next concept navigation
+- "Missing only" toggle (skip to next unannotated concept)
+- Escape to close
+
+### 9.4 Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| Space | Play/pause |
+| Left/Right | ±1s |
+| Shift+Left/Right | ±5s |
+| Ctrl+Left/Right | ±30s |
+| Escape | Close panel / exit fullscreen |
+| Tab | Next annotation field |
+| Enter | Save annotation |
+
+---
+
+## 10. AI Suggestions Pipeline
+
+### 10.1 Reference Form Collection
+
+For each concept, collect reference forms from speakers with **verified** annotations (status = accepted/reviewed/verified):
+
+- Orthographic forms (Kurdish script)
+- IPA transcriptions
+- Romanized forms
+
+**Self-reinforcing:** As the reviewer verifies more concepts, the reference pool grows, and suggestions improve.
+
+### 10.2 Matching Strategies
+
+All run offline (no AI required):
+
+| Strategy | Method | Score Range |
+|----------|--------|-------------|
+| 1. Exact ortho | Token-level match against Kurdish reference forms | 0.70–1.00 |
+| 2. Fuzzy ortho | Levenshtein ≤1 (≤4 chars), ≤2 (>4 chars) | 0.40–0.69 |
+| 3. Phonetic regex | IPA → regex, match romanized tokens | 0.20–0.39 |
+| 4. LLM-assisted | Sonnet/GPT evaluates transcript windows (optional) | 0.10–0.39 |
+
+### 10.3 Positional Re-Ranking (Client-Side)
+
+Selected reference speakers provide expected timestamps per concept. Proximity boost:
+- Within ±30s of expected position → up to +0.25 boost
+- Beyond ±120s → no boost
+- Linear decay between
+- Changing reference speakers instantly re-ranks (no API calls)
+
+### 10.4 `ai_suggestions.json` Schema
 
 ```json
 {
   "positional_anchors": {
     "Mand01": {
       "concept_coverage": 82,
-      "timestamps": {
-        "1": 2.3,
-        "2": 35.7,
-        "3": 68.1,
-        ...
-      }
-    },
-    "Fail02": {
-      "concept_coverage": 11,
-      "timestamps": {
-        "1": 337.2,
-        "44": 892.1
+      "timestamps": { "1": 2.3, "2": 35.7 }
+    }
+  },
+  "suggestions": {
+    "1": {
+      "concept_en": "one",
+      "reference_forms": ["jek", "yek", "یەک"],
+      "speakers": {
+        "Fail02": [
+          {
+            "source_wav": "audio/working/Fail02/SK_Faili_F_1968.wav",
+            "segment_start_sec": 337.2,
+            "segment_end_sec": 340.2,
+            "transcript_text": "نیشن نەتنیشن هەیشنم یەک",
+            "matched_token": "یەک",
+            "confidence": "high",
+            "confidence_score": 0.92,
+            "method": "exact_ortho_match"
+          }
+        ]
       }
     }
   }
 }
 ```
 
-Each speaker's `timestamps` maps concept ID → absolute timestamp in their source recording where that concept was elicited. Derived from CSV segment data + lexicon_start_sec. Speakers with very low coverage (Fail02: 11/82, Khan04: 1/82) are available but shown as dimmed/low-confidence in the UI selector.
+---
 
-**Important:** `segment_start_sec` is the coarse transcript segment start, NOT the precise word onset. The matched token occurs somewhere within the 3-second window. The reviewer must listen and fine-tune the region.
+## 11. Server & Hosting
+
+### 11.1 Local Server
+
+`thesis_server.py` — Python HTTP server with:
+- HTTP range request support (206 Partial Content) for streaming large audio files
+- CORS headers for JS audio decoding
+- Serves all project files from project root
+- Cross-platform (`pathlib` throughout)
+- Configurable port via `project.json`
+
+### 11.2 Development vs Production
+
+- **Dev mode:** Local server with full PARSE features (source audio browsing, AI suggestions, video sync)
+- **Export mode:** Static HTML with pre-cut segments only (for sharing/publication via GitHub Pages)
 
 ---
 
-## 4. UI Design
+## 12. Coarse Transcripts
 
-### 4.1 Source Explorer Panel
+### 12.1 Generation
 
-Added as a **collapsible panel** per form row in the main RT. Activated by a 🔍 button next to each speaker row.
-
-**Global singleton enforcement:** Only ONE source explorer panel can be open at a time. Opening a new one automatically closes (and destroys the wavesurfer instance of) the previous one. This prevents memory blowout from multiple large audio buffers.
-
-**Full-width layout:** The source explorer panel breaks out of the form column width and renders at **100% viewport width** (minus padding). This ensures the waveform and spectrogram have enough horizontal resolution, even on 1366px laptops.
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ Fail02 — Concept "one" (#1)                     [?] Missing           │
-│                                                                        │
-│ 🔍 Source Explorer                            ▼ Collapse    [⛶ Full]  │
-│ ┌────────────────────────────────────────────────────────────────────┐ │
-│ │ Source: SK_Faili_F_1968.wav (87 min, 153MB)   Lexicon starts: 335s │ │
-│ │                                                                    │ │
-│ │ Positional prior: [☑ Mand01] [☑ Qasr01] [☑ Saha01] [☑ Khan02]   │ │
-│ │                   [☑ Kalh01] [☑ Fail01] [☐ Fail02⚠] [☐ Khan04⚠] │ │
-│ │                                                                    │ │
-│ │ ┌── AI Suggestions ──────────────────────────────────────────────┐ │ │
-│ │ │ 🤖 1. ~337s — "...هەیشنم یەک" — HIGH 0.92 (exact)       [▶]  │ │ │
-│ │ │ 🤖 2. ~892s — "...ئەجەک دو سە" — MED 0.61 (fuzzy)      [▶]  │ │ │
-│ │ │ 🤖 3. ~1204s — "...یەکەم..." — LOW 0.35 (partial)       [▶]  │ │ │
-│ │ └────────────────────────────────────────────────────────────────┘ │ │
-│ │                                                                    │ │
-│ │ ┌── Transcript Timeline (virtualized, ~20 visible) ─────────────┐ │ │
-│ │ │ 335.0s │ نیشن نەتنیشن هەیشنم یەک                              │ │ │
-│ │ │ 350.0s │ دو سە چوار                                  ← current │ │ │
-│ │ │ 365.0s │ پێنج شەش حەوت                                         │ │ │
-│ │ │ 380.0s │ هەشت نۆ دە                                            │ │ │
-│ │ │ [🔍 Search transcript...]                                       │ │ │
-│ │ └────────────────────────────────────────────────────────────────┘ │ │
-│ │                                                                    │ │
-│ │ ┌── Waveform (from pre-generated peaks) ─────────────────────────┐ │ │
-│ │ │ ▁▂▃█▇▅▃▁▁▁▂▅██▇▃▁▁▂▃▅▇█▇▅▃▁▁▁▂▃██▇▅▃▂▁▁▁▂▃▅▇█▇▅▃▁▁      │ │ │
-│ │ │      [========]  ← draggable region                             │ │ │
-│ │ │  335s    340s    345s    350s    355s    360s    365s           │ │ │
-│ │ └────────────────────────────────────────────────────────────────┘ │ │
-│ │                                                                    │ │
-│ │ ┌── Spectrogram (on-demand, ≤30s window) ────────────────────────┐ │ │
-│ │ │  5000 Hz ─┬─────────────────────────────────────────────────── │ │ │
-│ │ │           │ [computed via Web Worker FFT — narrow-band default] │ │ │
-│ │ │     0 Hz ─┴─────────────────────────────────────────────────── │ │ │
-│ │ │  335s    340s    345s    350s    355s    360s    365s           │ │ │
-│ │ └────────────────────────────────────────────────────────────────┘ │ │
-│ │                                                                    │ │
-│ │ ◄◄ -30s  ◄ -5s   ▶ Play Region   +5s ►  +30s ►►  🔄 Loop       │ │
-│ │                                                                    │ │
-│ │ Region: 337.2s → 338.1s (0.9s)                                    │ │
-│ │ [✓ Assign to this concept]  [Export as WAV clip]                   │ │
-│ └────────────────────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### 4.2 Full-Screen Source Explorer Mode
-
-For heavy investigation sessions (Fail02: 71 missing, Khan04: 81 missing), the inline panel is too cramped. A **[⛶ Full]** button toggles the source explorer into a **modal overlay** that fills the viewport.
-
-- Same controls as inline, but with more space for waveform zoom and transcript browsing
-- Overlay closes with Escape or a close button
-- Current concept context shown in overlay header
-- Prev/Next concept navigation within the overlay (skip to next missing concept)
-- Estimated addition: ~1.5 hours on top of base inline implementation
-
-### 4.3 Feature Breakdown
-
-#### A. Waveform Display
-- **Library:** [wavesurfer.js](https://wavesurfer-js.org/) v7 (MIT, 27KB gzipped)
-- **Backend: MediaElement** (NOT default WebAudio) — uses `<audio>` element for playback, which supports native browser range requests for seeking without downloading the full file
-- **Waveform rendering:** From **pre-generated peaks JSON** (`peaks/<Speaker>.json`), NOT from raw PCM decode. This is the accepted pattern for large files with wavesurfer.
-- **Plugins:** `RegionsPlugin` (draggable region selection), `TimelinePlugin` (time axis)
-- **Initial position:** Jump to `lexicon_start_sec` (or AI suggestion timestamp) on open
-- **Zoom:** Mouse wheel on waveform
-
-#### B. Spectrogram Display
-- **Computed via Web Worker** to avoid UI freezing
-- **Hard-capped to ≤30s window** — spectrogram is computationally expensive; no full-recording rendering
-- Narrow-band (window=2048, for formant visibility) or wide-band (window=256, for temporal detail)
-- **Toggle:** On-demand only, renders for the currently visible/selected window
-- Greyscale to match existing static spectrograms
-
-#### C. Transcript Timeline
-- Rendered from `coarse_transcripts/<Speaker>.json`
-- **Virtualized list** — only ~20 DOM elements visible at a time, recycled on scroll (prevents sluggishness with 800+ segments)
-- Click → seeks waveform to that position
-- **Highlight current segment** as audio plays
-- **Search within transcript** — type Kurdish text or romanized form, matching segments highlighted and scrolled to
-
-#### D. AI Suggestions
-- Loaded from `ai_suggestions.json` for current concept × speaker
-- Ranked by `confidence_score` (numeric), displayed with confidence label + score
-- Click → seek + create region at `segment_start_sec`
-- Reviewer verifies by listening, then adjusts region handles to isolate the word
-- **Fetch cancellation:** Uses `AbortController` — if the user rapidly clicks through suggestions, previous pending fetches are cancelled to prevent race conditions
-
-#### D2. Positional Prior — Speaker Selector
-- **UI control:** Multi-select dropdown/checkbox list at the top of the Source Explorer panel: "Reference speakers for positional prior"
-- Default: all speakers with CSV data and ≥50% concept coverage (typically Mand01, Qasr01, Saha01, Khan02, Kalh01, Fail01)
-- Reviewer can toggle individual speakers on/off as positional references
-- **How it works:**
-  - `ai_suggestions.json` stores all candidates with their **base match score** (ortho/fuzzy/phonetic only — no positional weighting baked in)
-  - Each candidate also stores `segment_start_sec` (its raw timestamp in the source recording)
-  - The client loads the selected reference speakers' known concept timestamps from `positional_anchors` in `ai_suggestions.json`
-  - Client-side re-ranking: for each candidate, compute distance to the **median expected timestamp** across selected reference speakers, apply a Gaussian-like proximity boost (±30s window), produce the final `confidence_score`
-  - Changing the speaker selection **instantly re-ranks** suggestions without reloading data
-- **Why this matters:** Geographically closer varieties may have more similar elicitation pacing. The reviewer knows which speakers are most relevant for a given target — e.g., Khan02's timing may be a better prior for Khan04 than Saha01's
-- **Persistence:** Selected reference speakers saved to localStorage per target speaker
-
-#### E. Navigation Controls
-- **Skip buttons:** -30s, -5s, +5s, +30s
-- **Jump to next/prev transcript segment** (skips silence)
-- **Jump to AI suggestion #N**
-- **Keyboard shortcuts:** Space = play/pause, Left/Right = ±1s, Shift+Left/Right = ±5s, Escape = close panel
-- **Zoom:** Mouse wheel on waveform zooms in/out
-
-#### F. Region Selection & Assignment
-- Draggable start/end handles on the waveform (wavesurfer `RegionsPlugin`)
-- **"Play Region"** — plays only the selected portion
-- **"Loop Region"** — repeats selected portion
-- **"Assign to concept"** — saves `{speaker, concept_id, source_wav, start_sec, end_sec}` into decisions JSON
-- **"Export as WAV"** — Web Audio API `OfflineAudioContext` to render region as downloadable file (or save to decisions for batch server-side extraction)
-- Supports marking **multiple regions** (for variant A, B selection from different iterations)
-
-### 4.4 Integration with Existing RT
-
-The source explorer is **not a separate page** — it's a panel that expands within the existing form row (or modal overlay). This means:
-
-- All existing review features (accept/flag, cognate sets, notes, phonetic flags) work alongside
-- Source explorer state (region, assignment) is saved into the same `decisions` JSON
-- On export, source explorer assignments are included
-
-### 4.5 Decisions JSON Schema Extension
+Whisper STT on each source recording, generating 3-second windows:
 
 ```json
 {
-  "concept_id": "1",
-  "status": "reviewed",
-  "notes": "Used AI suggestion #1, trimmed to 337.2-338.1s",
-  "source_regions": {
-    "Fail02": {
-      "source_wav": "Audio_Original/Fail02/SK_Faili_F_1968.wav",
-      "start_sec": 337.2,
-      "end_sec": 338.1,
-      "assigned": true,
-      "replaces_segment": true,
-      "ai_suggestion_used": 1,
-      "ai_suggestion_confidence": "high",
-      "ai_suggestion_score": 0.92
-    },
-    "Khan01": {
-      "source_wav": "Audio_Original/Khan01_missing/REC00002.wav",
-      "start_sec": 1285.4,
-      "end_sec": 1286.1,
-      "assigned": true,
-      "replaces_segment": true,
-      "notes": "iteration 2, cleaner than iteration 1"
-    }
-  }
+  "speaker": "Mand01",
+  "source_wav": "audio/working/Mand01/Mandali_M_1900_01.wav",
+  "duration_sec": 11924.0,
+  "segments": [
+    { "start": 0, "end": 3, "text": "سەەە بۊ دەی بەی" },
+    { "start": 15, "end": 18, "text": "نیشن نەتنیشن هەیشنم یەک" }
+  ]
 }
 ```
 
----
+### 12.2 Whisper Configuration
 
-## 5. Server Requirements
-
-### 5.1 HTTP Range Request Support
-
-The current `Start Review Tool.bat` uses Python's `http.server`. This does NOT support range requests by default, which means:
-- Browser must download the entire WAV before seeking (500MB+ per file)
-- Unusable for large files
-
-**Fix:** Custom `thesis_server.py` with range request support:
-- Extends `SimpleHTTPRequestHandler` to handle `Range` headers (~50 lines)
-- Returns 206 Partial Content with correct `Content-Range` headers
-- CORS headers for JS audio decoding
-- Binds to `0.0.0.0:8766` (accessible via Tailscale too)
-- **Windows path handling:** Uses `os.path.join()` throughout (forward-slash URL paths → Windows backslash filesystem paths handled by Python's `pathlib`)
-
-### 5.2 Updated Batch File
-
-```bat
-@echo off
-echo Starting SK Review Tool server on port 8766...
-cd /d "C:\Users\Lucas\Thesis"
-python thesis_server.py
-```
+- **Model:** `razhan/whisper-base-sdh` (SK fine-tuned) or user-selected
+- **Language trick:** `language='sd'` (Sindhi) forces Kurdish-script output
+- **Processing:** Local GPU only — no cloud STT
+- **Window:** 3s segments every 15s (coarse scan, not full transcription)
 
 ---
 
-## 6. Build Steps (Ordered)
+## 13. Waveform & Spectrogram
 
-### Phase 0: WAV Audit (est. 30 min)
+### 13.1 Waveform
 
-0. **Run `ffprobe` on all source WAVs**
-   - Verify bit depth (must be 16-bit PCM), sample rate, channels, duration, file size
-   - If any files are 24-bit or 32-bit float → transcode to 16-bit PCM with `ffmpeg -i input.wav -acodec pcm_s16le -ar 44100 output_16bit.wav`
-   - If any files are multi-channel (>2) → downmix to mono with `ffmpeg -ac 1`
-   - Record results in `source_index.json` metadata fields
-   - This step MUST complete before anything else — prevents silent failures later
+- **Library:** wavesurfer.js v7, MediaElement backend
+- **Peaks:** Pre-generated JSON files (generated by Python `soundfile` + numpy)
+- **Loading:** Peaks JSON for instant waveform render; `<audio>` element for streaming playback via range requests
+- **Plugins:** RegionsPlugin (draggable segments), TimelinePlugin (time axis)
 
-### Phase 1: Data Preparation (est. 2.5 hours)
+### 13.2 Spectrogram
 
-1. **Generate `source_index.json`**
-   - Map each speaker → source WAV path(s), duration, file size, bit depth, channels, sample rate, lexicon start
-   - Use verified offsets from `alignment/offsets.json` + memory
-   - Special handling for Khan01 (3 WAVs), Khan03 (3 WAVs, no CSV)
-   - **Est: 20 min**
+- **Computed via Web Worker** (offloads FFT from main thread)
+- **Hard cap:** ≤30s window
+- **Modes:** Narrow-band (window=2048, formant visibility) / Wide-band (window=256, temporal detail)
+- **Rendering:** Greyscale, on-demand (toggle button)
 
-2. **Pre-generate peaks JSON files**
-   - Python script: read each WAV with `wave` module, compute min/max peaks at ~100 samples/sec (samples_per_pixel = sample_rate / 100)
-   - Output to `peaks/<Speaker>.json` in wavesurfer-compatible format
-   - ~2–4MB per file for 2-hour recordings
-   - **Est: 30 min** (script + run time for all 10 speakers)
+### 13.3 Peaks Generation
 
-3. **Reformat coarse transcripts**
-   - Copy and simplify `alignment/*_coarse.json` → `coarse_transcripts/<Speaker>.json`
-   - Normalize schema: `{speaker, source_wav, duration_sec, segments: [{start, end, text}]}`
-   - For Khan01: merge transcripts from the primary WAV (REC00002.wav)
-   - For Khan03: use C0401 turbo transcript (already in `Khan03_turbo/`)
-   - **Est: 20 min**
-
-4. **Generate `ai_suggestions.json`**
-   - For each concept × speaker:
-     - Collect reference forms from other speakers (ortho + IPA) via `review_data.json`
-     - Tokenize coarse transcript on whitespace/diacritics (handles script mixing)
-     - Match tokens: exact → fuzzy (Levenshtein ≤1 for ≤4 chars, ≤2 for >4 chars) → phonetic regex
-     - Apply positional prior where CSV anchors exist (skip for Fail02/Khan04 — insufficient anchors)
-     - Score candidates numerically (0.0–1.0), assign label (high/medium/low)
-     - Output top 5 candidates per concept × speaker
-   - **Est: 1.5 hours** (script development + debugging + validation of ~656K comparisons)
-
-5. **Copy data files to `C:\Users\Lucas\Thesis\`**
-   - `source_index.json`, `peaks/`, `coarse_transcripts/`, `ai_suggestions.json`
-   - **Est: 5 min**
-
-### Phase 2: Server Upgrade (est. 30 min)
-
-6. **Write `thesis_server.py`** — Range-request-capable HTTP server with CORS
-7. **Update `Start Review Tool.bat`** to use new server
-8. **Test:** Verify range requests work — seek to middle of Khan02's 3:10:00 recording, confirm no full download
-
-### Phase 3: UI — Waveform & Basic Controls (est. 3.5 hours)
-
-9. **Add wavesurfer.js v7** to the RT (CDN or local copy)
-   - Configure **MediaElement backend** with pre-generated peaks
-   - Add RegionsPlugin, TimelinePlugin
-
-10. **Add 🔍 button** per form row → opens source explorer panel
-    - **Global singleton logic:** Close previous panel + destroy wavesurfer instance before opening new one
-
-11. **Implement waveform loading:**
-    - Load source WAV URL from `source_index.json`
-    - Load peaks from `peaks/<Speaker>.json`
-    - Initialize wavesurfer with `backend: 'MediaElement'` + `peaks` data
-    - Initial position = lexicon start time (or segment timestamp if exists)
-    - Display file size warning if >200MB
-
-12. **Navigation controls:**
-    - Skip buttons: -30s, -5s, +5s, +30s
-    - Keyboard: Space, Left/Right, Shift+arrows, Escape
-    - **AbortController** for rapid seek cancellation
-
-13. **Region selection:**
-    - wavesurfer `RegionsPlugin` — drag to create/adjust region
-    - Play Region button, Loop toggle
-    - Display region timestamps + duration
-
-### Phase 4: UI — Transcript & AI Suggestions (est. 2.5 hours)
-
-14. **Transcript timeline panel:**
-    - Load from `coarse_transcripts/<Speaker>.json`
-    - **Virtualized scrollable list** — render only ~20 DOM elements, recycle on scroll
-    - Click to seek
-    - Highlight current segment during playback
-    - Search/filter box (Kurdish text or romanized)
-
-15. **AI suggestions panel:**
-    - Load from `ai_suggestions.json` for current concept × speaker
-    - Ranked cards with confidence badge + numeric score
-    - Click → seek + create region at suggestion timestamp
-    - Note: "timestamps are segment starts (~3s window, listen to locate word)"
-
-16. **Spectrogram panel (on-demand):**
-    - Computed via **Web Worker** to prevent UI freeze
-    - **Hard-capped to ≤30s window**
-    - Toggle button, only renders for visible window
-    - Greyscale, narrow-band default
-
-### Phase 5: Assignment & Export (est. 1.5 hours)
-
-17. **"Assign to concept" button:**
-    - Saves region boundaries + source WAV path + AI suggestion metadata into decisions JSON
-    - Visual indicator: form row shows "✓ re-assigned from source"
-
-18. **Export extension:**
-    - Export JSON includes `source_regions` per concept (with `ai_suggestion_confidence` field)
-    - Separate "Export re-cut list" → JSON of all regions that need re-extraction
-
-19. **Batch re-extraction script (Python):**
-    - Reads export JSON
-    - Uses ffmpeg to cut new segments from source WAVs
-    - Re-generates spectrograms for new segments
-    - Updates `review_data.json` with new paths
-
-### Phase 6: Full-Screen Mode (est. 1.5 hours)
-
-20. **[⛶ Full] button** → opens modal overlay with same controls
-    - Full viewport width for waveform/spectrogram
-    - Prev/Next missing concept navigation within overlay
-    - Escape to close
-
-### Phase 7: Polish & Integration (est. 1 hour)
-
-21. **State persistence** — save source explorer state to localStorage
-22. **Loading states** — skeleton/spinner while peaks load and audio connects
-23. **Error handling** — graceful failure if source WAV missing, if peaks file missing, if bit depth unsupported
-24. **Feature detection** — hide source explorer if not running on local server (no source WAVs on gh-pages)
+Python script using `soundfile`:
+- Reads any supported format (16/24/32-bit WAV, RF64, MP3, FLAC, M4A)
+- Normalizes to float32 internally
+- Computes min/max peaks at ~100 samples/sec
+- Outputs wavesurfer PeaksData v2 JSON
 
 ---
 
-## 7. Dependencies
+## 14. Build Status
 
-| Dependency | Version | Size | Purpose |
-|------------|---------|------|---------|
-| wavesurfer.js | v7.x | 27KB gz | Waveform (MediaElement backend), regions, timeline |
-| wavesurfer Regions Plugin | v7.x | 5KB gz | Draggable region selection |
-| wavesurfer Timeline Plugin | v7.x | 3KB gz | Time axis display |
+### ✅ Built (Wave 1-4, commit `897e56f`)
 
-**Removed from v1:** wavesurfer Spectrogram Plugin — replaced with custom Web Worker FFT (more control over window size cap).
+| File | Status | Notes |
+|------|--------|-------|
+| `python/thesis_server.py` | ✅ Built + reviewed | Needs cross-platform path update |
+| `python/generate_source_index.py` | ✅ Built + reviewed | Needs project.json integration |
+| `python/generate_peaks.py` | ✅ Built + reviewed | **Needs rewrite: `wave` → `soundfile`** |
+| `python/reformat_transcripts.py` | ✅ Built + reviewed | OK as-is |
+| `python/generate_ai_suggestions.py` | ✅ Built + reviewed | Needs AI provider abstraction |
+| `python/batch_reextract.py` | ✅ Built + reviewed | OK as-is |
+| `js/source-explorer.js` | ✅ Built + reviewed | Needs annotation save integration |
+| `js/waveform-controller.js` | ✅ Built + reviewed | OK as-is |
+| `js/spectrogram-worker.js` | ✅ Built + reviewed | OK as-is |
+| `js/transcript-panel.js` | ✅ Built | Needs review |
+| `js/suggestions-panel.js` | ✅ Built | Needs review |
+| `js/region-manager.js` | ✅ Built | Needs review + annotation layer integration |
+| `js/fullscreen-mode.js` | ✅ Built | Needs review |
+| `review_tool_dev.html` | ✅ Built | Needs annotation panel HTML |
+| `Start Review Tool.bat` | ✅ Built | Add cross-platform launcher |
 
-All MIT licensed. Can be loaded from CDN or bundled locally.
+### 🔲 New (v4.0 additions)
 
-**Data prep scripts** require: Python 3.8+ with `wave`, `struct`, `json`, `numpy` (for peaks generation). No server-side dependencies beyond Python stdlib for the HTTP server.
-
----
-
-## 8. Risks & Mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| WAV files are 24-bit or 32-bit float | `decodeAudioData()` silently fails | **Phase 0:** ffprobe audit, transcode to 16-bit PCM |
-| WAV files are multi-channel (>2ch) | `decodeAudioData()` fails beyond stereo | **Phase 0:** ffprobe audit, downmix to mono |
-| Large WAV load time via MediaElement | Slow initial seek | Pre-generated peaks for instant waveform; `<audio>` handles range-request seeking natively |
-| Client-side spectrogram slow for large windows | UI freezes | **Hard cap ≤30s window**; compute in **Web Worker** |
-| Multiple source explorers opened simultaneously | Browser OOM | **Global singleton** — auto-close previous, destroy wavesurfer instance |
-| Concurrent fetch collisions from rapid clicking | Waveform thrash, stale audio | **AbortController** cancels pending fetches on new seek |
-| Coarse transcripts are low quality (turbo model, 3s windows) | AI suggestions miss targets | Multiple matching strategies; reviewer verifies; script mixing handled by per-token matching |
-| Whisper script mixing (Arabic + romanized in same segment) | Exact match misses romanized forms | Tokenize on whitespace, check each token independently |
-| Levenshtein too loose on short Kurdish words | False positive matches | **≤1 for words ≤4 chars, ≤2 for >4 chars** |
-| Fail02/Khan04 have no positional prior | AI suggestions less accurate | Fall back to transcript-only matching; flag as "no positional prior" |
-| Khan03 has no CSV | Positional prior unavailable | Use Khan01/Khan02 JBIL sequence as reference |
-| wavesurfer range request support | MediaElement may buffer differently per browser | Test with custom server; verify Chrome + Firefox behavior |
-| 800+ transcript segments as DOM elements | Sluggish UI | **Virtualized list** — only ~20 DOM elements rendered |
-| Windows path separators in server | Path join failures | Use `pathlib` / `os.path.join()` throughout |
-| Waveform too narrow in inline panel | Spectrogram unreadable on small screens | **Full-width panel** (100vw minus padding) + **full-screen mode toggle** |
-
----
-
-## 9. Future Enhancements (Not in Scope)
-
-- **Video clip integration** — sync video files, extract mouth-view clips per segment
-- **Praat TextGrid export** — export region selections as Praat-compatible TextGrids
-- **Real-time AI matching** — call LLM to analyze unfound segments (requires agent online)
-- **Collaborative annotations** — multiple reviewers, conflict resolution
-- **Formant overlay** — LPC analysis on spectrogram (complex, may not be worth the JS cost)
-
----
-
-## 10. Definition of Done
-
-The source explorer is complete when:
-
-- [ ] All source WAVs audited with `ffprobe` — bit depth, channels, sample rate confirmed 16-bit PCM mono/stereo
-- [ ] Pre-generated peaks JSON exists for all 10 speakers' primary source WAVs
-- [ ] All 10 speakers' source WAVs load and play in the RT (MediaElement backend + peaks)
-- [ ] Waveform displays with seek, zoom, and region selection
-- [ ] Transcript timeline shows coarse transcript with virtualized list, clickable to seek
-- [ ] AI suggestions appear for at least 80% of missing concepts, with numeric confidence scores
-- [ ] Positional prior speaker selector works — toggling reference speakers re-ranks suggestions live
-- [ ] Reviewer can select a region and assign it to a concept
-- [ ] Assignments persist in decisions JSON (with AI suggestion metadata) and survive page reload
-- [ ] Export includes source_regions for batch re-extraction
-- [ ] Spectrogram renders on-demand for selected region (≤30s, Web Worker)
-- [ ] Skip/navigate controls work (±5s, ±30s, keyboard shortcuts)
-- [ ] Local server supports range requests (verify with Khan02's 3:10:00 recording)
-- [ ] Only one source explorer panel open at a time (singleton enforcement)
-- [ ] Full-screen mode works for extended investigation sessions
-- [ ] Feature is hidden when running on gh-pages (no source WAVs available)
+| Component | Priority | Depends On |
+|-----------|----------|------------|
+| `project.json` config loader | 🔴 High | Nothing |
+| Annotation data model (JSON) | 🔴 High | Nothing |
+| Annotation save/load to disk | 🔴 High | Annotation data model |
+| Annotation panel UI (IPA/ortho/concept fields) | 🔴 High | Annotation data model |
+| Praat TextGrid export | 🔴 High | Annotation data model |
+| Praat TextGrid import | 🔴 High | Annotation data model |
+| `generate_peaks.py` rewrite (`soundfile`) | 🔴 High | Nothing |
+| Onboarding wizard | 🟡 Medium | project.json |
+| ELAN XML export | 🟡 Medium | Annotation data model |
+| CSV export | 🟡 Medium | Annotation data model |
+| AI provider abstraction | 🟡 Medium | project.json |
+| Video sync panel UI | 🟡 Medium | project.json |
+| FFT cross-correlation (Python) | 🟡 Medium | Nothing |
+| Video clip extraction | 🟡 Medium | Video sync |
+| Cross-platform launcher (shell + bat) | 🟢 Low | Nothing |
+| MIT LICENSE file | 🟢 Low | Nothing |
+| README.md | 🟢 Low | Everything else |
+| Tests | 🟢 Low | Stable API |
 
 ---
 
-## 11. Existing Assets Inventory
+## 15. Environment
 
-### Coarse Transcripts (alignment/)
+### GPU
+- NVIDIA GeForce RTX 5090 (32GB VRAM)
+- CUDA 13.0, WSL + Windows
 
-| File | Speaker | Segments | Duration |
-|------|---------|----------|----------|
-| Fail01_Faili_M_1984_coarse.json | Fail01 | ~420 | ~7,200s |
-| Fail02_SK_Faili_F_1968_coarse.json | Fail02 | ~180 | ~3,000s |
-| Kalh01_Kalh_M_1981_coarse.json | Kalh01 | ~507 | ~7,600s |
-| Khan01_REC00002_coarse.json | Khan01 (primary) | ~387 | ~8,580s |
-| Khan01_2023043001_coarse.json | Khan01 (alt) | ~240 | ~5,220s |
-| Khan01_20230502_khanaqini_01_02_coarse.json | Khan01 (alt) | ~200 | ~4,320s |
-| Khan02_khanaqini_F_1967_coarse.json | Khan02 | ~487 | ~11,382s |
-| Khan04_Khanaqin_F_2000_coarse.json | Khan04 | ~260 | ~5,954s |
-| Mand01_Mandali_M_1900_01_coarse.json | Mand01 | ~795 | ~11,924s |
-| Qasr01_Qasrashirin_M_1973_coarse.json | Qasr01 | ~933 | ~14,000s |
-| Saha01_Sahana_F_1978_coarse.json | Saha01 | ~500 | ~7,500s |
+### Whisper
+- `razhan/whisper-base-sdh` — SK fine-tuned, local CUDA
+- `language='sd'` trick for Kurdish-script output
 
-Khan03 uses turbo transcript from cluster detection, not coarse alignment.
+### ffmpeg
+- Windows: `C:\ProgramData\chocolatey\bin\ffmpeg.exe` v8.0
+- Cross-platform: must also work with system `ffmpeg` on macOS/Linux
 
-### Verified Lexicon Start Times
-
-| Speaker | Lexicon starts at | Source WAV |
-|---------|-------------------|------------|
-| Fail01  | ~506s             | Faili_M_1984.wav |
-| Fail02  | ~335s             | SK_Faili_F_1968.wav |
-| Kalh01  | ~884s             | Kalh_M_1981.wav |
-| Khan01  | ~1270s            | REC00002.wav |
-| Khan02  | ~418s             | khanaqini_F_1967.wav |
-| Khan03  | ~465s             | C0401_audio.wav |
-| Khan04  | ~1192s            | Khanaqin_F_2000.wav |
-| Mand01  | ~0s               | Mandali_M_1900_01.wav |
-| Qasr01  | ~0s               | Qasrashirin_M_1973.wav |
-| Saha01  | ~0s               | Sahana_F_1978.wav |
-
-### Reference Forms per Concept
-
-Available in `review_data.json` — for each concept, up to 10 speakers' ortho + IPA.
-Used for AI matching: collect non-missing forms as reference, build search patterns.
+### Python
+- WSL: Python 3.12.3, `soundfile`, `numpy`, `scipy`
+- Windows conda: `kurdish_asr` env with torch + CUDA
 
 ---
 
-## 12. Estimated Timeline
+## 16. Risks
 
-| Phase | Task | Estimate |
-|-------|------|----------|
-| 0 | WAV audit (ffprobe all source files) | 30 min |
-| 1 | Data preparation (source_index, peaks, transcripts, AI suggestions) | 2.5 hours |
-| 2 | Server upgrade (range requests) | 30 min |
-| 3 | Waveform + basic controls (MediaElement + peaks) | 3.5 hours |
-| 4 | Transcript timeline + AI suggestions (virtualized) | 2.5 hours |
-| 5 | Assignment + export | 1.5 hours |
-| 6 | Full-screen mode | 1.5 hours |
-| 7 | Polish + integration | 1 hour |
-| **Total** | | **~13 hours** |
+| Risk | Mitigation |
+|------|------------|
+| Annotation files grow large | One file per speaker, not one giant JSON |
+| TextGrid format edge cases | Test with real Praat-generated TextGrids |
+| Video sync FFT fails on noisy audio | Manual offset slider as fallback |
+| AI provider rate limits | Batch calls, cache results, graceful degradation |
+| Cross-platform path issues | `pathlib` everywhere, relative paths in project.json |
+| localStorage data loss | File-based persistence primary, localStorage as backup only |
+| Large WAV + soundfile memory | Stream in chunks for peaks generation |
 
-Spread across **3–4 focused sessions** (3–4 hours each). Not a single marathon.
+---
 
-**Risk buffer:** The wavesurfer MediaElement + peaks integration is the riskiest step. If it doesn't work cleanly, allow an extra 2–3 hours for debugging or switching to a custom `<audio>` + `<canvas>` waveform renderer.
+## 17. Definition of Done
+
+PARSE v1.0 is complete when:
+
+- [ ] Project config (`project.json`) drives all paths and settings
+- [ ] Annotations save to disk as JSON files per speaker
+- [ ] 4-tier structure: IPA, Ortho, Concept, Speaker
+- [ ] Annotations editable in UI (IPA, ortho, concept fields per region)
+- [ ] Praat TextGrid export produces valid files openable in Praat
+- [ ] Praat TextGrid import works (replace speaker / create new)
+- [ ] ELAN XML export produces valid .eaf files
+- [ ] CSV export with all annotation data
+- [ ] Segment audio export via ffmpeg
+- [ ] `generate_peaks.py` uses `soundfile` (handles all formats)
+- [ ] AI suggestions work with provider abstraction (Sonnet now, OpenAI ready)
+- [ ] AI is optional — core features work fully offline
+- [ ] Video sync panel with FFT auto-sync + manual fine-tune
+- [ ] Video clip extraction from synced timestamps
+- [ ] FPS selection for video sync (24–60fps)
+- [ ] SIL language codes in project config
+- [ ] All paths relative — works on Windows, macOS, Linux
+- [ ] MIT LICENSE file in repo
+- [ ] All existing features from v3.0 still work (waveform, spectrogram, transcript, regions, fullscreen)

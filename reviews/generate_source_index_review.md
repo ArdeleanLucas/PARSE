@@ -115,7 +115,7 @@ All validation helpers terminate the process via `_fail()` instead of raising st
 
 ## Recommended test coverage
 
-I did not find obvious companion tests for this script under `source-explorer/`. At minimum, add tests for:
+I did not find obvious companion tests for this script under `parse/`. At minimum, add tests for:
 
 1. **Single-WAV speaker path generation**
    - `peaks/Fail01.json`
