@@ -91,20 +91,24 @@ Before spawning ANY sub-agents:
 ## Execution Plan
 
 ```
-1. Spawn E1 + E3 + E4 + E5          (4 parallel opencode_tasks)
-2. Spawn E2                           (after E1 dispatched, uses same interface)
-3. Spawn F1 + F2 + F3               (3 parallel, can overlap with Wave 5)
-4. Wait for F1 → Spawn F4           (needs TextGrid format)
-5. Spawn G1 + G2 + G3               (3 parallel, can overlap with waves 5-6)
-6. Wait for ALL waves 5-7 → Spawn H1
-7. Wait for H1 → Spawn H2           (HTML shell integration)
-8. Write H3 + H4 manually           (trivial)
-9. Wave 9: I1 namespace migration   (one careful task)
-10. Wave 9: I2-I4 wiring            (after I1)
-11. Full review + test + commit + push
+Batch 1 (8 slots): E1 + E2 + E3 + E4 + E5 + F1 + F2 + F3
+  → Wave 5 (all 5) + Wave 6 Python scripts (3) = 8 parallel
+
+Batch 2 (after some Batch 1 slots free): F4 + G1 + G2 + G3
+  → F4 needs F1 done. G1-G3 are independent.
+
+Batch 3 (sequential): H1 → H2
+  → H1 needs E3. H2 needs everything.
+
+Manual: H3 (shell launcher) + H4 (LICENSE)
+
+Batch 4 (sequential, careful): I1 → I2 + I3 + I4
+  → Namespace migration first, then wiring.
+
+Final: Full review + test + commit + push
 ```
 
-**Maximum parallel tasks at once:** ~10 (waves 5+6+7 overlap)
+**Maximum parallel tasks at once:** 8 (hard limit on concurrent sub-agents)
 **Estimated total:** 12-16 opencode_task dispatches
 
 ---
