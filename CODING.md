@@ -1,4 +1,4 @@
-# CODING.md — PARSE Build Protocol
+# CODING.md — PARSE Build Protocol v4.0
 
 > Read this file before ANY code work on PARSE. Non-negotiable.
 
@@ -6,152 +6,266 @@
 
 **PARSE** — **P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer
 
-Build the PARSE review tool using parallel `opencode_task` sub-agents.
+A browser-based phonetic review tool for linguists. Timestamps are the core data model. All annotations are Praat-compatible 4-tier interval structures saved to disk.
 
-- **Repo**: `TarahAssistant/PARSE` — ALL code pushes go here. No exceptions.
-- **Plan**: `PROJECT_PLAN.md` (full spec, schemas, edge cases)
-- **Interfaces**: `INTERFACES.md` (shared types, events, function signatures — created FIRST)
+- **Plan**: `PROJECT_PLAN.md` (full spec, schemas, UI design, video sync)
+- **Interfaces**: `INTERFACES.md` (shared types, events, function signatures)
+- **Standards**: `AGENTS.md` (coding standards, format support, what NOT to do)
 - **Lessons**: `tasks/lessons.md` (mistakes to not repeat)
+- **Repo**: `TarahAssistant/PARSE` — ALL code pushes go here
 
 ## Project Directory
 
-All build output goes to: `/home/lucas/.openclaw/workspace/parse/`
-
 ```
 parse/
-├── CODING.md                  ← you are here
-├── INTERFACES.md              ← shared types, function sigs, events (created FIRST)
-├── PROJECT_PLAN.md            ← full spec
-├── python/                    ← all Python scripts
-│   ├── thesis_server.py
-│   ├── generate_source_index.py
-│   ├── generate_peaks.py
-│   ├── reformat_transcripts.py
-│   ├── generate_ai_suggestions.py
-│   └── batch_reextract.py
-├── js/                        ← JS modules (loaded by HTML)
-│   ├── parse.js               ← panel orchestrator, singleton, state persistence
-│   ├── waveform-controller.js ← wavesurfer init, MediaElement + peaks, nav controls
-│   ├── transcript-panel.js    ← virtualized list, search, click-to-seek, highlight
-│   ├── suggestions-panel.js   ← AI suggestions, positional prior selector, re-ranking
-│   ├── spectrogram-worker.js  ← Web Worker for FFT (narrow-band + wide-band)
-│   ├── region-manager.js      ← region selection, assignment, export, decisions JSON
-│   └── fullscreen-mode.js     ← modal overlay, prev/next missing concept
-├── review_tool_dev.html       ← HTML shell (loads all JS modules)
-├── Start Review Tool.bat      ← updated batch file
-├── reviews/                   ← review output data
+├── AGENTS.md              ← coding standards for sub-agents
+├── CODING.md              ← you are here (build protocol)
+├── INTERFACES.md          ← shared types, events, function signatures
+├── PROJECT_PLAN.md        ← full architecture spec (v4.0)
+├── python/
+│   ├── thesis_server.py           ← HTTP server with range requests + CORS
+│   ├── generate_source_index.py   ← ffprobe → source_index.json
+│   ├── generate_peaks.py          ← soundfile → peaks JSON (wavesurfer v2)
+│   ├── reformat_transcripts.py    ← coarse transcript reformatter
+│   ├── generate_ai_suggestions.py ← fuzzy matching pipeline
+│   ├── batch_reextract.py         ← ffmpeg segment extraction
+│   ├── textgrid_io.py             ← NEW: Praat TextGrid read/write
+│   ├── elan_export.py             ← NEW: ELAN XML (.eaf) export
+│   ├── csv_export.py              ← NEW: flat CSV export
+│   ├── video_sync.py              ← NEW: FFT cross-correlation + drift
+│   └── video_clip_extract.py      ← NEW: drift-corrected video clip extraction
+├── js/
+│   ├── parse.js                   ← panel orchestrator, singleton, state
+│   ├── waveform-controller.js     ← wavesurfer v7, MediaElement + peaks
+│   ├── spectrogram-worker.js      ← Web Worker FFT (narrow/wide band)
+│   ├── transcript-panel.js        ← virtualized list, search, click-to-seek
+│   ├── suggestions-panel.js       ← AI suggestions, positional re-ranking
+│   ├── region-manager.js          ← region tracking, assignment, export
+│   ├── fullscreen-mode.js         ← modal overlay, concept navigation
+│   ├── annotation-panel.js        ← NEW: IPA/ortho/concept fields, save/load
+│   ├── annotation-store.js        ← NEW: disk persistence, autosave, crash recovery
+│   ├── project-config.js          ← NEW: project.json loader + validator
+│   ├── video-sync-panel.js        ← NEW: sync UI, dual waveform, fine-tune
+│   ├── import-export.js           ← NEW: TextGrid/ELAN/CSV import/export UI
+│   └── onboarding.js              ← NEW: project setup wizard
+├── review_tool_dev.html           ← HTML shell
+├── Start Review Tool.bat          ← Windows launcher
+├── start_parse.sh                 ← NEW: macOS/Linux launcher
+├── LICENSE                        ← NEW: MIT
+├── annotations/                   ← NEW: per-speaker annotation JSON files
+├── exports/                       ← NEW: TextGrid, ELAN, CSV, clips output
+├── reviews/                       ← code review reports
 └── tasks/
-    └── lessons.md             ← mistakes and corrections
+    └── lessons.md                 ← mistakes and corrections
 ```
 
 ## Sub-Agent Rules
 
-1. **File ownership is strict** — each sub-agent writes ONLY its assigned files. No conflicts.
-2. **Read `INTERFACES.md` before writing any JS** — all modules follow the interface contract.
-3. **Read `PROJECT_PLAN.md`** for schemas, edge cases, and constraints relevant to your module.
-4. **Do NOT modify any file outside your assigned output files.**
-5. **`git diff --staged` before every commit.**
+1. **File ownership is strict** — each sub-agent writes ONLY its assigned files
+2. **Read `INTERFACES.md` before writing any JS** — all modules follow the interface contract
+3. **Read `AGENTS.md` for coding standards** — `soundfile` not `wave`, vanilla JS, pathlib, etc.
+4. **Read `PROJECT_PLAN.md`** for schemas, data models, and constraints
+5. **Do NOT modify any file outside your assigned output files**
+6. **`git diff --staged` before every commit**
 
-## Parallel Streams
+## Architecture: Timestamps Are The Bible
 
-### Wave 1 — Foundation (parallel, no deps)
+Every annotation in PARSE is a time-stamped segment with 4 tiers:
 
-| Stream | Task | Output Files | Notes |
-|--------|------|--------------|-------|
-| **A1** | Python: HTTP server | `python/thesis_server.py` | Range requests, CORS, Windows paths |
-| **A2** | Python: source_index generator | `python/generate_source_index.py` | Reads ffprobe output, writes JSON |
-| **A3** | Python: peaks generator | `python/generate_peaks.py` | Reads WAV via `wave` module, outputs peaks JSON |
-| **A4** | Python: transcript reformatter | `python/reformat_transcripts.py` | Simplifies coarse JSON schema |
-| **A5** | Python: AI suggestions generator | `python/generate_ai_suggestions.py` | Fuzzy matching, base scores only |
-| **A6** | Python: batch re-extractor | `python/batch_reextract.py` | Reads export JSON, runs ffmpeg |
+```
+Tier 1 (top):    IPA          "jek"
+Tier 2:          Ortho        "یەک"
+Tier 3:          Concept      "1:one"
+Tier 4 (bottom): Speaker      "Fail01"
+```
 
-All 6 Python scripts are independent. Spawn all at once.
+All downstream operations derive from timestamps:
+- Praat TextGrid export → timestamps become interval boundaries
+- ELAN XML export → timestamps become time slots
+- CSV export → timestamps become start_sec/end_sec columns
+- Video clip extraction → timestamps map through drift correction to video frames
+- Segment audio export → timestamps become ffmpeg -ss/-to arguments
 
-Each task prompt MUST include:
-- The relevant schema from `PROJECT_PLAN.md` (copy the JSON examples in)
-- Input/output file paths
-- Edge cases from the plan (bit depth, script mixing, Levenshtein thresholds, etc.)
+**No annotation exists without a timestamp. No timestamp exists without user confirmation.**
 
-### Wave 2 — JS Core (parallel, depends on INTERFACES.md)
+## Build Waves (v4.0)
 
-| Stream | Task | Output Files | Notes |
-|--------|------|--------------|-------|
-| **B1** | JS: panel orchestrator | `js/parse.js` | Singleton logic, open/close, localStorage |
-| **B2** | JS: waveform controller | `js/waveform-controller.js` | wavesurfer v7, MediaElement, peaks, AbortController |
-| **B3** | JS: spectrogram worker | `js/spectrogram-worker.js` | Web Worker, FFT, ≤30s cap, greyscale |
+### Wave 5 — Core v4.0 (parallel, high priority)
 
-### Wave 3 — JS Features (parallel, depends on Wave 2 interfaces)
+| Stream | Task | Output Files | Deps |
+|--------|------|--------------|------|
+| **E1** | Annotation data model + disk persistence | `js/annotation-store.js` | INTERFACES.md |
+| **E2** | Annotation panel UI (IPA/ortho/concept fields) | `js/annotation-panel.js` | E1 interface |
+| **E3** | Project config loader + validator | `js/project-config.js` | INTERFACES.md |
+| **E4** | `generate_peaks.py` rewrite (soundfile) | `python/generate_peaks.py` | Nothing |
 
-| Stream | Task | Output Files | Notes |
-|--------|------|--------------|-------|
-| **C1** | JS: transcript panel | `js/transcript-panel.js` | Virtualized list, search, highlight |
-| **C2** | JS: suggestions panel | `js/suggestions-panel.js` | AI suggestions, positional prior selector, re-ranking |
-| **C3** | JS: region manager | `js/region-manager.js` | Region selection, assignment, export |
-| **C4** | JS: fullscreen mode | `js/fullscreen-mode.js` | Modal overlay, prev/next navigation |
+E1+E3+E4 are independent. E2 depends on E1's interface (not its implementation — can run parallel if interface is defined first).
 
-### Wave 4 — Integration (sequential, after all waves)
+### Wave 6 — Import/Export (parallel, high priority)
 
-| Stream | Task | Output Files | Notes |
-|--------|------|--------------|-------|
-| **D1** | HTML shell + assembly | `review_tool_dev.html`, `Start Review Tool.bat` | Loads all JS, defines panel HTML structure |
+| Stream | Task | Output Files | Deps |
+|--------|------|--------------|------|
+| **F1** | Praat TextGrid read/write | `python/textgrid_io.py` | Annotation schema |
+| **F2** | ELAN XML export | `python/elan_export.py` | Annotation schema |
+| **F3** | CSV export | `python/csv_export.py` | Annotation schema |
+| **F4** | Import/Export UI (browser) | `js/import-export.js` | F1, E1 |
+
+F1, F2, F3 are independent Python scripts. F4 depends on F1 for TextGrid format and E1 for annotation model.
+
+### Wave 7 — Video Sync (parallel, medium priority)
+
+| Stream | Task | Output Files | Deps |
+|--------|------|--------------|------|
+| **G1** | FFT cross-correlation + drift detection | `python/video_sync.py` | Nothing |
+| **G2** | Video clip extraction | `python/video_clip_extract.py` | G1 sync data |
+| **G3** | Video sync panel UI | `js/video-sync-panel.js` | G1, INTERFACES.md |
+
+G1 is independent. G2 uses G1's output format. G3 wraps G1 in a browser UI.
+
+### Wave 8 — Onboarding + Polish (sequential, after waves 5-7)
+
+| Stream | Task | Output Files | Deps |
+|--------|------|--------------|------|
+| **H1** | Onboarding wizard | `js/onboarding.js` | E3 (project config) |
+| **H2** | HTML shell update | `review_tool_dev.html` | All JS modules |
+| **H3** | Cross-platform launcher | `start_parse.sh` | Nothing |
+| **H4** | MIT LICENSE | `LICENSE` | Nothing |
+
+### Wave 9 — Integration with existing v3.0 code
+
+| Stream | Task | Files Modified | Notes |
+|--------|------|----------------|-------|
+| **I1** | Wire annotation-store into region-manager | `js/region-manager.js` | Region assign → annotation save |
+| **I2** | Wire annotation-panel into parse.js | `js/parse.js` | Panel open → annotation fields appear |
+| **I3** | Wire project-config into all data loaders | `js/parse.js`, `review_tool_dev.html` | Replace hardcoded paths |
+| **I4** | Update AI suggestions for provider abstraction | `python/generate_ai_suggestions.py` | Add OpenAI/Ollama support |
 
 ## Execution Order
 
 ```
-Step 0: Create INTERFACES.md (defines all shared types, events, function signatures)
-Step 1: Spawn Wave 1 (A1–A6) — all 6 Python scripts in parallel
-Step 2: Spawn Wave 2 (B1–B3) — can run alongside Wave 1
-Step 3: Wait for Wave 2 to finish → Spawn Wave 3 (C1–C4) in parallel
-Step 4: Wait for all waves → Spawn Wave 4 (D1) for integration
-Step 5: Manual review + fix any integration issues
+Step 0: Update INTERFACES.md with v4.0 events + schemas
+Step 1: Spawn Wave 5 (E1-E4) — annotation core + peaks rewrite
+Step 2: Spawn Wave 6 (F1-F3) alongside Wave 5 — Python export scripts
+Step 3: Wait for E1 → Spawn E2 (annotation panel UI)
+Step 4: Wait for E1+F1 → Spawn F4 (import/export UI)
+Step 5: Spawn Wave 7 (G1-G3) — can overlap with waves 5-6
+Step 6: Wait for all → Wave 8 (onboarding, HTML, launchers)
+Step 7: Wave 9 — integration wiring (sequential, careful)
+Step 8: Review + test + fix integration bugs
 ```
 
-**In practice:** Waves 1 and 2 launch simultaneously (9 parallel tasks). Wave 3 launches once Wave 2 interfaces are stable (4 more tasks). Wave 4 is the final assembly.
+**Practical:** Waves 5+6+7 can run mostly in parallel (up to 10 tasks). Wave 8 is sequential. Wave 9 is surgical edits to existing files.
 
-## Interface Contract (INTERFACES.md)
+## Key Schemas (for sub-agent prompts)
 
-Before spawning ANY sub-agent, write `INTERFACES.md` with:
+### Annotation File (`annotations/<Speaker>.parse.json`)
 
-1. **Global namespace:** `window.SourceExplorer` — all modules attach here
-2. **Events (CustomEvent on document):**
-   - `se:panel-open` — `{speaker, conceptId, sourceWav}`
-   - `se:panel-close` — `{speaker}`
-   - `se:seek` — `{timeSec}` — any module can request a seek
-   - `se:region-created` — `{startSec, endSec}`
-   - `se:region-assigned` — `{speaker, conceptId, startSec, endSec, sourceWav}`
-   - `se:suggestion-click` — `{suggestionIndex, segmentStartSec}`
-   - `se:transcript-click` — `{segmentIndex, startSec}`
-   - `se:priors-changed` — `{selectedSpeakers: string[]}`
-   - `se:fullscreen-toggle` — `{}`
-3. **Shared data access:**
-   - `window.SourceExplorer.sourceIndex` — loaded source_index.json
-   - `window.SourceExplorer.transcripts` — loaded coarse transcripts (keyed by speaker)
-   - `window.SourceExplorer.suggestions` — loaded ai_suggestions.json
-   - `window.SourceExplorer.decisions` — current decisions state (read/write)
-4. **Module init pattern:** Each module exports an `init(container)` function called by the HTML shell
-5. **DOM contract:** Each module receives a specific container div ID (defined in HTML shell)
+```json
+{
+  "version": 1,
+  "project_id": "sk-thesis-2026",
+  "speaker": "Fail01",
+  "source_audio": "audio/working/Fail01/Faili_M_1984.wav",
+  "source_audio_duration_sec": 7200.0,
+  "tiers": {
+    "ipa": {
+      "type": "interval",
+      "display_order": 1,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "jek" }
+      ]
+    },
+    "ortho": {
+      "type": "interval",
+      "display_order": 2,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "یەک" }
+      ]
+    },
+    "concept": {
+      "type": "interval",
+      "display_order": 3,
+      "intervals": [
+        { "start": 506.2, "end": 506.9, "text": "1:one" }
+      ]
+    },
+    "speaker": {
+      "type": "interval",
+      "display_order": 4,
+      "intervals": [
+        { "start": 0, "end": 7200.0, "text": "Fail01" }
+      ]
+    }
+  },
+  "metadata": {
+    "language_code": "sdh",
+    "created": "2026-03-23T21:00:00Z",
+    "modified": "2026-03-23T22:00:00Z"
+  }
+}
+```
+
+### Video Sync Data
+
+```json
+{
+  "video_file": "Khan01_session.mp4",
+  "audio_file": "audio/working/Khan01/REC00002.wav",
+  "fps": 60,
+  "sync": {
+    "status": "synced",
+    "offset_sec": 14.3,
+    "drift_rate": 0.00667,
+    "method": "fft_auto",
+    "ai_verified": true,
+    "manual_adjustment_sec": 0.0
+  }
+}
+```
+
+### Timestamp → Video Mapping
+
+```
+video_time = (wav_time × (1 + drift_rate/60)) + offset_sec + manual_adjustment_sec
+video_frame = round(video_time × fps)
+```
 
 ## Sub-Agent Prompt Template
 
-Each `opencode_task` prompt includes:
-1. The module's purpose (one paragraph)
-2. The exact output file path(s)
-3. The interface contract (relevant events + shared data)
-4. The relevant schema sections (copied from PROJECT_PLAN.md)
+Each `opencode_task` prompt MUST include:
+
+1. Module purpose (one paragraph)
+2. Exact output file path(s)
+3. Interface contract (relevant events + shared data from INTERFACES.md)
+4. Relevant schema (copied from this file or PROJECT_PLAN.md)
 5. Specific edge cases and constraints
 6. **"Do NOT modify any file outside your assigned output files"**
+7. **"Read AGENTS.md for coding standards before writing code"**
 
 ## What Runs Where
 
-- **Python scripts** — written in sandbox, **executed on Lucas's Windows machine** (they need access to `C:\Users\Lucas\Thesis\`)
-- **JS modules + HTML** — written in sandbox, **deployed to `C:\Users\Lucas\Thesis\`** for dev server
+- **Python scripts** — written in sandbox, **executed on user's machine** (needs audio file access)
+- **JS modules + HTML** — written in sandbox, **deployed to project directory** for dev server
 - **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/parse/`
+
+## Pre-Build Checklist
+
+Before spawning any Wave 5+ sub-agents:
+
+- [ ] INTERFACES.md updated with v4.0 events (annotation events, import/export events, video sync events)
+- [ ] `generate_peaks.py` soundfile rewrite (can run as E4 in wave 5)
+- [ ] WAV normalization done (Lucas, on Windows) — or at least one speaker for testing
 
 ## Post-Build Checklist
 
 After all waves complete:
-1. Review each file for interface compliance
-2. Test HTML shell loads all modules without console errors
-3. Copy entire `parse/` to Lucas's Windows machine
-4. Run `thesis_server.py` + open `review_tool_dev.html` in Chrome
-5. Verify: waveform loads, transcript renders, suggestions appear, regions work
+
+1. `python3 -m py_compile python/*.py` — all Python scripts compile
+2. `node --check js/*.js` — all JS modules pass syntax check
+3. Review each file for interface compliance
+4. Test: annotations save to disk and survive page reload
+5. Test: TextGrid export opens in Praat without errors
+6. Test: waveform loads, transcript renders, suggestions appear
+7. Test: video sync produces correct offset (if video files available)
+8. `git diff --staged` before committing
+9. Push to `TarahAssistant/PARSE`
