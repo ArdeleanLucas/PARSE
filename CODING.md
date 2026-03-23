@@ -24,6 +24,7 @@ parse/
 ├── PROJECT_PLAN.md        ← full architecture spec (v4.0)
 ├── python/
 │   ├── thesis_server.py           ← HTTP server with range requests + CORS
+│   ├── normalize_audio.py         ← NEW: two-pass ffmpeg loudnorm (originals → working copies)
 │   ├── generate_source_index.py   ← ffprobe → source_index.json
 │   ├── generate_peaks.py          ← soundfile → peaks JSON (wavesurfer v2)
 │   ├── reformat_transcripts.py    ← coarse transcript reformatter
@@ -98,8 +99,19 @@ All downstream operations derive from timestamps:
 | **E2** | Annotation panel UI (IPA/ortho/concept fields) | `js/annotation-panel.js` | E1 interface |
 | **E3** | Project config loader + validator | `js/project-config.js` | INTERFACES.md |
 | **E4** | `generate_peaks.py` rewrite (soundfile) | `python/generate_peaks.py` | Nothing |
+| **E5** | Audio normalization pipeline | `python/normalize_audio.py` | Nothing |
 
-E1+E3+E4 are independent. E2 depends on E1's interface (not its implementation — can run parallel if interface is defined first).
+E1+E3+E4+E5 are independent. E2 depends on E1's interface (not its implementation — can run parallel if interface is defined first).
+
+**E5 — `normalize_audio.py`** is critical infrastructure. PARSE NEVER modifies original audio files. This script:
+- Reads from `audio/original/<Speaker>/` (untouched source recordings)
+- Writes to `audio/working/<Speaker>/` (normalized copies)
+- Two-pass ffmpeg `loudnorm` normalization to -16 LUFS
+- Converts any format (32-bit float, 24-bit, RF64, MP3) → 16-bit PCM mono 44.1kHz
+- Handles stereo → mono downmix
+- All downstream tools (peaks, Whisper, wavesurfer) read from `audio/working/`, NEVER from `audio/original/`
+- Skips files already normalized (checks output existence + source modification time)
+- Cross-platform: uses `ffmpeg`/`ffprobe` via configurable path or system PATH
 
 ### Wave 6 — Import/Export (parallel, high priority)
 
@@ -248,13 +260,26 @@ Each `opencode_task` prompt MUST include:
 - **JS modules + HTML** — written in sandbox, **deployed to project directory** for dev server
 - **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/parse/`
 
+## Data Pipeline Order
+
+This is the mandatory sequence for preparing a new project's audio:
+
+```
+1. normalize_audio.py    → audio/original/ → audio/working/ (16-bit PCM mono, -16 LUFS)
+2. generate_source_index.py → ffprobe audio/working/ → source_index.json
+3. generate_peaks.py     → soundfile audio/working/ → peaks/*.json
+4. reformat_transcripts.py  → coarse transcripts → transcripts/*.json
+5. generate_ai_suggestions.py → transcripts + review_data → ai_suggestions.json
+```
+
+Step 1 is a HARD PREREQUISITE. Nothing runs without normalized working copies.
+
 ## Pre-Build Checklist
 
 Before spawning any Wave 5+ sub-agents:
 
 - [ ] INTERFACES.md updated with v4.0 events (annotation events, import/export events, video sync events)
-- [ ] `generate_peaks.py` soundfile rewrite (can run as E4 in wave 5)
-- [ ] WAV normalization done (Lucas, on Windows) — or at least one speaker for testing
+- [ ] `normalize_audio.py` built (E5 in wave 5) — this IS the pipeline, not a manual step
 
 ## Post-Build Checklist
 
