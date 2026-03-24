@@ -42,13 +42,9 @@ These speakers have the same data quality as Tier 1 but haven't been run through
 
 | Speaker | WAV (Audio_Original) | WAV size | Audition CSV | Notes |
 |---------|----------------------|----------|--------------|-------|
-| Hala01  | `Hala01 process/Halabja_M_1990_01.wav` | 2.2G | `Halabja_M_1990.csv` | CK variety (Central Kurdish / Halabja) — may be outgroup |
 | Kala01  | `Kala01/Kalari_F_2001.wav` | 3.1G | `Kalari_F_2001.csv` | — |
 | Kifr01  | `Kifr01/Kifri_M_1990_01.wav` | 3.7G | `Kifri_M_1990_01_01 - Kaso Solav.csv` | — |
 | Zang01  | `Zang01/Zangana_F_1987.wav` | 1.9G | `Zangana_F_1987_01 - Kaso Solav.csv` | — |
-
-**Hala01 also has 508 processed segments** in `Audio_Processed/Hala01 process/segments/`
-with a rich transcription CSV (`hala01_ipa_transcriptions.csv`, format includes variety/gender/age/city metadata).
 
 ---
 
@@ -100,11 +96,14 @@ The processed segments and IPA transcriptions already exist.
 
 ---
 
-## Tier 4 — No CSV, no processed segments (unstarted)
+## Excluded Speakers
 
-| Speaker | WAV | WAV size | Notes |
-|---------|-----|----------|-------|
-| Gora01  | `Gora01_missing/Gorani_M_1971.wav` | 1.4G | **Gorani** — not Southern Kurdish. Likely comparative/outgroup only. Confirm with Lucas whether to process. |
+These speakers are **NOT part of the thesis project** and will not be processed.
+
+| Speaker | Notes |
+|---------|-------|
+| Hala01  | Central Kurdish (Halabja/CK variety) — not associated with this project |
+| Gora01  | Gorani — not associated with this project |
 
 ---
 
