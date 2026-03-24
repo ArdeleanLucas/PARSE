@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Source Explorer - Dev Shell</title>
+  <title>PARSE — Phonetic Analysis &amp; Review Source Explorer</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -39,7 +39,7 @@
       display: flex;
       flex-direction: column;
     }
-    .se-panel {
+    .parse-panel {
       background: #fff;
       padding: 20px;
       border-radius: 12px;
@@ -47,9 +47,9 @@
       box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
       margin-top: 20px;
     }
-    .se-panel.hidden { display: none !important; }
+    .parse-panel.hidden { display: none !important; }
 
-    .se-fullscreen {
+    .parse-fullscreen {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
       background: rgba(248, 250, 252, 0.95);
@@ -57,22 +57,25 @@
       padding: 20px;
       overflow: auto;
     }
-    .se-fullscreen.hidden { display: none !important; }
+    .parse-fullscreen.hidden { display: none !important; }
+    .parse-video-sync.hidden,
+    .parse-modal.hidden,
+    .parse-onboarding.hidden { display: none !important; }
 
-    #se-header { margin-bottom: 20px; }
+    #parse-header { margin-bottom: 20px; }
 
-    .se-grid {
+    .parse-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 350px;
       gap: 24px;
       align-items: start;
     }
-    .se-col-main {
+    .parse-col-main {
       display: flex;
       flex-direction: column;
       gap: 20px;
     }
-    .se-col-side {
+    .parse-col-side {
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -112,7 +115,7 @@
 <div class="layout">
   <div class="sidebar">
     <h2 style="margin-top:0; font-size: 1.25rem;">Dev Controls</h2>
-    <p style="font-size: 0.9em; color: #64748b;">Select a missing concept to open the Source Explorer.</p>
+    <p style="font-size: 0.9em; color: #64748b;">Select a missing concept to open PARSE.</p>
 
     <div id="demo-list">
       <p style="font-size:0.9em;color:#94a3b8;">Loading data...</p>
@@ -120,35 +123,48 @@
 
     <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
       <button class="btn" id="btn-export" style="width: 100%;">Log Decisions to Console</button>
+      <button class="btn" id="btn-import-export" style="width:100%; margin-top:8px;">Import / Export</button>
+      <button class="btn" id="btn-setup" style="width:100%; margin-top:8px;">⚙ Project Setup</button>
     </div>
   </div>
 
   <div class="main-content">
     <div style="background:#fff; padding:20px; border-radius:12px; border:1px solid var(--border);">
-      <h1 style="margin:0 0 10px 0; font-size:1.5rem;">Source Explorer - Wave 4 Integration</h1>
-      <p style="margin:0; color:#64748b;">This is the development shell wrapping the Source Explorer JS modules.</p>
+      <h1 style="margin:0 0 10px 0; font-size:1.5rem;">PARSE — Phonetic Analysis &amp; Review Source Explorer</h1>
+      <p style="margin:0; color:#64748b;">This is the development shell wrapping the PARSE JS modules.</p>
     </div>
 
-    <div id="se-panel" class="se-panel hidden" aria-hidden="true">
-      <div id="se-header"></div>
+    <div id="parse-panel" class="parse-panel hidden" aria-hidden="true">
+      <div id="parse-header"></div>
 
-      <div class="se-grid">
-        <div class="se-col-main">
-          <div id="se-waveform"></div>
-          <div id="se-spectrogram"></div>
-          <div id="se-transcript"></div>
+      <div class="parse-grid">
+        <div class="parse-col-main">
+          <div id="parse-waveform"></div>
+          <div id="parse-spectrogram"></div>
+          <div id="parse-annotation"></div>
+          <div id="parse-transcript"></div>
         </div>
-        <div class="se-col-side">
-          <div id="se-controls"></div>
-          <div id="se-priors"></div>
-          <div id="se-suggestions"></div>
+        <div class="parse-col-side">
+          <div id="parse-controls"></div>
+          <div id="parse-priors"></div>
+          <div id="parse-suggestions"></div>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<div id="se-fullscreen-overlay" class="se-fullscreen hidden"></div>
+<!-- Fullscreen overlay -->
+<div id="parse-fullscreen-overlay" class="parse-fullscreen hidden"></div>
+
+<!-- Video sync panel (shown per-speaker when video exists) -->
+<div id="parse-video-sync" class="parse-video-sync hidden"></div>
+
+<!-- Import/Export modal -->
+<div id="parse-io-modal" class="parse-modal hidden"></div>
+
+<!-- Onboarding wizard (shown when no project.json exists) -->
+<div id="parse-onboarding" class="parse-onboarding hidden"></div>
 
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -156,19 +172,14 @@
 
 <script>
   (function seedNamespace() {
-    const existing = window.SourceExplorer || {};
-    const existingModules = existing.modules || {};
-
-    window.SourceExplorer = existing;
-    window.SourceExplorer.sourceIndex = existing.sourceIndex || null;
-    window.SourceExplorer.transcripts = existing.transcripts && typeof existing.transcripts === 'object'
-      ? existing.transcripts
-      : {};
-    window.SourceExplorer.suggestions = existing.suggestions || null;
-    window.SourceExplorer.decisions = existing.decisions && typeof existing.decisions === 'object'
-      ? existing.decisions
-      : {};
-    window.SourceExplorer.modules = Object.assign({
+    window.PARSE = window.PARSE || {};
+    window.PARSE.project = window.PARSE.project || null;
+    window.PARSE.sourceIndex = window.PARSE.sourceIndex || null;
+    window.PARSE.transcripts = window.PARSE.transcripts || {};
+    window.PARSE.suggestions = window.PARSE.suggestions || null;
+    window.PARSE.annotations = window.PARSE.annotations || {};
+    window.PARSE.modules = window.PARSE.modules || {
+      config: null,
       panel: null,
       waveform: null,
       transcript: null,
@@ -176,7 +187,12 @@
       spectrogram: null,
       regions: null,
       fullscreen: null,
-    }, existingModules);
+      annotationStore: null,
+      annotationPanel: null,
+      videoSync: null,
+      importExport: null,
+      onboarding: null,
+    };
   })();
 </script>
 
@@ -186,12 +202,18 @@
 <script src="js/suggestions-panel.js"></script>
 <script src="js/region-manager.js"></script>
 <script src="js/fullscreen-mode.js"></script>
+<script src="js/project-config.js"></script>
+<script src="js/annotation-store.js"></script>
+<script src="js/annotation-panel.js"></script>
+<script src="js/import-export.js"></script>
+<script src="js/video-sync-panel.js"></script>
+<script src="js/onboarding.js"></script>
 
 <script>
   (async function initApp() {
-    console.log('[DevShell] Bootstrapping Source Explorer...');
+    console.log('[DevShell] Bootstrapping PARSE...');
 
-    const SE = window.SourceExplorer;
+    const SE = window.PARSE;
     const transcriptLoads = new Map();
 
     function escapeHtml(value) {
@@ -315,7 +337,7 @@
         return;
       }
 
-      document.dispatchEvent(new CustomEvent('se:panel-open', {
+      document.dispatchEvent(new CustomEvent('parse:panel-open', {
         detail: context,
       }));
     }
@@ -346,7 +368,7 @@
 
     function restoreDecisionsStore() {
       try {
-        const savedDecisions = localStorage.getItem('se-decisions');
+        const savedDecisions = localStorage.getItem('parse-decisions') || localStorage.getItem('se-decisions');
         if (!savedDecisions) return;
 
         const parsed = JSON.parse(savedDecisions);
@@ -378,12 +400,16 @@
     }
 
     function initializeModules() {
-      const panelEl = document.getElementById('se-panel');
-      const waveformEl = document.getElementById('se-waveform');
-      const spectrogramEl = document.getElementById('se-spectrogram');
-      const transcriptEl = document.getElementById('se-transcript');
-      const controlsEl = document.getElementById('se-controls');
-      const suggestionsEl = document.getElementById('se-suggestions');
+      const panelEl = document.getElementById('parse-panel');
+      const waveformEl = document.getElementById('parse-waveform');
+      const spectrogramEl = document.getElementById('parse-spectrogram');
+      const annotationEl = document.getElementById('parse-annotation');
+      const transcriptEl = document.getElementById('parse-transcript');
+      const controlsEl = document.getElementById('parse-controls');
+      const suggestionsEl = document.getElementById('parse-suggestions');
+      const ioModalEl = document.getElementById('parse-io-modal');
+      const videoSyncEl = document.getElementById('parse-video-sync');
+      const onboardingEl = document.getElementById('parse-onboarding');
 
       if (SE.modules.panel && typeof SE.modules.panel.init === 'function') {
         SE.modules.panel.init(panelEl);
@@ -402,6 +428,24 @@
       }
       if (SE.modules.fullscreen && typeof SE.modules.fullscreen.init === 'function') {
         SE.modules.fullscreen.init(controlsEl);
+      }
+      if (SE.modules.config && typeof SE.modules.config.init === 'function') {
+        SE.modules.config.init();
+      }
+      if (SE.modules.annotationStore && typeof SE.modules.annotationStore.init === 'function') {
+        SE.modules.annotationStore.init();
+      }
+      if (SE.modules.annotationPanel && typeof SE.modules.annotationPanel.init === 'function') {
+        SE.modules.annotationPanel.init(annotationEl);
+      }
+      if (SE.modules.importExport && typeof SE.modules.importExport.init === 'function') {
+        SE.modules.importExport.init(ioModalEl);
+      }
+      if (SE.modules.videoSync && typeof SE.modules.videoSync.init === 'function') {
+        SE.modules.videoSync.init(videoSyncEl);
+      }
+      if (SE.modules.onboarding && typeof SE.modules.onboarding.init === 'function') {
+        SE.modules.onboarding.init(onboardingEl);
       }
 
       ensureSpectrogramStub(spectrogramEl);
@@ -517,7 +561,7 @@
     }
 
     function attachAppListeners() {
-      document.addEventListener('se:panel-open', function (event) {
+      document.addEventListener('parse:panel-open', function (event) {
         const detail = event && event.detail ? event.detail : {};
         ensureTranscriptLoaded(detail.speaker);
       });
@@ -531,6 +575,18 @@
         } else {
           alert('Region manager not found or missing getExportState().');
         }
+      });
+
+      document.getElementById('btn-import-export').addEventListener('click', function () {
+        const ie = window.PARSE.modules.importExport;
+        if (ie && typeof ie.show === 'function') ie.show();
+        else alert('Import/Export module not loaded.');
+      });
+
+      document.getElementById('btn-setup').addEventListener('click', function () {
+        const ob = window.PARSE.modules.onboarding;
+        if (ob && typeof ob.show === 'function') ob.show();
+        else alert('Onboarding module not loaded.');
       });
     }
 
