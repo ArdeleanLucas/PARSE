@@ -244,15 +244,20 @@ video_frame = round(video_time × fps)
 
 ## Sub-Agent Prompt Template
 
-Each `opencode_task` prompt MUST include:
+Each sub-agent prompt MUST include:
 
-1. Module purpose (one paragraph)
-2. Exact output file path(s)
-3. Interface contract (relevant events + shared data from INTERFACES.md)
-4. Relevant schema (copied from this file or PROJECT_PLAN.md)
-5. Specific edge cases and constraints
-6. **"Do NOT modify any file outside your assigned output files"**
-7. **"Read AGENTS.md for coding standards before writing code"**
+1. **Standard preamble (always first):**
+   > "Before writing any code, read these three files in order:
+   > 1. `/home/lucas/.openclaw/workspace/parse/CODING.md`
+   > 2. `/home/lucas/.openclaw/workspace/parse/AGENTS.md`
+   > 3. `/home/lucas/.openclaw/agents/dr-kurd/TOOLS.md`
+   > Then follow whatever additional reading those docs direct you to."
+2. Module purpose (one paragraph)
+3. Exact output file path(s)
+4. Interface contract (relevant events + shared data from INTERFACES.md)
+5. Relevant schema (copied from this file or PROJECT_PLAN.md)
+6. Specific edge cases and constraints
+7. **"Do NOT modify any file outside your assigned output files"**
 
 ## What Runs Where
 
