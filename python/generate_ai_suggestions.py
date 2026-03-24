@@ -19,6 +19,7 @@ Usage:
         --review-data path/to/review_data.json \
         --transcripts-dir path/to/coarse_transcripts/ \
         --anchors path/to/anchors.json \
+        --project path/to/project.json \
         --output path/to/ai_suggestions.json
 """
 
@@ -26,6 +27,7 @@ import argparse
 import json
 import math
 import os
+from pathlib import Path
 import re
 import sys
 import unicodedata
@@ -74,6 +76,10 @@ _MISSING_STATUSES = {
 _VERIFIED_STATUSES = {'accepted', 'reviewed', 'verified', 'correct'}
 
 _MAX_POSITIONAL_BOOST = 0.25
+
+_DEFAULT_AI_PROVIDER = 'anthropic'
+_DEFAULT_AI_MODEL = 'claude-sonnet-4-6'
+_DEFAULT_AI_API_KEY_ENV = 'ANTHROPIC_API_KEY'
 
 
 def normalize_text_for_match(text: str) -> str:
@@ -439,6 +445,148 @@ def get_concept_en(concept_data: dict) -> str:
 
 
 # ============================================================================
+# AI provider configuration
+# ============================================================================
+
+def load_ai_config(project_file: Optional[str]) -> dict:
+    config: dict = {
+        'enabled': bool(os.environ.get(_DEFAULT_AI_API_KEY_ENV, '')),
+        'provider': _DEFAULT_AI_PROVIDER,
+        'model': _DEFAULT_AI_MODEL,
+        'api_key_env': _DEFAULT_AI_API_KEY_ENV,
+    }
+
+    if not project_file:
+        return config
+
+    project_path = Path(project_file)
+    if not project_path.exists():
+        print(
+            f'[WARN] project.json not found: {project_path} — falling back to default Anthropic config',
+            file=sys.stderr,
+        )
+        return config
+
+    try:
+        with project_path.open('r', encoding='utf-8') as fh:
+            project_data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f'[WARN] Failed to load project config {project_path}: {exc} — '
+            'falling back to default Anthropic config',
+            file=sys.stderr,
+        )
+        return config
+
+    ai_block = project_data.get('ai')
+    if not isinstance(ai_block, dict):
+        return config
+
+    provider = str(ai_block.get('provider') or _DEFAULT_AI_PROVIDER).strip().lower()
+    model = str(ai_block.get('model') or _DEFAULT_AI_MODEL).strip() or _DEFAULT_AI_MODEL
+    api_key_env = str(ai_block.get('api_key_env') or _DEFAULT_AI_API_KEY_ENV).strip() or _DEFAULT_AI_API_KEY_ENV
+
+    return {
+        'enabled': bool(ai_block.get('enabled', False)),
+        'provider': provider,
+        'model': model,
+        'api_key_env': api_key_env,
+    }
+
+
+def llm_strategy_enabled(ai_config: Optional[dict]) -> bool:
+    if not ai_config:
+        return False
+
+    if not ai_config.get('enabled', False):
+        return False
+
+    provider = str(ai_config.get('provider', _DEFAULT_AI_PROVIDER)).strip().lower()
+    api_key_env = str(ai_config.get('api_key_env', _DEFAULT_AI_API_KEY_ENV)).strip() or _DEFAULT_AI_API_KEY_ENV
+
+    if provider not in {'anthropic', 'openai', 'ollama'}:
+        print(
+            f'[WARN] Strategy 4 disabled: unknown AI provider {provider}',
+            file=sys.stderr,
+        )
+        return False
+
+    if provider in {'anthropic', 'openai'} and not os.environ.get(api_key_env, ''):
+        print(
+            f'[WARN] Strategy 4 disabled: {provider} requires env var {api_key_env}',
+            file=sys.stderr,
+        )
+        return False
+
+    return True
+
+
+def call_llm(prompt: str, config: dict) -> str:
+    """Call the configured LLM provider and return plain response text."""
+    provider = str(config.get('provider', _DEFAULT_AI_PROVIDER)).strip().lower() or _DEFAULT_AI_PROVIDER
+    model = str(config.get('model', _DEFAULT_AI_MODEL)).strip() or _DEFAULT_AI_MODEL
+    api_key_env = str(config.get('api_key_env', _DEFAULT_AI_API_KEY_ENV)).strip() or _DEFAULT_AI_API_KEY_ENV
+    api_key = os.environ.get(api_key_env, '')
+
+    try:
+        if provider == 'anthropic':
+            if not api_key:
+                raise RuntimeError(f'Anthropic API key env var {api_key_env} is not set')
+
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model=model,
+                max_tokens=1024,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            if not msg.content:
+                raise RuntimeError('Anthropic returned empty content')
+            return msg.content[0].text
+
+        elif provider == 'openai':
+            if not api_key:
+                raise RuntimeError(f'OpenAI API key env var {api_key_env} is not set')
+
+            import openai
+
+            client = openai.OpenAI(api_key=api_key)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=1024,
+            )
+            if not resp.choices:
+                raise RuntimeError('OpenAI returned no choices')
+            return resp.choices[0].message.content or ''
+
+        elif provider == 'ollama':
+            import json as _json
+            import urllib.request
+
+            ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+            payload = _json.dumps({'model': model, 'prompt': prompt, 'stream': False}).encode()
+            req = urllib.request.Request(
+                f'{ollama_host}/api/generate',
+                data=payload,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=120) as response:
+                data = _json.loads(response.read())
+            return str(data.get('response', ''))
+
+        else:
+            raise RuntimeError(f'Unknown AI provider: {provider}')
+
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f'{provider} LLM call failed: {exc}') from exc
+
+
+# ============================================================================
 # Transcript loading
 # ============================================================================
 
@@ -619,11 +767,15 @@ def generate_all_suggestions(
     transcripts_dir: str,
     anchors: dict,
     top_n: int = 25,
+    ai_config: Optional[dict] = None,
 ) -> dict:
     concept_ids = get_all_concept_ids(review_data)
     all_speakers = get_all_speakers(review_data)
 
     print(f'[INFO] {len(concept_ids)} concepts × {len(all_speakers)} speakers', file=sys.stderr)
+
+    if not llm_strategy_enabled(ai_config):
+        print('[INFO] Strategy 4 (LLM-assisted) disabled or unavailable; using strategies 1-3 only', file=sys.stderr)
 
     transcripts: dict[str, dict] = {}
     for speaker in all_speakers:
@@ -778,6 +930,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help='Path to positional anchors JSON (speaker → concept → timestamp).',
     )
     parser.add_argument(
+        '--project',
+        default=None,
+        metavar='FILE',
+        help='Optional path to project.json for AI provider configuration.',
+    )
+    parser.add_argument(
         '--output',
         required=True,
         metavar='FILE',
@@ -811,6 +969,10 @@ def main() -> None:
     print(f'[INFO] Loading anchors: {args.anchors or "(none)"}', file=sys.stderr)
     anchors = load_anchors(args.anchors)
 
+    if args.project:
+        print(f'[INFO] Loading project config: {args.project}', file=sys.stderr)
+    ai_config = load_ai_config(args.project)
+
     if not os.path.isdir(args.transcripts_dir):
         print(f'[ERROR] transcripts-dir is not a directory: {args.transcripts_dir}', file=sys.stderr)
         sys.exit(1)
@@ -823,6 +985,7 @@ def main() -> None:
         transcripts_dir=args.transcripts_dir,
         anchors=anchors,
         top_n=args.top_n,
+        ai_config=ai_config,
     )
 
     output_dir = os.path.dirname(os.path.abspath(args.output))
