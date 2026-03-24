@@ -1,7 +1,7 @@
 /**
  * fullscreen-mode.js — fullscreen controls + concept navigation UI
  *
- * Attaches to window.SourceExplorer.modules.fullscreen.
+ * Attaches to window.PARSE.modules.fullscreen.
  * Manages UI/state for:
  *  - fullscreen toggle button
  *  - Escape-to-exit while fullscreen is active
@@ -10,26 +10,26 @@
  *
  * This module does NOT reparent/open panels itself.
  * It only emits:
- *  - se:fullscreen-toggle { active: boolean }
- *  - se:navigate-concept { direction: 'prev'|'next', missingOnly: boolean }
+ *  - parse:fullscreen-toggle { active: boolean }
+ *  - parse:navigate-concept { direction: 'prev'|'next', missingOnly: boolean }
  */
 (function () {
   'use strict';
 
-  if (!window.SourceExplorer) {
-    window.SourceExplorer = {};
+  if (!window.PARSE) {
+    window.PARSE = {};
   }
-  if (!window.SourceExplorer.modules) {
-    window.SourceExplorer.modules = {};
+  if (!window.PARSE.modules) {
+    window.PARSE.modules = {};
   }
 
-  const SE = window.SourceExplorer;
+  const SE = window.PARSE;
 
   const STORAGE_KEY = 'se-fullscreen-mode-state';
-  const STYLE_ID = 'se-fullscreen-mode-style';
-  const PANEL_ID = 'se-panel';
-  const OVERLAY_ID = 'se-fullscreen-overlay';
-  const DEFAULT_CONTAINER_ID = 'se-controls';
+  const STYLE_ID = 'parse-fullscreen-mode-style';
+  const PANEL_ID = 'parse-panel';
+  const OVERLAY_ID = 'parse-fullscreen-overlay';
+  const DEFAULT_CONTAINER_ID = 'parse-controls';
   const ROOT_CLASS = 'se-fullscreen-controls';
   const ROOT_ATTR = 'data-se-fullscreen-controls';
   const HIDDEN_CLASS = 'se-fullscreen-controls--hidden';
@@ -362,7 +362,7 @@
     }
 
     document.dispatchEvent(
-      new CustomEvent('se:fullscreen-toggle', {
+      new CustomEvent('parse:fullscreen-toggle', {
         detail: { active: !!active },
       })
     );
@@ -374,7 +374,7 @@
     }
 
     document.dispatchEvent(
-      new CustomEvent('se:navigate-concept', {
+      new CustomEvent('parse:navigate-concept', {
         detail: {
           direction: direction === 'prev' ? 'prev' : 'next',
           missingOnly: !!missingOnly,
@@ -538,9 +538,9 @@
     onRootClickBound = handleRootClick;
     onRootChangeBound = handleRootChange;
 
-    document.addEventListener('se:panel-open', onPanelOpenBound);
-    document.addEventListener('se:panel-close', onPanelCloseBound);
-    document.addEventListener('se:fullscreen-toggle', onFullscreenToggleBound);
+    document.addEventListener('parse:panel-open', onPanelOpenBound);
+    document.addEventListener('parse:panel-close', onPanelCloseBound);
+    document.addEventListener('parse:fullscreen-toggle', onFullscreenToggleBound);
 
     rootEl.addEventListener('click', onRootClickBound);
     rootEl.addEventListener('change', onRootChangeBound);
@@ -554,13 +554,13 @@
 
   function destroy() {
     if (onPanelOpenBound) {
-      document.removeEventListener('se:panel-open', onPanelOpenBound);
+      document.removeEventListener('parse:panel-open', onPanelOpenBound);
     }
     if (onPanelCloseBound) {
-      document.removeEventListener('se:panel-close', onPanelCloseBound);
+      document.removeEventListener('parse:panel-close', onPanelCloseBound);
     }
     if (onFullscreenToggleBound) {
-      document.removeEventListener('se:fullscreen-toggle', onFullscreenToggleBound);
+      document.removeEventListener('parse:fullscreen-toggle', onFullscreenToggleBound);
     }
     setKeydownListener(false);
 

@@ -1,27 +1,28 @@
 /**
- * region-manager.js — Source Explorer region assignment UI
+ * region-manager.js — PARSE region assignment UI
  *
  * Responsibilities:
- *  - Render region status + assignment controls into #se-controls
- *  - Track the current Source Explorer context (speaker / concept / source WAV)
- *  - Track the currently selected waveform region via se:region-updated
+ *  - Render region status + assignment controls into #parse-controls
+ *  - Track the current PARSE context (speaker / concept / source WAV)
+ *  - Track the currently selected waveform region via parse:region-updated
  *  - Surface any prior assignment for the current speaker+concept
- *  - Persist source-region decisions into window.SourceExplorer.decisions
- *  - Dispatch se:region-assigned on assignment
+ *  - Persist source-region decisions into window.PARSE.decisions
+ *  - Dispatch parse:region-assigned on assignment
  *  - Expose lightweight export-ready decision helpers
  */
 (function () {
   'use strict';
 
-  if (!window.SourceExplorer) {
-    window.SourceExplorer = {};
+  if (!window.PARSE) {
+    window.PARSE = {};
   }
-  if (!window.SourceExplorer.modules) {
-    window.SourceExplorer.modules = {};
+  if (!window.PARSE.modules) {
+    window.PARSE.modules = {};
   }
 
-  var SE = window.SourceExplorer;
-  var DECISIONS_LS_KEY = 'se-decisions';
+  const SE = window.PARSE;
+  var DECISIONS_LS_KEY = 'parse-decisions';
+  var LEGACY_DECISIONS_LS_KEY = 'se-decisions';
 
   var containerEl = null;
   var rootEl = null;
@@ -40,7 +41,7 @@
       return api;
     }
 
-    containerEl = mountEl || document.getElementById('se-controls');
+    containerEl = mountEl || document.getElementById('parse-controls');
     if (!containerEl) {
       console.warn('[region-manager] No controls container found.');
       return api;
@@ -112,17 +113,17 @@
   }
 
   function bindEvents() {
-    document.addEventListener('se:panel-open', onPanelOpen);
-    document.addEventListener('se:panel-close', onPanelClose);
-    document.addEventListener('se:region-updated', onRegionUpdated);
-    document.addEventListener('se:suggestion-click', onSuggestionClick);
+    document.addEventListener('parse:panel-open', onPanelOpen);
+    document.addEventListener('parse:panel-close', onPanelClose);
+    document.addEventListener('parse:region-updated', onRegionUpdated);
+    document.addEventListener('parse:suggestion-click', onSuggestionClick);
   }
 
   function unbindEvents() {
-    document.removeEventListener('se:panel-open', onPanelOpen);
-    document.removeEventListener('se:panel-close', onPanelClose);
-    document.removeEventListener('se:region-updated', onRegionUpdated);
-    document.removeEventListener('se:suggestion-click', onSuggestionClick);
+    document.removeEventListener('parse:panel-open', onPanelOpen);
+    document.removeEventListener('parse:panel-close', onPanelClose);
+    document.removeEventListener('parse:region-updated', onRegionUpdated);
+    document.removeEventListener('parse:suggestion-click', onSuggestionClick);
 
     if (els.loadPrior) {
       els.loadPrior.removeEventListener('click', onLoadPriorClick);
@@ -205,6 +206,9 @@
       suggestionIndex: normalizedSuggestionIndex,
       segmentStartSec: toFiniteNumber(detail.segmentStartSec),
       segmentEndSec: toFiniteNumber(detail.segmentEndSec),
+      score: suggestion && isFiniteNumber(suggestion.confidence_score)
+        ? roundScore(suggestion.confidence_score)
+        : null,
       meta: suggestion,
     };
 
@@ -222,7 +226,7 @@
     };
     state.activeSuggestion = decisionToSuggestionContext(state.priorDecision);
 
-    document.dispatchEvent(new CustomEvent('se:seek', {
+    document.dispatchEvent(new CustomEvent('parse:seek', {
       detail: {
         timeSec: state.priorDecision.start_sec,
         createRegion: true,
@@ -306,8 +310,31 @@
       eventDetail.aiSuggestionScore = suggestionPayload.aiSuggestionScore;
     }
 
-    document.dispatchEvent(new CustomEvent('se:region-assigned', {
+    var annotationContext = state.context ? clone(state.context) : null;
+    var annotationSuggestion = state.activeSuggestion ? clone(state.activeSuggestion) : null;
+    var annotationRegion = {
+      startSec: nextRegion.start_sec,
+      endSec: nextRegion.end_sec,
+      sourceWav: nextRegion.source_wav,
+    };
+
+    document.dispatchEvent(new CustomEvent('parse:region-assigned', {
       detail: eventDetail,
+    }));
+
+    document.dispatchEvent(new CustomEvent('parse:annotation-save', {
+      detail: {
+        speaker: annotationContext && annotationContext.speaker ? annotationContext.speaker : speaker,
+        conceptId: annotationContext && annotationContext.conceptId != null ? annotationContext.conceptId : conceptId,
+        startSec: annotationRegion.startSec,
+        endSec: annotationRegion.endSec,
+        ipa: '',
+        ortho: '',
+        concept: resolveConceptText(annotationContext && annotationContext.conceptId != null ? annotationContext.conceptId : conceptId),
+        sourceWav: annotationContext && annotationContext.sourceWav ? annotationContext.sourceWav : (annotationRegion.sourceWav || ''),
+        aiSuggestionUsed: annotationSuggestion ? annotationSuggestion.suggestionIndex : undefined,
+        aiSuggestionScore: annotationSuggestion ? annotationSuggestion.score : undefined,
+      },
     }));
 
     render();
@@ -331,7 +358,7 @@
     }
 
     if (!state.context || !state.context.speaker || !state.context.conceptId) {
-      els.status.textContent = 'No source explorer panel is active.';
+      els.status.textContent = 'No PARSE panel is active.';
       return;
     }
 
@@ -481,7 +508,29 @@
   }
 
   function ensureDecisionsStore() {
-    if (!SE.decisions || typeof SE.decisions !== 'object') {
+    if (hasDecisionEntries(SE.decisions)) {
+      return;
+    }
+
+    var persisted = readPersistedDecisions(DECISIONS_LS_KEY);
+    if (hasDecisionEntries(persisted)) {
+      SE.decisions = persisted;
+      return;
+    }
+
+    var legacy = readPersistedDecisions(LEGACY_DECISIONS_LS_KEY);
+    if (hasDecisionEntries(legacy)) {
+      SE.decisions = legacy;
+      persistDecisions();
+      return;
+    }
+
+    if (isDecisionObject(persisted)) {
+      SE.decisions = persisted;
+      return;
+    }
+
+    if (!isDecisionObject(SE.decisions)) {
       SE.decisions = {};
     }
   }
@@ -492,6 +541,29 @@
     } catch (error) {
       console.warn('[region-manager] Failed to persist decisions:', error);
     }
+  }
+
+  function readPersistedDecisions(storageKey) {
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw || !raw.trim()) {
+        return null;
+      }
+
+      var parsed = JSON.parse(raw);
+      return isDecisionObject(parsed) ? parsed : null;
+    } catch (error) {
+      console.warn('[region-manager] Failed to read persisted decisions from ' + storageKey + ':', error);
+      return null;
+    }
+  }
+
+  function isDecisionObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function hasDecisionEntries(value) {
+    return isDecisionObject(value) && Object.keys(value).length > 0;
   }
 
   function getDecisionForCurrentContext() {
@@ -545,6 +617,24 @@
     }
 
     return null;
+  }
+
+  function resolveConceptText(conceptId) {
+    var normalizedConceptId = conceptId != null ? String(conceptId) : '';
+    if (!normalizedConceptId) {
+      return '';
+    }
+
+    if (
+      SE.suggestions &&
+      SE.suggestions.suggestions &&
+      SE.suggestions.suggestions[normalizedConceptId] &&
+      SE.suggestions.suggestions[normalizedConceptId].concept_en
+    ) {
+      return normalizedConceptId + ':' + SE.suggestions.suggestions[normalizedConceptId].concept_en;
+    }
+
+    return normalizedConceptId;
   }
 
   function resolveSuggestionMeta(conceptId, speaker, suggestionIndex, segmentStartSec, segmentEndSec) {
@@ -607,6 +697,7 @@
       suggestionIndex: decision.ai_suggestion_used,
       segmentStartSec: decision.start_sec,
       segmentEndSec: decision.end_sec,
+      score: decision.ai_suggestion_score,
       meta: {
         confidence: decision.ai_suggestion_confidence,
         confidence_score: decision.ai_suggestion_score,

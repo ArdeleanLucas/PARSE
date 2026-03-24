@@ -2,25 +2,25 @@
  * suggestions-panel.js — AI suggestions + positional prior selector
  *
  * Responsibilities:
- *  - Attach to window.SourceExplorer.modules.suggestions
- *  - Render the positional prior speaker selector into #se-priors
- *  - Render AI suggestion cards into #se-suggestions
- *  - Listen for se:panel-open / se:panel-close
- *  - Listen for se:priors-changed and re-rank suggestions client-side
- *  - Emit se:suggestion-click and se:seek when a suggestion is chosen
- *  - Preserve the underlying suggestion store (window.SourceExplorer.suggestions)
+ *  - Attach to window.PARSE.modules.suggestions
+ *  - Render the positional prior speaker selector into #parse-priors
+ *  - Render AI suggestion cards into #parse-suggestions
+ *  - Listen for parse:panel-open / parse:panel-close
+ *  - Listen for parse:priors-changed and re-rank suggestions client-side
+ *  - Emit parse:suggestion-click and parse:seek when a suggestion is chosen
+ *  - Preserve the underlying suggestion store (window.PARSE.suggestions)
  *    by computing derived scores on copies only
  */
 (function () {
   'use strict';
 
-  window.SourceExplorer = window.SourceExplorer || {};
-  window.SourceExplorer.modules = window.SourceExplorer.modules || {};
+  window.PARSE = window.PARSE || {};
+  window.PARSE.modules = window.PARSE.modules || {};
 
-  const SE = window.SourceExplorer;
+  const SE = window.PARSE;
 
-  const PRIORS_CONTAINER_ID = 'se-priors';
-  const SUGGESTIONS_CONTAINER_ID = 'se-suggestions';
+  const PRIORS_CONTAINER_ID = 'parse-priors';
+  const SUGGESTIONS_CONTAINER_ID = 'parse-suggestions';
   const PRIORS_STORAGE_KEY = 'se-suggestions-priors';
 
   const MAX_POSITIONAL_BOOST = 0.25;
@@ -553,13 +553,13 @@
 
     renderSuggestions();
 
-    emit('se:suggestion-click', {
+    emit('parse:suggestion-click', {
       suggestionIndex: rank,
       segmentStartSec: suggestion.segment_start_sec,
       segmentEndSec: suggestion.segment_end_sec,
     });
 
-    emit('se:seek', {
+    emit('parse:seek', {
       timeSec: suggestion.segment_start_sec,
       createRegion: true,
       regionDurationSec: Math.max(0.2, suggestion.segment_end_sec - suggestion.segment_start_sec),
@@ -609,7 +609,7 @@
       if (panelModule && typeof panelModule.open === 'function') {
         panelModule.open(nextContext);
       } else {
-        emit('se:panel-open', nextContext);
+        emit('parse:panel-open', nextContext);
       }
       return;
     }
@@ -635,7 +635,7 @@
     if (!target) return;
 
     if (event.type === 'change' && target.matches && target.matches('input[data-role="prior-checkbox"]')) {
-      emit('se:priors-changed', {
+      emit('parse:priors-changed', {
         selectedSpeakers: collectCheckedPriorSpeakers(),
       });
       return;
@@ -644,13 +644,13 @@
     if (event.type === 'click' && target.matches) {
       if (target.matches('[data-role="priors-clear"]')) {
         event.preventDefault();
-        emit('se:priors-changed', { selectedSpeakers: [] });
+        emit('parse:priors-changed', { selectedSpeakers: [] });
         return;
       }
 
       if (target.matches('[data-role="priors-recommended"]')) {
         event.preventDefault();
-        emit('se:priors-changed', {
+        emit('parse:priors-changed', {
           selectedSpeakers: getDefaultPriorSelection(state.currentContext.speaker, state.currentContext.conceptId),
         });
       }
@@ -803,9 +803,9 @@
     state.bound.priorsInteraction = handlePriorsInteraction;
     state.bound.suggestionsClick = handleSuggestionsClick;
 
-    document.addEventListener('se:panel-open', state.bound.panelOpen);
-    document.addEventListener('se:panel-close', state.bound.panelClose);
-    document.addEventListener('se:priors-changed', state.bound.priorsChanged);
+    document.addEventListener('parse:panel-open', state.bound.panelOpen);
+    document.addEventListener('parse:panel-close', state.bound.panelClose);
+    document.addEventListener('parse:priors-changed', state.bound.priorsChanged);
 
     if (state.priorsEl) {
       state.priorsEl.addEventListener('change', state.bound.priorsInteraction);
@@ -821,13 +821,13 @@
 
   function destroy() {
     if (state.bound.panelOpen) {
-      document.removeEventListener('se:panel-open', state.bound.panelOpen);
+      document.removeEventListener('parse:panel-open', state.bound.panelOpen);
     }
     if (state.bound.panelClose) {
-      document.removeEventListener('se:panel-close', state.bound.panelClose);
+      document.removeEventListener('parse:panel-close', state.bound.panelClose);
     }
     if (state.bound.priorsChanged) {
-      document.removeEventListener('se:priors-changed', state.bound.priorsChanged);
+      document.removeEventListener('parse:priors-changed', state.bound.priorsChanged);
     }
     if (state.priorsEl && state.bound.priorsInteraction) {
       state.priorsEl.removeEventListener('change', state.bound.priorsInteraction);
@@ -869,7 +869,7 @@
   }
 
   function rerank(selectedSpeakers) {
-    emit('se:priors-changed', {
+    emit('parse:priors-changed', {
       selectedSpeakers: Array.isArray(selectedSpeakers) ? selectedSpeakers.slice() : [],
     });
   }

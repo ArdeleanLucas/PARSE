@@ -5,16 +5,16 @@
  *  - Create/destroy a WaveSurfer v7 instance (MediaElement backend) per panel-open
  *  - Load pre-generated peaks JSON for large-file waveform rendering
  *  - Manage ONE active draggable region via RegionsPlugin
- *  - Emit se:playback-position, se:playback-state, se:region-updated
- *  - Listen for se:panel-open, se:panel-close, se:seek
+ *  - Emit parse:playback-position, parse:playback-state, parse:region-updated
+ *  - Listen for parse:panel-open, parse:panel-close, parse:seek
  *  - Keyboard shortcuts: Space, Left/Right (±1s), Shift+Left/Right (±5s)
  *  - Expose skip(±5s), jump(±30s), init(), destroy()
  *
  * Assumes wavesurfer.js v7 is loaded globally:
  *   window.WaveSurfer, window.WaveSurfer.Regions, window.WaveSurfer.Timeline
  *
- * Renders into: #se-waveform
- * Attaches to:  window.SourceExplorer.modules.waveform
+ * Renders into: #parse-waveform
+ * Attaches to:  window.PARSE.modules.waveform
  */
 (function () {
   'use strict';
@@ -227,8 +227,8 @@
   function isInShortcutScope(el) {
     if (!(el instanceof Element)) return false;
 
-    const panel = document.getElementById('se-panel');
-    const overlay = document.getElementById('se-fullscreen-overlay');
+    const panel = document.getElementById('parse-panel');
+    const overlay = document.getElementById('parse-fullscreen-overlay');
 
     return !!(
       (panel && panel.contains(el)) ||
@@ -270,7 +270,7 @@
         activeRegion.remove();
       } catch (_) { /* already removed */ }
       activeRegion = null;
-      emit('se:region-updated', { startSec: null, endSec: null });
+      emit('parse:region-updated', { startSec: null, endSec: null });
     }
   }
 
@@ -303,7 +303,7 @@
       drag: true,
       resize: true,
     });
-    emit('se:region-updated', { startSec: activeRegion.start, endSec: activeRegion.end });
+    emit('parse:region-updated', { startSec: activeRegion.start, endSec: activeRegion.end });
   }
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────────────────
@@ -413,10 +413,10 @@
 
     // Resolve container
     if (!containerEl) {
-      containerEl = document.getElementById('se-waveform');
+      containerEl = document.getElementById('parse-waveform');
     }
     if (!containerEl) {
-      console.error('[waveform-controller] #se-waveform container not found');
+      console.error('[waveform-controller] #parse-waveform container not found');
       return;
     }
 
@@ -474,22 +474,22 @@
     // ── Wire playback events ─────────────────────────────────────────────────
     ws.on('timeupdate', function (currentTime) {
       if (!isActiveWaveSurfer(ws, loadToken)) return;
-      emit('se:playback-position', { timeSec: currentTime });
+      emit('parse:playback-position', { timeSec: currentTime });
     });
 
     ws.on('play', function () {
       if (!isActiveWaveSurfer(ws, loadToken)) return;
-      emit('se:playback-state', { playing: true });
+      emit('parse:playback-state', { playing: true });
     });
 
     ws.on('pause', function () {
       if (!isActiveWaveSurfer(ws, loadToken)) return;
-      emit('se:playback-state', { playing: false });
+      emit('parse:playback-state', { playing: false });
     });
 
     ws.on('finish', function () {
       if (!isActiveWaveSurfer(ws, loadToken)) return;
-      emit('se:playback-state', { playing: false });
+      emit('parse:playback-state', { playing: false });
     });
 
     ws.on('error', function (err) {
@@ -514,13 +514,13 @@
         try { activeRegion.remove(); } catch (_) {}
       }
       activeRegion = region;
-      emit('se:region-updated', { startSec: region.start, endSec: region.end });
+      emit('parse:region-updated', { startSec: region.start, endSec: region.end });
     });
 
     localRegionsPlugin.on('region-updated', function (region) {
       if (!isActiveWaveSurfer(ws, loadToken)) return;
       activeRegion = region;
-      emit('se:region-updated', { startSec: region.start, endSec: region.end });
+      emit('parse:region-updated', { startSec: region.start, endSec: region.end });
     });
 
     const channelData = getChannelDataFromPeaks(peaksData);
@@ -543,7 +543,7 @@
   // ─── Document event handlers ──────────────────────────────────────────────────
 
   /**
-   * se:panel-open
+   * parse:panel-open
    * { speaker, conceptId, sourceWav, lexiconStartSec }
    */
   async function onPanelOpen(e) {
@@ -555,7 +555,7 @@
     const loadToken = invalidateLoadToken();
     currentSpeaker = speaker;
 
-    const SE = window.SourceExplorer;
+    const SE = window.PARSE;
     const speakerInfo = SE && SE.sourceIndex && SE.sourceIndex.speakers
       ? SE.sourceIndex.speakers[speaker]
       : null;
@@ -612,7 +612,7 @@
   }
 
   /**
-   * se:panel-close
+   * parse:panel-close
    * { speaker }
    */
   function onPanelClose(/* e */) {
@@ -625,7 +625,7 @@
   }
 
   /**
-   * se:seek
+   * parse:seek
    * { timeSec, createRegion?, regionDurationSec? }
    */
   function onSeek(e) {
@@ -665,16 +665,16 @@
 
   /**
    * Initialise the module.
-   * @param {HTMLElement} [el]  Container element. Defaults to #se-waveform.
+   * @param {HTMLElement} [el]  Container element. Defaults to #parse-waveform.
    * @returns {object}  Public API
    */
   function init(el) {
-    containerEl = el || document.getElementById('se-waveform');
+    containerEl = el || document.getElementById('parse-waveform');
     bindContainerFocus();
 
-    document.addEventListener('se:panel-open', onPanelOpen);
-    document.addEventListener('se:panel-close', onPanelClose);
-    document.addEventListener('se:seek', onSeek);
+    document.addEventListener('parse:panel-open', onPanelOpen);
+    document.addEventListener('parse:panel-close', onPanelClose);
+    document.addEventListener('parse:seek', onSeek);
 
     return {
       skip: skip,
@@ -705,9 +705,9 @@
    * Teardown: remove all event listeners and destroy WaveSurfer.
    */
   function destroy() {
-    document.removeEventListener('se:panel-open', onPanelOpen);
-    document.removeEventListener('se:panel-close', onPanelClose);
-    document.removeEventListener('se:seek', onSeek);
+    document.removeEventListener('parse:panel-open', onPanelOpen);
+    document.removeEventListener('parse:panel-close', onPanelClose);
+    document.removeEventListener('parse:seek', onSeek);
 
     invalidateLoadToken();
     if (abortController) {
@@ -722,9 +722,9 @@
 
   // ─── Register module ──────────────────────────────────────────────────────────
 
-  window.SourceExplorer = window.SourceExplorer || {};
-  window.SourceExplorer.modules = window.SourceExplorer.modules || {};
-  window.SourceExplorer.modules.waveform = {
+  window.PARSE = window.PARSE || {};
+  window.PARSE.modules = window.PARSE.modules || {};
+  window.PARSE.modules.waveform = {
     init: init,
     destroy: destroy,
     skip: skip,

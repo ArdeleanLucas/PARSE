@@ -2,13 +2,13 @@
  * transcript-panel.js — Source Explorer transcript panel
  *
  * Responsibilities:
- *  - Attach to window.SourceExplorer.modules.transcript
- *  - Render the current speaker's coarse transcript into #se-transcript
+ *  - Attach to window.PARSE.modules.transcript
+ *  - Render the current speaker's coarse transcript into #parse-transcript
  *  - Support search/filter across transcript text
  *  - Keep rendering efficient for ~800 segments via simple windowing
- *  - Highlight the active segment from se:playback-position updates
- *  - Dispatch se:transcript-click and se:seek on row click
- *  - Fully clean up per-panel UI/listeners/state on se:panel-close
+ *  - Highlight the active segment from parse:playback-position updates
+ *  - Dispatch parse:transcript-click and parse:seek on row click
+ *  - Fully clean up per-panel UI/listeners/state on parse:panel-close
  */
 (function () {
   'use strict';
@@ -17,16 +17,16 @@
   // Namespace guard
   // ───────────────────────────────────────────────────────────────────────────
 
-  window.SourceExplorer = window.SourceExplorer || {};
-  window.SourceExplorer.modules = window.SourceExplorer.modules || {};
+  window.PARSE = window.PARSE || {};
+  window.PARSE.modules = window.PARSE.modules || {};
 
-  const SE = window.SourceExplorer;
+  const SE = window.PARSE;
 
   // ───────────────────────────────────────────────────────────────────────────
   // Constants
   // ───────────────────────────────────────────────────────────────────────────
 
-  const STYLE_ID = 'se-transcript-panel-styles';
+  const STYLE_ID = 'parse-transcript-panel-styles';
   const DEFAULT_VIEWPORT_HEIGHT = 360;
   const ROW_HEIGHT = 68;
   const OVERSCAN_ROWS = 6;
@@ -283,7 +283,7 @@
 
   function buildShell() {
     if (!state.containerEl) {
-      state.containerEl = document.getElementById('se-transcript');
+      state.containerEl = document.getElementById('parse-transcript');
     }
     if (!state.containerEl) return;
 
@@ -301,10 +301,10 @@
     const searchLabel = document.createElement('label');
     searchLabel.className = 'se-transcript-search-label';
     searchLabel.textContent = 'Transcript';
-    searchLabel.setAttribute('for', 'se-transcript-search-input');
+    searchLabel.setAttribute('for', 'parse-transcript-search-input');
 
     const searchInput = document.createElement('input');
-    searchInput.id = 'se-transcript-search-input';
+    searchInput.id = 'parse-transcript-search-input';
     searchInput.className = 'se-transcript-search';
     searchInput.type = 'search';
     searchInput.placeholder = 'Search transcript text…';
@@ -403,12 +403,12 @@
 
       updateActiveIndex(segment.originalIndex, { reveal: true });
 
-      emit('se:transcript-click', {
+      emit('parse:transcript-click', {
         segmentIndex: segment.originalIndex,
         startSec: segment.start,
       });
 
-      emit('se:seek', {
+      emit('parse:seek', {
         timeSec: segment.start,
       });
     };
@@ -496,7 +496,7 @@
 
     if (!total) {
       state.summaryEl.textContent = 'No transcript data';
-      state.hintEl.textContent = 'This speaker has no coarse transcript loaded in window.SourceExplorer.transcripts.';
+      state.hintEl.textContent = 'This speaker has no coarse transcript loaded in window.PARSE.transcripts.';
       return;
     }
 
@@ -720,11 +720,11 @@
 
   function init(containerEl) {
     ensureStyles();
-    state.containerEl = containerEl || document.getElementById('se-transcript');
+    state.containerEl = containerEl || document.getElementById('parse-transcript');
 
-    document.addEventListener('se:panel-open', onPanelOpen);
-    document.addEventListener('se:panel-close', onPanelClose);
-    document.addEventListener('se:playback-position', onPlaybackPosition);
+    document.addEventListener('parse:panel-open', onPanelOpen);
+    document.addEventListener('parse:panel-close', onPanelClose);
+    document.addEventListener('parse:playback-position', onPlaybackPosition);
 
     return {
       refresh: function () {
@@ -749,9 +749,9 @@
   }
 
   function destroy() {
-    document.removeEventListener('se:panel-open', onPanelOpen);
-    document.removeEventListener('se:panel-close', onPanelClose);
-    document.removeEventListener('se:playback-position', onPlaybackPosition);
+    document.removeEventListener('parse:panel-open', onPanelOpen);
+    document.removeEventListener('parse:panel-close', onPanelClose);
+    document.removeEventListener('parse:playback-position', onPlaybackPosition);
 
     resetPanelState();
     state.containerEl = null;

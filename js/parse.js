@@ -1,38 +1,38 @@
 /**
- * parse.js — Source Explorer Panel Orchestrator
+ * parse.js — PARSE Panel Orchestrator
  *
- * Singleton panel manager for the Source Explorer feature.
- * Attaches to window.SourceExplorer.modules.panel.
+ * Singleton panel manager for the PARSE feature.
+ * Attaches to window.PARSE.modules.panel.
  *
  * Responsibilities:
  *  - Singleton enforcement: only one panel open at a time
  *  - Context management: speaker, conceptId, sourceWav, lexiconStartSec
  *  - Panel show/hide and header population
- *  - Fullscreen reparenting (se:fullscreen-toggle)
- *  - Concept navigation (se:navigate-concept)
- *  - Region assignment indicator (se:region-assigned)
+ *  - Fullscreen reparenting (parse:fullscreen-toggle)
+ *  - Concept navigation (parse:navigate-concept)
+ *  - Region assignment indicator (parse:region-assigned)
  *  - localStorage persistence for lightweight UI state
  */
 (function () {
   'use strict';
 
   // ── Namespace guard ─────────────────────────────────────────────────────────
-  if (!window.SourceExplorer) {
-    window.SourceExplorer = {};
+  if (!window.PARSE) {
+    window.PARSE = {};
   }
-  if (!window.SourceExplorer.modules) {
-    window.SourceExplorer.modules = {};
+  if (!window.PARSE.modules) {
+    window.PARSE.modules = {};
   }
 
-  const SE = window.SourceExplorer;
+  const SE = window.PARSE;
 
   // ── Constants ───────────────────────────────────────────────────────────────
   const LS_KEY = 'se-panel-state';
 
   // DOM IDs defined by the HTML shell (INTERFACES.md §DOM Contract)
-  const PANEL_ID          = 'se-panel';
-  const HEADER_ID         = 'se-header';
-  const FULLSCREEN_OVL_ID = 'se-fullscreen-overlay';
+  const PANEL_ID          = 'parse-panel';
+  const HEADER_ID         = 'parse-header';
+  const FULLSCREEN_OVL_ID = 'parse-fullscreen-overlay';
 
   // CSS classes
   const CLS_HIDDEN     = 'hidden';
@@ -40,9 +40,9 @@
 
   // ── Module state ────────────────────────────────────────────────────────────
   let _containerEl    = null;   // element passed to init()
-  let _panelEl        = null;   // #se-panel
-  let _headerEl       = null;   // #se-header
-  let _overlayEl      = null;   // #se-fullscreen-overlay
+  let _panelEl        = null;   // #parse-panel
+  let _headerEl       = null;   // #parse-header
+  let _overlayEl      = null;   // #parse-fullscreen-overlay
   let _inlineParent   = null;   // original parent of _panelEl (for reparent restore)
   let _inlineNextSib  = null;   // original next sibling (for insertion order restore)
   let _isFullscreen   = false;
@@ -58,11 +58,12 @@
   };
 
   // Bound event handler references (for removeEventListener)
-  let _boundOnPanelOpen       = null;
-  let _boundOnPanelClose      = null;
+  let _boundOnPanelOpen        = null;
+  let _boundOnPanelClose       = null;
   let _boundOnFullscreenToggle = null;
-  let _boundOnNavigateConcept = null;
-  let _boundOnRegionAssigned  = null;
+  let _boundOnNavigateConcept  = null;
+  let _boundOnRegionAssigned   = null;
+  let _boundOnAnnotationsChanged = null;
 
   // ── localStorage helpers ────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@
   function _populateHeader(ctx) {
     if (!_headerEl) return;
 
-    const SE_data = window.SourceExplorer;
+    const SE_data = window.PARSE;
 
     // Resolve concept label from suggestions data (if available)
     let conceptLabel = ctx.conceptId ? '#' + ctx.conceptId : '';
@@ -203,23 +204,23 @@
         '</span>' +
       '</div>' +
       '<div class="se-header__controls">' +
-        '<button class="se-btn se-btn--collapse" id="se-btn-collapse" title="Collapse panel" aria-label="Collapse source explorer">▼ Collapse</button>' +
-        '<button class="se-btn se-btn--fullscreen" id="se-btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen mode">⛶ Full</button>' +
+        '<button class="se-btn se-btn--collapse" id="parse-btn-collapse" title="Collapse panel" aria-label="Collapse PARSE panel">▼ Collapse</button>' +
+        '<button class="se-btn se-btn--fullscreen" id="parse-btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen mode">⛶ Full</button>' +
       '</div>';
 
     // Wire up header buttons
-    const collapseBtn = document.getElementById('se-btn-collapse');
+    const collapseBtn = document.getElementById('parse-btn-collapse');
     if (collapseBtn) {
       collapseBtn.addEventListener('click', function () {
         _dispatchClose(ctx.speaker);
       });
     }
 
-    const fullscreenBtn = document.getElementById('se-btn-fullscreen');
+    const fullscreenBtn = document.getElementById('parse-btn-fullscreen');
     if (fullscreenBtn) {
       fullscreenBtn.addEventListener('click', function () {
         document.dispatchEvent(
-          new CustomEvent('se:fullscreen-toggle', {
+          new CustomEvent('parse:fullscreen-toggle', {
             detail: { active: !_isFullscreen },
           })
         );
@@ -230,12 +231,12 @@
   // ── Event dispatchers ───────────────────────────────────────────────────────
 
   function _dispatchOpen(detail) {
-    document.dispatchEvent(new CustomEvent('se:panel-open', { detail: detail }));
+    document.dispatchEvent(new CustomEvent('parse:panel-open', { detail: detail }));
   }
 
   function _dispatchClose(speaker) {
     document.dispatchEvent(
-      new CustomEvent('se:panel-close', { detail: { speaker: speaker } })
+      new CustomEvent('parse:panel-close', { detail: { speaker: speaker } })
     );
   }
 
@@ -243,7 +244,7 @@
 
   /**
    * Actually show the panel and populate it with context.
-   * Called from the se:panel-open handler AFTER singleton teardown.
+   * Called from the parse:panel-open handler AFTER singleton teardown.
    */
   function _openPanel(detail) {
     if (!_panelEl) return;
@@ -281,7 +282,7 @@
 
   /**
    * Hide the panel and clear context.
-   * Called from the se:panel-close handler.
+   * Called from the parse:panel-close handler.
    */
   function _closePanel() {
     if (!_panelEl) return;
@@ -325,7 +326,7 @@
     _isFullscreen = true;
 
     // Update fullscreen button label
-    const btn = document.getElementById('se-btn-fullscreen');
+    const btn = document.getElementById('parse-btn-fullscreen');
     if (btn) btn.textContent = '✕ Exit Full';
   }
 
@@ -352,7 +353,7 @@
     _inlineNextSib = null;
 
     // Restore fullscreen button label
-    const btn = document.getElementById('se-btn-fullscreen');
+    const btn = document.getElementById('parse-btn-fullscreen');
     if (btn) btn.textContent = '⛶ Full';
   }
 
@@ -368,7 +369,7 @@
    * @returns {string|null}
    */
   function _findAdjacentConcept(currentConceptId, direction, missingOnly) {
-    const SE_data = window.SourceExplorer;
+    const SE_data = window.PARSE;
     const speaker = _ctx.speaker;
 
     if (!speaker) return null;
@@ -434,7 +435,7 @@
    * assignment exists for this concept.
    */
   function _resolveSourceWav(speaker, conceptId) {
-    const SE_data = window.SourceExplorer;
+    const SE_data = window.PARSE;
 
     // Check if there's an existing decision for this concept/speaker
     const dec = SE_data && SE_data.decisions && SE_data.decisions[conceptId];
@@ -462,7 +463,7 @@
   }
 
   function _resolveLexiconStart(speaker, sourceWav) {
-    const SE_data = window.SourceExplorer;
+    const SE_data = window.PARSE;
     if (SE_data && SE_data.sourceIndex && SE_data.sourceIndex.speakers) {
       const spkData = SE_data.sourceIndex.speakers[speaker];
       if (spkData && spkData.source_wavs) {
@@ -514,6 +515,17 @@
     }
 
     _openPanel(detail);
+
+    // Notify annotation-panel of the new context
+    const context = _ctx;
+    const annotPanel = SE.modules && SE.modules.annotationPanel;
+    if (annotPanel && typeof annotPanel.setContext === 'function') {
+      annotPanel.setContext({
+        speaker: context.speaker,
+        conceptId: context.conceptId,
+        sourceWav: context.sourceWav,
+      });
+    }
   }
 
   function _onPanelClose(evt) {
@@ -524,6 +536,12 @@
       return;
     }
     _closePanel();
+
+    // Clear annotation-panel context
+    const annotPanel = SE.modules && SE.modules.annotationPanel;
+    if (annotPanel && typeof annotPanel.clearContext === 'function') {
+      annotPanel.clearContext();
+    }
 
     if (_pendingOpenDetail) {
       const nextDetail = _pendingOpenDetail;
@@ -558,7 +576,7 @@
     const nextConceptId = _findAdjacentConcept(_ctx.conceptId, direction, missingOnly);
     if (!nextConceptId) {
       // Nothing found — could notify UI here
-      console.warn('[SourceExplorer] No adjacent concept found in direction:', direction);
+      console.warn('[PARSE] No adjacent concept found in direction:', direction);
       return;
     }
 
@@ -566,7 +584,7 @@
     const nextSourceWav   = _resolveSourceWav(prevSpeaker, nextConceptId);
     const nextLexiconStart = _resolveLexiconStart(prevSpeaker, nextSourceWav);
 
-    // Close current panel (fires se:panel-close so other modules clean up)
+    // Close current panel (fires parse:panel-close so other modules clean up)
     _dispatchClose(prevSpeaker);
 
     // Open the next concept in a new animation frame to allow teardown
@@ -598,13 +616,21 @@
     }
   }
 
+  function _onAnnotationsChanged(evt) {
+    // Update any annotation count indicator in the panel header if present
+    const detail = evt && evt.detail ? evt.detail : {};
+    // Best-effort: try to update a badge or header text if the element exists
+    const badge = document.getElementById('parse-annotation-count');
+    if (badge) badge.textContent = detail.totalAnnotations || '';
+  }
+
   // ── Decisions store helper ──────────────────────────────────────────────────
 
   /**
    * Write a region assignment into SE.decisions and persist to localStorage.
    */
   function _applyDecision(assignDetail) {
-    const SE_data = window.SourceExplorer;
+    const SE_data = window.PARSE;
     if (!SE_data) return;
 
     const { speaker, conceptId, startSec, endSec, sourceWav } = assignDetail;
@@ -688,7 +714,7 @@
       badge = document.createElement('span');
       badge.className = BADGE_CLASS;
       badge.setAttribute(BADGE_ATTR, speaker + '|' + conceptId);
-      badge.setAttribute('title', 'Source region assigned from Source Explorer');
+      badge.setAttribute('title', 'Source region assigned from PARSE');
       containerEl.appendChild(badge);
     }
     badge.textContent = '✓ re-assigned';
@@ -746,7 +772,7 @@
     _overlayEl = _getOverlayEl();
 
     if (!_panelEl) {
-      console.warn('[SourceExplorer] #' + PANEL_ID + ' not found in DOM. init() aborted.');
+      console.warn('[PARSE] #' + PANEL_ID + ' not found in DOM. init() aborted.');
       return;
     }
 
@@ -767,17 +793,19 @@
     _mergePersistedDecisions();
 
     // Register event listeners
-    _boundOnPanelOpen        = _onPanelOpen;
-    _boundOnPanelClose       = _onPanelClose;
-    _boundOnFullscreenToggle = _onFullscreenToggle;
-    _boundOnNavigateConcept  = _onNavigateConcept;
-    _boundOnRegionAssigned   = _onRegionAssigned;
+    _boundOnPanelOpen         = _onPanelOpen;
+    _boundOnPanelClose        = _onPanelClose;
+    _boundOnFullscreenToggle  = _onFullscreenToggle;
+    _boundOnNavigateConcept   = _onNavigateConcept;
+    _boundOnRegionAssigned    = _onRegionAssigned;
+    _boundOnAnnotationsChanged = _onAnnotationsChanged;
 
-    document.addEventListener('se:panel-open',        _boundOnPanelOpen);
-    document.addEventListener('se:panel-close',       _boundOnPanelClose);
-    document.addEventListener('se:fullscreen-toggle', _boundOnFullscreenToggle);
-    document.addEventListener('se:navigate-concept',  _boundOnNavigateConcept);
-    document.addEventListener('se:region-assigned',   _boundOnRegionAssigned);
+    document.addEventListener('parse:panel-open',          _boundOnPanelOpen);
+    document.addEventListener('parse:panel-close',         _boundOnPanelClose);
+    document.addEventListener('parse:fullscreen-toggle',   _boundOnFullscreenToggle);
+    document.addEventListener('parse:navigate-concept',    _boundOnNavigateConcept);
+    document.addEventListener('parse:region-assigned',     _boundOnRegionAssigned);
+    document.addEventListener('parse:annotations-changed', _boundOnAnnotationsChanged);
 
     // Keyboard shortcut: Escape closes the panel
     document.addEventListener('keydown', _onKeyDown);
@@ -794,7 +822,7 @@
         if (_isFullscreen) {
           // First Escape exits fullscreen; second closes panel
           document.dispatchEvent(
-            new CustomEvent('se:fullscreen-toggle', { detail: { active: false } })
+            new CustomEvent('parse:fullscreen-toggle', { detail: { active: false } })
           );
         } else {
           _dispatchClose(_ctx.speaker);
@@ -806,14 +834,15 @@
 
   /**
    * destroy — clean up all listeners and internal state.
-   * Called if the host page tears down the source explorer.
+   * Called if the host page tears down PARSE.
    */
   function destroy() {
-    if (_boundOnPanelOpen)        document.removeEventListener('se:panel-open',        _boundOnPanelOpen);
-    if (_boundOnPanelClose)       document.removeEventListener('se:panel-close',       _boundOnPanelClose);
-    if (_boundOnFullscreenToggle) document.removeEventListener('se:fullscreen-toggle', _boundOnFullscreenToggle);
-    if (_boundOnNavigateConcept)  document.removeEventListener('se:navigate-concept',  _boundOnNavigateConcept);
-    if (_boundOnRegionAssigned)   document.removeEventListener('se:region-assigned',   _boundOnRegionAssigned);
+    if (_boundOnPanelOpen)         document.removeEventListener('parse:panel-open',          _boundOnPanelOpen);
+    if (_boundOnPanelClose)        document.removeEventListener('parse:panel-close',         _boundOnPanelClose);
+    if (_boundOnFullscreenToggle)  document.removeEventListener('parse:fullscreen-toggle',   _boundOnFullscreenToggle);
+    if (_boundOnNavigateConcept)   document.removeEventListener('parse:navigate-concept',    _boundOnNavigateConcept);
+    if (_boundOnRegionAssigned)    document.removeEventListener('parse:region-assigned',     _boundOnRegionAssigned);
+    if (_boundOnAnnotationsChanged) document.removeEventListener('parse:annotations-changed', _boundOnAnnotationsChanged);
     document.removeEventListener('keydown', _onKeyDown);
 
     // If in fullscreen, restore DOM structure
@@ -829,11 +858,12 @@
     _headerEl    = null;
     _overlayEl   = null;
 
-    _boundOnPanelOpen        = null;
-    _boundOnPanelClose       = null;
-    _boundOnFullscreenToggle = null;
-    _boundOnNavigateConcept  = null;
-    _boundOnRegionAssigned   = null;
+    _boundOnPanelOpen         = null;
+    _boundOnPanelClose        = null;
+    _boundOnFullscreenToggle  = null;
+    _boundOnNavigateConcept   = null;
+    _boundOnRegionAssigned    = null;
+    _boundOnAnnotationsChanged = null;
   }
 
   /**
