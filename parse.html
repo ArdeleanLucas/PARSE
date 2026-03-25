@@ -1,0 +1,2211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PARSE — Phonetic Analysis & Review</title>
+
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0f172a;
+    --surface:   #1e293b;
+    --border:    #334155;
+    --accent:    #38bdf8;
+    --accent2:   #818cf8;
+    --text:      #f1f5f9;
+    --muted:     #94a3b8;
+    --ok:        #34d399;
+    --warn:      #fbbf24;
+    --danger:    #f87171;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ──────────────────────────────────────────── */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #topbar h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); }
+  #topbar .sep { color: var(--border); }
+
+  #topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #settings-wrap {
+    position: relative;
+  }
+
+  #settings-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.45);
+    padding: 6px;
+    z-index: 300;
+  }
+
+  #settings-menu.hidden {
+    display: none;
+  }
+
+  .settings-item {
+    width: 100%;
+    display: block;
+    text-align: left;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .settings-item:hover {
+    background: var(--bg);
+    border-color: var(--border);
+  }
+
+  .settings-item.danger {
+    color: var(--danger);
+    border-color: rgba(248, 113, 113, 0.25);
+  }
+
+  #speaker-select {
+    padding: 4px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  #status-pill {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 3px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+  }
+
+  /* ── Main layout ──────────────────────────────────────── */
+  #layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Concept list (left) ──────────────────────────────── */
+  #concept-list {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #concept-search {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #concept-search input {
+    width: 100%;
+    padding: 5px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  #concept-items {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .concept-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #1e293b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    transition: background 0.1s;
+  }
+  .concept-item:hover { background: rgba(56,189,248,0.07); }
+  .concept-item.active { background: rgba(56,189,248,0.12); border-left: 2px solid var(--accent); }
+
+  .concept-item .ci-label { flex: 1; font-weight: 500; }
+  .concept-item .ci-time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+  .concept-item .ci-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    background: var(--border);
+  }
+  .concept-item.has-annotation .ci-dot { background: var(--ok); }
+  .concept-item.has-ipa .ci-dot { background: var(--accent2); }
+
+  /* ── Right pane ───────────────────────────────────────── */
+  #main-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Waveform ─────────────────────────────────────────── */
+  #waveform-container {
+    position: relative;
+    background: #0a111e;
+    flex-shrink: 0;
+    padding: 0 0 8px 0;
+  }
+
+  #waveform { min-height: 80px; }
+  #timeline  { }
+
+  #waveform-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ctrl-btn {
+    padding: 4px 10px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .ctrl-btn:hover { background: var(--border); }
+  .ctrl-btn.primary { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+  .ctrl-btn.danger { border-color: var(--danger); color: var(--danger); }
+
+  #playback-time {
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 120px;
+  }
+
+  #zoom-range {
+    width: 80px;
+    accent-color: var(--accent);
+  }
+
+  /* ── Annotation panel ─────────────────────────────────── */
+  #annotation-pane {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  #annotation-pane.empty-state {
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .annot-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .annot-concept {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .annot-speaker-badge {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 99px;
+  }
+
+  .annot-segment-info {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    gap: 12px;
+  }
+
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .field-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .field-input {
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 15px;
+    font-family: 'Noto Naskh Arabic', 'Arial Unicode MS', system-ui;
+    direction: rtl;
+    text-align: right;
+  }
+  .field-input.ltr {
+    direction: ltr;
+    text-align: left;
+    font-family: 'Noto Serif', 'Gentium Plus', system-ui;
+  }
+  .field-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(56,189,248,0.15);
+  }
+
+  /* Reference forms from known speakers */
+  .ref-forms {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .ref-forms-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .ref-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ref-row:last-child { border-bottom: none; }
+  .ref-spk { color: var(--muted); width: 60px; flex-shrink: 0; }
+  .ref-ipa { font-family: monospace; color: var(--accent2); flex: 1; }
+  .ref-ortho { direction: rtl; flex: 1; text-align: right; }
+
+  .save-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  #btn-save {
+    flex: 1;
+    padding: 10px;
+    background: var(--accent);
+    color: #0f172a;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  #btn-save:hover { opacity: 0.85; }
+  #btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #btn-mark-missing {
+    padding: 10px 16px;
+    background: var(--bg);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--ok);
+    color: #0f172a;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+  }
+  .toast.show { opacity: 1; }
+
+  /* ── Loading overlay ──────────────────────────────────── */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9000;
+    gap: 12px;
+    transition: opacity 0.3s;
+  }
+  #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  #loading-overlay h2 { color: var(--accent); font-size: 18px; }
+  #loading-overlay p  { color: var(--muted); font-size: 13px; }
+
+  /* ── Import wizard ─────────────────────────────────────── */
+  .wizard-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(10, 16, 28, 0.68);
+    backdrop-filter: blur(4px);
+  }
+
+  .wizard-overlay.hidden {
+    display: none;
+  }
+
+  .wizard-modal {
+    width: min(700px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 24px 64px rgba(2, 8, 23, 0.6);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .wizard-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .wizard-title {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .wizard-title h2 {
+    font-size: 18px;
+    color: var(--accent);
+  }
+
+  .wizard-title p {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .wizard-status {
+    font-size: 12px;
+    border-radius: 6px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+  }
+
+  .wizard-status.ok {
+    color: var(--ok);
+    border-color: rgba(52, 211, 153, 0.25);
+  }
+
+  .wizard-status.warn {
+    color: var(--warn);
+    border-color: rgba(251, 191, 36, 0.25);
+  }
+
+  .wizard-status.danger {
+    color: var(--danger);
+    border-color: rgba(248, 113, 113, 0.25);
+  }
+
+  .wiz-step {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.45);
+  }
+
+  .wiz-step-head {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: rgba(15, 23, 42, 0.66);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .wiz-step.active .wiz-step-head {
+    border-bottom-color: var(--border);
+  }
+
+  .wiz-step.completed .wiz-step-head {
+    box-shadow: inset 3px 0 0 var(--ok);
+  }
+
+  .wiz-step-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .wiz-step-no {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .wiz-step-status {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .wiz-step-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .wiz-step.collapsed .wiz-step-body {
+    display: none;
+  }
+
+  .wiz-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .wiz-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.55);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .wiz-card-title {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+
+  .wiz-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .wiz-row .field-input {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .drop-zone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    background: rgba(15, 23, 42, 0.45);
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+
+  .drop-zone.dragover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  .wiz-table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: auto;
+    max-height: 260px;
+    background: var(--bg);
+  }
+
+  .wiz-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .wiz-table th,
+  .wiz-table td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 8px;
+    text-align: left;
+    white-space: nowrap;
+    vertical-align: top;
+  }
+
+  .wiz-table th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .wiz-table td[contenteditable="true"] {
+    background: rgba(56, 189, 248, 0.06);
+    min-width: 90px;
+  }
+
+  .wiz-table td[contenteditable="true"]:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .wiz-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 9px;
+    background: var(--bg);
+    color: var(--muted);
+  }
+
+  .wiz-chip.ok {
+    color: var(--ok);
+    border-color: rgba(52, 211, 153, 0.35);
+  }
+
+  .wiz-chip.warn {
+    color: var(--warn);
+    border-color: rgba(251, 191, 36, 0.35);
+  }
+
+  .wiz-hint {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .wiz-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .wiz-warning {
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    background: rgba(251, 191, 36, 0.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--warn);
+  }
+
+  @media (max-width: 860px) {
+    #topbar {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    #status-pill {
+      margin-left: 0;
+    }
+
+    .wiz-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .wizard-overlay {
+      padding: 10px;
+    }
+
+    .wizard-modal {
+      width: 100%;
+      max-height: calc(100vh - 20px);
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <h2>PARSE</h2>
+  <p id="loading-msg">Loading data…</p>
+</div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <h1>PARSE</h1>
+  <span class="sep">|</span>
+  <select id="speaker-select"></select>
+  <div id="topbar-actions">
+    <button class="ctrl-btn" id="btn-new-speaker" type="button">New Speaker</button>
+    <div id="settings-wrap">
+      <button class="ctrl-btn" id="btn-settings" type="button">Settings ▾</button>
+      <div id="settings-menu" class="hidden">
+        <button class="settings-item danger" id="btn-reset-project" type="button">Reset Project</button>
+      </div>
+    </div>
+  </div>
+  <span id="status-pill">—</span>
+</div>
+
+<!-- Layout -->
+<div id="layout">
+
+  <!-- Left: concept list -->
+  <div id="concept-list">
+    <div id="concept-search">
+      <input type="text" id="search-input" placeholder="Filter concepts…" autocomplete="off">
+    </div>
+    <div id="concept-items"></div>
+  </div>
+
+  <!-- Right: waveform + annotation -->
+  <div id="main-pane">
+
+    <!-- Waveform -->
+    <div id="waveform-container">
+      <div id="waveform"></div>
+      <div id="timeline"></div>
+    </div>
+
+    <!-- Playback controls -->
+    <div id="waveform-controls">
+      <button class="ctrl-btn primary" id="btn-play">▶ Play</button>
+      <button class="ctrl-btn" id="btn-back1">◀ 1s</button>
+      <button class="ctrl-btn" id="btn-fwd1">1s ▶</button>
+      <button class="ctrl-btn" id="btn-back5">◀ 5s</button>
+      <button class="ctrl-btn" id="btn-fwd5">5s ▶</button>
+      <span id="playback-time">0:00:00 / 0:00:00</span>
+      <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto;">
+        Zoom <input type="range" id="zoom-range" min="1" max="500" value="10">
+      </label>
+    </div>
+
+    <!-- Annotation area -->
+    <div id="annotation-pane" class="empty-state">
+      <div>Select a concept from the list to annotate</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Import wizard -->
+<div id="import-wizard-overlay" class="wizard-overlay hidden" aria-hidden="true">
+  <div class="wizard-modal" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+    <div class="wizard-header">
+      <div class="wizard-title">
+        <h2 id="wizard-title">Import Speaker Dataset</h2>
+        <p id="wizard-subtitle">Link existing files and build PARSE data structures locally.</p>
+      </div>
+      <button class="ctrl-btn" id="wizard-close-btn" type="button">Close</button>
+    </div>
+    <div class="wizard-status" id="wizard-status">Ready.</div>
+
+    <section class="wiz-step" data-step="1">
+      <button class="wiz-step-head" type="button" data-step-toggle="1">
+        <span class="wiz-step-label"><span class="wiz-step-no">1</span>Speaker Info</span>
+        <span class="wiz-step-status">Pending</span>
+      </button>
+      <div class="wiz-step-body">
+        <div class="wiz-grid">
+          <div class="field-group">
+            <label class="field-label" for="wiz-speaker-id">Speaker ID *</label>
+            <input class="field-input ltr" id="wiz-speaker-id" type="text" placeholder="e.g. Kalh01" autocomplete="off">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="wiz-speaker-name">Speaker name</label>
+            <input class="field-input ltr" id="wiz-speaker-name" type="text" placeholder="Optional" autocomplete="off">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="wiz-variety">Variety / dialect</label>
+            <input class="field-input ltr" id="wiz-variety" type="text" placeholder="e.g. Kalhori" autocomplete="off">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="wiz-sex">Sex</label>
+            <select class="field-input ltr" id="wiz-sex">
+              <option value="">Unspecified</option>
+              <option value="M">M</option>
+              <option value="F">F</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="wiz-birth-year">Birth year</label>
+            <input class="field-input ltr" id="wiz-birth-year" type="number" min="1800" max="2100" step="1" placeholder="Optional">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="wiz-origin">Origin</label>
+            <input class="field-input ltr" id="wiz-origin" type="text" placeholder="City / region" autocomplete="off">
+          </div>
+        </div>
+        <div class="wiz-actions">
+          <button class="ctrl-btn primary" id="wiz-step1-next" type="button">Continue to WAV</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="wiz-step collapsed" data-step="2">
+      <button class="wiz-step-head" type="button" data-step-toggle="2">
+        <span class="wiz-step-label"><span class="wiz-step-no">2</span>Link WAV File(s)</span>
+        <span class="wiz-step-status">Pending</span>
+      </button>
+      <div class="wiz-step-body">
+        <div class="wiz-grid">
+          <div class="wiz-card">
+            <div class="wiz-card-title">File picker mode</div>
+            <input class="field-input ltr" id="wiz-wav-file" type="file" accept=".wav,.mp3,.ogg,audio/*">
+            <div class="drop-zone" id="wiz-wav-drop">Drop a WAV/MP3/OGG file here</div>
+            <button class="ctrl-btn" id="wiz-add-wav-file" type="button">Add WAV from file</button>
+          </div>
+          <div class="wiz-card">
+            <div class="wiz-card-title">Server path mode</div>
+            <div class="wiz-row">
+              <input class="field-input ltr" id="wiz-wav-path" type="text" placeholder="audio/working/Kalh01/Kalh_M_1981.wav" autocomplete="off">
+            </div>
+            <button class="ctrl-btn" id="wiz-add-wav-path" type="button">Add WAV from server path</button>
+            <div class="wiz-hint">Validates with HEAD request before import.</div>
+          </div>
+        </div>
+
+        <div id="wiz-wav-list"></div>
+
+        <div class="wiz-actions">
+          <button class="ctrl-btn" id="wiz-add-another-wav" type="button">Add another WAV</button>
+          <button class="ctrl-btn primary" id="wiz-step2-next" type="button">Continue to timestamps</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="wiz-step collapsed" data-step="3">
+      <button class="wiz-step-head" type="button" data-step-toggle="3">
+        <span class="wiz-step-label"><span class="wiz-step-no">3</span>Link Timestamp CSV / TextGrid</span>
+        <span class="wiz-step-status">Pending</span>
+      </button>
+      <div class="wiz-step-body">
+        <div class="wiz-grid">
+          <div class="wiz-card">
+            <div class="wiz-card-title">File picker mode</div>
+            <input class="field-input ltr" id="wiz-ts-file" type="file" accept=".csv,.tsv,.txt,.textgrid,.TextGrid">
+            <div class="drop-zone" id="wiz-ts-drop">Drop CSV / TSV / TextGrid here</div>
+            <button class="ctrl-btn" id="wiz-load-ts-file" type="button">Load timestamp file</button>
+          </div>
+          <div class="wiz-card">
+            <div class="wiz-card-title">Server path mode</div>
+            <div class="wiz-row">
+              <input class="field-input ltr" id="wiz-ts-path" type="text" placeholder="audio/working/Kalh01/markers.csv" autocomplete="off">
+            </div>
+            <button class="ctrl-btn" id="wiz-load-ts-path" type="button">Load timestamp from server path</button>
+          </div>
+        </div>
+
+        <div class="wiz-row">
+          <span class="wiz-chip" id="wiz-ts-format-chip">No file loaded</span>
+          <span class="wiz-chip" id="wiz-ts-rows-chip">0 rows</span>
+        </div>
+
+        <div id="wiz-ts-tier-picker"></div>
+        <div id="wiz-ts-mapping"></div>
+
+        <div id="wiz-ts-time-summary" class="wiz-hint"></div>
+        <div id="wiz-offset-row" class="field-group" style="display:none;">
+          <label class="field-label" for="wiz-lexicon-offset">Lexicon start offset (seconds)</label>
+          <input class="field-input ltr" id="wiz-lexicon-offset" type="number" min="0" step="0.001" value="0">
+        </div>
+
+        <div id="wiz-ts-preview"></div>
+
+        <div class="wiz-actions">
+          <button class="ctrl-btn primary" id="wiz-step3-next" type="button">Continue to IPA (optional)</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="wiz-step collapsed" data-step="4">
+      <button class="wiz-step-head" type="button" data-step-toggle="4">
+        <span class="wiz-step-label"><span class="wiz-step-no">4</span>Link IPA / Transcription CSV (optional)</span>
+        <span class="wiz-step-status">Optional</span>
+      </button>
+      <div class="wiz-step-body">
+        <div class="wiz-grid">
+          <div class="wiz-card">
+            <div class="wiz-card-title">File picker mode</div>
+            <input class="field-input ltr" id="wiz-ipa-file" type="file" accept=".csv,.tsv,.txt">
+            <div class="drop-zone" id="wiz-ipa-drop">Drop IPA/transcription CSV here</div>
+            <button class="ctrl-btn" id="wiz-load-ipa-file" type="button">Load IPA file</button>
+          </div>
+          <div class="wiz-card">
+            <div class="wiz-card-title">Server path mode</div>
+            <div class="wiz-row">
+              <input class="field-input ltr" id="wiz-ipa-path" type="text" placeholder="Audio_Processed/Kalh01_process/Kalh01_transcriptions.csv" autocomplete="off">
+            </div>
+            <button class="ctrl-btn" id="wiz-load-ipa-path" type="button">Load IPA from server path</button>
+          </div>
+        </div>
+
+        <div id="wiz-ipa-mapping"></div>
+        <div id="wiz-ipa-align"></div>
+        <div id="wiz-ipa-preview"></div>
+
+        <div class="wiz-actions">
+          <button class="ctrl-btn" id="wiz-step4-skip" type="button">Skip IPA for now</button>
+          <button class="ctrl-btn primary" id="wiz-step4-next" type="button">Continue to preview</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="wiz-step collapsed" data-step="5">
+      <button class="wiz-step-head" type="button" data-step-toggle="5">
+        <span class="wiz-step-label"><span class="wiz-step-no">5</span>Preview & Confirm</span>
+        <span class="wiz-step-status">Pending</span>
+      </button>
+      <div class="wiz-step-body">
+        <div class="wiz-hint">Click any editable cell to adjust values before import.</div>
+        <div id="wiz-final-preview"></div>
+        <div class="wiz-actions">
+          <button class="ctrl-btn primary" id="wiz-import-confirm" type="button">Import Speaker</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+const STATE = {
+  sourceIndex: null,
+  coarseTranscript: null,    // {source_wav, segments[]}
+  annotations: {},           // conceptKey → {ipa, ortho, startSec, endSec, status}
+  currentSpeaker: null,
+  currentSegmentIdx: null,
+  wavesurfer: null,
+  regionsPlugin: null,
+};
+
+const LS_KEY = 'parse-annotations-v1';
+const LS_SOURCE_INDEX = 'parse-sourceIndex';
+const LS_SPEAKERS = 'parse-speakers';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── IMPORT WIZARD ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const WIZ = {
+  wavFiles: [],          // [{url, name, durationSec, isPrimary, isObjectUrl}]
+  tsRows: [],            // [{label, startSec, endSec, rawStart, rawEnd}]
+  tsFormat: null,        // 'audition' | 'generic'
+  tsTimeMode: null,      // 'absolute' | 'relative' | 'mixed'
+  ipaRows: [],           // [{ipa, ortho, lexemeId, status}]
+  ipaColMap: {},         // {ipa_col, ortho_col, id_col}
+  mergedRows: [],        // final merged dataset
+  speakerMeta: {},
+};
+
+function showWizard() {
+  const el = document.getElementById('import-wizard-overlay');
+  el.classList.remove('hidden');
+  el.setAttribute('aria-hidden', 'false');
+  // Reset to step 1
+  document.querySelectorAll('.wiz-step').forEach((s, i) => {
+    s.classList.remove('active', 'completed');
+    if (i === 0) s.classList.remove('collapsed');
+    else s.classList.add('collapsed');
+    s.querySelector('.wiz-step-status').textContent = i === 3 ? 'Optional' : 'Pending';
+  });
+  document.querySelector('[data-step="1"]').classList.add('active');
+  wizStatus('Ready.', '');
+}
+
+function hideWizard() {
+  const el = document.getElementById('import-wizard-overlay');
+  el.classList.add('hidden');
+  el.setAttribute('aria-hidden', 'true');
+}
+
+function wizStatus(msg, cls) {
+  const el = document.getElementById('wizard-status');
+  el.textContent = msg;
+  el.className = 'wizard-status' + (cls ? ' ' + cls : '');
+}
+
+function wizGoToStep(n) {
+  document.querySelectorAll('.wiz-step').forEach(s => {
+    const sn = parseInt(s.dataset.step);
+    if (sn < n) { s.classList.add('collapsed', 'completed'); s.classList.remove('active'); s.querySelector('.wiz-step-status').textContent = '✓'; }
+    else if (sn === n) { s.classList.remove('collapsed'); s.classList.add('active'); s.querySelector('.wiz-step-status').textContent = 'Active'; }
+    else { s.classList.add('collapsed'); s.classList.remove('active'); }
+  });
+}
+
+// ── Step toggle (click header to expand/collapse) ──
+function wireWizardStepToggles() {
+  document.querySelectorAll('[data-step-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const step = btn.closest('.wiz-step');
+      if (step.classList.contains('collapsed') && step.classList.contains('completed')) {
+        // Allow re-expanding completed steps
+        step.classList.toggle('collapsed');
+      }
+    });
+  });
+}
+
+// ── CSV parsing utilities ──
+function parseCSVText(text) {
+  // Detect delimiter: tab vs comma vs semicolon
+  const firstLine = text.split(/\r?\n/)[0];
+  let delim = ',';
+  if (firstLine.includes('\t')) delim = '\t';
+  else if ((firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length) delim = ';';
+
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return { headers: [], rows: [], delim };
+
+  const headers = lines[0].split(delim).map(h => h.trim().replace(/^["']|["']$/g, ''));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delim).map(c => c.trim().replace(/^["']|["']$/g, ''));
+    if (cols.length >= 2) rows.push(cols);
+  }
+  return { headers, rows, delim };
+}
+
+function parseTimeValue(val) {
+  // Parse H:MM:SS.mmm or M:SS.mmm or SS.mmm
+  if (!val || typeof val !== 'string') return { sec: 0, format: 'unknown' };
+  val = val.trim();
+  const parts = val.split(':');
+  if (parts.length === 3) {
+    // H:MM:SS.mmm
+    return { sec: parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]), format: 'hms' };
+  } else if (parts.length === 2) {
+    // M:SS.mmm — could be relative
+    return { sec: parseFloat(parts[0]) * 60 + parseFloat(parts[1]), format: 'ms' };
+  } else {
+    // raw seconds
+    return { sec: parseFloat(val) || 0, format: 'sec' };
+  }
+}
+
+function detectAuditionFormat(headers) {
+  // Audition TSV: Name, Start, Duration, Time Format, Type, Description
+  const lower = headers.map(h => h.toLowerCase());
+  return lower.includes('name') && lower.includes('start') && (lower.includes('duration') || lower.includes('end'));
+}
+
+function detectTimeFormats(rows, startColIdx) {
+  let hmsCount = 0, msCount = 0, secCount = 0;
+  let firstMsBoundary = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const val = rows[i][startColIdx];
+    const { format } = parseTimeValue(val);
+    if (format === 'hms') hmsCount++;
+    else if (format === 'ms') { msCount++; if (firstMsBoundary < 0) firstMsBoundary = i; }
+    else secCount++;
+  }
+  if (hmsCount > 0 && msCount > 0) return { mode: 'mixed', boundary: firstMsBoundary };
+  if (hmsCount > msCount) return { mode: 'absolute' };
+  if (msCount > 0) return { mode: 'relative' };
+  return { mode: 'absolute' };
+}
+
+// ── Read file (from File object or server path) ──
+async function readFileText(fileOrPath) {
+  if (fileOrPath instanceof File) {
+    return fileOrPath.text();
+  }
+  // Server path
+  const r = await fetch(fileOrPath);
+  if (!r.ok) throw new Error(`Failed to fetch ${fileOrPath}: ${r.status}`);
+  return r.text();
+}
+
+async function validateServerPath(path) {
+  try {
+    const r = await fetch(path, { method: 'HEAD' });
+    return r.ok;
+  } catch { return false; }
+}
+
+async function getAudioDuration(url) {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const response = await fetch(url);
+    const buf = await response.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(buf);
+    audioCtx.close();
+    return audioBuf.duration;
+  } catch (e) {
+    console.warn('Could not decode audio for duration:', e);
+    // Fallback: try Audio element
+    return new Promise((resolve) => {
+      const a = new Audio(url);
+      a.addEventListener('loadedmetadata', () => resolve(a.duration));
+      a.addEventListener('error', () => resolve(0));
+    });
+  }
+}
+
+// ── Step 1: Speaker Info ──
+function wireStep1() {
+  document.getElementById('wiz-step1-next').addEventListener('click', () => {
+    const id = document.getElementById('wiz-speaker-id').value.trim();
+    if (!id) { wizStatus('Speaker ID is required.', 'danger'); return; }
+    WIZ.speakerMeta = {
+      id,
+      name: document.getElementById('wiz-speaker-name').value.trim(),
+      variety: document.getElementById('wiz-variety').value.trim(),
+      sex: document.getElementById('wiz-sex').value,
+      birthYear: parseInt(document.getElementById('wiz-birth-year').value) || null,
+      origin: document.getElementById('wiz-origin').value.trim(),
+    };
+    wizStatus(`Speaker: ${id}`, 'ok');
+    wizGoToStep(2);
+  });
+}
+
+// ── Step 2: WAV files ──
+function wireStep2() {
+  const wavList = document.getElementById('wiz-wav-list');
+
+  function renderWavList() {
+    if (WIZ.wavFiles.length === 0) { wavList.innerHTML = '<div class="wiz-hint">No WAV files added yet.</div>'; return; }
+    wavList.innerHTML = '<div class="wiz-table-wrap"><table class="wiz-table"><thead><tr><th>File</th><th>Duration</th><th>Primary</th><th></th></tr></thead><tbody>' +
+      WIZ.wavFiles.map((w, i) => `<tr>
+        <td>${escHtml(w.name)}</td>
+        <td>${fmt(w.durationSec)}</td>
+        <td><input type="radio" name="wiz-primary-wav" data-idx="${i}" ${w.isPrimary ? 'checked' : ''}></td>
+        <td><button class="ctrl-btn" data-remove-wav="${i}" type="button">✕</button></td>
+      </tr>`).join('') + '</tbody></table></div>';
+
+    wavList.querySelectorAll('[name="wiz-primary-wav"]').forEach(r => {
+      r.addEventListener('change', () => {
+        WIZ.wavFiles.forEach((w, j) => w.isPrimary = (j === parseInt(r.dataset.idx)));
+        renderWavList();
+      });
+    });
+    wavList.querySelectorAll('[data-remove-wav]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.removeWav);
+        if (WIZ.wavFiles[idx].isObjectUrl) URL.revokeObjectURL(WIZ.wavFiles[idx].url);
+        WIZ.wavFiles.splice(idx, 1);
+        if (WIZ.wavFiles.length > 0 && !WIZ.wavFiles.some(w => w.isPrimary)) WIZ.wavFiles[0].isPrimary = true;
+        renderWavList();
+      });
+    });
+  }
+
+  async function addWav(url, name, isObjectUrl) {
+    wizStatus(`Reading audio duration for ${name}…`, '');
+    let dur = 0;
+    try { dur = await getAudioDuration(url); } catch { }
+    const isPrimary = WIZ.wavFiles.length === 0;
+    WIZ.wavFiles.push({ url, name, durationSec: dur, isPrimary, isObjectUrl });
+    wizStatus(`Added ${name} (${fmt(dur)})`, 'ok');
+    renderWavList();
+  }
+
+  // File picker
+  document.getElementById('wiz-add-wav-file').addEventListener('click', () => {
+    const file = document.getElementById('wiz-wav-file').files[0];
+    if (!file) { wizStatus('Select a file first.', 'warn'); return; }
+    const url = URL.createObjectURL(file);
+    addWav(url, file.name, true);
+  });
+
+  // Drag and drop
+  const dropZone = document.getElementById('wiz-wav-drop');
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) { const url = URL.createObjectURL(file); addWav(url, file.name, true); }
+  });
+
+  // Server path
+  document.getElementById('wiz-add-wav-path').addEventListener('click', async () => {
+    const path = document.getElementById('wiz-wav-path').value.trim();
+    if (!path) { wizStatus('Enter a server path.', 'warn'); return; }
+    wizStatus(`Validating ${path}…`, '');
+    const ok = await validateServerPath(path);
+    if (!ok) { wizStatus(`Cannot reach ${path} — check the path and server.`, 'danger'); return; }
+    await addWav(path, path.split('/').pop(), false);
+  });
+
+  // Next
+  document.getElementById('wiz-step2-next').addEventListener('click', () => {
+    if (WIZ.wavFiles.length === 0) { wizStatus('Add at least one WAV file.', 'danger'); return; }
+    wizStatus(`${WIZ.wavFiles.length} WAV file(s) linked.`, 'ok');
+    wizGoToStep(3);
+  });
+
+  renderWavList();
+}
+
+// ── Step 3: Timestamp CSV ──
+function wireStep3() {
+  async function loadTimestamps(source) {
+    wizStatus('Parsing timestamps…', '');
+    let text;
+    try { text = await readFileText(source); } catch (e) { wizStatus(e.message, 'danger'); return; }
+
+    const { headers, rows, delim } = parseCSVText(text);
+    if (rows.length === 0) { wizStatus('No data rows found in file.', 'danger'); return; }
+
+    const isAudition = detectAuditionFormat(headers);
+    WIZ.tsFormat = isAudition ? 'audition' : 'generic';
+
+    let startColIdx, endColIdx, labelColIdx, durColIdx;
+    const lowerH = headers.map(h => h.toLowerCase());
+
+    if (isAudition) {
+      labelColIdx = lowerH.indexOf('name');
+      startColIdx = lowerH.indexOf('start');
+      durColIdx = lowerH.indexOf('duration');
+      endColIdx = -1;
+    } else {
+      // Show column mapping UI for generic CSV
+      startColIdx = lowerH.findIndex(h => h.includes('start') || h.includes('begin') || h.includes('time'));
+      endColIdx = lowerH.findIndex(h => h.includes('end'));
+      durColIdx = lowerH.findIndex(h => h.includes('dur'));
+      labelColIdx = lowerH.findIndex(h => h.includes('name') || h.includes('label') || h.includes('concept') || h.includes('text'));
+      if (labelColIdx < 0) labelColIdx = 0;
+      if (startColIdx < 0) startColIdx = Math.min(1, headers.length - 1);
+
+      // Show mapping UI
+      const mapEl = document.getElementById('wiz-ts-mapping');
+      mapEl.innerHTML = `<div class="wiz-warning">Generic CSV detected. Please verify column mapping:</div>
+        <div class="wiz-grid">
+          <div class="field-group"><label class="field-label">Label column</label>
+            <select class="field-input ltr" id="wiz-ts-label-col">${headers.map((h, i) => `<option value="${i}" ${i === labelColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
+          <div class="field-group"><label class="field-label">Start time column</label>
+            <select class="field-input ltr" id="wiz-ts-start-col">${headers.map((h, i) => `<option value="${i}" ${i === startColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
+          <div class="field-group"><label class="field-label">End time / Duration column</label>
+            <select class="field-input ltr" id="wiz-ts-end-col"><option value="-1">None</option>${headers.map((h, i) => `<option value="${i}" ${i === endColIdx || i === durColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
+        </div>`;
+    }
+
+    // Detect time formats
+    const { mode, boundary } = detectTimeFormats(rows, startColIdx);
+    WIZ.tsTimeMode = mode;
+
+    const timeSummary = document.getElementById('wiz-ts-time-summary');
+    const offsetRow = document.getElementById('wiz-offset-row');
+
+    if (mode === 'relative') {
+      timeSummary.innerHTML = '⚠️ Timestamps appear <strong>relative</strong> (M:SS format). Enter the lexicon start offset below.';
+      offsetRow.style.display = '';
+    } else if (mode === 'mixed') {
+      timeSummary.innerHTML = `⚠️ <strong>Mixed format</strong> detected. Rows before #${boundary + 1} are H:MM:SS (absolute), rows after are M:SS (relative).`;
+      offsetRow.style.display = '';
+    } else {
+      timeSummary.innerHTML = '✓ Timestamps are absolute (H:MM:SS format).';
+      offsetRow.style.display = 'none';
+    }
+
+    // Parse rows
+    const offset = parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0;
+    WIZ.tsRows = rows.map((cols, i) => {
+      const label = cols[labelColIdx] || `segment-${i + 1}`;
+      const { sec: startRaw, format: startFmt } = parseTimeValue(cols[startColIdx]);
+      let startSec = startRaw;
+      // Apply offset for relative times
+      if ((mode === 'relative') || (mode === 'mixed' && startFmt === 'ms')) {
+        startSec = startRaw + offset;
+      }
+      let endSec = startSec + 2; // default 2s duration
+      if (durColIdx >= 0 && cols[durColIdx]) {
+        const { sec: durSec } = parseTimeValue(cols[durColIdx]);
+        endSec = startSec + durSec;
+      } else if (endColIdx >= 0 && cols[endColIdx]) {
+        const { sec: endRaw, format: endFmt } = parseTimeValue(cols[endColIdx]);
+        endSec = endRaw;
+        if ((mode === 'relative') || (mode === 'mixed' && endFmt === 'ms')) {
+          endSec = endRaw + offset;
+        }
+      }
+      return { label, startSec, endSec, rawStart: cols[startColIdx], rawEnd: cols[endColIdx >= 0 ? endColIdx : durColIdx] || '' };
+    });
+
+    // Update chips
+    document.getElementById('wiz-ts-format-chip').textContent = isAudition ? 'Audition TSV' : 'Generic CSV';
+    document.getElementById('wiz-ts-format-chip').className = 'wiz-chip ok';
+    document.getElementById('wiz-ts-rows-chip').textContent = `${WIZ.tsRows.length} rows`;
+    document.getElementById('wiz-ts-rows-chip').className = 'wiz-chip ok';
+
+    // Preview table
+    const previewEl = document.getElementById('wiz-ts-preview');
+    const previewRows = WIZ.tsRows.slice(0, 10);
+    previewEl.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
+      <thead><tr><th>#</th><th>Label</th><th>Start</th><th>End</th><th>Duration</th></tr></thead>
+      <tbody>${previewRows.map((r, i) => `<tr>
+        <td>${i + 1}</td><td>${escHtml(r.label)}</td><td>${fmt(r.startSec)}</td><td>${fmt(r.endSec)}</td>
+        <td>${((r.endSec - r.startSec) * 1000).toFixed(0)} ms</td>
+      </tr>`).join('')}</tbody></table></div>
+      ${WIZ.tsRows.length > 10 ? `<div class="wiz-hint">…and ${WIZ.tsRows.length - 10} more rows</div>` : ''}`;
+
+    wizStatus(`${WIZ.tsRows.length} timestamps parsed (${isAudition ? 'Audition' : 'generic'} format).`, 'ok');
+  }
+
+  // File picker
+  document.getElementById('wiz-load-ts-file').addEventListener('click', () => {
+    const file = document.getElementById('wiz-ts-file').files[0];
+    if (!file) { wizStatus('Select a file first.', 'warn'); return; }
+    loadTimestamps(file);
+  });
+
+  // Drop zone
+  const drop = document.getElementById('wiz-ts-drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) loadTimestamps(e.dataTransfer.files[0]);
+  });
+
+  // Server path
+  document.getElementById('wiz-load-ts-path').addEventListener('click', () => {
+    const path = document.getElementById('wiz-ts-path').value.trim();
+    if (!path) { wizStatus('Enter a path.', 'warn'); return; }
+    loadTimestamps(path);
+  });
+
+  // Offset re-parse
+  document.getElementById('wiz-lexicon-offset').addEventListener('change', () => {
+    // Re-apply offset
+    const offset = parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0;
+    WIZ.tsRows.forEach(r => {
+      const { sec: startRaw, format: startFmt } = parseTimeValue(r.rawStart);
+      let startSec = startRaw;
+      if (WIZ.tsTimeMode === 'relative' || (WIZ.tsTimeMode === 'mixed' && startFmt === 'ms')) {
+        startSec = startRaw + offset;
+      }
+      r.startSec = startSec;
+      r.endSec = startSec + (r.endSec - r.startSec); // preserve duration
+    });
+  });
+
+  // Next
+  document.getElementById('wiz-step3-next').addEventListener('click', () => {
+    if (WIZ.tsRows.length === 0) { wizStatus('Load a timestamp file first.', 'danger'); return; }
+    wizGoToStep(4);
+  });
+}
+
+// ── Step 4: IPA CSV (optional) ──
+function wireStep4() {
+  async function loadIPA(source) {
+    wizStatus('Parsing IPA file…', '');
+    let text;
+    try { text = await readFileText(source); } catch (e) { wizStatus(e.message, 'danger'); return; }
+
+    const { headers, rows } = parseCSVText(text);
+    if (rows.length === 0) { wizStatus('No data rows found.', 'danger'); return; }
+
+    // Auto-detect columns
+    const lowerH = headers.map(h => h.toLowerCase());
+    const ipaCol = lowerH.findIndex(h => h === 'ipa' || h.includes('ipa'));
+    const orthoCol = lowerH.findIndex(h => h === 'ortho' || h.includes('orth') || h.includes('script'));
+    const idCol = lowerH.findIndex(h => h.includes('lexeme') || h.includes('id') || h === 'id');
+    const statusCol = lowerH.findIndex(h => h === 'status');
+
+    WIZ.ipaColMap = { ipa: ipaCol, ortho: orthoCol, id: idCol, status: statusCol };
+
+    // Show mapping
+    const mapEl = document.getElementById('wiz-ipa-mapping');
+    mapEl.innerHTML = `<div class="wiz-grid">
+      <div class="field-group"><label class="field-label">IPA column</label>
+        <select class="field-input ltr" id="wiz-ipa-col-sel">${headers.map((h, i) => `<option value="${i}" ${i === ipaCol ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}<option value="-1">None</option></select></div>
+      <div class="field-group"><label class="field-label">Ortho column</label>
+        <select class="field-input ltr" id="wiz-ortho-col-sel">${headers.map((h, i) => `<option value="${i}" ${i === orthoCol ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}<option value="-1">None</option></select></div>
+    </div>`;
+
+    WIZ.ipaRows = rows.map(cols => ({
+      ipa: ipaCol >= 0 ? (cols[ipaCol] || '') : '',
+      ortho: orthoCol >= 0 ? (cols[orthoCol] || '') : '',
+      lexemeId: idCol >= 0 ? (cols[idCol] || '') : '',
+      status: statusCol >= 0 ? (cols[statusCol] || '') : '',
+    }));
+
+    // Alignment check
+    const alignEl = document.getElementById('wiz-ipa-align');
+    if (WIZ.ipaRows.length === WIZ.tsRows.length) {
+      alignEl.innerHTML = `<div class="wiz-chip ok">✓ Row counts match (${WIZ.ipaRows.length} = ${WIZ.tsRows.length}) — aligning by order.</div>`;
+    } else {
+      alignEl.innerHTML = `<div class="wiz-warning">Row count mismatch: IPA has ${WIZ.ipaRows.length} rows, timestamps have ${WIZ.tsRows.length}. Will align by order up to the shorter list.</div>`;
+    }
+
+    // Preview
+    const previewEl = document.getElementById('wiz-ipa-preview');
+    const n = Math.min(10, WIZ.ipaRows.length, WIZ.tsRows.length);
+    previewEl.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
+      <thead><tr><th>#</th><th>Timestamp Label</th><th>IPA</th><th>Ortho</th></tr></thead>
+      <tbody>${Array.from({ length: n }, (_, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${escHtml(WIZ.tsRows[i]?.label || '—')}</td>
+        <td style="font-family:monospace;color:var(--accent2)">${escHtml(WIZ.ipaRows[i]?.ipa || '—')}</td>
+        <td dir="rtl">${escHtml(WIZ.ipaRows[i]?.ortho || '—')}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+
+    wizStatus(`${WIZ.ipaRows.length} IPA rows loaded.`, 'ok');
+  }
+
+  document.getElementById('wiz-load-ipa-file').addEventListener('click', () => {
+    const file = document.getElementById('wiz-ipa-file').files[0];
+    if (!file) { wizStatus('Select a file.', 'warn'); return; }
+    loadIPA(file);
+  });
+
+  const drop = document.getElementById('wiz-ipa-drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragover'); if (e.dataTransfer.files[0]) loadIPA(e.dataTransfer.files[0]); });
+
+  document.getElementById('wiz-load-ipa-path').addEventListener('click', () => {
+    const path = document.getElementById('wiz-ipa-path').value.trim();
+    if (!path) { wizStatus('Enter a path.', 'warn'); return; }
+    loadIPA(path);
+  });
+
+  document.getElementById('wiz-step4-skip').addEventListener('click', () => {
+    WIZ.ipaRows = [];
+    wizGoToStep(5);
+    buildFinalPreview();
+  });
+
+  document.getElementById('wiz-step4-next').addEventListener('click', () => {
+    wizGoToStep(5);
+    buildFinalPreview();
+  });
+}
+
+// ── Step 5: Preview & Confirm ──
+function buildFinalPreview() {
+  // Merge timestamp rows + IPA rows
+  WIZ.mergedRows = WIZ.tsRows.map((ts, i) => {
+    const ipa = WIZ.ipaRows[i] || {};
+    return {
+      idx: i + 1,
+      label: ts.label,
+      startSec: ts.startSec,
+      endSec: ts.endSec,
+      ipa: ipa.ipa || '',
+      ortho: ipa.ortho || '',
+    };
+  });
+
+  const el = document.getElementById('wiz-final-preview');
+  el.innerHTML = `<div class="wiz-table-wrap" style="max-height:400px"><table class="wiz-table">
+    <thead><tr><th>#</th><th>Label</th><th>Start</th><th>End</th><th>IPA</th><th>Ortho</th></tr></thead>
+    <tbody>${WIZ.mergedRows.map(r => `<tr>
+      <td>${r.idx}</td>
+      <td>${escHtml(r.label)}</td>
+      <td>${fmt(r.startSec)}</td>
+      <td>${fmt(r.endSec)}</td>
+      <td contenteditable="true" data-field="ipa" data-idx="${r.idx - 1}" style="font-family:monospace;color:var(--accent2)">${escHtml(r.ipa)}</td>
+      <td contenteditable="true" data-field="ortho" data-idx="${r.idx - 1}" dir="rtl">${escHtml(r.ortho)}</td>
+    </tr>`).join('')}</tbody></table></div>
+    <div class="wiz-hint">${WIZ.mergedRows.length} segments total. Edit IPA/Ortho cells directly if needed.</div>`;
+
+  // Listen for cell edits
+  el.querySelectorAll('[contenteditable]').forEach(td => {
+    td.addEventListener('blur', () => {
+      const idx = parseInt(td.dataset.idx);
+      const field = td.dataset.field;
+      if (WIZ.mergedRows[idx]) WIZ.mergedRows[idx][field] = td.textContent.trim();
+    });
+  });
+
+  wizStatus(`${WIZ.mergedRows.length} segments ready to import.`, 'ok');
+}
+
+function wireStep5() {
+  document.getElementById('wiz-import-confirm').addEventListener('click', () => {
+    if (WIZ.mergedRows.length === 0) { wizStatus('Nothing to import.', 'danger'); return; }
+    finishImport();
+  });
+}
+
+// ── Finish Import: build data structures and save ──
+function finishImport() {
+  const spk = WIZ.speakerMeta;
+  const primary = WIZ.wavFiles.find(w => w.isPrimary) || WIZ.wavFiles[0];
+
+  // Build sourceIndex
+  const sourceIndex = {
+    version: '4.0',
+    generated: new Date().toISOString(),
+    speakers: {}
+  };
+
+  // Load existing if any
+  try {
+    const existing = JSON.parse(localStorage.getItem(LS_SOURCE_INDEX));
+    if (existing && existing.speakers) Object.assign(sourceIndex.speakers, existing.speakers);
+  } catch {}
+
+  sourceIndex.speakers[spk.id] = {
+    source_wavs: WIZ.wavFiles.map(w => ({
+      filename: w.url,
+      duration_sec: w.durationSec,
+      is_primary: w.isPrimary,
+    })),
+    peaks_file: null,
+    lexicon_start_sec: parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0,
+  };
+
+  // Build coarse transcript
+  const transcript = {
+    source_wav: primary ? primary.url : '',
+    segments: WIZ.mergedRows.map(r => ({
+      start: r.startSec,
+      end: r.endSec,
+      text: r.label,
+    })),
+  };
+
+  // Save speaker metadata
+  let speakers = {};
+  try { speakers = JSON.parse(localStorage.getItem(LS_SPEAKERS)) || {}; } catch {}
+  speakers[spk.id] = spk;
+
+  // Pre-populate annotations if IPA data exists
+  WIZ.mergedRows.forEach((r, i) => {
+    if (r.ipa || r.ortho) {
+      const key = `${spk.id}::${i}`;
+      STATE.annotations[key] = {
+        speaker: spk.id,
+        segIdx: i,
+        ipa: r.ipa,
+        ortho: r.ortho,
+        notes: '',
+        startSec: r.startSec,
+        endSec: r.endSec,
+        conceptText: r.label,
+        status: 'ok',
+        savedAt: Date.now(),
+      };
+    }
+  });
+  saveAnnotations();
+
+  // Save to localStorage
+  localStorage.setItem(LS_SOURCE_INDEX, JSON.stringify(sourceIndex));
+  localStorage.setItem(`parse-transcript-${spk.id}`, JSON.stringify(transcript));
+  localStorage.setItem(LS_SPEAKERS, JSON.stringify(speakers));
+
+  wizStatus('Import complete!', 'ok');
+  hideWizard();
+
+  // Reload app with new data
+  STATE.sourceIndex = sourceIndex;
+  buildSpeakerSelect(sourceIndex);
+  document.getElementById('speaker-select').value = spk.id;
+  loadSpeaker(spk.id);
+}
+
+// ── Topbar buttons ──
+function wireTopbarButtons() {
+  document.getElementById('btn-new-speaker').addEventListener('click', () => {
+    WIZ.wavFiles = []; WIZ.tsRows = []; WIZ.ipaRows = []; WIZ.mergedRows = [];
+    showWizard();
+  });
+
+  const settingsBtn = document.getElementById('btn-settings');
+  const settingsMenu = document.getElementById('settings-menu');
+  if (settingsBtn && settingsMenu) {
+    settingsBtn.addEventListener('click', () => settingsMenu.classList.toggle('hidden'));
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#settings-wrap')) settingsMenu.classList.add('hidden');
+    });
+  }
+
+  document.getElementById('btn-reset-project').addEventListener('click', () => {
+    if (!confirm('This will clear all imported data and annotations. Continue?')) return;
+    localStorage.removeItem(LS_SOURCE_INDEX);
+    localStorage.removeItem(LS_SPEAKERS);
+    // Remove all transcript keys
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('parse-transcript-')) localStorage.removeItem(k);
+    }
+    localStorage.removeItem(LS_KEY);
+    STATE.annotations = {};
+    STATE.sourceIndex = null;
+    showWizard();
+  });
+}
+
+// ── Wire all wizard steps ──
+function wireWizard() {
+  wireWizardStepToggles();
+  wireStep1();
+  wireStep2();
+  wireStep3();
+  wireStep4();
+  wireStep5();
+  wireTopbarButtons();
+
+  document.getElementById('wizard-close-btn').addEventListener('click', hideWizard);
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function fmt(sec) {
+  if (!Number.isFinite(sec)) return '--:--';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+    : `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function annotKey(speaker, segIdx) {
+  return `${speaker}::${segIdx}`;
+}
+
+function loadAnnotations() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return {};
+}
+
+function saveAnnotations() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(STATE.annotations));
+  } catch(e) {}
+}
+
+function showToast(msg, duration = 1800) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+function setLoading(msg) {
+  const el = document.getElementById('loading-overlay');
+  const msgEl = document.getElementById('loading-msg');
+  if (msg) {
+    el.classList.remove('hidden');
+    msgEl.textContent = msg;
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+// ─── Data loading (localStorage first, server fallback) ────────────────────────
+async function loadSourceIndex() {
+  // Check localStorage first
+  try {
+    const stored = localStorage.getItem(LS_SOURCE_INDEX);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.speakers && Object.keys(parsed.speakers).length > 0) {
+        console.log('[PARSE] Loaded source index from localStorage');
+        return parsed;
+      }
+    }
+  } catch {}
+  // Fallback to server
+  const r = await fetch('source_index.json');
+  if (!r.ok) throw new Error('source_index.json not found');
+  return r.json();
+}
+
+async function loadTranscript(speaker) {
+  // Check localStorage first
+  try {
+    const stored = localStorage.getItem(`parse-transcript-${speaker}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.segments) {
+        console.log(`[PARSE] Loaded transcript for ${speaker} from localStorage`);
+        return parsed;
+      }
+    }
+  } catch {}
+  // Fallback to server
+  const r = await fetch(`coarse_transcripts/${speaker}.json`);
+  if (!r.ok) throw new Error(`coarse_transcripts/${speaker}.json not found`);
+  return r.json();
+}
+
+// ─── Speaker selector ─────────────────────────────────────────────────────────
+function buildSpeakerSelect(sourceIndex) {
+  const sel = document.getElementById('speaker-select');
+  sel.innerHTML = '';
+  const speakers = Object.keys(sourceIndex.speakers).sort();
+  for (const spk of speakers) {
+    const opt = document.createElement('option');
+    opt.value = spk;
+    opt.textContent = spk;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => loadSpeaker(sel.value));
+}
+
+// ─── Load speaker ─────────────────────────────────────────────────────────────
+async function loadSpeaker(speaker) {
+  setLoading(`Loading ${speaker}…`);
+
+  // Destroy existing wavesurfer
+  if (STATE.wavesurfer) {
+    STATE.wavesurfer.destroy();
+    STATE.wavesurfer = null;
+    STATE.regionsPlugin = null;
+  }
+
+  // Reset annotation pane
+  const pane = document.getElementById('annotation-pane');
+  pane.className = 'annotation-pane empty-state';
+  pane.innerHTML = '<div>Select a concept from the list to annotate</div>';
+
+  STATE.currentSpeaker = speaker;
+  STATE.currentSegmentIdx = null;
+
+  // Load transcript
+  let transcript;
+  try {
+    transcript = await loadTranscript(speaker);
+  } catch(e) {
+    setLoading(null);
+    alert(`Could not load transcript for ${speaker}: ${e.message}`);
+    return;
+  }
+  STATE.coarseTranscript = transcript;
+
+  // Resolve WAV URL
+  const spkData = STATE.sourceIndex.speakers[speaker];
+  const primary = (spkData.source_wavs || []).find(w => w.is_primary) || spkData.source_wavs[0];
+  const wavUrl = primary ? primary.filename : null;
+  if (!wavUrl) {
+    setLoading(null);
+    alert(`No WAV file found for ${speaker}`);
+    return;
+  }
+
+  // Load peaks
+  let peaksData = null;
+  try {
+    const peaksUrl = spkData.peaks_file;
+    if (peaksUrl) {
+      const pr = await fetch(peaksUrl);
+      if (pr.ok) peaksData = await pr.json();
+    }
+  } catch(e) {
+    console.warn('Peaks load failed, will decode audio directly:', e);
+  }
+
+  // Build WaveSurfer
+  const Regions  = window.WaveSurfer.Regions;
+  const Timeline = window.WaveSurfer.Timeline;
+
+  if (!window.WaveSurfer || !Regions || !Timeline) {
+    setLoading(null);
+    alert('WaveSurfer CDN scripts not loaded. Check your internet connection.');
+    return;
+  }
+
+  const regionsPlugin  = Regions.create({ dragToSeek: true });
+  const timelinePlugin = Timeline.create({ container: '#timeline', timeInterval: 30, primaryLabelInterval: 60, style: { color: '#94a3b8', fontSize: '10px' } });
+
+  const wsOptions = {
+    container: '#waveform',
+    backend: 'MediaElement',
+    waveColor: '#334155',
+    progressColor: '#38bdf8',
+    cursorColor: '#f1f5f9',
+    height: 80,
+    normalize: true,
+    plugins: [regionsPlugin, timelinePlugin],
+  };
+
+  if (peaksData) {
+    // Detect peaks format: array (raw) or {data:[], length, sample_rate, channels}
+    let channelData = null;
+    if (Array.isArray(peaksData)) {
+      channelData = [new Float32Array(peaksData)];
+    } else if (peaksData.data && Array.isArray(peaksData.data)) {
+      channelData = [new Float32Array(peaksData.data)];
+    } else if (peaksData.data && typeof peaksData.data === 'object' && !Array.isArray(peaksData.data)) {
+      // Possible structured object with channel arrays
+      const ch0 = peaksData.data['0'] || peaksData.data['channel_0'];
+      if (ch0) channelData = [new Float32Array(ch0)];
+    }
+    if (channelData) {
+      wsOptions.peaks = channelData;
+      wsOptions.duration = primary.duration_sec || 0;
+    }
+  }
+
+  const ws = window.WaveSurfer.create(wsOptions);
+  STATE.wavesurfer = ws;
+  STATE.regionsPlugin = regionsPlugin;
+
+  // Load audio
+  ws.load(wavUrl);
+
+  // Playback time display
+  ws.on('audioprocess', () => updateTimeDisplay());
+  ws.on('seek', () => updateTimeDisplay());
+
+  ws.on('ready', () => {
+    setLoading(null);
+    updateTimeDisplay();
+    buildConceptList(speaker, transcript, spkData);
+    updateStatusPill(speaker, transcript);
+    drawCueRegions(transcript);
+  });
+
+  ws.on('error', (err) => {
+    setLoading(null);
+    console.error('WaveSurfer error:', err);
+    // Still build the concept list even if audio fails
+    buildConceptList(speaker, transcript, spkData);
+    updateStatusPill(speaker, transcript);
+  });
+
+  // Play/pause toggle
+  ws.on('play',  () => { document.getElementById('btn-play').textContent = '⏸ Pause'; });
+  ws.on('pause', () => { document.getElementById('btn-play').textContent = '▶ Play'; });
+  ws.on('finish',() => { document.getElementById('btn-play').textContent = '▶ Play'; });
+
+  // Zoom
+  document.getElementById('zoom-range').value = 10;
+  ws.zoom(10);
+}
+
+function updateTimeDisplay() {
+  const ws = STATE.wavesurfer;
+  if (!ws) return;
+  const cur = ws.getCurrentTime() || 0;
+  const dur = ws.getDuration() || 0;
+  document.getElementById('playback-time').textContent = `${fmt(cur)} / ${fmt(dur)}`;
+}
+
+function drawCueRegions(transcript) {
+  const rp = STATE.regionsPlugin;
+  if (!rp) return;
+  const segs = transcript.segments || [];
+  segs.forEach((seg, i) => {
+    rp.addRegion({
+      id: `cue-${i}`,
+      start: seg.start,
+      end: seg.end,
+      color: 'rgba(56,189,248,0.08)',
+      drag: false,
+      resize: false,
+    });
+  });
+}
+
+// ─── Concept list ─────────────────────────────────────────────────────────────
+function buildConceptList(speaker, transcript, spkData) {
+  const segs = transcript.segments || [];
+  const container = document.getElementById('concept-items');
+  container.innerHTML = '';
+
+  segs.forEach((seg, i) => {
+    const key = annotKey(speaker, i);
+    const annot = STATE.annotations[key];
+    const div = document.createElement('div');
+    div.className = 'concept-item' + (annot ? (annot.status === 'ok' ? ' has-annotation' : ' has-ipa') : '');
+    div.dataset.idx = i;
+
+    const label = seg.text || `segment ${i+1}`;
+    div.innerHTML = `
+      <span class="ci-dot"></span>
+      <span class="ci-label">${escHtml(label)}</span>
+      <span class="ci-time">${fmt(seg.start)}</span>
+    `;
+
+    div.addEventListener('click', () => openSegment(i));
+    container.appendChild(div);
+  });
+
+  // Search filter
+  const searchInput = document.getElementById('search-input');
+  searchInput.oninput = () => {
+    const q = searchInput.value.toLowerCase();
+    container.querySelectorAll('.concept-item').forEach(el => {
+      const label = el.querySelector('.ci-label').textContent.toLowerCase();
+      el.style.display = label.includes(q) ? '' : 'none';
+    });
+  };
+}
+
+function updateStatusPill(speaker, transcript) {
+  const total = (transcript.segments || []).length;
+  const done = Object.keys(STATE.annotations).filter(k => k.startsWith(speaker + '::') && STATE.annotations[k]?.status === 'ok').length;
+  document.getElementById('status-pill').textContent = `${done} / ${total} annotated`;
+}
+
+function updateStatusPill() {
+  const speaker = STATE.currentSpeaker;
+  const transcript = STATE.coarseTranscript;
+  if (!speaker || !transcript) return;
+  const total = (transcript.segments || []).length;
+  const done = Object.keys(STATE.annotations).filter(k => k.startsWith(speaker + '::') && STATE.annotations[k]?.status === 'ok').length;
+  document.getElementById('status-pill').textContent = `${done} / ${total} annotated`;
+}
+
+// ─── Open a segment ───────────────────────────────────────────────────────────
+function openSegment(idx) {
+  const speaker = STATE.currentSpeaker;
+  const transcript = STATE.coarseTranscript;
+  if (!speaker || !transcript) return;
+
+  const segs = transcript.segments || [];
+  const seg = segs[idx];
+  if (!seg) return;
+
+  STATE.currentSegmentIdx = idx;
+
+  // Highlight in list
+  document.querySelectorAll('.concept-item').forEach(el => el.classList.remove('active'));
+  const activeEl = document.querySelector(`.concept-item[data-idx="${idx}"]`);
+  if (activeEl) {
+    activeEl.classList.add('active');
+    activeEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  // Seek waveform
+  const ws = STATE.wavesurfer;
+  if (ws) {
+    const dur = ws.getDuration() || 1;
+    ws.seekTo(Math.max(0, Math.min(1, (seg.start - 0.5) / dur)));
+  }
+
+  // Build annotation form
+  buildAnnotationPane(speaker, idx, seg);
+}
+
+function buildAnnotationPane(speaker, idx, seg) {
+  const key = annotKey(speaker, idx);
+  const existing = STATE.annotations[key] || {};
+
+  const spkData = STATE.sourceIndex?.speakers?.[speaker];
+  const lexStart = (spkData?.source_wavs?.[0]?.lexicon_start_sec) || 0;
+  const absStart = seg.start;
+  const absEnd   = seg.end;
+
+  const pane = document.getElementById('annotation-pane');
+  pane.className = 'annotation-pane';
+
+  // Collect reference IPA from other speakers' annotations for same concept position
+  const refs = buildRefForms(speaker, idx, seg.text);
+
+  pane.innerHTML = `
+    <div class="annot-header">
+      <span class="annot-concept">${escHtml(seg.text || `Segment ${idx+1}`)}</span>
+      <span class="annot-speaker-badge">${escHtml(speaker)}</span>
+    </div>
+    <div class="annot-segment-info">
+      <span>⏱ ${fmt(absStart)} – ${fmt(absEnd)}</span>
+      <span>Duration: ${((absEnd - absStart) * 1000).toFixed(0)} ms</span>
+      <span>Segment ${idx+1}</span>
+    </div>
+
+    ${refs.length ? `
+    <div class="ref-forms">
+      <div class="ref-forms-title">Reference forms (other speakers)</div>
+      ${refs.map(r => `
+        <div class="ref-row">
+          <span class="ref-spk">${escHtml(r.speaker)}</span>
+          <span class="ref-ipa">${escHtml(r.ipa)}</span>
+          <span class="ref-ortho">${escHtml(r.ortho)}</span>
+        </div>
+      `).join('')}
+    </div>` : ''}
+
+    <div class="field-group">
+      <label class="field-label" for="field-ipa">IPA Transcription</label>
+      <input class="field-input ltr" id="field-ipa" type="text"
+             placeholder="e.g. jak" value="${escHtml(existing.ipa || '')}" autocomplete="off">
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="field-ortho">Orthographic (Kurdish script)</label>
+      <input class="field-input" id="field-ortho" type="text"
+             placeholder="e.g. یەک" value="${escHtml(existing.ortho || '')}" autocomplete="off" dir="rtl">
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="field-notes">Notes (optional)</label>
+      <input class="field-input ltr" id="field-notes" type="text"
+             placeholder="Borrowing? Variant? Noise?" value="${escHtml(existing.notes || '')}" autocomplete="off">
+    </div>
+
+    <div class="save-row">
+      <button id="btn-save">Save & Next →</button>
+      <button id="btn-mark-missing">Mark Missing</button>
+    </div>
+  `;
+
+  document.getElementById('field-ipa').focus();
+
+  document.getElementById('btn-save').addEventListener('click', () => saveAndNext(speaker, idx, false));
+  document.getElementById('btn-mark-missing').addEventListener('click', () => saveAndNext(speaker, idx, true));
+
+  // Enter key saves
+  pane.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveAndNext(speaker, idx, false);
+    }
+  });
+}
+
+function buildRefForms(targetSpeaker, segIdx, conceptText) {
+  // Find annotations from other speakers that have the same text label (concept)
+  const refs = [];
+  const speakers = Object.keys(STATE.sourceIndex?.speakers || {});
+  for (const spk of speakers) {
+    if (spk === targetSpeaker) continue;
+    const key = annotKey(spk, segIdx);
+    const annot = STATE.annotations[key];
+    if (annot && (annot.ipa || annot.ortho)) {
+      refs.push({ speaker: spk, ipa: annot.ipa || '—', ortho: annot.ortho || '' });
+    }
+  }
+  return refs;
+}
+
+function saveAndNext(speaker, idx, missing) {
+  const ipa    = document.getElementById('field-ipa')?.value.trim() || '';
+  const ortho  = document.getElementById('field-ortho')?.value.trim() || '';
+  const notes  = document.getElementById('field-notes')?.value.trim() || '';
+  const seg    = STATE.coarseTranscript?.segments?.[idx];
+
+  const key = annotKey(speaker, idx);
+  STATE.annotations[key] = {
+    speaker, segIdx: idx,
+    ipa, ortho, notes,
+    startSec: seg?.start, endSec: seg?.end,
+    conceptText: seg?.text || '',
+    status: missing ? 'missing' : 'ok',
+    savedAt: Date.now(),
+  };
+  saveAnnotations();
+
+  // Update dot in list
+  const listEl = document.querySelector(`.concept-item[data-idx="${idx}"]`);
+  if (listEl) {
+    listEl.classList.remove('has-annotation', 'has-ipa');
+    if (!missing) listEl.classList.add('has-annotation');
+    else          listEl.classList.add('has-ipa');
+    listEl.classList.remove('active');
+  }
+
+  updateStatusPill();
+
+  if (missing) {
+    showToast('Marked as missing');
+  } else {
+    showToast('Saved ✓');
+  }
+
+  // Move to next concept
+  const segs = STATE.coarseTranscript?.segments || [];
+  const next = idx + 1;
+  if (next < segs.length) {
+    setTimeout(() => openSegment(next), 150);
+  } else {
+    const pane = document.getElementById('annotation-pane');
+    pane.innerHTML = '<div style="color:var(--ok);font-size:18px;">✓ All segments annotated!</div>';
+  }
+}
+
+function escHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Playback controls ────────────────────────────────────────────────────────
+function wireControls() {
+  document.getElementById('btn-play').addEventListener('click', () => {
+    STATE.wavesurfer?.playPause();
+  });
+  document.getElementById('btn-back1').addEventListener('click', () => {
+    const ws = STATE.wavesurfer; if (!ws) return;
+    const t = Math.max(0, ws.getCurrentTime() - 1);
+    ws.seekTo(t / (ws.getDuration() || 1));
+  });
+  document.getElementById('btn-fwd1').addEventListener('click', () => {
+    const ws = STATE.wavesurfer; if (!ws) return;
+    const t = Math.min(ws.getDuration(), ws.getCurrentTime() + 1);
+    ws.seekTo(t / (ws.getDuration() || 1));
+  });
+  document.getElementById('btn-back5').addEventListener('click', () => {
+    const ws = STATE.wavesurfer; if (!ws) return;
+    const t = Math.max(0, ws.getCurrentTime() - 5);
+    ws.seekTo(t / (ws.getDuration() || 1));
+  });
+  document.getElementById('btn-fwd5').addEventListener('click', () => {
+    const ws = STATE.wavesurfer; if (!ws) return;
+    const t = Math.min(ws.getDuration(), ws.getCurrentTime() + 5);
+    ws.seekTo(t / (ws.getDuration() || 1));
+  });
+  document.getElementById('zoom-range').addEventListener('input', (e) => {
+    STATE.wavesurfer?.zoom(Number(e.target.value));
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); STATE.wavesurfer?.playPause(); }
+    if (e.code === 'ArrowLeft')  { e.preventDefault(); nudge(-1); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); nudge(+1); }
+    if (e.code === 'ArrowDown')  { e.preventDefault(); nextConcept(+1); }
+    if (e.code === 'ArrowUp')    { e.preventDefault(); nextConcept(-1); }
+  });
+}
+
+function nudge(sec) {
+  const ws = STATE.wavesurfer; if (!ws) return;
+  const t = Math.max(0, Math.min(ws.getDuration(), ws.getCurrentTime() + sec));
+  ws.seekTo(t / (ws.getDuration() || 1));
+}
+
+function nextConcept(dir) {
+  const segs = STATE.coarseTranscript?.segments;
+  if (!segs) return;
+  const cur = STATE.currentSegmentIdx ?? -1;
+  const next = Math.max(0, Math.min(segs.length - 1, cur + dir));
+  if (next !== cur) openSegment(next);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  STATE.annotations = loadAnnotations();
+  wireControls();
+  wireWizard();
+
+  setLoading('Loading source index…');
+  try {
+    STATE.sourceIndex = await loadSourceIndex();
+  } catch(e) {
+    // No data from server or localStorage → show import wizard
+    setLoading(null);
+    console.log('[PARSE] No source index found — showing import wizard');
+    showWizard();
+    return;
+  }
+
+  const speakers = Object.keys(STATE.sourceIndex.speakers).sort();
+  if (speakers.length === 0) {
+    setLoading(null);
+    showWizard();
+    return;
+  }
+
+  buildSpeakerSelect(STATE.sourceIndex);
+
+  // Default to Kalh01 if available
+  const defaultSpk = speakers.includes('Kalh01') ? 'Kalh01' : speakers[0];
+  document.getElementById('speaker-select').value = defaultSpk;
+
+  await loadSpeaker(defaultSpk);
+}
+
+init();
+</script>
+</body>
+</html>
