@@ -986,16 +986,80 @@ const LS_SPEAKERS = 'parse-speakers';
 
 const WIZ = {
   wavFiles: [],          // [{url, name, durationSec, isPrimary, isObjectUrl}]
-  tsRows: [],            // [{label, startSec, endSec, rawStart, rawEnd}]
+  tsRows: [],            // [{id,label,startSec,endSec,rawStart,rawEnd}]
   tsFormat: null,        // 'audition' | 'generic'
   tsTimeMode: null,      // 'absolute' | 'relative' | 'mixed'
+  tsHeaders: [],
+  tsRawRows: [],
+  tsMap: { idIdx: -1, labelIdx: -1, startIdx: -1, endIdx: -1, durIdx: -1 },
+  tsBoundaryRow: -1,
+  tsTextGridTiers: [],
+  tsSelectedTier: '',
+  tsSourceName: '',
   ipaRows: [],           // [{ipa, ortho, lexemeId, status}]
-  ipaColMap: {},         // {ipa_col, ortho_col, id_col}
+  ipaHeaders: [],
+  ipaRawRows: [],
+  ipaColMap: { id: -1, label: -1, ipa: -1, ortho: -1, audioPath: -1, status: -1 },
+  ipaAlignStrategy: 'by_order',
+  ipaAlignmentConfidence: 'low',
   mergedRows: [],        // final merged dataset
   speakerMeta: {},
 };
 
+function resetWizardState() {
+  WIZ.wavFiles.forEach(w => { if (w && w.isObjectUrl && w.url) URL.revokeObjectURL(w.url); });
+  WIZ.wavFiles = [];
+  WIZ.tsRows = [];
+  WIZ.tsFormat = null;
+  WIZ.tsTimeMode = null;
+  WIZ.tsHeaders = [];
+  WIZ.tsRawRows = [];
+  WIZ.tsMap = { idIdx: -1, labelIdx: -1, startIdx: -1, endIdx: -1, durIdx: -1 };
+  WIZ.tsBoundaryRow = -1;
+  WIZ.tsTextGridTiers = [];
+  WIZ.tsSelectedTier = '';
+  WIZ.tsSourceName = '';
+  WIZ.ipaRows = [];
+  WIZ.ipaHeaders = [];
+  WIZ.ipaRawRows = [];
+  WIZ.ipaColMap = { id: -1, label: -1, ipa: -1, ortho: -1, audioPath: -1, status: -1 };
+  WIZ.ipaAlignStrategy = 'by_order';
+  WIZ.ipaAlignmentConfidence = 'low';
+  WIZ.ipaAligned = [];
+  WIZ.mergedRows = [];
+  WIZ.speakerMeta = {};
+
+  ['wiz-speaker-id','wiz-speaker-name','wiz-variety','wiz-birth-year','wiz-origin','wiz-wav-path','wiz-ts-path','wiz-ipa-path'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['wiz-sex','wiz-wav-file','wiz-ts-file','wiz-ipa-file'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  const formatChip = document.getElementById('wiz-ts-format-chip');
+  const rowsChip = document.getElementById('wiz-ts-rows-chip');
+  if (formatChip) { formatChip.textContent = 'No file loaded'; formatChip.className = 'wiz-chip'; }
+  if (rowsChip) { rowsChip.textContent = '0 rows'; rowsChip.className = 'wiz-chip'; }
+
+  const offsetRow = document.getElementById('wiz-offset-row');
+  const offsetInput = document.getElementById('wiz-lexicon-offset');
+  if (offsetRow) offsetRow.style.display = 'none';
+  if (offsetInput) offsetInput.value = '0';
+
+  ['wiz-wav-list','wiz-ts-tier-picker','wiz-ts-mapping','wiz-ts-preview','wiz-ipa-mapping','wiz-ipa-align','wiz-ipa-preview','wiz-final-preview'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+  const wavList = document.getElementById('wiz-wav-list');
+  if (wavList) wavList.innerHTML = '<div class="wiz-hint">No WAV files added yet.</div>';
+  const sum = document.getElementById('wiz-ts-time-summary');
+  if (sum) sum.textContent = '';
+}
+
 function showWizard() {
+  resetWizardState();
   const el = document.getElementById('import-wizard-overlay');
   el.classList.remove('hidden');
   el.setAttribute('aria-hidden', 'false');
@@ -1011,6 +1075,11 @@ function showWizard() {
 }
 
 function hideWizard() {
+  const hasProject = !!(STATE.sourceIndex && STATE.sourceIndex.speakers && Object.keys(STATE.sourceIndex.speakers).length);
+  if (!hasProject) {
+    wizStatus('Import is required before annotation can start.', 'warn');
+    return;
+  }
   const el = document.getElementById('import-wizard-overlay');
   el.classList.add('hidden');
   el.setAttribute('aria-hidden', 'true');
@@ -1066,8 +1135,10 @@ function parseCSVText(text) {
 
 function parseTimeValue(val) {
   // Parse H:MM:SS.mmm or M:SS.mmm or SS.mmm
-  if (!val || typeof val !== 'string') return { sec: 0, format: 'unknown' };
-  val = val.trim();
+  if (val == null) return { sec: NaN, format: 'unknown' };
+  val = String(val).trim();
+  if (!val) return { sec: NaN, format: 'unknown' };
+  val = val.replace(',', '.');
   const parts = val.split(':');
   if (parts.length === 3) {
     // H:MM:SS.mmm
@@ -1077,8 +1148,51 @@ function parseTimeValue(val) {
     return { sec: parseFloat(parts[0]) * 60 + parseFloat(parts[1]), format: 'ms' };
   } else {
     // raw seconds
-    return { sec: parseFloat(val) || 0, format: 'sec' };
+    const n = parseFloat(val);
+    return { sec: Number.isFinite(n) ? n : NaN, format: 'sec' };
   }
+}
+
+function normalizeKey(str) {
+  return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function parseTextGrid(text) {
+  const tiers = [];
+  const tierRegex = /item \[\d+\]:([\s\S]*?)(?=\n\s*item \[\d+\]:|$)/g;
+  const tierBlocks = Array.from(String(text || '').matchAll(tierRegex));
+
+  for (const blockMatch of tierBlocks) {
+    const block = blockMatch[1] || '';
+    const clsMatch = block.match(/class\s*=\s*"([^"]+)"/);
+    if (!clsMatch || clsMatch[1].toLowerCase() !== 'intervaltier') continue;
+    const nameMatch = block.match(/name\s*=\s*"([^"]*)"/);
+    const name = nameMatch ? nameMatch[1] : `Tier ${tiers.length + 1}`;
+
+    const intervals = [];
+    const intervalRegex = /intervals \[\d+\]:([\s\S]*?)(?=\n\s*intervals \[\d+\]:|$)/g;
+    const intervalBlocks = Array.from(block.matchAll(intervalRegex));
+    for (const intervalMatch of intervalBlocks) {
+      const chunk = intervalMatch[1] || '';
+      const xmin = chunk.match(/xmin\s*=\s*([0-9eE+\-.]+)/);
+      const xmax = chunk.match(/xmax\s*=\s*([0-9eE+\-.]+)/);
+      const txt = chunk.match(/text\s*=\s*"([\s\S]*?)"/);
+      const start = parseFloat(xmin ? xmin[1] : 'NaN');
+      const end = parseFloat(xmax ? xmax[1] : 'NaN');
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      intervals.push({
+        start,
+        end: end > start ? end : start + 0.001,
+        text: txt ? txt[1].replace(/""/g, '"').trim() : '',
+      });
+    }
+
+    if (intervals.length) {
+      tiers.push({ name, intervals });
+    }
+  }
+
+  return tiers;
 }
 
 function detectAuditionFormat(headers) {
@@ -1143,8 +1257,9 @@ async function getAudioDuration(url) {
 // ── Step 1: Speaker Info ──
 function wireStep1() {
   document.getElementById('wiz-step1-next').addEventListener('click', () => {
-    const id = document.getElementById('wiz-speaker-id').value.trim();
+    const id = document.getElementById('wiz-speaker-id').value.trim().replace(/\s+/g, '');
     if (!id) { wizStatus('Speaker ID is required.', 'danger'); return; }
+    document.getElementById('wiz-speaker-id').value = id;
     WIZ.speakerMeta = {
       id,
       name: document.getElementById('wiz-speaker-name').value.trim(),
@@ -1189,12 +1304,22 @@ function wireStep2() {
     });
   }
 
-  async function addWav(url, name, isObjectUrl) {
+  async function addWav(url, name, isObjectUrl, meta = {}) {
     wizStatus(`Reading audio duration for ${name}…`, '');
     let dur = 0;
     try { dur = await getAudioDuration(url); } catch { }
     const isPrimary = WIZ.wavFiles.length === 0;
-    WIZ.wavFiles.push({ url, name, durationSec: dur, isPrimary, isObjectUrl });
+    WIZ.wavFiles.push({
+      url,
+      name,
+      durationSec: dur,
+      isPrimary,
+      isObjectUrl,
+      fileSizeBytes: Number(meta.fileSizeBytes) || 0,
+      sampleRate: Number(meta.sampleRate) || 0,
+      channels: Number(meta.channels) || 0,
+      bitDepth: Number(meta.bitDepth) || 0,
+    });
     wizStatus(`Added ${name} (${fmt(dur)})`, 'ok');
     renderWavList();
   }
@@ -1204,7 +1329,7 @@ function wireStep2() {
     const file = document.getElementById('wiz-wav-file').files[0];
     if (!file) { wizStatus('Select a file first.', 'warn'); return; }
     const url = URL.createObjectURL(file);
-    addWav(url, file.name, true);
+    addWav(url, file.name, true, { fileSizeBytes: file.size });
   });
 
   // Drag and drop
@@ -1214,7 +1339,7 @@ function wireStep2() {
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); dropZone.classList.remove('dragover');
     const file = e.dataTransfer.files[0];
-    if (file) { const url = URL.createObjectURL(file); addWav(url, file.name, true); }
+    if (file) { const url = URL.createObjectURL(file); addWav(url, file.name, true, { fileSizeBytes: file.size }); }
   });
 
   // Server path
@@ -1225,6 +1350,12 @@ function wireStep2() {
     const ok = await validateServerPath(path);
     if (!ok) { wizStatus(`Cannot reach ${path} — check the path and server.`, 'danger'); return; }
     await addWav(path, path.split('/').pop(), false);
+  });
+
+  // Next
+  document.getElementById('wiz-add-another-wav').addEventListener('click', () => {
+    document.getElementById('wiz-wav-file').focus();
+    wizStatus('Add another WAV via file picker or server path.', '');
   });
 
   // Next
@@ -1239,107 +1370,300 @@ function wireStep2() {
 
 // ── Step 3: Timestamp CSV ──
 function wireStep3() {
-  async function loadTimestamps(source) {
-    wizStatus('Parsing timestamps…', '');
-    let text;
-    try { text = await readFileText(source); } catch (e) { wizStatus(e.message, 'danger'); return; }
+  const mapHost = document.getElementById('wiz-ts-mapping');
+  const tierHost = document.getElementById('wiz-ts-tier-picker');
+  const previewHost = document.getElementById('wiz-ts-preview');
+  const summaryEl = document.getElementById('wiz-ts-time-summary');
+  const formatChip = document.getElementById('wiz-ts-format-chip');
+  const rowsChip = document.getElementById('wiz-ts-rows-chip');
+  const offsetRow = document.getElementById('wiz-offset-row');
+  const offsetInput = document.getElementById('wiz-lexicon-offset');
 
-    const { headers, rows, delim } = parseCSVText(text);
-    if (rows.length === 0) { wizStatus('No data rows found in file.', 'danger'); return; }
+  function inferGenericMap(headers) {
+    const low = headers.map(h => h.toLowerCase());
+    const findIdx = (keys) => low.findIndex(h => keys.some(k => h.includes(k)));
+    const idIdx = findIdx(['lexeme', 'segment', 'concept_id', 'id']);
+    const labelIdx = Math.max(findIdx(['name', 'label', 'concept', 'text', 'description']), 0);
+    const startIdx = Math.max(findIdx(['start', 'begin', 'onset', 'xmin', 'time']), 0);
+    const endIdx = findIdx(['end', 'stop', 'xmax', 'offset']);
+    const durIdx = findIdx(['duration', 'dur', 'length']);
+    return { idIdx, labelIdx, startIdx, endIdx, durIdx };
+  }
 
-    const isAudition = detectAuditionFormat(headers);
-    WIZ.tsFormat = isAudition ? 'audition' : 'generic';
-
-    let startColIdx, endColIdx, labelColIdx, durColIdx;
-    const lowerH = headers.map(h => h.toLowerCase());
-
-    if (isAudition) {
-      labelColIdx = lowerH.indexOf('name');
-      startColIdx = lowerH.indexOf('start');
-      durColIdx = lowerH.indexOf('duration');
-      endColIdx = -1;
-    } else {
-      // Show column mapping UI for generic CSV
-      startColIdx = lowerH.findIndex(h => h.includes('start') || h.includes('begin') || h.includes('time'));
-      endColIdx = lowerH.findIndex(h => h.includes('end'));
-      durColIdx = lowerH.findIndex(h => h.includes('dur'));
-      labelColIdx = lowerH.findIndex(h => h.includes('name') || h.includes('label') || h.includes('concept') || h.includes('text'));
-      if (labelColIdx < 0) labelColIdx = 0;
-      if (startColIdx < 0) startColIdx = Math.min(1, headers.length - 1);
-
-      // Show mapping UI
-      const mapEl = document.getElementById('wiz-ts-mapping');
-      mapEl.innerHTML = `<div class="wiz-warning">Generic CSV detected. Please verify column mapping:</div>
-        <div class="wiz-grid">
-          <div class="field-group"><label class="field-label">Label column</label>
-            <select class="field-input ltr" id="wiz-ts-label-col">${headers.map((h, i) => `<option value="${i}" ${i === labelColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
-          <div class="field-group"><label class="field-label">Start time column</label>
-            <select class="field-input ltr" id="wiz-ts-start-col">${headers.map((h, i) => `<option value="${i}" ${i === startColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
-          <div class="field-group"><label class="field-label">End time / Duration column</label>
-            <select class="field-input ltr" id="wiz-ts-end-col"><option value="-1">None</option>${headers.map((h, i) => `<option value="${i}" ${i === endColIdx || i === durColIdx ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}</select></div>
-        </div>`;
-    }
-
-    // Detect time formats
-    const { mode, boundary } = detectTimeFormats(rows, startColIdx);
-    WIZ.tsTimeMode = mode;
-
-    const timeSummary = document.getElementById('wiz-ts-time-summary');
-    const offsetRow = document.getElementById('wiz-offset-row');
-
-    if (mode === 'relative') {
-      timeSummary.innerHTML = '⚠️ Timestamps appear <strong>relative</strong> (M:SS format). Enter the lexicon start offset below.';
+  function renderTimeSummary() {
+    if (WIZ.tsTimeMode === 'relative') {
+      summaryEl.innerHTML = 'Detected <strong>relative</strong> start times (M:SS.mmm). Set lexicon offset in seconds.';
       offsetRow.style.display = '';
-    } else if (mode === 'mixed') {
-      timeSummary.innerHTML = `⚠️ <strong>Mixed format</strong> detected. Rows before #${boundary + 1} are H:MM:SS (absolute), rows after are M:SS (relative).`;
+    } else if (WIZ.tsTimeMode === 'mixed') {
+      summaryEl.innerHTML = `Detected <strong>mixed</strong> times. Boundary appears around row ${WIZ.tsBoundaryRow > 0 ? WIZ.tsBoundaryRow : '?'}. Relative rows receive the offset.`;
       offsetRow.style.display = '';
     } else {
-      timeSummary.innerHTML = '✓ Timestamps are absolute (H:MM:SS format).';
+      summaryEl.innerHTML = 'Detected <strong>absolute</strong> timestamps (H:MM:SS.mmm or seconds).';
       offsetRow.style.display = 'none';
     }
+  }
 
-    // Parse rows
-    const offset = parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0;
-    WIZ.tsRows = rows.map((cols, i) => {
-      const label = cols[labelColIdx] || `segment-${i + 1}`;
-      const { sec: startRaw, format: startFmt } = parseTimeValue(cols[startColIdx]);
-      let startSec = startRaw;
-      // Apply offset for relative times
-      if ((mode === 'relative') || (mode === 'mixed' && startFmt === 'ms')) {
-        startSec = startRaw + offset;
-      }
-      let endSec = startSec + 2; // default 2s duration
-      if (durColIdx >= 0 && cols[durColIdx]) {
-        const { sec: durSec } = parseTimeValue(cols[durColIdx]);
-        endSec = startSec + durSec;
-      } else if (endColIdx >= 0 && cols[endColIdx]) {
-        const { sec: endRaw, format: endFmt } = parseTimeValue(cols[endColIdx]);
-        endSec = endRaw;
-        if ((mode === 'relative') || (mode === 'mixed' && endFmt === 'ms')) {
-          endSec = endRaw + offset;
-        }
-      }
-      return { label, startSec, endSec, rawStart: cols[startColIdx], rawEnd: cols[endColIdx >= 0 ? endColIdx : durColIdx] || '' };
-    });
-
-    // Update chips
-    document.getElementById('wiz-ts-format-chip').textContent = isAudition ? 'Audition TSV' : 'Generic CSV';
-    document.getElementById('wiz-ts-format-chip').className = 'wiz-chip ok';
-    document.getElementById('wiz-ts-rows-chip').textContent = `${WIZ.tsRows.length} rows`;
-    document.getElementById('wiz-ts-rows-chip').className = 'wiz-chip ok';
-
-    // Preview table
-    const previewEl = document.getElementById('wiz-ts-preview');
-    const previewRows = WIZ.tsRows.slice(0, 10);
-    previewEl.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
+  function renderTimestampPreview() {
+    const rows = WIZ.tsRows.slice(0, 10);
+    if (!rows.length) {
+      previewHost.innerHTML = '<div class="wiz-hint">No timestamp rows parsed yet.</div>';
+      return;
+    }
+    previewHost.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
       <thead><tr><th>#</th><th>Label</th><th>Start</th><th>End</th><th>Duration</th></tr></thead>
-      <tbody>${previewRows.map((r, i) => `<tr>
-        <td>${i + 1}</td><td>${escHtml(r.label)}</td><td>${fmt(r.startSec)}</td><td>${fmt(r.endSec)}</td>
+      <tbody>${rows.map((r, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${escHtml(r.label)}</td>
+        <td>${fmt(r.startSec)} (${r.startSec.toFixed(3)})</td>
+        <td>${fmt(r.endSec)} (${r.endSec.toFixed(3)})</td>
         <td>${((r.endSec - r.startSec) * 1000).toFixed(0)} ms</td>
       </tr>`).join('')}</tbody></table></div>
-      ${WIZ.tsRows.length > 10 ? `<div class="wiz-hint">…and ${WIZ.tsRows.length - 10} more rows</div>` : ''}`;
+      ${WIZ.tsRows.length > 10 ? `<div class="wiz-hint">Showing first 10 of ${WIZ.tsRows.length} rows.</div>` : ''}`;
+  }
 
-    wizStatus(`${WIZ.tsRows.length} timestamps parsed (${isAudition ? 'Audition' : 'generic'} format).`, 'ok');
+  function detectTimeModeByStart(rows, startIdx) {
+    let hms = 0;
+    let ms = 0;
+    let firstKind = null;
+    let boundary = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = parseTimeValue(rows[i][startIdx]);
+      let kind = null;
+      if (parsed.format === 'hms' || parsed.format === 'sec') kind = 'absolute';
+      if (parsed.format === 'ms') kind = 'relative';
+      if (!kind) continue;
+      if (!firstKind) firstKind = kind;
+      if (firstKind && kind !== firstKind && boundary < 0) boundary = i + 1;
+      if (kind === 'absolute') hms++;
+      if (kind === 'relative') ms++;
+    }
+    if (hms > 0 && ms > 0) return { mode: 'mixed', boundary };
+    if (ms > 0 && hms === 0) return { mode: 'relative', boundary: -1 };
+    return { mode: 'absolute', boundary: -1 };
+  }
+
+  function buildRowsFromMap() {
+    const { idIdx, labelIdx, startIdx, endIdx, durIdx } = WIZ.tsMap;
+    if (WIZ.tsFormat === 'textgrid') {
+      const tier = WIZ.tsTextGridTiers.find(t => t.name === WIZ.tsSelectedTier) || WIZ.tsTextGridTiers[0];
+      const sourceRows = (tier?.intervals || []).filter(r => String(r.text || '').trim());
+      const rows = sourceRows.length ? sourceRows : (tier?.intervals || []);
+      WIZ.tsRows = rows.map((r, i) => ({
+        id: '',
+        label: String(r.text || `segment-${i + 1}`),
+        startSec: Number(r.start),
+        endSec: Number(r.end > r.start ? r.end : r.start + 0.6),
+        rawStart: String(r.start),
+        rawEnd: String(r.end),
+      }));
+      WIZ.tsRows.sort((a, b) => a.startSec - b.startSec);
+      WIZ.tsTimeMode = 'absolute';
+      WIZ.tsBoundaryRow = -1;
+      renderTimeSummary();
+      rowsChip.textContent = `${WIZ.tsRows.length} rows`;
+      rowsChip.className = 'wiz-chip ok';
+      renderTimestampPreview();
+      return;
+    }
+
+    const detect = detectTimeModeByStart(WIZ.tsRawRows, startIdx);
+    WIZ.tsTimeMode = detect.mode;
+    WIZ.tsBoundaryRow = detect.boundary;
+    renderTimeSummary();
+    const offset = parseFloat(offsetInput.value) || 0;
+
+    const rows = [];
+    for (let i = 0; i < WIZ.tsRawRows.length; i++) {
+      const cols = WIZ.tsRawRows[i];
+      const label = (labelIdx >= 0 ? cols[labelIdx] : '') || `segment-${i + 1}`;
+      const id = idIdx >= 0 ? (cols[idIdx] || '') : '';
+      const pStart = parseTimeValue(cols[startIdx]);
+      if (!Number.isFinite(pStart.sec)) continue;
+
+      let startSec = pStart.sec;
+      if (WIZ.tsTimeMode === 'relative' || (WIZ.tsTimeMode === 'mixed' && pStart.format === 'ms')) {
+        startSec += offset;
+      }
+
+      let endSec = NaN;
+      if (endIdx >= 0 && cols[endIdx]) {
+        const pEnd = parseTimeValue(cols[endIdx]);
+        if (Number.isFinite(pEnd.sec)) {
+          endSec = pEnd.sec;
+          if (WIZ.tsTimeMode === 'relative' || (WIZ.tsTimeMode === 'mixed' && pEnd.format === 'ms')) {
+            endSec += offset;
+          }
+        }
+      }
+      if (!Number.isFinite(endSec) && durIdx >= 0 && cols[durIdx]) {
+        const pDur = parseTimeValue(cols[durIdx]);
+        if (Number.isFinite(pDur.sec)) {
+          endSec = startSec + pDur.sec;
+        }
+      }
+      if (!Number.isFinite(endSec) || endSec <= startSec) endSec = startSec + 0.6;
+
+      rows.push({
+        id: String(id || '').trim(),
+        label: String(label || '').trim(),
+        startSec,
+        endSec,
+        rawStart: cols[startIdx] || '',
+        rawEnd: endIdx >= 0 ? (cols[endIdx] || '') : (durIdx >= 0 ? (cols[durIdx] || '') : ''),
+      });
+    }
+
+    WIZ.tsRows = rows.sort((a, b) => a.startSec - b.startSec);
+    rowsChip.textContent = `${WIZ.tsRows.length} rows`;
+    rowsChip.className = `wiz-chip ${WIZ.tsRows.length ? 'ok' : ''}`;
+    renderTimestampPreview();
+  }
+
+  function renderGenericMapping() {
+    if (WIZ.tsFormat === 'textgrid') {
+      mapHost.innerHTML = '';
+      return;
+    }
+
+    const hs = WIZ.tsHeaders;
+    const options = hs.map((h, i) => `<option value="${i}">${escHtml(h)}</option>`).join('');
+    mapHost.innerHTML = `<div class="wiz-card">
+      <div class="wiz-card-title">Column mapping</div>
+      <div class="wiz-grid">
+        <div class="field-group"><label class="field-label">Concept ID (optional)</label>
+          <select class="field-input ltr" id="wiz-ts-map-id"><option value="-1">(none)</option>${options}</select></div>
+        <div class="field-group"><label class="field-label">Concept label</label>
+          <select class="field-input ltr" id="wiz-ts-map-label">${options}</select></div>
+        <div class="field-group"><label class="field-label">Start time</label>
+          <select class="field-input ltr" id="wiz-ts-map-start">${options}</select></div>
+        <div class="field-group"><label class="field-label">End time</label>
+          <select class="field-input ltr" id="wiz-ts-map-end"><option value="-1">(none)</option>${options}</select></div>
+        <div class="field-group"><label class="field-label">Duration (if no end)</label>
+          <select class="field-input ltr" id="wiz-ts-map-dur"><option value="-1">(none)</option>${options}</select></div>
+      </div>
+    </div>`;
+
+    document.getElementById('wiz-ts-map-id').value = String(WIZ.tsMap.idIdx);
+    document.getElementById('wiz-ts-map-label').value = String(WIZ.tsMap.labelIdx);
+    document.getElementById('wiz-ts-map-start').value = String(WIZ.tsMap.startIdx);
+    document.getElementById('wiz-ts-map-end').value = String(WIZ.tsMap.endIdx);
+    document.getElementById('wiz-ts-map-dur').value = String(WIZ.tsMap.durIdx);
+
+    const onMapChange = () => {
+      WIZ.tsMap.idIdx = parseInt(document.getElementById('wiz-ts-map-id').value, 10);
+      WIZ.tsMap.labelIdx = parseInt(document.getElementById('wiz-ts-map-label').value, 10);
+      WIZ.tsMap.startIdx = parseInt(document.getElementById('wiz-ts-map-start').value, 10);
+      WIZ.tsMap.endIdx = parseInt(document.getElementById('wiz-ts-map-end').value, 10);
+      WIZ.tsMap.durIdx = parseInt(document.getElementById('wiz-ts-map-dur').value, 10);
+      buildRowsFromMap();
+    };
+
+    ['wiz-ts-map-id','wiz-ts-map-label','wiz-ts-map-start','wiz-ts-map-end','wiz-ts-map-dur'].forEach(id => {
+      document.getElementById(id).addEventListener('change', onMapChange);
+    });
+  }
+
+  function renderTextGridTierPicker() {
+    if (WIZ.tsFormat !== 'textgrid') {
+      tierHost.innerHTML = '';
+      return;
+    }
+    const options = WIZ.tsTextGridTiers.map(t => `<option value="${escHtml(t.name)}">${escHtml(t.name)} (${t.intervals.length} intervals)</option>`).join('');
+    tierHost.innerHTML = `<div class="wiz-card">
+      <div class="wiz-card-title">TextGrid interval tier</div>
+      <div class="field-group">
+        <label class="field-label" for="wiz-ts-tier-select">Tier</label>
+        <select class="field-input ltr" id="wiz-ts-tier-select">${options}</select>
+      </div>
+    </div>`;
+    const sel = document.getElementById('wiz-ts-tier-select');
+    sel.value = WIZ.tsSelectedTier;
+    sel.addEventListener('change', () => {
+      WIZ.tsSelectedTier = sel.value;
+      buildRowsFromMap();
+    });
+  }
+
+  async function loadTimestamps(source) {
+    wizStatus('Parsing timestamps…', '');
+    let text = '';
+    let sourceName = 'timestamps';
+
+    try {
+      if (source instanceof File) {
+        sourceName = source.name;
+        text = await source.text();
+      } else {
+        sourceName = String(source).split('/').pop() || String(source);
+        const ok = await validateServerPath(source);
+        if (!ok) throw new Error(`Cannot access ${source}`);
+        text = await readFileText(source);
+      }
+    } catch (e) {
+      wizStatus(e.message || 'Could not read timestamp source.', 'danger');
+      return;
+    }
+
+    WIZ.tsSourceName = sourceName;
+    const isTextGrid = /\.textgrid$/i.test(sourceName) || /Object class\s*=\s*"TextGrid"/i.test(text);
+    if (isTextGrid) {
+      const tiers = parseTextGrid(text);
+      if (!tiers.length) {
+        wizStatus('TextGrid parsed, but no interval tiers were found.', 'danger');
+        return;
+      }
+
+      WIZ.tsFormat = 'textgrid';
+      WIZ.tsTextGridTiers = tiers;
+      WIZ.tsSelectedTier = tiers[0].name;
+      WIZ.tsHeaders = [];
+      WIZ.tsRawRows = [];
+      WIZ.tsMap = { idIdx: -1, labelIdx: -1, startIdx: -1, endIdx: -1, durIdx: -1 };
+      formatChip.textContent = 'Praat TextGrid';
+      formatChip.className = 'wiz-chip ok';
+      mapHost.innerHTML = '';
+      renderTextGridTierPicker();
+      buildRowsFromMap();
+      wizStatus(`${WIZ.tsRows.length} intervals loaded from ${sourceName}.`, 'ok');
+      return;
+    }
+
+    const parsed = parseCSVText(text);
+    if (parsed.rows.length === 0) {
+      wizStatus('No data rows found in timestamp file.', 'danger');
+      return;
+    }
+
+    WIZ.tsHeaders = parsed.headers;
+    WIZ.tsRawRows = parsed.rows;
+    WIZ.tsTextGridTiers = [];
+    WIZ.tsSelectedTier = '';
+    tierHost.innerHTML = '';
+
+    const isAudition = detectAuditionFormat(parsed.headers);
+    WIZ.tsFormat = isAudition ? 'audition' : 'generic';
+
+    if (isAudition) {
+      const lh = parsed.headers.map(h => h.toLowerCase());
+      WIZ.tsMap = {
+        idIdx: -1,
+        labelIdx: lh.indexOf('name'),
+        startIdx: lh.indexOf('start'),
+        endIdx: -1,
+        durIdx: lh.indexOf('duration'),
+      };
+      mapHost.innerHTML = '<div class="wiz-hint">Audition TSV detected — columns mapped automatically.</div>';
+      formatChip.textContent = 'Audition TSV';
+      formatChip.className = 'wiz-chip ok';
+    } else {
+      WIZ.tsMap = inferGenericMap(parsed.headers);
+      formatChip.textContent = 'Generic CSV/TSV';
+      formatChip.className = 'wiz-chip warn';
+      renderGenericMapping();
+    }
+
+    buildRowsFromMap();
+    wizStatus(`${WIZ.tsRows.length} timestamp rows parsed from ${sourceName}.`, 'ok');
   }
 
   // File picker
@@ -1366,18 +1690,9 @@ function wireStep3() {
   });
 
   // Offset re-parse
-  document.getElementById('wiz-lexicon-offset').addEventListener('change', () => {
-    // Re-apply offset
-    const offset = parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0;
-    WIZ.tsRows.forEach(r => {
-      const { sec: startRaw, format: startFmt } = parseTimeValue(r.rawStart);
-      let startSec = startRaw;
-      if (WIZ.tsTimeMode === 'relative' || (WIZ.tsTimeMode === 'mixed' && startFmt === 'ms')) {
-        startSec = startRaw + offset;
-      }
-      r.startSec = startSec;
-      r.endSec = startSec + (r.endSec - r.startSec); // preserve duration
-    });
+  offsetInput.addEventListener('input', () => {
+    if (!WIZ.tsRows.length) return;
+    buildRowsFromMap();
   });
 
   // Next
@@ -1389,59 +1704,221 @@ function wireStep3() {
 
 // ── Step 4: IPA CSV (optional) ──
 function wireStep4() {
-  async function loadIPA(source) {
-    wizStatus('Parsing IPA file…', '');
-    let text;
-    try { text = await readFileText(source); } catch (e) { wizStatus(e.message, 'danger'); return; }
+  const mapEl = document.getElementById('wiz-ipa-mapping');
+  const alignEl = document.getElementById('wiz-ipa-align');
+  const previewEl = document.getElementById('wiz-ipa-preview');
 
-    const { headers, rows } = parseCSVText(text);
-    if (rows.length === 0) { wizStatus('No data rows found.', 'danger'); return; }
+  function autoDetectMap(headers) {
+    const low = headers.map(h => h.toLowerCase());
+    const findIdx = (keys) => low.findIndex(h => keys.some(k => h.includes(k)));
+    return {
+      id: findIdx(['lexeme', 'segment_id', 'concept_id', 'id']),
+      label: findIdx(['concept', 'label', 'name', 'english', 'gloss', 'description']),
+      ipa: findIdx(['ipa', 'phonetic', 'transcription']),
+      ortho: findIdx(['ortho', 'orth', 'script', 'arabic']),
+      audioPath: findIdx(['audio_path', 'audio', 'wav', 'source']),
+      status: findIdx(['status', 'state', 'flag']),
+    };
+  }
 
-    // Auto-detect columns
-    const lowerH = headers.map(h => h.toLowerCase());
-    const ipaCol = lowerH.findIndex(h => h === 'ipa' || h.includes('ipa'));
-    const orthoCol = lowerH.findIndex(h => h === 'ortho' || h.includes('orth') || h.includes('script'));
-    const idCol = lowerH.findIndex(h => h.includes('lexeme') || h.includes('id') || h === 'id');
-    const statusCol = lowerH.findIndex(h => h === 'status');
+  function extractIdLike(str) {
+    const s = String(str || '').trim();
+    const m = s.match(/[A-Za-z]+[_-]?\d+/);
+    if (m) return m[0];
+    const n = s.match(/^\d+/);
+    if (n) return n[0];
+    return s;
+  }
 
-    WIZ.ipaColMap = { ipa: ipaCol, ortho: orthoCol, id: idCol, status: statusCol };
+  function rowFromCols(cols) {
+    const map = WIZ.ipaColMap;
+    return {
+      lexemeId: map.id >= 0 ? String(cols[map.id] || '').trim() : '',
+      label: map.label >= 0 ? String(cols[map.label] || '').trim() : '',
+      ipa: map.ipa >= 0 ? String(cols[map.ipa] || '').trim() : '',
+      ortho: map.ortho >= 0 ? String(cols[map.ortho] || '').trim() : '',
+      audioPath: map.audioPath >= 0 ? String(cols[map.audioPath] || '').trim() : '',
+      status: map.status >= 0 ? String(cols[map.status] || '').trim() : '',
+    };
+  }
 
-    // Show mapping
-    const mapEl = document.getElementById('wiz-ipa-mapping');
-    mapEl.innerHTML = `<div class="wiz-grid">
-      <div class="field-group"><label class="field-label">IPA column</label>
-        <select class="field-input ltr" id="wiz-ipa-col-sel">${headers.map((h, i) => `<option value="${i}" ${i === ipaCol ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}<option value="-1">None</option></select></div>
-      <div class="field-group"><label class="field-label">Ortho column</label>
-        <select class="field-input ltr" id="wiz-ortho-col-sel">${headers.map((h, i) => `<option value="${i}" ${i === orthoCol ? 'selected' : ''}>${escHtml(h)}</option>`).join('')}<option value="-1">None</option></select></div>
-    </div>`;
+  function alignByOrder(tsRows, ipaRows) {
+    const out = tsRows.map(() => ({}));
+    const n = Math.min(tsRows.length, ipaRows.length);
+    for (let i = 0; i < n; i++) out[i] = ipaRows[i];
+    return out;
+  }
 
-    WIZ.ipaRows = rows.map(cols => ({
-      ipa: ipaCol >= 0 ? (cols[ipaCol] || '') : '',
-      ortho: orthoCol >= 0 ? (cols[orthoCol] || '') : '',
-      lexemeId: idCol >= 0 ? (cols[idCol] || '') : '',
-      status: statusCol >= 0 ? (cols[statusCol] || '') : '',
-    }));
+  function alignByIdOrName(tsRows, ipaRows, byId) {
+    const out = tsRows.map(() => ({}));
+    const buckets = {};
+    ipaRows.forEach(r => {
+      const rawKey = byId ? (r.lexemeId || r.label) : (r.label || r.lexemeId || r.ortho || r.ipa);
+      const key = normalizeKey(rawKey);
+      if (!key) return;
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(r);
+    });
 
-    // Alignment check
-    const alignEl = document.getElementById('wiz-ipa-align');
-    if (WIZ.ipaRows.length === WIZ.tsRows.length) {
-      alignEl.innerHTML = `<div class="wiz-chip ok">✓ Row counts match (${WIZ.ipaRows.length} = ${WIZ.tsRows.length}) — aligning by order.</div>`;
+    tsRows.forEach((ts, i) => {
+      const rawKey = byId ? (ts.id || extractIdLike(ts.label)) : (ts.label || ts.id);
+      const key = normalizeKey(rawKey);
+      if (!key || !buckets[key] || !buckets[key].length) return;
+      out[i] = buckets[key].shift();
+    });
+
+    return out;
+  }
+
+  function refreshAlignment() {
+    const tsRows = WIZ.tsRows;
+    const ipaRows = WIZ.ipaRows;
+    let aligned = [];
+
+    if (WIZ.ipaAlignStrategy === 'by_id') {
+      aligned = alignByIdOrName(tsRows, ipaRows, true);
+    } else if (WIZ.ipaAlignStrategy === 'by_name') {
+      aligned = alignByIdOrName(tsRows, ipaRows, false);
     } else {
-      alignEl.innerHTML = `<div class="wiz-warning">Row count mismatch: IPA has ${WIZ.ipaRows.length} rows, timestamps have ${WIZ.tsRows.length}. Will align by order up to the shorter list.</div>`;
+      aligned = alignByOrder(tsRows, ipaRows);
     }
 
-    // Preview
-    const previewEl = document.getElementById('wiz-ipa-preview');
-    const n = Math.min(10, WIZ.ipaRows.length, WIZ.tsRows.length);
-    previewEl.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
-      <thead><tr><th>#</th><th>Timestamp Label</th><th>IPA</th><th>Ortho</th></tr></thead>
-      <tbody>${Array.from({ length: n }, (_, i) => `<tr>
-        <td>${i + 1}</td>
-        <td>${escHtml(WIZ.tsRows[i]?.label || '—')}</td>
-        <td style="font-family:monospace;color:var(--accent2)">${escHtml(WIZ.ipaRows[i]?.ipa || '—')}</td>
-        <td dir="rtl">${escHtml(WIZ.ipaRows[i]?.ortho || '—')}</td>
-      </tr>`).join('')}</tbody></table></div>`;
+    WIZ.ipaAligned = aligned;
+    const matched = aligned.filter(r => r && (r.ipa || r.ortho || r.lexemeId || r.label)).length;
+    const ratio = tsRows.length ? matched / tsRows.length : 0;
+    if (WIZ.ipaAlignStrategy === 'by_order' && ipaRows.length === tsRows.length) WIZ.ipaAlignmentConfidence = 'high';
+    else if (ratio >= 0.6) WIZ.ipaAlignmentConfidence = 'medium';
+    else WIZ.ipaAlignmentConfidence = 'low';
 
+    const mismatchWarn = ipaRows.length !== tsRows.length
+      ? `<div class="wiz-warning">Row count mismatch: timestamp rows = ${tsRows.length}, IPA rows = ${ipaRows.length}. Choose alignment strategy.</div>`
+      : '';
+    alignEl.innerHTML = `${mismatchWarn}<div class="wiz-card">
+      <div class="wiz-card-title">Alignment</div>
+      <div class="wiz-grid">
+        <div class="field-group">
+          <label class="field-label" for="wiz-ipa-strategy">Strategy</label>
+          <select class="field-input ltr" id="wiz-ipa-strategy">
+            <option value="by_order">by_order</option>
+            <option value="by_id">by_id</option>
+            <option value="by_name">by_name</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Result</label>
+          <div class="wiz-row">
+            <span class="wiz-chip ${WIZ.ipaAlignmentConfidence === 'high' ? 'ok' : (WIZ.ipaAlignmentConfidence === 'medium' ? 'warn' : '')}">confidence: ${WIZ.ipaAlignmentConfidence}</span>
+            <span class="wiz-chip">matched: ${matched}/${tsRows.length}</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    const strategySel = document.getElementById('wiz-ipa-strategy');
+    strategySel.value = WIZ.ipaAlignStrategy;
+    strategySel.addEventListener('change', () => {
+      WIZ.ipaAlignStrategy = strategySel.value;
+      refreshAlignment();
+    });
+
+    const n = Math.min(10, tsRows.length);
+    previewEl.innerHTML = `<div class="wiz-table-wrap"><table class="wiz-table">
+      <thead><tr><th>#</th><th>Timestamp label</th><th>IPA</th><th>Ortho</th></tr></thead>
+      <tbody>${Array.from({ length: n }, (_, i) => {
+        const t = tsRows[i];
+        const r = aligned[i] || {};
+        return `<tr>
+          <td>${i + 1}</td>
+          <td>${escHtml(t?.label || '')}</td>
+          <td style="font-family:monospace;color:var(--accent2)">${escHtml(r.ipa || '')}</td>
+          <td dir="rtl">${escHtml(r.ortho || '')}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  function rebuildIpaRows() {
+    WIZ.ipaRows = WIZ.ipaRawRows.map(cols => rowFromCols(cols));
+    refreshAlignment();
+  }
+
+  function renderMapUI() {
+    const headers = WIZ.ipaHeaders;
+    if (!headers.length) {
+      mapEl.innerHTML = '<div class="wiz-hint">No IPA file loaded.</div>';
+      alignEl.innerHTML = '';
+      previewEl.innerHTML = '';
+      return;
+    }
+
+    const opts = headers.map((h, i) => `<option value="${i}">${escHtml(h)}</option>`).join('');
+    mapEl.innerHTML = `<div class="wiz-card">
+      <div class="wiz-card-title">Column auto-detection (editable)</div>
+      <div class="wiz-grid">
+        <div class="field-group"><label class="field-label">lexeme_id</label><select class="field-input ltr" id="wiz-ipa-map-id"><option value="-1">(none)</option>${opts}</select></div>
+        <div class="field-group"><label class="field-label">concept label</label><select class="field-input ltr" id="wiz-ipa-map-label"><option value="-1">(none)</option>${opts}</select></div>
+        <div class="field-group"><label class="field-label">ipa</label><select class="field-input ltr" id="wiz-ipa-map-ipa"><option value="-1">(none)</option>${opts}</select></div>
+        <div class="field-group"><label class="field-label">ortho</label><select class="field-input ltr" id="wiz-ipa-map-ortho"><option value="-1">(none)</option>${opts}</select></div>
+        <div class="field-group"><label class="field-label">audio_path</label><select class="field-input ltr" id="wiz-ipa-map-audio"><option value="-1">(none)</option>${opts}</select></div>
+        <div class="field-group"><label class="field-label">status</label><select class="field-input ltr" id="wiz-ipa-map-status"><option value="-1">(none)</option>${opts}</select></div>
+      </div>
+    </div>`;
+
+    document.getElementById('wiz-ipa-map-id').value = String(WIZ.ipaColMap.id);
+    document.getElementById('wiz-ipa-map-label').value = String(WIZ.ipaColMap.label);
+    document.getElementById('wiz-ipa-map-ipa').value = String(WIZ.ipaColMap.ipa);
+    document.getElementById('wiz-ipa-map-ortho').value = String(WIZ.ipaColMap.ortho);
+    document.getElementById('wiz-ipa-map-audio').value = String(WIZ.ipaColMap.audioPath);
+    document.getElementById('wiz-ipa-map-status').value = String(WIZ.ipaColMap.status);
+
+    const onMapChange = () => {
+      WIZ.ipaColMap.id = parseInt(document.getElementById('wiz-ipa-map-id').value, 10);
+      WIZ.ipaColMap.label = parseInt(document.getElementById('wiz-ipa-map-label').value, 10);
+      WIZ.ipaColMap.ipa = parseInt(document.getElementById('wiz-ipa-map-ipa').value, 10);
+      WIZ.ipaColMap.ortho = parseInt(document.getElementById('wiz-ipa-map-ortho').value, 10);
+      WIZ.ipaColMap.audioPath = parseInt(document.getElementById('wiz-ipa-map-audio').value, 10);
+      WIZ.ipaColMap.status = parseInt(document.getElementById('wiz-ipa-map-status').value, 10);
+      rebuildIpaRows();
+    };
+    ['wiz-ipa-map-id','wiz-ipa-map-label','wiz-ipa-map-ipa','wiz-ipa-map-ortho','wiz-ipa-map-audio','wiz-ipa-map-status'].forEach(id => {
+      document.getElementById(id).addEventListener('change', onMapChange);
+    });
+  }
+
+  async function loadIPA(source) {
+    wizStatus('Parsing IPA file…', '');
+    let text = '';
+    try {
+      if (source instanceof File) {
+        text = await source.text();
+      } else {
+        const ok = await validateServerPath(source);
+        if (!ok) throw new Error(`Cannot access ${source}`);
+        text = await readFileText(source);
+      }
+    } catch (e) {
+      wizStatus(e.message || 'Could not read IPA source.', 'danger');
+      return;
+    }
+
+    const parsed = parseCSVText(text);
+    if (!parsed.rows.length) {
+      wizStatus('No data rows found in IPA file.', 'danger');
+      return;
+    }
+
+    WIZ.ipaHeaders = parsed.headers;
+    WIZ.ipaRawRows = parsed.rows;
+    WIZ.ipaColMap = autoDetectMap(parsed.headers);
+
+    if (WIZ.ipaRawRows.length === WIZ.tsRows.length) {
+      WIZ.ipaAlignStrategy = 'by_order';
+    } else if (WIZ.ipaColMap.id >= 0) {
+      WIZ.ipaAlignStrategy = 'by_id';
+    } else {
+      WIZ.ipaAlignStrategy = 'by_name';
+    }
+
+    renderMapUI();
+    rebuildIpaRows();
     wizStatus(`${WIZ.ipaRows.length} IPA rows loaded.`, 'ok');
   }
 
@@ -1463,7 +1940,13 @@ function wireStep4() {
   });
 
   document.getElementById('wiz-step4-skip').addEventListener('click', () => {
+    WIZ.ipaHeaders = [];
+    WIZ.ipaRawRows = [];
     WIZ.ipaRows = [];
+    WIZ.ipaAligned = [];
+    mapEl.innerHTML = '<div class="wiz-hint">No IPA file loaded (skipped).</div>';
+    alignEl.innerHTML = '';
+    previewEl.innerHTML = '';
     wizGoToStep(5);
     buildFinalPreview();
   });
@@ -1476,38 +1959,60 @@ function wireStep4() {
 
 // ── Step 5: Preview & Confirm ──
 function buildFinalPreview() {
-  // Merge timestamp rows + IPA rows
+  const primary = WIZ.wavFiles.find(w => w.isPrimary) || WIZ.wavFiles[0];
+  const wavSource = primary ? primary.name : '';
+  const aligned = (WIZ.ipaAligned && WIZ.ipaAligned.length)
+    ? WIZ.ipaAligned
+    : WIZ.tsRows.map((_, i) => WIZ.ipaRows[i] || {});
+
   WIZ.mergedRows = WIZ.tsRows.map((ts, i) => {
-    const ipa = WIZ.ipaRows[i] || {};
+    const ipa = aligned[i] || {};
     return {
       idx: i + 1,
       label: ts.label,
+      id: ts.id || '',
       startSec: ts.startSec,
       endSec: ts.endSec,
       ipa: ipa.ipa || '',
       ortho: ipa.ortho || '',
+      wavSource,
     };
   });
 
   const el = document.getElementById('wiz-final-preview');
   el.innerHTML = `<div class="wiz-table-wrap" style="max-height:400px"><table class="wiz-table">
-    <thead><tr><th>#</th><th>Label</th><th>Start</th><th>End</th><th>IPA</th><th>Ortho</th></tr></thead>
+    <thead><tr><th>#</th><th>Concept Label</th><th>Start Time</th><th>End Time</th><th>IPA</th><th>Ortho</th><th>WAV Source</th></tr></thead>
     <tbody>${WIZ.mergedRows.map(r => `<tr>
       <td>${r.idx}</td>
-      <td>${escHtml(r.label)}</td>
-      <td>${fmt(r.startSec)}</td>
-      <td>${fmt(r.endSec)}</td>
+      <td contenteditable="true" data-field="label" data-idx="${r.idx - 1}">${escHtml(r.label)}</td>
+      <td contenteditable="true" data-field="startSec" data-idx="${r.idx - 1}">${r.startSec.toFixed(3)}</td>
+      <td contenteditable="true" data-field="endSec" data-idx="${r.idx - 1}">${r.endSec.toFixed(3)}</td>
       <td contenteditable="true" data-field="ipa" data-idx="${r.idx - 1}" style="font-family:monospace;color:var(--accent2)">${escHtml(r.ipa)}</td>
       <td contenteditable="true" data-field="ortho" data-idx="${r.idx - 1}" dir="rtl">${escHtml(r.ortho)}</td>
+      <td>${escHtml(r.wavSource)}</td>
     </tr>`).join('')}</tbody></table></div>
-    <div class="wiz-hint">${WIZ.mergedRows.length} segments total. Edit IPA/Ortho cells directly if needed.</div>`;
+    <div class="wiz-hint">${WIZ.mergedRows.length} segments total. You can edit label/start/end/IPA/ortho inline.</div>`;
 
   // Listen for cell edits
   el.querySelectorAll('[contenteditable]').forEach(td => {
     td.addEventListener('blur', () => {
       const idx = parseInt(td.dataset.idx);
       const field = td.dataset.field;
-      if (WIZ.mergedRows[idx]) WIZ.mergedRows[idx][field] = td.textContent.trim();
+      const row = WIZ.mergedRows[idx];
+      if (!row) return;
+      const text = td.textContent.trim();
+      if (field === 'startSec' || field === 'endSec') {
+        const p = parseTimeValue(text);
+        if (Number.isFinite(p.sec)) {
+          row[field] = p.sec;
+          if (row.endSec <= row.startSec) row.endSec = row.startSec + 0.6;
+          td.textContent = row[field].toFixed(3);
+        } else {
+          td.textContent = row[field].toFixed(3);
+        }
+      } else {
+        row[field] = text;
+      }
     });
   });
 
@@ -1524,7 +2029,24 @@ function wireStep5() {
 // ── Finish Import: build data structures and save ──
 function finishImport() {
   const spk = WIZ.speakerMeta;
+  if (!spk || !spk.id) {
+    wizStatus('Speaker ID missing. Return to Step 1.', 'danger');
+    wizGoToStep(1);
+    return;
+  }
+
   const primary = WIZ.wavFiles.find(w => w.isPrimary) || WIZ.wavFiles[0];
+  if (!primary) {
+    wizStatus('At least one WAV file is required.', 'danger');
+    wizGoToStep(2);
+    return;
+  }
+
+  if (!WIZ.mergedRows.length) {
+    wizStatus('No merged rows to import.', 'danger');
+    wizGoToStep(5);
+    return;
+  }
 
   // Build sourceIndex
   const sourceIndex = {
@@ -1533,25 +2055,45 @@ function finishImport() {
     speakers: {}
   };
 
+  if (STATE.sourceIndex?.speakers) {
+    Object.assign(sourceIndex.speakers, STATE.sourceIndex.speakers);
+  }
+
   // Load existing if any
   try {
     const existing = JSON.parse(localStorage.getItem(LS_SOURCE_INDEX));
     if (existing && existing.speakers) Object.assign(sourceIndex.speakers, existing.speakers);
   } catch {}
 
+  if (sourceIndex.speakers[spk.id]) {
+    const overwrite = confirm(`Speaker ${spk.id} already exists. Replace with imported data?`);
+    if (!overwrite) return;
+  }
+
+  const lexiconOffsetSec = parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0;
+
   sourceIndex.speakers[spk.id] = {
     source_wavs: WIZ.wavFiles.map(w => ({
       filename: w.url,
-      duration_sec: w.durationSec,
+      duration_sec: Number(w.durationSec) || 0,
+      file_size_bytes: Number(w.fileSizeBytes) || 0,
+      bit_depth: Number(w.bitDepth) || 0,
+      sample_rate: Number(w.sampleRate) || 0,
+      channels: Number(w.channels) || 0,
+      lexicon_start_sec: lexiconOffsetSec,
       is_primary: w.isPrimary,
     })),
-    peaks_file: null,
-    lexicon_start_sec: parseFloat(document.getElementById('wiz-lexicon-offset').value) || 0,
+    peaks_file: '',
+    transcript_file: `coarse_transcripts/${spk.id}.json`,
+    has_csv: true,
+    notes: [spk.variety, spk.origin].filter(Boolean).join(' | '),
   };
 
   // Build coarse transcript
   const transcript = {
+    speaker: spk.id,
     source_wav: primary ? primary.url : '',
+    duration_sec: Math.max(...WIZ.mergedRows.map(r => Number(r.endSec) || 0)),
     segments: WIZ.mergedRows.map(r => ({
       start: r.startSec,
       end: r.endSec,
@@ -1562,7 +2104,20 @@ function finishImport() {
   // Save speaker metadata
   let speakers = {};
   try { speakers = JSON.parse(localStorage.getItem(LS_SPEAKERS)) || {}; } catch {}
-  speakers[spk.id] = spk;
+  speakers[spk.id] = {
+    speaker_id: spk.id,
+    name: spk.name || '',
+    variety: spk.variety || '',
+    sex: spk.sex || '',
+    birth_year: spk.birthYear || null,
+    origin: spk.origin || '',
+    imported_at: new Date().toISOString(),
+    import_source: {
+      timestamp_source: WIZ.tsSourceName || '',
+      timestamp_format: WIZ.tsFormat || '',
+      ipa_alignment: WIZ.ipaRows.length ? WIZ.ipaAlignStrategy : 'none',
+    },
+  };
 
   // Pre-populate annotations if IPA data exists
   WIZ.mergedRows.forEach((r, i) => {
@@ -1574,8 +2129,8 @@ function finishImport() {
         ipa: r.ipa,
         ortho: r.ortho,
         notes: '',
-        startSec: r.startSec,
-        endSec: r.endSec,
+        startSec: Number(r.startSec) || 0,
+        endSec: Number(r.endSec) || 0,
         conceptText: r.label,
         status: 'ok',
         savedAt: Date.now(),
@@ -1602,7 +2157,6 @@ function finishImport() {
 // ── Topbar buttons ──
 function wireTopbarButtons() {
   document.getElementById('btn-new-speaker').addEventListener('click', () => {
-    WIZ.wavFiles = []; WIZ.tsRows = []; WIZ.ipaRows = []; WIZ.mergedRows = [];
     showWizard();
   });
 
@@ -1723,8 +2277,9 @@ async function loadTranscript(speaker) {
     }
   } catch {}
   // Fallback to server
-  const r = await fetch(`coarse_transcripts/${speaker}.json`);
-  if (!r.ok) throw new Error(`coarse_transcripts/${speaker}.json not found`);
+  const transcriptPath = STATE.sourceIndex?.speakers?.[speaker]?.transcript_file || `coarse_transcripts/${speaker}.json`;
+  const r = await fetch(transcriptPath);
+  if (!r.ok) throw new Error(`${transcriptPath} not found`);
   return r.json();
 }
 
@@ -1739,7 +2294,7 @@ function buildSpeakerSelect(sourceIndex) {
     opt.textContent = spk;
     sel.appendChild(opt);
   }
-  sel.addEventListener('change', () => loadSpeaker(sel.value));
+  sel.onchange = () => loadSpeaker(sel.value);
 }
 
 // ─── Load speaker ─────────────────────────────────────────────────────────────
@@ -1768,6 +2323,11 @@ async function loadSpeaker(speaker) {
   } catch(e) {
     setLoading(null);
     alert(`Could not load transcript for ${speaker}: ${e.message}`);
+    const hasLocal = !!localStorage.getItem(`parse-transcript-${speaker}`);
+    if (!hasLocal) {
+      wizStatus(`Transcript missing for ${speaker}. Import data to continue.`, 'warn');
+      showWizard();
+    }
     return;
   }
   STATE.coarseTranscript = transcript;
@@ -1807,41 +2367,44 @@ async function loadSpeaker(speaker) {
   const regionsPlugin  = Regions.create({ dragToSeek: true });
   const timelinePlugin = Timeline.create({ container: '#timeline', timeInterval: 30, primaryLabelInterval: 60, style: { color: '#94a3b8', fontSize: '10px' } });
 
+  // Resolve peaks into channel data
+  let channelData = null;
+  let audioDuration = 0;
+  if (peaksData) {
+    if (Array.isArray(peaksData)) {
+      channelData = [new Float32Array(peaksData)];
+    } else if (peaksData.data && Array.isArray(peaksData.data)) {
+      channelData = [new Float32Array(peaksData.data)];
+    } else if (peaksData.data && typeof peaksData.data === 'object' && !Array.isArray(peaksData.data)) {
+      const ch0 = peaksData.data['0'] || peaksData.data['channel_0'];
+      if (ch0) channelData = [new Float32Array(ch0)];
+    }
+    audioDuration = primary.duration_sec || 0;
+  }
+
   const wsOptions = {
     container: '#waveform',
     backend: 'MediaElement',
+    url: wavUrl,
     waveColor: '#334155',
     progressColor: '#38bdf8',
     cursorColor: '#f1f5f9',
     height: 80,
     normalize: true,
     plugins: [regionsPlugin, timelinePlugin],
+    // Provide peaks + duration so WaveSurfer renders waveform immediately
+    // while the MediaElement backend handles actual audio playback from url
+    ...(channelData ? { peaks: channelData, duration: audioDuration } : {}),
   };
-
-  if (peaksData) {
-    // Detect peaks format: array (raw) or {data:[], length, sample_rate, channels}
-    let channelData = null;
-    if (Array.isArray(peaksData)) {
-      channelData = [new Float32Array(peaksData)];
-    } else if (peaksData.data && Array.isArray(peaksData.data)) {
-      channelData = [new Float32Array(peaksData.data)];
-    } else if (peaksData.data && typeof peaksData.data === 'object' && !Array.isArray(peaksData.data)) {
-      // Possible structured object with channel arrays
-      const ch0 = peaksData.data['0'] || peaksData.data['channel_0'];
-      if (ch0) channelData = [new Float32Array(ch0)];
-    }
-    if (channelData) {
-      wsOptions.peaks = channelData;
-      wsOptions.duration = primary.duration_sec || 0;
-    }
-  }
 
   const ws = window.WaveSurfer.create(wsOptions);
   STATE.wavesurfer = ws;
   STATE.regionsPlugin = regionsPlugin;
 
-  // Load audio
-  ws.load(wavUrl);
+  // If no peaks were provided, explicitly load the audio URL
+  if (!channelData) {
+    ws.load(wavUrl);
+  }
 
   // Playback time display
   ws.on('audioprocess', () => updateTimeDisplay());
@@ -1932,15 +2495,9 @@ function buildConceptList(speaker, transcript, spkData) {
   };
 }
 
-function updateStatusPill(speaker, transcript) {
-  const total = (transcript.segments || []).length;
-  const done = Object.keys(STATE.annotations).filter(k => k.startsWith(speaker + '::') && STATE.annotations[k]?.status === 'ok').length;
-  document.getElementById('status-pill').textContent = `${done} / ${total} annotated`;
-}
-
-function updateStatusPill() {
-  const speaker = STATE.currentSpeaker;
-  const transcript = STATE.coarseTranscript;
+function updateStatusPill(speakerArg, transcriptArg) {
+  const speaker = speakerArg || STATE.currentSpeaker;
+  const transcript = transcriptArg || STATE.coarseTranscript;
   if (!speaker || !transcript) return;
   const total = (transcript.segments || []).length;
   const done = Object.keys(STATE.annotations).filter(k => k.startsWith(speaker + '::') && STATE.annotations[k]?.status === 'ok').length;
