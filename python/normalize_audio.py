@@ -316,6 +316,28 @@ def is_up_to_date(source_path: Path, output_path: Path, force: bool) -> bool:
     return output_path.stat().st_mtime >= source_path.stat().st_mtime
 
 
+def is_windows_binary(ffmpeg_bin: str) -> bool:
+    """Return True if the ffmpeg binary is a Windows .exe (needs Windows-style paths)."""
+    return ffmpeg_bin.lower().endswith(".exe")
+
+
+def to_ffmpeg_path(path: Path, ffmpeg_bin: str) -> str:
+    """Convert a Path to the format expected by ffmpeg.
+    Windows .exe binaries need C:\\ style paths; native binaries get POSIX paths."""
+    if is_windows_binary(ffmpeg_bin):
+        try:
+            result = subprocess.run(
+                ["wslpath", "-w", str(path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            win_path = result.stdout.strip()
+            if win_path:
+                return win_path
+        except Exception:
+            pass
+    return str(path)
+
+
 def run_command(command: list) -> subprocess.CompletedProcess:
     return subprocess.run(
         command,
@@ -389,7 +411,7 @@ def build_pass1_command(ffmpeg_bin: str, source_path: Path) -> list:
         "-hide_banner",
         "-y",
         "-i",
-        str(source_path),
+        to_ffmpeg_path(source_path, ffmpeg_bin),
         "-af",
         f"loudnorm=I={TARGET_I}:TP={TARGET_TP}:LRA={TARGET_LRA}:print_format=json",
         "-f",
@@ -414,7 +436,7 @@ def build_pass2_command(ffmpeg_bin: str, source_path: Path, output_path: Path, s
         "-hide_banner",
         "-y",
         "-i",
-        str(source_path),
+        to_ffmpeg_path(source_path, ffmpeg_bin),
         "-af",
         loudnorm_filter,
         "-ar",
@@ -423,7 +445,7 @@ def build_pass2_command(ffmpeg_bin: str, source_path: Path, output_path: Path, s
         TARGET_CHANNELS,
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
-        str(output_path),
+        to_ffmpeg_path(output_path, ffmpeg_bin),
     ]
 
 
@@ -433,7 +455,7 @@ def build_single_pass_command(ffmpeg_bin: str, source_path: Path, output_path: P
         "-hide_banner",
         "-y",
         "-i",
-        str(source_path),
+        to_ffmpeg_path(source_path, ffmpeg_bin),
         "-af",
         f"loudnorm=I={TARGET_I}:TP={TARGET_TP}:LRA={TARGET_LRA}",
         "-ar",
@@ -442,7 +464,7 @@ def build_single_pass_command(ffmpeg_bin: str, source_path: Path, output_path: P
         TARGET_CHANNELS,
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
-        str(output_path),
+        to_ffmpeg_path(output_path, ffmpeg_bin),
     ]
 
 
