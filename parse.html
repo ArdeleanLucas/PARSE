@@ -2602,6 +2602,23 @@ function buildConceptList(speaker, transcript, spkData) {
     `;
 
     div.addEventListener('click', () => openSegment(i));
+    div.addEventListener('dblclick', () => {
+      openSegment(i);
+      // Auto-play the segment
+      const ws = STATE.wavesurfer;
+      if (ws) {
+        STATE.segmentPlayMode = true;
+        const seg = STATE.coarseTranscript?.segments?.[i];
+        if (seg) {
+          if (typeof ws.setTime === 'function') {
+            ws.setTime(seg.start);
+          } else {
+            ws.seekTo(seg.start / (ws.getDuration() || 1));
+          }
+          ws.play();
+        }
+      }
+    });
     container.appendChild(div);
   });
 
