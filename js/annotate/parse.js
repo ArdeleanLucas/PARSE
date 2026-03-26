@@ -28,6 +28,9 @@
 
   // ── Constants ───────────────────────────────────────────────────────────────
   const LS_KEY = 'se-panel-state';
+  const TAG_STYLE_ID = 'se-tag-sidebar-style';
+  const TAG_FILTER_BAR_ID = 'se-tag-filter-bar';
+  const TAG_DROPDOWN_ID = 'se-tag-dropdown';
 
   // DOM IDs defined by the HTML shell (INTERFACES.md §DOM Contract)
   const PANEL_ID          = 'parse-panel';
@@ -49,6 +52,19 @@
   let _isOpen         = false;
   let _pendingOpenDetail = null;
 
+  // Tags sidebar integration state
+  let _tagsModule = null;
+  let _tagFilterState = {
+    tagId: null,
+    showUntagged: false,
+  };
+  let _tagFilterSignature = null;
+  let _tagSidebarRefreshQueued = false;
+  let _tagSidebarObserver = null;
+  let _activeTagDropdownContext = null;
+  let _searchInputEl = null;
+  let _boundOnSearchInput = null;
+
   // Current open context
   let _ctx = {
     speaker:        null,
@@ -64,6 +80,13 @@
   let _boundOnNavigateConcept  = null;
   let _boundOnRegionAssigned   = null;
   let _boundOnAnnotationsChanged = null;
+  let _boundOnTagFilterChanged = null;
+  let _boundOnTagsUpdated = null;
+  let _boundOnItemsTagged = null;
+  let _boundOnTagCreated = null;
+  let _boundOnTagDeleted = null;
+  let _boundOnDocumentPointerDown = null;
+  let _boundOnDocumentKeyDown = null;
 
   // ── localStorage helpers ────────────────────────────────────────────────────
 
@@ -126,6 +149,872 @@
     } catch (_) {
       // Invalid persisted decisions — silently ignore
     }
+  }
+
+  // ── Tag sidebar helpers ─────────────────────────────────────────────────────
+
+  function _normalizeConceptId(value) {
+    if (value == null) return null;
+
+    let text = String(value).trim();
+    if (!text) return null;
+
+    if (text.charAt(0) === '#') {
+      text = text.slice(1).trim();
+    }
+
+    const colonIdx = text.indexOf(':');
+    if (colonIdx !== -1) {
+      text = text.slice(0, colonIdx).trim();
+    }
+
+    return text || null;
+  }
+
+  function _conceptArg(conceptId) {
+    const normalized = _normalizeConceptId(conceptId);
+    if (!normalized) return null;
+    const num = Number(normalized);
+    return Number.isFinite(num) ? num : normalized;
+  }
+
+  function _extractConceptIdFromLabelText(labelText) {
+    const text = String(labelText || '').trim();
+    if (!text) return null;
+
+    const prefixedMatch = text.match(/^#?\s*(\d+)\s*[:\-\.]/);
+    if (prefixedMatch && prefixedMatch[1]) {
+      return _normalizeConceptId(prefixedMatch[1]);
+    }
+
+    const plainNumMatch = text.match(/^#?\s*(\d+)\b/);
+    if (plainNumMatch && plainNumMatch[1]) {
+      return _normalizeConceptId(plainNumMatch[1]);
+    }
+
+    return null;
+  }
+
+  function _conceptIdFromItem(itemEl) {
+    if (!itemEl) return null;
+
+    if (itemEl.dataset && itemEl.dataset.seConceptId) {
+      return _normalizeConceptId(itemEl.dataset.seConceptId);
+    }
+
+    let conceptId =
+      _normalizeConceptId(itemEl.getAttribute('data-concept-id')) ||
+      _normalizeConceptId(itemEl.getAttribute('data-conceptid'));
+
+    if (!conceptId) {
+      const labelEl = itemEl.querySelector('.ci-label');
+      conceptId = _extractConceptIdFromLabelText(labelEl ? labelEl.textContent : itemEl.textContent);
+    }
+
+    if (!conceptId && itemEl.dataset && itemEl.dataset.idx != null) {
+      const idx = Number(itemEl.dataset.idx);
+      if (Number.isFinite(idx)) {
+        conceptId = String(idx + 1);
+      }
+    }
+
+    if (conceptId && itemEl.dataset) {
+      itemEl.dataset.seConceptId = conceptId;
+    }
+
+    return conceptId;
+  }
+
+  function _normalizeTagFilter(filter) {
+    const next = {
+      tagId: null,
+      showUntagged: false,
+    };
+
+    if (!filter || typeof filter !== 'object') {
+      return next;
+    }
+
+    const tagId = filter.tagId != null ? String(filter.tagId).trim() : '';
+    next.tagId = tagId || null;
+    next.showUntagged = !!filter.showUntagged;
+    return next;
+  }
+
+  function _tagFilterSignatureOf(filter) {
+    const f = _normalizeTagFilter(filter);
+    return (f.tagId || '') + '|' + (f.showUntagged ? '1' : '0');
+  }
+
+  function _dispatchTagFilterChanged(source) {
+    document.dispatchEvent(
+      new CustomEvent('parse:tag-filter-changed', {
+        detail: {
+          tagId: _tagFilterState.tagId,
+          showUntagged: !!_tagFilterState.showUntagged,
+          source: source || 'annotate-sidebar',
+        },
+      })
+    );
+  }
+
+  function _getTagsModule() {
+    if (_tagsModule) return _tagsModule;
+    if (SE.modules && SE.modules.tags) {
+      _tagsModule = SE.modules.tags;
+    }
+    return _tagsModule;
+  }
+
+  function _safeGetTags() {
+    const tagsModule = _getTagsModule();
+    if (!tagsModule || typeof tagsModule.getTags !== 'function') {
+      return [];
+    }
+
+    try {
+      const tags = tagsModule.getTags();
+      if (!Array.isArray(tags)) return [];
+      return tags
+        .map(function (tag) {
+          if (!tag || typeof tag !== 'object') return null;
+          const id = String(tag.id || tag.tagId || '').trim();
+          if (!id) return null;
+          return {
+            id: id,
+            name: String(tag.name || id).trim() || id,
+            color: String(tag.color || '#64748b').trim() || '#64748b',
+          };
+        })
+        .filter(Boolean);
+    } catch (error) {
+      console.warn('[PARSE] Failed to read tags:', error);
+      return [];
+    }
+  }
+
+  function _safeGetTagsForConcept(conceptId) {
+    const tagsModule = _getTagsModule();
+    if (!tagsModule || typeof tagsModule.getTagsForConcept !== 'function') {
+      return [];
+    }
+
+    const conceptArg = _conceptArg(conceptId);
+    if (conceptArg == null) return [];
+
+    try {
+      const tags = tagsModule.getTagsForConcept(conceptArg);
+      if (!Array.isArray(tags)) return [];
+      return tags
+        .map(function (tag) {
+          if (!tag || typeof tag !== 'object') return null;
+          const id = String(tag.id || tag.tagId || '').trim();
+          if (!id) return null;
+          return {
+            id: id,
+            name: String(tag.name || id).trim() || id,
+            color: String(tag.color || '#64748b').trim() || '#64748b',
+          };
+        })
+        .filter(Boolean);
+    } catch (error) {
+      console.warn('[PARSE] Failed to read concept tags:', error);
+      return [];
+    }
+  }
+
+  function _conceptMatchesTagFilter(conceptId) {
+    const normalizedId = _normalizeConceptId(conceptId);
+    if (!normalizedId) return true;
+
+    const tags = _safeGetTagsForConcept(normalizedId);
+    const hasTags = tags.length > 0;
+    const hasSelectedTag = _tagFilterState.tagId
+      ? tags.some(function (tag) { return tag.id === _tagFilterState.tagId; })
+      : false;
+
+    if (!_tagFilterState.tagId && !_tagFilterState.showUntagged) {
+      return true;
+    }
+
+    if (!_tagFilterState.tagId && _tagFilterState.showUntagged) {
+      return !hasTags;
+    }
+
+    if (_tagFilterState.tagId && !_tagFilterState.showUntagged) {
+      return hasSelectedTag;
+    }
+
+    return hasSelectedTag || !hasTags;
+  }
+
+  function _conceptItemEls() {
+    const container = document.getElementById('concept-items');
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('.concept-item'));
+  }
+
+  function _searchQuery() {
+    const input = document.getElementById('search-input');
+    if (!input) return '';
+    return String(input.value || '').trim().toLowerCase();
+  }
+
+  function _itemMatchesSearch(itemEl, query) {
+    if (!query) return true;
+    const labelEl = itemEl ? itemEl.querySelector('.ci-label') : null;
+    const text = String(labelEl ? labelEl.textContent : (itemEl ? itemEl.textContent : '')).toLowerCase();
+    return text.indexOf(query) !== -1;
+  }
+
+  function _applyTagFilterToConceptList() {
+    const items = _conceptItemEls();
+    if (!items.length) return;
+
+    const query = _searchQuery();
+
+    items.forEach(function (itemEl) {
+      const conceptId = _conceptIdFromItem(itemEl);
+      const matchesTag = conceptId ? _conceptMatchesTagFilter(conceptId) : true;
+      const matchesSearch = _itemMatchesSearch(itemEl, query);
+      itemEl.style.display = matchesTag && matchesSearch ? '' : 'none';
+    });
+  }
+
+  function _onSearchInput() {
+    requestAnimationFrame(_applyTagFilterToConceptList);
+  }
+
+  function _wireSearchInput() {
+    const input = document.getElementById('search-input');
+    if (!input) return;
+
+    if (_searchInputEl === input) {
+      return;
+    }
+
+    if (_searchInputEl && _boundOnSearchInput) {
+      _searchInputEl.removeEventListener('input', _boundOnSearchInput);
+    }
+
+    _searchInputEl = input;
+    _boundOnSearchInput = _onSearchInput;
+    _searchInputEl.addEventListener('input', _boundOnSearchInput);
+  }
+
+  function _createTagDot(color, title) {
+    const dot = document.createElement('span');
+    dot.className = 'se-tag-dot';
+    dot.style.background = color || '#64748b';
+    if (title) {
+      dot.title = title;
+      dot.setAttribute('aria-label', title);
+    }
+    return dot;
+  }
+
+  function _ensureTagStyles() {
+    if (document.getElementById(TAG_STYLE_ID)) return;
+
+    const styleEl = document.createElement('style');
+    styleEl.id = TAG_STYLE_ID;
+    styleEl.textContent = '' +
+      '#' + TAG_FILTER_BAR_ID + '{' +
+        'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border,#334155);' +
+        'background:linear-gradient(180deg, rgba(148,163,184,0.08), rgba(148,163,184,0.02));' +
+      '}' +
+      '.se-tag-filter-pill{' +
+        'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;' +
+        'border:1px solid var(--border,#334155);background:rgba(15,23,42,0.55);color:var(--muted,#94a3b8);' +
+        'font-size:11px;line-height:1.6;cursor:pointer;' +
+      '}' +
+      '.se-tag-filter-pill:hover{border-color:var(--accent,#38bdf8);color:var(--text,#f1f5f9);}' +
+      '.se-tag-filter-pill.is-active{' +
+        'background:rgba(56,189,248,0.18);border-color:var(--accent,#38bdf8);color:var(--text,#f1f5f9);' +
+      '}' +
+      '.se-filter-empty{font-size:11px;color:var(--muted,#94a3b8);padding:2px 0;}' +
+      '.concept-item .ci-label{min-width:0;}' +
+      '.se-concept-tags-inline{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;}' +
+      '.se-tag-dots{display:inline-flex;align-items:center;gap:3px;max-width:56px;overflow:hidden;}' +
+      '.se-tag-dot{width:7px;height:7px;border-radius:50%;display:inline-block;border:1px solid rgba(15,23,42,0.35);}' +
+      '.se-tag-more{font-size:10px;color:var(--muted,#94a3b8);margin-left:1px;}' +
+      '.se-tag-toggle-btn{' +
+        'height:18px;min-width:18px;padding:0 4px;border-radius:5px;border:1px solid transparent;' +
+        'background:transparent;color:var(--muted,#94a3b8);font-size:11px;line-height:1;cursor:pointer;' +
+      '}' +
+      '.se-tag-toggle-btn:hover,.se-tag-toggle-btn.is-open{' +
+        'border-color:var(--border,#334155);background:rgba(56,189,248,0.14);color:var(--text,#f1f5f9);' +
+      '}' +
+      '#'+ TAG_DROPDOWN_ID + '{' +
+        'position:fixed;z-index:12000;min-width:200px;max-width:280px;padding:6px;' +
+        'border-radius:10px;border:1px solid var(--border,#334155);' +
+        'background:var(--surface,#1e293b);box-shadow:0 16px 28px rgba(2,6,23,0.5);' +
+      '}' +
+      '#'+ TAG_DROPDOWN_ID + '[hidden]{display:none;}' +
+      '.se-tag-dd-head{font-size:11px;color:var(--muted,#94a3b8);padding:3px 6px 6px;}' +
+      '.se-tag-dd-option{' +
+        'width:100%;display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;' +
+        'border:1px solid transparent;background:transparent;color:var(--text,#f1f5f9);' +
+        'font-size:12px;text-align:left;cursor:pointer;' +
+      '}' +
+      '.se-tag-dd-option:hover{background:rgba(56,189,248,0.12);}' +
+      '.se-tag-dd-option.is-active{border-color:var(--accent,#38bdf8);background:rgba(56,189,248,0.16);}' +
+      '.se-tag-dd-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.se-tag-dd-check{font-size:11px;color:var(--accent,#38bdf8);min-width:32px;text-align:right;}' +
+      '.se-tag-dd-empty{font-size:12px;color:var(--muted,#94a3b8);padding:8px 6px;}';
+
+    document.head.appendChild(styleEl);
+  }
+
+  function _ensureTagFilterBar() {
+    const conceptListEl = document.getElementById('concept-list');
+    const itemsEl = document.getElementById('concept-items');
+    if (!conceptListEl || !itemsEl) return null;
+
+    let barEl = document.getElementById(TAG_FILTER_BAR_ID);
+    if (!barEl) {
+      barEl = document.createElement('div');
+      barEl.id = TAG_FILTER_BAR_ID;
+      barEl.addEventListener('click', _onTagFilterBarClick);
+
+      const searchEl = document.getElementById('concept-search');
+      if (searchEl && searchEl.parentNode === conceptListEl) {
+        conceptListEl.insertBefore(barEl, itemsEl);
+      } else {
+        conceptListEl.insertBefore(barEl, conceptListEl.firstChild || itemsEl);
+      }
+    }
+
+    return barEl;
+  }
+
+  function _renderTagFilterBar() {
+    const barEl = _ensureTagFilterBar();
+    if (!barEl) return;
+
+    const tags = _safeGetTags();
+    barEl.innerHTML = '';
+
+    function makeButton(label, mode, tag) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'se-tag-filter-pill';
+      btn.dataset.seTagFilter = '1';
+      btn.dataset.mode = mode;
+      if (tag && tag.id) {
+        btn.dataset.tagId = tag.id;
+      }
+
+      if (tag && tag.color) {
+        btn.appendChild(_createTagDot(tag.color, tag.name));
+      }
+
+      const textNode = document.createElement('span');
+      textNode.textContent = label;
+      btn.appendChild(textNode);
+
+      const filter = _tagFilterState;
+      const active =
+        (mode === 'all' && !filter.tagId && !filter.showUntagged) ||
+        (mode === 'untagged' && !!filter.showUntagged) ||
+        (mode === 'tag' && filter.tagId === (tag && tag.id));
+
+      if (active) {
+        btn.classList.add('is-active');
+      }
+
+      return btn;
+    }
+
+    barEl.appendChild(makeButton('All', 'all'));
+    barEl.appendChild(makeButton('Untagged', 'untagged'));
+
+    if (tags.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'se-filter-empty';
+      empty.textContent = 'No tags defined';
+      barEl.appendChild(empty);
+      return;
+    }
+
+    tags.forEach(function (tag) {
+      barEl.appendChild(makeButton(tag.name, 'tag', tag));
+    });
+  }
+
+  function _setTagFilter(nextFilter, source, syncToTags) {
+    const normalized = _normalizeTagFilter(nextFilter);
+    const nextSignature = _tagFilterSignatureOf(normalized);
+    const changed = nextSignature !== _tagFilterSignature;
+
+    _tagFilterState = normalized;
+    _tagFilterSignature = nextSignature;
+
+    if (syncToTags !== false) {
+      const tagsModule = _getTagsModule();
+      if (tagsModule && typeof tagsModule.setFilter === 'function') {
+        try {
+          tagsModule.setFilter(normalized.tagId, normalized.showUntagged);
+        } catch (error) {
+          console.warn('[PARSE] Failed to set tag filter:', error);
+        }
+      }
+    }
+
+    _renderTagFilterBar();
+    _refreshConceptTagIndicators();
+    _applyTagFilterToConceptList();
+
+    if (changed) {
+      _dispatchTagFilterChanged(source || 'annotate-sidebar');
+    }
+  }
+
+  function _onTagFilterBarClick(evt) {
+    const btn = evt && evt.target && typeof evt.target.closest === 'function'
+      ? evt.target.closest('[data-se-tag-filter="1"]')
+      : null;
+    if (!btn) return;
+
+    const mode = btn.dataset.mode || 'all';
+    if (mode === 'all') {
+      _setTagFilter({ tagId: null, showUntagged: false }, 'annotate-sidebar', true);
+      return;
+    }
+    if (mode === 'untagged') {
+      _setTagFilter({ tagId: null, showUntagged: true }, 'annotate-sidebar', true);
+      return;
+    }
+
+    const tagId = String(btn.dataset.tagId || '').trim() || null;
+    _setTagFilter({ tagId: tagId, showUntagged: false }, 'annotate-sidebar', true);
+  }
+
+  function _ensureConceptTagInline(itemEl, conceptId) {
+    if (!itemEl) return null;
+
+    let inlineEl = itemEl.querySelector('.se-concept-tags-inline');
+    if (!inlineEl) {
+      inlineEl = document.createElement('span');
+      inlineEl.className = 'se-concept-tags-inline';
+
+      const dotsEl = document.createElement('span');
+      dotsEl.className = 'se-tag-dots';
+      inlineEl.appendChild(dotsEl);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'se-tag-toggle-btn';
+      btn.setAttribute('aria-haspopup', 'true');
+      btn.title = 'Toggle tags';
+      btn.textContent = '\uD83C\uDFF7';
+      btn.addEventListener('click', function (clickEvt) {
+        clickEvt.preventDefault();
+        clickEvt.stopPropagation();
+
+        const currentConceptId = _conceptIdFromItem(itemEl);
+        if (!currentConceptId) return;
+        _toggleTagDropdown(currentConceptId, itemEl, btn);
+      });
+
+      inlineEl.appendChild(btn);
+
+      const timeEl = itemEl.querySelector('.ci-time');
+      if (timeEl && timeEl.parentNode === itemEl) {
+        itemEl.insertBefore(inlineEl, timeEl);
+      } else {
+        itemEl.appendChild(inlineEl);
+      }
+    }
+
+    if (conceptId && itemEl.dataset) {
+      itemEl.dataset.seConceptId = conceptId;
+    }
+
+    return inlineEl;
+  }
+
+  function _renderTagDots(itemEl, conceptId) {
+    const inlineEl = _ensureConceptTagInline(itemEl, conceptId);
+    if (!inlineEl) return;
+
+    const dotsEl = inlineEl.querySelector('.se-tag-dots');
+    const btn = inlineEl.querySelector('.se-tag-toggle-btn');
+    if (!dotsEl || !btn) return;
+
+    const tags = _safeGetTagsForConcept(conceptId);
+    dotsEl.innerHTML = '';
+
+    const maxDots = 3;
+    tags.slice(0, maxDots).forEach(function (tag) {
+      dotsEl.appendChild(_createTagDot(tag.color, tag.name));
+    });
+
+    if (tags.length > maxDots) {
+      const more = document.createElement('span');
+      more.className = 'se-tag-more';
+      more.textContent = '+' + String(tags.length - maxDots);
+      dotsEl.appendChild(more);
+    }
+
+    btn.classList.toggle('is-tagged', tags.length > 0);
+    btn.title = tags.length > 0
+      ? 'Tags: ' + tags.map(function (tag) { return tag.name; }).join(', ')
+      : 'Toggle tags';
+  }
+
+  function _refreshConceptTagIndicators() {
+    const items = _conceptItemEls();
+    items.forEach(function (itemEl) {
+      const conceptId = _conceptIdFromItem(itemEl);
+      if (!conceptId) return;
+      _renderTagDots(itemEl, conceptId);
+    });
+  }
+
+  function _ensureTagDropdownEl() {
+    let dropdownEl = document.getElementById(TAG_DROPDOWN_ID);
+    if (!dropdownEl) {
+      dropdownEl = document.createElement('div');
+      dropdownEl.id = TAG_DROPDOWN_ID;
+      dropdownEl.hidden = true;
+      dropdownEl.addEventListener('click', function (evt) {
+        const optionEl = evt && evt.target && typeof evt.target.closest === 'function'
+          ? evt.target.closest('[data-se-tag-option="1"]')
+          : null;
+        if (!optionEl || !_activeTagDropdownContext) return;
+
+        evt.preventDefault();
+        evt.stopPropagation();
+
+        const tagId = String(optionEl.dataset.tagId || '').trim();
+        const conceptId = _activeTagDropdownContext.conceptId;
+        if (!tagId || !conceptId) return;
+        _toggleTagForConcept(conceptId, tagId);
+      });
+      document.body.appendChild(dropdownEl);
+    }
+    return dropdownEl;
+  }
+
+  function _positionTagDropdown() {
+    const dropdownEl = document.getElementById(TAG_DROPDOWN_ID);
+    if (!dropdownEl || !_activeTagDropdownContext || !_activeTagDropdownContext.buttonEl) {
+      return;
+    }
+
+    const btnRect = _activeTagDropdownContext.buttonEl.getBoundingClientRect();
+    const ddRect = dropdownEl.getBoundingClientRect();
+
+    let left = btnRect.left;
+    let top = btnRect.bottom + 6;
+
+    if (left + ddRect.width > window.innerWidth - 8) {
+      left = window.innerWidth - ddRect.width - 8;
+    }
+    if (left < 8) {
+      left = 8;
+    }
+
+    if (top + ddRect.height > window.innerHeight - 8) {
+      top = btnRect.top - ddRect.height - 6;
+      if (top < 8) {
+        top = 8;
+      }
+    }
+
+    dropdownEl.style.left = Math.round(left) + 'px';
+    dropdownEl.style.top = Math.round(top) + 'px';
+  }
+
+  function _renderTagDropdown() {
+    const dropdownEl = _ensureTagDropdownEl();
+    if (!dropdownEl || !_activeTagDropdownContext) return;
+
+    const conceptId = _activeTagDropdownContext.conceptId;
+    const tags = _safeGetTags();
+    const assigned = new Set(_safeGetTagsForConcept(conceptId).map(function (tag) { return tag.id; }));
+
+    dropdownEl.innerHTML = '';
+
+    const heading = document.createElement('div');
+    heading.className = 'se-tag-dd-head';
+    heading.textContent = 'Tags for concept #' + conceptId;
+    dropdownEl.appendChild(heading);
+
+    if (!tags.length) {
+      const empty = document.createElement('div');
+      empty.className = 'se-tag-dd-empty';
+      empty.textContent = 'No tags are defined yet.';
+      dropdownEl.appendChild(empty);
+      return;
+    }
+
+    tags.forEach(function (tag) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'se-tag-dd-option';
+      option.dataset.seTagOption = '1';
+      option.dataset.tagId = tag.id;
+
+      const active = assigned.has(tag.id);
+      if (active) {
+        option.classList.add('is-active');
+      }
+
+      option.appendChild(_createTagDot(tag.color, tag.name));
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'se-tag-dd-name';
+      nameEl.textContent = tag.name;
+      option.appendChild(nameEl);
+
+      const checkEl = document.createElement('span');
+      checkEl.className = 'se-tag-dd-check';
+      checkEl.textContent = active ? 'On' : '';
+      option.appendChild(checkEl);
+
+      dropdownEl.appendChild(option);
+    });
+  }
+
+  function _openTagDropdown(conceptId, itemEl, buttonEl) {
+    if (!conceptId || !itemEl || !buttonEl) return;
+
+    _closeTagDropdown();
+
+    _activeTagDropdownContext = {
+      conceptId: conceptId,
+      itemEl: itemEl,
+      buttonEl: buttonEl,
+    };
+
+    buttonEl.classList.add('is-open');
+
+    const dropdownEl = _ensureTagDropdownEl();
+    dropdownEl.hidden = false;
+    _renderTagDropdown();
+    _positionTagDropdown();
+  }
+
+  function _closeTagDropdown() {
+    const dropdownEl = document.getElementById(TAG_DROPDOWN_ID);
+    if (dropdownEl) {
+      dropdownEl.hidden = true;
+    }
+
+    if (_activeTagDropdownContext && _activeTagDropdownContext.buttonEl) {
+      _activeTagDropdownContext.buttonEl.classList.remove('is-open');
+    }
+
+    _activeTagDropdownContext = null;
+  }
+
+  function _toggleTagDropdown(conceptId, itemEl, buttonEl) {
+    const isSameContext =
+      _activeTagDropdownContext &&
+      _activeTagDropdownContext.conceptId === conceptId &&
+      _activeTagDropdownContext.buttonEl === buttonEl;
+
+    if (isSameContext) {
+      _closeTagDropdown();
+      return;
+    }
+
+    _openTagDropdown(conceptId, itemEl, buttonEl);
+  }
+
+  function _toggleTagForConcept(conceptId, tagId) {
+    const tagsModule = _getTagsModule();
+    if (!tagsModule) return;
+
+    const conceptArg = _conceptArg(conceptId);
+    if (conceptArg == null) return;
+
+    const currentlyAssigned = _safeGetTagsForConcept(conceptId).map(function (tag) { return tag.id; });
+    const hasTag = currentlyAssigned.indexOf(tagId) !== -1;
+
+    try {
+      if (hasTag && typeof tagsModule.removeTagFromConcepts === 'function') {
+        tagsModule.removeTagFromConcepts(tagId, [conceptArg]);
+      } else if (!hasTag && typeof tagsModule.addTagToConcepts === 'function') {
+        tagsModule.addTagToConcepts(tagId, [conceptArg]);
+      }
+
+      document.dispatchEvent(
+        new CustomEvent('parse:tags-updated', {
+          detail: {
+            conceptId: conceptArg,
+            tagId: tagId,
+            action: hasTag ? 'remove' : 'add',
+          },
+        })
+      );
+    } catch (error) {
+      console.warn('[PARSE] Failed to toggle concept tag:', error);
+    }
+  }
+
+  function _onDocumentPointerDown(evt) {
+    if (!_activeTagDropdownContext) return;
+
+    const dropdownEl = document.getElementById(TAG_DROPDOWN_ID);
+    if (!dropdownEl) return;
+
+    const target = evt && evt.target;
+    if (!target) return;
+
+    if (dropdownEl.contains(target)) return;
+    if (
+      _activeTagDropdownContext.buttonEl &&
+      _activeTagDropdownContext.buttonEl.contains(target)
+    ) {
+      return;
+    }
+
+    _closeTagDropdown();
+  }
+
+  function _onDocumentKeyDown(evt) {
+    if (!_activeTagDropdownContext) return;
+    if (!evt || evt.key !== 'Escape') return;
+
+    _closeTagDropdown();
+    evt.preventDefault();
+    evt.stopPropagation();
+  }
+
+  function _refreshTagSidebar() {
+    _tagSidebarRefreshQueued = false;
+
+    if (!_getTagsModule()) return;
+
+    _attachTagSidebarObserver();
+
+    _ensureTagStyles();
+    _wireSearchInput();
+    _renderTagFilterBar();
+    _refreshConceptTagIndicators();
+    _applyTagFilterToConceptList();
+
+    if (_activeTagDropdownContext) {
+      if (!_activeTagDropdownContext.itemEl || !document.body.contains(_activeTagDropdownContext.itemEl)) {
+        _closeTagDropdown();
+      } else {
+        _renderTagDropdown();
+        _positionTagDropdown();
+      }
+    }
+  }
+
+  function _scheduleTagSidebarRefresh() {
+    if (_tagSidebarRefreshQueued) return;
+    _tagSidebarRefreshQueued = true;
+    requestAnimationFrame(_refreshTagSidebar);
+  }
+
+  function _attachTagSidebarObserver() {
+    if (_tagSidebarObserver || typeof MutationObserver !== 'function') {
+      return;
+    }
+
+    const targetEl = document.getElementById('concept-items') || document.getElementById('concept-list');
+    if (!targetEl) return;
+
+    _tagSidebarObserver = new MutationObserver(function () {
+      _scheduleTagSidebarRefresh();
+    });
+
+    _tagSidebarObserver.observe(targetEl, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  function _detachTagSidebarObserver() {
+    if (_tagSidebarObserver) {
+      _tagSidebarObserver.disconnect();
+      _tagSidebarObserver = null;
+    }
+  }
+
+  function _initTagSidebarIntegration() {
+    const tagsModule = SE.modules && SE.modules.tags;
+    if (!tagsModule || typeof tagsModule.init !== 'function') {
+      return;
+    }
+
+    try {
+      const maybeApi = tagsModule.init(document.getElementById('concept-list') || _containerEl || document.body);
+      _tagsModule = maybeApi || tagsModule;
+    } catch (error) {
+      console.warn('[PARSE] tags.init() failed:', error);
+      _tagsModule = tagsModule;
+    }
+
+    if (_tagsModule && typeof _tagsModule.getFilter === 'function') {
+      try {
+        _tagFilterState = _normalizeTagFilter(_tagsModule.getFilter());
+      } catch (_) {
+        _tagFilterState = _normalizeTagFilter(_tagFilterState);
+      }
+    }
+
+    _tagFilterSignature = _tagFilterSignatureOf(_tagFilterState);
+    _attachTagSidebarObserver();
+    _scheduleTagSidebarRefresh();
+  }
+
+  function _destroyTagSidebarIntegration() {
+    _closeTagDropdown();
+    _detachTagSidebarObserver();
+
+    if (_searchInputEl && _boundOnSearchInput) {
+      _searchInputEl.removeEventListener('input', _boundOnSearchInput);
+    }
+    _searchInputEl = null;
+    _boundOnSearchInput = null;
+
+    const filterBar = document.getElementById(TAG_FILTER_BAR_ID);
+    if (filterBar && filterBar.parentNode) {
+      filterBar.parentNode.removeChild(filterBar);
+    }
+
+    const dropdownEl = document.getElementById(TAG_DROPDOWN_ID);
+    if (dropdownEl && dropdownEl.parentNode) {
+      dropdownEl.parentNode.removeChild(dropdownEl);
+    }
+
+    const tagsModule = _getTagsModule();
+    if (tagsModule && typeof tagsModule.destroy === 'function') {
+      try {
+        tagsModule.destroy();
+      } catch (error) {
+        console.warn('[PARSE] tags.destroy() failed:', error);
+      }
+    }
+
+    _tagsModule = null;
+    _tagFilterState = { tagId: null, showUntagged: false };
+    _tagFilterSignature = null;
+    _tagSidebarRefreshQueued = false;
+  }
+
+  function _onTagFilterChanged(evt) {
+    const detail = (evt && evt.detail) || {};
+    _setTagFilter(detail, 'tags-module', false);
+  }
+
+  function _onTagsUpdated() {
+    _scheduleTagSidebarRefresh();
+  }
+
+  function _onItemsTagged() {
+    _scheduleTagSidebarRefresh();
+  }
+
+  function _onTagDefinitionsChanged() {
+    _scheduleTagSidebarRefresh();
   }
 
   // ── DOM helpers ─────────────────────────────────────────────────────────────
@@ -278,6 +1167,8 @@
     if (!_isFullscreen && _panelEl.scrollIntoView) {
       _panelEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+
+    _scheduleTagSidebarRefresh();
   }
 
   /**
@@ -295,6 +1186,8 @@
 
     _panelEl.classList.add(CLS_HIDDEN);
     _panelEl.setAttribute('aria-hidden', 'true');
+
+    _closeTagDropdown();
 
     // Clear header
     if (_headerEl) {
@@ -799,6 +1692,13 @@
     _boundOnNavigateConcept   = _onNavigateConcept;
     _boundOnRegionAssigned    = _onRegionAssigned;
     _boundOnAnnotationsChanged = _onAnnotationsChanged;
+    _boundOnTagFilterChanged  = _onTagFilterChanged;
+    _boundOnTagsUpdated       = _onTagsUpdated;
+    _boundOnItemsTagged       = _onItemsTagged;
+    _boundOnTagCreated        = _onTagDefinitionsChanged;
+    _boundOnTagDeleted        = _onTagDefinitionsChanged;
+    _boundOnDocumentPointerDown = _onDocumentPointerDown;
+    _boundOnDocumentKeyDown   = _onDocumentKeyDown;
 
     document.addEventListener('parse:panel-open',          _boundOnPanelOpen);
     document.addEventListener('parse:panel-close',         _boundOnPanelClose);
@@ -806,6 +1706,15 @@
     document.addEventListener('parse:navigate-concept',    _boundOnNavigateConcept);
     document.addEventListener('parse:region-assigned',     _boundOnRegionAssigned);
     document.addEventListener('parse:annotations-changed', _boundOnAnnotationsChanged);
+    document.addEventListener('parse:tag-filter',          _boundOnTagFilterChanged);
+    document.addEventListener('parse:tags-updated',        _boundOnTagsUpdated);
+    document.addEventListener('parse:items-tagged',        _boundOnItemsTagged);
+    document.addEventListener('parse:tag-created',         _boundOnTagCreated);
+    document.addEventListener('parse:tag-deleted',         _boundOnTagDeleted);
+    document.addEventListener('pointerdown',               _boundOnDocumentPointerDown);
+    document.addEventListener('keydown',                   _boundOnDocumentKeyDown, true);
+
+    _initTagSidebarIntegration();
 
     // Keyboard shortcut: Escape closes the panel
     document.addEventListener('keydown', _onKeyDown);
@@ -843,7 +1752,16 @@
     if (_boundOnNavigateConcept)   document.removeEventListener('parse:navigate-concept',    _boundOnNavigateConcept);
     if (_boundOnRegionAssigned)    document.removeEventListener('parse:region-assigned',     _boundOnRegionAssigned);
     if (_boundOnAnnotationsChanged) document.removeEventListener('parse:annotations-changed', _boundOnAnnotationsChanged);
+    if (_boundOnTagFilterChanged)  document.removeEventListener('parse:tag-filter',          _boundOnTagFilterChanged);
+    if (_boundOnTagsUpdated)       document.removeEventListener('parse:tags-updated',        _boundOnTagsUpdated);
+    if (_boundOnItemsTagged)       document.removeEventListener('parse:items-tagged',        _boundOnItemsTagged);
+    if (_boundOnTagCreated)        document.removeEventListener('parse:tag-created',         _boundOnTagCreated);
+    if (_boundOnTagDeleted)        document.removeEventListener('parse:tag-deleted',         _boundOnTagDeleted);
+    if (_boundOnDocumentPointerDown) document.removeEventListener('pointerdown',              _boundOnDocumentPointerDown);
+    if (_boundOnDocumentKeyDown)   document.removeEventListener('keydown',                   _boundOnDocumentKeyDown, true);
     document.removeEventListener('keydown', _onKeyDown);
+
+    _destroyTagSidebarIntegration();
 
     // If in fullscreen, restore DOM structure
     if (_isFullscreen) {
@@ -864,6 +1782,13 @@
     _boundOnNavigateConcept   = null;
     _boundOnRegionAssigned    = null;
     _boundOnAnnotationsChanged = null;
+    _boundOnTagFilterChanged  = null;
+    _boundOnTagsUpdated       = null;
+    _boundOnItemsTagged       = null;
+    _boundOnTagCreated        = null;
+    _boundOnTagDeleted        = null;
+    _boundOnDocumentPointerDown = null;
+    _boundOnDocumentKeyDown   = null;
   }
 
   /**

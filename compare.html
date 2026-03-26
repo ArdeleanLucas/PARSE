@@ -49,6 +49,7 @@
   }
 
   #compare-container {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: grid;
@@ -72,7 +73,7 @@
 
   #compare-header {
     grid-column: 1 / -1;
-    padding: 12px;
+    padding: 12px 170px 12px 12px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -486,6 +487,49 @@
     display: none;
   }
 
+  .compare-mode-link {
+    display: none;
+  }
+
+  .mode-switcher {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(11, 18, 32, 0.72);
+  }
+
+  .mode-switch-link {
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 5px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+  }
+
+  .mode-switch-link:hover {
+    color: var(--text);
+    border-color: var(--border);
+    background: rgba(157, 176, 208, 0.12);
+  }
+
+  .mode-switch-link.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #05111f;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
   @media (max-width: 1100px) {
     body {
       overflow: auto;
@@ -497,6 +541,10 @@
       min-height: auto;
     }
 
+    #compare-header {
+      padding: 12px;
+    }
+
     #compare-table {
       min-height: 380px;
     }
@@ -506,12 +554,23 @@
     #compare-spectrogram {
       min-height: 140px;
     }
+
+    .mode-switcher {
+      position: static;
+      margin-left: auto;
+      margin-right: 12px;
+      margin-top: 12px;
+    }
   }
 </style>
 </head>
 <body>
 
 <div id="compare-container">
+  <div class="mode-switcher" aria-label="Mode switcher">
+    <a class="mode-switch-link" href="parse.html">Annotate</a>
+    <a class="mode-switch-link active" href="compare.html" aria-current="page">Compare</a>
+  </div>
   <div id="compare-header"><!-- Mode switcher, speaker selector, tag filter, compute button --></div>
   <div id="compare-table"><!-- Concept x speaker matrix --></div>
   <div id="compare-cognate-panel"><!-- Cognate controls --></div>
@@ -548,6 +607,8 @@
 <script src="js/compare/enrichments.js"></script>
 <script src="js/compare/concept-table.js"></script>
 <script src="js/compare/cognate-controls.js"></script>
+<script src="js/compare/borrowing-panel.js"></script>
+<script src="js/compare/speaker-import.js"></script>
 <script src="js/compare/compare.js"></script>
 
 </body>

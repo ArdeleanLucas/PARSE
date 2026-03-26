@@ -54,6 +54,42 @@
     gap: 8px;
   }
 
+  .mode-switcher {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.7);
+  }
+
+  .mode-switch-link {
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 5px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+  }
+
+  .mode-switch-link:hover {
+    color: var(--text);
+    border-color: var(--border);
+    background: rgba(148, 163, 184, 0.12);
+  }
+
+  .mode-switch-link.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0f172a;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
   #settings-wrap {
     position: relative;
   }
@@ -109,7 +145,7 @@
   }
 
   #status-pill {
-    margin-left: auto;
+    margin-left: 8px;
     font-size: 11px;
     color: var(--muted);
     background: var(--bg);
@@ -694,6 +730,10 @@
       gap: 8px;
     }
 
+    .mode-switcher {
+      margin-left: 0;
+    }
+
     #status-pill {
       margin-left: 0;
     }
@@ -734,6 +774,10 @@
         <button class="settings-item danger" id="btn-reset-project" type="button">Reset Project</button>
       </div>
     </div>
+  </div>
+  <div class="mode-switcher" aria-label="Mode switcher">
+    <a class="mode-switch-link active" href="parse.html" aria-current="page">Annotate</a>
+    <a class="mode-switch-link" href="compare.html">Compare</a>
   </div>
   <span id="status-pill">—</span>
 </div>

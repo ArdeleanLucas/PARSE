@@ -13,6 +13,9 @@
   };
   const CONCEPT_SELECTED_EVENT = 'parse:compare-concept-selected';
   const CONCEPT_SELECT_COMPAT_EVENT = CONCEPT_SELECTED_EVENT.replace(/selected$/, 'select');
+  const TAG_PSEUDO_ALL = '__all__';
+  const TAG_PSEUDO_UNTAGGED = '__untagged__';
+  const TAG_DEFAULT_COLOR = '#6b7280';
 
   const state = {
     initialized: false,
@@ -32,8 +35,8 @@
     filteredConcepts: [],
     selectedConceptId: '',
     tagFilter: {
-      tagId: null,
-      showUntagged: true,
+      activeTagIds: [],
+      includeUntagged: false,
     },
     computeType: 'cognates',
     computeToken: 0,
@@ -481,11 +484,129 @@
     return concepts;
   }
 
+  function uniqueStringList(values) {
+    const list = Array.isArray(values) ? values : [];
+    const out = [];
+    const seen = new Set();
+
+    for (let i = 0; i < list.length; i += 1) {
+      const text = toString(list[i]);
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      out.push(text);
+    }
+
+    return out;
+  }
+
+  function enrichmentsConceptIds(enrichments) {
+    const data = toObject(enrichments);
+    const ids = [];
+    const seen = new Set();
+
+    const sources = [
+      toObject(data.cognate_sets),
+      toObject(toObject(data.manual_overrides).cognate_sets),
+      toObject(data.borrowing_flags),
+      toObject(toObject(data.manual_overrides).borrowing_flags),
+      toObject(toObject(data.manual_overrides).accepted_concepts),
+    ];
+
+    for (let s = 0; s < sources.length; s += 1) {
+      const keys = Object.keys(sources[s]);
+      for (let i = 0; i < keys.length; i += 1) {
+        const conceptId = normalizeConceptId(keys[i]);
+        if (!conceptId || seen.has(conceptId)) continue;
+        seen.add(conceptId);
+        const numeric = Number(conceptId);
+        ids.push(Number.isFinite(numeric) ? numeric : conceptId);
+      }
+    }
+
+    return ids;
+  }
+
+  function enrichmentsSpeakers(enrichments) {
+    const data = toObject(enrichments);
+    const out = [];
+    const seen = new Set();
+
+    const configured = uniqueStringList(toObject(data.config).speakers_included);
+    for (let i = 0; i < configured.length; i += 1) {
+      seen.add(configured[i]);
+      out.push(configured[i]);
+    }
+
+    const setSources = [
+      toObject(data.cognate_sets),
+      toObject(toObject(data.manual_overrides).cognate_sets),
+    ];
+
+    for (let s = 0; s < setSources.length; s += 1) {
+      const conceptKeys = Object.keys(setSources[s]);
+      for (let i = 0; i < conceptKeys.length; i += 1) {
+        const groups = toObject(setSources[s][conceptKeys[i]]);
+        const groupKeys = Object.keys(groups);
+        for (let j = 0; j < groupKeys.length; j += 1) {
+          const speakers = uniqueStringList(groups[groupKeys[j]]);
+          for (let k = 0; k < speakers.length; k += 1) {
+            const speaker = speakers[k];
+            if (seen.has(speaker)) continue;
+            seen.add(speaker);
+            out.push(speaker);
+          }
+        }
+      }
+    }
+
+    const borrowingSources = [
+      toObject(data.borrowing_flags),
+      toObject(toObject(data.manual_overrides).borrowing_flags),
+    ];
+
+    for (let b = 0; b < borrowingSources.length; b += 1) {
+      const conceptKeys = Object.keys(borrowingSources[b]);
+      for (let i = 0; i < conceptKeys.length; i += 1) {
+        const speakerEntries = toObject(borrowingSources[b][conceptKeys[i]]);
+        const speakerKeys = Object.keys(speakerEntries);
+        for (let j = 0; j < speakerKeys.length; j += 1) {
+          const speaker = toString(speakerKeys[j]);
+          if (!speaker || seen.has(speaker)) continue;
+          seen.add(speaker);
+          out.push(speaker);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  function dispatchEnrichmentsUpdatedFromMemory() {
+    const enrichments = toObject(P.enrichments);
+    if (!Object.keys(enrichments).length) {
+      return;
+    }
+
+    dispatchEvent('parse:enrichments-updated', {
+      computedAt: toString(enrichments.computed_at) || null,
+      speakers: enrichmentsSpeakers(enrichments),
+      concepts: enrichmentsConceptIds(enrichments),
+    });
+  }
+
   async function ensureEnrichments() {
     const moduleApi = toObject(P.modules).enrichmentsIO;
     if (moduleApi && typeof moduleApi.init === 'function') {
       await moduleApi.init();
+      return;
     }
+
+    if (moduleApi && typeof moduleApi.read === 'function') {
+      await moduleApi.read();
+      return;
+    }
+
+    dispatchEnrichmentsUpdatedFromMemory();
   }
 
   async function ensureTagsModule() {
@@ -498,9 +619,64 @@
     }
   }
 
+  function normalizeTagColor(value) {
+    const text = toString(value);
+    if (!text) return TAG_DEFAULT_COLOR;
+
+    if (/^#[0-9a-fA-F]{3}$/.test(text)) {
+      return '#' +
+        text.charAt(1) + text.charAt(1) +
+        text.charAt(2) + text.charAt(2) +
+        text.charAt(3) + text.charAt(3);
+    }
+
+    if (/^#[0-9a-fA-F]{6}$/.test(text)) {
+      return text;
+    }
+
+    return TAG_DEFAULT_COLOR;
+  }
+
+  function looksNumericConceptId(value) {
+    const conceptId = normalizeConceptId(value);
+    return /^[0-9]+$/.test(conceptId);
+  }
+
+  function hexToRgba(hex, alpha) {
+    const normalized = normalizeTagColor(hex).replace('#', '');
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+      return 'rgba(107, 114, 128, ' + String(alpha) + ')';
+    }
+    return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + String(alpha) + ')';
+  }
+
   function tagEntriesFromState() {
+    const seen = new Set();
     const tagsOut = [];
     const tagsModule = toObject(P.modules).tags;
+
+    if (tagsModule && typeof tagsModule.getTags === 'function') {
+      try {
+        const fromModule = tagsModule.getTags();
+        const list = Array.isArray(fromModule) ? fromModule : [];
+        for (let i = 0; i < list.length; i += 1) {
+          const item = list[i];
+          if (!item || typeof item !== 'object') continue;
+          const id = toString(item.id || item.tagId);
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          tagsOut.push({
+            id: id,
+            name: toString(item.name || item.label || id),
+            color: normalizeTagColor(item.color),
+          });
+        }
+      } catch (_) {
+      }
+    }
 
     if (tagsModule && typeof tagsModule.getAllTags === 'function') {
       try {
@@ -510,8 +686,13 @@
           const item = list[i];
           if (!item || typeof item !== 'object') continue;
           const id = toString(item.id || item.tagId);
-          if (!id) continue;
-          tagsOut.push({ id: id, name: toString(item.name || item.label || id) });
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          tagsOut.push({
+            id: id,
+            name: toString(item.name || item.label || id),
+            color: normalizeTagColor(item.color),
+          });
         }
       } catch (_) {
       }
@@ -522,8 +703,22 @@
     }
 
     const tags = toObject(P.tags);
+    const definitions = Array.isArray(tags.tags) ? tags.tags : [];
     const byConcept = toObject(tags.byConcept);
     const assignments = toObject(tags.assignments);
+
+    for (let i = 0; i < definitions.length; i += 1) {
+      const item = definitions[i];
+      if (!item || typeof item !== 'object') continue;
+      const id = toString(item.id || item.tagId);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      tagsOut.push({
+        id: id,
+        name: toString(item.name || item.label || id),
+        color: normalizeTagColor(item.color),
+      });
+    }
 
     const defs = [];
 
@@ -533,7 +728,7 @@
         if (!item || typeof item !== 'object') continue;
         const id = toString(item.id || item.tagId);
         if (!id) continue;
-        defs.push({ id: id, name: toString(item.name || id) });
+        defs.push({ id: id, name: toString(item.name || id), color: normalizeTagColor(item.color) });
       }
     } else {
       const defObj = toObject(tags.definitions);
@@ -543,37 +738,269 @@
         if (!id) continue;
         const value = defObj[keys[i]];
         const name = value && typeof value === 'object' ? toString(value.name || id) : id;
-        defs.push({ id: id, name: name });
+        const color = value && typeof value === 'object'
+          ? normalizeTagColor(value.color)
+          : TAG_DEFAULT_COLOR;
+        defs.push({ id: id, name: name, color: color });
       }
     }
 
-    if (defs.length) {
-      return defs;
+    for (let i = 0; i < defs.length; i += 1) {
+      const tag = defs[i];
+      if (!tag || !tag.id || seen.has(tag.id)) continue;
+      seen.add(tag.id);
+      tagsOut.push({ id: tag.id, name: tag.name, color: normalizeTagColor(tag.color) });
     }
 
-    const inferred = [];
-    const inferredSeen = new Set();
+    if (tagsOut.length) {
+      return tagsOut;
+    }
 
     const byConceptKeys = Object.keys(byConcept);
     for (let i = 0; i < byConceptKeys.length; i += 1) {
       const tagList = Array.isArray(byConcept[byConceptKeys[i]]) ? byConcept[byConceptKeys[i]] : [];
       for (let j = 0; j < tagList.length; j += 1) {
         const tagId = toString(tagList[j]);
-        if (!tagId || inferredSeen.has(tagId)) continue;
-        inferredSeen.add(tagId);
-        inferred.push({ id: tagId, name: tagId });
+        if (!tagId || seen.has(tagId)) continue;
+        seen.add(tagId);
+        tagsOut.push({ id: tagId, name: tagId, color: TAG_DEFAULT_COLOR });
       }
     }
 
     const assignmentKeys = Object.keys(assignments);
     for (let i = 0; i < assignmentKeys.length; i += 1) {
       const tagId = toString(assignmentKeys[i]);
-      if (!tagId || inferredSeen.has(tagId)) continue;
-      inferredSeen.add(tagId);
-      inferred.push({ id: tagId, name: tagId });
+      if (!tagId || seen.has(tagId)) continue;
+
+      if (looksNumericConceptId(tagId)) {
+        continue;
+      }
+
+      const assigned = assignments[assignmentKeys[i]];
+      if (Array.isArray(assigned)) {
+        const looksLikeConceptList = assigned.some(function (value) {
+          return looksNumericConceptId(value);
+        });
+        if (looksLikeConceptList) {
+          seen.add(tagId);
+          tagsOut.push({ id: tagId, name: tagId, color: TAG_DEFAULT_COLOR });
+        }
+      }
     }
 
-    return inferred;
+    return tagsOut;
+  }
+
+  function normalizeTagIdList(values) {
+    const inList = Array.isArray(values) ? values : [];
+    const out = [];
+    const seen = new Set();
+
+    for (let i = 0; i < inList.length; i += 1) {
+      const tagId = toString(inList[i]);
+      if (!tagId || seen.has(tagId)) continue;
+      if (tagId === TAG_PSEUDO_ALL || tagId === TAG_PSEUDO_UNTAGGED) continue;
+      seen.add(tagId);
+      out.push(tagId);
+    }
+
+    return out;
+  }
+
+  function normalizeTagFilter(filterLike) {
+    const payload = toObject(filterLike);
+    let includeUntagged = !!payload.includeUntagged;
+
+    if (typeof payload.showUntagged === 'boolean') {
+      includeUntagged = payload.showUntagged;
+    }
+
+    let candidates = [];
+    if (Array.isArray(payload.activeTagIds)) {
+      candidates = candidates.concat(payload.activeTagIds);
+    }
+    if (Array.isArray(payload.activeTags)) {
+      candidates = candidates.concat(payload.activeTags);
+    }
+
+    if (!candidates.length && payload.tagId != null && toString(payload.tagId) !== '') {
+      candidates.push(payload.tagId);
+    }
+
+    const normalized = [];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const value = toString(candidates[i]);
+      if (!value) continue;
+
+      const lower = value.toLowerCase();
+      if (value === TAG_PSEUDO_UNTAGGED || lower === 'untagged') {
+        includeUntagged = true;
+        continue;
+      }
+
+      if (value === TAG_PSEUDO_ALL || lower === 'all') {
+        continue;
+      }
+
+      normalized.push(value);
+    }
+
+    return {
+      activeTagIds: normalizeTagIdList(normalized),
+      includeUntagged: !!includeUntagged,
+    };
+  }
+
+  function sameStringArray(left, right) {
+    const a = Array.isArray(left) ? left : [];
+    const b = Array.isArray(right) ? right : [];
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  function activeTagsForEvent() {
+    const active = state.tagFilter.activeTagIds.slice();
+    if (state.tagFilter.includeUntagged) {
+      active.push('untagged');
+    }
+    return active;
+  }
+
+  function dispatchTagFilterChanged() {
+    dispatchEvent('parse:tag-filter-changed', {
+      activeTags: activeTagsForEvent(),
+    });
+  }
+
+  function hasKnownTagId(tagId) {
+    const wanted = toString(tagId);
+    if (!wanted) return false;
+    const entries = tagEntriesFromState();
+    for (let i = 0; i < entries.length; i += 1) {
+      if (toString(entries[i].id) === wanted) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function pruneMissingActiveTags() {
+    const nextActive = [];
+    const seen = new Set();
+
+    for (let i = 0; i < state.tagFilter.activeTagIds.length; i += 1) {
+      const tagId = toString(state.tagFilter.activeTagIds[i]);
+      if (!tagId || seen.has(tagId)) continue;
+      if (!hasKnownTagId(tagId)) continue;
+      seen.add(tagId);
+      nextActive.push(tagId);
+    }
+
+    const changed = !sameStringArray(nextActive, state.tagFilter.activeTagIds);
+    if (changed) {
+      state.tagFilter.activeTagIds = nextActive;
+    }
+    return changed;
+  }
+
+  function setTagFilter(nextFilter, options) {
+    const opts = toObject(options);
+    const normalized = normalizeTagFilter(nextFilter);
+    const previous = {
+      activeTagIds: state.tagFilter.activeTagIds.slice(),
+      includeUntagged: !!state.tagFilter.includeUntagged,
+    };
+
+    state.tagFilter.activeTagIds = normalized.activeTagIds;
+    state.tagFilter.includeUntagged = normalized.includeUntagged;
+    pruneMissingActiveTags();
+
+    const changed = !sameStringArray(previous.activeTagIds, state.tagFilter.activeTagIds) ||
+      previous.includeUntagged !== state.tagFilter.includeUntagged;
+
+    if (!changed && !opts.force) {
+      return false;
+    }
+
+    renderHeader();
+    syncViews();
+    emitCompareOpen();
+
+    if (opts.dispatch !== false) {
+      dispatchTagFilterChanged();
+    }
+
+    return true;
+  }
+
+  function toggleTagFilterTag(rawTagId) {
+    const tagId = toString(rawTagId);
+    if (!tagId) return;
+
+    if (tagId === TAG_PSEUDO_ALL) {
+      setTagFilter({ activeTagIds: [], includeUntagged: false });
+      return;
+    }
+
+    if (tagId === TAG_PSEUDO_UNTAGGED) {
+      setTagFilter({
+        activeTagIds: state.tagFilter.activeTagIds,
+        includeUntagged: !state.tagFilter.includeUntagged,
+      });
+      return;
+    }
+
+    if (!hasKnownTagId(tagId)) {
+      return;
+    }
+
+    const nextActive = state.tagFilter.activeTagIds.slice();
+    const index = nextActive.indexOf(tagId);
+    if (index === -1) {
+      nextActive.push(tagId);
+    } else {
+      nextActive.splice(index, 1);
+    }
+
+    setTagFilter({
+      activeTagIds: nextActive,
+      includeUntagged: state.tagFilter.includeUntagged,
+    });
+  }
+
+  function tagPillHtml(tagId, label, color, active) {
+    const pillColor = normalizeTagColor(color);
+    const isActive = !!active;
+    const background = isActive ? pillColor : hexToRgba(pillColor, 0.16);
+    const textColor = isActive ? '#07101b' : pillColor;
+
+    return '<button type="button" class="compare-btn compare-tag-pill" data-action="toggle-tag-pill" data-tag-id="' + escapeHtml(tagId) + '" aria-pressed="' + (isActive ? 'true' : 'false') + '" style="border-color:' + pillColor + ';background:' + background + ';color:' + textColor + ';font-weight:' + (isActive ? '700' : '600') + ';">' +
+      escapeHtml(label) +
+      '</button>';
+  }
+
+  function tagFilterBarHtml() {
+    const entries = tagEntriesFromState();
+    const allActive = !state.tagFilter.activeTagIds.length && !state.tagFilter.includeUntagged;
+    const untaggedActive = !!state.tagFilter.includeUntagged;
+    const pills = [];
+
+    pills.push(tagPillHtml(TAG_PSEUDO_ALL, 'All', '#4cc2ff', allActive));
+    pills.push(tagPillHtml(TAG_PSEUDO_UNTAGGED, 'Untagged', '#9db0d0', untaggedActive));
+
+    for (let i = 0; i < entries.length; i += 1) {
+      const tag = entries[i];
+      const isActive = state.tagFilter.activeTagIds.indexOf(tag.id) !== -1;
+      pills.push(tagPillHtml(tag.id, tag.name || tag.id, tag.color, isActive));
+    }
+
+    return '<div class="compare-tag-filter-bar" id="compare-tag-filter-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">' +
+      '<span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-right:2px;">Tags</span>' +
+      pills.join('') +
+      '</div>';
   }
 
   function tagsForConcept(conceptId) {
@@ -594,10 +1021,21 @@
     }
 
     const tags = toObject(P.tags);
+    const tagAssignments = toObject(tags.assignments);
     const byConcept = toObject(tags.byConcept);
-    const assignments = toObject(tags.assignments);
     const result = [];
     const seen = new Set();
+
+    const directAssignments = Array.isArray(tagAssignments[conceptKey])
+      ? tagAssignments[conceptKey]
+      : (Array.isArray(tagAssignments[String(Number(conceptKey))]) ? tagAssignments[String(Number(conceptKey))] : []);
+
+    for (let i = 0; i < directAssignments.length; i += 1) {
+      const tagId = toString(directAssignments[i]);
+      if (!tagId || seen.has(tagId)) continue;
+      seen.add(tagId);
+      result.push(tagId);
+    }
 
     const fromByConcept = Array.isArray(byConcept[conceptKey])
       ? byConcept[conceptKey]
@@ -610,10 +1048,10 @@
       result.push(tagId);
     }
 
-    const assignmentKeys = Object.keys(assignments);
+    const assignmentKeys = Object.keys(tagAssignments);
     for (let i = 0; i < assignmentKeys.length; i += 1) {
       const tagId = assignmentKeys[i];
-      const concepts = Array.isArray(assignments[tagId]) ? assignments[tagId] : [];
+      const concepts = Array.isArray(tagAssignments[tagId]) ? tagAssignments[tagId] : [];
       for (let j = 0; j < concepts.length; j += 1) {
         const candidateId = normalizeConceptId(concepts[j]);
         if (candidateId === conceptKey) {
@@ -630,45 +1068,27 @@
     return result;
   }
 
-  function conceptHasTag(conceptId, tagId) {
-    const wanted = toString(tagId);
-    if (!wanted) return false;
-
-    const conceptTags = tagsForConcept(conceptId);
-    for (let i = 0; i < conceptTags.length; i += 1) {
-      if (toString(conceptTags[i]) === wanted) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function conceptHasAnyTag(conceptId) {
-    return tagsForConcept(conceptId).length > 0;
-  }
-
   function applyTagFilter(concepts) {
     const list = Array.isArray(concepts) ? concepts : [];
-    const tagId = state.tagFilter.tagId ? toString(state.tagFilter.tagId) : null;
-    const showUntagged = !!state.tagFilter.showUntagged;
+    const activeTagIds = normalizeTagIdList(state.tagFilter.activeTagIds);
+    const includeUntagged = !!state.tagFilter.includeUntagged;
 
-    if (!tagId) {
-      if (showUntagged) {
-        return list.slice();
-      }
-
-      return list.filter(function (concept) {
-        return conceptHasAnyTag(concept.id);
-      });
+    if (!activeTagIds.length && !includeUntagged) {
+      return list.slice();
     }
 
     return list.filter(function (concept) {
-      if (conceptHasTag(concept.id, tagId)) {
-        return true;
+      const conceptTags = tagsForConcept(concept.id);
+      if (!conceptTags.length) {
+        return includeUntagged;
       }
-      if (showUntagged && !conceptHasAnyTag(concept.id)) {
-        return true;
+
+      for (let i = 0; i < activeTagIds.length; i += 1) {
+        if (conceptTags.indexOf(activeTagIds[i]) !== -1) {
+          return true;
+        }
       }
+
       return false;
     });
   }
@@ -828,19 +1248,6 @@
     return options.join('');
   }
 
-  function tagOptionsHtml() {
-    const entries = tagEntriesFromState();
-    const options = ['<option value="">All tags</option>'];
-
-    for (let i = 0; i < entries.length; i += 1) {
-      const tag = entries[i];
-      const selected = toString(state.tagFilter.tagId) === toString(tag.id) ? ' selected' : '';
-      options.push('<option value="' + escapeHtml(tag.id) + '"' + selected + '>' + escapeHtml(tag.name || tag.id) + '</option>');
-    }
-
-    return options.join('');
-  }
-
   function renderHeader() {
     if (!state.headerEl) return;
 
@@ -856,21 +1263,13 @@
         '</div>' +
 
         '<div class="compare-control-group">' +
-          '<label for="compare-tag-select">Tag filter</label>' +
-          '<select id="compare-tag-select" class="compare-select">' + tagOptionsHtml() + '</select>' +
-          '<label class="compare-tag-toggle" for="compare-tag-untagged">' +
-            '<input id="compare-tag-untagged" type="checkbox" ' + (state.tagFilter.showUntagged ? 'checked' : '') + '>' +
-            '<span>show untagged</span>' +
-          '</label>' +
-        '</div>' +
-
-        '<div class="compare-control-group">' +
           '<label for="compare-compute-type">Compute</label>' +
           '<select id="compare-compute-type" class="compare-select">' + computeTypeOptionsHtml() + '</select>' +
           '<button type="button" class="compare-btn primary" data-action="run-compute">Run</button>' +
           '<button type="button" class="compare-btn" data-action="refresh-enrichments">Refresh</button>' +
         '</div>' +
       '</div>' +
+      tagFilterBarHtml() +
       '<div class="compare-speaker-chips">' + selectedSpeakersHtml() + '</div>';
   }
 
@@ -982,12 +1381,22 @@
   }
 
   function onHeaderClick(event) {
-    const actionEl = event.target.closest('[data-action]');
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') {
+      return;
+    }
+
+    const actionEl = target.closest('[data-action]');
     if (!actionEl || !state.headerEl || !state.headerEl.contains(actionEl)) {
       return;
     }
 
     const action = toString(actionEl.dataset.action);
+
+    if (action === 'toggle-tag-pill') {
+      toggleTagFilterTag(actionEl.dataset.tagId);
+      return;
+    }
 
     if (action === 'go-annotate') {
       dispatchEvent('parse:compare-close', {});
@@ -1035,29 +1444,165 @@
       if (COMPUTE_TYPE_ORDER.indexOf(type) !== -1) {
         state.computeType = type;
       }
-      return;
-    }
-
-    if (target.id === 'compare-tag-select' || target.id === 'compare-tag-untagged') {
-      const tagSelect = state.headerEl.querySelector('#compare-tag-select');
-      const showUntagged = state.headerEl.querySelector('#compare-tag-untagged');
-      dispatchEvent('parse:tag-filter', {
-        tagId: tagSelect && toString(tagSelect.value) ? toString(tagSelect.value) : null,
-        showUntagged: !!(showUntagged && showUntagged.checked),
-      });
     }
   }
 
   function onTagFilter(event) {
     const detail = toObject(event && event.detail);
-    state.tagFilter.tagId = detail.tagId != null && toString(detail.tagId) !== ''
-      ? toString(detail.tagId)
-      : null;
-    state.tagFilter.showUntagged = detail.showUntagged == null ? true : !!detail.showUntagged;
+    setTagFilter(detail, { dispatch: true });
+  }
 
+  function onTagDefinitionsChanged() {
+    const activeChanged = pruneMissingActiveTags();
     renderHeader();
     syncViews();
     emitCompareOpen();
+
+    if (activeChanged) {
+      dispatchTagFilterChanged();
+    }
+  }
+
+  function onItemsTagged() {
+    syncViews();
+    emitCompareOpen();
+  }
+
+  function ensureEnrichmentsWritable() {
+    const current = toObject(P.enrichments);
+    P.enrichments = Object.assign({}, current);
+    P.enrichments.manual_overrides = toObject(P.enrichments.manual_overrides);
+    P.enrichments.manual_overrides.borrowing_flags = toObject(P.enrichments.manual_overrides.borrowing_flags);
+    P.enrichments.manual_overrides.accepted_concepts = toObject(P.enrichments.manual_overrides.accepted_concepts);
+    return P.enrichments;
+  }
+
+  function normalizeBorrowingDecision(value) {
+    const raw = toString(value).toLowerCase();
+    if (!raw) return '';
+
+    if (
+      raw === 'native' ||
+      raw === 'not_borrowing' ||
+      raw === 'not-borrowing' ||
+      raw === 'not borrowing' ||
+      raw === 'notborrowed' ||
+      raw === 'no'
+    ) {
+      return 'native';
+    }
+
+    if (
+      raw === 'borrowed' ||
+      raw === 'confirmed' ||
+      raw === 'borrowing' ||
+      raw === 'loan' ||
+      raw === 'yes'
+    ) {
+      return 'borrowed';
+    }
+
+    if (
+      raw === 'uncertain' ||
+      raw === 'undecided' ||
+      raw === 'unknown' ||
+      raw === 'maybe'
+    ) {
+      return 'uncertain';
+    }
+
+    if (raw === 'skip' || raw === 'skipped') {
+      return 'skip';
+    }
+
+    return '';
+  }
+
+  function borrowingStatusForDecision(decision) {
+    if (decision === 'borrowed') return 'confirmed';
+    if (decision === 'native') return 'not_borrowing';
+    return 'undecided';
+  }
+
+  function persistEnrichments(reason) {
+    const moduleApi = toObject(P.modules).enrichmentsIO;
+    const fallback = toObject(P.modules).enrichments;
+
+    if (moduleApi && typeof moduleApi.write === 'function') {
+      return moduleApi.write(reason);
+    }
+
+    if (moduleApi && typeof moduleApi.save === 'function') {
+      return moduleApi.save(reason);
+    }
+
+    if (fallback && typeof fallback.save === 'function') {
+      return fallback.save(reason);
+    }
+
+    return Promise.resolve(false);
+  }
+
+  function onBorrowingDecision(event) {
+    const detail = toObject(event && event.detail);
+    const conceptId = normalizeConceptId(detail.conceptId);
+    const speakerId = toString(detail.speakerId || detail.speaker);
+    const decision = normalizeBorrowingDecision(detail.decision || detail.status);
+    const sourceLang = toString(detail.sourceLang || detail.source_lang).toLowerCase();
+
+    if (!conceptId || !speakerId || !decision) {
+      return;
+    }
+
+    const enrichments = ensureEnrichmentsWritable();
+    const manualOverrides = toObject(enrichments.manual_overrides);
+    const borrowingFlags = toObject(manualOverrides.borrowing_flags);
+    const conceptFlags = toObject(borrowingFlags[conceptId]);
+    const existing = toObject(conceptFlags[speakerId]);
+
+    const nextEntry = Object.assign({}, existing, {
+      decision: decision,
+      status: borrowingStatusForDecision(decision),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (decision === 'borrowed' && sourceLang) {
+      nextEntry.source_lang = sourceLang;
+      nextEntry.sourceLang = sourceLang;
+    } else {
+      delete nextEntry.source_lang;
+      delete nextEntry.sourceLang;
+    }
+
+    conceptFlags[speakerId] = nextEntry;
+    borrowingFlags[conceptId] = conceptFlags;
+    manualOverrides.borrowing_flags = borrowingFlags;
+    enrichments.manual_overrides = manualOverrides;
+
+    dispatchEnrichmentsUpdatedFromMemory();
+
+    persistEnrichments('borrowing-decision').catch(function (error) {
+      console.warn('[compare] failed to save borrowing decision:', error);
+    });
+  }
+
+  function onCognateAcceptPersist(event) {
+    const detail = toObject(event && event.detail);
+    const conceptId = normalizeConceptId(detail.conceptId);
+    if (!conceptId) return;
+
+    const enrichments = ensureEnrichmentsWritable();
+    const manualOverrides = toObject(enrichments.manual_overrides);
+    const acceptedConcepts = toObject(manualOverrides.accepted_concepts);
+    acceptedConcepts[conceptId] = new Date().toISOString();
+    manualOverrides.accepted_concepts = acceptedConcepts;
+    enrichments.manual_overrides = manualOverrides;
+
+    dispatchEnrichmentsUpdatedFromMemory();
+
+    persistEnrichments('cognate-accept').catch(function (error) {
+      console.warn('[compare] failed to save cognate accept:', error);
+    });
   }
 
   function onConceptSelected(event) {
@@ -1425,6 +1970,7 @@
     await loadAnnotationsForSpeakers(allSpeakers);
     await ensureEnrichments();
     await ensureTagsModule();
+    pruneMissingActiveTags();
 
     state.availableSpeakers = collectSpeakerIds();
     if (!state.selectedSpeakers.length) {
@@ -1446,6 +1992,9 @@
 
     ensureSubmodules();
 
+    // Re-broadcast after submodules subscribe, so compare UI panels hydrate from enrichments immediately.
+    dispatchEnrichmentsUpdatedFromMemory();
+
     if (P.modules.audioPlayer && typeof P.modules.audioPlayer.init === 'function') {
       P.modules.audioPlayer.init();
     }
@@ -1462,8 +2011,13 @@
     addListener(state.headerEl, 'change', onHeaderChange);
 
     addListener(document, 'parse:tag-filter', onTagFilter);
+    addListener(document, 'parse:tag-created', onTagDefinitionsChanged);
+    addListener(document, 'parse:tag-deleted', onTagDefinitionsChanged);
+    addListener(document, 'parse:items-tagged', onItemsTagged);
     addListener(document, CONCEPT_SELECTED_EVENT, onConceptSelected);
     addListener(document, 'parse:compute-request', onComputeRequest);
+    addListener(document, 'parse:borrowing-decision', onBorrowingDecision);
+    addListener(document, 'parse:cognate-accept', onCognateAcceptPersist);
   }
 
   /**
@@ -1493,7 +2047,23 @@
     P.compareState = toObject(P.compareState);
     state.selectedSpeakers = normalizeSpeakerList(P.compareState.selectedSpeakers || []);
     state.selectedConceptId = normalizeConceptId(P.compareState.selectedConceptId);
-    state.tagFilter = Object.assign({}, state.tagFilter, toObject(P.compareState.tagFilter));
+    (function () {
+      const savedTagFilter = toObject(P.compareState.tagFilter);
+      const hasModernShape =
+        Array.isArray(savedTagFilter.activeTagIds) ||
+        Array.isArray(savedTagFilter.activeTags) ||
+        typeof savedTagFilter.includeUntagged === 'boolean';
+
+      if (
+        !hasModernShape &&
+        savedTagFilter.tagId == null &&
+        savedTagFilter.showUntagged === true
+      ) {
+        state.tagFilter = { activeTagIds: [], includeUntagged: false };
+      } else {
+        state.tagFilter = normalizeTagFilter(savedTagFilter);
+      }
+    })();
 
     bindEvents();
     state.initialized = true;
@@ -1556,7 +2126,7 @@
     state.selectedConceptId = '';
     state.computeType = 'cognates';
     state.conceptDispatchToken = 0;
-    state.tagFilter = { tagId: null, showUntagged: true };
+    state.tagFilter = { activeTagIds: [], includeUntagged: false };
   }
 
   /**

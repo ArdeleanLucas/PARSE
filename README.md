@@ -1,139 +1,99 @@
 # PARSE
 
-**P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer
+**P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer  
+Browser-based dual-mode workstation for linguistic fieldwork and cross-speaker comparison.  
+Repository: [TarahAssistant/PARSE](https://github.com/TarahAssistant/PARSE)
 
-PARSE is a browser-based tool for linguists who need to review, annotate, and verify phonetic field recordings. It was developed in the context of Southern Kurdish dialect phylogenetics research, but the workflow is general-purpose: if you have long-form WAV recordings plus timestamp or cue data, PARSE gives you a lightweight environment for segment-level review without requiring a heavy desktop annotation stack.
+## What is PARSE
 
-Repository: [`TarahAssistant/PARSE`](https://github.com/TarahAssistant/PARSE)
+PARSE is a browser-based research tool for linguists who work with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, and comparative analysis in one workspace, so researchers can move from raw recordings to analysis-ready linguistic data without jumping between several disconnected tools.
 
-## What PARSE is for
+Version 5.0 introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes run in the browser, and both are built around precise time-aligned annotations.
 
-Field linguistics workflows often involve moving back and forth between audio editors, spreadsheets, transcripts, and annotation software. PARSE is designed to bring that review loop into a single browser-based workspace so a researcher can:
+No installation of frontend tooling is required for normal use. Run the local Python server, open the interface in a browser, and start working. PARSE is designed for real fieldwork constraints (large recordings, mixed metadata quality, iterative review), and should be treated as **research software** rather than production software.
 
-- inspect long recordings visually,
-- jump to candidate segments quickly,
-- correct timestamp boundaries by hand,
-- annotate each segment with phonetic and orthographic forms, and
-- preserve review progress locally while building a cleaner dataset for downstream analysis.
+## Modes
 
-The initial target use case is a Southern Kurdish dialect comparison thesis, but the tool is suitable for any linguist working with:
+### Annotate mode
 
-- WAV recordings,
-- cue or timestamp files,
-- segment-level transcription or gloss data, and
-- multi-speaker comparison workflows.
+Annotate mode is the per-speaker segmentation workstation.
 
-## Core features
+- Waveform review with WaveSurfer 7 for long recordings.
+- Four core tiers: **IPA**, **orthography**, **concept**, and **speaker**.
+- AI-assisted STT support for locating candidate segments.
+- Draggable timestamp regions for boundary correction.
+- Fast segment playback and iterative annotation refinement.
 
-- **Waveform viewer powered by WaveSurfer.js** for browsing long recordings in the browser
-- **Segment-level annotation** with both **IPA** and **orthographic/script** fields
-- **Draggable timestamp regions** for adjusting segment start and end boundaries
-- **Auto-play segment review** for fast verification of clipped regions
-- **Import wizard** for bringing in recordings plus **CSV/TextGrid** cue data
-- **Multi-speaker support** for comparative review across speakers or dialects
-- **localStorage persistence** so browser-side annotation progress survives page reloads
-- **Lightweight deployment**: a single self-contained HTML app, no build step, no frontend framework
+### Compare mode
 
-## Technology overview
+Compare mode is the cross-speaker analysis workspace for cognates and phylogenetic preparation.
 
-PARSE is intentionally simple to run and inspect:
+- Concept x speaker comparison table for side-by-side lexical review.
+- Cognate controls: **accept**, **split**, **merge**, and **cycle**.
+- Borrowing adjudication aided by contact-language similarity signals.
+- Enrichments layer for computed analysis metadata.
+- Tag system for scoped filtering and selective analysis.
+- Export to LingPy-compatible TSV for downstream pipelines.
 
-- **Frontend:** a single self-contained `parse.html` file
-- **Language:** vanilla JavaScript, HTML, and CSS
-- **Waveform library:** WaveSurfer.js loaded from CDN
-- **Build tooling:** none
-- **Serving model:** any HTTP server with **Range request** support for long-audio playback
-- **Persistence:** browser-local storage for review state
-- **Supporting pipeline:** Python utilities in `python/` and `scripts/` for preparing datasets
+## AI Provider System
 
-This makes the project easy to clone, serve locally, and adapt for specific research datasets.
+PARSE v5.0 supports four AI backends:
 
-## Quickstart
+- **Local faster-whisper** (GPU-capable local processing)
+- **OpenAI Whisper API**
+- **xAI / Grok**
+- **Ollama**
 
-### Requirements
+Provider selection is feature-specific. You can route **STT**, **IPA transcription**, and **LLM tasks** to different providers in the same project. Configuration lives in `config/ai_config.json`.
 
-- Python 3
-- A modern browser
-- An HTTP server that supports **Range requests**
+## Quick Start
 
-> Do **not** open `parse.html` directly with `file://`. Long-form audio playback works best when the app is served over HTTP.
-
-From the project root:
+From the repository root:
 
 ```bash
-python3 serve.py 8766
+python3 python/server.py
 ```
 
-Then open:
+The server runs on port `8766` by default.
+
+Open either mode in your browser:
+
+- Annotate mode: `http://localhost:8766/parse.html`
+- Compare mode: `http://localhost:8766/compare.html`
+
+## Project Structure
 
 ```text
-http://localhost:8766/parse.html
+parse.html          -- Annotate mode
+compare.html        -- Compare mode
+js/annotate/        -- Annotate JS modules
+js/compare/         -- Compare JS modules
+js/shared/          -- Shared modules (tags, audio, AI client)
+python/ai/          -- AI provider layer
+python/compare/     -- Compare pipeline (cognates, matching, offsets)
+config/             -- Configuration files
+docs/               -- Documentation
 ```
 
-If your local checkout is still using the current helper scripts in this repository, the existing equivalents are `python3 python/thesis_server.py` or `./start_parse.sh`.
+## Data Architecture
 
-## Typical workflow
+PARSE uses a hybrid data model:
 
-1. Start the local HTTP server.
-2. Open `parse.html` in the browser.
-3. Import one or more WAV recordings.
-4. Import a cue file or timestamp file (for example CSV or TextGrid).
-5. Review proposed segments in the waveform view.
-6. Adjust region boundaries by dragging timestamps.
-7. Enter or correct IPA and orthographic annotations.
-8. Repeat across speakers while retaining progress locally in the browser.
+- **Live annotations**: per-speaker JSON annotation files (primary source of truth).
+- **Computed enrichments**: `parse-enrichments.json`, generated for comparative analysis overlays.
 
-## Data pipeline
+The enrichments layer stores computed structures such as cognate sets, similarity scores, and borrowing decisions, while preserving manual adjudications.
 
-In addition to the browser app, the repository includes Python-based data preparation utilities for building the review dataset:
+## Technology
 
-- **Audio normalization** for consistent working copies
-- **Waveform peak generation** for fast browser rendering
-- **Coarse transcript generation** for navigable text-aligned review
-- **AI suggestion generation** for candidate segment discovery
-- **Auxiliary scripts** for orthographic/transcription processing
+- Vanilla JavaScript (no build step)
+- Python 3.8+
+- WaveSurfer 7 (CDN)
+- No npm/node runtime requirement for normal use
 
-Relevant directories:
+## Context
 
-- `python/` — normalization, transcript prep, peaks generation, AI suggestions, import/export helpers
-- `scripts/` — auxiliary processing scripts used during dataset preparation
-
-## Project structure
-
-```text
-PARSE/
-├── parse.html              # Main self-contained browser app
-├── python/                 # Data prep and server-side helper scripts
-│   ├── normalize_audio.py
-│   ├── build_coarse_transcripts.py
-│   ├── generate_peaks.py
-│   ├── generate_ai_suggestions.py
-│   └── ...
-├── scripts/                # Auxiliary processing scripts
-├── js/                     # Modular/dev JavaScript components
-├── ONBOARDING_PLAN.md      # Import and onboarding design notes
-├── PROJECT_PLAN.md         # Project architecture and roadmap
-├── CODING.md               # Build and implementation protocol
-├── review_tool_dev.html    # Alternate/dev shell
-└── LICENSE
-```
-
-## Research context
-
-PARSE was built for **Southern Kurdish dialect phylogenetics** work, where the practical problem is not just transcription, but reliable recovery of comparable lexical items from long field recordings across many speakers.
-
-That said, the design is intentionally broader than a single thesis. Any researcher with:
-
-- field recordings,
-- segment timestamps,
-- cue exports from tools like Praat or Adobe Audition, or
-- speaker-by-speaker review needs
-
-can adapt PARSE as a lightweight annotation and verification environment.
-
-## Status
-
-PARSE is an active research software project. The current repository contains both the main single-file browser application and supporting scripts for a broader annotation, import/export, and AI-assisted review pipeline.
+PARSE was built for a Southern Kurdish dialect phylogenetics thesis at the University of Bamberg. The working dataset includes 11 speakers and an 85-item wordlist, with downstream Bayesian phylogenetic analysis in BEAST 2.
 
 ## License
 

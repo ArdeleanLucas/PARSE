@@ -1,4 +1,4 @@
-# INTERFACES.md — PARSE Module Contract v5.0
+# INTERFACES.md — PARSE Module Contract v5.1 (Post-build audit)
 
 All modules attach to `window.PARSE`. Communication is via CustomEvents on `document`.
 
@@ -8,51 +8,80 @@ All modules attach to `window.PARSE`. Communication is via CustomEvents on `docu
 
 ```js
 window.PARSE = {
-  // Project config (loaded from project.json on startup)
+  // Project config + loaded assets
   project: null,
+  sourceIndex: null,
+  transcripts: {},
+  suggestions: null,
+  annotations: {},
 
-  // Data stores
-  sourceIndex: null,       // source_index.json
-  transcripts: {},         // transcripts/<Speaker>.json, keyed by speaker ID
-  suggestions: null,       // ai_suggestions.json
-  annotations: {},         // annotation data, keyed by speaker ID
-  enrichments: null,       // parse-enrichments.json (cognate sets, similarity, borrowing)
-  tags: {},                // tag definitions and assignments
+  // Compare enrichments cache (normalized by js/compare/enrichments.js)
+  enrichments: {
+    computed_at: null,
+    config: {},
+    cognate_sets: {},
+    similarity: {},
+    borrowing_flags: {},
+    manual_overrides: {
+      cognate_sets: {},
+      borrowing_flags: {},
+      accepted_concepts: {},
+    },
+    history: [],
+  },
 
-  // Current state
-  mode: 'annotate',        // 'annotate' | 'compare'
+  // Tag state (normalized by js/shared/tags.js)
+  tags: {
+    tags: [],                      // [{ id, name, color }]
+    assignments: {},               // { [conceptId]: string[] }
+    included: {},                  // { [conceptId]: boolean } (false entries persisted)
+    filter: { tagId: null, showUntagged: false },
+  },
+
+  // Current app mode and selection
+  mode: 'annotate',               // 'annotate' | 'compare'
   currentSpeaker: null,
   currentConcept: null,
+
+  // Compare UI/session snapshot (set by js/compare/compare.js + concept-table.js)
+  compareState: {
+    availableSpeakers: [],
+    selectedSpeakers: [],
+    concepts: [],
+    filteredConcepts: [],
+    selectedConceptId: '',
+    tagFilter: { tagId: null, showUntagged: true },
+  },
 
   // Module references (set by each module's init())
   modules: {
     // Shared
-    config: null,          // js/shared/project-config.js
-    annotationStore: null, // js/shared/annotation-store.js
-    tags: null,            // js/shared/tags.js
-    audioPlayer: null,     // js/shared/audio-player.js
-    aiClient: null,        // js/shared/ai-client.js
-    spectrogram: null,     // js/shared/spectrogram-worker.js
+    config: null,
+    annotationStore: null,
+    tags: null,                   // js/shared/tags.js
+    audioPlayer: null,            // js/shared/audio-player.js
+    aiClient: null,               // js/shared/ai-client.js
+    spectrogram: null,
 
     // Annotate mode
-    panel: null,           // js/annotate/parse.js
-    waveform: null,        // js/annotate/waveform-controller.js
-    transcript: null,      // js/annotate/transcript-panel.js
-    suggestions: null,     // js/annotate/suggestions-panel.js
-    regions: null,         // js/annotate/region-manager.js
-    fullscreen: null,      // js/annotate/fullscreen-mode.js
-    annotationPanel: null, // js/annotate/annotation-panel.js
-    videoSync: null,       // js/annotate/video-sync-panel.js
-    importExport: null,    // js/annotate/import-export.js
-    onboarding: null,      // js/annotate/onboarding.js
+    panel: null,
+    waveform: null,
+    transcript: null,
+    suggestions: null,
+    regions: null,
+    fullscreen: null,
+    annotationPanel: null,
+    videoSync: null,
+    importExport: null,
+    onboarding: null,
 
     // Compare mode
-    compare: null,         // js/compare/compare.js
-    conceptTable: null,    // js/compare/concept-table.js
-    cognateControls: null, // js/compare/cognate-controls.js
-    borrowingPanel: null,  // js/compare/borrowing-panel.js
-    speakerImport: null,   // js/compare/speaker-import.js
-    enrichmentsIO: null,   // js/compare/enrichments.js
+    compare: null,                // js/compare/compare.js
+    conceptTable: null,           // js/compare/concept-table.js
+    cognateControls: null,        // js/compare/cognate-controls.js
+    borrowingPanel: null,         // js/compare/borrowing-panel.js
+    speakerImport: null,          // [PLANNED] js/compare/speaker-import.js
+    enrichmentsIO: null,          // js/compare/enrichments.js
   }
 };
 ```
@@ -182,7 +211,7 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:export-elan" → { speaker }
 "parse:export-csv" → { speaker: string | "all" }
 "parse:export-segments" → { speaker: string | "all" }
-"parse:export-wordlist" → { speakers: string[], conceptIds: number[] }  // NEW: LingPy TSV export
+"parse:export-wordlist" → { speakers: string[], conceptIds: number[] }  // [PLANNED] LingPy TSV export event not emitted in current JS
 "parse:io-complete" → { operation, format, success, message? }
 ```
 
@@ -193,14 +222,14 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:video-sync-progress" → { speaker, step, progress }
 "parse:video-sync-result" → { speaker, offsetSec, driftRate, method, aiVerified, confidence }
 "parse:video-sync-locked" → { speaker, videoFile, offsetSec, driftRate, manualAdjustmentSec, fps }
-"parse:video-extract-clips" → { speaker: string | "all" }
+"parse:video-extract-clips" → { speaker: string | "all" }  // [PLANNED] not emitted in current JS
 ```
 
 ### Compare Mode (NEW in v5.0)
 
 ```js
 // Compare mode opened
-"parse:compare-open" → { speakers: string[], conceptIds: number[] }
+"parse:compare-open" → { speakers: string[], conceptIds: Array<number | string> }
 
 // Compare mode closed
 "parse:compare-close" → {}
@@ -210,6 +239,19 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 
 // Speaker removed from comparison
 "parse:compare-speaker-remove" → { speaker }
+
+// Current compare speaker list changed
+"parse:compare-speakers-changed" → { speakers: string[] }
+
+// Canonical concept selection event used by compare submodules
+"parse:compare-concept-select" → { conceptId: number | string | null, conceptLabel: string, speakers: string[] }
+
+// Compatibility + high-level concept selection broadcast
+"parse:compare-concept-selected" → {
+  conceptId: string | null,
+  conceptLabel?: string,
+  speakers?: string[]
+}
 ```
 
 ### Cognate Controls (NEW in v5.0)
@@ -234,16 +276,28 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:cognate-cycle" → { conceptId, speaker, newGroup: string }
 
 // Cognate sets changed (any modification)
-"parse:cognates-changed" → { conceptId, groups: Record<string, string[]> }
+"parse:cognates-changed" → {
+  conceptId,
+  groups: Record<string, string[]>,
+  source?: string // set by enrichments.js
+}
 ```
 
 ### Borrowing (NEW in v5.0)
 
 ```js
-// Borrowing status changed for a speaker's form
-"parse:borrowing-changed" → { conceptId, speaker, status: "confirmed" | "not_borrowing" | "undecided" }
+// Borrowing decision emitted by borrowing panel
+"parse:borrowing-decision" → {
+  conceptId,
+  speakerId: string,
+  decision: "borrowed" | "inherited" | "skip",
+  sourceLang: string | null
+}
 
-// Borrowing handling decision
+// [PLANNED] event consumed by enrichments.js; no current dispatcher in JS
+"parse:borrowing-changed" → { conceptId, speaker, status }
+
+// [PLANNED] event consumed by enrichments.js; no current dispatcher in JS
 "parse:borrowing-handle" → { conceptId, speaker, handling: "missing" | "separate_cognate" }
 ```
 
@@ -254,7 +308,7 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:compute-request" → {
   type: "cognates" | "offset" | "spectrograms",
   speakers: string[],
-  conceptIds: number[],
+  conceptIds: Array<number | string>,
   contactLanguages?: string[],
   lexstatThreshold?: number
 }
@@ -269,14 +323,17 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:compute-done" → { jobId, type, success: boolean, error?: string }
 
 // Enrichments updated (data refreshed in memory)
-"parse:enrichments-updated" → { computedAt, speakers: string[], concepts: number[] }
+"parse:enrichments-updated" → { computedAt, speakers: string[], concepts: Array<number | string> }
+
+// Enrichments read/write error
+"parse:enrichments-error" → { message: string, timestamp: string }
 ```
 
 ### AI / STT (NEW in v5.0)
 
 ```js
 // Full-file STT requested for new speaker
-"parse:stt-request" → { speaker, sourceWav, language?, model? }
+"parse:stt-request" → { speaker, sourceWav, options?: object }
 
 // STT job started
 "parse:stt-started" → { jobId, speaker, estimatedDuration? }
@@ -287,34 +344,233 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 // STT completed
 "parse:stt-done" → { jobId, speaker, success: boolean, totalSegments?: number, error?: string }
 
-// Cross-speaker match results available
+// [PLANNED] Cross-speaker match results event not emitted in current JS
 "parse:match-results" → { speaker, matches: Array<{ conceptId, candidates: Array<{ startSec, endSec, ipa, ortho, confidence }> }> }
 ```
 
 ---
 
-## Module Init Pattern
+## Module APIs (implemented)
 
-Each module exports `init` and `destroy`. The HTML shell calls them in order.
+### `window.PARSE.modules.compare` (`js/compare/compare.js`)
 
-```js
-(function() {
-  'use strict';
-  const P = window.PARSE;
+**Exports**
 
-  function init(containerEl) {
-    // containerEl = the DOM element this module renders into
-    // Set up event listeners, render initial UI
-    // Return a public API object
-  }
+- `init(containerEl?) => Promise<object>`
+- `destroy() => void`
+- `refresh() => Promise<void>`
+- `getSelectedSpeakers() => string[]`
 
-  function destroy() {
-    // Remove event listeners, clean up resources
-  }
+**Dispatches**
 
-  P.modules.moduleName = { init, destroy };
-})();
-```
+- `parse:compare-open`
+- `parse:compare-close`
+- `parse:compare-speaker-add`
+- `parse:compare-speaker-remove`
+- `parse:compare-speakers-changed`
+- `parse:compare-concept-selected`
+- `parse:compare-concept-select` (compat alias)
+- `parse:compute-request`
+- `parse:compute-started`
+- `parse:compute-progress`
+- `parse:compute-done`
+- `parse:tag-filter`
+
+**Consumes**
+
+- `parse:tag-filter` → updates local compare filter state, rerenders header/table, re-emits `parse:compare-open`
+- `parse:compare-concept-selected` → syncs selected concept in compare state
+- `parse:compute-request` → starts compute workflow + polling
+
+**Global state writes**
+
+- `P.mode = 'compare'`
+- `P.compareState.availableSpeakers`
+- `P.compareState.selectedSpeakers`
+- `P.compareState.concepts`
+- `P.compareState.filteredConcepts`
+- `P.compareState.selectedConceptId`
+- `P.compareState.tagFilter`
+
+### `window.PARSE.modules.conceptTable` (`js/compare/concept-table.js`)
+
+**Exports**
+
+- `init(containerEl?) => object`
+- `destroy() => void`
+- `setConcepts(concepts) => void`
+- `setSpeakers(speakers) => void`
+- `setData(payload) => void`
+- `refresh() => void`
+- `getVisibleConceptIds() => Array<number|string>`
+
+**Dispatches**
+
+- `parse:compare-concept-select`
+- `parse:compare-concept-selected`
+- `parse:audio-play`
+
+**Consumes**
+
+- `parse:enrichments-updated` → rerenders table and cognate badges
+- `parse:tag-filter` → rerenders with active filter
+- `parse:cognates-changed` → rerenders updated groups
+- `parse:compare-speakers-changed` → updates visible speaker columns
+- `parse:compare-concept-select` → syncs selected row
+- `parse:annotations-changed` → rerenders entries from latest annotations
+
+**Global state writes**
+
+- `P.currentConcept`
+- `P.compareState.selectedConceptId`
+
+### `window.PARSE.modules.cognateControls` (`js/compare/cognate-controls.js`)
+
+**Exports**
+
+- `init(containerEl?) => object`
+- `destroy() => void`
+- `setConcept(conceptId, conceptLabel?) => void`
+- `setSpeakers(speakers) => void`
+
+**Dispatches**
+
+- `parse:cognate-accept`
+- `parse:cognate-split-start`
+- `parse:cognate-split-assign`
+- `parse:cognate-split-done`
+- `parse:cognate-merge`
+- `parse:cognate-cycle`
+- `parse:cognates-changed`
+
+**Consumes**
+
+- `parse:compare-concept-select` → sets concept context and speaker list
+- `parse:compare-speakers-changed` → re-sanitizes group membership
+- `parse:cognates-changed` → updates panel state for current concept
+- `parse:enrichments-updated` → reloads groups from enrichments cache
+
+### `window.PARSE.modules.enrichmentsIO` (`js/compare/enrichments.js`)
+
+**Exports**
+
+- `init() => Promise<object>`
+- `destroy() => void`
+- `read() => Promise<object>`
+- `write(reason?) => Promise<object>`
+- `flushPending() => boolean`
+- `getError() => { message: string, timestamp: string } | null`
+- `getCognateGroupsForConcept(conceptId) => Record<string, string[]>`
+- `getGroupForSpeaker(conceptId, speaker) => string`
+- `setCognateGroups(conceptId, groups, source?) => void`
+- `clearManualOverride(conceptId) => boolean`
+
+**Dispatches**
+
+- `parse:enrichments-updated`
+- `parse:enrichments-error`
+- `parse:cognates-changed`
+
+**Consumes**
+
+- `parse:cognate-accept` → marks concept accepted in `manual_overrides.accepted_concepts`
+- `parse:cognate-split-done` → persists split output into manual cognate overrides
+- `parse:cognate-merge` → merges all speakers into group `A`
+- `parse:cognate-cycle` → cycles a speaker to next group and persists
+- `parse:borrowing-changed` → updates `manual_overrides.borrowing_flags` ([PLANNED] producer)
+- `parse:borrowing-handle` → updates borrowing handling override ([PLANNED] producer)
+- `parse:compare-close` → flushes pending debounced writes
+
+**Global state writes**
+
+- `P.enrichments` (normalized shape)
+
+### `window.PARSE.modules.tags` (`js/shared/tags.js`)
+
+**Exports**
+
+- `init(containerEl?) => object`
+- `destroy() => void`
+- `getTags() => Array<{ id, name, color }>`
+- `createTag(name, color?) => { id, name, color }`
+- `deleteTag(tagId) => boolean`
+- `renameTag(tagId, name) => { id, name, color } | null`
+- `addTagToConcepts(tagId, conceptIds) => number[]`
+- `removeTagFromConcepts(tagId, conceptIds) => number[]`
+- `getTagsForConcept(conceptId) => Array<{ id, name, color }>`
+- `isIncluded(conceptId) => boolean`
+- `setIncluded(conceptId, included) => boolean`
+- `setFilter(tagId, showUntagged?) => { tagId, showUntagged }`
+- `setShowUntagged(showUntagged) => { tagId, showUntagged }`
+- `getFilter() => { tagId, showUntagged }`
+- `matchesFilter(conceptId) => boolean`
+
+**Dispatches**
+
+- `parse:tag-created`
+- `parse:tag-deleted`
+- `parse:items-tagged`
+- `parse:tag-filter`
+- `parse:analysis-toggle`
+
+**Consumes**
+
+- none (`parse:*`)
+
+**Global state writes**
+
+- `P.tags` (normalized tags, assignments, included map, filter)
+
+### `window.PARSE.modules.aiClient` (`js/shared/ai-client.js`)
+
+**Exports**
+
+- `init(options?) => object`
+- `destroy() => void`
+- `setBaseUrl(baseUrl) => void`
+- `requestSTT(speaker, sourceWav, opts?) => Promise<string>`
+- `pollSTTStatus(jobId) => Promise<object>`
+- `requestIPA(text, language) => Promise<string>`
+- `requestSuggestions(speaker, opts?) => Promise<Array|object>`
+- `requestCompute(type, speakers, conceptIds, opts?) => Promise<string>`
+- `getEnrichments() => Promise<object>`
+- `saveEnrichments(data) => Promise<object>`
+- `getConfig() => Promise<object>`
+- `updateConfig(patch) => Promise<object>`
+- `startPolling(jobId, type, intervalMs?) => { key: string, stop: () => void }`
+- `stopPolling(jobId, type) => void`
+
+**Dispatches**
+
+- `parse:stt-request`
+- `parse:stt-started`
+- `parse:stt-progress`
+- `parse:stt-done`
+- `parse:compute-started`
+- `parse:compute-progress`
+- `parse:compute-done`
+
+**Consumes**
+
+- none (`parse:*`)
+
+### `window.PARSE.modules.audioPlayer` (`js/shared/audio-player.js`)
+
+**Exports**
+
+- `init() => object`
+- `destroy() => void`
+- `play(sourceWav, startSec, endSec) => Promise<void>`
+- `stop() => void`
+- `isPlaying() => boolean`
+
+**Dispatches**
+
+- `parse:audio-done`
+
+**Consumes**
+
+- `parse:audio-play` → plays requested region, emits `parse:audio-done` on completion
 
 ---
 
@@ -510,3 +766,48 @@ Used by `suggestions-panel.js` when the reviewer selects reference speakers.
 5. Create `python/ai/` and `python/compare/` packages
 6. Create `config/` directory with default configs
 7. All new modules use `window.PARSE` and `parse:` events
+
+---
+
+## Event Cross-reference (Wave 14 surface)
+
+| Event | Dispatched by | Consumed by |
+|---|---|---|
+| `parse:analysis-toggle` | `js/shared/tags.js` | - |
+| `parse:annotations-changed` | `js/shared/annotation-store.js` | `js/compare/borrowing-panel.js`, `js/compare/concept-table.js` |
+| `parse:audio-done` | `js/shared/audio-player.js` | - |
+| `parse:audio-play` | `js/compare/concept-table.js` | `js/shared/audio-player.js` |
+| `parse:borrowing-changed` | `[PLANNED]` | `js/compare/enrichments.js` |
+| `parse:borrowing-decision` | `js/compare/borrowing-panel.js` | - |
+| `parse:borrowing-handle` | `[PLANNED]` | `js/compare/enrichments.js` |
+| `parse:cognate-accept` | `js/compare/cognate-controls.js` | `js/compare/enrichments.js` |
+| `parse:cognate-cycle` | `js/compare/cognate-controls.js` | `js/compare/enrichments.js` |
+| `parse:cognate-merge` | `js/compare/cognate-controls.js` | `js/compare/enrichments.js` |
+| `parse:cognate-split-assign` | `js/compare/cognate-controls.js` | - |
+| `parse:cognate-split-done` | `js/compare/cognate-controls.js` | `js/compare/enrichments.js` |
+| `parse:cognate-split-start` | `js/compare/cognate-controls.js` | - |
+| `parse:cognates-changed` | `js/compare/cognate-controls.js`, `js/compare/enrichments.js` | `js/compare/cognate-controls.js`, `js/compare/concept-table.js` |
+| `parse:compare-close` | `js/compare/compare.js` | `js/compare/enrichments.js` |
+| `parse:compare-concept-select` | `js/compare/compare.js`, `js/compare/concept-table.js` | `js/compare/cognate-controls.js`, `js/compare/concept-table.js` |
+| `parse:compare-concept-selected` | `js/compare/compare.js`, `js/compare/concept-table.js` | `js/compare/borrowing-panel.js`, `js/compare/compare.js` |
+| `parse:compare-open` | `js/compare/compare.js` | `js/compare/borrowing-panel.js` |
+| `parse:compare-speaker-add` | `js/compare/compare.js` | - |
+| `parse:compare-speaker-remove` | `js/compare/compare.js` | - |
+| `parse:compare-speakers-changed` | `js/compare/compare.js` | `js/compare/borrowing-panel.js`, `js/compare/cognate-controls.js`, `js/compare/concept-table.js` |
+| `parse:compute-done` | `js/compare/compare.js`, `js/shared/ai-client.js` | - |
+| `parse:compute-progress` | `js/compare/compare.js`, `js/shared/ai-client.js` | - |
+| `parse:compute-request` | `js/compare/compare.js` | `js/compare/compare.js` |
+| `parse:compute-started` | `js/compare/compare.js`, `js/shared/ai-client.js` | - |
+| `parse:enrichments-error` | `js/compare/enrichments.js` | - |
+| `parse:enrichments-updated` | `js/compare/enrichments.js` | `js/compare/borrowing-panel.js`, `js/compare/cognate-controls.js`, `js/compare/concept-table.js` |
+| `parse:items-tagged` | `js/shared/tags.js` | - |
+| `parse:match-results` | `[PLANNED]` | - |
+| `parse:stt-done` | `js/shared/ai-client.js` | - |
+| `parse:stt-progress` | `js/shared/ai-client.js` | - |
+| `parse:stt-request` | `js/shared/ai-client.js` | - |
+| `parse:stt-started` | `js/shared/ai-client.js` | - |
+| `parse:tag-created` | `js/shared/tags.js` | - |
+| `parse:tag-deleted` | `js/shared/tags.js` | - |
+| `parse:tag-filter` | `js/compare/compare.js`, `js/shared/tags.js` | `js/compare/compare.js`, `js/compare/concept-table.js` |
+| `parse:video-extract-clips` | `[PLANNED]` | - |
+| `parse:export-wordlist` | `[PLANNED]` | - |

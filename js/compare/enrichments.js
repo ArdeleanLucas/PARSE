@@ -5,7 +5,8 @@
   window.PARSE.modules = window.PARSE.modules || {};
 
   const P = window.PARSE;
-  const HISTORY_LIMIT = 10;
+  const HISTORY_LIMIT = 20;
+  const HISTORY_FIELD = '_history';
   const SAVE_DEBOUNCE_MS = 500;
   const ENRICHMENTS_URL = '/api/enrichments';
   const GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E'];
@@ -78,6 +79,18 @@
     return result;
   }
 
+  function normalizeTimestamp(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (!text) return '';
+
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) {
+      return '';
+    }
+
+    return parsed.toISOString();
+  }
+
   function normalizeGroups(rawGroups) {
     const groupsIn = toObject(rawGroups);
     const groupsOut = {};
@@ -125,6 +138,23 @@
     return outSets;
   }
 
+  function normalizeIncludeInAnalysisOverrides(rawOverrides) {
+    const overridesIn = toObject(rawOverrides);
+    const overridesOut = {};
+
+    const keys = Object.keys(overridesIn);
+    for (let i = 0; i < keys.length; i += 1) {
+      const conceptId = normalizeConceptId(keys[i]);
+      if (!conceptId) continue;
+
+      if (overridesIn[keys[i]] === false) {
+        overridesOut[conceptId] = false;
+      }
+    }
+
+    return overridesOut;
+  }
+
   function normalizeManualOverrides(rawManualOverrides) {
     const overridesIn = toObject(rawManualOverrides);
     const overridesOut = deepClone(overridesIn);
@@ -132,40 +162,135 @@
     overridesOut.cognate_sets = normalizeManualCognateSets(overridesIn.cognate_sets);
     overridesOut.borrowing_flags = toObject(overridesIn.borrowing_flags);
     overridesOut.accepted_concepts = toObject(overridesIn.accepted_concepts);
+    overridesOut.include_in_analysis = normalizeIncludeInAnalysisOverrides(overridesIn.include_in_analysis);
 
     return overridesOut;
   }
 
-  function ensureEnrichmentsShape(rawEnrichments) {
+  function normalizeEnrichmentsCore(rawEnrichments) {
     const source = toObject(rawEnrichments);
 
-    const enrichments = {
+    return {
       computed_at: typeof source.computed_at === 'string' ? source.computed_at : null,
       config: toObject(source.config),
       cognate_sets: normalizeCognateSets(source.cognate_sets),
       similarity: toObject(source.similarity),
       borrowing_flags: toObject(source.borrowing_flags),
       manual_overrides: normalizeManualOverrides(source.manual_overrides),
-      history: Array.isArray(source.history) ? deepClone(source.history) : [],
+    };
+  }
+
+  function snapshotDataFromEnrichments(rawEnrichments) {
+    return deepClone(normalizeEnrichmentsCore(rawEnrichments));
+  }
+
+  function formatSnapshotFilename(timestamp) {
+    const normalized = normalizeTimestamp(timestamp) || nowIso();
+    let base = normalized;
+
+    if (base.charAt(base.length - 1) === 'Z') {
+      base = base.slice(0, -1);
+    }
+
+    const dotIndex = base.indexOf('.');
+    if (dotIndex !== -1) {
+      base = base.slice(0, dotIndex);
+    }
+
+    base = base.replace(/:/g, '-');
+    return 'snapshot-' + base + '.json';
+  }
+
+  function hasSnapshotData(value) {
+    const data = toObject(value);
+    return (
+      !!data.computed_at ||
+      !!data.config ||
+      !!data.cognate_sets ||
+      !!data.similarity ||
+      !!data.borrowing_flags ||
+      !!data.manual_overrides
+    );
+  }
+
+  function normalizeHistoryEntry(rawEntry) {
+    const entry = toObject(rawEntry);
+    if (!entry || !Object.keys(entry).length) {
+      return null;
+    }
+
+    const timestamp = normalizeTimestamp(entry.timestamp || entry.saved_at || entry.created_at || entry.modified_at) || nowIso();
+    const reason = String(entry.reason || 'snapshot').trim() || 'snapshot';
+
+    const directData = toObject(entry.data);
+    const legacyData = {
+      computed_at: entry.computed_at,
+      config: entry.config,
+      cognate_sets: entry.cognate_sets,
+      similarity: entry.similarity,
+      borrowing_flags: entry.borrowing_flags,
+      manual_overrides: entry.manual_overrides,
     };
 
+    const payload = hasSnapshotData(directData) ? directData : legacyData;
+    const normalizedData = snapshotDataFromEnrichments(payload);
+
+    return {
+      timestamp: timestamp,
+      filename: String(entry.filename || formatSnapshotFilename(timestamp)).trim() || formatSnapshotFilename(timestamp),
+      reason: reason,
+      data: normalizedData,
+    };
+  }
+
+  function normalizeHistory(rawHistory) {
+    if (!Array.isArray(rawHistory)) {
+      return [];
+    }
+
+    const out = [];
+    for (let i = 0; i < rawHistory.length; i += 1) {
+      const normalizedEntry = normalizeHistoryEntry(rawHistory[i]);
+      if (normalizedEntry) {
+        out.push(normalizedEntry);
+      }
+    }
+
+    if (out.length <= HISTORY_LIMIT) {
+      return out;
+    }
+
+    return out.slice(out.length - HISTORY_LIMIT);
+  }
+
+  function ensureEnrichmentsShape(rawEnrichments) {
+    const source = toObject(rawEnrichments);
+    const enrichments = normalizeEnrichmentsCore(source);
+
+    enrichments[HISTORY_FIELD] = normalizeHistory(source[HISTORY_FIELD] || source.history);
     return enrichments;
+  }
+
+  function addNormalizedConceptIds(targetSet, source) {
+    const object = toObject(source);
+    const keys = Object.keys(object);
+    for (let i = 0; i < keys.length; i += 1) {
+      const conceptId = normalizeConceptId(keys[i]);
+      if (conceptId) {
+        targetSet.add(conceptId);
+      }
+    }
   }
 
   function conceptIdsFromEnrichments(enrichments) {
     const ids = new Set();
 
-    const computed = toObject(enrichments.cognate_sets);
-    const computedKeys = Object.keys(computed);
-    for (let i = 0; i < computedKeys.length; i += 1) {
-      ids.add(computedKeys[i]);
-    }
-
-    const manual = toObject(enrichments.manual_overrides.cognate_sets);
-    const manualKeys = Object.keys(manual);
-    for (let i = 0; i < manualKeys.length; i += 1) {
-      ids.add(manualKeys[i]);
-    }
+    addNormalizedConceptIds(ids, enrichments.cognate_sets);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).cognate_sets);
+    addNormalizedConceptIds(ids, enrichments.borrowing_flags);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).borrowing_flags);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).accepted_concepts);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).include_in_analysis);
 
     return Array.from(ids).map(function (id) {
       const num = Number(id);
@@ -224,24 +349,34 @@
     return P.enrichments;
   }
 
+  function getHistoryEntries(enrichments) {
+    return normalizeHistory(toObject(enrichments)[HISTORY_FIELD]);
+  }
+
+  function setHistoryEntries(enrichments, historyEntries) {
+    const normalized = normalizeHistory(historyEntries);
+    toObject(enrichments)[HISTORY_FIELD] = normalized;
+    return normalized;
+  }
+
   function buildVersionSnapshot(reason) {
     const enrichments = getCurrentEnrichments();
+    const timestamp = nowIso();
     return {
-      saved_at: nowIso(),
+      timestamp: timestamp,
+      filename: formatSnapshotFilename(timestamp),
       reason: String(reason || 'manual-update'),
-      computed_at: enrichments.computed_at,
-      cognate_sets: deepClone(enrichments.cognate_sets),
-      borrowing_flags: deepClone(enrichments.borrowing_flags),
-      manual_overrides: deepClone(enrichments.manual_overrides),
+      data: snapshotDataFromEnrichments(enrichments),
     };
   }
 
   function appendHistory(reason) {
     const enrichments = getCurrentEnrichments();
-    const history = Array.isArray(enrichments.history) ? enrichments.history : [];
-    const snapshot = buildVersionSnapshot(reason);
-    const nextHistory = history.concat([snapshot]);
-    enrichments.history = nextHistory.slice(Math.max(nextHistory.length - HISTORY_LIMIT, 0));
+    const history = getHistoryEntries(enrichments);
+    const snapshot = normalizeHistoryEntry(buildVersionSnapshot(reason));
+    const nextHistory = history.concat(snapshot ? [snapshot] : []);
+    setHistoryEntries(enrichments, nextHistory);
+    return snapshot;
   }
 
   async function postEnrichments(payload) {
@@ -356,6 +491,239 @@
     return result;
   }
 
+  function normalizeBorrowingDecision(value) {
+    if (typeof value === 'boolean') {
+      return value ? 'borrowed' : 'native';
+    }
+
+    const raw = String(value == null ? '' : value).trim().toLowerCase();
+    if (!raw) return '';
+
+    if (
+      raw === 'native' ||
+      raw === 'not_borrowing' ||
+      raw === 'not-borrowing' ||
+      raw === 'not borrowing' ||
+      raw === 'notborrowed' ||
+      raw === 'no'
+    ) {
+      return 'native';
+    }
+
+    if (
+      raw === 'borrowed' ||
+      raw === 'confirmed' ||
+      raw === 'borrowing' ||
+      raw === 'loan' ||
+      raw === 'yes'
+    ) {
+      return 'borrowed';
+    }
+
+    if (
+      raw === 'uncertain' ||
+      raw === 'undecided' ||
+      raw === 'unknown' ||
+      raw === 'maybe'
+    ) {
+      return 'uncertain';
+    }
+
+    if (raw === 'skip' || raw === 'skipped') {
+      return 'skip';
+    }
+
+    return '';
+  }
+
+  function normalizeSourceLanguage(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
+  }
+
+  function normalizeBorrowingRecord(entry) {
+    const out = {
+      decision: '',
+      source: '',
+      handling: '',
+    };
+
+    if (entry == null) {
+      return out;
+    }
+
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const objectEntry = toObject(entry);
+      out.decision = normalizeBorrowingDecision(
+        objectEntry.decision != null
+          ? objectEntry.decision
+          : (objectEntry.status != null ? objectEntry.status : objectEntry.value)
+      );
+
+      out.source = normalizeSourceLanguage(
+        objectEntry.source != null
+          ? objectEntry.source
+          : (objectEntry.sourceLang != null
+            ? objectEntry.sourceLang
+            : (objectEntry.source_lang != null
+              ? objectEntry.source_lang
+              : (objectEntry.lang != null ? objectEntry.lang : objectEntry.language)))
+      );
+
+      out.handling = String(objectEntry.handling == null ? '' : objectEntry.handling).trim().toLowerCase();
+
+      if (!out.decision && typeof objectEntry.borrowed === 'boolean') {
+        out.decision = objectEntry.borrowed ? 'borrowed' : 'native';
+      }
+    } else {
+      out.decision = normalizeBorrowingDecision(entry);
+    }
+
+    if (out.decision === 'skip') {
+      out.decision = '';
+    }
+
+    if (!out.decision && out.source) {
+      out.decision = 'borrowed';
+    }
+
+    if (out.decision && out.decision !== 'borrowed') {
+      out.source = '';
+    }
+
+    return out;
+  }
+
+  function hasBorrowingData(record) {
+    const normalized = toObject(record);
+    return !!(
+      String(normalized.decision || '').trim() ||
+      String(normalized.source || '').trim() ||
+      String(normalized.handling || '').trim()
+    );
+  }
+
+  function mergeBorrowingRecord(baseRecord, patchRecord) {
+    const base = normalizeBorrowingRecord(baseRecord);
+    const patch = normalizeBorrowingRecord(patchRecord);
+
+    if (patch.decision) {
+      base.decision = patch.decision;
+    }
+
+    if (patch.handling) {
+      base.handling = patch.handling;
+    }
+
+    if (patch.source && (patch.decision === 'borrowed' || base.decision === 'borrowed' || !base.decision)) {
+      base.source = patch.source;
+      if (!base.decision) {
+        base.decision = 'borrowed';
+      }
+    }
+
+    if (base.decision && base.decision !== 'borrowed') {
+      base.source = '';
+    }
+
+    return hasBorrowingData(base) ? base : null;
+  }
+
+  function absorbBorrowingConceptNode(targetConceptMap, conceptNode) {
+    const node = toObject(conceptNode);
+    const directKeys = Object.keys(node);
+    const reserved = {
+      speakers: true,
+      updated_at: true,
+      updatedAt: true,
+      note: true,
+      notes: true,
+      status: true,
+      decision: true,
+      handling: true,
+      source: true,
+      source_lang: true,
+      sourceLang: true,
+      value: true,
+      borrowed: true,
+    };
+
+    for (let i = 0; i < directKeys.length; i += 1) {
+      const speakerKey = String(directKeys[i] == null ? '' : directKeys[i]).trim();
+      if (!speakerKey || reserved[speakerKey]) continue;
+
+      const merged = mergeBorrowingRecord(targetConceptMap[speakerKey], node[directKeys[i]]);
+      if (merged) {
+        targetConceptMap[speakerKey] = merged;
+      }
+    }
+
+    const nested = toObject(node.speakers);
+    const nestedKeys = Object.keys(nested);
+    for (let i = 0; i < nestedKeys.length; i += 1) {
+      const speakerKey = String(nestedKeys[i] == null ? '' : nestedKeys[i]).trim();
+      if (!speakerKey) continue;
+
+      const merged = mergeBorrowingRecord(targetConceptMap[speakerKey], nested[nestedKeys[i]]);
+      if (merged) {
+        targetConceptMap[speakerKey] = merged;
+      }
+    }
+  }
+
+  function collectBorrowingDecisionMap(enrichments) {
+    const out = {};
+    const source = toObject(enrichments);
+
+    function absorb(flagsSource) {
+      const flags = toObject(flagsSource);
+      const conceptKeys = Object.keys(flags);
+      for (let i = 0; i < conceptKeys.length; i += 1) {
+        const conceptId = normalizeConceptId(conceptKeys[i]);
+        if (!conceptId) continue;
+
+        if (!out[conceptId]) {
+          out[conceptId] = {};
+        }
+
+        absorbBorrowingConceptNode(out[conceptId], flags[conceptKeys[i]]);
+
+        if (!Object.keys(out[conceptId]).length) {
+          delete out[conceptId];
+        }
+      }
+    }
+
+    absorb(source.borrowing_flags);
+    absorb(toObject(source.manual_overrides).borrowing_flags);
+    return out;
+  }
+
+  function getIncludeInAnalysisOverrideMap(enrichments) {
+    const overrides = toObject(toObject(enrichments).manual_overrides);
+    return normalizeIncludeInAnalysisOverrides(overrides.include_in_analysis);
+  }
+
+  function getGlobalIncludedMap() {
+    return normalizeIncludeInAnalysisOverrides(toObject(P.tags).included);
+  }
+
+  function isIncludedInAnalysis(conceptId, enrichments) {
+    const conceptKey = normalizeConceptId(conceptId);
+    if (!conceptKey) return true;
+
+    const localOverrides = getIncludeInAnalysisOverrideMap(enrichments);
+    if (Object.prototype.hasOwnProperty.call(localOverrides, conceptKey)) {
+      return localOverrides[conceptKey] !== false;
+    }
+
+    const globalIncluded = getGlobalIncludedMap();
+    if (Object.prototype.hasOwnProperty.call(globalIncluded, conceptKey)) {
+      return globalIncluded[conceptKey] !== false;
+    }
+
+    return true;
+  }
+
   function upsertBorrowingOverride(conceptId, speaker, patch) {
     const enrichments = getCurrentEnrichments();
     const conceptKey = normalizeConceptId(conceptId);
@@ -370,6 +738,24 @@
 
     emitEnrichmentsUpdated();
     scheduleWrite('borrowing-override');
+  }
+
+  function setIncludeInAnalysis(conceptId, included) {
+    const enrichments = getCurrentEnrichments();
+    const conceptKey = normalizeConceptId(conceptId);
+    if (!conceptKey) return;
+
+    const overrides = toObject(enrichments.manual_overrides.include_in_analysis);
+    if (included === false) {
+      overrides[conceptKey] = false;
+    } else {
+      delete overrides[conceptKey];
+    }
+
+    enrichments.manual_overrides.include_in_analysis = overrides;
+
+    emitEnrichmentsUpdated();
+    scheduleWrite('analysis-toggle');
   }
 
   function nextGroupLetter(currentLetter) {
@@ -476,7 +862,8 @@
 
   function onBorrowingChanged(event) {
     const detail = toObject(event && event.detail);
-    upsertBorrowingOverride(detail.conceptId, detail.speaker, {
+    const speaker = detail.speaker || detail.speakerId;
+    upsertBorrowingOverride(detail.conceptId, speaker, {
       status: detail.status,
       updated_at: nowIso(),
     });
@@ -484,10 +871,37 @@
 
   function onBorrowingHandle(event) {
     const detail = toObject(event && event.detail);
-    upsertBorrowingOverride(detail.conceptId, detail.speaker, {
+    const speaker = detail.speaker || detail.speakerId;
+    upsertBorrowingOverride(detail.conceptId, speaker, {
       handling: detail.handling,
       updated_at: nowIso(),
     });
+  }
+
+  function onBorrowingDecision(event) {
+    const detail = toObject(event && event.detail);
+    const speaker = detail.speaker || detail.speakerId;
+    const patch = {
+      decision: detail.decision,
+      updated_at: nowIso(),
+    };
+
+    const sourceLanguage = detail.sourceLang != null ? detail.sourceLang : detail.source;
+    if (sourceLanguage != null && String(sourceLanguage).trim()) {
+      patch.source_lang = sourceLanguage;
+    }
+
+    const normalizedDecision = normalizeBorrowingDecision(detail.decision);
+    if (normalizedDecision && normalizedDecision !== 'borrowed') {
+      patch.source_lang = '';
+    }
+
+    upsertBorrowingOverride(detail.conceptId, speaker, patch);
+  }
+
+  function onAnalysisToggle(event) {
+    const detail = toObject(event && event.detail);
+    setIncludeInAnalysis(detail.conceptId, detail.included !== false);
   }
 
   function onCompareClose() {
@@ -639,6 +1053,358 @@
     }
   }
 
+  function compareConceptIdOrder(leftId, rightId) {
+    const leftNum = Number(leftId);
+    const rightNum = Number(rightId);
+
+    if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
+      return leftNum - rightNum;
+    }
+
+    return String(leftId).localeCompare(String(rightId));
+  }
+
+  function parseConceptMeta(rawEntry, index) {
+    let rawId = '';
+    let label = '';
+
+    if (rawEntry && typeof rawEntry === 'object') {
+      rawId = rawEntry.id;
+      if (rawId == null) rawId = rawEntry.concept_id;
+      if (rawId == null) rawId = rawEntry.conceptId;
+      if (rawId == null) rawId = rawEntry.key;
+      if (rawId == null) rawId = rawEntry.number;
+
+      label = rawEntry.label;
+      if (label == null) label = rawEntry.english;
+      if (label == null) label = rawEntry.gloss;
+      if (label == null) label = rawEntry.name;
+      if (label == null) label = rawEntry.concept_en;
+      if (label == null) label = rawEntry.text;
+    } else if (typeof rawEntry === 'string') {
+      const text = rawEntry.trim();
+      const colonIndex = text.indexOf(':');
+      if (colonIndex !== -1) {
+        rawId = text.slice(0, colonIndex).trim();
+        label = text.slice(colonIndex + 1).trim();
+      } else {
+        rawId = text;
+      }
+    } else if (typeof rawEntry === 'number') {
+      rawId = String(rawEntry);
+    }
+
+    const conceptId = normalizeConceptId(rawId || String(index + 1));
+    if (!conceptId) {
+      return null;
+    }
+
+    return {
+      id: conceptId,
+      label: String(label == null ? '' : label).trim(),
+    };
+  }
+
+  function getConceptLabelMap() {
+    const out = {};
+    const compareState = toObject(P.compareState);
+    const lists = [];
+
+    if (Array.isArray(compareState.concepts)) {
+      lists.push(compareState.concepts);
+    }
+
+    if (Array.isArray(compareState.filteredConcepts)) {
+      lists.push(compareState.filteredConcepts);
+    }
+
+    for (let l = 0; l < lists.length; l += 1) {
+      const list = lists[l];
+      for (let i = 0; i < list.length; i += 1) {
+        const parsed = parseConceptMeta(list[i], i);
+        if (!parsed) continue;
+        if (parsed.label && !out[parsed.id]) {
+          out[parsed.id] = parsed.label;
+        }
+      }
+    }
+
+    return out;
+  }
+
+  function getTotalConceptCount(enrichments, labelMap) {
+    const compareConcepts = Array.isArray(toObject(P.compareState).concepts)
+      ? toObject(P.compareState).concepts
+      : [];
+    if (compareConcepts.length) {
+      return compareConcepts.length;
+    }
+
+    const configured = toStringArray(toObject(enrichments.config).concepts_included);
+    if (configured.length) {
+      return configured.length;
+    }
+
+    const ids = new Set(Object.keys(toObject(labelMap)));
+    addNormalizedConceptIds(ids, enrichments.cognate_sets);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).cognate_sets);
+    addNormalizedConceptIds(ids, enrichments.borrowing_flags);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).borrowing_flags);
+    addNormalizedConceptIds(ids, toObject(enrichments.manual_overrides).accepted_concepts);
+    return ids.size;
+  }
+
+  function summarizeEnrichments(rawEnrichments) {
+    const enrichments = ensureEnrichmentsShape(rawEnrichments);
+    const conceptIds = new Set();
+
+    addNormalizedConceptIds(conceptIds, enrichments.cognate_sets);
+    addNormalizedConceptIds(conceptIds, toObject(enrichments.manual_overrides).cognate_sets);
+    addNormalizedConceptIds(conceptIds, toObject(enrichments.manual_overrides).accepted_concepts);
+
+    const sortedConceptIds = Array.from(conceptIds).sort(compareConceptIdOrder);
+    let cognateConcepts = 0;
+    let cognateGroups = 0;
+
+    for (let i = 0; i < sortedConceptIds.length; i += 1) {
+      const groups = getGroupsFromSource(enrichments, sortedConceptIds[i]);
+      const count = Object.keys(groups).length;
+      if (count > 0) {
+        cognateConcepts += 1;
+        cognateGroups += count;
+      }
+    }
+
+    const borrowingMap = collectBorrowingDecisionMap(enrichments);
+    const borrowingConceptIds = Object.keys(borrowingMap);
+    let borrowingDecisions = 0;
+    let borrowedForms = 0;
+
+    for (let i = 0; i < borrowingConceptIds.length; i += 1) {
+      const speakers = Object.keys(toObject(borrowingMap[borrowingConceptIds[i]]));
+      for (let j = 0; j < speakers.length; j += 1) {
+        const record = normalizeBorrowingRecord(toObject(borrowingMap[borrowingConceptIds[i]])[speakers[j]]);
+        if (record.decision) {
+          borrowingDecisions += 1;
+          if (record.decision === 'borrowed') {
+            borrowedForms += 1;
+          }
+        }
+      }
+    }
+
+    const acceptedConceptIds = new Set();
+    addNormalizedConceptIds(acceptedConceptIds, toObject(enrichments.manual_overrides).accepted_concepts);
+    const excludedConceptIds = new Set();
+    addNormalizedConceptIds(excludedConceptIds, toObject(enrichments.manual_overrides).include_in_analysis);
+
+    return {
+      cognateConcepts: cognateConcepts,
+      cognateGroups: cognateGroups,
+      borrowingDecisions: borrowingDecisions,
+      borrowedForms: borrowedForms,
+      acceptedConcepts: acceptedConceptIds.size,
+      excludedConcepts: excludedConceptIds.size,
+    };
+  }
+
+  function getHistory() {
+    const enrichments = getCurrentEnrichments();
+    const history = getHistoryEntries(enrichments);
+
+    return history.map(function (entry) {
+      return {
+        timestamp: entry.timestamp,
+        summary: summarizeEnrichments(entry.data),
+      };
+    });
+  }
+
+  function restoreSnapshot(timestamp) {
+    const requested = String(timestamp == null ? '' : timestamp).trim();
+    const normalizedTimestamp = normalizeTimestamp(requested);
+
+    if (!requested || !normalizedTimestamp) {
+      throw new Error('restoreSnapshot(timestamp) requires a valid ISO timestamp.');
+    }
+
+    const enrichments = getCurrentEnrichments();
+    const history = getHistoryEntries(enrichments);
+    let snapshot = null;
+
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const entry = history[i];
+      const candidate = normalizeTimestamp(entry.timestamp) || String(entry.timestamp || '').trim();
+      if (candidate === normalizedTimestamp || String(entry.timestamp || '').trim() === requested) {
+        snapshot = entry;
+        break;
+      }
+    }
+
+    if (!snapshot) {
+      throw new Error('Snapshot not found for timestamp: ' + requested);
+    }
+
+    const restored = ensureEnrichmentsShape(snapshot.data);
+    setHistoryEntries(restored, history);
+    P.enrichments = restored;
+
+    emitEnrichmentsUpdated();
+    scheduleWrite('restore-snapshot');
+    return deepClone(P.enrichments);
+  }
+
+  function collectDecisionConceptIds(enrichments, borrowingMap) {
+    const conceptIds = new Set();
+
+    addNormalizedConceptIds(conceptIds, toObject(enrichments.manual_overrides).cognate_sets);
+    addNormalizedConceptIds(conceptIds, toObject(enrichments.manual_overrides).accepted_concepts);
+    addNormalizedConceptIds(conceptIds, borrowingMap);
+    addNormalizedConceptIds(conceptIds, toObject(enrichments.manual_overrides).include_in_analysis);
+    addNormalizedConceptIds(conceptIds, getGlobalIncludedMap());
+
+    return Array.from(conceptIds).sort(compareConceptIdOrder);
+  }
+
+  function buildConceptExportKey(conceptId, labelMap) {
+    const label = String(toObject(labelMap)[conceptId] || '').trim();
+    if (!label) {
+      return conceptId;
+    }
+    return conceptId + ':' + label;
+  }
+
+  function exportBorrowingForConcept(speakerMap) {
+    const speakers = Object.keys(toObject(speakerMap));
+    const out = {};
+    let borrowedCount = 0;
+
+    for (let i = 0; i < speakers.length; i += 1) {
+      const speaker = String(speakers[i] == null ? '' : speakers[i]).trim();
+      if (!speaker) continue;
+
+      const record = normalizeBorrowingRecord(toObject(speakerMap)[speakers[i]]);
+      if (!hasBorrowingData(record)) {
+        continue;
+      }
+
+      const entry = {};
+      if (record.decision) {
+        entry.decision = record.decision;
+      }
+      if (record.decision === 'borrowed') {
+        borrowedCount += 1;
+        if (record.source) {
+          entry.source = record.source;
+        }
+      }
+      if (record.handling) {
+        entry.handling = record.handling;
+      }
+
+      if (Object.keys(entry).length) {
+        out[speaker] = entry;
+      }
+    }
+
+    return {
+      borrowing: out,
+      borrowedCount: borrowedCount,
+    };
+  }
+
+  function exportDecisions() {
+    const enrichments = getCurrentEnrichments();
+    const labelMap = getConceptLabelMap();
+    const borrowingMap = collectBorrowingDecisionMap(enrichments);
+    const decisionConceptIds = collectDecisionConceptIds(enrichments, borrowingMap);
+    const manualOverrides = toObject(enrichments.manual_overrides);
+    const manualCognates = toObject(manualOverrides.cognate_sets);
+    const acceptedConcepts = toObject(manualOverrides.accepted_concepts);
+    const includeOverrides = getIncludeInAnalysisOverrideMap(enrichments);
+    const globalIncluded = getGlobalIncludedMap();
+
+    const conceptsOut = {};
+    let totalBorrowings = 0;
+
+    for (let i = 0; i < decisionConceptIds.length; i += 1) {
+      const conceptId = decisionConceptIds[i];
+      const manualGroups = normalizeGroups(manualCognates[conceptId]);
+      const hasManualCognateDecision = Object.keys(manualGroups).length > 0;
+      const hasAcceptedDecision = Object.prototype.hasOwnProperty.call(acceptedConcepts, conceptId);
+      const hasCognateDecision = hasManualCognateDecision || hasAcceptedDecision;
+
+      const includeDecision = (
+        Object.prototype.hasOwnProperty.call(includeOverrides, conceptId) ||
+        Object.prototype.hasOwnProperty.call(globalIncluded, conceptId)
+      );
+
+      const borrowingExport = exportBorrowingForConcept(toObject(borrowingMap[conceptId]));
+      const hasBorrowingDecision = Object.keys(borrowingExport.borrowing).length > 0;
+
+      if (!hasCognateDecision && !hasBorrowingDecision && !includeDecision) {
+        continue;
+      }
+
+      const conceptOut = {};
+
+      if (hasCognateDecision) {
+        const groups = getGroupsFromSource(enrichments, conceptId);
+        if (Object.keys(groups).length) {
+          conceptOut.cognateSet = {
+            groups: deepClone(groups),
+          };
+        }
+      }
+
+      if (hasBorrowingDecision) {
+        conceptOut.borrowing = borrowingExport.borrowing;
+        totalBorrowings += borrowingExport.borrowedCount;
+      }
+
+      conceptOut.includeInAnalysis = isIncludedInAnalysis(conceptId, enrichments);
+
+      const conceptKey = buildConceptExportKey(conceptId, labelMap);
+      conceptsOut[conceptKey] = conceptOut;
+    }
+
+    return {
+      exportedAt: nowIso(),
+      version: '1.0',
+      concepts: conceptsOut,
+      stats: {
+        totalConcepts: getTotalConceptCount(enrichments, labelMap),
+        decidedConcepts: Object.keys(conceptsOut).length,
+        totalBorrowings: totalBorrowings,
+      },
+    };
+  }
+
+  function exportDecisionsAsFile() {
+    const exportPayload = exportDecisions();
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+
+    const objectUrl = URL.createObjectURL(blob);
+    const linkEl = document.createElement('a');
+    linkEl.href = objectUrl;
+    linkEl.download = 'decisions.json';
+    linkEl.style.display = 'none';
+
+    document.body.appendChild(linkEl);
+    linkEl.click();
+
+    window.setTimeout(function () {
+      URL.revokeObjectURL(objectUrl);
+      if (linkEl.parentNode) {
+        linkEl.parentNode.removeChild(linkEl);
+      }
+    }, 0);
+
+    return exportPayload;
+  }
+
   /**
    * Return cognate groups for a concept, preferring manual overrides.
    * @param {string|number} conceptId Concept id.
@@ -749,6 +1515,8 @@
     addDocumentListener('parse:cognate-cycle', onCognateCycle);
     addDocumentListener('parse:borrowing-changed', onBorrowingChanged);
     addDocumentListener('parse:borrowing-handle', onBorrowingHandle);
+    addDocumentListener('parse:borrowing-decision', onBorrowingDecision);
+    addDocumentListener('parse:analysis-toggle', onAnalysisToggle);
     addDocumentListener('parse:compare-close', onCompareClose);
     addWindowListener('beforeunload', onBeforeUnload);
     addWindowListener('pagehide', onPageHide);
@@ -781,5 +1549,9 @@
     getGroupForSpeaker: getGroupForSpeaker,
     setCognateGroups: setCognateGroups,
     clearManualOverride: clearManualOverride,
+    getHistory: getHistory,
+    restoreSnapshot: restoreSnapshot,
+    exportDecisions: exportDecisions,
+    exportDecisionsAsFile: exportDecisionsAsFile,
   };
 })();

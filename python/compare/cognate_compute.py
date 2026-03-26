@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,63 @@ FALLBACK_ONSET_ALTERNATIONS: Tuple[Tuple[str, str], ...] = (
 )
 FALLBACK_CODA_DELETIONS: Tuple[str, ...] = ("k", "g", "q", "t", "d", "p", "b")
 FALLBACK_MAX_VARIANTS = 32
+WORDLIST_TSV_COLUMNS: Tuple[str, ...] = ("ID", "CONCEPT", "DOCULECT", "IPA", "COGID", "TOKENS", "BORROWING")
+WORDLIST_DIGRAPHS: Tuple[str, ...] = (
+    "t͡ʃ",
+    "d͡ʒ",
+    "t͡s",
+    "d͡z",
+    "ʈ͡ʂ",
+    "ɖ͡ʐ",
+    "t͡ɕ",
+    "d͡ʑ",
+    "tʃ",
+    "dʒ",
+    "ts",
+    "dz",
+    "ʈʂ",
+    "ɖʐ",
+    "tɕ",
+    "dʑ",
+)
+BORROWED_TEXT_VALUES: Set[str] = {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "borrowed",
+    "borrowing",
+    "confirmed",
+    "loan",
+    "loanword",
+    "suspected",
+}
+NOT_BORROWED_TEXT_VALUES: Set[str] = {
+    "0",
+    "false",
+    "no",
+    "n",
+    "not_borrowing",
+    "not-borrowing",
+    "not borrowing",
+    "undecided",
+    "none",
+    "missing",
+}
+WORDLIST_ATTACH_CHARS: Set[str] = {
+    "ː",
+    "ˑ",
+    "ʰ",
+    "ʱ",
+    "ʷ",
+    "ʲ",
+    "˞",
+    "ˤ",
+    "ʼ",
+    "ˀ",
+}
+WORDLIST_SKIP_CHARS: Set[str] = {"(", ")", "[", "]", "{", "}", ",", ";"}
+WORDLIST_DIGRAPHS_SORTED: Tuple[str, ...] = tuple(sorted(WORDLIST_DIGRAPHS, key=len, reverse=True))
 
 
 @dataclass
@@ -710,8 +768,302 @@ def compute_similarity_scores(
     return similarity
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run LingPy LexStat and build PARSE enrichments JSON.")
+def _speaker_lookup_key(raw_value: Any) -> str:
+    return _normalize_space(raw_value).lower()
+
+
+def _iter_string_values(raw_value: Any) -> Iterable[str]:
+    if isinstance(raw_value, list):
+        for item in raw_value:
+            text = _normalize_space(item)
+            if text:
+                yield text
+        return
+
+    if isinstance(raw_value, str):
+        text = _normalize_space(raw_value)
+        if not text:
+            return
+        if "," in text:
+            for token in text.split(","):
+                item = _normalize_space(token)
+                if item:
+                    yield item
+            return
+        yield text
+        return
+
+    text = _normalize_space(raw_value)
+    if text:
+        yield text
+
+
+def _normalize_cognate_sets(raw_sets: Any) -> Dict[str, Dict[str, List[str]]]:
+    if not isinstance(raw_sets, Mapping):
+        return {}
+
+    normalized: Dict[str, Dict[str, List[str]]] = {}
+
+    for raw_concept_id, raw_groups in raw_sets.items():
+        concept_id = _normalize_concept_key(raw_concept_id)
+        if not concept_id or not isinstance(raw_groups, Mapping):
+            continue
+
+        groups_out: Dict[str, List[str]] = {}
+        for raw_group_label, raw_speakers in raw_groups.items():
+            group_label = _normalize_space(raw_group_label).upper()
+            if not group_label:
+                continue
+
+            speakers = _dedupe_non_empty_strings(_iter_string_values(raw_speakers))
+            if speakers:
+                groups_out[group_label] = speakers
+
+        if groups_out:
+            normalized[concept_id] = groups_out
+
+    return normalized
+
+
+def _resolve_effective_cognate_sets(enrichments: Mapping[str, Any]) -> Dict[str, Dict[str, List[str]]]:
+    computed_sets = _normalize_cognate_sets(enrichments.get("cognate_sets"))
+
+    manual_overrides = enrichments.get("manual_overrides")
+    if isinstance(manual_overrides, Mapping):
+        manual_sets = _normalize_cognate_sets(manual_overrides.get("cognate_sets"))
+        for concept_id, groups in manual_sets.items():
+            if groups:
+                computed_sets[concept_id] = groups
+
+    return computed_sets
+
+
+def _cognate_group_sort_key(group_label: str) -> Tuple[int, int, str]:
+    label = _normalize_space(group_label).upper()
+    if len(label) == 1 and "A" <= label <= "Z":
+        return (0, ord(label) - ord("A"), label)
+
+    if label.startswith("G") and label[1:].isdigit():
+        return (1, int(label[1:]), label)
+
+    if label.isdigit():
+        return (2, int(label), label)
+
+    return (3, 0, label)
+
+
+def _build_cogid_lookup(
+    cognate_sets: Mapping[str, Mapping[str, Sequence[str]]],
+) -> Tuple[Dict[Tuple[str, str], int], Dict[str, Dict[str, str]]]:
+    cogid_lookup: Dict[Tuple[str, str], int] = {}
+    group_lookup: Dict[str, Dict[str, str]] = {}
+    next_cogid = 1
+
+    for concept_id in sorted(cognate_sets.keys(), key=_concept_sort_key):
+        groups = cognate_sets.get(concept_id, {})
+        group_labels = sorted(groups.keys(), key=_cognate_group_sort_key)
+        by_speaker: Dict[str, str] = {}
+
+        for raw_group_label in group_labels:
+            group_label = _normalize_space(raw_group_label).upper()
+            if not group_label:
+                continue
+
+            speakers = _dedupe_non_empty_strings(groups.get(raw_group_label, []))
+            if not speakers:
+                continue
+
+            cogid_lookup[(concept_id, group_label)] = next_cogid
+            next_cogid += 1
+
+            for speaker in speakers:
+                speaker_key = _speaker_lookup_key(speaker)
+                if speaker_key and speaker_key not in by_speaker:
+                    by_speaker[speaker_key] = group_label
+
+        if by_speaker:
+            group_lookup[concept_id] = by_speaker
+
+    return cogid_lookup, group_lookup
+
+
+def _parse_borrowing_text(value: str) -> Optional[bool]:
+    text = _normalize_space(value).lower()
+    if not text:
+        return None
+    if text in BORROWED_TEXT_VALUES:
+        return True
+    if text in NOT_BORROWED_TEXT_VALUES:
+        return False
+    return None
+
+
+def _parse_borrowing_value(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return float(value) != 0.0
+        except (TypeError, ValueError):
+            return None
+
+    if isinstance(value, str):
+        return _parse_borrowing_text(value)
+
+    if isinstance(value, Mapping):
+        for key in ("borrowed", "is_borrowed", "borrowing", "loan", "flag", "value", "status"):
+            if key not in value:
+                continue
+            parsed = _parse_borrowing_value(value.get(key))
+            if parsed is not None:
+                return parsed
+        return None
+
+    if isinstance(value, list):
+        saw_false = False
+        for item in value:
+            parsed = _parse_borrowing_value(item)
+            if parsed is True:
+                return True
+            if parsed is False:
+                saw_false = True
+        if saw_false:
+            return False
+
+    return None
+
+
+def _merge_borrowing_lookup(target: Dict[str, Dict[str, int]], raw_flags: Any) -> None:
+    if not isinstance(raw_flags, Mapping):
+        return
+
+    for raw_concept_id, raw_speaker_map in raw_flags.items():
+        concept_id = _normalize_concept_key(raw_concept_id)
+        if not concept_id or not isinstance(raw_speaker_map, Mapping):
+            continue
+
+        concept_flags = target.setdefault(concept_id, {})
+        for raw_speaker, raw_value in raw_speaker_map.items():
+            speaker_key = _speaker_lookup_key(raw_speaker)
+            if not speaker_key:
+                continue
+
+            is_borrowed = _parse_borrowing_value(raw_value)
+            if is_borrowed is None:
+                continue
+
+            concept_flags[speaker_key] = 1 if is_borrowed else 0
+
+
+def _build_borrowing_lookup(enrichments: Mapping[str, Any]) -> Dict[str, Dict[str, int]]:
+    lookup: Dict[str, Dict[str, int]] = {}
+    _merge_borrowing_lookup(lookup, enrichments.get("borrowing_flags"))
+
+    manual_overrides = enrichments.get("manual_overrides")
+    if isinstance(manual_overrides, Mapping):
+        _merge_borrowing_lookup(lookup, manual_overrides.get("borrowing_flags"))
+
+    return lookup
+
+
+def _tokenize_ipa_for_wordlist(ipa_text: str) -> List[str]:
+    normalized = unicodedata.normalize("NFC", _normalize_ipa(ipa_text))
+    if not normalized:
+        return []
+
+    tokens: List[str] = []
+    index = 0
+
+    while index < len(normalized):
+        char = normalized[index]
+        if char.isspace() or char in FALLBACK_BOUNDARY_CHARS or char in WORDLIST_SKIP_CHARS:
+            index += 1
+            continue
+
+        token = ""
+        for digraph in WORDLIST_DIGRAPHS_SORTED:
+            if normalized.startswith(digraph, index):
+                token = digraph
+                index += len(digraph)
+                break
+
+        if not token:
+            token = char
+            index += 1
+
+        while index < len(normalized):
+            marker = normalized[index]
+            if unicodedata.combining(marker) or marker in WORDLIST_ATTACH_CHARS:
+                token += marker
+                index += 1
+                continue
+            break
+
+        if token:
+            tokens.append(token)
+
+    return tokens
+
+
+def export_wordlist_tsv(enrichments_path: Path, annotations_dir: Path, output_path: Path) -> int:
+    enrichments_data = _load_json(enrichments_path)
+    if not isinstance(enrichments_data, Mapping):
+        raise ValueError(f"Expected enrichments JSON object in {enrichments_path}")
+
+    forms_by_concept, _speakers = load_annotations(annotations_dir)
+    cognate_sets = _resolve_effective_cognate_sets(enrichments_data)
+    cogid_lookup, cogid_group_by_speaker = _build_cogid_lookup(cognate_sets)
+    borrowing_lookup = _build_borrowing_lookup(enrichments_data)
+
+    rows: List[Tuple[int, str, str, str, int, str, int]] = []
+    row_id = 1
+
+    for concept_id in sorted(forms_by_concept.keys(), key=_concept_sort_key):
+        concept_groups = cogid_group_by_speaker.get(concept_id, {})
+        concept_borrowing = borrowing_lookup.get(concept_id, {})
+
+        for record in forms_by_concept.get(concept_id, []):
+            ipa = _normalize_ipa(record.ipa)
+            if not ipa:
+                continue
+
+            tokens = _tokenize_ipa_for_wordlist(ipa)
+            if not tokens:
+                continue
+
+            speaker_key = _speaker_lookup_key(record.speaker)
+            group_label = concept_groups.get(speaker_key, "")
+            cogid = cogid_lookup.get((concept_id, group_label), 0) if group_label else 0
+            borrowing = concept_borrowing.get(speaker_key, 0)
+            concept_value = _normalize_space(record.concept_label) or concept_id
+
+            rows.append(
+                (
+                    row_id,
+                    concept_value,
+                    record.speaker,
+                    ipa,
+                    int(cogid),
+                    " ".join(tokens),
+                    int(borrowing),
+                )
+            )
+            row_id += 1
+
+    output_path = output_path.expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(WORDLIST_TSV_COLUMNS)
+        for row in rows:
+            writer.writerow(row)
+
+    return len(rows)
+
+
+def _add_compute_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--annotations-dir", required=True, type=Path, help="Directory with *.parse.json files")
     parser.add_argument("--concepts", required=True, type=Path, help="Concept list JSON/CSV")
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD, help="LexStat threshold (default: 0.60)")
@@ -727,13 +1079,40 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Optional comma-separated language codes override (e.g. ar,fa)",
     )
+
+
+def _add_export_tsv_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--enrichments", required=True, type=Path, help="Path to parse-enrichments.json")
+    parser.add_argument("--annotations", required=True, type=Path, help="Directory with *.parse.json files")
+    parser.add_argument("--output", required=True, type=Path, help="Output wordlist TSV path")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="PARSE cognate computation and TSV export utilities.")
+    subparsers = parser.add_subparsers(dest="command")
+
+    compute_parser = subparsers.add_parser("compute", help="Run LingPy LexStat and build PARSE enrichments JSON.")
+    _add_compute_arguments(compute_parser)
+
+    export_tsv_parser = subparsers.add_parser("export-tsv", help="Export LingPy-compatible wordlist.tsv")
+    _add_export_tsv_arguments(export_tsv_parser)
+
     return parser
 
 
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
+def _parse_cli_args(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    argv = list(sys.argv[1:])
+    known_commands = {"compute", "export-tsv", "-h", "--help"}
 
+    if not argv:
+        argv = ["compute"]
+    elif argv[0] not in known_commands:
+        argv = ["compute"] + argv
+
+    return parser.parse_args(argv)
+
+
+def _run_compute_command(args: argparse.Namespace) -> int:
     try:
         contact_languages_from_config, refs_by_concept = load_contact_language_data(args.sil_config)
 
@@ -793,6 +1172,32 @@ def main() -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def _run_export_tsv_command(args: argparse.Namespace) -> int:
+    try:
+        row_count = export_wordlist_tsv(
+            enrichments_path=args.enrichments,
+            annotations_dir=args.annotations,
+            output_path=args.output,
+        )
+    except Exception as exc:
+        _error(f"Wordlist TSV export failed: {exc}")
+        return 1
+
+    output_path = args.output.expanduser().resolve()
+    print(f"[INFO] Wrote {row_count} rows to {output_path}", file=sys.stderr)
+    return 0
+
+
+def main() -> int:
+    parser = build_parser()
+    args = _parse_cli_args(parser)
+
+    if args.command == "export-tsv":
+        return _run_export_tsv_command(args)
+
+    return _run_compute_command(args)
 
 
 if __name__ == "__main__":
