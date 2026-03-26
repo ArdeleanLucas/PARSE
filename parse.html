@@ -2431,9 +2431,12 @@ async function loadSpeaker(speaker) {
     // Auto-stop only when playing was triggered by segment navigation
     if (STATE.segmentPlayMode && STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
       const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
-      if (seg && ws.getCurrentTime() >= seg.end) {
-        ws.pause();
-        STATE.segmentPlayMode = false;
+      if (seg) {
+        const bounds = getSegmentBounds(STATE.currentSegmentIdx, seg);
+        if (ws.getCurrentTime() >= bounds.end) {
+          ws.pause();
+          STATE.segmentPlayMode = false;
+        }
       }
     }
   });
@@ -2525,6 +2528,20 @@ function highlightActiveRegion(idx) {
   });
 }
 
+function getSegmentRegion(idx) {
+  const rp = STATE.regionsPlugin;
+  if (!rp || idx == null || typeof rp.getRegions !== 'function') return null;
+  return rp.getRegions().find(r => r?.id === `cue-${idx}`) || null;
+}
+
+function getSegmentBounds(idx, seg) {
+  const region = getSegmentRegion(idx);
+  return {
+    start: Number.isFinite(region?.start) ? region.start : seg.start,
+    end: Number.isFinite(region?.end) ? region.end : seg.end,
+  };
+}
+
 function saveTranscriptToStorage() {
   if (!STATE.currentSpeaker || !STATE.coarseTranscript) return;
   try {
@@ -2610,10 +2627,11 @@ function buildConceptList(speaker, transcript, spkData) {
         STATE.segmentPlayMode = true;
         const seg = STATE.coarseTranscript?.segments?.[i];
         if (seg) {
+          const bounds = getSegmentBounds(i, seg);
           if (typeof ws.setTime === 'function') {
-            ws.setTime(seg.start);
+            ws.setTime(bounds.start);
           } else {
-            ws.seekTo(seg.start / (ws.getDuration() || 1));
+            ws.seekTo(bounds.start / (ws.getDuration() || 1));
           }
           ws.play();
         }
@@ -2666,7 +2684,8 @@ function openSegment(idx) {
   const ws = STATE.wavesurfer;
   if (ws) {
     STATE.segmentPlayMode = true;
-    const targetSec = Math.max(0, seg.start - 0.3);
+    const bounds = getSegmentBounds(idx, seg);
+    const targetSec = Math.max(0, bounds.start - 0.3);
     if (typeof ws.setTime === 'function') {
       ws.setTime(targetSec);
     } else {
@@ -2844,11 +2863,12 @@ function wireControls() {
       if (STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
         const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
         if (seg) {
+          const bounds = getSegmentBounds(STATE.currentSegmentIdx, seg);
           STATE.segmentPlayMode = true;
           if (typeof ws.setTime === 'function') {
-            ws.setTime(seg.start);
+            ws.setTime(bounds.start);
           } else {
-            ws.seekTo(seg.start / (ws.getDuration() || 1));
+            ws.seekTo(bounds.start / (ws.getDuration() || 1));
           }
           ws.play();
           return;
