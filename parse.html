@@ -2884,6 +2884,24 @@ function wireControls() {
       doRedo();
     }
   });
+
+  // Mouse wheel on waveform → horizontal scroll (left/right)
+  const waveformContainer = document.getElementById('waveform-container');
+  waveformContainer.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const ws = STATE.wavesurfer;
+    if (!ws) return;
+    const dur = ws.getDuration() || 1;
+    // deltaY > 0 = scroll down = scroll right in time; deltaY < 0 = scroll left
+    const scrollAmount = (e.deltaY > 0 ? 1 : -1) * 2; // 2 seconds per scroll tick
+    const currentTime = ws.getCurrentTime();
+    const newTime = Math.max(0, Math.min(dur, currentTime + scrollAmount));
+    if (typeof ws.setTime === 'function') {
+      ws.setTime(newTime);
+    } else {
+      ws.seekTo(newTime / dur);
+    }
+  }, { passive: false });
 }
 
 function nudge(sec) {
