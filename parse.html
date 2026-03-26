@@ -2808,7 +2808,27 @@ function escHtml(str) {
 // ─── Playback controls ────────────────────────────────────────────────────────
 function wireControls() {
   document.getElementById('btn-play').addEventListener('click', () => {
-    STATE.wavesurfer?.playPause();
+    const ws = STATE.wavesurfer;
+    if (!ws) return;
+    if (ws.isPlaying()) {
+      ws.pause();
+    } else {
+      // If a segment is selected, play from its current start to its end
+      if (STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
+        const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
+        if (seg) {
+          STATE.segmentPlayMode = true;
+          if (typeof ws.setTime === 'function') {
+            ws.setTime(seg.start);
+          } else {
+            ws.seekTo(seg.start / (ws.getDuration() || 1));
+          }
+          ws.play();
+          return;
+        }
+      }
+      ws.play();
+    }
   });
   document.getElementById('btn-back1').addEventListener('click', () => {
     const ws = STATE.wavesurfer; if (!ws) return;
