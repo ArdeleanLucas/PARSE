@@ -13,13 +13,13 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #0f172a;
-    --surface:   #1e293b;
-    --border:    #334155;
-    --accent:    #38bdf8;
-    --accent2:   #818cf8;
-    --text:      #f1f5f9;
-    --muted:     #94a3b8;
+    --bg:        #f0f2f5;
+    --surface:   #ffffff;
+    --border:    #dde2ef;
+    --accent:    #4461d4;
+    --accent2:   #7c9cff;
+    --text:      #1a1a2e;
+    --muted:     #6b7db3;
     --ok:        #34d399;
     --warn:      #fbbf24;
     --danger:    #f87171;
@@ -37,16 +37,25 @@
 
   /* ── Top bar ──────────────────────────────────────────── */
   #topbar {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 0 20px;
+    height: 52px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    gap: 16px;
     flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    z-index: 100;
   }
-  #topbar h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); }
-  #topbar .sep { color: var(--border); }
+  #topbar h1 {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: #e8eaf0;
+  }
+  #topbar .sep { color: #4a5580; }
 
   #topbar-actions {
     display: flex;
@@ -54,41 +63,15 @@
     gap: 8px;
   }
 
-  .mode-switcher {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.7);
-  }
+  .topbar-spacer { flex: 1; }
 
-  .mode-switch-link {
-    text-decoration: none;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    padding: 5px 10px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1;
-    transition: border-color 0.12s, background 0.12s, color 0.12s;
-  }
-
-  .mode-switch-link:hover {
-    color: var(--text);
-    border-color: var(--border);
-    background: rgba(148, 163, 184, 0.12);
-  }
-
-  .mode-switch-link.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #0f172a;
-    font-weight: 600;
-    pointer-events: none;
-  }
+  .mode-switcher { display:flex; gap:0; margin-left:12px; }
+  .mode-switcher a { padding:4px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; border:1px solid #4a5580; transition:all 0.15s; }
+  .mode-switcher a:first-child { border-radius:6px 0 0 6px; }
+  .mode-switcher a:last-child { border-radius:0 6px 6px 0; border-left:none; }
+  .mode-switcher a.active { background:#4461d4; color:#fff; border-color:#4461d4; }
+  .mode-switcher a:not(.active) { background:#2d3561; color:#b0beff; }
+  .mode-switcher a:not(.active):hover { background:#3d4a7a; }
 
   #settings-wrap {
     position: relative;
@@ -135,23 +118,24 @@
   }
 
   #speaker-select {
-    padding: 4px 8px;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: 13px;
+    padding: 5px 10px;
+    background: #2d3561;
+    color: #b0beff;
+    border: 1px solid #4a5580;
+    border-radius: 6px;
+    font-size: 0.8rem;
     cursor: pointer;
   }
 
   #status-pill {
-    margin-left: 8px;
-    font-size: 11px;
-    color: var(--muted);
-    background: var(--bg);
-    padding: 3px 8px;
-    border-radius: 99px;
-    border: 1px solid var(--border);
+    margin-left: 0;
+    font-size: 0.82rem;
+    color: #b0beff;
+    background: #2d3561;
+    padding: 3px 12px;
+    border-radius: 20px;
+    border: 1px solid #4a5580;
+    white-space: nowrap;
   }
 
   /* ── Main layout ──────────────────────────────────────── */
@@ -163,27 +147,28 @@
 
   /* ── Concept list (left) ──────────────────────────────── */
   #concept-list {
-    width: 260px;
+    width: 240px;
     flex-shrink: 0;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
+    background: #fff;
+    border-right: 1px solid #dde2ef;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
 
   #concept-search {
-    padding: 8px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px;
+    border-bottom: 1px solid #dde2ef;
     flex-shrink: 0;
+    background: #fff;
   }
   #concept-search input {
     width: 100%;
-    padding: 5px 8px;
-    background: var(--bg);
+    padding: 6px 10px;
+    background: #f8f9fc;
     color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    border: 1px solid #c8d0e8;
+    border-radius: 6px;
     font-size: 12px;
   }
 
@@ -194,7 +179,7 @@
 
   .concept-item {
     padding: 8px 12px;
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid #eef2ff;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -202,8 +187,8 @@
     font-size: 12px;
     transition: background 0.1s;
   }
-  .concept-item:hover { background: rgba(56,189,248,0.07); }
-  .concept-item.active { background: rgba(56,189,248,0.12); border-left: 2px solid var(--accent); }
+  .concept-item:hover { background: #f0f4ff; }
+  .concept-item.active { background: #eef2ff; border-left: 2px solid var(--accent); }
 
   .concept-item .ci-label { flex: 1; font-weight: 500; }
   .concept-item .ci-time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
@@ -225,7 +210,7 @@
   /* ── Waveform ─────────────────────────────────────────── */
   #waveform-container {
     position: relative;
-    background: #0a111e;
+    background: #1e293b;
     flex-shrink: 0;
     padding: 0 0 8px 0;
   }
@@ -244,17 +229,18 @@
   }
 
   .ctrl-btn {
-    padding: 4px 10px;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: 12px;
+    background: #2d3561;
+    color: #b0beff;
+    border: 1px solid #4a5580;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    transition: all 0.15s;
+    white-space: nowrap;
     cursor: pointer;
-    transition: background 0.1s;
   }
-  .ctrl-btn:hover { background: var(--border); }
-  .ctrl-btn.primary { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+  .ctrl-btn:hover { background: #3d4a7a; color: #fff; }
+  .ctrl-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
   .ctrl-btn.danger { border-color: var(--danger); color: var(--danger); }
 
   #playback-time {
@@ -764,7 +750,10 @@
 <!-- Top bar -->
 <div id="topbar">
   <h1>PARSE</h1>
-  <span class="sep">|</span>
+  <div class="mode-switcher">
+    <a href="parse.html" class="active">Annotate</a>
+    <a href="compare.html">Compare</a>
+  </div>
   <select id="speaker-select"></select>
   <div id="topbar-actions">
     <button class="ctrl-btn" id="btn-new-speaker" type="button">New Speaker</button>
@@ -775,10 +764,7 @@
       </div>
     </div>
   </div>
-  <div class="mode-switcher" aria-label="Mode switcher">
-    <a class="mode-switch-link active" href="parse.html" aria-current="page">Annotate</a>
-    <a class="mode-switch-link" href="compare.html">Compare</a>
-  </div>
+  <div class="topbar-spacer"></div>
   <span id="status-pill">—</span>
 </div>
 
