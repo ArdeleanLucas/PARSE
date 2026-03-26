@@ -1,0 +1,22 @@
+{
+  "ar": {
+    "name": "Arabic",
+    "family": "Semitic",
+    "concepts": {}
+  },
+  "fa": {
+    "name": "Persian",
+    "family": "Iranian",
+    "concepts": {}
+  },
+  "ckb": {
+    "name": "Central Kurdish (Sorani)",
+    "family": "Iranian",
+    "concepts": {}
+  },
+  "tr": {
+    "name": "Turkish",
+    "family": "Turkic",
+    "concepts": {}
+  }
+}

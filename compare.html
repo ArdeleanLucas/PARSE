@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PARSE Compare Mode</title>
+
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+
+  :root {
+    --bg: #0b1220;
+    --surface: #162033;
+    --surface-2: #1d2a42;
+    --border: #2c3b56;
+    --text: #e6edf8;
+    --muted: #9db0d0;
+    --accent: #4cc2ff;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --group-a: #38bdf8;
+    --group-b: #34d399;
+    --group-c: #f59e0b;
+    --group-d: #a78bfa;
+    --group-e: #f87171;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background:
+      radial-gradient(1400px 700px at 15% -20%, rgba(76, 194, 255, 0.14), transparent 50%),
+      radial-gradient(1000px 600px at 100% 0, rgba(52, 211, 153, 0.1), transparent 50%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans", system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #compare-container {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(460px, 2.4fr) minmax(260px, 1fr);
+    grid-template-rows: auto minmax(200px, 1fr) minmax(160px, auto) minmax(120px, auto);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  #compare-header,
+  #compare-table,
+  #compare-cognate-panel,
+  #compare-borrowing-panel,
+  #compare-spectrogram,
+  #compare-compute-status {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(22, 32, 51, 0.94), rgba(16, 24, 38, 0.96));
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  }
+
+  #compare-header {
+    grid-column: 1 / -1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .compare-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .compare-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--accent);
+  }
+
+  .compare-mode-link {
+    text-decoration: none;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    background: rgba(11, 18, 32, 0.7);
+    font-size: 12px;
+  }
+
+  .compare-mode-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .compare-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(11, 18, 32, 0.65);
+    padding: 4px 8px;
+  }
+
+  .compare-control-group label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+
+  .compare-select,
+  .compare-input,
+  .compare-btn {
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #111a2a;
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .compare-btn {
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .compare-btn:hover {
+    border-color: var(--accent);
+  }
+
+  .compare-btn.primary {
+    border-color: #2498df;
+    background: linear-gradient(180deg, #3ab8ff, #2199e0);
+    color: #05111f;
+  }
+
+  .compare-tag-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .compare-speaker-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .compare-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    background: rgba(17, 26, 42, 0.75);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .compare-chip button {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+  }
+
+  .compare-chip button:hover {
+    color: var(--danger);
+  }
+
+  #compare-table {
+    grid-column: 1 / 2;
+    grid-row: 2 / 5;
+    min-height: 0;
+    overflow: hidden;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compare-table-scroll {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(11, 18, 32, 0.6);
+    min-height: 0;
+    flex: 1;
+  }
+
+  .compare-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+  }
+
+  .compare-matrix th,
+  .compare-matrix td {
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid rgba(44, 59, 86, 0.5);
+    padding: 8px;
+    vertical-align: top;
+  }
+
+  .compare-matrix th:last-child,
+  .compare-matrix td:last-child {
+    border-right: none;
+  }
+
+  .compare-matrix th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #17233a;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+  }
+
+  .compare-matrix tbody tr:hover {
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  .compare-matrix tr.is-selected {
+    background: rgba(76, 194, 255, 0.16);
+  }
+
+  .compare-concept-cell {
+    min-width: 180px;
+    width: 180px;
+  }
+
+  .compare-concept-label {
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .compare-concept-id {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .compare-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 48px;
+  }
+
+  .compare-play-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #0e1727;
+    color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .compare-play-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .compare-cell-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .compare-ipa {
+    font-family: "Noto Serif", "Gentium Plus", serif;
+    color: #c6defa;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+
+  .compare-ortho {
+    color: #f4dba8;
+    font-size: 12px;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+
+  .compare-empty {
+    color: #6d7f9e;
+    font-style: italic;
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+  }
+
+  .compare-cognate-badge,
+  .cognate-speaker-badge {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 0 6px;
+  }
+
+  .group-a { background: rgba(56, 189, 248, 0.2); border-color: rgba(56, 189, 248, 0.8); color: #bdeeff; }
+  .group-b { background: rgba(52, 211, 153, 0.2); border-color: rgba(52, 211, 153, 0.8); color: #bff8e3; }
+  .group-c { background: rgba(245, 158, 11, 0.2); border-color: rgba(245, 158, 11, 0.8); color: #ffe1a8; }
+  .group-d { background: rgba(167, 139, 250, 0.2); border-color: rgba(167, 139, 250, 0.8); color: #e8ddff; }
+  .group-e { background: rgba(248, 113, 113, 0.2); border-color: rgba(248, 113, 113, 0.8); color: #ffd5d5; }
+
+  #compare-cognate-panel,
+  #compare-borrowing-panel,
+  #compare-spectrogram {
+    grid-column: 2 / 3;
+    padding: 12px;
+    overflow: auto;
+  }
+
+  #compare-cognate-panel {
+    grid-row: 2 / 3;
+  }
+
+  #compare-borrowing-panel {
+    grid-row: 3 / 4;
+  }
+
+  #compare-spectrogram {
+    grid-row: 4 / 5;
+  }
+
+  .panel-title {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .panel-placeholder {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .cognate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .cognate-action-btn {
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #10192b;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+
+  .cognate-action-btn.is-active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .cognate-speaker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px;
+  }
+
+  .cognate-speaker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    background: rgba(16, 25, 43, 0.75);
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+
+  .cognate-speaker-item:hover {
+    border-color: var(--accent);
+  }
+
+  .cognate-speaker-label {
+    font-size: 12px;
+    color: var(--text);
+  }
+
+  .cognate-mode-note {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  .split-group-chooser {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .split-group-btn {
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #111a2a;
+    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .split-group-btn.is-active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  #compare-compute-status {
+    margin: 0 12px 12px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+  }
+
+  .compute-status-text {
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 200px;
+  }
+
+  .compute-progress-wrap {
+    flex: 1;
+    height: 8px;
+    border-radius: 999px;
+    background: #111a2a;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .compute-progress-bar {
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #38bdf8, #34d399);
+    transition: width 0.2s ease;
+  }
+
+  .parse-modal.hidden {
+    display: none;
+  }
+
+  @media (max-width: 1100px) {
+    body {
+      overflow: auto;
+    }
+
+    #compare-container {
+      display: flex;
+      flex-direction: column;
+      min-height: auto;
+    }
+
+    #compare-table {
+      min-height: 380px;
+    }
+
+    #compare-cognate-panel,
+    #compare-borrowing-panel,
+    #compare-spectrogram {
+      min-height: 140px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="compare-container">
+  <div id="compare-header"><!-- Mode switcher, speaker selector, tag filter, compute button --></div>
+  <div id="compare-table"><!-- Concept x speaker matrix --></div>
+  <div id="compare-cognate-panel"><!-- Cognate controls --></div>
+  <div id="compare-borrowing-panel"><!-- Similarity bars, borrowing adjudication --></div>
+  <div id="compare-spectrogram"><!-- On-demand spectrogram display --></div>
+</div>
+<div id="compare-speaker-import" class="parse-modal hidden"></div>
+<div id="compare-compute-status"><!-- Background computation progress --></div>
+
+<script>
+(function seedNamespace() {
+  window.PARSE = window.PARSE || {};
+  const P = window.PARSE;
+  P.project = P.project || null;
+  P.sourceIndex = P.sourceIndex || null;
+  P.transcripts = P.transcripts || {};
+  P.suggestions = P.suggestions || null;
+  P.annotations = P.annotations || {};
+  P.enrichments = P.enrichments || null;
+  P.tags = P.tags || {};
+  P.mode = 'compare';
+  P.currentSpeaker = P.currentSpeaker || null;
+  P.currentConcept = P.currentConcept || null;
+  P.modules = P.modules || {};
+})();
+</script>
+
+<script src="js/shared/annotation-store.js"></script>
+<script src="js/shared/project-config.js"></script>
+<script src="js/shared/tags.js"></script>
+<script src="js/shared/audio-player.js"></script>
+<script src="js/shared/ai-client.js"></script>
+
+<script src="js/compare/enrichments.js"></script>
+<script src="js/compare/concept-table.js"></script>
+<script src="js/compare/cognate-controls.js"></script>
+<script src="js/compare/compare.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "stt": {
+    "provider": "faster-whisper",
+    "model_path": "",
+    "language": "sd",
+    "device": "cuda",
+    "compute_type": "float16"
+  },
+  "ipa": {
+    "provider": "local",
+    "model": "epitran"
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "specialized_layers": []
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "from": "j",
+    "to": "y",
+    "context": "onset",
+    "bidirectional": true
+  },
+  {
+    "from": "k",
+    "to": "g",
+    "context": "onset",
+    "bidirectional": true
+  },
+  {
+    "from": "q",
+    "to": "g",
+    "context": "onset",
+    "bidirectional": false
+  },
+  {
+    "from": "t",
+    "to": "d",
+    "context": "onset",
+    "bidirectional": true
+  },
+  {
+    "from": "p",
+    "to": "b",
+    "context": "onset",
+    "bidirectional": true
+  },
+  {
+    "from": "e",
+    "to": "a",
+    "context": "nucleus",
+    "bidirectional": true
+  },
+  {
+    "from": "e",
+    "to": "ae",
+    "context": "nucleus",
+    "bidirectional": true
+  },
+  {
+    "from": "k",
+    "to": "",
+    "context": "coda",
+    "bidirectional": false
+  },
+  {
+    "from": "g",
+    "to": "",
+    "context": "coda",
+    "bidirectional": false
+  }
+]
