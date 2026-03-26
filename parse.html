@@ -773,7 +773,7 @@
       <button class="ctrl-btn" id="btn-redo" title="Redo (Ctrl+Shift+Z)" disabled>↪ Redo</button>
       <span id="playback-time">0:00:00 / 0:00:00</span>
       <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto;">
-        Zoom <input type="range" id="zoom-range" min="1" max="500" value="250">
+        Zoom <input type="range" id="zoom-range" min="1" max="1000" value="500">
       </label>
     </div>
 
@@ -2465,8 +2465,8 @@ async function loadSpeaker(speaker) {
   ws.on('finish',() => { document.getElementById('btn-play').textContent = '▶ Play'; });
 
   // Zoom
-  document.getElementById('zoom-range').value = 250;
-  ws.zoom(250);
+  document.getElementById('zoom-range').value = 500;
+  ws.zoom(500);
 }
 
 function updateTimeDisplay() {
