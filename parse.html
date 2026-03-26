@@ -773,7 +773,7 @@
       <button class="ctrl-btn" id="btn-redo" title="Redo (Ctrl+Shift+Z)" disabled>↪ Redo</button>
       <span id="playback-time">0:00:00 / 0:00:00</span>
       <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto;">
-        Zoom <input type="range" id="zoom-range" min="1" max="1000" value="500">
+        Zoom <input type="range" id="zoom-range" min="1" max="1000" value="1">
       </label>
     </div>
 
@@ -2465,8 +2465,8 @@ async function loadSpeaker(speaker) {
   ws.on('finish',() => { document.getElementById('btn-play').textContent = '▶ Play'; });
 
   // Zoom
-  document.getElementById('zoom-range').value = 500;
-  ws.zoom(500);
+  document.getElementById('zoom-range').value = 1;
+  ws.zoom(1);
 }
 
 function updateTimeDisplay() {
@@ -2655,6 +2655,16 @@ function openSegment(idx) {
     } else {
       const dur = ws.getDuration() || 1;
       ws.seekTo(Math.max(0, Math.min(1, targetSec / dur)));
+    }
+  }
+
+  // Auto-zoom to meaningful level when selecting a segment
+  if (ws) {
+    const currentZoom = Number(document.getElementById('zoom-range').value);
+    if (currentZoom < 400) {
+      // Zoom to 500 (50%) for meaningful waveform view
+      document.getElementById('zoom-range').value = 500;
+      ws.zoom(500);
     }
   }
 
