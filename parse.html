@@ -2416,8 +2416,17 @@ async function loadSpeaker(speaker) {
     ws.load(wavUrl);
   }
 
-  // Playback time display
-  ws.on('audioprocess', () => updateTimeDisplay());
+  // Playback time display + auto-stop at segment end
+  ws.on('audioprocess', () => {
+    updateTimeDisplay();
+    // Auto-stop when reaching the end of the current segment
+    if (STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
+      const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
+      if (seg && ws.getCurrentTime() >= seg.end) {
+        ws.pause();
+      }
+    }
+  });
   ws.on('seek', () => updateTimeDisplay());
 
   ws.on('ready', () => {
