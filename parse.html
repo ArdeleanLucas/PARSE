@@ -2594,9 +2594,10 @@ function buildConceptList(speaker, transcript, spkData) {
     div.dataset.idx = i;
 
     const label = seg.text || `segment ${i+1}`;
+    const orthoPreview = seg.ortho ? ` <span style="color:var(--muted);font-size:11px;direction:rtl">${escHtml(seg.ortho)}</span>` : '';
     div.innerHTML = `
       <span class="ci-dot"></span>
-      <span class="ci-label">${escHtml(label)}</span>
+      <span class="ci-label">${escHtml(label)}${orthoPreview}</span>
       <span class="ci-time">${fmt(seg.start)}</span>
     `;
 
@@ -2705,13 +2706,13 @@ function buildAnnotationPane(speaker, idx, seg) {
     <div class="field-group">
       <label class="field-label" for="field-ipa">IPA Transcription</label>
       <input class="field-input ltr" id="field-ipa" type="text"
-             placeholder="e.g. jak" value="${escHtml(existing.ipa || '')}" autocomplete="off">
+             placeholder="e.g. jak" value="${escHtml(existing.ipa || seg.text || '')}" autocomplete="off">
     </div>
 
     <div class="field-group">
       <label class="field-label" for="field-ortho">Orthographic Script</label>
       <input class="field-input" id="field-ortho" type="text"
-             placeholder="e.g. یەک" value="${escHtml(existing.ortho || '')}" autocomplete="off" dir="rtl">
+             placeholder="e.g. یەک" value="${escHtml(existing.ortho || seg.ortho || '')}" autocomplete="off" dir="rtl">
     </div>
 
     <div class="field-group">
