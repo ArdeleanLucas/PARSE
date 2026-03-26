@@ -1,4 +1,4 @@
-# INTERFACES.md — PARSE Module Contract v4.0
+# INTERFACES.md — PARSE Module Contract v5.0
 
 All modules attach to `window.PARSE`. Communication is via CustomEvents on `document`.
 
@@ -9,29 +9,50 @@ All modules attach to `window.PARSE`. Communication is via CustomEvents on `docu
 ```js
 window.PARSE = {
   // Project config (loaded from project.json on startup)
-  project: null,          // parsed project.json
+  project: null,
 
-  // Data stores (loaded by HTML shell on page load)
-  sourceIndex: null,      // parsed source_index.json
-  transcripts: {},        // parsed transcripts/<Speaker>.json, keyed by speaker ID
-  suggestions: null,      // parsed ai_suggestions.json
-  annotations: {},        // loaded annotation data, keyed by speaker ID (from annotations/*.parse.json)
+  // Data stores
+  sourceIndex: null,       // source_index.json
+  transcripts: {},         // transcripts/<Speaker>.json, keyed by speaker ID
+  suggestions: null,       // ai_suggestions.json
+  annotations: {},         // annotation data, keyed by speaker ID
+  enrichments: null,       // parse-enrichments.json (cognate sets, similarity, borrowing)
+  tags: {},                // tag definitions and assignments
+
+  // Current state
+  mode: 'annotate',        // 'annotate' | 'compare'
+  currentSpeaker: null,
+  currentConcept: null,
 
   // Module references (set by each module's init())
   modules: {
-    config: null,         // project-config.js
-    panel: null,          // parse.js
-    waveform: null,       // waveform-controller.js
-    transcript: null,     // transcript-panel.js
-    suggestions: null,    // suggestions-panel.js
-    spectrogram: null,    // spectrogram-worker.js (wrapper)
-    regions: null,        // region-manager.js
-    fullscreen: null,     // fullscreen-mode.js
-    annotationStore: null,// annotation-store.js
-    annotationPanel: null,// annotation-panel.js
-    videoSync: null,      // video-sync-panel.js
-    importExport: null,   // import-export.js
-    onboarding: null,     // onboarding.js
+    // Shared
+    config: null,          // js/shared/project-config.js
+    annotationStore: null, // js/shared/annotation-store.js
+    tags: null,            // js/shared/tags.js
+    audioPlayer: null,     // js/shared/audio-player.js
+    aiClient: null,        // js/shared/ai-client.js
+    spectrogram: null,     // js/shared/spectrogram-worker.js
+
+    // Annotate mode
+    panel: null,           // js/annotate/parse.js
+    waveform: null,        // js/annotate/waveform-controller.js
+    transcript: null,      // js/annotate/transcript-panel.js
+    suggestions: null,     // js/annotate/suggestions-panel.js
+    regions: null,         // js/annotate/region-manager.js
+    fullscreen: null,      // js/annotate/fullscreen-mode.js
+    annotationPanel: null, // js/annotate/annotation-panel.js
+    videoSync: null,       // js/annotate/video-sync-panel.js
+    importExport: null,    // js/annotate/import-export.js
+    onboarding: null,      // js/annotate/onboarding.js
+
+    // Compare mode
+    compare: null,         // js/compare/compare.js
+    conceptTable: null,    // js/compare/concept-table.js
+    cognateControls: null, // js/compare/cognate-controls.js
+    borrowingPanel: null,  // js/compare/borrowing-panel.js
+    speakerImport: null,   // js/compare/speaker-import.js
+    enrichmentsIO: null,   // js/compare/enrichments.js
   }
 };
 ```
@@ -46,223 +67,239 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 
 ```js
 // Project config loaded and validated
-// Fired by: project-config.js (on startup or after onboarding)
-// Listened by: all modules (initialize with project settings)
-"parse:project-loaded" → { projectId: string, projectName: string, speakers: string[], language: { code: string, name: string } }
+"parse:project-loaded" → { projectId, projectName, speakers: string[], language: { code, name } }
 
-// Project config error (missing file, invalid JSON, etc.)
-// Fired by: project-config.js
-// Listened by: parse.js (show error / trigger onboarding)
+// Project config error
 "parse:project-error" → { error: string, showOnboarding: boolean }
 ```
 
-### Panel Lifecycle
+### Panel Lifecycle (Annotate)
 
 ```js
-// Open PARSE panel for a speaker + concept
-// Fired by: parse.js (when 🔍 button clicked)
-// Listened by: waveform-controller, transcript-panel, suggestions-panel, region-manager, annotation-panel
-"parse:panel-open" → { speaker: string, conceptId: string, sourceWav: string, lexiconStartSec: number }
+// Open panel for a speaker + concept
+"parse:panel-open" → { speaker, conceptId, sourceWav, lexiconStartSec }
 
-// Close PARSE panel
-// Fired by: parse.js (singleton close, or user collapse)
-// Listened by: all modules (cleanup)
-"parse:panel-close" → { speaker: string }
+// Close panel
+"parse:panel-close" → { speaker }
 ```
 
 ### Audio Navigation
 
 ```js
-// Request the waveform to seek to a timestamp
-// Fired by: transcript-panel (click), suggestions-panel (click), navigation buttons
-// Listened by: waveform-controller
-"parse:seek" → { timeSec: number, createRegion?: boolean, regionDurationSec?: number }
+// Seek waveform to timestamp
+"parse:seek" → { timeSec, createRegion?: boolean, regionDurationSec?: number }
 
-// Playback position update (fires continuously during playback)
-// Fired by: waveform-controller
-// Listened by: transcript-panel (highlight current), spectrogram (cursor), annotation-panel (field tracking)
-"parse:playback-position" → { timeSec: number }
+// Playback position update (continuous during playback)
+"parse:playback-position" → { timeSec }
 
 // Playback state change
-// Fired by: waveform-controller
-// Listened by: UI buttons
 "parse:playback-state" → { playing: boolean }
 ```
 
-### Region Management
+### Audio Player (Shared — used in both modes)
 
 ```js
-// Region created or updated (drag handles on waveform)
-// Fired by: waveform-controller (RegionsPlugin)
-// Listened by: region-manager, spectrogram (re-render), annotation-panel (update timestamp display)
-"parse:region-updated" → { startSec: number, endSec: number }
+// Play a specific audio region from a WAV file
+"parse:audio-play" → { sourceWav, startSec, endSec, speaker?, conceptId? }
 
-// Region assigned to current concept (legacy v3 flow — still supported)
-// Fired by: region-manager (when "Assign" button clicked)
-// Listened by: parse.js (update form row indicator)
-"parse:region-assigned" → { speaker: string, conceptId: string, startSec: number, endSec: number, sourceWav: string, aiSuggestionUsed?: number, aiSuggestionConfidence?: string, aiSuggestionScore?: number }
+// Audio playback completed
+"parse:audio-done" → { sourceWav, speaker?, conceptId? }
 ```
 
-### Annotations (NEW in v4.0)
+### Region Management (Annotate)
 
 ```js
-// Annotation saved (user confirmed IPA/ortho/concept for a region)
-// Fired by: annotation-panel.js (when "Save Annotation" clicked)
-// Listened by: annotation-store.js (persist to disk), parse.js (update UI indicators)
-"parse:annotation-save" → {
-  speaker: string,
-  conceptId: string,
-  startSec: number,
-  endSec: number,
-  ipa: string,
-  ortho: string,
-  concept: string,         // format: "1:one"
-  sourceWav: string,
-  aiSuggestionUsed?: number,
-  aiSuggestionScore?: number
-}
+// Region created or updated
+"parse:region-updated" → { startSec, endSec }
+
+// Region assigned to concept
+"parse:region-assigned" → { speaker, conceptId, startSec, endSec, sourceWav, aiSuggestionUsed?, aiSuggestionScore? }
+```
+
+### Annotations
+
+```js
+// Annotation saved
+"parse:annotation-save" → { speaker, conceptId, startSec, endSec, ipa, ortho, concept, sourceWav, aiSuggestionUsed?, aiSuggestionScore? }
 
 // Annotation deleted
-// Fired by: annotation-panel.js (when user removes an annotation)
-// Listened by: annotation-store.js (remove from disk), parse.js (update UI)
-"parse:annotation-delete" → { speaker: string, conceptId: string, startSec: number }
+"parse:annotation-delete" → { speaker, conceptId, startSec }
 
-// Annotation loaded from disk (initial load or after import)
-// Fired by: annotation-store.js
-// Listened by: annotation-panel.js (populate fields), region-manager (show saved regions)
-"parse:annotations-loaded" → { speaker: string, count: number }
+// Annotations loaded from disk
+"parse:annotations-loaded" → { speaker, count }
 
-// Annotation data changed (any modification to the annotation store)
-// Fired by: annotation-store.js (after save, delete, or import)
-// Listened by: parse.js (update progress indicators)
-"parse:annotations-changed" → { speaker: string, totalAnnotations: number }
+// Annotation data changed
+"parse:annotations-changed" → { speaker, totalAnnotations }
 ```
 
-### Suggestions & Prior
+### Tags (NEW in v5.0)
+
+```js
+// Tag created
+"parse:tag-created" → { tagId, name, color? }
+
+// Tag deleted
+"parse:tag-deleted" → { tagId }
+
+// Items tagged
+"parse:items-tagged" → { tagId, conceptIds: number[], action: "add" | "remove" }
+
+// Tag filter changed (sidebar filter)
+"parse:tag-filter" → { tagId: string | null, showUntagged: boolean }
+
+// Include-in-analysis toggle
+"parse:analysis-toggle" → { conceptId, included: boolean }
+```
+
+### Suggestions & Prior (Annotate)
 
 ```js
 // AI suggestion clicked
-// Fired by: suggestions-panel
-// Listened by: (triggers parse:seek internally, but also logged)
-"parse:suggestion-click" → { suggestionIndex: number, segmentStartSec: number, segmentEndSec: number }
+"parse:suggestion-click" → { suggestionIndex, segmentStartSec, segmentEndSec }
 
 // Positional prior reference speakers changed
-// Fired by: suggestions-panel (speaker selector checkboxes)
-// Listened by: suggestions-panel (self, re-rank)
 "parse:priors-changed" → { selectedSpeakers: string[] }
 ```
 
-### Transcript
+### Transcript (Annotate)
 
 ```js
-// Transcript segment clicked
-// Fired by: transcript-panel
-// Listened by: (triggers parse:seek internally)
-"parse:transcript-click" → { segmentIndex: number, startSec: number }
+"parse:transcript-click" → { segmentIndex, startSec }
 ```
 
-### Fullscreen
+### Fullscreen (Annotate)
 
 ```js
-// Toggle fullscreen mode
-// Fired by: fullscreen-mode.js (button or Escape)
-// Listened by: parse.js (reparent panel into overlay)
 "parse:fullscreen-toggle" → { active: boolean }
-
-// Navigate to next/prev concept (within fullscreen)
-// Fired by: fullscreen-mode.js (prev/next buttons)
-// Listened by: parse.js (close current, open next)
 "parse:navigate-concept" → { direction: "prev" | "next", missingOnly: boolean }
 ```
 
-### Import / Export (NEW in v4.0)
+### Import / Export
 
 ```js
-// TextGrid import requested
-// Fired by: import-export.js (user selected a .TextGrid file)
-// Listened by: annotation-store.js (parse + load)
-"parse:import-textgrid" → { file: File, targetSpeaker: string, mode: "replace" | "new", newSpeakerName?: string }
-
-// TextGrid export requested
-// Fired by: import-export.js (user clicked export)
-// Listened by: annotation-store.js (serialize + trigger download)
-"parse:export-textgrid" → { speaker: string }
-
-// ELAN XML export requested
-// Fired by: import-export.js
-// Listened by: annotation-store.js
-"parse:export-elan" → { speaker: string }
-
-// CSV export requested
-// Fired by: import-export.js
-// Listened by: annotation-store.js
+"parse:import-textgrid" → { file: File, targetSpeaker, mode: "replace" | "new", newSpeakerName? }
+"parse:export-textgrid" → { speaker }
+"parse:export-elan" → { speaker }
 "parse:export-csv" → { speaker: string | "all" }
-
-// Segment audio export requested
-// Fired by: import-export.js
-// Listened by: annotation-store.js (collect timestamps), server-side (ffmpeg extraction)
 "parse:export-segments" → { speaker: string | "all" }
-
-// Import/export completed
-// Fired by: annotation-store.js
-// Listened by: import-export.js (show success/error)
-"parse:io-complete" → { operation: "import" | "export", format: string, success: boolean, message?: string }
+"parse:export-wordlist" → { speakers: string[], conceptIds: number[] }  // NEW: LingPy TSV export
+"parse:io-complete" → { operation, format, success, message? }
 ```
 
-### Video Sync (NEW in v4.0)
+### Video Sync (Annotate)
 
 ```js
-// Video sync initiated
-// Fired by: video-sync-panel.js (user clicked "Auto-sync")
-// Listened by: video-sync-panel.js (self — show progress)
-"parse:video-sync-start" → { speaker: string, videoFile: string, audioFile: string, fps: number }
-
-// Video sync progress update
-// Fired by: video-sync-panel.js (during FFT processing)
-// Listened by: video-sync-panel.js (update progress bar)
-"parse:video-sync-progress" → { speaker: string, step: string, progress: number }
-
-// Video sync completed — offset + drift computed
-// Fired by: video-sync-panel.js (after FFT + optional AI verification)
-// Listened by: video-sync-panel.js (show results for confirmation)
-"parse:video-sync-result" → {
-  speaker: string,
-  offsetSec: number,
-  driftRate: number,
-  method: "fft_auto" | "manual",
-  aiVerified: boolean,
-  confidence: number
-}
-
-// Video sync locked by user
-// Fired by: video-sync-panel.js (user confirmed sync)
-// Listened by: project-config.js (save to project.json)
-"parse:video-sync-locked" → {
-  speaker: string,
-  videoFile: string,
-  offsetSec: number,
-  driftRate: number,
-  manualAdjustmentSec: number,
-  fps: number
-}
-
-// Video clip extraction requested
-// Fired by: video-sync-panel.js or import-export.js
-// Listened by: server-side handler
+"parse:video-sync-start" → { speaker, videoFile, audioFile, fps }
+"parse:video-sync-progress" → { speaker, step, progress }
+"parse:video-sync-result" → { speaker, offsetSec, driftRate, method, aiVerified, confidence }
+"parse:video-sync-locked" → { speaker, videoFile, offsetSec, driftRate, manualAdjustmentSec, fps }
 "parse:video-extract-clips" → { speaker: string | "all" }
+```
+
+### Compare Mode (NEW in v5.0)
+
+```js
+// Compare mode opened
+"parse:compare-open" → { speakers: string[], conceptIds: number[] }
+
+// Compare mode closed
+"parse:compare-close" → {}
+
+// Speaker added to comparison
+"parse:compare-speaker-add" → { speaker, importMode: "raw" | "existing" | "manual" }
+
+// Speaker removed from comparison
+"parse:compare-speaker-remove" → { speaker }
+```
+
+### Cognate Controls (NEW in v5.0)
+
+```js
+// Cognate grouping accepted (keep precomputed sets)
+"parse:cognate-accept" → { conceptId }
+
+// Cognate group split initiated
+"parse:cognate-split-start" → { conceptId }
+
+// Speaker reassigned during split
+"parse:cognate-split-assign" → { conceptId, speaker, fromGroup: string, toGroup: string }
+
+// Cognate split confirmed
+"parse:cognate-split-done" → { conceptId, groups: Record<string, string[]> }
+
+// All merged into one cognate set
+"parse:cognate-merge" → { conceptId }
+
+// Single speaker's cognate class cycled
+"parse:cognate-cycle" → { conceptId, speaker, newGroup: string }
+
+// Cognate sets changed (any modification)
+"parse:cognates-changed" → { conceptId, groups: Record<string, string[]> }
+```
+
+### Borrowing (NEW in v5.0)
+
+```js
+// Borrowing status changed for a speaker's form
+"parse:borrowing-changed" → { conceptId, speaker, status: "confirmed" | "not_borrowing" | "undecided" }
+
+// Borrowing handling decision
+"parse:borrowing-handle" → { conceptId, speaker, handling: "missing" | "separate_cognate" }
+```
+
+### Enrichments (NEW in v5.0)
+
+```js
+// Computation requested
+"parse:compute-request" → {
+  type: "cognates" | "offset" | "spectrograms",
+  speakers: string[],
+  conceptIds: number[],
+  contactLanguages?: string[],
+  lexstatThreshold?: number
+}
+
+// Computation started (background)
+"parse:compute-started" → { jobId, type, estimatedDuration? }
+
+// Computation progress
+"parse:compute-progress" → { jobId, type, progress: number, message? }
+
+// Computation completed
+"parse:compute-done" → { jobId, type, success: boolean, error?: string }
+
+// Enrichments updated (data refreshed in memory)
+"parse:enrichments-updated" → { computedAt, speakers: string[], concepts: number[] }
+```
+
+### AI / STT (NEW in v5.0)
+
+```js
+// Full-file STT requested for new speaker
+"parse:stt-request" → { speaker, sourceWav, language?, model? }
+
+// STT job started
+"parse:stt-started" → { jobId, speaker, estimatedDuration? }
+
+// STT progress
+"parse:stt-progress" → { jobId, speaker, progress: number, segmentsProcessed: number }
+
+// STT completed
+"parse:stt-done" → { jobId, speaker, success: boolean, totalSegments?: number, error?: string }
+
+// Cross-speaker match results available
+"parse:match-results" → { speaker, matches: Array<{ conceptId, candidates: Array<{ startSec, endSec, ipa, ortho, confidence }> }> }
 ```
 
 ---
 
 ## Module Init Pattern
 
-Each module exports a single `init` function. The HTML shell calls them in order.
+Each module exports `init` and `destroy`. The HTML shell calls them in order.
 
 ```js
-// Each module file structure:
 (function() {
   'use strict';
-
   const P = window.PARSE;
 
   function init(containerEl) {
@@ -275,50 +312,56 @@ Each module exports a single `init` function. The HTML shell calls them in order
     // Remove event listeners, clean up resources
   }
 
-  // Register module
   P.modules.moduleName = { init, destroy };
 })();
 ```
-
-**IMPORTANT:** v4.0 uses `window.PARSE` (not `window.SourceExplorer`). Existing v3 modules must be updated during Wave 9 integration.
 
 ---
 
 ## DOM Contract
 
-The HTML shell provides these container elements:
+### parse.html (Annotate Mode)
 
 ```html
-<!-- Main panel (parse.js manages visibility) -->
 <div id="parse-panel" class="parse-panel hidden">
   <div id="parse-header"></div>
-  <div id="parse-priors"></div>           <!-- suggestions-panel: speaker selector -->
-  <div id="parse-suggestions"></div>      <!-- suggestions-panel: suggestion cards -->
-  <div id="parse-transcript"></div>       <!-- transcript-panel: virtualized list -->
-  <div id="parse-waveform"></div>         <!-- waveform-controller: wavesurfer instance -->
-  <div id="parse-spectrogram"></div>      <!-- spectrogram wrapper -->
-  <div id="parse-annotation"></div>       <!-- annotation-panel: IPA/ortho/concept fields -->
-  <div id="parse-controls"></div>         <!-- nav buttons, region info, save/export -->
+  <div id="parse-priors"></div>
+  <div id="parse-suggestions"></div>
+  <div id="parse-transcript"></div>
+  <div id="parse-waveform"></div>
+  <div id="parse-spectrogram"></div>
+  <div id="parse-annotation"></div>
+  <div id="parse-controls"></div>
 </div>
+<div id="parse-fullscreen-overlay" class="parse-fullscreen hidden"></div>
+<div id="parse-video-sync" class="parse-video-sync hidden"></div>
+<div id="parse-io-modal" class="parse-modal hidden"></div>
+<div id="parse-onboarding" class="parse-onboarding hidden"></div>
+```
 
-<!-- Fullscreen overlay -->
-<div id="parse-fullscreen-overlay" class="parse-fullscreen hidden">
-  <!-- fullscreen-mode.js manages this overlay -->
+### compare.html (Compare Mode)
+
+```html
+<div id="compare-container">
+  <div id="compare-header">
+    <!-- Mode switcher, speaker selector, tag filter, compute button -->
+  </div>
+  <div id="compare-table">
+    <!-- Concept × speaker matrix, rendered by concept-table.js -->
+  </div>
+  <div id="compare-cognate-panel">
+    <!-- Cognate controls: accept/split/merge/cycle -->
+  </div>
+  <div id="compare-borrowing-panel">
+    <!-- Similarity bars, borrowing adjudication -->
+  </div>
+  <div id="compare-spectrogram">
+    <!-- On-demand spectrogram display -->
+  </div>
 </div>
-
-<!-- Video sync panel (shown per-speaker when video exists) -->
-<div id="parse-video-sync" class="parse-video-sync hidden">
-  <!-- video-sync-panel.js manages this -->
-</div>
-
-<!-- Import/Export modal -->
-<div id="parse-io-modal" class="parse-modal hidden">
-  <!-- import-export.js manages this -->
-</div>
-
-<!-- Onboarding wizard (shown when no project.json exists) -->
-<div id="parse-onboarding" class="parse-onboarding hidden">
-  <!-- onboarding.js manages this -->
+<div id="compare-speaker-import" class="parse-modal hidden"></div>
+<div id="compare-compute-status">
+  <!-- Background computation progress indicator -->
 </div>
 ```
 
@@ -326,115 +369,13 @@ The HTML shell provides these container elements:
 
 ## Data Schemas (for JS consumption)
 
-### project.json
+### project.json — see PROJECT_PLAN.md §4.1
 
-```ts
-interface ProjectConfig {
-  parse_version: string;
-  project_id: string;
-  project_name: string;
-  language: {
-    code: string;           // SIL ISO 639-3
-    name: string;
-    script: string;
-    contact_languages: string[];
-  };
-  paths: {
-    audio_original: string;
-    audio_working: string;
-    annotations: string;
-    exports: string;
-    peaks: string;
-    transcripts: string;
-  };
-  concepts: {
-    source: string;         // CSV filename
-    id_column: string;
-    label_column: string;
-    total: number;
-  };
-  speakers: Record<string, {
-    source_files: Array<{
-      filename: string;
-      is_primary: boolean;
-      lexicon_start_sec: number;
-    }>;
-    video_files: Array<{
-      filename: string;
-      fps: number;
-      sync_status: "unsynced" | "syncing" | "synced";
-      sync?: VideoSyncData;
-    }>;
-    has_csv_timestamps: boolean;
-    notes?: string;
-  }>;
-  ai: {
-    enabled: boolean;
-    provider: "anthropic" | "openai" | "ollama" | null;
-    model: string | null;
-    api_key_env?: string;
-  };
-  server: {
-    port: number;
-    host: string;
-  };
-}
-```
+### Annotation File — see CODING.md "Key Schemas"
 
-### Annotation File (`annotations/<Speaker>.parse.json`)
+### Enrichments — see CODING.md "Key Schemas"
 
-```ts
-interface AnnotationFile {
-  version: 1;
-  project_id: string;
-  speaker: string;
-  source_audio: string;
-  source_audio_duration_sec: number;
-  tiers: {
-    ipa: IntervalTier;
-    ortho: IntervalTier;
-    concept: IntervalTier;
-    speaker: IntervalTier;
-    [customTierName: string]: IntervalTier;  // user-added tiers
-  };
-  metadata: {
-    language_code: string;
-    created: string;      // ISO 8601
-    modified: string;     // ISO 8601
-  };
-}
-
-interface IntervalTier {
-  type: "interval";
-  display_order: number;    // 1 = top (closest to spectrogram)
-  intervals: Array<{
-    start: number;          // seconds
-    end: number;            // seconds
-    text: string;
-  }>;
-}
-```
-
-### Video Sync Data
-
-```ts
-interface VideoSyncData {
-  status: "unsynced" | "syncing" | "synced";
-  offset_sec: number;
-  drift_rate: number;           // seconds of drift per minute
-  method: "fft_auto" | "manual";
-  ai_verified: boolean;
-  locked_at: string;            // ISO 8601
-  manual_adjustment_sec: number;
-}
-```
-
-### Timestamp → Video Mapping
-
-```
-video_time(wav_time) = (wav_time × (1 + drift_rate / 60)) + offset_sec + manual_adjustment_sec
-video_frame(wav_time) = round(video_time(wav_time) × fps)
-```
+### AI Config — see `config/ai_config.json`
 
 ### source_index.json
 
@@ -442,7 +383,7 @@ video_frame(wav_time) = round(video_time(wav_time) × fps)
 interface SourceIndex {
   speakers: Record<string, {
     source_wavs: Array<{
-      filename: string;           // relative URL path (from audio/working/)
+      filename: string;
       duration_sec: number;
       file_size_bytes: number;
       bit_depth: number;
@@ -451,8 +392,8 @@ interface SourceIndex {
       lexicon_start_sec: number;
       is_primary: boolean;
     }>;
-    peaks_file: string;           // relative URL path to peaks JSON
-    transcript_file: string;      // relative URL path to transcript JSON
+    peaks_file: string;
+    transcript_file: string;
     has_csv: boolean;
     notes?: string;
   }>;
@@ -466,11 +407,7 @@ interface CoarseTranscript {
   speaker: string;
   source_wav: string;
   duration_sec: number;
-  segments: Array<{
-    start: number;    // seconds
-    end: number;      // seconds
-    text: string;     // native script (may contain romanized mixed in)
-  }>;
+  segments: Array<{ start: number; end: number; text: string; }>;
 }
 ```
 
@@ -478,21 +415,18 @@ interface CoarseTranscript {
 
 ```ts
 interface AISuggestions {
-  positional_anchors: Record<string, {
-    concept_coverage: number;
-    timestamps: Record<string, number>;   // conceptId → absolute timestamp
-  }>;
-  suggestions: Record<string, {           // keyed by conceptId
+  positional_anchors: Record<string, { concept_coverage: number; timestamps: Record<string, number>; }>;
+  suggestions: Record<string, {
     concept_en: string;
     reference_forms: string[];
-    speakers: Record<string, Array<{      // keyed by speaker
+    speakers: Record<string, Array<{
       source_wav: string;
       segment_start_sec: number;
       segment_end_sec: number;
       transcript_text: string;
       matched_token: string;
       confidence: "high" | "medium" | "low";
-      confidence_score: number;           // 0.0-1.0 (BASE score, no positional boost)
+      confidence_score: number;
       method: "exact_ortho_match" | "fuzzy_ortho_match" | "romanized_phonetic_match" | "llm_assisted_match";
       note?: string;
     }>>;
@@ -510,9 +444,30 @@ interface PeaksData {
   samples_per_pixel: number;
   bits: number;
   length: number;
-  data: number[];     // interleaved min/max pairs
+  data: number[];
 }
 ```
+
+---
+
+## Server API Endpoints
+
+| Endpoint | Method | Purpose | Returns |
+|----------|--------|---------|---------|
+| `POST /api/stt` | POST | Full-file STT | `{ jobId }` |
+| `POST /api/stt/status` | POST | Poll STT progress | `{ jobId, progress, status, segments? }` |
+| `POST /api/ipa` | POST | Text → IPA | `{ ipa }` |
+| `POST /api/suggest` | POST | AI concept suggestions | `{ suggestions[] }` |
+| `POST /api/compute/cognates` | POST | LexStat computation | `{ jobId }` |
+| `POST /api/compute/offset` | POST | Auto-offset detection | `{ jobId }` |
+| `POST /api/compute/spectrograms` | POST | Batch spectrograms | `{ jobId }` |
+| `GET /api/enrichments` | GET | Read enrichments | `{ enrichments }` |
+| `POST /api/enrichments` | POST | Write enrichments | `{ success }` |
+| `GET /api/config` | GET | Read config | `{ config }` |
+| `PUT /api/config` | PUT | Update config | `{ success }` |
+| `GET /*` | GET | Static files | File content |
+
+All long-running endpoints return immediately with `{ jobId }`. Poll status via `/api/{type}/status`.
 
 ---
 
@@ -521,57 +476,37 @@ interface PeaksData {
 Used by `suggestions-panel.js` when the reviewer selects reference speakers.
 
 ```
-Input:
-  - candidate.base_score (from ai_suggestions.json)
-  - candidate.segment_start_sec
-  - selectedSpeakers[] (from UI checkboxes)
-  - positionalAnchors (from ai_suggestions.json)
-  - currentConceptId
-
-Algorithm:
-  1. For each selected speaker, look up their timestamp for currentConceptId
-     (skip speakers without this concept)
-  2. Compute median of these timestamps → expectedTimeSec
-  3. distance = |candidate.segment_start_sec - expectedTimeSec|
-  4. positionalBoost = max(0, 0.25 * (1 - distance / 120))
-     // Linear decay: full 0.25 boost at distance=0, zero boost at distance≥120s
-  5. finalScore = min(1.0, candidate.base_score + positionalBoost)
-  6. Re-derive label: ≥0.80 = "high", 0.50-0.79 = "medium", <0.50 = "low"
-
-If no selected speakers have a timestamp for this concept:
-  finalScore = base_score (no boost applied)
+1. For each selected speaker, look up their timestamp for currentConceptId
+2. Compute median → expectedTimeSec
+3. distance = |candidate.segment_start_sec - expectedTimeSec|
+4. positionalBoost = max(0, 0.25 * (1 - distance / 120))
+5. finalScore = min(1.0, candidate.base_score + positionalBoost)
+6. Re-derive label: ≥0.80 = "high", 0.50-0.79 = "medium", <0.50 = "low"
 ```
 
 ---
 
 ## Spectrogram Web Worker Protocol
 
-Communication between main thread and `spectrogram-worker.js`:
-
 ```js
 // Main → Worker
-{ type: "compute", audioData: Float32Array, sampleRate: number, windowSize: 2048|256, startSec: number, endSec: number }
+{ type: "compute", audioData: Float32Array, sampleRate, windowSize: 2048|256, startSec, endSec }
 
 // Worker → Main
-{ type: "result", imageData: Uint8ClampedArray, width: number, height: number, startSec: number, endSec: number }
+{ type: "result", imageData: Uint8ClampedArray, width, height, startSec, endSec }
 
 // Worker → Main (error)
 { type: "error", message: string }
 ```
 
-The main thread extracts the audio chunk from the `<audio>` element via `AudioContext.decodeAudioData()` for ONLY the selected ≤30s window, then sends the raw PCM to the worker for FFT.
-
 ---
 
-## Migration Notes (v3.0 → v4.0)
+## Migration Notes (v4.0 → v5.0)
 
-Existing v3 modules use `window.SourceExplorer` and `se:` event prefixes. During Wave 9 integration:
-
-1. Replace `window.SourceExplorer` → `window.PARSE` in all JS files
-2. Replace `se:` event prefix → `parse:` in all event names
-3. Replace `se-` DOM ID prefix → `parse-` in HTML and JS
-4. Wire `region-manager.js` "Assign" flow into `annotation-store.js` save
-5. Replace localStorage decisions with `annotation-store.js` file persistence
-6. Add `annotation-panel.js` rendering into the panel open flow
-
-**Do NOT do this migration during waves 5-7.** New modules use `window.PARSE` and `parse:` events from the start. Old modules get migrated in Wave 9.
+1. Move JS files from `js/` to `js/annotate/` (Annotate-specific) or `js/shared/` (shared)
+2. Update `<script src>` paths in `parse.html`
+3. Add `compare.html` with `js/shared/` + `js/compare/` imports
+4. Rename Python files per §14 in PROJECT_PLAN.md
+5. Create `python/ai/` and `python/compare/` packages
+6. Create `config/` directory with default configs
+7. All new modules use `window.PARSE` and `parse:` events

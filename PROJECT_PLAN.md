@@ -1,12 +1,13 @@
 # PARSE — Phonetic Analysis & Review Source Explorer
 
-**Version:** 4.0
-**Date:** 2026-03-23
-**Status:** Architecture Redesign — Timestamp-Centric Model
+**Version:** 5.0
+**Date:** 2026-03-26
+**Status:** Dual-Mode Architecture — Annotate + Compare
 **License:** MIT
 **Repo:** `TarahAssistant/PARSE`
 
 **Changelog:**
+- v5.0 — Dual-mode architecture: Annotate (segmentation workstation) + Compare (cross-speaker cognate analysis). Tagging/filtering system, "include in analysis" toggles, borrowing adjudication with SIL contact languages, save history, multiple speaker import paths, full BEAST2 pipeline roadmap. Legacy review_tool.html preserved as reference.
 - v4.0 — Major architecture redesign: timestamps as core data model, 4-tier Praat-compatible annotations, TextGrid/ELAN/CSV import/export, video sync infrastructure, project config abstraction, AI provider abstraction, onboarding flow, SIL language codes
 - v3.0 — Build complete (14 files), environment inventory, Audio_Working pipeline
 - v2.0 — Wavesurfer backend fix, timeline recalibration, fuzzy matching tightening
@@ -15,21 +16,32 @@
 
 ## 1. Vision
 
-PARSE is a browser-based phonetic review tool for linguists working with audio recordings of word lists, interviews, or elicitation sessions. It replaces the Praat/Audacity ↔ spreadsheet workflow with an integrated environment for:
+PARSE is a browser-based phonetic analysis workstation for linguists working with audio recordings of word lists, interviews, or elicitation sessions. It replaces Praat, Audacity, ELAN, and spreadsheet workflows with a single integrated environment.
 
-- Browsing full source recordings with waveform + spectrogram + transcript
+**Two work modes:**
+
+**Annotate** — Per-speaker segmentation and transcription:
+- Browse full source recordings with waveform + spectrogram + transcript
 - AI-assisted location of target words in long recordings
 - Precise time-stamped segmentation with IPA, orthography, and concept annotations
+- Tag and filter concepts for selective analysis
 - Praat TextGrid / ELAN XML interoperability
 - Video synchronization for recordings with accompanying video
-- Batch export of annotated segments for further analysis
+
+**Compare** — Cross-speaker cognate analysis and phylogenetic data preparation:
+- Concept × speaker matrix view (all speakers side by side)
+- Cognate set management (accept, split, merge, click-to-cycle)
+- Borrowing adjudication with contact language similarity scores
+- AI-powered new speaker alignment (full-file STT → repetition detection → cross-speaker matching)
+- Auto-offset detection for misaligned imported timestamps
+- Export to LingPy wordlist.tsv → LexStat → BEAST2 pipeline
 
 **Design principles:**
 - **Timestamps are the bible** — every annotation is anchored to precise start/end times in the source audio. All downstream operations (Praat export, video clips, segment extraction) derive from timestamps.
 - **Local-first** — all audio processing stays on-machine. No data leaves without explicit user action.
-- **AI-optional** — core functionality works fully offline. AI features (fuzzy matching, video sync refinement) enhance the experience but are not required.
+- **AI-layered** — base layers (faster-whisper STT + IPA) work locally. Optional LLM and language-specific layers can be added. Core functionality works fully offline.
 - **Cross-platform** — runs on Windows, macOS, Linux. No hardcoded paths.
-- **Interoperable** — Praat TextGrid, ELAN XML, and CSV are first-class formats.
+- **Interoperable** — Praat TextGrid, ELAN XML, CSV, and LingPy TSV are first-class formats.
 
 ---
 
@@ -402,59 +414,103 @@ Lossless extraction (`-c copy` where possible, `-acodec pcm_s16le` otherwise).
 
 ## 7. AI Integration
 
-### 7.1 Provider Abstraction
+**Updated:** 2026-03-26 — Complete rewrite for layered AI architecture.
 
-AI features are optional. When enabled, PARSE supports multiple providers through a unified interface:
+### 7.1 AI Layer Architecture
+
+PARSE uses a **layered** AI architecture. All processing is local-first (GPU). Cloud APIs are optional add-ons.
+
+**Base layers (required for AI features):**
+
+| Layer | Purpose | Implementation | Location |
+|-------|---------|----------------|----------|
+| **STT** | Full-file speech-to-text with timestamps | faster-whisper | `python/ai/stt_pipeline.py` |
+| **IPA** | Orthographic → IPA conversion | epitran / custom model | `python/ai/ipa_transcribe.py` |
+
+**Optional layers:**
+
+| Layer | Purpose | Implementation | Location |
+|-------|---------|----------------|----------|
+| **LLM** | Concept suggestions, quality checks | OpenAI / Anthropic / local Ollama | `python/ai/suggestions.py` |
+| **Language-specific** | Fine-tuned STT for target language | User-provided whisper model | Configured in `config/ai_config.json` |
+
+**Design principle:** AI features are OPTIONAL. Core segmentation, annotation, and comparison work fully offline. AI adds speed and convenience, not gatekeeping.
+
+### 7.2 Provider Abstraction
+
+`python/ai/provider.py` defines an abstract interface that all AI features call:
+
+```python
+class AIProvider:
+    def transcribe(wav_path, language) -> List[Segment]
+    def to_ipa(text, language) -> str
+    def suggest_concepts(transcript_windows, reference_forms) -> List[Suggestion]
+```
+
+**Implementations:**
+- **LocalWhisperProvider** — faster-whisper + CT2 models, local GPU
+- **OpenAIProvider** — OpenAI Whisper API + GPT for suggestions
+- **HybridProvider** — local STT + cloud LLM (best of both)
+- **OllamaProvider** — fully local LLM (no cloud dependency)
+
+Users select provider in `config/ai_config.json`. Application code calls the abstract interface only — never imports a specific provider directly.
+
+### 7.3 AI Configuration
+
+Stored in `config/ai_config.json` (see §14.1 for full schema):
 
 ```json
 {
-  "ai": {
-    "enabled": true,
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-6",
-    "api_key_env": "PARSE_AI_API_KEY"
-  }
+  "stt": {
+    "provider": "faster-whisper",
+    "model_path": "",
+    "language": "sd",
+    "device": "cuda",
+    "compute_type": "float16"
+  },
+  "ipa": { "provider": "local", "model": "epitran" },
+  "llm": { "provider": "openai", "model": "gpt-4o", "api_key_env": "OPENAI_API_KEY" },
+  "specialized_layers": []
 }
 ```
 
-**Supported providers (planned):**
+**Specialized layers** allow users to add language-specific fine-tuned models (e.g., `razhan/whisper-base-sdh` for Southern Kurdish). These stack on top of the base STT layer.
 
-| Provider | Models | Auth |
-|----------|--------|------|
-| Anthropic | claude-sonnet-4-6 | API key |
-| OpenAI | gpt-4o, gpt-4o-mini | API key or OAuth login |
-| Local (Ollama) | any | No auth (localhost) |
+### 7.4 Model Management
 
-**Current implementation:** Anthropic Sonnet via API key. OpenAI and local support are architecture-ready but not built yet.
+`python/ai/model_manager.py` handles:
+- Model path resolution (local paths, HuggingFace cache, CT2 directories)
+- Model download on first use (if HuggingFace model ID provided)
+- Cache validation (CT2 vs safetensors format check)
+- GPU/CPU device selection and memory estimation
 
-### 7.2 AI-Assisted Fuzzy Matching (Strategy #4)
+### 7.5 JS ↔ Python Communication
 
-After strategies 1-3 (exact ortho, Levenshtein, phonetic regex) run offline:
+`js/shared/ai-client.js` communicates with the Python server for AI operations:
+- `POST /api/stt` — trigger full-file STT (returns job ID for polling)
+- `POST /api/stt/status` — poll STT job progress
+- `POST /api/ipa` — convert text to IPA
+- `POST /api/suggest` — get concept suggestions
+- `POST /api/compute` — trigger cognate computation
+- `POST /api/offset-detect` — run auto-offset detection
 
-1. Filter: concepts with only low-confidence (< 0.40) or zero matches
-2. Batch prompt: send ~20 candidate transcript windows per API call with reference forms
-3. AI evaluates: morphological variants, dialectal alternations, Whisper errors
-4. Score: `base_score` 0.10–0.39 for AI matches (lower than rule-based by design)
-5. Cache: results in `ai_suggestions.json`, never re-computed unless transcripts change
+All AI endpoints return immediately with a job ID. Frontend polls for completion. This enables background processing while user works.
 
-**Offline fallback:** Strategies 1-3 work without any AI provider. Users without API access still get exact, fuzzy, and phonetic matches.
+### 7.6 AI-Assisted Features
 
-### 7.3 AI-Assisted Video Sync Verification
+**In Annotate mode:**
+- Coarse transcript scanning (3s windows every 15s for concept location)
+- AI concept suggestions (Strategy #4: LLM evaluates candidate windows)
+- Video sync verification (FFT + optional AI confirmation)
 
-After automated FFT cross-correlation produces an initial offset + drift estimate:
+**In Compare mode:**
+- Full-file STT on new speaker import (§12.2)
+- Auto-offset detection (§12.3)
+- Repetition detection for wordlist identification (§12.4)
+- Cross-speaker matching with phonetic variation rules (§12.5)
+- Cognate set computation via LexStat (§17.8)
 
-1. Extract ~5 aligned windows from both audio streams
-2. Send to AI: "Do these segments sound aligned? Estimate misalignment if any."
-3. AI suggests corrections → applied to sync parameters
-4. User confirms in UI
-
-**Offline fallback:** FFT cross-correlation works without AI. Manual fine-tune slider available.
-
-### 7.4 Future AI Features (Architecture-Ready, Not Built)
-
-- **Automated cognate lookup** — given a concept and language code, pull reference forms from Wiktionary/academic sources
-- **IPA suggestion** — given an audio segment + orthography, suggest IPA transcription
-- **Quality check** — flag suspicious annotations (duration too short, IPA doesn't match ortho pattern)
+**Offline fallback:** All non-AI features work without any provider configured. Strategies 1-3 (exact match, Levenshtein, phonetic regex) run purely client-side.
 
 ---
 
@@ -695,44 +751,163 @@ Selected reference speakers provide expected timestamps per concept. Proximity b
 
 ### 11.1 Local Server
 
-`thesis_server.py` — Python HTTP server with:
+`python/server.py` — Python HTTP server with:
 - HTTP range request support (206 Partial Content) for streaming large audio files
 - CORS headers for JS audio decoding
 - Serves all project files from project root
 - Cross-platform (`pathlib` throughout)
 - Configurable port via `project.json`
 
+**API endpoints (served by `server.py`):**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/stt` | POST | Trigger full-file STT (returns job ID) |
+| `/api/stt/status` | POST | Poll STT job progress |
+| `/api/ipa` | POST | Convert text to IPA |
+| `/api/suggest` | POST | Get AI concept suggestions |
+| `/api/compute/cognates` | POST | Trigger LexStat cognate computation |
+| `/api/compute/offset` | POST | Run auto-offset detection |
+| `/api/compute/spectrograms` | POST | Batch spectrogram generation |
+| `/api/enrichments` | GET/POST | Read/write enrichments layer |
+| `/api/config` | GET/PUT | Read/update project + AI config |
+| `/*` | GET | Static file serving (HTML, JS, audio, peaks) |
+
+All long-running endpoints (STT, cognate compute) return immediately with a job ID. Frontend polls for completion via status endpoints. This enables background processing while the user works.
+
 ### 11.2 Development vs Production
 
-- **Dev mode:** Local server with full PARSE features (source audio browsing, AI suggestions, video sync)
+- **Dev mode:** Local server with full PARSE features (source audio, AI, Compare, video sync)
 - **Export mode:** Static HTML with pre-cut segments only (for sharing/publication via GitHub Pages)
 
 ---
 
-## 12. Coarse Transcripts
+## 12. Speech-to-Text & Cross-Speaker Matching Pipeline
 
-### 12.1 Generation
+**Updated:** 2026-03-26 — Complete rewrite based on design session.
 
-Whisper STT on each source recording, generating 3-second windows:
+### 12.1 STT Configuration
 
+See §7 for the full AI layer architecture and provider abstraction.
+
+**SK-specific config (thesis):**
+- Model: `razhan/whisper-base-sdh` (CT2 format at `/mnt/c/Users/Lucas/Thesis/models/razhan-whisper-ct2/`)
+- Language trick: `language='sd'` (Sindhi) forces Kurdish-script output
+- Performance: ~33.7× realtime on CUDA float16
+
+### 12.2 Full Audio Processing on Speaker Import
+
+When a new speaker is added, the **entire audio file** is processed through STT. This is NOT a sparse coarse scan — it produces complete coverage of the recording.
+
+**Why full coverage matters:**
+- The transcription becomes a **searchable index** for finding unsegmented concepts
+- In Compare mode, when a concept is missing for a speaker, the full transcription can be searched to find candidate locations
+- The STT output is inaccurate but fast — useful for discovery, not final transcription
+
+**Processing time warning:**
+- 3-5 hours of audio → 30 min to 1 hour of processing (GPU-dependent)
+- UI must warn user before starting: "Processing [filename] (~X hours of audio). This may take [estimated time]. You can continue working while it runs."
+- Runs in **background** — user keeps working in Annotate, Compare, or any other mode
+- Progress indicator visible but non-blocking
+- Results appear incrementally or on completion
+
+**Output format:**
 ```json
 {
-  "speaker": "Mand01",
-  "source_wav": "audio/working/Mand01/Mandali_M_1900_01.wav",
-  "duration_sec": 11924.0,
+  "speaker": "Khan04",
+  "source_wav": "audio/working/Khan04/Khanaqin_F_2000.wav",
+  "duration_sec": 7200.0,
+  "processed_at": "2026-03-26T11:00:00Z",
+  "model": "razhan/whisper-base-sdh",
   "segments": [
-    { "start": 0, "end": 3, "text": "سەەە بۊ دەی بەی" },
-    { "start": 15, "end": 18, "text": "نیشن نەتنیشن هەیشنم یەک" }
+    { "start": 12.3, "end": 13.1, "ortho": "یەک", "ipa": "jek" },
+    { "start": 13.5, "end": 14.2, "ortho": "یەک", "ipa": "jek" },
+    { "start": 14.8, "end": 15.5, "ortho": "یەک", "ipa": "jek" },
+    { "start": 18.2, "end": 19.0, "ortho": "دوو", "ipa": "duː" }
   ]
 }
 ```
 
-### 12.2 Whisper Configuration
+### 12.3 Auto-Offset Detection
 
-- **Model:** `razhan/whisper-base-sdh` (SK fine-tuned) or user-selected
-- **Language trick:** `language='sd'` (Sindhi) forces Kurdish-script output
+When importing data with pre-existing timestamps (CSV + WAV), an AI layer automatically checks whether segment timestamps are consistently offset from the actual audio.
+
+**Why this happens:**
+- Third-party audio processing may strip user metadata
+- Privacy protection may trim the start of recordings (e.g., +10 minutes offset)
+- Different recording setups produce different header/metadata lengths
+
+**Detection method:**
+1. Take a sample of known segments (e.g., first 10 with timestamps)
+2. For each, check if the expected content exists at the stated timestamp
+3. If not, search nearby (±30s, then ±5min, then ±30min) for a match
+4. Look for a **consistent shift** across all samples
+5. If consistent offset found → apply globally and confirm with user
+6. If inconsistent → flag as manual review needed
+
+**This is the FIRST thing checked on import** — before any other processing.
+
+### 12.4 Repetition Detection
+
+In elicitation recordings, speakers typically repeat each concept 2-4 times. PARSE detects this pattern to identify likely wordlist items vs. conversational filler.
+
+**Method:**
+- After full STT, group identical or near-identical forms by phonetic similarity
+- Flag forms appearing **2-4 times** in close succession (within ~30s window) as likely elicitation items
+- Forms appearing only once or appearing throughout the recording are likely conversational
+
+**Output:** Each flagged group becomes a "candidate lexical item" with:
+- Representative form (most common variant)
+- All occurrence timestamps
+- Occurrence count
+- Confidence score based on repetition pattern
+
+### 12.5 Cross-Speaker Matching (Compare Mode)
+
+When a baseline speaker is already segmented, PARSE can automatically find matching concepts in a new speaker's recording.
+
+**The chain:**
+```
+Baseline speaker annotations (known: "yek" = concept 1 at 506.2s)
+  + New speaker's full STT transcription
+  + Repetition-detected candidate items from new speaker
+    → Phonetic variation regex matching
+      → Phonetic distance scoring (LexStat)
+        → Positional ordering boost
+          → Ranked candidates presented in Compare UI
+```
+
+**Step 1: Phonetic variation rules**
+Not just raw string distance — linguistically informed regex patterns that account for known sound correspondences:
+- Initial consonant alternations: j ~ y, k ~ g, q ~ ɢ
+- Vowel quality variation: e ~ a ~ ɛ ~ æ
+- Final consonant lenition or loss: k ~ g ~ ∅
+- Voicing alternations: t ~ d, p ~ b
+
+These rules are **configurable** — users can add their own for their specific language. PARSE ships with defaults for common phonetic processes.
+
+The old review tool used Strategy #3 (phonetic regex) for this — that logic carries forward here.
+
+**Step 2: Phonetic distance scoring**
+LexStat / edit distance on IPA forms, ranking candidates by similarity to baseline.
+
+**Step 3: Positional ordering boost**
+Concepts in elicitation recordings tend to follow a consistent order. If concept 4 was found at timestamp X, concept 5 should be near X + typical gap. Candidates near the expected position get boosted (same positional prior system from §10.3).
+
+**In the Compare UI:**
+- User sees concept "one" row → baseline speaker shows "jek"
+- New speaker column shows top candidate: "yak" at 14.2s (confidence: 0.87)
+- User clicks → audio plays from that timestamp
+- User confirms → segment created, or rejects → next candidate shown
+
+### 12.6 Whisper Configuration (Legacy Reference)
+
+For coarse transcript generation (Annotate mode, not full STT):
+- **Window:** 3s segments every 15s (sparse scan for concept location)
+- **Model:** User-selected or project default
 - **Processing:** Local GPU only — no cloud STT
-- **Window:** 3s segments every 15s (coarse scan, not full transcription)
+
+Full STT (§12.2) is the primary pipeline for new speakers. Coarse scan remains available as a faster alternative when full coverage isn't needed.
 
 ---
 
@@ -762,50 +937,183 @@ Python script using `soundfile`:
 
 ---
 
-## 14. Build Status
+## 14. File Structure (v5.0)
 
-### ✅ Built (Wave 1-4, commit `897e56f`)
+**Updated:** 2026-03-26
 
-| File | Status | Notes |
+```
+parse/
+├── parse.html                      ← Annotate mode (existing main app)
+├── compare.html                    ← Compare mode (NEW)
+├── start_parse.sh                  ← Linux/Mac launcher
+├── Start Review Tool.bat           ← Windows launcher
+├── LICENSE
+├── README.md
+├── PROJECT_PLAN.md
+│
+├── js/
+│   ├── shared/                     ← shared across Annotate + Compare
+│   │   ├── annotation-store.js     ← localStorage/disk persistence
+│   │   ├── project-config.js       ← project.json loader
+│   │   ├── tags.js                 ← tagging/filtering system (NEW)
+│   │   ├── audio-player.js         ← shared audio playback from WAV regions (NEW)
+│   │   ├── ai-client.js            ← JS ↔ Python AI server communication (NEW)
+│   │   └── spectrogram-worker.js   ← Web Worker FFT
+│   ├── annotate/                   ← Annotate-specific
+│   │   ├── parse.js                ← main entry / router
+│   │   ├── annotation-panel.js     ← IPA/ortho/concept fields
+│   │   ├── region-manager.js       ← waveform region CRUD
+│   │   ├── waveform-controller.js  ← WaveSurfer wrapper
+│   │   ├── transcript-panel.js     ← coarse transcript display
+│   │   ├── suggestions-panel.js    ← AI suggestion rankings
+│   │   ├── fullscreen-mode.js      ← fullscreen overlay
+│   │   ├── onboarding.js           ← import wizard
+│   │   ├── import-export.js        ← CSV/TextGrid/ELAN import/export
+│   │   └── video-sync-panel.js     ← video alignment UI
+│   └── compare/                    ← Compare-specific (ALL NEW)
+│       ├── compare.js              ← main entry
+│       ├── concept-table.js        ← concept × speaker matrix layout
+│       ├── cognate-controls.js     ← accept/split/merge/click-to-cycle
+│       ├── borrowing-panel.js      ← similarity bars, adjudication
+│       ├── speaker-import.js       ← new speaker import wizard
+│       └── enrichments.js          ← enrichments layer read/write
+│
+├── python/
+│   ├── server.py                   ← HTTP server with range requests
+│   ├── peaks.py                    ← waveform peak generation
+│   ├── source_index.py             ← source_index.json builder
+│   ├── normalize_audio.py          ← audio normalization (ffmpeg)
+│   ├── textgrid_io.py              ← Praat TextGrid read/write
+│   ├── elan_export.py              ← ELAN XML export
+│   ├── csv_export.py               ← CSV export
+│   ├── video_sync.py               ← FFT cross-correlation
+│   ├── video_clip_extract.py       ← video segment extraction
+│   ├── batch_reextract.py          ← batch re-extraction
+│   ├── reformat_transcripts.py     ← transcript reformatting
+│   │
+│   ├── ai/                         ← AI abstraction layer (NEW)
+│   │   ├── __init__.py
+│   │   ├── provider.py             ← abstract interface (local, OpenAI, etc.)
+│   │   ├── stt_pipeline.py         ← faster-whisper full-file STT
+│   │   ├── ipa_transcribe.py       ← ortho → IPA conversion model
+│   │   ├── model_manager.py        ← model download, cache, path resolution
+│   │   └── suggestions.py          ← AI concept suggestions (from generate_ai_suggestions.py)
+│   │
+│   ├── compare/                    ← Compare pipeline scripts (NEW)
+│   │   ├── cognate_compute.py      ← LexStat wrapper, enrichments builder
+│   │   ├── cross_speaker_match.py  ← STT + repetition detect + matching
+│   │   ├── offset_detect.py        ← auto-offset detection
+│   │   └── phonetic_rules.py       ← configurable phonetic variation engine
+│   │
+│   └── coarse_transcripts.py       ← coarse transcript generation
+│
+├── config/                         ← user-editable configuration (NEW)
+│   ├── ai_config.json              ← model paths, API keys, provider selection
+│   ├── phonetic_rules.json         ← phonetic variation rules (j~y, e~a, etc.)
+│   └── sil_contact_languages.json  ← contact language definitions
+│
+├── docs/                           ← development documentation
+│   ├── CODING.md
+│   ├── INTERFACES.md
+│   ├── ONBOARDING_PLAN.md
+│   ├── SPEAKERS.md
+│   └── BUILD_SESSION.md
+│
+├── review_tool_dev.html            ← LEGACY (DO NOT TOUCH)
+└── tasks/
+    └── lessons.md
+```
+
+### 14.1 AI Configuration Schema
+
+`config/ai_config.json`:
+```json
+{
+  "stt": {
+    "provider": "faster-whisper",
+    "model_path": "",
+    "language": "sd",
+    "device": "cuda",
+    "compute_type": "float16"
+  },
+  "ipa": {
+    "provider": "local",
+    "model": "epitran"
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "specialized_layers": [
+    {
+      "name": "razhan-sk",
+      "type": "whisper-finetune",
+      "model_path": "/path/to/razhan-whisper-ct2/",
+      "language_codes": ["sdh"]
+    }
+  ]
+}
+```
+
+### 14.2 AI Provider Abstraction
+
+`python/ai/provider.py` defines an abstract interface:
+- `transcribe(wav_path, language) → segments[]` — full-file STT
+- `to_ipa(text, language) → ipa_string` — orthographic → IPA
+- `suggest_concepts(transcript_windows, reference_forms) → suggestions[]` — AI concept matching
+
+Implementations:
+- **LocalWhisperProvider** — faster-whisper + CT2 models
+- **OpenAIProvider** — OpenAI Whisper API + GPT for suggestions
+- **HybridProvider** — local STT + cloud LLM
+
+Users select in `ai_config.json`. Application code calls the abstract interface only.
+
+### 14.3 Build Status
+
+#### ✅ Existing (needs reorganization into new structure)
+
+| Current Path | New Path | Status |
 |------|--------|-------|
-| `python/thesis_server.py` | ✅ Built + reviewed | Needs cross-platform path update |
-| `python/generate_source_index.py` | ✅ Built + reviewed | Needs project.json integration |
-| `python/generate_peaks.py` | ✅ Built + reviewed | **Needs rewrite: `wave` → `soundfile`** |
-| `python/reformat_transcripts.py` | ✅ Built + reviewed | OK as-is |
-| `python/generate_ai_suggestions.py` | ✅ Built + reviewed | Needs AI provider abstraction |
-| `python/batch_reextract.py` | ✅ Built + reviewed | OK as-is |
-| `js/source-explorer.js` | ✅ Built + reviewed | Needs annotation save integration |
-| `js/waveform-controller.js` | ✅ Built + reviewed | OK as-is |
-| `js/spectrogram-worker.js` | ✅ Built + reviewed | OK as-is |
-| `js/transcript-panel.js` | ✅ Built | Needs review |
-| `js/suggestions-panel.js` | ✅ Built | Needs review |
-| `js/region-manager.js` | ✅ Built | Needs review + annotation layer integration |
-| `js/fullscreen-mode.js` | ✅ Built | Needs review |
-| `review_tool_dev.html` | ✅ Built | Needs annotation panel HTML |
-| `Start Review Tool.bat` | ✅ Built | Add cross-platform launcher |
+| `python/thesis_server.py` | `python/server.py` | ✅ Needs rename |
+| `python/generate_source_index.py` | `python/source_index.py` | ✅ Needs rename |
+| `python/generate_peaks.py` | `python/peaks.py` | ✅ Needs rewrite (wave→soundfile) |
+| `python/generate_ai_suggestions.py` | `python/ai/suggestions.py` | ✅ Move + refactor |
+| `python/reformat_transcripts.py` | (keep) | ✅ OK |
+| `python/batch_reextract.py` | (keep) | ✅ OK |
+| `python/build_coarse_transcripts.py` | `python/coarse_transcripts.py` | ✅ Rename |
+| All `js/*.js` files | `js/annotate/*.js` | ✅ Move |
+| `js/annotation-store.js` | `js/shared/annotation-store.js` | ✅ Move to shared |
+| `js/project-config.js` | `js/shared/project-config.js` | ✅ Move to shared |
+| `js/spectrogram-worker.js` | `js/shared/spectrogram-worker.js` | ✅ Move to shared |
 
-### 🔲 New (v4.0 additions)
+#### 🔲 New files to build
 
-| Component | Priority | Depends On |
-|-----------|----------|------------|
-| `project.json` config loader | 🔴 High | Nothing |
-| Annotation data model (JSON) | 🔴 High | Nothing |
-| Annotation save/load to disk | 🔴 High | Annotation data model |
-| Annotation panel UI (IPA/ortho/concept fields) | 🔴 High | Annotation data model |
-| Praat TextGrid export | 🔴 High | Annotation data model |
-| Praat TextGrid import | 🔴 High | Annotation data model |
-| `generate_peaks.py` rewrite (`soundfile`) | 🔴 High | Nothing |
-| Onboarding wizard | 🟡 Medium | project.json |
-| ELAN XML export | 🟡 Medium | Annotation data model |
-| CSV export | 🟡 Medium | Annotation data model |
-| AI provider abstraction | 🟡 Medium | project.json |
-| Video sync panel UI | 🟡 Medium | project.json |
-| FFT cross-correlation (Python) | 🟡 Medium | Nothing |
-| Video clip extraction | 🟡 Medium | Video sync |
-| Cross-platform launcher (shell + bat) | 🟢 Low | Nothing |
-| MIT LICENSE file | 🟢 Low | Nothing |
-| README.md | 🟢 Low | Everything else |
-| Tests | 🟢 Low | Stable API |
+| File | Priority | Purpose |
+|------|----------|---------|
+| `python/ai/__init__.py` | 🔴 | AI package |
+| `python/ai/provider.py` | 🔴 | Abstract AI interface |
+| `python/ai/stt_pipeline.py` | 🔴 | Full-file STT with faster-whisper |
+| `python/ai/ipa_transcribe.py` | 🔴 | Ortho → IPA conversion |
+| `python/ai/model_manager.py` | 🟡 | Model download/cache management |
+| `python/compare/cognate_compute.py` | 🔴 | LexStat wrapper + enrichments |
+| `python/compare/cross_speaker_match.py` | 🔴 | STT + repetition detect + matching |
+| `python/compare/offset_detect.py` | 🔴 | Auto-offset detection |
+| `python/compare/phonetic_rules.py` | 🔴 | Configurable phonetic variation |
+| `config/ai_config.json` | 🔴 | AI model/provider configuration |
+| `config/phonetic_rules.json` | 🔴 | Phonetic variation rules |
+| `config/sil_contact_languages.json` | 🟡 | Contact language definitions |
+| `js/shared/tags.js` | 🔴 | Tagging/filtering system |
+| `js/shared/audio-player.js` | 🔴 | Shared audio playback |
+| `js/shared/ai-client.js` | 🔴 | JS ↔ Python AI communication |
+| `compare.html` | 🔴 | Compare mode entry point |
+| `js/compare/compare.js` | 🔴 | Compare main entry |
+| `js/compare/concept-table.js` | 🔴 | Concept × speaker matrix |
+| `js/compare/cognate-controls.js` | 🔴 | Accept/split/merge/cycle |
+| `js/compare/borrowing-panel.js` | 🟡 | Similarity bars, adjudication |
+| `js/compare/speaker-import.js` | 🟡 | New speaker import wizard |
+| `js/compare/enrichments.js` | 🔴 | Enrichments layer read/write |
 
 ---
 
@@ -843,10 +1151,203 @@ Python script using `soundfile`:
 
 ---
 
-## 17. Definition of Done
+## 17. Work Modes — Annotate & Compare
 
-PARSE v1.0 is complete when:
+**Added:** 2026-03-26 (from design session with Lucas)
 
+PARSE has two primary work modes, navigated via a top-level mode switcher: `Annotate | Compare`
+
+### 17.1 Mode: Annotate (current UI)
+
+The existing single-speaker, concept-by-concept editing workflow. This is the transcription/segmentation workstation.
+
+**What it does:**
+- User imports a speaker dataset (WAV + optional timestamps/IPA/ortho)
+- User edits segment boundaries, IPA, ortho, concept annotations
+- Replaces Audacity/Praat for segmentation work
+- AI suggestions help locate concepts in long recordings
+
+**Current status:** Built and functional (`parse.html`). This is the "chunking page" — the initial processing mode.
+
+**Future growth:** Vowel charts, phonetic scripts, speaker-level analysis features. Name "Annotate" is intentionally extensible.
+
+### 17.2 Mode: Compare (to be built)
+
+Cross-speaker, concept-first analysis view. This is where cognate comparison, borrowing adjudication, and phylogenetic data preparation happen.
+
+**Layout:** Table/matrix view (same as old `review_tool.html`):
+- **Rows** = concepts
+- **Columns** = speakers
+- Each cell shows: IPA, ortho, audio play button, spectrogram toggle, cognate badge, similarity bars
+
+**Cognate controls (all four from old tool):**
+- ✓ **Accept Grouping** — keep precomputed cognate sets
+- ✂ **Split** — interactive mode, click speakers to reassign groups
+- ⊕ **Merge All** — collapse into one cognate set
+- **Click-to-cycle** — click any speaker's cognate badge to manually reassign class
+
+**Borrowing adjudication:**
+- Arabic/Persian similarity bars per speaker row
+- Borrowing confirmation: confirmed / not_borrowing
+- Handling: code as "missing (?)" or "separate cognate"
+- **Onboarding asks users which contact/borrowing languages apply** — uses SIL language codes to select
+
+**Audio in Compare:**
+- Plays from the annotated source WAV region set during Annotate (not pre-cut segment files)
+- This is a key design difference from the old review tool — PARSE has more power to adjust segments when they're wrong
+
+**Data source:**
+- Compare pulls from PARSE's own annotation data (localStorage / annotation JSON files)
+- `review_data.json` is legacy reference only — used to understand the old pipeline, not as a live data source
+- The old `review_tool.html` at `C:\Users\Lucas\Thesis\review_tool.html` is preserved as-is (sacred, do not modify)
+
+### 17.3 "Include in Analysis" — Item Selection
+
+Users must select which concepts/items go to cognate analysis. Not everything gets compared.
+
+**MVP (v1):** Simple toggle per concept in the Annotate sidebar. Checkbox or switch: "Include in analysis."
+
+**Future (v2):** Chat/voice command from any screen:
+- User types: "include items 5, 12, 23-40 in analysis"
+- Or speaks: "include item 5 in analysis" (STT → agent processes)
+- Agent can process bulk selections regardless of current screen
+
+### 17.4 Tagging & Filtering System
+
+**Tags:** Users can create custom named tag groups (like labels/categories). Examples:
+- "cognate" — items selected for cognate analysis
+- "borrowing" — suspected loans
+- "review" — items needing re-review
+- Users give tags custom names
+
+**Filtering:**
+- Sidebar filters by tag (show only items with "cognate" tag)
+- Essential for users with ~80 selected concepts out of 500+ total items
+- Multiple filter modes: show tagged, show untagged, show all
+
+**Bulk tag application:**
+- User pastes/imports a concept list (IDs or English glosses) to tag all at once
+- Single prompt: "Tag items 1-82 as 'cognate'" or paste a list file
+- Supports text file import or direct paste
+
+### 17.5 Speaker Import Options
+
+When adding a new speaker to Compare, multiple import paths:
+
+1. **Raw audio only** — import a WAV file with no additional data. User goes through Annotate first to segment and annotate, then returns to Compare.
+
+2. **Pre-existing data with timestamps** — import data that already has timestamps, IPA, segments complete (e.g., legacy data from old review tool pipeline). Skip Annotate for these speakers.
+
+3. **Manual onboarding** — user fills out speaker metadata form (name, file paths, language variety, etc.) during onboarding wizard.
+
+4. **Agent-assisted import (future)** — user tells the agent a folder path, agent scans the folder and imports whatever data it finds (WAVs, CSVs, JSONs, TextGrids).
+
+### 17.6 Save & Export
+
+**Primary save format:** JSON (PARSE's native annotation format)
+- Autosave on every edit
+- **Save history maintained** — changes don't overwrite previous saves
+- Version snapshots so user can roll back
+- No GitHub integration for now — everything local
+
+**Export options:**
+- `wordlist.tsv` — LingPy-compatible format (ID, DOCULECT, CONCEPT, IPA, COGID)
+- `decisions.json` — reviewer decisions, cognate sets, borrowing adjudications
+- Praat TextGrid, ELAN XML, CSV (already in plan)
+- Segment audio export via ffmpeg (already in plan)
+
+### 17.7 Pipeline: Compare → BEAST2
+
+The downstream pipeline from Compare mode to phylogenetic analysis:
+
+```
+PARSE Annotate (per-speaker segmentation + annotation)
+  → PARSE Compare (cross-speaker cognate review + borrowing adjudication)
+    → Export: wordlist.tsv
+      → LingPy LexStat cognate detection (sk_lingpy_cognate_detect.py)
+        → cognates.csv
+          → Binary character matrix conversion (TBD — script not yet built)
+            → NEXUS file
+              → BEAST2 XML generation (TBD — script not yet built)
+                → BEAST2 run
+```
+
+**Existing:** `sk_lingpy_cognate_detect.py` (LexStat/SCA → cognates.csv)
+**Missing/TBD:** cognates.csv → binary matrix → NEXUS → BEAST2 XML scripts
+**Legacy reference:** Old review_tool.html pipeline (preserved, not active)
+
+### 17.8 Data Architecture — Hybrid (Option C)
+
+**Decision:** 2026-03-26 — Hybrid approach. Live annotations + separate enrichments layer.
+
+**Core data (always live):**
+- Compare reads directly from per-speaker annotation files (localStorage/disk)
+- IPA, ortho, timestamps, audio regions are always current — no rebuild needed
+- Switching from Annotate to Compare immediately reflects any edits
+
+**Enrichments layer (computed on demand):**
+- Stored separately in `parse-enrichments.json`
+- Contains: cognate sets, contact language similarity scores, borrowing flags, manual overrides
+- Computed by Python/LingPy server-side, triggered by user via "Compute" button in Compare
+- Enrichments have a visible "last computed" timestamp so user knows freshness
+
+**Enrichment schema:**
+```json
+{
+  "computed_at": "2026-03-26T10:00:00Z",
+  "config": {
+    "contact_languages": ["ar", "fa"],
+    "speakers_included": ["Fail01", "Kalh01", "Mand01"],
+    "concepts_included": [1, 2, 5, 12],
+    "lexstat_threshold": 0.6
+  },
+  "cognate_sets": { "1": { "A": ["Fail01","Kalh01"], "B": ["Mand01"] } },
+  "similarity": { "1": { "Fail01": { "ar": 0.12, "fa": 0.05 } } },
+  "borrowing_flags": {},
+  "manual_overrides": {}
+}
+```
+
+**Computation workflow:**
+1. User selects contact languages in Compare UI (SIL codes)
+2. User selects which tagged concepts to compute (e.g., only "cognate" tagged items — not all 500)
+3. User selects which speakers to include (baseline may be ready, others still in progress)
+4. User clicks "Compute" → warning about potential duration → runs in background
+5. User keeps working (Annotate, fix other speakers, anything) while computation runs
+6. Results appear in Compare when done — cognate badges, similarity bars populate
+7. User can re-run with additional speakers/concepts as more data becomes ready
+
+**Computation engine:**
+- LexStat cognate detection + similarity scoring = **purely algorithmic** (LingPy, CPU only, no AI/GPU needed)
+- For 10 speakers × 80 concepts: runs in seconds
+- For very large datasets (100+ speakers, thousands of concepts): could take minutes → background execution essential
+- Python server handles computation, writes results to enrichments file
+
+**Spectrogram computation in Compare:**
+- User-controlled granularity:
+  - **Single lexeme** — compute spectrogram for one concept × one speaker on click
+  - **Single speaker** — compute all spectrograms for one speaker's tagged concepts
+  - **All speakers** — compute spectrograms for all speakers × all tagged concepts (batch)
+- Computed from source WAV regions via Web Worker FFT (same as Annotate)
+- Cached after first computation — no redundant recomputation
+- On-demand by default, batch as user option
+
+### 17.9 Legacy Preservation
+
+These files are preserved as reference material. **Do not modify:**
+- `/mnt/c/Users/Lucas/Thesis/review_tool.html` — old monolithic review tool (1,716 lines)
+- `/mnt/c/Users/Lucas/Thesis/review_data.json` — old review dataset (82 concepts × 6 speakers)
+- `/home/lucas/.openclaw/workspace/parse/review_tool_dev.html` — PARSE dev shell (linked to data)
+
+### 17.10 Build Scope — Full Functionality
+
+**Decision:** 2026-03-26 — Build everything. No MVP/stripped-down version. Full Compare mode with all features for thesis deadline (May 2026). Target: 1-2 day build sprint.
+
+---
+
+## 18. Definition of Done
+
+### PARSE v1.0 — Annotate Mode
 - [ ] Project config (`project.json`) drives all paths and settings
 - [ ] Annotations save to disk as JSON files per speaker
 - [ ] 4-tier structure: IPA, Ortho, Concept, Speaker
@@ -863,6 +1364,32 @@ PARSE v1.0 is complete when:
 - [ ] Video clip extraction from synced timestamps
 - [ ] FPS selection for video sync (24–60fps)
 - [ ] SIL language codes in project config
+- [ ] Tagging system: custom named tags, filter sidebar by tag
+- [ ] Bulk tag application (paste/import concept list)
+- [ ] "Include in analysis" toggle per concept
 - [ ] All paths relative — works on Windows, macOS, Linux
 - [ ] MIT LICENSE file in repo
 - [ ] All existing features from v3.0 still work (waveform, spectrogram, transcript, regions, fullscreen)
+
+### PARSE v1.1 — Compare Mode
+- [ ] Mode switcher: Annotate | Compare in top nav
+- [ ] Concept × Speaker table/matrix layout
+- [ ] Per-cell: IPA, ortho, audio play, spectrogram toggle, cognate badge
+- [ ] Cognate controls: Accept / Split / Merge All / click-to-cycle
+- [ ] Borrowing adjudication: similarity bars, confirmed/not_borrowing, missing vs separate
+- [ ] Contact language selection via SIL codes (onboarding)
+- [ ] Audio playback from annotated source WAV regions
+- [ ] Filter to tagged items only (e.g., "cognate" tag)
+- [ ] Save as JSON with version history (no overwrites)
+- [ ] Export to `wordlist.tsv` (LingPy-compatible)
+- [ ] Export to `decisions.json` (reviewer decisions)
+- [ ] Multiple speaker import paths (raw audio, pre-existing data, manual, agent-assisted)
+
+### PARSE v2.0 — Future
+- [ ] Built-in chat box for agent commands
+- [ ] Voice command support (STT → agent)
+- [ ] Agent-assisted folder import
+- [ ] Additional analysis modes (vowel charts, phonetic scripts, speaker comparison)
+- [ ] cognates.csv → binary matrix conversion script
+- [ ] NEXUS → BEAST2 XML generation script
+- [ ] Full pipeline automation: Compare → LexStat → BEAST2

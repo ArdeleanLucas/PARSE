@@ -1,4 +1,4 @@
-# CODING.md — PARSE Build Protocol v4.0
+# CODING.md — PARSE Build Protocol v5.0
 
 > Read this file before ANY code work on PARSE. Non-negotiable.
 
@@ -6,59 +6,36 @@
 
 **PARSE** — **P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer
 
-A browser-based phonetic review tool for linguists. Timestamps are the core data model. All annotations are Praat-compatible 4-tier interval structures saved to disk.
+Two-mode browser-based phonetic workstation for linguists:
+- **Annotate** — per-speaker segmentation, IPA/ortho annotation, AI-assisted concept location
+- **Compare** — cross-speaker cognate analysis, borrowing adjudication, BEAST2 pipeline
 
-- **Plan**: `PROJECT_PLAN.md` (full spec, schemas, UI design, video sync)
-- **Interfaces**: `INTERFACES.md` (shared types, events, function signatures)
-- **Standards**: `AGENTS.md` (coding standards, format support, what NOT to do)
-- **Lessons**: `tasks/lessons.md` (mistakes to not repeat)
-- **Repo**: `TarahAssistant/PARSE` — ALL code pushes go here
+**Key docs:**
+- `PROJECT_PLAN.md` — full spec, schemas, UI design (v5.0, 1395 lines)
+- `INTERFACES.md` — shared types, events, function signatures
+- `AGENTS.md` — coding standards, file structure, what NOT to do
+- `tasks/lessons.md` — mistakes to not repeat
+- **Repo:** `TarahAssistant/PARSE`
 
-## Project Directory
+## Architecture: Timestamps Are The Bible
+
+Every annotation is a time-stamped segment with 4 tiers:
 
 ```
-parse/
-├── AGENTS.md              ← coding standards for sub-agents
-├── CODING.md              ← you are here (build protocol)
-├── INTERFACES.md          ← shared types, events, function signatures
-├── PROJECT_PLAN.md        ← full architecture spec (v4.0)
-├── python/
-│   ├── thesis_server.py           ← HTTP server with range requests + CORS
-│   ├── normalize_audio.py         ← NEW: two-pass ffmpeg loudnorm (originals → working copies)
-│   ├── generate_source_index.py   ← ffprobe → source_index.json
-│   ├── generate_peaks.py          ← soundfile → peaks JSON (wavesurfer v2)
-│   ├── reformat_transcripts.py    ← coarse transcript reformatter
-│   ├── generate_ai_suggestions.py ← fuzzy matching pipeline
-│   ├── batch_reextract.py         ← ffmpeg segment extraction
-│   ├── textgrid_io.py             ← NEW: Praat TextGrid read/write
-│   ├── elan_export.py             ← NEW: ELAN XML (.eaf) export
-│   ├── csv_export.py              ← NEW: flat CSV export
-│   ├── video_sync.py              ← NEW: FFT cross-correlation + drift
-│   └── video_clip_extract.py      ← NEW: drift-corrected video clip extraction
-├── js/
-│   ├── parse.js                   ← panel orchestrator, singleton, state
-│   ├── waveform-controller.js     ← wavesurfer v7, MediaElement + peaks
-│   ├── spectrogram-worker.js      ← Web Worker FFT (narrow/wide band)
-│   ├── transcript-panel.js        ← virtualized list, search, click-to-seek
-│   ├── suggestions-panel.js       ← AI suggestions, positional re-ranking
-│   ├── region-manager.js          ← region tracking, assignment, export
-│   ├── fullscreen-mode.js         ← modal overlay, concept navigation
-│   ├── annotation-panel.js        ← NEW: IPA/ortho/concept fields, save/load
-│   ├── annotation-store.js        ← NEW: disk persistence, autosave, crash recovery
-│   ├── project-config.js          ← NEW: project.json loader + validator
-│   ├── video-sync-panel.js        ← NEW: sync UI, dual waveform, fine-tune
-│   ├── import-export.js           ← NEW: TextGrid/ELAN/CSV import/export UI
-│   └── onboarding.js              ← NEW: project setup wizard
-├── review_tool_dev.html           ← HTML shell
-├── Start Review Tool.bat          ← Windows launcher
-├── start_parse.sh                 ← NEW: macOS/Linux launcher
-├── LICENSE                        ← NEW: MIT
-├── annotations/                   ← NEW: per-speaker annotation JSON files
-├── exports/                       ← NEW: TextGrid, ELAN, CSV, clips output
-├── reviews/                       ← code review reports
-└── tasks/
-    └── lessons.md                 ← mistakes and corrections
+Tier 1 (top):    IPA          "jek"
+Tier 2:          Ortho        "یەک"
+Tier 3:          Concept      "1:one"
+Tier 4 (bottom): Speaker      "Fail01"
 ```
+
+All downstream operations derive from timestamps. No annotation exists without a timestamp.
+
+## Data Architecture: Hybrid (Option C)
+
+- **Annotations** (always live): per-speaker JSON files, read directly by Compare
+- **Enrichments** (computed on demand): cognate sets, similarity scores, borrowing flags in `parse-enrichments.json`
+- Compare reads live annotations and overlays enrichments on top
+- Enrichments have a visible "last computed" timestamp
 
 ## Sub-Agent Rules
 
@@ -69,106 +46,112 @@ parse/
 5. **Do NOT modify any file outside your assigned output files**
 6. **`git diff --staged` before every commit**
 
-## Architecture: Timestamps Are The Bible
+## Build Waves (v5.0)
 
-Every annotation in PARSE is a time-stamped segment with 4 tiers:
+### Wave 10 — File Restructure (prerequisite, sequential)
 
-```
-Tier 1 (top):    IPA          "jek"
-Tier 2:          Ortho        "یەک"
-Tier 3:          Concept      "1:one"
-Tier 4 (bottom): Speaker      "Fail01"
-```
+| Task | Action | Notes |
+|------|--------|-------|
+| Move shared JS | `js/*.js` → `js/annotate/*.js` | All existing Annotate JS files |
+| Extract shared | `annotation-store.js`, `project-config.js`, `spectrogram-worker.js` → `js/shared/` | Used by both modes |
+| Rename Python | `thesis_server.py` → `server.py`, `generate_*.py` → shorter names | See §14 in plan |
+| Move AI suggestions | `generate_ai_suggestions.py` → `python/ai/suggestions.py` | Refactor for provider abstraction |
+| Create directories | `js/shared/`, `js/compare/`, `python/ai/`, `python/compare/`, `config/`, `docs/` | New v5.0 structure |
+| Move docs | `BUILD_SESSION.md`, `SPEAKERS.md`, etc. → `docs/` | Keep AGENTS.md, CODING.md, PROJECT_PLAN.md in root |
+| Update HTML imports | `parse.html` script paths: `js/annotate/parse.js`, `js/shared/...` | Must not break existing functionality |
 
-All downstream operations derive from timestamps:
-- Praat TextGrid export → timestamps become interval boundaries
-- ELAN XML export → timestamps become time slots
-- CSV export → timestamps become start_sec/end_sec columns
-- Video clip extraction → timestamps map through drift correction to video frames
-- Segment audio export → timestamps become ffmpeg -ss/-to arguments
+**CRITICAL:** Test that `parse.html` still loads and works after restructure. Annotate mode must not break.
 
-**No annotation exists without a timestamp. No timestamp exists without user confirmation.**
-
-## Build Waves (v4.0)
-
-### Wave 5 — Core v4.0 (parallel, high priority)
+### Wave 11 — Shared Infrastructure (parallel, high priority)
 
 | Stream | Task | Output Files | Deps |
 |--------|------|--------------|------|
-| **E1** | Annotation data model + disk persistence | `js/annotation-store.js` | INTERFACES.md |
-| **E2** | Annotation panel UI (IPA/ortho/concept fields) | `js/annotation-panel.js` | E1 interface |
-| **E3** | Project config loader + validator | `js/project-config.js` | INTERFACES.md |
-| **E4** | `generate_peaks.py` rewrite (soundfile) | `python/generate_peaks.py` | Nothing |
-| **E5** | Audio normalization pipeline | `python/normalize_audio.py` | Nothing |
+| **K1** | Tagging/filtering system | `js/shared/tags.js` | Nothing |
+| **K2** | Shared audio player (WAV region playback) | `js/shared/audio-player.js` | Nothing |
+| **K3** | AI client (JS ↔ Python server) | `js/shared/ai-client.js` | Server API |
+| **K4** | AI provider abstraction | `python/ai/provider.py`, `python/ai/__init__.py` | Nothing |
+| **K5** | STT pipeline | `python/ai/stt_pipeline.py` | K4 |
+| **K6** | IPA transcription | `python/ai/ipa_transcribe.py` | K4 |
+| **K7** | Config files | `config/ai_config.json`, `config/phonetic_rules.json`, `config/sil_contact_languages.json` | Nothing |
 
-E1+E3+E4+E5 are independent. E2 depends on E1's interface (not its implementation — can run parallel if interface is defined first).
+K1, K2, K4, K7 are fully independent. K3 needs API endpoint definitions. K5, K6 depend on K4's interface.
 
-**E5 — `normalize_audio.py`** is critical infrastructure. PARSE NEVER modifies original audio files. This script:
-- Reads from `audio/original/<Speaker>/` (untouched source recordings)
-- Writes to `audio/working/<Speaker>/` (normalized copies)
-- Two-pass ffmpeg `loudnorm` normalization to -16 LUFS
-- Converts any format (32-bit float, 24-bit, RF64, MP3) → 16-bit PCM mono 44.1kHz
-- Handles stereo → mono downmix
-- All downstream tools (peaks, Whisper, wavesurfer) read from `audio/working/`, NEVER from `audio/original/`
-- Skips files already normalized (checks output existence + source modification time)
-- Cross-platform: uses `ffmpeg`/`ffprobe` via configurable path or system PATH
-
-### Wave 6 — Import/Export (parallel, high priority)
+### Wave 12 — Compare Mode Core (parallel, high priority)
 
 | Stream | Task | Output Files | Deps |
 |--------|------|--------------|------|
-| **F1** | Praat TextGrid read/write | `python/textgrid_io.py` | Annotation schema |
-| **F2** | ELAN XML export | `python/elan_export.py` | Annotation schema |
-| **F3** | CSV export | `python/csv_export.py` | Annotation schema |
-| **F4** | Import/Export UI (browser) | `js/import-export.js` | F1, E1 |
+| **L1** | Compare HTML shell + main entry | `compare.html`, `js/compare/compare.js` | Shared JS |
+| **L2** | Concept × speaker table | `js/compare/concept-table.js` | L1 |
+| **L3** | Cognate controls (accept/split/merge/cycle) | `js/compare/cognate-controls.js` | L2 |
+| **L4** | Enrichments layer read/write | `js/compare/enrichments.js` | Nothing |
+| **L5** | Server API endpoints | Update `python/server.py` | K4, K5 |
 
-F1, F2, F3 are independent Python scripts. F4 depends on F1 for TextGrid format and E1 for annotation model.
+L1 can start immediately with shared modules. L2 depends on L1's DOM structure. L3 depends on L2. L4 is independent.
 
-### Wave 7 — Video Sync (parallel, medium priority)
-
-| Stream | Task | Output Files | Deps |
-|--------|------|--------------|------|
-| **G1** | FFT cross-correlation + drift detection | `python/video_sync.py` | Nothing |
-| **G2** | Video clip extraction | `python/video_clip_extract.py` | G1 sync data |
-| **G3** | Video sync panel UI | `js/video-sync-panel.js` | G1, INTERFACES.md |
-
-G1 is independent. G2 uses G1's output format. G3 wraps G1 in a browser UI.
-
-### Wave 8 — Onboarding + Polish (sequential, after waves 5-7)
+### Wave 13 — Compare Pipeline (parallel, medium priority)
 
 | Stream | Task | Output Files | Deps |
 |--------|------|--------------|------|
-| **H1** | Onboarding wizard | `js/onboarding.js` | E3 (project config) |
-| **H2** | HTML shell update | `review_tool_dev.html` | All JS modules |
-| **H3** | Cross-platform launcher | `start_parse.sh` | Nothing |
-| **H4** | MIT LICENSE | `LICENSE` | Nothing |
+| **M1** | Cognate computation (LexStat wrapper) | `python/compare/cognate_compute.py` | K7 (config) |
+| **M2** | Cross-speaker matching | `python/compare/cross_speaker_match.py` | K5 (STT) |
+| **M3** | Auto-offset detection | `python/compare/offset_detect.py` | K5 (STT) |
+| **M4** | Phonetic variation rules engine | `python/compare/phonetic_rules.py` | K7 (config) |
+| **M5** | Borrowing adjudication panel | `js/compare/borrowing-panel.js` | L2 |
+| **M6** | Speaker import wizard | `js/compare/speaker-import.js` | K3 (AI client) |
 
-### Wave 9 — Integration with existing v3.0 code
+M1, M4 are independent. M2, M3 depend on STT pipeline. M5 depends on concept table. M6 depends on AI client.
 
-| Stream | Task | Files Modified | Notes |
-|--------|------|----------------|-------|
-| **I1** | Wire annotation-store into region-manager | `js/region-manager.js` | Region assign → annotation save |
-| **I2** | Wire annotation-panel into parse.js | `js/parse.js` | Panel open → annotation fields appear |
-| **I3** | Wire project-config into all data loaders | `js/parse.js`, `review_tool_dev.html` | Replace hardcoded paths |
-| **I4** | Update AI suggestions for provider abstraction | `python/generate_ai_suggestions.py` | Add OpenAI/Ollama support |
+### Wave 14 — Integration + Polish (sequential, after waves 11-13)
+
+| Task | Files Modified | Notes |
+|------|----------------|-------|
+| Wire tags into Annotate sidebar | `js/annotate/parse.js` | Tag toggle per concept |
+| Wire tags filter into Compare | `js/compare/compare.js` | Filter by tagged items |
+| Mode switcher (Annotate ↔ Compare) | Both HTML files | Navigation links/buttons |
+| Enrichments ↔ Compare UI wiring | Multiple Compare JS | Cognate badges, similarity bars populate from enrichments |
+| Save history implementation | `js/compare/enrichments.js` | Version snapshots, no overwrites |
+| Export: wordlist.tsv | `python/compare/cognate_compute.py` | LingPy-compatible format |
+| Export: decisions.json | `js/compare/enrichments.js` | Reviewer decisions + cognate sets |
+| Update INTERFACES.md | `INTERFACES.md` | All new events for Compare mode |
 
 ## Execution Order
 
 ```
-Step 0: Update INTERFACES.md with v4.0 events + schemas
-Step 1: Spawn Wave 5 (E1-E4) — annotation core + peaks rewrite
-Step 2: Spawn Wave 6 (F1-F3) alongside Wave 5 — Python export scripts
-Step 3: Wait for E1 → Spawn E2 (annotation panel UI)
-Step 4: Wait for E1+F1 → Spawn F4 (import/export UI)
-Step 5: Spawn Wave 7 (G1-G3) — can overlap with waves 5-6
-Step 6: Wait for all → Wave 8 (onboarding, HTML, launchers)
-Step 7: Wave 9 — integration wiring (sequential, careful)
-Step 8: Review + test + fix integration bugs
+Step 0: Update INTERFACES.md with v5.0 events (Compare, tags, enrichments, AI)
+Step 1: Wave 10 — file restructure (MUST complete before anything else)
+Step 2: Spawn Wave 11 (K1-K7) — shared infrastructure
+Step 3: Spawn Wave 12 (L1-L5) alongside Wave 11 — Compare skeleton
+Step 4: Spawn Wave 13 (M1-M6) as dependencies resolve
+Step 5: Wave 14 — integration wiring (sequential, careful)
+Step 6: Review + test + fix integration bugs
 ```
 
-**Practical:** Waves 5+6+7 can run mostly in parallel (up to 10 tasks). Wave 8 is sequential. Wave 9 is surgical edits to existing files.
+**Practical:** Waves 11+12 can run mostly in parallel (up to 12 tasks). Wave 13 starts as soon as dependencies from 11 resolve. Wave 14 is sequential.
 
-## Key Schemas (for sub-agent prompts)
+## Sub-Agent Prompt Template
+
+Each sub-agent prompt MUST include:
+
+1. **Standard preamble (always first):**
+   > "Before writing any code, read these files in order:
+   > 1. `/home/lucas/.openclaw/workspace/parse/CODING.md`
+   > 2. `/home/lucas/.openclaw/workspace/parse/AGENTS.md`
+   > 3. `/home/lucas/.openclaw/workspace/parse/INTERFACES.md`
+   > Then follow whatever additional reading those docs direct you to."
+2. Module purpose (one paragraph)
+3. Exact output file path(s)
+4. Interface contract (relevant events + shared data)
+5. Relevant schema (from PROJECT_PLAN.md)
+6. Specific edge cases and constraints
+7. **"Do NOT modify any file outside your assigned output files"**
+
+## What Runs Where
+
+- **Python scripts** — written in sandbox, **executed on user's machine** (needs audio file access)
+- **JS modules + HTML** — written in sandbox, **deployed to project directory** for dev server
+- **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/parse/`
+
+## Key Schemas
 
 ### Annotation File (`annotations/<Speaker>.parse.json`)
 
@@ -180,122 +163,80 @@ Step 8: Review + test + fix integration bugs
   "source_audio": "audio/working/Fail01/Faili_M_1984.wav",
   "source_audio_duration_sec": 7200.0,
   "tiers": {
-    "ipa": {
-      "type": "interval",
-      "display_order": 1,
-      "intervals": [
-        { "start": 506.2, "end": 506.9, "text": "jek" }
-      ]
-    },
-    "ortho": {
-      "type": "interval",
-      "display_order": 2,
-      "intervals": [
-        { "start": 506.2, "end": 506.9, "text": "یەک" }
-      ]
-    },
-    "concept": {
-      "type": "interval",
-      "display_order": 3,
-      "intervals": [
-        { "start": 506.2, "end": 506.9, "text": "1:one" }
-      ]
-    },
-    "speaker": {
-      "type": "interval",
-      "display_order": 4,
-      "intervals": [
-        { "start": 0, "end": 7200.0, "text": "Fail01" }
-      ]
-    }
+    "ipa": { "type": "interval", "display_order": 1, "intervals": [{ "start": 506.2, "end": 506.9, "text": "jek" }] },
+    "ortho": { "type": "interval", "display_order": 2, "intervals": [{ "start": 506.2, "end": 506.9, "text": "یەک" }] },
+    "concept": { "type": "interval", "display_order": 3, "intervals": [{ "start": 506.2, "end": 506.9, "text": "1:one" }] },
+    "speaker": { "type": "interval", "display_order": 4, "intervals": [{ "start": 0, "end": 7200.0, "text": "Fail01" }] }
   },
-  "metadata": {
-    "language_code": "sdh",
-    "created": "2026-03-23T21:00:00Z",
-    "modified": "2026-03-23T22:00:00Z"
-  }
+  "metadata": { "language_code": "sdh", "created": "2026-03-26T10:00:00Z", "modified": "2026-03-26T11:00:00Z" }
 }
 ```
 
-### Video Sync Data
+### Enrichments (`parse-enrichments.json`)
 
 ```json
 {
-  "video_file": "Khan01_session.mp4",
-  "audio_file": "audio/working/Khan01/REC00002.wav",
-  "fps": 60,
-  "sync": {
-    "status": "synced",
-    "offset_sec": 14.3,
-    "drift_rate": 0.00667,
-    "method": "fft_auto",
-    "ai_verified": true,
-    "manual_adjustment_sec": 0.0
-  }
+  "computed_at": "2026-03-26T10:00:00Z",
+  "config": {
+    "contact_languages": ["ar", "fa"],
+    "speakers_included": ["Fail01", "Kalh01", "Mand01"],
+    "concepts_included": [1, 2, 5, 12],
+    "lexstat_threshold": 0.6
+  },
+  "cognate_sets": { "1": { "A": ["Fail01","Kalh01"], "B": ["Mand01"] } },
+  "similarity": { "1": { "Fail01": { "ar": 0.12, "fa": 0.05 } } },
+  "borrowing_flags": {},
+  "manual_overrides": {}
 }
 ```
 
-### Timestamp → Video Mapping
+### AI Config (`config/ai_config.json`)
 
+```json
+{
+  "stt": { "provider": "faster-whisper", "model_path": "", "language": "sd", "device": "cuda", "compute_type": "float16" },
+  "ipa": { "provider": "local", "model": "epitran" },
+  "llm": { "provider": "openai", "model": "gpt-4o", "api_key_env": "OPENAI_API_KEY" },
+  "specialized_layers": []
+}
 ```
-video_time = (wav_time × (1 + drift_rate/60)) + offset_sec + manual_adjustment_sec
-video_frame = round(video_time × fps)
-```
-
-## Sub-Agent Prompt Template
-
-Each sub-agent prompt MUST include:
-
-1. **Standard preamble (always first):**
-   > "Before writing any code, read these three files in order:
-   > 1. `/home/lucas/.openclaw/workspace/parse/CODING.md`
-   > 2. `/home/lucas/.openclaw/workspace/parse/AGENTS.md`
-   > 3. `/home/lucas/.openclaw/agents/dr-kurd/TOOLS.md`
-   > Then follow whatever additional reading those docs direct you to."
-2. Module purpose (one paragraph)
-3. Exact output file path(s)
-4. Interface contract (relevant events + shared data from INTERFACES.md)
-5. Relevant schema (copied from this file or PROJECT_PLAN.md)
-6. Specific edge cases and constraints
-7. **"Do NOT modify any file outside your assigned output files"**
-
-## What Runs Where
-
-- **Python scripts** — written in sandbox, **executed on user's machine** (needs audio file access)
-- **JS modules + HTML** — written in sandbox, **deployed to project directory** for dev server
-- **opencode_task sandbox** — `/home/lucas/.openclaw/workspace/parse/`
 
 ## Data Pipeline Order
 
-This is the mandatory sequence for preparing a new project's audio:
-
+### Annotate pipeline (per-speaker):
 ```
-1. normalize_audio.py    → audio/original/ → audio/working/ (16-bit PCM mono, -16 LUFS)
-2. generate_source_index.py → ffprobe audio/working/ → source_index.json
-3. generate_peaks.py     → soundfile audio/working/ → peaks/*.json
-4. reformat_transcripts.py  → coarse transcripts → transcripts/*.json
-5. generate_ai_suggestions.py → transcripts + review_data → ai_suggestions.json
+1. normalize_audio.py    → audio/original/ → audio/working/
+2. source_index.py       → ffprobe audio/working/ → source_index.json
+3. peaks.py              → soundfile audio/working/ → peaks/*.json
+4. coarse_transcripts.py → coarse transcripts → transcripts/*.json
+5. ai/suggestions.py     → transcripts + review_data → ai_suggestions.json
 ```
 
-Step 1 is a HARD PREREQUISITE. Nothing runs without normalized working copies.
+### Compare pipeline (cross-speaker):
+```
+1. ai/stt_pipeline.py         → full-file STT on new speaker (background, GPU)
+2. compare/offset_detect.py   → auto-detect timestamp offsets
+3. compare/phonetic_rules.py  → apply phonetic variation rules
+4. compare/cross_speaker_match.py → repetition detect + cross-speaker matching
+5. compare/cognate_compute.py → LexStat → enrichments.json
+6. Export: wordlist.tsv → LingPy → BEAST2 XML (TBD scripts)
+```
 
 ## Pre-Build Checklist
 
-Before spawning any Wave 5+ sub-agents:
-
-- [ ] INTERFACES.md updated with v4.0 events (annotation events, import/export events, video sync events)
-- [ ] `normalize_audio.py` built (E5 in wave 5) — this IS the pipeline, not a manual step
+- [ ] INTERFACES.md updated with v5.0 events (Compare, tags, enrichments, AI endpoints)
+- [ ] Wave 10 file restructure complete
+- [ ] `parse.html` still loads and works after restructure
 
 ## Post-Build Checklist
 
-After all waves complete:
-
-1. `python3 -m py_compile python/*.py` — all Python scripts compile
-2. `node --check js/*.js` — all JS modules pass syntax check
+1. `python3 -m py_compile python/*.py python/ai/*.py python/compare/*.py` — all compile
+2. `node --check js/shared/*.js js/annotate/*.js js/compare/*.js` — all pass syntax
 3. Review each file for interface compliance
-4. Test: annotations save to disk and survive page reload
-5. Test: TextGrid export opens in Praat without errors
-6. Test: waveform loads, transcript renders, suggestions appear
-7. Test: video sync produces correct offset (if video files available)
-8. `git diff --staged` before committing
-9. Push to `TarahAssistant/PARSE`
+4. Test: Annotate mode unchanged (annotations save, regions work, suggestions appear)
+5. Test: Compare mode loads concept × speaker table
+6. Test: Cognate controls work (accept/split/merge/cycle)
+7. Test: STT pipeline runs on new speaker import
+8. Test: Enrichments compute and display
+9. `git diff --staged` before committing
+10. Push to `TarahAssistant/PARSE`
