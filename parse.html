@@ -1324,13 +1324,17 @@ function wireStep2() {
     renderWavList();
   }
 
-  // File picker
-  document.getElementById('wiz-add-wav-file').addEventListener('click', () => {
-    const file = document.getElementById('wiz-wav-file').files[0];
+  // File picker — auto-add on selection AND on button click
+  const wavFileInput = document.getElementById('wiz-wav-file');
+  function addFromFilePicker() {
+    const file = wavFileInput.files[0];
     if (!file) { wizStatus('Select a file first.', 'warn'); return; }
     const url = URL.createObjectURL(file);
     addWav(url, file.name, true, { fileSizeBytes: file.size });
-  });
+    wavFileInput.value = ''; // reset so same file can be re-added
+  }
+  wavFileInput.addEventListener('change', addFromFilePicker);
+  document.getElementById('wiz-add-wav-file').addEventListener('click', addFromFilePicker);
 
   // Drag and drop
   const dropZone = document.getElementById('wiz-wav-drop');
@@ -1343,13 +1347,19 @@ function wireStep2() {
   });
 
   // Server path
-  document.getElementById('wiz-add-wav-path').addEventListener('click', async () => {
-    const path = document.getElementById('wiz-wav-path').value.trim();
+  async function addFromServerPath() {
+    const pathInput = document.getElementById('wiz-wav-path');
+    const path = pathInput.value.trim();
     if (!path) { wizStatus('Enter a server path.', 'warn'); return; }
     wizStatus(`Validating ${path}…`, '');
     const ok = await validateServerPath(path);
     if (!ok) { wizStatus(`Cannot reach ${path} — check the path and server.`, 'danger'); return; }
     await addWav(path, path.split('/').pop(), false);
+    pathInput.value = '';
+  }
+  document.getElementById('wiz-add-wav-path').addEventListener('click', addFromServerPath);
+  document.getElementById('wiz-wav-path').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addFromServerPath(); }
   });
 
   // Next
@@ -2524,11 +2534,18 @@ function openSegment(idx) {
     activeEl.scrollIntoView({ block: 'nearest' });
   }
 
-  // Seek waveform
+  // Seek waveform to segment start
   const ws = STATE.wavesurfer;
   if (ws) {
-    const dur = ws.getDuration() || 1;
-    ws.seekTo(Math.max(0, Math.min(1, (seg.start - 0.5) / dur)));
+    const targetSec = Math.max(0, seg.start - 0.5);
+    console.log(`[PARSE] Seeking to ${targetSec.toFixed(1)}s for segment "${seg.text}" (start=${seg.start}s, duration=${ws.getDuration()}s)`);
+    // Use setTime for absolute positioning (more reliable than seekTo ratio)
+    if (typeof ws.setTime === 'function') {
+      ws.setTime(targetSec);
+    } else {
+      const dur = ws.getDuration() || 1;
+      ws.seekTo(Math.max(0, Math.min(1, targetSec / dur)));
+    }
   }
 
   // Build annotation form
