@@ -765,6 +765,12 @@
       <button class="ctrl-btn" id="btn-fwd1">1s ▶</button>
       <button class="ctrl-btn" id="btn-back5">◀ 5s</button>
       <button class="ctrl-btn" id="btn-fwd5">5s ▶</button>
+      <span class="sep">|</span>
+      <button class="ctrl-btn" id="btn-set-start" title="Set segment start to current playhead">⬅ Set Start</button>
+      <button class="ctrl-btn" id="btn-set-end" title="Set segment end to current playhead">Set End ➡</button>
+      <span class="sep">|</span>
+      <button class="ctrl-btn" id="btn-undo" title="Undo (Ctrl+Z)" disabled>↩ Undo</button>
+      <button class="ctrl-btn" id="btn-redo" title="Redo (Ctrl+Shift+Z)" disabled>↪ Redo</button>
       <span id="playback-time">0:00:00 / 0:00:00</span>
       <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto;">
         Zoom <input type="range" id="zoom-range" min="1" max="500" value="10">
@@ -974,6 +980,9 @@ const STATE = {
   currentSegmentIdx: null,
   wavesurfer: null,
   regionsPlugin: null,
+  segmentPlayMode: false,    // true = auto-stop at segment end; false = free scrub
+  undoStack: [],             // [{segIdx, field, oldVal, newVal}]
+  redoStack: [],
 };
 
 const LS_KEY = 'parse-annotations-v1';
@@ -2416,18 +2425,23 @@ async function loadSpeaker(speaker) {
     ws.load(wavUrl);
   }
 
-  // Playback time display + auto-stop at segment end
+  // Playback time display + auto-stop at segment end (only for segment-triggered playback)
   ws.on('audioprocess', () => {
     updateTimeDisplay();
-    // Auto-stop when reaching the end of the current segment
-    if (STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
+    // Auto-stop only when playing was triggered by segment navigation
+    if (STATE.segmentPlayMode && STATE.currentSegmentIdx != null && STATE.coarseTranscript) {
       const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
       if (seg && ws.getCurrentTime() >= seg.end) {
         ws.pause();
+        STATE.segmentPlayMode = false;
       }
     }
   });
-  ws.on('seek', () => updateTimeDisplay());
+  ws.on('seek', () => {
+    updateTimeDisplay();
+    // If user clicks waveform directly, disable segment auto-stop
+    STATE.segmentPlayMode = false;
+  });
 
   ws.on('ready', () => {
     setLoading(null);
@@ -2466,17 +2480,104 @@ function updateTimeDisplay() {
 function drawCueRegions(transcript) {
   const rp = STATE.regionsPlugin;
   if (!rp) return;
+  // Clear existing regions
+  rp.clearRegions();
   const segs = transcript.segments || [];
   segs.forEach((seg, i) => {
-    rp.addRegion({
+    const region = rp.addRegion({
       id: `cue-${i}`,
       start: seg.start,
       end: seg.end,
-      color: 'rgba(56,189,248,0.08)',
-      drag: false,
-      resize: false,
+      color: i === STATE.currentSegmentIdx ? 'rgba(56,189,248,0.18)' : 'rgba(56,189,248,0.08)',
+      drag: true,
+      resize: true,
+    });
+    // Save timestamp changes when region is moved/resized
+    region.on('update-end', () => {
+      const oldStart = seg.start;
+      const oldEnd = seg.end;
+      pushUndo(i, 'start', oldStart, region.start);
+      pushUndo(i, 'end', oldEnd, region.end);
+      seg.start = region.start;
+      seg.end = region.end;
+      saveTranscriptToStorage();
+      // Update annotation pane if this segment is selected
+      if (STATE.currentSegmentIdx === i) {
+        buildAnnotationPane(STATE.currentSpeaker, i, seg);
+      }
+      // Update time display in concept list
+      const listEl = document.querySelector(`.concept-item[data-idx="${i}"] .ci-time`);
+      if (listEl) listEl.textContent = fmt(seg.start);
+    });
+    // Click region to select that segment
+    region.on('click', () => {
+      openSegment(i);
     });
   });
+}
+
+function highlightActiveRegion(idx) {
+  const rp = STATE.regionsPlugin;
+  if (!rp) return;
+  rp.getRegions().forEach(r => {
+    const rIdx = parseInt(r.id.replace('cue-', ''));
+    r.setOptions({ color: rIdx === idx ? 'rgba(56,189,248,0.18)' : 'rgba(56,189,248,0.08)' });
+  });
+}
+
+function saveTranscriptToStorage() {
+  if (!STATE.currentSpeaker || !STATE.coarseTranscript) return;
+  try {
+    localStorage.setItem(`parse-transcript-${STATE.currentSpeaker}`, JSON.stringify(STATE.coarseTranscript));
+  } catch {}
+}
+
+// ─── Undo / Redo ──────────────────────────────────────────────────────────────
+function pushUndo(segIdx, field, oldVal, newVal) {
+  if (oldVal === newVal) return;
+  STATE.undoStack.push({ segIdx, field, oldVal, newVal, ts: Date.now() });
+  STATE.redoStack = []; // clear redo on new action
+  updateUndoButtons();
+}
+
+function doUndo() {
+  const entry = STATE.undoStack.pop();
+  if (!entry) return;
+  const seg = STATE.coarseTranscript?.segments?.[entry.segIdx];
+  if (!seg) return;
+  seg[entry.field] = entry.oldVal;
+  STATE.redoStack.push(entry);
+  saveTranscriptToStorage();
+  // Redraw region
+  drawCueRegions(STATE.coarseTranscript);
+  if (STATE.currentSegmentIdx === entry.segIdx) {
+    buildAnnotationPane(STATE.currentSpeaker, entry.segIdx, seg);
+  }
+  updateUndoButtons();
+  showToast('Undo ↩', 1000);
+}
+
+function doRedo() {
+  const entry = STATE.redoStack.pop();
+  if (!entry) return;
+  const seg = STATE.coarseTranscript?.segments?.[entry.segIdx];
+  if (!seg) return;
+  seg[entry.field] = entry.newVal;
+  STATE.undoStack.push(entry);
+  saveTranscriptToStorage();
+  drawCueRegions(STATE.coarseTranscript);
+  if (STATE.currentSegmentIdx === entry.segIdx) {
+    buildAnnotationPane(STATE.currentSpeaker, entry.segIdx, seg);
+  }
+  updateUndoButtons();
+  showToast('Redo ↪', 1000);
+}
+
+function updateUndoButtons() {
+  const undoBtn = document.getElementById('btn-undo');
+  const redoBtn = document.getElementById('btn-redo');
+  if (undoBtn) undoBtn.disabled = STATE.undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = STATE.redoStack.length === 0;
 }
 
 // ─── Concept list ─────────────────────────────────────────────────────────────
@@ -2543,12 +2644,11 @@ function openSegment(idx) {
     activeEl.scrollIntoView({ block: 'nearest' });
   }
 
-  // Seek waveform to segment start
+  // Seek waveform to segment start and enable auto-stop
   const ws = STATE.wavesurfer;
   if (ws) {
-    const targetSec = Math.max(0, seg.start - 0.5);
-    console.log(`[PARSE] Seeking to ${targetSec.toFixed(1)}s for segment "${seg.text}" (start=${seg.start}s, duration=${ws.getDuration()}s)`);
-    // Use setTime for absolute positioning (more reliable than seekTo ratio)
+    STATE.segmentPlayMode = true;
+    const targetSec = Math.max(0, seg.start - 0.3);
     if (typeof ws.setTime === 'function') {
       ws.setTime(targetSec);
     } else {
@@ -2556,6 +2656,9 @@ function openSegment(idx) {
       ws.seekTo(Math.max(0, Math.min(1, targetSec / dur)));
     }
   }
+
+  // Highlight active region
+  highlightActiveRegion(idx);
 
   // Build annotation form
   buildAnnotationPane(speaker, idx, seg);
@@ -2730,14 +2833,56 @@ function wireControls() {
     STATE.wavesurfer?.zoom(Number(e.target.value));
   });
 
+  // Set Start / Set End buttons
+  document.getElementById('btn-set-start').addEventListener('click', () => {
+    const ws = STATE.wavesurfer;
+    if (!ws || STATE.currentSegmentIdx == null || !STATE.coarseTranscript) return;
+    const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
+    if (!seg) return;
+    const newStart = ws.getCurrentTime();
+    pushUndo(STATE.currentSegmentIdx, 'start', seg.start, newStart);
+    seg.start = newStart;
+    saveTranscriptToStorage();
+    drawCueRegions(STATE.coarseTranscript);
+    buildAnnotationPane(STATE.currentSpeaker, STATE.currentSegmentIdx, seg);
+    showToast(`Start → ${fmt(newStart)}`, 1200);
+  });
+
+  document.getElementById('btn-set-end').addEventListener('click', () => {
+    const ws = STATE.wavesurfer;
+    if (!ws || STATE.currentSegmentIdx == null || !STATE.coarseTranscript) return;
+    const seg = STATE.coarseTranscript.segments[STATE.currentSegmentIdx];
+    if (!seg) return;
+    const newEnd = ws.getCurrentTime();
+    pushUndo(STATE.currentSegmentIdx, 'end', seg.end, newEnd);
+    seg.end = newEnd;
+    saveTranscriptToStorage();
+    drawCueRegions(STATE.coarseTranscript);
+    buildAnnotationPane(STATE.currentSpeaker, STATE.currentSegmentIdx, seg);
+    showToast(`End → ${fmt(newEnd)}`, 1200);
+  });
+
+  // Undo / Redo buttons
+  document.getElementById('btn-undo').addEventListener('click', doUndo);
+  document.getElementById('btn-redo').addEventListener('click', doRedo);
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+    if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
     if (e.code === 'Space') { e.preventDefault(); STATE.wavesurfer?.playPause(); }
     if (e.code === 'ArrowLeft')  { e.preventDefault(); nudge(-1); }
     if (e.code === 'ArrowRight') { e.preventDefault(); nudge(+1); }
     if (e.code === 'ArrowDown')  { e.preventDefault(); nextConcept(+1); }
     if (e.code === 'ArrowUp')    { e.preventDefault(); nextConcept(-1); }
+    // Ctrl+Z / Ctrl+Shift+Z for undo/redo
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
+      e.preventDefault();
+      if (e.shiftKey) doRedo(); else doUndo();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
+      e.preventDefault();
+      doRedo();
+    }
   });
 }
 
