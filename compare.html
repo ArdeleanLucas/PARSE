@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PARSE Compare — Concept-first Review Workspace</title>
+<title>PARSE Compare</title>
 
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -263,11 +263,14 @@ textarea, input, select { font-family: inherit; }
 /* ═══════════════════════════════════════════════════════════════
    CONCEPT HEADER
 ══════════════════════════════════════════════════════════════ */
+#header-card {
+  padding: 10px 14px;
+}
 #concept-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 #concept-title {
   font-size: 1.5rem;
@@ -287,7 +290,7 @@ textarea, input, select { font-family: inherit; }
 }
 .nav-btn:hover { background: #eef2ff; border-color: #4461d4; }
 .nav-btn:disabled { opacity: 0.4; cursor: default; }
-#concept-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+#concept-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: nowrap; }
 .action-btn {
   border: none;
   border-radius: 6px;
@@ -326,7 +329,7 @@ textarea, input, select { font-family: inherit; }
 }
 .ref-lang-label.arabic { color: #c2410c; }
 .ref-lang-label.persian { color: #7c3aed; }
-.ref-form { font-size: 1.1rem; direction: rtl; unicode-bidi: bidi-override; }
+.ref-form { font-size: 1.1rem; }
 .ref-ipa  { font-size: 0.9rem; color: #6b7db3; font-family: 'Noto Sans', monospace; }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -736,6 +739,67 @@ textarea, input, select { font-family: inherit; }
   color: #1a1a2e;
   outline: none;
   cursor: pointer;
+}
+
+/* Borrowing module card overrides (match review_tool light cards) */
+#compare-borrowing-panel .bp-count-badge {
+  background: #f0f4ff !important;
+  border-color: #c8d0e8 !important;
+  color: #4461d4 !important;
+}
+#compare-borrowing-panel .bp-context-card,
+#compare-borrowing-panel .bp-lang-section,
+#compare-borrowing-panel .bp-decision-row {
+  background: #fff !important;
+  border-color: #dde2ef !important;
+}
+#compare-borrowing-panel .bp-lang-section summary {
+  background: #f8f9fc !important;
+  border-bottom: 1px solid #e2e8f5 !important;
+  border-radius: 8px;
+}
+#compare-borrowing-panel .bp-lang-section[open] summary {
+  border-radius: 8px 8px 0 0;
+}
+#compare-borrowing-panel .bp-lang-body {
+  background: #fff !important;
+  border-top: 1px solid #e2e8f5 !important;
+  border-radius: 0 0 8px 8px;
+}
+#compare-borrowing-panel .bp-score-track {
+  background: #e8ecf5 !important;
+  border-color: #d8deef !important;
+}
+#compare-borrowing-panel .bp-score-track.is-empty {
+  background: #f3f6ff !important;
+}
+#compare-borrowing-panel .bp-source-row select {
+  background: #fff !important;
+  border-color: #c8d0e8 !important;
+  color: #1a1a2e !important;
+}
+#compare-borrowing-panel .bp-context-ipa {
+  color: #1f3775 !important;
+}
+#compare-borrowing-panel .bp-context-ortho {
+  color: #5f72a4 !important;
+}
+#compare-borrowing-panel .bp-context-empty,
+#compare-borrowing-panel .bp-context-speaker,
+#compare-borrowing-panel .bp-concept-line,
+#compare-borrowing-panel .bp-lang-family,
+#compare-borrowing-panel .bp-score-label,
+#compare-borrowing-panel .bp-refs,
+#compare-borrowing-panel .bp-speaker-name,
+#compare-borrowing-panel .bp-speaker-form {
+  color: #5e6f9f !important;
+}
+#compare-borrowing-panel .bp-lang-name,
+#compare-borrowing-panel .bp-speaker-id,
+#compare-borrowing-panel .bp-radio-label,
+#compare-borrowing-panel .bp-source-row label,
+#compare-borrowing-panel .bp-refs strong {
+  color: #1a1a2e !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1314,7 +1378,7 @@ textarea, input, select { font-family: inherit; }
 
 <!-- ── TOP BAR ──────────────────────────────────────────────── -->
 <div id="topbar">
-  <h1>PARSE Compare <span>Concept-first review shell</span></h1>
+  <h1>PARSE Compare</h1>
   <div id="progress-badge">0 / 0 reviewed</div>
   <div id="phon-progress-badge" style="font-size:11px;color:#94a3b8;margin-top:2px">🔬 Phonetic flags: 0 / 0 resolved</div>
   <div id="progress-bar-wrap"><div id="progress-bar-fill" style="width:0%"></div></div>
@@ -1335,10 +1399,8 @@ textarea, input, select { font-family: inherit; }
 
 <!-- ── LOAD SCREEN ──────────────────────────────────────────── -->
 <div id="load-screen" class="hidden">
-  <h2>PARSE Compare Fallback Loader</h2>
-  <p>This fallback loader remains for legacy shell parity only. Normal Compare workflow boots directly from project + annotation data.</p>
-  <button class="load-btn" id="btn-load-review-data">📂 Load review_data.json (legacy)</button>
-  <p style="font-size:0.8rem;color:#9aa3c0">Keyboard shortcuts: ← → navigate · Enter accept · B/F flag</p>
+  <h2>PARSE Compare Loader</h2>
+  <button class="load-btn" id="btn-load-review-data">📂 Load review_data.json</button>
 </div>
 
 <!-- ── MAIN APP ─────────────────────────────────────────────── -->
@@ -1346,10 +1408,6 @@ textarea, input, select { font-family: inherit; }
   <!-- SIDEBAR -->
   <div id="sidebar">
     <div id="sidebar-search">
-      <div class="sidebar-intro">
-        <div class="sidebar-intro-title">Step 1 · Concept Queue</div>
-        <p class="sidebar-intro-copy">Start in the sidebar, then review the selected concept top-to-bottom on the right.</p>
-      </div>
       <input type="text" id="search-box" placeholder="Search concepts…">
       <div style="display:flex;gap:4px;margin-top:5px;">
         <button class="sort-btn active" data-sort="alpha" title="Sort alphabetically">A→Z</button>
@@ -1370,33 +1428,24 @@ textarea, input, select { font-family: inherit; }
       <div class="shell-state-meta" id="compare-shell-state-meta">
         <span class="shell-meta-chip">Booting…</span>
       </div>
-      <ol class="compare-flow-list">
-        <li>Start with the sidebar concept queue.</li>
-        <li>Review cards in order: references → speaker forms → cognates → borrowing → notes.</li>
-        <li>Use matrix/spectrogram drawers only for secondary cross-checks.</li>
-      </ol>
-      <p class="compare-flow-note">Acceptance expectation: every section should show explicit loading/empty/error copy—never silent blank space.</p>
     </div>
 
-    <!-- compare controls (secondary; concept workflow stays primary below) -->
+    <!-- compare controls -->
     <div id="compare-header">
       <div class="compare-waiting-copy">
-        <strong>Preparing speaker + compute controls…</strong>
-        <p>If this persists, Compare bootstrap likely failed. Reload and check project.json, source_index.json, and annotation/enrichment paths.</p>
+        <strong>Loading controls…</strong>
       </div>
     </div>
     <div id="compare-compute-status">
-      <div class="compute-status-text">Bootstrapping compare workspace…</div>
+      <div class="compute-status-text">Loading…</div>
       <div class="compute-progress-wrap"><div class="compute-progress-bar" style="width:2%"></div></div>
     </div>
 
     <!-- concept header card -->
     <div class="card" id="header-card">
-      <div class="card-title">Step 2 · Current Concept</div>
-      <p class="section-hint">Use Prev/Next and Accept/Flag after selecting a concept from the sidebar queue.</p>
       <div id="concept-header">
         <button class="nav-btn" id="btn-prev">← Prev</button>
-        <div id="concept-title">Select a concept from Step 1 queue…</div>
+        <div id="concept-title">Select a concept…</div>
         <button class="nav-btn" id="btn-next">Next →</button>
         <div id="concept-actions">
           <button class="action-btn accept" id="btn-accept">✓ Accept</button>
@@ -1407,26 +1456,24 @@ textarea, input, select { font-family: inherit; }
 
     <!-- reference forms -->
     <div class="card">
-      <div class="card-title">Step 3 · Reference Forms</div>
-      <p class="section-hint">Reference cells stay explicit: missing values should show <strong>No data</strong> or <strong>—</strong>, never blank.</p>
+      <div class="card-title">Reference Forms</div>
       <div class="ref-grid">
         <div class="ref-lang">
           <div class="ref-lang-label arabic">Arabic</div>
           <div class="ref-form" id="ref-arabic-form">—</div>
-          <div class="ref-ipa" id="ref-arabic-ipa">Select a concept to load Arabic reference details.</div>
+          <div class="ref-ipa" id="ref-arabic-ipa">—</div>
         </div>
         <div class="ref-lang">
           <div class="ref-lang-label persian">Persian</div>
           <div class="ref-form" id="ref-persian-form">—</div>
-          <div class="ref-ipa" id="ref-persian-ipa">Select a concept to load Persian reference details.</div>
+          <div class="ref-ipa" id="ref-persian-ipa">—</div>
         </div>
       </div>
     </div>
 
     <!-- speaker forms -->
     <div class="card">
-      <div class="card-title">Step 4 · Speaker Forms</div>
-      <p class="section-hint">Concept-bound review table (primary). The full concept×speaker matrix is in an optional drawer below.</p>
+      <div class="card-title">Speaker Forms</div>
       <table class="forms-table" id="forms-table">
         <thead>
           <tr>
@@ -1440,7 +1487,7 @@ textarea, input, select { font-family: inherit; }
         </thead>
         <tbody id="forms-tbody">
           <tr class="forms-empty-row">
-            <td colspan="6" class="empty-msg">Select a concept and at least one speaker to populate this primary review table.</td>
+            <td colspan="6" class="empty-msg">Select a concept.</td>
           </tr>
         </tbody>
       </table>
@@ -1448,54 +1495,49 @@ textarea, input, select { font-family: inherit; }
 
     <!-- cognate decision -->
     <div class="card">
-      <div class="card-title">Step 5 · Cognate Decision</div>
-      <p class="section-hint">Accept/split/merge/cycle should always bind to the currently active concept only.</p>
+      <div class="card-title">Cognate Decision</div>
       <div class="cognate-panel" id="cognate-panel">
         <div id="compare-cognate-panel">
-          <p class="empty-msg">Waiting for concept context. If no groups exist yet, this panel should explicitly say so.</p>
+          <p class="empty-msg">&nbsp;</p>
         </div>
       </div>
     </div>
 
     <!-- borrowing panel -->
     <div class="card" id="borrow-card">
-      <div class="card-title">Step 6 · Potential Borrowings</div>
-      <p class="section-hint">No candidates should render an explicit “No borrowing candidates” message.</p>
+      <div class="card-title">Potential Borrowings</div>
       <div id="borrow-panel">
         <div id="compare-borrowing-panel">
-          <p class="empty-msg">Waiting for selected concept + speakers. Borrowing adjudication appears here once similarity data is available.</p>
+          <p class="empty-msg">&nbsp;</p>
         </div>
       </div>
     </div>
 
     <!-- notes -->
     <div class="card">
-      <div class="card-title">Step 7 · Notes</div>
-      <p class="section-hint">Concept notes are draft-persisted in compare shell decisions.</p>
-      <textarea class="notes-textarea" id="notes-field" placeholder="Select a concept to add notes…" disabled></textarea>
+      <div class="card-title">Notes</div>
+      <textarea class="notes-textarea" id="notes-field" placeholder="Add notes…" disabled></textarea>
     </div>
 
     <!-- nav footer -->
     <div id="nav-footer">
-      <span id="nav-position">Waiting for concept queue…</span>
+      <span id="nav-position">—</span>
       <div style="display:flex;gap:8px">
         <button class="nav-btn" id="btn-prev-bottom">← Previous</button>
         <button class="nav-btn" id="btn-next-bottom">Next →</button>
       </div>
     </div>
 
-    <!-- secondary compare mounts (intentionally de-emphasized vs concept-first flow) -->
+    <!-- secondary compare mounts -->
     <div class="card secondary-surfaces">
-      <div class="card-title">Optional Secondary Surfaces</div>
-      <p class="section-hint">Use these for cross-checking only after the primary concept-review stack above.</p>
+      <div class="card-title">Secondary Surfaces</div>
 
       <details class="secondary-surface" id="compare-matrix-surface">
         <summary>
           <span>Concept × Speaker Matrix</span>
-          <span class="summary-note">Secondary cross-check view</span>
         </summary>
         <div class="secondary-body">
-          <p class="secondary-empty">Matrix becomes useful after speakers are selected. It should never be the first required interaction.</p>
+          <p class="secondary-empty">&nbsp;</p>
           <div id="compare-table"></div>
         </div>
       </details>
@@ -1503,10 +1545,9 @@ textarea, input, select { font-family: inherit; }
       <details class="secondary-surface" id="compare-spectrogram-surface">
         <summary>
           <span>Spectrogram Workspace</span>
-          <span class="summary-note">Secondary evidence panel</span>
         </summary>
         <div class="secondary-body">
-          <p class="secondary-empty">Waiting for on-demand spectrogram requests from the compare workflow.</p>
+          <p class="secondary-empty">&nbsp;</p>
           <div id="compare-spectrogram"></div>
         </div>
       </details>

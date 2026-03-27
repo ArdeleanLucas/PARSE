@@ -846,64 +846,36 @@
 
   function refreshShellStateFromData() {
     if (state.isBootstrapping) {
-      setShellState(
-        'loading',
-        'Loading compare workspace…',
-        'Building concept queue and pulling annotations/enrichments.'
-      );
+      setShellState('loading', 'Loading…', 'Loading data.');
       return;
     }
 
     if (state.bootstrapErrorMessage) {
-      setShellState(
-        'error',
-        'Compare workspace hit an error.',
-        state.bootstrapErrorMessage + ' The concept-first shell is still available; refresh after fixing data paths/services.'
-      );
+      setShellState('error', 'Error', state.bootstrapErrorMessage);
       return;
     }
 
     if (isNoDataState()) {
-      setShellState(
-        'no-data',
-        'No compare data detected yet.',
-        'No speakers or concepts were found from project CSV, annotations, or enrichments. The compare shell is loaded and ready once data wiring is available.'
-      );
+      setShellState('no-data', 'No Data', 'No compare data found.');
       return;
     }
 
     if (!state.concepts.length) {
-      setShellState(
-        'empty',
-        'Concept queue is empty.',
-        'Compare loaded, but there are no concept records to review yet. Check concept CSV columns and annotation concept labels.'
-      );
+      setShellState('empty', 'No Concepts', 'Concept list is empty.');
       return;
     }
 
     if (!state.filteredConcepts.length) {
-      setShellState(
-        'filtered-empty',
-        'No concepts match the current filters.',
-        'Try clearing search/filter/tag selection to restore the concept queue.'
-      );
+      setShellState('filtered-empty', 'No Matches', 'No concepts match filters.');
       return;
     }
 
     if (!state.selectedSpeakers.length) {
-      setShellState(
-        'attention',
-        'Concept queue loaded. No speakers selected.',
-        'Use the speaker control above to add one or more speakers, then review each concept top-to-bottom.'
-      );
+      setShellState('attention', 'No Speakers Selected', 'Select at least one speaker.');
       return;
     }
 
-    setShellState(
-      'ready',
-      'Ready for concept-by-concept review.',
-      'Sidebar queue, concept cards, and decision draft persistence are active.'
-    );
+    setShellState('ready', 'Ready', 'Compare is ready.');
   }
 
   function conceptDisplayLabel(concept) {
@@ -1083,15 +1055,15 @@
 
     if (!state.filteredConcepts.length) {
       if (state.isBootstrapping) {
-        state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">Loading concept queue…</div>';
+        state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">Loading…</div>';
       } else if (!state.concepts.length) {
         if (isNoDataState()) {
-          state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">No compare data detected yet. Add speaker annotations or concept CSV data, then refresh Compare.</div>';
+          state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">No data.</div>';
         } else {
-          state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">Concept queue is empty. Check concept IDs/labels in project CSV or annotation concept tiers.</div>';
+          state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">No concepts.</div>';
         }
       } else {
-        state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">No concepts match current search/filter settings.</div>';
+        state.sidebarConceptListEl.innerHTML = '<div class="sidebar-empty panel-placeholder">No matches.</div>';
       }
       return;
     }
@@ -1354,12 +1326,12 @@
       return;
     }
 
-    function applyReferenceValues(formEl, ipaEl, refs, languageLabel) {
+    function applyReferenceValues(formEl, ipaEl, refs) {
       if (!formEl || !ipaEl) return;
 
       if (!refs.length) {
-        formEl.textContent = 'No data';
-        ipaEl.textContent = 'No ' + languageLabel + ' reference form available for this concept yet.';
+        formEl.textContent = '';
+        ipaEl.textContent = '—';
         return;
       }
 
@@ -1367,22 +1339,20 @@
       if (refs.length > 1) {
         ipaEl.textContent = refs.slice(1).join(' · ');
       } else {
-        ipaEl.textContent = 'Reference form available from enrichments.';
+        ipaEl.textContent = '—';
       }
     }
 
     applyReferenceValues(
       state.refArabicFormEl,
       state.refArabicIpaEl,
-      referenceFormsForConceptLanguage(concept.id, ['ar', 'arabic']),
-      'Arabic'
+      referenceFormsForConceptLanguage(concept.id, ['ar', 'arabic'])
     );
 
     applyReferenceValues(
       state.refPersianFormEl,
       state.refPersianIpaEl,
-      referenceFormsForConceptLanguage(concept.id, ['fa', 'persian']),
-      'Persian'
+      referenceFormsForConceptLanguage(concept.id, ['fa', 'persian'])
     );
   }
 
@@ -1550,12 +1520,12 @@
     state.formsTbodyEl = tbody;
 
     if (!concept) {
-      tbody.innerHTML = '<tr class="forms-empty-row"><td colspan="6" class="empty-msg">Select a concept from the sidebar to begin speaker-by-speaker review.</td></tr>';
+      tbody.innerHTML = '<tr class="forms-empty-row"><td colspan="6" class="empty-msg">Select a concept.</td></tr>';
       return;
     }
 
     if (!state.selectedSpeakers.length) {
-      tbody.innerHTML = '<tr class="forms-empty-row"><td colspan="6" class="empty-msg">No speakers selected. Use the speaker controls above to add speakers for this concept.</td></tr>';
+      tbody.innerHTML = '<tr class="forms-empty-row"><td colspan="6" class="empty-msg">No speakers selected.</td></tr>';
       return;
     }
 
@@ -1596,7 +1566,7 @@
             '</div>' +
           '</div>'
         )
-        : '<span class="empty-msg">No annotated form available for this concept yet.</span>';
+        : '<span class="empty-msg">No data.</span>';
 
       const cognateCell = group
         ? '<span class="forms-cognate-chip" style="border-color:' + badgeColor + ';color:' + badgeColor + ';background:' + hexToRgba(badgeColor, 0.15) + '" title="Cognate group ' + escapeHtml(group) + '">' + escapeHtml(group) + '</span>'
@@ -1632,7 +1602,7 @@
     if (state.conceptTitleEl) {
       state.conceptTitleEl.innerHTML = hasConcept
         ? escapeHtml(conceptDisplayLabel(concept)) + ' <span>(#' + escapeHtml(concept.id) + ')</span>'
-        : 'Compare review shell <span>(sidebar-first workflow)</span>';
+        : 'Compare';
     }
 
     renderReferenceCards(concept);
@@ -1643,25 +1613,25 @@
       state.notesFieldEl.disabled = !hasConcept;
       state.notesFieldEl.value = hasConcept ? decision.notes : '';
       state.notesFieldEl.placeholder = hasConcept
-        ? 'Draft concept note (saved in local shell decisions).'
-        : 'Select a concept to add notes.';
+        ? 'Add notes…'
+        : 'Select a concept.';
     }
 
     if (state.navPositionEl) {
       if (!state.filteredConcepts.length) {
         if (state.isBootstrapping) {
-          state.navPositionEl.textContent = 'Loading concept queue…';
+          state.navPositionEl.textContent = 'Loading…';
         } else if (state.bootstrapErrorMessage) {
-          state.navPositionEl.textContent = 'Compare boot error. Check status above.';
+          state.navPositionEl.textContent = 'Error';
         } else if (!state.concepts.length) {
           state.navPositionEl.textContent = isNoDataState()
-            ? 'No compare data detected yet.'
-            : 'Concept queue is empty.';
+            ? 'No data.'
+            : 'No concepts.';
         } else {
-          state.navPositionEl.textContent = 'No concepts match current filters.';
+          state.navPositionEl.textContent = 'No matches.';
         }
       } else if (index === -1) {
-        state.navPositionEl.textContent = 'Select a concept from the sidebar to continue.';
+        state.navPositionEl.textContent = 'Select a concept.';
       } else {
         state.navPositionEl.textContent = 'Concept ' + (index + 1) + ' of ' + state.filteredConcepts.length;
       }
@@ -3152,7 +3122,7 @@
 
     state.tableEl.innerHTML =
       '<div class="panel-title">Concept Matrix</div>' +
-      '<div class="panel-placeholder">Matrix view is available as a secondary surface. Concept-first review remains the default workflow.</div>';
+      '<div class="panel-placeholder">No data.</div>';
   }
 
   function renderCognatePanelPlaceholder() {
@@ -3160,15 +3130,15 @@
 
     state.cognatePanelEl.innerHTML =
       '<div class="panel-title">Cognate Decision</div>' +
-      '<div class="panel-placeholder">No cognate grouping data available for this concept yet.</div>';
+      '<div class="panel-placeholder">No data.</div>';
   }
 
   function renderBorrowingPanel() {
     if (!state.borrowingPanelEl) return;
 
     state.borrowingPanelEl.innerHTML =
-      '<div class="panel-title">Borrowing adjudication</div>' +
-      '<div class="panel-placeholder">No borrowing candidates available for this concept yet.</div>';
+      '<div class="panel-title">Potential Borrowings</div>' +
+      '<div class="panel-placeholder">No data.</div>';
   }
 
   function renderSpectrogramPanel() {
@@ -3179,7 +3149,7 @@
 
     state.spectrogramPanelEl.innerHTML =
       '<div class="panel-title">Spectrogram</div>' +
-      '<div class="panel-placeholder">On-demand spectrogram previews are shown here after selection.</div>';
+      '<div class="panel-placeholder">No data.</div>';
   }
 
   function speakerSelectOptionsHtml() {
@@ -3980,8 +3950,8 @@
     state.filteredConcepts = [];
     state.selectedConceptId = '';
 
-    setShellState('loading', 'Loading compare workspace…', 'Reading project config, source index, annotations, enrichments, and tags.');
-    setComputeStatus('Loading compare mode data…', 2);
+    setShellState('loading', 'Loading…', 'Loading data.');
+    setComputeStatus('Loading…', 2);
 
     renderHeader();
     renderMatrixPlaceholder();
@@ -3994,7 +3964,7 @@
     try {
       P.mode = 'compare';
 
-      setComputeStatus('Loading project configuration…', 8);
+      setComputeStatus('Loading project…', 8);
       const loadedProject = await loadProjectConfig();
       state.bootstrapSummary.projectLoaded = !!(loadedProject && typeof loadedProject === 'object');
 
@@ -4010,7 +3980,7 @@
         setComputeStatus('Loading speaker annotations…', 30);
         await loadAnnotationsForSpeakers(allSpeakers);
       } else {
-        setComputeStatus('No speakers found in project/source index. Checking enrichments…', 30);
+        setComputeStatus('No speakers found. Loading enrichments…', 30);
       }
 
       const annotationRecords = toObject(P.annotations);
@@ -4024,7 +3994,7 @@
       }
       state.bootstrapSummary.loadedAnnotationSpeakers = loadedAnnotationSpeakers;
 
-      setComputeStatus('Loading enrichments and tags…', 45);
+      setComputeStatus('Loading enrichments…', 45);
       await ensureEnrichments();
       await ensureTagsModule();
       pruneMissingActiveTags();
@@ -4036,7 +4006,7 @@
         });
       }
 
-      setComputeStatus('Building concept queue…', 62);
+      setComputeStatus('Loading concepts…', 62);
       const annotationLabels = extractAnnotationConceptLabels();
       state.bootstrapSummary.annotationConcepts = Object.keys(annotationLabels).length;
 
@@ -4053,7 +4023,7 @@
         state.selectedConceptId = state.filteredConcepts[0].id;
       }
 
-      setComputeStatus('Finalizing compare shell…', 82);
+      setComputeStatus('Finalizing…', 82);
       renderHeader();
       renderBorrowingPanel();
       renderSpectrogramPanel();
@@ -4073,15 +4043,15 @@
       emitCompareOpen();
 
       if (isNoDataState()) {
-        setComputeStatus('No compare data detected yet. Add speaker annotations or concept CSV, then refresh.', 0);
+        setComputeStatus('No data.', 0);
       } else if (!state.concepts.length) {
-        setComputeStatus('Compare loaded, but concept queue is empty.', 0);
+        setComputeStatus('No concepts.', 0);
       } else if (!state.filteredConcepts.length) {
-        setComputeStatus('Concept queue loaded. Current filters hide all concepts.', 0);
+        setComputeStatus('No matches.', 0);
       } else if (!state.selectedSpeakers.length) {
-        setComputeStatus('Concept queue loaded. Add speakers to start speaker-form review.', 0);
+        setComputeStatus('No speakers selected.', 0);
       } else {
-        setComputeStatus('Compare ready. Review concepts from top to bottom.', 0);
+        setComputeStatus('Ready.', 0);
       }
     } catch (error) {
       const message = toString(error && error.message) || 'Unknown compare bootstrap failure.';
