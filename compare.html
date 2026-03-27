@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PARSE Compare Mode</title>
+<title>PARSE Compare — Review Tool Shell</title>
 
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -15,6 +15,15 @@
 ══════════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 15px; }
+:root {
+  --text: #1a1a2e;
+  --muted: #6b7db3;
+  --border: #dde2ef;
+  --accent: #4461d4;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #f87171;
+}
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: #f0f2f5;
@@ -25,17 +34,7 @@ body {
   overflow: hidden;
 }
 button { cursor: pointer; font-family: inherit; }
-textarea, input { font-family: inherit; }
-
-:root {
-  --text: #1a1a2e;
-  --muted: #6b7db3;
-  --border: #dde2ef;
-  --accent: #4461d4;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --danger: #f87171;
-}
+textarea, input, select { font-family: inherit; }
 
 /* ═══════════════════════════════════════════════════════════════
    TOP BAR
@@ -107,6 +106,24 @@ textarea, input { font-family: inherit; }
 .topbar-btn.green { background: #1a4a2e; color: #4ade80; border-color: #2d7a4a; }
 .topbar-btn.green:hover { background: #25623d; }
 
+.mode-switcher {
+  display: flex;
+  gap: 0;
+}
+.mode-switcher a {
+  padding: 4px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid #4a5580;
+  transition: all 0.15s;
+}
+.mode-switcher a:first-child { border-radius: 6px 0 0 6px; }
+.mode-switcher a:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.mode-switcher a.active { background: #4461d4; color: #fff; border-color: #4461d4; }
+.mode-switcher a:not(.active) { background: #2d3561; color: #b0beff; }
+.mode-switcher a:not(.active):hover { background: #3d4a7a; }
+
 /* ═══════════════════════════════════════════════════════════════
    MAIN LAYOUT
 ══════════════════════════════════════════════════════════════ */
@@ -131,6 +148,26 @@ textarea, input { font-family: inherit; }
 #sidebar-search {
   padding: 10px;
   border-bottom: 1px solid #dde2ef;
+}
+.sidebar-intro {
+  margin-bottom: 8px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  border: 1px solid #d8e0f4;
+  background: linear-gradient(135deg, #f7f9ff 0%, #f0f4ff 100%);
+}
+.sidebar-intro-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4461d4;
+}
+.sidebar-intro-copy {
+  margin-top: 4px;
+  font-size: 0.79rem;
+  line-height: 1.4;
+  color: #5e6f9f;
 }
 #sidebar-search input {
   width: 100%;
@@ -176,10 +213,18 @@ textarea, input { font-family: inherit; }
 .status-dot.reviewed   { background: #4ade80; }
 .status-dot.flagged    { background: #fbbf24; }
 .status-dot.borrowing  { background: #f87171; }
+.sidebar-placeholder,
+.sidebar-empty {
+  padding: 10px 12px;
+  color: #6e80b3;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    MAIN CONTENT
 ══════════════════════════════════════════════════════════════ */
+#main,
 #compare-container {
   flex: 1;
   overflow-y: auto;
@@ -207,295 +252,12 @@ textarea, input { font-family: inherit; }
   color: #6b7db3;
   margin-bottom: 12px;
 }
-
-/* ═══════════════════════════════════════════════════════════════
-   COMPARE.JS COMPAT MOUNTS (v5)
-══════════════════════════════════════════════════════════════ */
-#compare-header { min-height: 28px; }
-#compare-table { min-height: 240px; }
-#compare-cognate-panel,
-#compare-borrowing-panel,
-#compare-spectrogram,
-#compare-compute-status { min-height: 56px; }
-
-#compare-table > .panel-title,
-#compare-cognate-panel > .panel-title,
-#compare-spectrogram > .panel-title,
-#compare-borrowing-panel > .panel-title,
-#compare-borrowing-panel .bp-title-wrap .panel-title { display: none; }
-
-.panel-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #6b7db3;
+.section-hint {
+  margin-top: -4px;
   margin-bottom: 10px;
-}
-
-.panel-placeholder {
-  color: #9aa3c0;
-  font-size: 0.84rem;
-}
-
-.compare-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.compare-brand {
-  font-weight: 700;
-  color: #1a1a2e;
-}
-
-.compare-mode-link {
-  color: #4461d4;
-  text-decoration: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.compare-control-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.compare-control-group label {
-  font-size: 0.75rem;
-  color: #6b7db3;
-  font-weight: 600;
-}
-
-.compare-select {
-  padding: 5px 8px;
-  border: 1px solid #c8d0e8;
-  border-radius: 6px;
-  background: #fff;
-  color: #1a1a2e;
+  color: #6073a7;
   font-size: 0.8rem;
-}
-
-.compare-btn {
-  border: 1px solid #c8d0e8;
-  border-radius: 6px;
-  background: #eef2ff;
-  color: #4461d4;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 5px 10px;
-}
-
-.compare-btn.primary {
-  background: #4461d4;
-  border-color: #4461d4;
-  color: #fff;
-}
-
-.compare-speaker-chips {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.compare-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid #c8d0e8;
-  border-radius: 999px;
-  background: #f8f9fc;
-  padding: 3px 8px;
-  font-size: 0.78rem;
-  color: #1a1a2e;
-}
-
-.compare-chip button {
-  border: none;
-  background: transparent;
-  color: #6b7db3;
-  font-size: 0.72rem;
-  padding: 0;
-  cursor: pointer;
-}
-
-.compare-table-scroll {
-  overflow: auto;
-  border: 1px solid #dde2ef;
-  border-radius: 8px;
-}
-
-.compare-matrix {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.84rem;
-}
-
-.compare-matrix th,
-.compare-matrix td {
-  border-bottom: 1px solid #eef2ff;
-  border-right: 1px solid #eef2ff;
-  padding: 8px 10px;
-  vertical-align: middle;
-  text-align: left;
-}
-
-.compare-matrix th:last-child,
-.compare-matrix td:last-child { border-right: none; }
-
-.compare-matrix thead th {
-  background: #f8f9fc;
-  color: #6b7db3;
-  font-size: 0.74rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-
-.compare-matrix tr.is-selected td { background: #eef2ff; }
-.compare-concept-label { font-weight: 600; }
-.compare-concept-id { font-size: 0.72rem; color: #9aa3c0; margin-top: 2px; }
-.compare-entry { display: flex; align-items: center; gap: 8px; }
-
-.compare-play-btn {
-  border: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: #4461d4;
-  color: #fff;
-  font-size: 0.72rem;
-  flex-shrink: 0;
-}
-
-.compare-cell-lines { min-width: 0; }
-.compare-ipa { font-family: monospace; color: #2d3561; }
-.compare-ortho { font-size: 0.78rem; color: #6b7db3; }
-
-.compare-cognate-badge {
-  margin-left: auto;
-  border: 1px solid;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.compare-empty { color: #9aa3c0; }
-
-.compute-status-text {
-  font-size: 0.82rem;
-  color: #1a1a2e;
-  margin-bottom: 8px;
-}
-
-.compute-progress-wrap {
-  width: 100%;
-  height: 8px;
-  border-radius: 999px;
-  background: #e8ecf5;
-  overflow: hidden;
-}
-
-.compute-progress-bar {
-  height: 100%;
-  width: 0%;
-  background: #4ade80;
-  transition: width 0.2s ease;
-}
-
-.cognate-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin: 10px 0;
-}
-
-.cognate-action-btn {
-  border: 1px solid #c8d0e8;
-  border-radius: 6px;
-  padding: 5px 14px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  background: #f0f4ff;
-  color: #4461d4;
-  transition: all 0.15s;
-}
-
-.cognate-action-btn:hover { background: #dce4ff; }
-.cognate-action-btn.is-active { background: #4461d4; color: #fff; border-color: #4461d4; }
-
-.cognate-mode-note {
-  font-size: 0.78rem;
-  color: #6b7db3;
-}
-
-.split-group-chooser {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.split-group-btn {
-  border: 1px solid;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 0.76rem;
-  font-weight: 700;
-  background: #fff;
-}
-
-.split-group-btn.is-active {
-  box-shadow: inset 0 0 0 2px currentColor;
-}
-
-.cognate-speaker-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.cognate-speaker-item {
-  border: 1px solid #c8d0e8;
-  border-radius: 12px;
-  background: #f8f9fc;
-  padding: 4px 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.cognate-speaker-item:hover {
-  border-color: #4461d4;
-  background: #eef2ff;
-}
-
-.cognate-speaker-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  border: 1px solid;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.cognate-speaker-label {
-  font-size: 0.8rem;
-  color: #1a1a2e;
+  line-height: 1.42;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -588,6 +350,11 @@ textarea, input { font-family: inherit; }
 }
 .forms-table tr:last-child td { border-bottom: none; }
 .forms-table tr:hover td { background: #fafbff; }
+.forms-empty-row td { color: #5e6f9f; }
+.forms-empty-row .empty-msg {
+  color: #5e6f9f;
+  font-style: normal;
+}
 
 /* IPA cell – inline edit */
 .ipa-cell {
@@ -965,31 +732,469 @@ textarea, input { font-family: inherit; }
 }
 #toast.show { opacity: 1; transform: translateY(0); }
 
+/* shared assistant mount (Compare + Annotate parity) */
+#parse-assistant-dock {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1400;
+  pointer-events: none;
+}
+#parse-assistant-dock > * {
+  pointer-events: auto;
+}
+
+/* compare module mounts */
+#compare-shell-state {
+  border-left: 4px solid #4461d4;
+  background: linear-gradient(135deg, #f8faff 0%, #f2f5ff 100%);
+}
+#compare-shell-state[data-state="loading"] {
+  border-left-color: #4461d4;
+}
+#compare-shell-state[data-state="ready"] {
+  border-left-color: #22c55e;
+  background: linear-gradient(135deg, #f7fff9 0%, #f2fff6 100%);
+}
+#compare-shell-state[data-state="empty"],
+#compare-shell-state[data-state="filtered-empty"] {
+  border-left-color: #f59e0b;
+  background: linear-gradient(135deg, #fffaf0 0%, #fff5e1 100%);
+}
+#compare-shell-state[data-state="attention"] {
+  border-left-color: #eab308;
+  background: linear-gradient(135deg, #fffef5 0%, #fff9dd 100%);
+}
+.shell-state-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+.shell-state-message {
+  margin-top: 6px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #4f5f8f;
+}
+.compare-flow-list {
+  margin: 10px 0 0 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #3f538f;
+}
+.compare-flow-note {
+  margin-top: 8px;
+  color: #5e6f9f;
+  font-size: 0.79rem;
+}
+
+#compare-header {
+  background: #fff;
+  border: 1px solid #dde2ef;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  padding: 12px 16px;
+}
+.compare-waiting-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.compare-waiting-copy strong {
+  font-size: 0.82rem;
+  color: #334b90;
+}
+.compare-waiting-copy p {
+  font-size: 0.79rem;
+  color: #6374a6;
+  line-height: 1.4;
+}
+.compare-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.compare-brand {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-right: 4px;
+}
+.compare-mode-link {
+  font-size: 0.8rem;
+  color: #4461d4;
+  text-decoration: none;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.compare-mode-link:hover { text-decoration: underline; }
+.compare-control-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.compare-control-group label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7db3;
+  font-weight: 700;
+}
+.compare-select {
+  border: 1px solid #c8d0e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #1a1a2e;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  min-width: 132px;
+}
+.compare-btn {
+  border: 1px solid #c8d0e8;
+  border-radius: 6px;
+  background: #f5f7ff;
+  color: #4461d4;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  transition: all 0.15s;
+}
+.compare-btn:hover { background: #e8edff; border-color: #4461d4; }
+.compare-btn.primary {
+  background: #4461d4;
+  color: #fff;
+  border-color: #4461d4;
+}
+.compare-btn.primary:hover { background: #3350b8; }
+.compare-speaker-chips {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef2ff;
+  color: #324a9f;
+  border: 1px solid #d6ddf4;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.compare-chip button {
+  border: none;
+  background: rgba(68,97,212,0.14);
+  color: #2b3f8d;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 0.68rem;
+  line-height: 16px;
+}
+.compare-chip button:hover { background: rgba(68,97,212,0.25); }
+
+#compare-compute-status {
+  background: #fff;
+  border: 1px solid #dde2ef;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.compute-status-text {
+  font-size: 0.8rem;
+  color: #4f5f8f;
+  margin-bottom: 6px;
+}
+.compute-progress-wrap {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e9edf8;
+}
+.compute-progress-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4f7bff 0%, #53d6a3 100%);
+  transition: width 0.25s ease;
+}
+
+.panel-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7db3;
+  margin-bottom: 10px;
+}
+.panel-placeholder { color: #9aa3c0; font-size: 0.84rem; }
+#compare-cognate-panel > .panel-title,
+#compare-borrowing-panel > .panel-title,
+#compare-borrowing-panel .bp-title-wrap .panel-title,
+#compare-table > .panel-title,
+#compare-spectrogram > .panel-title { display: none; }
+
+.cognate-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0;
+}
+.cognate-action-btn {
+  border: 1px solid #c8d0e8;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f0f4ff;
+  color: #4461d4;
+  transition: all 0.15s;
+}
+.cognate-action-btn:hover { background: #dce4ff; }
+.cognate-action-btn.is-active { background: #4461d4; color: #fff; border-color: #4461d4; }
+.cognate-mode-note {
+  font-size: 0.78rem;
+  color: #6b7db3;
+}
+.split-group-chooser {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.split-group-btn {
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  background: #fff;
+}
+.split-group-btn.is-active {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+.cognate-speaker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cognate-speaker-item {
+  border: 1px solid #c8d0e8;
+  border-radius: 12px;
+  background: #f8f9fc;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.cognate-speaker-item:hover {
+  border-color: #4461d4;
+  background: #eef2ff;
+}
+.cognate-speaker-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.cognate-speaker-label {
+  font-size: 0.8rem;
+  color: #1a1a2e;
+}
+
+.secondary-surfaces {
+  margin-top: 2px;
+}
+.secondary-surface {
+  border: 1px solid #d8deef;
+  border-radius: 10px;
+  background: #f9fbff;
+}
+.secondary-surface + .secondary-surface {
+  margin-top: 10px;
+}
+.secondary-surface summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: #334b90;
+}
+.secondary-surface summary::-webkit-details-marker { display: none; }
+.secondary-surface summary::before {
+  content: '▸';
+  color: #5b71b2;
+  margin-right: 8px;
+  transition: transform 0.15s ease;
+}
+.secondary-surface[open] summary::before {
+  transform: rotate(90deg);
+}
+.secondary-surface .summary-note {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: #7081b0;
+}
+.secondary-body {
+  border-top: 1px solid #dde4f5;
+  padding: 10px 12px 12px;
+  background: #fff;
+  border-radius: 0 0 10px 10px;
+}
+.secondary-empty {
+  margin-bottom: 8px;
+  font-size: 0.79rem;
+  color: #6a7cab;
+  line-height: 1.4;
+}
+
+.compare-table-scroll {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #dde2ef;
+  border-radius: 8px;
+  background: #fff;
+}
+.compare-matrix {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+}
+.compare-matrix th,
+.compare-matrix td {
+  padding: 7px 8px;
+  border-right: 1px solid #edf0f8;
+  border-bottom: 1px solid #edf0f8;
+  vertical-align: top;
+}
+.compare-matrix th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f6f8ff;
+  color: #5568a3;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+}
+.compare-matrix th:last-child,
+.compare-matrix td:last-child {
+  border-right: none;
+}
+.compare-matrix tr:last-child td {
+  border-bottom: none;
+}
+.compare-matrix tbody tr:hover td {
+  background: #f8faff;
+}
+.compare-matrix tbody tr.is-selected td {
+  background: #ecf2ff;
+}
+.compare-concept-label {
+  font-weight: 700;
+  color: #273a77;
+}
+.compare-concept-id {
+  font-size: 0.72rem;
+  color: #7c8fbf;
+  margin-top: 2px;
+}
+.compare-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.compare-play-btn {
+  border: none;
+  background: #4461d4;
+  color: #fff;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+  line-height: 20px;
+}
+.compare-play-btn:hover {
+  background: #3350b8;
+}
+.compare-cell-lines {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.compare-ipa {
+  font-family: 'Noto Sans', 'DejaVu Sans', monospace;
+  color: #20346a;
+}
+.compare-ortho {
+  font-size: 0.76rem;
+  color: #6d7faa;
+}
+.compare-empty {
+  color: #9aa6c8;
+}
+.compare-cognate-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+.parse-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.5);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    UTILITIES
 ══════════════════════════════════════════════════════════════ */
 .hidden { display: none !important; }
 .empty-msg { color: #9aa3c0; font-size: 0.85rem; font-style: italic; }
 </style>
-
-
-<style>
-.parse-modal { position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
-.parse-modal.hidden { display:none !important; }
-.mode-switcher { display:flex; gap:0; margin-left:12px; }
-.mode-switcher a { padding:4px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; border:1px solid #4a5580; transition:all 0.15s; }
-.mode-switcher a:first-child { border-radius:6px 0 0 6px; }
-.mode-switcher a:last-child { border-radius:0 6px 6px 0; border-left:none; }
-.mode-switcher a.active { background:#4461d4; color:#fff; border-color:#4461d4; }
-.mode-switcher a:not(.active) { background:#2d3561; color:#b0beff; }
-.mode-switcher a:not(.active):hover { background:#3d4a7a; }
-</style>
 </head>
-
 <body>
+
+<!-- ── TOP BAR ──────────────────────────────────────────────── -->
 <div id="topbar">
-  <h1>PARSE <span>Compare Mode</span></h1>
+  <h1>Southern Kurdish <span>Review Tool v3</span></h1>
   <div id="progress-badge">0 / 0 reviewed</div>
+  <div id="phon-progress-badge" style="font-size:11px;color:#94a3b8;margin-top:2px">🔬 Phonetic flags: 0 / 0 resolved</div>
   <div id="progress-bar-wrap"><div id="progress-bar-fill" style="width:0%"></div></div>
   <button class="filter-btn active" data-filter="all">All</button>
   <button class="filter-btn" data-filter="unreviewed">Unreviewed</button>
@@ -1001,30 +1206,72 @@ textarea, input { font-family: inherit; }
     <a href="compare.html" class="active">Compare</a>
   </div>
   <button class="topbar-btn" id="btn-load-decisions">Load Decisions</button>
-  <button class="topbar-btn green" id="btn-save">💾 Save</button>
+  <button class="topbar-btn green" id="btn-save">💾 Save Decisions</button>
+  <input type="file" id="file-input" accept=".json" class="hidden">
+  <input type="file" id="decision-input" accept=".json" class="hidden">
 </div>
 
+<!-- ── LOAD SCREEN ──────────────────────────────────────────── -->
+<div id="load-screen" class="hidden">
+  <h2>Southern Kurdish Linguistic Review</h2>
+  <p>Compare shell is preloaded from PARSE data adapters. This legacy review-data loader is kept only as a visual shell parity placeholder.</p>
+  <button class="load-btn" id="btn-load-review-data">📂 Load review_data.json</button>
+  <p style="font-size:0.8rem;color:#9aa3c0">Keyboard shortcuts: ← → navigate · Enter accept · B/F flag</p>
+</div>
+
+<!-- ── MAIN APP ─────────────────────────────────────────────── -->
 <div id="app">
+  <!-- SIDEBAR -->
   <div id="sidebar">
     <div id="sidebar-search">
+      <div class="sidebar-intro">
+        <div class="sidebar-intro-title">Step 1 · Concept Queue</div>
+        <p class="sidebar-intro-copy">Start in the sidebar, then review the selected concept top-to-bottom on the right.</p>
+      </div>
       <input type="text" id="search-box" placeholder="Search concepts…">
       <div style="display:flex;gap:4px;margin-top:5px;">
-        <button class="sort-btn active" data-sort="alpha">A→Z</button>
-        <button class="sort-btn" data-sort="id">1→N</button>
+        <button class="sort-btn active" data-sort="alpha" title="Sort alphabetically">A→Z</button>
+        <button class="sort-btn" data-sort="id" title="Sort by concept #">1→N</button>
       </div>
     </div>
-    <div id="concept-list"></div>
+    <div id="concept-list">
+      <div class="sidebar-placeholder">Loading concept queue…</div>
+    </div>
   </div>
 
+  <!-- MAIN CONTENT -->
   <div id="compare-container">
-    <!-- Compare header + controls (rendered by compare.js) -->
-    <div id="compare-header"></div>
+    <div class="card" id="compare-shell-state" data-state="loading" aria-live="polite">
+      <div class="card-title">Compare Workspace</div>
+      <div class="shell-state-title" id="compare-shell-state-title">Loading compare workspace…</div>
+      <p class="shell-state-message" id="compare-shell-state-message">Reading project config, annotations, and enrichments.</p>
+      <ol class="compare-flow-list">
+        <li>Pick a concept in the sidebar queue.</li>
+        <li>Review concept cards in order: references → forms → cognates → borrowing → notes.</li>
+        <li>Use matrix/spectrogram drawers only when you need a secondary cross-check.</li>
+      </ol>
+      <p class="compare-flow-note">If a section is still waiting on data, it should explicitly say so (never a blank panel).</p>
+    </div>
 
-    <!-- Concept header -->
+    <!-- compare controls (secondary; concept workflow stays primary below) -->
+    <div id="compare-header">
+      <div class="compare-waiting-copy">
+        <strong>Preparing speaker + compute controls…</strong>
+        <p>If this persists, Compare failed to initialize. Reload and verify project/annotation paths.</p>
+      </div>
+    </div>
+    <div id="compare-compute-status">
+      <div class="compute-status-text">Waiting for compare bootstrap…</div>
+      <div class="compute-progress-wrap"><div class="compute-progress-bar" style="width:2%"></div></div>
+    </div>
+
+    <!-- concept header card -->
     <div class="card" id="header-card">
+      <div class="card-title">Step 2 · Current Concept</div>
+      <p class="section-hint">Use Prev/Next and Accept/Flag after selecting a concept from the sidebar queue.</p>
       <div id="concept-header">
         <button class="nav-btn" id="btn-prev">← Prev</button>
-        <div id="concept-title">—</div>
+        <div id="concept-title">Waiting for concept selection…</div>
         <button class="nav-btn" id="btn-next">Next →</button>
         <div id="concept-actions">
           <button class="action-btn accept" id="btn-accept">✓ Accept</button>
@@ -1033,60 +1280,111 @@ textarea, input { font-family: inherit; }
       </div>
     </div>
 
-    <!-- Reference forms -->
+    <!-- reference forms -->
     <div class="card">
-      <div class="card-title">Reference Forms</div>
-      <div class="ref-grid" id="compare-reference-forms">
-        <div class="ref-lang"><div class="ref-lang-label arabic">Arabic</div><div class="ref-form" id="ref-arabic-form">—</div><div class="ref-ipa" id="ref-arabic-ipa">—</div></div>
-        <div class="ref-lang"><div class="ref-lang-label persian">Persian</div><div class="ref-form" id="ref-persian-form">—</div><div class="ref-ipa" id="ref-persian-ipa">—</div></div>
+      <div class="card-title">Step 3 · Reference Forms</div>
+      <p class="section-hint">Reference cells stay explicit: missing values should show <strong>No data</strong> or <strong>—</strong>, never blank.</p>
+      <div class="ref-grid">
+        <div class="ref-lang">
+          <div class="ref-lang-label arabic">Arabic</div>
+          <div class="ref-form" id="ref-arabic-form">—</div>
+          <div class="ref-ipa" id="ref-arabic-ipa">Waiting for concept…</div>
+        </div>
+        <div class="ref-lang">
+          <div class="ref-lang-label persian">Persian</div>
+          <div class="ref-form" id="ref-persian-form">—</div>
+          <div class="ref-ipa" id="ref-persian-ipa">Waiting for concept…</div>
+        </div>
       </div>
     </div>
 
-    <!-- Speaker forms table -->
-    <div class="card" id="compare-concept-table">
-      <div class="card-title">Speaker Forms</div>
-      <div id="compare-table">
-        <table class="forms-table" id="forms-table">
-          <thead><tr><th>Speaker</th><th>IPA & Utterances</th><th>Arabic sim.</th><th>Persian sim.</th><th>Cognate</th><th>Flag</th></tr></thead>
-          <tbody id="forms-tbody"></tbody>
-        </table>
+    <!-- speaker forms -->
+    <div class="card">
+      <div class="card-title">Step 4 · Speaker Forms</div>
+      <p class="section-hint">Concept-bound review table (primary). The full concept×speaker matrix is in an optional drawer below.</p>
+      <table class="forms-table" id="forms-table">
+        <thead>
+          <tr>
+            <th>Speaker</th>
+            <th>IPA & Utterances</th>
+            <th>Arabic sim.</th>
+            <th>Persian sim.</th>
+            <th>Cognate</th>
+            <th>Flag</th>
+          </tr>
+        </thead>
+        <tbody id="forms-tbody">
+          <tr class="forms-empty-row">
+            <td colspan="6" class="empty-msg">Waiting for concept + speaker selection. Missing speaker data should render as “No annotated form available for this concept yet.”</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- cognate decision -->
+    <div class="card">
+      <div class="card-title">Step 5 · Cognate Decision</div>
+      <p class="section-hint">Accept/split/merge/cycle should always bind to the currently active concept only.</p>
+      <div class="cognate-panel" id="cognate-panel">
+        <div id="compare-cognate-panel">
+          <p class="empty-msg">Waiting for concept context. If no groups exist yet, this panel should explicitly say so.</p>
+        </div>
       </div>
     </div>
 
-    <!-- Cognate decision -->
-    <div class="card" id="compare-cognate-controls">
-      <div class="card-title">Cognate Decision</div>
-      <div class="cognate-panel" id="compare-cognate-panel"></div>
+    <!-- borrowing panel -->
+    <div class="card" id="borrow-card">
+      <div class="card-title">Step 6 · Potential Borrowings</div>
+      <p class="section-hint">No candidates should render an explicit “No borrowing candidates” message.</p>
+      <div id="borrow-panel">
+        <div id="compare-borrowing-panel">
+          <p class="empty-msg">Waiting for selected concept + speakers. Borrowing adjudication appears here once similarity data is available.</p>
+        </div>
+      </div>
     </div>
 
-    <!-- Borrowing panel -->
-    <div class="card" id="compare-borrowing-card">
-      <div class="card-title">Potential Borrowings</div>
-      <div id="compare-borrowing-panel"></div>
-    </div>
-
-    <!-- Enrichments status -->
-    <div class="card" id="compare-enrichments">
-      <div class="card-title">Enrichments</div>
-      <div id="compare-compute-status">No enrichments loaded.</div>
-    </div>
-
-    <!-- Hidden mount used by compare.js spectrogram panel -->
-    <div id="compare-spectrogram" class="hidden"></div>
-
-    <!-- Notes -->
+    <!-- notes -->
     <div class="card">
-      <div class="card-title">Notes</div>
-      <textarea class="notes-textarea" id="notes-field" placeholder="Free-form notes for this concept…"></textarea>
+      <div class="card-title">Step 7 · Notes</div>
+      <p class="section-hint">Concept notes are draft-persisted in compare shell decisions.</p>
+      <textarea class="notes-textarea" id="notes-field" placeholder="Select a concept to add notes…" disabled></textarea>
     </div>
 
-    <!-- Nav footer -->
+    <!-- nav footer -->
     <div id="nav-footer">
-      <span id="nav-position">← → navigate · Enter accept · B flag</span>
+      <span id="nav-position">Waiting for concept queue…</span>
       <div style="display:flex;gap:8px">
         <button class="nav-btn" id="btn-prev-bottom">← Previous</button>
         <button class="nav-btn" id="btn-next-bottom">Next →</button>
       </div>
+    </div>
+
+    <!-- secondary compare mounts (intentionally de-emphasized vs concept-first flow) -->
+    <div class="card secondary-surfaces">
+      <div class="card-title">Optional Secondary Surfaces</div>
+      <p class="section-hint">Use these for cross-checking only after the primary concept-review stack above.</p>
+
+      <details class="secondary-surface" id="compare-matrix-surface">
+        <summary>
+          <span>Concept × Speaker Matrix</span>
+          <span class="summary-note">Secondary cross-check view</span>
+        </summary>
+        <div class="secondary-body">
+          <p class="secondary-empty">Matrix becomes useful after speakers are selected. It should never be the first required interaction.</p>
+          <div id="compare-table"></div>
+        </div>
+      </details>
+
+      <details class="secondary-surface" id="compare-spectrogram-surface">
+        <summary>
+          <span>Spectrogram Workspace</span>
+          <span class="summary-note">Secondary evidence panel</span>
+        </summary>
+        <div class="secondary-body">
+          <p class="secondary-empty">Waiting for on-demand spectrogram requests from the compare workflow.</p>
+          <div id="compare-spectrogram"></div>
+        </div>
+      </details>
     </div>
   </div>
 </div>
@@ -1094,8 +1392,11 @@ textarea, input { font-family: inherit; }
 <!-- Speaker import modal -->
 <div id="compare-speaker-import" class="parse-modal hidden"></div>
 
-<!-- Toast -->
+<!-- TOAST -->
 <div id="toast"></div>
+
+<!-- Shared assistant launcher/dock mount -->
+<div id="parse-assistant-dock" data-assistant-page="compare" data-assistant-mounted="false"></div>
 
 <script>
 window.PARSE = window.PARSE || {
