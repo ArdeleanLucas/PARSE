@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import unquote, urlparse
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE

@@ -736,4 +736,28 @@
     isOpen: isOpen,
     render: render,
   };
+
+  // Also register under the keys that compare.js resolveAssistantModule() looks for.
+  P.modules.assistantDock = P.modules.chatPanel;
+  P.modules.aiChatDock = P.modules.chatPanel;
+
+  // Auto-init: when compare.js fires the mount-ready event, initialize the chat panel.
+  document.addEventListener('parse:assistant-mount-ready', function onMountReady(evt) {
+    var detail = evt && evt.detail ? evt.detail : {};
+    var mountId = detail.mountId || 'parse-assistant-dock';
+    var mountEl = document.getElementById(mountId);
+    if (!mountEl) return;
+
+    try {
+      if (!P.modules.chatPanel._initialized) {
+        P.modules.chatPanel.init({ mountEl: mountEl });
+        P.modules.chatPanel._initialized = true;
+      }
+    } catch (err) {
+      console.warn('[chat-panel] auto-init from mount-ready failed:', err);
+    }
+  });
+
+  // Also fire the module-ready event so compare.js picks it up on retry.
+  document.dispatchEvent(new CustomEvent('parse:assistant-ready', { detail: {} }));
 }());
