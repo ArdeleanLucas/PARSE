@@ -306,6 +306,200 @@
     throw new Error('Unable to poll compute job status.');
   }
 
+  function extractChatRunId(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    return normalizeJobId(
+      payload.runId != null ? payload.runId :
+      payload.run_id != null ? payload.run_id :
+      payload.jobId != null ? payload.jobId :
+      payload.job_id != null ? payload.job_id :
+      payload.id
+    );
+  }
+
+  async function requestFirstAvailable(candidates, fallbackMessage) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    let lastError = null;
+
+    for (let i = 0; i < list.length; i += 1) {
+      const candidate = list[i] || {};
+      const pathname = String(candidate.pathname || '').trim();
+      if (!pathname) {
+        continue;
+      }
+
+      const options = Object.assign({}, candidate.options || {});
+      try {
+        return await request(pathname, options);
+      } catch (error) {
+        lastError = error;
+        if (error && (error.status === 404 || error.status === 405)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    throw new Error(fallbackMessage || 'No compatible API endpoint responded.');
+  }
+
+  /**
+   * Start a backend chat run.
+   *
+   * The request body is intentionally pass-through to keep this helper compatible
+   * with incremental backend API evolution.
+   *
+   * @param {object=} payload Chat request payload.
+   * @returns {Promise<object>} Server response payload.
+   */
+  function startChatRun(payload) {
+    const body = payload && typeof payload === 'object' ? payload : {};
+
+    return requestFirstAvailable(
+      [
+        {
+          pathname: '/api/chat',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+        {
+          pathname: '/api/chat/run',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+        {
+          pathname: '/api/chat/start',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+      ],
+      'Unable to start chat run.'
+    );
+  }
+
+  /**
+   * Poll chat run status.
+   * @param {string} runId Backend run identifier.
+   * @param {object=} opts Optional polling options merged into request body.
+   * @returns {Promise<object>} Status payload.
+   */
+  function pollChatRunStatus(runId, opts) {
+    const normalizedRunId = normalizeJobId(runId);
+    if (!normalizedRunId) {
+      return Promise.reject(new Error('runId is required.'));
+    }
+
+    const body = Object.assign({}, opts || {}, {
+      runId: normalizedRunId,
+    });
+
+    const encodedRunId = encodeURIComponent(normalizedRunId);
+
+    return requestFirstAvailable(
+      [
+        {
+          pathname: '/api/chat/status',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/run/status',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/' + encodedRunId + '/status',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/status?runId=' + encodedRunId,
+          options: { method: 'GET', timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/' + encodedRunId,
+          options: { method: 'GET', timeoutMs: QUICK_TIMEOUT_MS },
+        },
+      ],
+      'Unable to poll chat run status.'
+    );
+  }
+
+  /**
+   * Request cancellation for a chat run.
+   * @param {string} runId Backend run identifier.
+   * @param {object=} opts Optional cancellation options merged into request body.
+   * @returns {Promise<object>} Cancellation response payload.
+   */
+  function cancelChatRun(runId, opts) {
+    const normalizedRunId = normalizeJobId(runId);
+    if (!normalizedRunId) {
+      return Promise.reject(new Error('runId is required.'));
+    }
+
+    const body = Object.assign({}, opts || {}, {
+      runId: normalizedRunId,
+    });
+
+    const encodedRunId = encodeURIComponent(normalizedRunId);
+
+    return requestFirstAvailable(
+      [
+        {
+          pathname: '/api/chat/cancel',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/run/cancel',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+        {
+          pathname: '/api/chat/' + encodedRunId + '/cancel',
+          options: { method: 'POST', body: body, timeoutMs: QUICK_TIMEOUT_MS },
+        },
+      ],
+      'Unable to cancel chat run.'
+    );
+  }
+
+  /**
+   * Retry a previous chat run.
+   * @param {string} runId Backend run identifier.
+   * @param {object=} opts Optional retry options merged into request body.
+   * @returns {Promise<object>} Retry response payload.
+   */
+  function retryChatRun(runId, opts) {
+    const normalizedRunId = normalizeJobId(runId);
+    if (!normalizedRunId) {
+      return Promise.reject(new Error('runId is required.'));
+    }
+
+    const body = Object.assign({}, opts || {}, {
+      runId: normalizedRunId,
+    });
+
+    const encodedRunId = encodeURIComponent(normalizedRunId);
+
+    return requestFirstAvailable(
+      [
+        {
+          pathname: '/api/chat/retry',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+        {
+          pathname: '/api/chat/run/retry',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+        {
+          pathname: '/api/chat/' + encodedRunId + '/retry',
+          options: { method: 'POST', body: body, timeoutMs: null },
+        },
+      ],
+      'Unable to retry chat run.'
+    );
+  }
+
   /**
    * Initialize the AI client module.
    * @param {{baseUrl?: string}=} options Optional initialization options.
@@ -700,6 +894,11 @@
     requestIPA: requestIPA,
     requestSuggestions: requestSuggestions,
     requestCompute: requestCompute,
+    startChatRun: startChatRun,
+    pollChatRunStatus: pollChatRunStatus,
+    cancelChatRun: cancelChatRun,
+    retryChatRun: retryChatRun,
+    extractChatRunId: extractChatRunId,
     getEnrichments: getEnrichments,
     saveEnrichments: saveEnrichments,
     getConfig: getConfig,

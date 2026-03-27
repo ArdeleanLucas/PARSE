@@ -17,7 +17,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 
 class Segment(TypedDict):
@@ -45,6 +45,18 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "provider": "openai",
         "model": "gpt-4o",
         "api_key_env": "OPENAI_API_KEY",
+    },
+    "chat": {
+        "enabled": True,
+        "provider": "openai",
+        "model": "gpt54",
+        "api_key_env": "OPENAI_API_KEY",
+        "reasoning_effort": "high",
+        "temperature": 0.1,
+        "max_tool_rounds": 4,
+        "max_history_messages": 24,
+        "max_output_tokens": 1400,
+        "max_tool_result_chars": 24000,
     },
     "specialized_layers": [],
 }
@@ -102,6 +114,235 @@ def load_ai_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
         return defaults
 
     return _deep_merge_dicts(defaults, raw_data)
+
+
+def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve chat config from merged defaults/user config.
+
+    Chat is OpenAI-only in the current PARSE MVP backend.
+    """
+    llm_config = merged_config.get("llm", {})
+    if not isinstance(llm_config, dict):
+        llm_config = {}
+
+    chat_config = merged_config.get("chat", {})
+    if not isinstance(chat_config, dict):
+        chat_config = {}
+
+    defaults = {
+        "enabled": True,
+        "provider": "openai",
+        "model": str(chat_config.get("model") or llm_config.get("model") or "gpt54").strip() or "gpt54",
+        "api_key_env": str(chat_config.get("api_key_env") or llm_config.get("api_key_env") or "OPENAI_API_KEY").strip()
+        or "OPENAI_API_KEY",
+        "reasoning_effort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
+        "temperature": chat_config.get("temperature", 0.1),
+        "max_tool_rounds": int(chat_config.get("max_tool_rounds", 4) or 4),
+        "max_history_messages": int(chat_config.get("max_history_messages", 24) or 24),
+        "max_output_tokens": int(chat_config.get("max_output_tokens", 1400) or 1400),
+        "max_tool_result_chars": int(chat_config.get("max_tool_result_chars", 24000) or 24000),
+    }
+
+    resolved = _deep_merge_dicts(defaults, chat_config)
+
+    provider_name = str(resolved.get("provider") or "openai").strip().lower()
+    if provider_name != "openai":
+        print(
+            "[WARN] chat.provider={0!r} is unsupported; forcing 'openai'".format(provider_name),
+            file=sys.stderr,
+        )
+        resolved["provider"] = "openai"
+
+    model_name = str(resolved.get("model") or "").strip()
+    if not model_name:
+        resolved["model"] = "gpt54"
+
+    api_key_env = str(resolved.get("api_key_env") or "").strip()
+    if not api_key_env:
+        resolved["api_key_env"] = "OPENAI_API_KEY"
+
+    reasoning_effort = str(resolved.get("reasoning_effort") or "").strip().lower()
+    if reasoning_effort not in {"minimal", "low", "medium", "high"}:
+        resolved["reasoning_effort"] = "high"
+
+    try:
+        resolved["temperature"] = float(resolved.get("temperature", 0.1))
+    except (TypeError, ValueError):
+        resolved["temperature"] = 0.1
+
+    return resolved
+
+
+def get_chat_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return resolved chat config with OpenAI-only constraints applied."""
+    override = config or {}
+    merged = _deep_merge_dicts(load_ai_config(), override)
+    return _build_chat_config(merged)
+
+
+class OpenAIChatRuntime:
+    """Thin OpenAI chat runtime wrapper with tool-call support and reasoning fallback."""
+
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        config_path: Optional[Path] = None,
+    ) -> None:
+        self.config_path = resolve_ai_config_path(config_path)
+        file_config = load_ai_config(self.config_path)
+        merged_config = _deep_merge_dicts(file_config, config or {})
+
+        self.chat_config = _build_chat_config(merged_config)
+        self.model = str(self.chat_config.get("model") or "gpt54").strip() or "gpt54"
+        self.api_key_env = str(self.chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
+        self.reasoning_effort = str(self.chat_config.get("reasoning_effort") or "high").strip() or "high"
+
+        try:
+            self.temperature = float(self.chat_config.get("temperature", 0.1))
+        except (TypeError, ValueError):
+            self.temperature = 0.1
+
+        try:
+            self.max_output_tokens = int(self.chat_config.get("max_output_tokens", 1400) or 1400)
+        except (TypeError, ValueError):
+            self.max_output_tokens = 1400
+
+        self.base_url = str(self.chat_config.get("base_url") or "").strip()
+        self._client: Optional[Any] = None
+
+    def _load_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+
+        api_key = os.environ.get(self.api_key_env, "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "OpenAI API key environment variable is missing: {0}".format(self.api_key_env)
+            )
+
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("openai dependency missing") from exc
+
+        client_kwargs: Dict[str, Any] = {
+            "api_key": api_key,
+        }
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+
+        self._client = OpenAI(**client_kwargs)
+        return self._client
+
+    def _call_with_token_fallback(self, client: Any, payload: Dict[str, Any]) -> Tuple[Any, str]:
+        """Call chat.completions.create while handling token-parameter differences."""
+        candidate = copy.deepcopy(payload)
+        try:
+            response = client.chat.completions.create(**candidate)
+            token_key = "max_completion_tokens" if "max_completion_tokens" in candidate else "none"
+            return response, token_key
+        except TypeError:
+            if "max_completion_tokens" in candidate:
+                max_tokens = candidate.pop("max_completion_tokens")
+                candidate["max_tokens"] = max_tokens
+                response = client.chat.completions.create(**candidate)
+                return response, "max_tokens"
+            raise
+
+    def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = "auto",
+        max_output_tokens: Optional[int] = None,
+    ) -> Tuple[Any, Dict[str, Any]]:
+        """Run a chat completion with optional tools.
+
+        Tries to pass reasoning hints when supported by SDK/model. Falls back cleanly
+        if the active client or model signature does not accept those fields.
+        """
+        client = self._load_client()
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+
+        max_tokens = max_output_tokens if max_output_tokens is not None else self.max_output_tokens
+        if isinstance(max_tokens, int) and max_tokens > 0:
+            payload["max_completion_tokens"] = int(max_tokens)
+
+        if tools is not None:
+            payload["tools"] = tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
+
+        reasoning_attempts: List[Tuple[str, Dict[str, Any]]] = []
+        if self.reasoning_effort:
+            reasoning_attempts.append(
+                (
+                    "reasoning",
+                    {
+                        "reasoning": {
+                            "effort": self.reasoning_effort,
+                        }
+                    },
+                )
+            )
+            reasoning_attempts.append(
+                (
+                    "reasoning_effort",
+                    {
+                        "reasoning_effort": self.reasoning_effort,
+                    },
+                )
+            )
+
+        reasoning_attempts.append(("none", {}))
+
+        errors: List[str] = []
+        for label, reasoning_payload in reasoning_attempts:
+            candidate = copy.deepcopy(payload)
+            candidate.update(reasoning_payload)
+
+            try:
+                response, token_key = self._call_with_token_fallback(client, candidate)
+                return (
+                    response,
+                    {
+                        "model": self.model,
+                        "reasoningConfigured": self.reasoning_effort,
+                        "reasoningAttempt": label,
+                        "reasoningApplied": label != "none",
+                        "tokenParameter": token_key,
+                    },
+                )
+            except TypeError as exc:
+                errors.append("{0}: {1}".format(label, exc))
+                continue
+
+        fallback_payload = {
+            "model": self.model,
+            "messages": messages,
+        }
+        if tools is not None:
+            fallback_payload["tools"] = tools
+            if tool_choice:
+                fallback_payload["tool_choice"] = tool_choice
+
+        response = client.chat.completions.create(**fallback_payload)
+        return (
+            response,
+            {
+                "model": self.model,
+                "reasoningConfigured": self.reasoning_effort,
+                "reasoningAttempt": "fallback_without_reasoning",
+                "reasoningApplied": False,
+                "warnings": errors,
+                "tokenParameter": "none",
+            },
+        )
 
 
 def _coerce_confidence(value: float) -> float:
@@ -944,9 +1185,11 @@ __all__ = [
     "OpenAIProvider",
     "XAIProvider",
     "OllamaProvider",
+    "OpenAIChatRuntime",
     "get_stt_provider",
     "get_ipa_provider",
     "get_llm_provider",
+    "get_chat_config",
     "get_provider",
     "load_ai_config",
     "resolve_ai_config_path",

@@ -15,5 +15,17 @@
     "model": "gpt-4o",
     "api_key_env": "OPENAI_API_KEY"
   },
+  "chat": {
+    "enabled": true,
+    "provider": "openai",
+    "model": "gpt54",
+    "api_key_env": "OPENAI_API_KEY",
+    "reasoning_effort": "high",
+    "temperature": 0.1,
+    "max_tool_rounds": 4,
+    "max_history_messages": 24,
+    "max_output_tokens": 1400,
+    "max_tool_result_chars": 24000
+  },
   "specialized_layers": []
 }
