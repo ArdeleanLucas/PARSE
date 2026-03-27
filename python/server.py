@@ -729,6 +729,11 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_config()
             return
 
+        parts = self._path_parts(request_path)
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
+            self._api_get_annotation(parts[2])
+            return
+
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
@@ -927,6 +932,32 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 raise ApiError(HTTPStatus.BAD_REQUEST, "jobId does not match compute type")
 
         self._send_json(HTTPStatus.OK, _job_response_payload(job))
+
+    def _api_get_annotation(self, speaker: str) -> None:
+        """Return annotation JSON for a single speaker.
+
+        Lookup order: ``<speaker>.parse.json`` then ``<speaker>.json``.
+        Returns 404 if neither exists.
+        """
+        safe_speaker = pathlib.Path(speaker).name  # prevent path traversal
+        if not safe_speaker:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Invalid speaker id")
+
+        annotations_dir = _project_root() / "annotations"
+        canonical = annotations_dir / (safe_speaker + ".parse.json")
+        legacy = annotations_dir / (safe_speaker + ".json")
+
+        target: Optional[pathlib.Path] = None
+        if canonical.is_file():
+            target = canonical
+        elif legacy.is_file():
+            target = legacy
+
+        if target is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "No annotation file for speaker: {0}".format(safe_speaker))
+
+        payload = _read_json_file(target, {})
+        self._send_json(HTTPStatus.OK, payload)
 
     def _api_get_enrichments(self) -> None:
         payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
