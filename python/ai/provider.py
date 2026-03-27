@@ -317,9 +317,33 @@ class OpenAIChatRuntime:
             return self._client
 
         api_key = os.environ.get(self.api_key_env, "").strip()
+
+        if not api_key:
+            oauth_token = ""
+            _get_access_token = None
+
+            try:
+                from python.ai.openai_auth import get_access_token as _get_access_token
+            except ImportError:
+                try:
+                    from .openai_auth import get_access_token as _get_access_token
+                except ImportError:
+                    _get_access_token = None
+
+            if callable(_get_access_token):
+                try:
+                    oauth_token = str(_get_access_token() or "").strip()
+                except Exception:
+                    oauth_token = ""
+
+            if oauth_token:
+                api_key = oauth_token
+
         if not api_key:
             raise RuntimeError(
-                "OpenAI API key environment variable is missing: {0}".format(self.api_key_env)
+                "OpenAI credentials are missing. Set {0} env var or sign in via the PARSE UI".format(
+                    self.api_key_env
+                )
             )
 
         try:
