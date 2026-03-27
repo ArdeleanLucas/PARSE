@@ -16,8 +16,6 @@
     launcherBtnEl: null,
     launcherUnreadEl: null,
     panelEl: null,
-    modeLabelEl: null,
-    modelLabelEl: null,
     historyEl: null,
     composerFormEl: null,
     composerInputEl: null,
@@ -153,10 +151,6 @@
       '.parse-chat-title{font-size:13px;font-weight:700;letter-spacing:0.02em;}' +
       '.parse-chat-close{border:1px solid rgba(100,116,139,0.5);background:rgba(15,23,42,0.55);color:#cbd5e1;border-radius:8px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;}' +
       '.parse-chat-close:hover{border-color:#93c5fd;color:#fff;}' +
-      '.parse-chat-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}' +
-      '.parse-chat-chip{border:1px solid rgba(56,189,248,0.45);background:rgba(14,116,144,0.2);color:#bae6fd;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;}' +
-      '.parse-chat-chip.model{border-color:rgba(99,102,241,0.45);background:rgba(49,46,129,0.28);color:#c7d2fe;text-transform:none;font-size:11px;letter-spacing:0;}' +
-      '.parse-chat-chip.mode{border-color:rgba(148,163,184,0.5);background:rgba(51,65,85,0.35);color:#e2e8f0;text-transform:none;font-size:11px;letter-spacing:0;}' +
       '.parse-chat-history{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px;}' +
       '.parse-chat-empty{border:1px dashed rgba(100,116,139,0.5);border-radius:12px;background:rgba(15,23,42,0.42);padding:12px;font-size:12px;line-height:1.45;color:#cbd5e1;}' +
       '.parse-chat-empty strong{color:#f8fafc;display:block;margin-bottom:6px;}' +
@@ -179,7 +173,6 @@
       '.parse-chat-error{border:1px solid rgba(248,113,113,0.55);background:rgba(127,29,29,0.25);border-radius:8px;padding:7px 8px;color:#fecaca;font-size:11px;line-height:1.4;}' +
       '.parse-chat-transcript-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:1px solid rgba(71,85,105,0.65);background:rgba(30,41,59,0.6);color:#e2e8f0;border-radius:8px;padding:6px 8px;font-size:11px;font-weight:700;cursor:pointer;}' +
       '.parse-chat-transcript-toggle:hover{border-color:#93c5fd;}' +
-      '.parse-chat-transcript-note{font-size:10px;color:#93c5fd;margin-top:5px;line-height:1.35;}' +
       '.parse-chat-transcript-list{margin-top:6px;border:1px solid rgba(71,85,105,0.55);border-radius:8px;background:rgba(15,23,42,0.42);padding:6px;display:flex;flex-direction:column;gap:6px;}' +
       '.parse-chat-transcript-item{border:1px solid rgba(71,85,105,0.5);border-radius:7px;padding:6px;background:rgba(15,23,42,0.56);display:flex;flex-direction:column;gap:4px;}' +
       '.parse-chat-transcript-head{display:flex;align-items:center;gap:6px;}' +
@@ -191,8 +184,7 @@
       '.parse-chat-composer{border-top:1px solid rgba(71,85,105,0.45);padding:10px;display:flex;flex-direction:column;gap:8px;background:rgba(15,23,42,0.75);}' +
       '.parse-chat-input{width:100%;min-height:70px;max-height:170px;resize:vertical;border:1px solid rgba(100,116,139,0.7);border-radius:10px;background:rgba(15,23,42,0.75);color:#f8fafc;padding:8px 9px;font-size:12px;line-height:1.45;}' +
       '.parse-chat-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 2px rgba(14,165,233,0.2);}' +
-      '.parse-chat-compose-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}' +
-      '.parse-chat-hint{font-size:10px;line-height:1.35;color:#93c5fd;}' +
+      '.parse-chat-compose-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;}' +
       '.parse-chat-send{border:1px solid rgba(56,189,248,0.8);background:linear-gradient(180deg,#0ea5e9,#0284c7);color:#fff;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;}' +
       '.parse-chat-send:disabled{opacity:0.5;cursor:not-allowed;}' +
       '.parse-chat-send:not(:disabled):hover{filter:brightness(1.06);}' +
@@ -400,7 +392,6 @@
             '<span>Tool transcript (' + transcript.length + ')</span>' +
             '<span>' + (transcriptOpen ? 'Hide' : 'Show') + '</span>' +
           '</button>' +
-          '<div class="parse-chat-transcript-note">Read-only execution: mutating tools are disabled in MVP.</div>' +
           (transcriptOpen
             ? '<div class="parse-chat-transcript-list">' + transcriptItems + '</div>'
             : '') +
@@ -422,9 +413,8 @@
     if (!runOrder.length) {
       state.historyEl.innerHTML = '' +
         '<div class="parse-chat-empty">' +
-          '<strong>PARSE Assistant (read-only)</strong>' +
-          'Use this dock to ask questions about annotations, compare output, or project context. ' +
-          'No file/context attachments yet. Tool transcript is shown per run.' +
+          '<strong>PARSE Assistant</strong>' +
+          'Ask about annotations, compare output, or project context.' +
         '</div>';
     } else {
       const cards = [];
@@ -458,24 +448,6 @@
     const unread = Math.max(0, Math.floor(Number(launcher.unread) || 0));
     state.launcherUnreadEl.textContent = unread > 99 ? '99+' : String(unread);
     state.launcherUnreadEl.classList.toggle('show', unread > 0 && !isOpen);
-  }
-
-  function updateMeta() {
-    if (!state.modeLabelEl || !state.modelLabelEl) {
-      return;
-    }
-
-    const snapshot = toObject(state.snapshot);
-    const readOnly = snapshot.readOnly !== false;
-
-    state.modeLabelEl.textContent = readOnly ? 'Read-only' : 'Interactive';
-
-    const provider = toString(snapshot.provider) || 'openai';
-    const model = toString(snapshot.model) || 'gpt54';
-    const reasoning = toString(snapshot.reasoning) || 'high';
-    const intent = toString(snapshot.intent) || 'xhigh';
-
-    state.modelLabelEl.textContent = provider + ' / ' + model + ' · ' + reasoning + ' · ' + intent;
   }
 
   function updateComposer() {
@@ -639,7 +611,6 @@
 
     // Authenticated — show normal chat
     if (state.composerFormEl) state.composerFormEl.style.display = '';
-    updateMeta();
     renderHistory();
     updateComposer();
   }
@@ -769,17 +740,11 @@
             '<button type="button" class="parse-chat-logout" data-action="logout" title="Sign out of OpenAI">Sign out</button>' +
             '<button type="button" class="parse-chat-close" data-action="close-panel">Close</button>' +
           '</div>' +
-          '<div class="parse-chat-meta">' +
-            '<span class="parse-chat-chip" data-role="mode-chip">Read-only</span>' +
-            '<span class="parse-chat-chip model" data-role="model-chip">openai / gpt54 · high · xhigh</span>' +
-            '<span class="parse-chat-chip mode">No attachments</span>' +
-          '</div>' +
         '</header>' +
         '<div class="parse-chat-history" data-role="history"></div>' +
         '<form class="parse-chat-composer" data-role="composer">' +
-          '<textarea class="parse-chat-input" data-role="composer-input" placeholder="Ask about annotations, comparisons, or transcripts (read-only)…"></textarea>' +
+          '<textarea class="parse-chat-input" data-role="composer-input" placeholder="Ask about annotations, comparisons, or transcripts…"></textarea>' +
           '<div class="parse-chat-compose-row">' +
-            '<div class="parse-chat-hint">History persists across Compare ↔ Annotate in this browser session.</div>' +
             '<button class="parse-chat-send" type="submit" data-role="send-btn">Send</button>' +
           '</div>' +
         '</form>' +
@@ -791,8 +756,6 @@
     state.launcherBtnEl = root.querySelector('.parse-chat-launcher');
     state.launcherUnreadEl = root.querySelector('[data-role="launcher-unread"]');
     state.panelEl = root.querySelector('.parse-chat-panel');
-    state.modeLabelEl = root.querySelector('[data-role="mode-chip"]');
-    state.modelLabelEl = root.querySelector('[data-role="model-chip"]');
     state.historyEl = root.querySelector('[data-role="history"]');
     state.composerFormEl = root.querySelector('[data-role="composer"]');
     state.composerInputEl = root.querySelector('[data-role="composer-input"]');
@@ -861,8 +824,6 @@
     state.launcherBtnEl = null;
     state.launcherUnreadEl = null;
     state.panelEl = null;
-    state.modeLabelEl = null;
-    state.modelLabelEl = null;
     state.historyEl = null;
     state.composerFormEl = null;
     state.composerInputEl = null;
