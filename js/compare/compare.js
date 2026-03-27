@@ -1330,7 +1330,7 @@
       if (!formEl || !ipaEl) return;
 
       if (!refs.length) {
-        formEl.textContent = 'No data';
+        formEl.textContent = '';
         ipaEl.textContent = '—';
         return;
       }
