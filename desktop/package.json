@@ -1,0 +1,15 @@
+{
+  "name": "parse-desktop-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Electron shell scaffold for PARSE desktop direction",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node dev-launch.js",
+    "check": "node --check main.js && node --check preload.js && node --check dev-launch.js"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}
