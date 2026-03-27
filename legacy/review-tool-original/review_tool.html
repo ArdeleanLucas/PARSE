@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Southern Kurdish — Linguistic Review Tool v4.1</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   RESET & BASE
+══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 15px; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f0f2f5;
+  color: #1a1a2e;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+button { cursor: pointer; font-family: inherit; }
+textarea, input { font-family: inherit; }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOP BAR
+══════════════════════════════════════════════════════════════ */
+#topbar {
+  background: #1a1a2e;
+  color: #fff;
+  padding: 0 20px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  z-index: 100;
+}
+#topbar h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: #e8eaf0;
+}
+#topbar h1 span { color: #7c9cff; }
+#progress-badge {
+  background: #2d3561;
+  border: 1px solid #4a5580;
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  color: #b0beff;
+}
+#progress-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: #2d3561;
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 300px;
+}
+#progress-bar-fill { height: 100%; background: #4ade80; border-radius: 3px; transition: width 0.3s; }
+
+.filter-btn {
+  background: #2d3561;
+  color: #b0beff;
+  border: 1px solid #4a5580;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+}
+.filter-btn:hover { background: #3d4a7a; }
+.filter-btn.active { background: #4461d4; color: #fff; border-color: #4461d4; }
+
+.topbar-spacer { flex: 1; }
+
+.topbar-btn {
+  background: #2d3561;
+  color: #b0beff;
+  border: 1px solid #4a5580;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.topbar-btn:hover { background: #3d4a7a; color: #fff; }
+.topbar-btn.green { background: #1a4a2e; color: #4ade80; border-color: #2d7a4a; }
+.topbar-btn.green:hover { background: #25623d; }
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN LAYOUT
+══════════════════════════════════════════════════════════════ */
+#app {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SIDEBAR
+══════════════════════════════════════════════════════════════ */
+#sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid #dde2ef;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#sidebar-search {
+  padding: 10px;
+  border-bottom: 1px solid #dde2ef;
+}
+#sidebar-search input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #c8d0e8;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  outline: none;
+  background: #f8f9fc;
+}
+#sidebar-search input:focus { border-color: #4461d4; background: #fff; }
+.sort-btn {
+  background: #e8eaf0; color: #555; border: 1px solid #ccc; border-radius: 4px;
+  padding: 2px 8px; font-size: 0.75rem; transition: all 0.15s;
+}
+.sort-btn:hover { background: #d0d4e0; }
+.sort-btn.active { background: #4461d4; color: #fff; border-color: #4461d4; }
+#concept-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.concept-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: all 0.1s;
+  font-size: 0.85rem;
+}
+.concept-item:hover { background: #f0f4ff; }
+.concept-item.active { background: #eef2ff; border-left-color: #4461d4; }
+.concept-item .ci-name { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.concept-item .ci-id { color: #9aa3c0; font-size: 0.75rem; }
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.unreviewed { background: #c8d0e8; }
+.status-dot.reviewed   { background: #4ade80; }
+.status-dot.flagged    { background: #fbbf24; }
+.status-dot.borrowing  { background: #f87171; }
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN CONTENT
+══════════════════════════════════════════════════════════════ */
+#main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CARDS
+══════════════════════════════════════════════════════════════ */
+.card {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  border: 1px solid #dde2ef;
+  padding: 16px 20px;
+}
+.card-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7db3;
+  margin-bottom: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCEPT HEADER
+══════════════════════════════════════════════════════════════ */
+#concept-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#concept-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+#concept-title span { color: #9aa3c0; font-size: 1rem; font-weight: 400; }
+.nav-btn {
+  background: #f0f2f5;
+  border: 1px solid #c8d0e8;
+  color: #4461d4;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.nav-btn:hover { background: #eef2ff; border-color: #4461d4; }
+.nav-btn:disabled { opacity: 0.4; cursor: default; }
+#concept-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.action-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.action-btn.accept { background: #dcfce7; color: #166534; }
+.action-btn.accept:hover { background: #bbf7d0; }
+.action-btn.accept.active { background: #22c55e; color: #fff; }
+.action-btn.flag { background: #fef9c3; color: #854d0e; }
+.action-btn.flag:hover { background: #fef08a; }
+.action-btn.flag.active { background: #eab308; color: #fff; }
+
+/* ═══════════════════════════════════════════════════════════════
+   REFERENCE BOX
+══════════════════════════════════════════════════════════════ */
+.ref-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.ref-lang {
+  background: #f8f9fc;
+  border: 1px solid #e2e8f5;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.ref-lang-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.ref-lang-label.arabic { color: #c2410c; }
+.ref-lang-label.persian { color: #7c3aed; }
+.ref-form { font-size: 1.1rem; direction: rtl; unicode-bidi: bidi-override; }
+.ref-ipa  { font-size: 0.9rem; color: #6b7db3; font-family: 'Noto Sans', monospace; }
+
+/* ═══════════════════════════════════════════════════════════════
+   SPEAKER FORMS TABLE
+══════════════════════════════════════════════════════════════ */
+.forms-table { width: 100%; border-collapse: collapse; }
+.forms-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7db3;
+  border-bottom: 2px solid #dde2ef;
+}
+.forms-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0f2f5;
+  vertical-align: top;
+}
+.forms-table tr:last-child td { border-bottom: none; }
+.forms-table tr:hover td { background: #fafbff; }
+
+/* IPA cell – inline edit */
+.ipa-cell {
+  font-family: 'Noto Sans', 'DejaVu Sans', monospace;
+  font-size: 1rem;
+  cursor: text;
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 60px;
+  display: inline-block;
+}
+.ipa-cell:hover { background: #eef2ff; }
+.ipa-cell.editing {
+  outline: 2px solid #4461d4;
+  background: #fff;
+}
+.ipa-input {
+  font-family: 'Noto Sans', 'DejaVu Sans', monospace;
+  font-size: 1rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  min-width: 60px;
+}
+
+/* Source badge */
+.source-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-right: 4px;
+  background: #e2e8f5;
+  color: #475569;
+}
+.source-badge.jbil { background: #dbeafe; color: #1e40af; }
+.source-badge.klq  { background: #fef3c7; color: #92400e; }
+
+/* Verification badge */
+.verify-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  cursor: help;
+}
+
+/* Spectrogram toggle */
+.spec-toggle {
+  display: block;
+  font-size: 0.7rem;
+  color: #4461d4;
+  text-decoration: underline;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.spec-container {
+  margin-top: 8px;
+  border: 1px solid #e2e8f5;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f8f9fc;
+  display: inline-block;
+}
+.spec-container img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Variant row stack */
+.variant-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  background: #f8f9fc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f5;
+}
+.variant-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+.variant-ordinal {
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: #64748b;
+  min-width: 75px;
+}
+.variant-label {
+  background: #fff;
+  border: 1px solid #c8d0e8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* Similarity bars */
+.sim-bars { display: flex; flex-direction: column; gap: 3px; min-width: 90px; }
+.sim-bar-row { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: #9aa3c0; }
+.sim-bar-wrap { width: 52px; height: 6px; background: #e8ecf5; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+.sim-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.sim-bar-fill.green  { background: #4ade80; }
+.sim-bar-fill.yellow { background: #fbbf24; }
+.sim-bar-fill.red    { background: #f87171; }
+
+/* Cognate badge */
+.cognate-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+/* Row-level flag */
+.row-flag-btn {
+  background: none;
+  border: 1px solid #e2e8f5;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 0.75rem;
+  color: #9aa3c0;
+  transition: all 0.15s;
+}
+.row-flag-btn:hover { border-color: #fbbf24; color: #854d0e; }
+.row-flag-btn.flagged { background: #fef9c3; border-color: #fbbf24; color: #854d0e; }
+/* Phonetic flags */
+.phon-flags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.phon-flag {
+  font-size: 0.7rem; padding: 1px 6px; border-radius: 3px;
+  cursor: pointer; border: 1px solid; opacity: 0.9;
+  transition: opacity 0.2s;
+}
+.phon-flag:hover { opacity: 1; }
+.phon-flag.dark_l { background: #d1fae5; border-color: #4ecdc4; color: #064e3b; }
+.phon-flag.x_fricative { background: #ffedd5; border-color: #ffa500; color: #7c2d12; }
+.phon-flag.h_fricative { background: #fee2e2; border-color: #ff6b6b; color: #7f1d1d; }
+.phon-flag.gh_fricative { background: #ede9fe; border-color: #9b59b6; color: #3b0764; }
+.phon-flag.heavy_r { background: #fce7f3; border-color: #e74c3c; color: #831843; }
+.phon-flag.resolved { opacity: 0.4; text-decoration: line-through; }
+.phon-flag.resolved-accept { border-color: #22c55e; background: #dcfce7; }
+.phon-flag.resolved-accept::after { content: ' ✓'; }
+.phon-flag.resolved-reject { border-color: #94a3b8; background: #f1f5f9; opacity: 0.5; }
+.phon-flag.resolved-reject::after { content: ' ✗'; }
+.phon-flag-spec { margin-top: 4px; max-width: 100%; border: 1px solid #ddd; border-radius: 4px; }
+.phon-flag-actions { margin-top: 3px; display: flex; gap: 4px; }
+.phon-flag-actions button.active { font-weight: bold; box-shadow: 0 0 0 2px currentColor; }
+.phon-flag-actions button {
+  font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
+  border: 1px solid #ccc; background: #fff; cursor: pointer;
+}
+.phon-flag-actions button.accept { border-color: #22c55e; color: #166534; }
+.phon-flag-actions button.reject { border-color: #ef4444; color: #991b1b; }
+.phon-flag-actions button.accept:hover { background: #dcfce7; }
+.phon-flag-actions button.reject:hover { background: #fee2e2; }
+
+/* Play btn */
+.play-btn {
+  background: #4461d4;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+}
+.play-btn:hover { background: #3350b8; }
+
+/* Borrowing row highlight */
+.forms-table tr.borrowing-row td { background: #fff5f5; }
+.forms-table tr.borrowing-row td:first-child { border-left: 3px solid #f87171; }
+
+/* ═══════════════════════════════════════════════════════════════
+   COGNATE DECISION PANEL
+══════════════════════════════════════════════════════════════ */
+.cognate-panel { display: flex; flex-direction: column; gap: 12px; }
+.cognate-sets-view { display: flex; flex-wrap: wrap; gap: 8px; }
+.cset-chip {
+  background: #f0f4ff;
+  border: 1px solid #c8d0e8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+.cset-chip-label { font-weight: 700; margin-right: 4px; }
+.cset-speakers { color: #4461d4; }
+
+.cognate-action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cog-btn {
+  border: 1px solid #c8d0e8;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f0f4ff;
+  color: #4461d4;
+  transition: all 0.15s;
+}
+.cog-btn:hover { background: #dce4ff; }
+.cog-btn.active { background: #4461d4; color: #fff; border-color: #4461d4; }
+.cog-btn.danger { color: #dc2626; border-color: #fca5a5; background: #fff5f5; }
+.cog-btn.danger:hover { background: #fee2e2; }
+.cog-btn.success { color: #166534; border-color: #86efac; background: #f0fdf4; }
+.cog-btn.success:hover { background: #dcfce7; }
+.cog-btn.success.active { background: #22c55e; color: #fff; border-color: #22c55e; }
+
+.split-hint {
+  font-size: 0.78rem;
+  color: #6b7db3;
+  background: #f0f4ff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px dashed #c8d0e8;
+}
+.split-assign {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.split-speaker-chip {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid #c8d0e8;
+  background: #f8f9fc;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.split-speaker-chip:hover { border-color: #4461d4; background: #eef2ff; }
+.split-speaker-chip .chip-group {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BORROWING PANEL
+══════════════════════════════════════════════════════════════ */
+.borrow-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #fff5f5;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+.borrow-row .br-speaker { font-weight: 700; min-width: 60px; }
+.borrow-row .br-ipa { font-family: monospace; color: #4461d4; }
+.borrow-row .br-source { color: #dc2626; font-size: 0.78rem; }
+.borrow-row .br-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.borrow-btn {
+  border: none;
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.borrow-btn.confirm { background: #fee2e2; color: #dc2626; }
+.borrow-btn.confirm:hover { background: #fca5a5; }
+.borrow-btn.confirm.active { background: #dc2626; color: #fff; }
+.borrow-btn.reject { background: #f0fdf4; color: #166534; }
+.borrow-btn.reject:hover { background: #bbf7d0; }
+.borrow-btn.reject.active { background: #22c55e; color: #fff; }
+
+.borrow-handle-select {
+  border: 1px solid #fca5a5;
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  background: #fff;
+  color: #1a1a2e;
+  outline: none;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NOTES
+══════════════════════════════════════════════════════════════ */
+.notes-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 12px;
+  border: 1px solid #c8d0e8;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  resize: vertical;
+  outline: none;
+  background: #fafbff;
+  color: #1a1a2e;
+  transition: border-color 0.15s;
+}
+.notes-textarea:focus { border-color: #4461d4; background: #fff; }
+
+/* ═══════════════════════════════════════════════════════════════
+   NAVIGATION FOOTER
+══════════════════════════════════════════════════════════════ */
+#nav-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0 4px;
+}
+#nav-position { font-size: 0.82rem; color: #6b7db3; }
+
+/* ═══════════════════════════════════════════════════════════════
+   WELCOME / LOAD SCREEN
+══════════════════════════════════════════════════════════════ */
+#load-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: #f0f2f5;
+}
+#load-screen h2 { font-size: 1.6rem; color: #1a1a2e; }
+#load-screen p { color: #6b7db3; max-width: 400px; text-align: center; line-height: 1.5; }
+.load-btn {
+  background: #4461d4;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 28px;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(68,97,212,0.3);
+}
+.load-btn:hover { background: #3350b8; transform: translateY(-1px); }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOAST NOTIFICATION
+══════════════════════════════════════════════════════════════ */
+#toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #1a1a2e;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  z-index: 999;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.25s;
+  pointer-events: none;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+
+/* ═══════════════════════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════════════════════ */
+.hidden { display: none !important; }
+.empty-msg { color: #9aa3c0; font-size: 0.85rem; font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- ── TOP BAR ──────────────────────────────────────────────── -->
+<div id="topbar">
+  <h1>Southern Kurdish <span>Review Tool v3</span></h1>
+  <div id="progress-badge">0 / 0 reviewed</div>
+  <div id="phon-progress-badge" style="font-size:11px;color:#94a3b8;margin-top:2px">🔬 Phonetic flags: 0 / 0 resolved</div>
+  <div id="progress-bar-wrap"><div id="progress-bar-fill" style="width:0%"></div></div>
+  <button class="filter-btn active" data-filter="all"     onclick="setFilter('all')">All</button>
+  <button class="filter-btn"        data-filter="unreviewed" onclick="setFilter('unreviewed')">Unreviewed</button>
+  <button class="filter-btn"        data-filter="flagged"  onclick="setFilter('flagged')">Flagged</button>
+  <button class="filter-btn"        data-filter="borrowing" onclick="setFilter('borrowing')">Borrowings</button>
+  <div class="topbar-spacer"></div>
+  <button class="topbar-btn" onclick="triggerLoadDecisions()">Load Decisions</button>
+  <button class="topbar-btn green" onclick="saveDecisions()">💾 Save Decisions</button>
+  <input type="file" id="file-input"     accept=".json" class="hidden" onchange="handleFileLoad(event)">
+  <input type="file" id="decision-input" accept=".json" class="hidden" onchange="handleDecisionLoad(event)">
+</div>
+
+<!-- ── LOAD SCREEN ──────────────────────────────────────────── -->
+<div id="load-screen">
+  <h2>Southern Kurdish Linguistic Review</h2>
+  <p>Load <code>review_data.json</code> (v3) to begin reviewing variants, source tags, and verification statuses.</p>
+  <button class="load-btn" onclick="document.getElementById('file-input').click()">📂 Load review_data.json</button>
+  <p style="font-size:0.8rem;color:#9aa3c0">Keyboard shortcuts: ← → navigate · Enter accept · B/F flag</p>
+</div>
+
+<!-- ── MAIN APP (hidden until data loaded) ──────────────────── -->
+<div id="app" class="hidden">
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-search">
+      <input type="text" id="search-box" placeholder="Search concepts…" oninput="filterSidebar(this.value)">
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button class="sort-btn active" data-sort="alpha" onclick="setSort('alpha')" title="Sort alphabetically">A→Z</button>
+        <button class="sort-btn" data-sort="id" onclick="setSort('id')" title="Sort by concept #">1→N</button>
+      </div>
+    </div>
+    <div id="concept-list"></div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div id="main">
+    <!-- concept header card -->
+    <div class="card" id="header-card">
+      <div id="concept-header">
+        <button class="nav-btn" id="btn-prev" onclick="navigate(-1)">← Prev</button>
+        <div id="concept-title">—</div>
+        <button class="nav-btn" id="btn-next" onclick="navigate(1)">Next →</button>
+        <div id="concept-actions">
+          <button class="action-btn accept" id="btn-accept" onclick="toggleAccept()">✓ Accept</button>
+          <button class="action-btn flag"   id="btn-flag"   onclick="toggleFlag()">⚑ Flag</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- reference forms -->
+    <div class="card">
+      <div class="card-title">Reference Forms</div>
+      <div class="ref-grid">
+        <div class="ref-lang">
+          <div class="ref-lang-label arabic">Arabic</div>
+          <div class="ref-form" id="ref-arabic-form">—</div>
+          <div class="ref-ipa"  id="ref-arabic-ipa">—</div>
+        </div>
+        <div class="ref-lang">
+          <div class="ref-lang-label persian">Persian</div>
+          <div class="ref-form" id="ref-persian-form">—</div>
+          <div class="ref-ipa"  id="ref-persian-ipa">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- speaker forms -->
+    <div class="card">
+      <div class="card-title">Speaker Forms</div>
+      <table class="forms-table" id="forms-table">
+        <thead>
+          <tr>
+            <th>Speaker</th>
+            <th>IPA & Utterances</th>
+            <th>Arabic sim.</th>
+            <th>Persian sim.</th>
+            <th>Cognate</th>
+            <th>Flag</th>
+          </tr>
+        </thead>
+        <tbody id="forms-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- cognate decision -->
+    <div class="card">
+      <div class="card-title">Cognate Decision</div>
+      <div class="cognate-panel" id="cognate-panel"></div>
+    </div>
+
+    <!-- borrowing panel -->
+    <div class="card" id="borrow-card">
+      <div class="card-title">Potential Borrowings</div>
+      <div id="borrow-panel"></div>
+    </div>
+
+    <!-- notes -->
+    <div class="card">
+      <div class="card-title">Notes</div>
+      <textarea class="notes-textarea" id="notes-field" placeholder="Free-form notes for this concept…" oninput="saveNotes(this.value)"></textarea>
+    </div>
+
+    <!-- nav footer -->
+    <div id="nav-footer">
+      <span id="nav-position"></span>
+      <div style="display:flex;gap:8px">
+        <button class="nav-btn" onclick="navigate(-1)">← Previous</button>
+        <button class="nav-btn" onclick="navigate(1)">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════
+let reviewData   = null;   // loaded from review_data.json
+let decisions    = {};     // {conceptId: {...}}
+let currentIdx   = 0;      // index into filteredConcepts
+let filterMode   = 'all';  // all | unreviewed | flagged | borrowing
+let sidebarQuery = '';
+let sortMode     = 'alpha'; // alpha | id
+let splitMode    = false;
+let splitGroups  = {};     // {speaker: groupIdx}
+let splitGroupCount = 0;
+
+// Cognate class → color mapping (deterministic)
+const COGNATE_COLORS = [
+  ['#3b82f6','#eff6ff'],['#f59e0b','#fffbeb'],['#10b981','#ecfdf5'],
+  ['#ef4444','#fef2f2'],['#8b5cf6','#f5f3ff'],['#06b6d4','#ecfeff'],
+  ['#f97316','#fff7ed'],['#84cc16','#f7fee7'],['#e879f9','#fdf4ff'],
+  ['#14b8a6','#f0fdfa'],
+];
+function cogColor(label) {
+  if (!label || label === '?') return ['#9aa3c0','#f8f9fc'];
+  let idx = 0;
+  for (let i = 0; i < label.length; i++) idx = (idx * 31 + label.charCodeAt(i)) % COGNATE_COLORS.length;
+  return COGNATE_COLORS[idx];
+}
+
+// ════════════════════════════════════════════════════════════════
+// DATA LOADING
+// ════════════════════════════════════════════════════════════════
+
+// Auto-load review_data.json from same directory (for server mode)
+(function autoLoad() {
+  fetch('review_data.json')
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => {
+      reviewData = data;
+      initApp();
+      console.log('Auto-loaded review_data.json from server.');
+    })
+    .catch(() => {
+      console.log('Auto-load failed (not served?). Use file picker.');
+    });
+})();
+
+function handleFileLoad(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      reviewData = JSON.parse(ev.target.result);
+      initApp();
+    } catch(err) {
+      alert('Could not parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function initApp() {
+  // Load from localStorage if available
+  const saved = localStorage.getItem('sk_review_decisions');
+  if (saved) {
+    try {
+      const d = JSON.parse(saved);
+      decisions = d.decisions || {};
+      showToast('Auto-saved decisions restored from localStorage.');
+    } catch(_) {}
+  }
+
+  document.getElementById('load-screen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderSidebar();
+  renderConcept(0);
+  updateProgress();
+}
+
+// ════════════════════════════════════════════════════════════════
+// FILTERED CONCEPT LIST
+// ════════════════════════════════════════════════════════════════
+function getFilteredConcepts() {
+  if (!reviewData) return [];
+  let filtered = reviewData.concepts.filter(c => {
+    const dec = decisions[c.concept_id] || {};
+    const q   = sidebarQuery.toLowerCase();
+    if (q && !c.concept_en.toLowerCase().includes(q) && !c.concept_id.includes(q)) return false;
+    if (filterMode === 'unreviewed') return dec.status !== 'reviewed';
+    if (filterMode === 'flagged')    return dec.status === 'flagged';
+    if (filterMode === 'borrowing')  return c.forms.some(f => f.borrowing_flag);
+    return true;
+  });
+  if (sortMode === 'id') {
+    filtered.sort((a, b) => {
+      const numA = parseInt(a.concept_id.replace(/\D/g, '')) || 0;
+      const numB = parseInt(b.concept_id.replace(/\D/g, '')) || 0;
+      return numA - numB;
+    });
+  } else {
+    filtered.sort((a, b) => a.concept_en.localeCompare(b.concept_en));
+  }
+  return filtered;
+}
+
+function setSort(mode) {
+  sortMode = mode;
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === mode));
+  currentIdx = 0;
+  renderSidebar();
+  renderConcept(0);
+}
+
+function setFilter(mode) {
+  filterMode = mode;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === mode));
+  currentIdx = 0;
+  renderSidebar();
+  renderConcept(0);
+}
+
+function filterSidebar(q) {
+  sidebarQuery = q;
+  currentIdx = 0;
+  renderSidebar();
+  renderConcept(0);
+}
+
+// ════════════════════════════════════════════════════════════════
+// SIDEBAR
+// ════════════════════════════════════════════════════════════════
+function renderSidebar() {
+  const list = document.getElementById('concept-list');
+  const filtered = getFilteredConcepts();
+  list.innerHTML = filtered.map((c, i) => {
+    const dec = decisions[c.concept_id] || {};
+    const hasBorrow = c.forms.some(f => f.borrowing_flag);
+    let dotClass = 'unreviewed';
+    if (dec.status === 'reviewed') dotClass = 'reviewed';
+    else if (dec.status === 'flagged') dotClass = 'flagged';
+    else if (hasBorrow) dotClass = 'borrowing';
+    return `<div class="concept-item${i === currentIdx ? ' active' : ''}" onclick="renderConcept(${i})">
+      <span class="status-dot ${dotClass}"></span>
+      <span class="ci-name">${escHtml(c.concept_en)}</span>
+      <span class="ci-id">#${c.concept_id}</span>
+    </div>`;
+  }).join('');
+}
+
+function scrollSidebarToActive() {
+  const list = document.getElementById('concept-list');
+  const active = list.querySelector('.concept-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+// ════════════════════════════════════════════════════════════════
+// CONCEPT RENDERING
+// ════════════════════════════════════════════════════════════════
+function renderConcept(idx) {
+  const filtered = getFilteredConcepts();
+  if (!filtered.length) {
+    document.getElementById('concept-title').textContent = 'No concepts match filter';
+    document.getElementById('forms-tbody').innerHTML = '';
+    document.getElementById('cognate-panel').innerHTML = '';
+    document.getElementById('borrow-panel').innerHTML = '';
+    document.getElementById('notes-field').value = '';
+    return;
+  }
+  currentIdx = Math.max(0, Math.min(idx, filtered.length - 1));
+  const concept = filtered[currentIdx];
+  const dec = decisions[concept.concept_id] || {};
+
+  // Sync split state
+  splitMode = false;
+  splitGroups = {};
+  splitGroupCount = 2;
+
+  // Header
+  document.getElementById('concept-title').innerHTML =
+    `${escHtml(concept.concept_en)} <span>(#${concept.concept_id})</span>`;
+
+  // Accept/flag buttons
+  const ba = document.getElementById('btn-accept');
+  const bf = document.getElementById('btn-flag');
+  ba.classList.toggle('active', dec.status === 'reviewed');
+  bf.classList.toggle('active', dec.status === 'flagged');
+
+  // Reference
+  document.getElementById('ref-arabic-form').textContent  = concept.arabic?.form  || '—';
+  document.getElementById('ref-arabic-ipa').textContent   = concept.arabic?.ipa   || '—';
+  document.getElementById('ref-persian-form').textContent = concept.persian?.form || '—';
+  document.getElementById('ref-persian-ipa').textContent  = concept.persian?.ipa  || '—';
+
+  // Forms table
+  renderFormsTable(concept, dec);
+
+  // Cognate panel
+  renderCognatePanel(concept, dec);
+
+  // Borrowing panel
+  renderBorrowPanel(concept, dec);
+
+  // Notes
+  document.getElementById('notes-field').value = dec.notes || '';
+
+  // Nav
+  document.getElementById('btn-prev').disabled = currentIdx === 0;
+  document.getElementById('btn-next').disabled = currentIdx === filtered.length - 1;
+  document.getElementById('nav-position').textContent =
+    `Concept ${currentIdx + 1} of ${filtered.length}`;
+
+  // Sidebar active
+  renderSidebar();
+  scrollSidebarToActive();
+  updateProgress();
+}
+
+// ── FORMS TABLE ────────────────────────────────────────────────
+function renderFormsTable(concept, dec) {
+  const tbody = document.getElementById('forms-tbody');
+  const ipaEdits = dec.ipa_edits || {};
+  const rowFlags = dec.row_flags || {};
+  const varSels = dec.variant_selections || {};
+
+  tbody.innerHTML = concept.forms.map((form, fi) => {
+    const speaker = form.speaker;
+    const ipa = ipaEdits[speaker] !== undefined ? ipaEdits[speaker] : form.ipa;
+    const arSim = form.arabic_similarity;
+    const prSim = form.persian_similarity;
+    const cogClass = (dec.cognate_sets
+      ? findCogClass(speaker, dec.cognate_sets)
+      : null) || form.cognate_class || '?';
+    const [cFg, cBg] = cogColor(cogClass);
+    const isBorrow = form.borrowing_flag && !((dec.borrowings || {})[speaker] === 'not_borrowing');
+    const isFlagged = rowFlags[speaker];
+    
+    // Source & Verification badges
+    const srcClass = form.source ? form.source.toLowerCase() : '';
+    const srcBadge = form.source ? `<span class="source-badge ${srcClass}">${form.source}</span>` : '';
+    const verifyBadge = renderVerifyBadge(form.verification);
+
+    // Main Audio/Spectrogram
+    const mainAudio = form.audio_path ? `
+      <audio id="aud-${fi}" src="${escHtml(form.audio_path)}" preload="none"></audio>
+      <button class="play-btn" onclick="document.getElementById('aud-${fi}').play()">▶</button>
+    ` : '';
+    const mainSpec = form.spectrogram_path ? `
+      <span class="spec-toggle" onclick="toggleSpec('spec-${fi}')">Toggle Spectrogram</span>
+      <div id="spec-${fi}" class="spec-container hidden">
+        <img src="${escHtml(form.spectrogram_path)}" loading="lazy">
+      </div>
+    ` : '';
+
+    // Variants
+    let variantsHtml = '';
+    if (form.variants && form.variants.length > 0) {
+      variantsHtml = `<div class="variant-stack">` + form.variants.map((v, vi) => {
+        const isSelected = varSels[speaker] === vi;
+        const vId = `v-${fi}-${vi}`;
+        return `
+          <div class="variant-row">
+            <input type="radio" name="var-sel-${fi}" ${isSelected?'checked':''} onchange="selectVariant('${escHtml(speaker)}', ${vi})">
+            <span class="variant-ordinal">${v.ordinal} utterance</span>
+            <span class="variant-label">${v.label}</span>
+            <span style="font-family:monospace;flex:1">${escHtml(v.ipa)}</span>
+            <audio id="aud-${vId}" src="${escHtml(v.audio_path)}" preload="none"></audio>
+            <button class="play-btn" onclick="document.getElementById('aud-${vId}').play()">▶</button>
+            <span class="spec-toggle" onclick="toggleSpec('spec-${vId}')">Spec</span>
+          </div>
+          <div id="spec-${vId}" class="spec-container hidden">
+            <img src="${escHtml(v.spectrogram_path)}" loading="lazy">
+          </div>
+        `;
+      }).join('') + `</div>`;
+    }
+
+    return `<tr class="${isBorrow ? 'borrowing-row' : ''}">
+      <td>
+        <div style="font-weight:600">${escHtml(speaker)}</div>
+        ${srcBadge} ${verifyBadge}
+      </td>
+      <td>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span class="ipa-cell" id="ipa-cell-${fi}"
+            onclick="startEditIPA(${fi}, '${escHtml(speaker)}')"
+            title="Click to edit">${escHtml(ipa || '—')}</span>
+          ${mainAudio}
+        </div>
+        ${renderPhoneticFlags(form, fi, speaker)}
+        ${mainSpec}
+        ${variantsHtml}
+      </td>
+      <td>${simBar(arSim, 'Ar')}</td>
+      <td>${simBar(prSim, 'Pr')}</td>
+      <td>
+        <span class="cognate-badge" style="color:${cFg};background:${cBg}"
+          onclick="cycleCogClass(event,'${escHtml(speaker)}')"
+          title="Click to cycle class">${cogClass}</span>
+      </td>
+      <td>
+        <button class="row-flag-btn${isFlagged ? ' flagged' : ''}"
+          onclick="toggleRowFlag('${escHtml(speaker)}')">⚑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPhoneticFlags(form, fi, speaker) {
+  // Check form and all variants for phonetic_flags
+  let flags = form.phonetic_flags || [];
+  let flagSpecs = form.flag_spectrogram ? [form.flag_spectrogram] : [];
+  if (form.variants) {
+    for (const v of form.variants) {
+      if (v.phonetic_flags) { flags = flags.concat(v.phonetic_flags); }
+      if (v.flag_spectrogram) { flagSpecs.push(v.flag_spectrogram); }
+    }
+  }
+  if (!flags.length) return '';
+  
+  const cid = getCurrentConcept()?.concept_id;
+  const pfDecs = (cid && decisions[cid]?.phonetic_flag_decisions) || {};
+  
+  let html = '<div class="phon-flags">';
+  flags.forEach((fl, fli) => {
+    const key = speaker + '_' + fl.type + '_' + fli;
+    const resolved = pfDecs[key];
+    const resClass = resolved === 'accept' ? ' resolved-accept' : resolved === 'reject' ? ' resolved-reject' : '';
+    const label = fl.type === 'dark_l' ? '/ɫ/' :
+                  fl.type === 'x_fricative' ? '/x/' :
+                  fl.type === 'h_fricative' ? '/h/' :
+                  fl.type === 'gh_fricative' ? '/ɣ/' :
+                  fl.type === 'heavy_r' ? '/r/' : fl.type;
+    const sev = fl.severity === 'high' ? '❗' : '⚠';
+    const decIcon = resolved === 'accept' ? ' ✓' : resolved === 'reject' ? ' ✗' : '';
+    html += `<span class="phon-flag ${fl.type}${resClass}" 
+      onclick="toggleFlagSpec('pfspec-${fi}-${fli}')"
+      title="${escHtml(fl.issue || fl.desc)}">${sev} ${label}${decIcon}</span>`;
+    
+    // Per-flag spectrogram + action buttons
+    const spec = flagSpecs[0] || '';  // Use first available spectrogram
+    html += `<div id="pfspec-${fi}-${fli}" class="hidden" style="margin-top:4px;margin-bottom:8px">
+      ${spec ? `<img class="phon-flag-spec" src="${escHtml(spec)}" loading="lazy" style="max-width:100%;border-radius:4px">` : '<em style="color:#666">No spectrogram available</em>'}
+      <div class="phon-flag-actions" style="margin-top:4px;display:flex;gap:6px">
+        <button class="${resolved === 'accept' ? 'accept active' : 'accept'}" 
+          onclick="resolvePhonFlag('${escHtml(speaker)}', 'accept', ${fi}, ${fli})"
+          title="Accept: IPA needs correction for ${escHtml(label)}">✓ Fix IPA</button>
+        <button class="${resolved === 'reject' ? 'reject active' : 'reject'}" 
+          onclick="resolvePhonFlag('${escHtml(speaker)}', 'reject', ${fi}, ${fli})"
+          title="Reject: IPA is correct as-is for ${escHtml(label)}">✗ IPA OK</button>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  
+  return html;
+}
+
+function toggleFlagSpec(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+
+function resolvePhonFlag(speaker, action, fi, flagIdx) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.phonetic_flag_decisions = dec.phonetic_flag_decisions || {};
+  // Store per-flag decision: speaker_flagType_flagIdx
+  const form = concept.forms[fi];
+  let flags = (form?.phonetic_flags || []);
+  if (form?.variants) {
+    for (const v of form.variants) {
+      if (v.phonetic_flags) flags = flags.concat(v.phonetic_flags);
+    }
+  }
+  const flag = flags[flagIdx || 0];
+  const key = speaker + '_' + (flag?.type || 'unknown') + '_' + (flagIdx || 0);
+  dec.phonetic_flag_decisions[key] = action;
+  autoSave();
+  renderConcept();
+  const typeLabel = flag ? (flag.type === 'dark_l' ? '/ɫ/' : flag.type === 'x_fricative' ? '/x/' : flag.type === 'h_fricative' ? '/h/' : flag.type === 'gh_fricative' ? '/ɣ/' : flag.type === 'heavy_r' ? '/r/' : flag.type) : '';
+  showToast(action === 'accept' ? `${typeLabel} flagged for IPA correction` : `${typeLabel} IPA confirmed OK`);
+}
+
+function renderVerifyBadge(v) {
+  if (!v) return '';
+  const status = typeof v === 'string' ? v : v.status;
+  if (status === 'auto_verified') return `<span class="verify-badge" title="Auto-verified">✓</span>`;
+  if (status === 'human_required') return `<span class="verify-badge" title="Human Review Required" style="color:#f59e0b">⚠</span>`;
+  if (status === 'consensus_but_noisy') {
+    const tooltip = v.runs ? `Consensus reached but ASR was noisy. Runs: ${v.runs.join(', ')}` : 'Consensus but noisy';
+    return `<span class="verify-badge" title="${escHtml(tooltip)}" style="color:#eab308">⚠</span>`;
+  }
+  if (status === 'not_checked') return `<span class="verify-badge" title="Not Checked" style="color:#9aa3c0">—</span>`;
+  return '';
+}
+
+function toggleSpec(id) {
+  document.getElementById(id).classList.toggle('hidden');
+}
+
+function selectVariant(speaker, index) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  decisions[concept.concept_id].variant_selections = decisions[concept.concept_id].variant_selections || {};
+  decisions[concept.concept_id].variant_selections[speaker] = index;
+  
+  // Also update IPA edit to this variant's IPA if not already manually edited
+  const form = concept.forms.find(f => f.speaker === speaker);
+  if (form && form.variants[index]) {
+    decisions[concept.concept_id].ipa_edits = decisions[concept.concept_id].ipa_edits || {};
+    decisions[concept.concept_id].ipa_edits[speaker] = form.variants[index].ipa;
+  }
+
+  autoSave();
+  renderCurrentConcept();
+}
+
+function simBar(val, lang) {
+  const pct = Math.round(val * 100);
+  let cls = 'green';
+  if (val >= 0.7) cls = 'red';
+  else if (val >= 0.3) cls = 'yellow';
+  return `<div class="sim-bars">
+    <div class="sim-bar-row">
+      <span style="width:14px;text-align:right">${lang}</span>
+      <div class="sim-bar-wrap"><div class="sim-bar-fill ${cls}" style="width:${pct}%"></div></div>
+      <span>${pct}%</span>
+    </div>
+  </div>`;
+}
+
+function findCogClass(speaker, cogSets) {
+  for (const [cls, spks] of Object.entries(cogSets)) {
+    if (spks.includes(speaker)) return cls;
+  }
+  return null;
+}
+
+// ── INLINE IPA EDIT ───────────────────────────────────────────
+function startEditIPA(fi, speaker) {
+  const cell = document.getElementById(`ipa-cell-${fi}`);
+  if (!cell) return;
+  const curText = cell.textContent === '—' ? '' : cell.textContent;
+  cell.classList.add('editing');
+  cell.innerHTML = `<input class="ipa-input" id="ipa-input-${fi}" value="${escHtml(curText)}" style="width:${Math.max(60,curText.length*12)}px">`;
+  const inp = document.getElementById(`ipa-input-${fi}`);
+  inp.focus(); inp.select();
+  inp.onblur = () => commitEditIPA(fi, speaker, inp.value);
+  inp.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { cell.classList.remove('editing'); renderCurrentConcept(); }
+    e.stopPropagation();
+  };
+}
+
+function commitEditIPA(fi, speaker, newVal) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  decisions[concept.concept_id].ipa_edits = decisions[concept.concept_id].ipa_edits || {};
+  decisions[concept.concept_id].ipa_edits[speaker] = newVal.trim();
+  autoSave();
+  renderCurrentConcept();
+}
+
+// ── COGNATE PANEL ─────────────────────────────────────────────
+function renderCognatePanel(concept, dec) {
+  const panel = document.getElementById('cognate-panel');
+  const cogSets = dec.cognate_sets || concept.cognate_sets || {};
+  const action  = dec.cognate_action || 'none';
+
+  // Sets display
+  const setsHtml = Object.keys(cogSets).length
+    ? `<div class="cognate-sets-view">` +
+      Object.entries(cogSets).map(([cls, spks]) => {
+        const [fg, bg] = cogColor(cls);
+        return `<div class="cset-chip">
+          <span class="cset-chip-label" style="color:${fg}">${cls}</span>
+          <span class="cset-speakers">${spks.join(', ')}</span>
+        </div>`;
+      }).join('') + `</div>`
+    : '<p class="empty-msg">No cognate grouping data.</p>';
+
+  let splitHtml = '';
+  if (splitMode) {
+    const spkChips = concept.forms.map(f => {
+      const gIdx = splitGroups[f.speaker] !== undefined ? splitGroups[f.speaker] : 0;
+      const label = int_to_label(gIdx);
+      const [fg] = cogColor(label);
+      return `<div class="split-speaker-chip" onclick="cycleSplitGroup('${escHtml(f.speaker)}')">
+        <span class="chip-group" style="background:${fg}">${label}</span>
+        <span>${escHtml(f.speaker)}</span>
+      </div>`;
+    }).join('');
+    splitHtml = `<div class="split-hint">Click speakers to reassign cognate group:</div>
+      <div class="split-assign">${spkChips}</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="cog-btn success" onclick="commitSplit()">Apply Split</button>
+        <button class="cog-btn danger"  onclick="cancelSplit()">Cancel</button>
+      </div>`;
+  }
+
+  panel.innerHTML = setsHtml +
+    `<div class="cognate-action-bar">
+      <button class="cog-btn success${action==='accept'?' active':''}" onclick="setCognateAction('accept')">✓ Accept Grouping</button>
+      <button class="cog-btn${splitMode?' active':''}" onclick="toggleSplitMode()">✂ Split</button>
+      <button class="cog-btn" onclick="mergeAll()">⊕ Merge All</button>
+    </div>` + splitHtml;
+}
+
+function setCognateAction(act) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.cognate_action = act;
+  if (act === 'accept') {
+    dec.cognate_sets = concept.cognate_sets || {};
+    dec.status = dec.status || 'reviewed';
+    document.getElementById('btn-accept').classList.add('active');
+  }
+  autoSave();
+  renderCurrentConcept();
+}
+
+function toggleSplitMode() {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  splitMode = !splitMode;
+  if (splitMode) {
+    // Initialize: put all in group 0
+    splitGroups = {};
+    splitGroupCount = 2;
+    concept.forms.forEach(f => { splitGroups[f.speaker] = 0; });
+  }
+  renderCognatePanel(concept, decisions[concept.concept_id] || {});
+}
+
+function cycleSplitGroup(speaker) {
+  const cur = splitGroups[speaker] || 0;
+  splitGroups[speaker] = (cur + 1) % splitGroupCount;
+  const concept = getCurrentConcept();
+  renderCognatePanel(concept, decisions[concept.concept_id] || {});
+}
+
+function commitSplit() {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const newSets = {};
+  concept.forms.forEach(f => {
+    const lbl = int_to_label(splitGroups[f.speaker] || 0);
+    if (!newSets[lbl]) newSets[lbl] = [];
+    newSets[lbl].push(f.speaker);
+  });
+  decisions[concept.concept_id].cognate_sets = newSets;
+  decisions[concept.concept_id].cognate_action = 'split';
+  splitMode = false;
+  autoSave();
+  renderCurrentConcept();
+  showToast('Split applied.');
+}
+
+function cancelSplit() {
+  splitMode = false;
+  renderCurrentConcept();
+}
+
+function mergeAll() {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const allSpks = concept.forms.map(f => f.speaker);
+  decisions[concept.concept_id].cognate_sets  = { A: allSpks };
+  decisions[concept.concept_id].cognate_action = 'merge';
+  autoSave();
+  renderCurrentConcept();
+  showToast('All forms merged into set A.');
+}
+
+function cycleCogClass(evt, speaker) {
+  evt.stopPropagation();
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.cognate_sets = dec.cognate_sets || JSON.parse(JSON.stringify(concept.cognate_sets || {}));
+  // Remove speaker from current set
+  let curSet = null;
+  for (const [k, spks] of Object.entries(dec.cognate_sets)) {
+    const i = spks.indexOf(speaker);
+    if (i !== -1) { curSet = k; spks.splice(i, 1); break; }
+  }
+  // Clean empty sets
+  for (const k of Object.keys(dec.cognate_sets)) {
+    if (!dec.cognate_sets[k].length) delete dec.cognate_sets[k];
+  }
+  // Find next class label
+  const existing = Object.keys(dec.cognate_sets).sort();
+  let nextLabel = 'A';
+  if (curSet) {
+    const idx = existing.indexOf(curSet);
+    nextLabel = existing[(idx + 1) % existing.length] || nextNewLabel(existing);
+  }
+  if (!dec.cognate_sets[nextLabel]) dec.cognate_sets[nextLabel] = [];
+  dec.cognate_sets[nextLabel].push(speaker);
+  autoSave();
+  renderCurrentConcept();
+}
+
+function nextNewLabel(existing) {
+  let i = 0;
+  while (existing.includes(int_to_label(i))) i++;
+  return int_to_label(i);
+}
+
+function toggleRowFlag(speaker) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.row_flags = dec.row_flags || {};
+  dec.row_flags[speaker] = !dec.row_flags[speaker];
+  autoSave();
+  renderCurrentConcept();
+}
+
+// ── BORROWING PANEL ───────────────────────────────────────────
+function renderBorrowPanel(concept, dec) {
+  const panel = document.getElementById('borrow-panel');
+  const borrowings = dec.borrowings || {};
+  const flagged = concept.forms.filter(f => f.borrowing_flag);
+
+  if (!flagged.length) {
+    panel.innerHTML = '<p class="empty-msg">No potential borrowings detected for this concept.</p>';
+    return;
+  }
+
+  panel.innerHTML = flagged.map(f => {
+    const state = borrowings[f.speaker];
+    const handle = borrowings[`${f.speaker}__handle`] || 'missing';
+    const ipa = (dec.ipa_edits || {})[f.speaker] || f.ipa;
+    return `<div class="borrow-row" style="margin-bottom:8px">
+      <span class="br-speaker">${escHtml(f.speaker)}</span>
+      <span class="br-ipa">${escHtml(ipa)}</span>
+      <span class="br-source">→ ${f.borrowing_flag === 'arabic' ? 'Arabic' : 'Persian'} (${Math.round((f.borrowing_flag === 'arabic' ? f.arabic_similarity : f.persian_similarity)*100)}%)</span>
+      <div class="br-actions">
+        <button class="borrow-btn confirm${state==='confirmed'?' active':''}"
+          onclick="setBorrowing('${escHtml(f.speaker)}','confirmed')">Borrowing</button>
+        <button class="borrow-btn reject${state==='not_borrowing'?' active':''}"
+          onclick="setBorrowing('${escHtml(f.speaker)}','not_borrowing')">Not borrowing</button>
+        ${state==='confirmed' ? `<select class="borrow-handle-select" onchange="setBorrowHandle('${escHtml(f.speaker)}',this.value)">
+          <option value="missing"  ${handle==='missing'?'selected':''}>Code as Missing (?)</option>
+          <option value="separate" ${handle==='separate'?'selected':''}>Separate Cognate</option>
+        </select>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setBorrowing(speaker, state) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  decisions[concept.concept_id].borrowings = decisions[concept.concept_id].borrowings || {};
+  decisions[concept.concept_id].borrowings[speaker] = state;
+  autoSave();
+  renderCurrentConcept();
+}
+
+function setBorrowHandle(speaker, val) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  decisions[concept.concept_id].borrowings[`${speaker}__handle`] = val;
+  autoSave();
+}
+
+// ════════════════════════════════════════════════════════════════
+// ACTIONS
+// ════════════════════════════════════════════════════════════════
+function toggleAccept() {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.status = dec.status === 'reviewed' ? 'unreviewed' : 'reviewed';
+  autoSave();
+  renderCurrentConcept();
+  updateProgress();
+}
+
+function toggleFlag() {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  const dec = decisions[concept.concept_id];
+  dec.status = dec.status === 'flagged' ? 'unreviewed' : 'flagged';
+  autoSave();
+  renderCurrentConcept();
+}
+
+function saveNotes(val) {
+  const concept = getCurrentConcept();
+  if (!concept) return;
+  ensureDec(concept.concept_id);
+  decisions[concept.concept_id].notes = val;
+  autoSave();
+}
+
+function navigate(dir) {
+  renderConcept(currentIdx + dir);
+}
+
+// ════════════════════════════════════════════════════════════════
+// DECISIONS EXPORT / IMPORT
+// ════════════════════════════════════════════════════════════════
+function saveDecisions() {
+  if (!reviewData) return;
+  const total    = reviewData.concepts.length;
+  const reviewed = Object.values(decisions).filter(d => d.status === 'reviewed').length;
+  
+  // Collect phonetic flag decisions summary
+  const phonFlagSummary = { accept: [], reject: [], pending: 0 };
+  let totalPhonFlags = 0;
+  for (const c of reviewData.concepts) {
+    const dec = decisions[c.concept_id];
+    const pfDecs = dec?.phonetic_flag_decisions || {};
+    for (let fi = 0; fi < c.forms.length; fi++) {
+      const form = c.forms[fi];
+      let flags = form.phonetic_flags || [];
+      if (form.variants) {
+        for (const v of form.variants) {
+          if (v.phonetic_flags) flags = flags.concat(v.phonetic_flags);
+        }
+      }
+      flags.forEach((fl, fli) => {
+        totalPhonFlags++;
+        const key = form.speaker + '_' + fl.type + '_' + fli;
+        const decision = pfDecs[key];
+        if (decision === 'accept') {
+          phonFlagSummary.accept.push({
+            concept: c.concept_id,
+            concept_en: c.concept_en,
+            speaker: form.speaker,
+            type: fl.type,
+            issue: fl.issue,
+            ipa: form.ipa,
+            ortho: form.ortho,
+          });
+        } else if (decision === 'reject') {
+          phonFlagSummary.reject.push({
+            concept: c.concept_id,
+            concept_en: c.concept_en,
+            speaker: form.speaker,
+            type: fl.type,
+          });
+        } else {
+          phonFlagSummary.pending++;
+        }
+      });
+    }
+  }
+  
+  const out = {
+    metadata: {
+      reviewer:       'Lucas Ardelean',
+      date:           new Date().toISOString().slice(0, 10),
+      total_concepts: total,
+      reviewed:       reviewed,
+      phonetic_flags: {
+        total: totalPhonFlags,
+        accepted_for_correction: phonFlagSummary.accept.length,
+        rejected_ipa_ok: phonFlagSummary.reject.length,
+        pending: phonFlagSummary.pending,
+      },
+    },
+    decisions,
+    phonetic_corrections: phonFlagSummary.accept,
+    phonetic_confirmed_ok: phonFlagSummary.reject,
+  };
+  downloadJSON(out, 'decisions.json');
+  showToast(`decisions.json downloaded. ${phonFlagSummary.accept.length} IPA corrections, ${phonFlagSummary.reject.length} confirmed OK, ${phonFlagSummary.pending} pending.`);
+}
+
+function triggerLoadDecisions() {
+  document.getElementById('decision-input').click();
+}
+
+function handleDecisionLoad(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const d = JSON.parse(ev.target.result);
+      decisions = d.decisions || {};
+      autoSave();
+      renderSidebar();
+      renderConcept(currentIdx);
+      updateProgress();
+      showToast('Decisions loaded.');
+    } catch(err) {
+      alert('Could not parse decisions JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function autoSave() {
+  if (!reviewData) return;
+  const total    = reviewData.concepts.length;
+  const reviewed = Object.values(decisions).filter(d => d.status === 'reviewed').length;
+  localStorage.setItem('sk_review_decisions', JSON.stringify({
+    metadata: { reviewer: 'Lucas Ardelean', date: new Date().toISOString().slice(0,10), total_concepts: total, reviewed },
+    decisions,
+  }));
+}
+
+// ════════════════════════════════════════════════════════════════
+// PROGRESS
+// ════════════════════════════════════════════════════════════════
+function updateProgress() {
+  if (!reviewData) return;
+  const total    = reviewData.concepts.length;
+  const reviewed = Object.values(decisions).filter(d => d.status === 'reviewed').length;
+  document.getElementById('progress-badge').textContent = `${reviewed} / ${total} reviewed`;
+  document.getElementById('progress-bar-fill').style.width = total ? `${reviewed / total * 100}%` : '0%';
+  
+  // Phonetic flags progress
+  let totalPhonFlags = 0, resolvedPhonFlags = 0;
+  for (const c of reviewData.concepts) {
+    const pfDecs = decisions[c.concept_id]?.phonetic_flag_decisions || {};
+    for (const form of c.forms) {
+      let flags = form.phonetic_flags || [];
+      if (form.variants) {
+        for (const v of form.variants) { if (v.phonetic_flags) flags = flags.concat(v.phonetic_flags); }
+      }
+      flags.forEach((fl, fli) => {
+        totalPhonFlags++;
+        const key = form.speaker + '_' + fl.type + '_' + fli;
+        if (pfDecs[key]) resolvedPhonFlags++;
+      });
+    }
+  }
+  const phonEl = document.getElementById('phon-progress-badge');
+  if (phonEl && totalPhonFlags > 0) {
+    phonEl.textContent = `🔬 Phonetic flags: ${resolvedPhonFlags} / ${totalPhonFlags} resolved`;
+    phonEl.style.color = resolvedPhonFlags === totalPhonFlags ? '#22c55e' : '#94a3b8';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════
+function getCurrentConcept() {
+  const filtered = getFilteredConcepts();
+  return filtered[currentIdx] || null;
+}
+
+function renderCurrentConcept() {
+  renderConcept(currentIdx);
+}
+
+function ensureDec(cid) {
+  if (!decisions[cid]) decisions[cid] = { 
+    status: 'unreviewed', 
+    notes: '', 
+    ipa_edits: {}, 
+    borrowings: {}, 
+    row_flags: {},
+    variant_selections: {}
+  };
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function int_to_label(n) {
+  let result = '';
+  n = n + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    result = String.fromCharCode(65 + rem) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result;
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ════════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (!reviewData) return;
+  // Ignore if typing in textarea/input
+  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
+  if (e.key === 'Enter')  { e.preventDefault(); toggleAccept(); }
+  if (e.key === 'b' || e.key === 'B') { e.preventDefault(); toggleFlag(); }
+  if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFlag(); }
+});
+</script>
+</body>
+</html>
