@@ -43,7 +43,7 @@
     height: 52px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     z-index: 100;
@@ -57,6 +57,12 @@
   }
   #topbar .sep { color: #4a5580; }
 
+  .topbar-mode-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   #topbar-actions {
     display: flex;
     align-items: center;
@@ -65,7 +71,7 @@
 
   .topbar-spacer { flex: 1; }
 
-  .mode-switcher { display:flex; gap:0; margin-left:12px; }
+  .mode-switcher { display:flex; gap:0; }
   .mode-switcher a { padding:4px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; border:1px solid #4a5580; transition:all 0.15s; }
   .mode-switcher a:first-child { border-radius:6px 0 0 6px; }
   .mode-switcher a:last-child { border-radius:0 6px 6px 0; border-left:none; }
@@ -716,10 +722,6 @@
       gap: 8px;
     }
 
-    .mode-switcher {
-      margin-left: 0;
-    }
-
     #status-pill {
       margin-left: 0;
     }
@@ -754,13 +756,15 @@
     <a href="parse.html" class="active">Annotate</a>
     <a href="compare.html">Compare</a>
   </div>
-  <select id="speaker-select"></select>
-  <div id="topbar-actions">
-    <button class="ctrl-btn" id="btn-new-speaker" type="button">New Speaker</button>
-    <div id="settings-wrap">
-      <button class="ctrl-btn" id="btn-settings" type="button">Settings ▾</button>
-      <div id="settings-menu" class="hidden">
-        <button class="settings-item danger" id="btn-reset-project" type="button">Reset Project</button>
+  <div class="topbar-mode-controls">
+    <select id="speaker-select"></select>
+    <div id="topbar-actions">
+      <button class="ctrl-btn" id="btn-new-speaker" type="button">New Speaker</button>
+      <div id="settings-wrap">
+        <button class="ctrl-btn" id="btn-settings" type="button">Settings ▾</button>
+        <div id="settings-menu" class="hidden">
+          <button class="settings-item danger" id="btn-reset-project" type="button">Reset Project</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2715,7 +2719,7 @@ function openSegment(idx) {
   if (ws) {
     STATE.segmentPlayMode = true;
     const bounds = getSegmentBounds(idx, seg);
-    const targetSec = Math.max(0, bounds.start - 0.3);
+    const targetSec = Math.max(0, bounds.start);
     if (typeof ws.setTime === 'function') {
       ws.setTime(targetSec);
     } else {
