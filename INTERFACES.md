@@ -890,17 +890,17 @@ interface PeaksData {
 | `POST /api/stt/status` | POST | Poll STT progress | `{ jobId, progress, status, segments? }` |
 | `POST /api/ipa` | POST | Text → IPA | `{ ipa }` |
 | `POST /api/suggest` | POST | AI concept suggestions | `{ suggestions[] }` |
-| `POST /api/chat/session` | POST | Create/get ephemeral chat session | `{ sessionId, ephemeral, sharedAcrossPages, messages[] }` |
-| `GET /api/chat/session/{sessionId}` | GET | Read current chat session snapshot | `{ sessionId, messages[], ... }` |
-| `POST /api/chat/run` | POST | Start assistant run (read-only MVP) | `{ jobId, sessionId, status, readOnly: true, attachmentsSupported: false }` |
-| `POST /api/chat/run/status` | POST | Poll chat run status/result | `{ jobId, status, progress, result?, error?, done, success }` |
+| `POST /api/chat/session` | POST | Create/get ephemeral chat session | `{ sessionId, messages[], readOnly: true, attachmentsSupported: false, limits, ... }` |
+| `GET /api/chat/session/{sessionId}` | GET | Read current chat session snapshot | `{ sessionId, messages[], readOnly: true, attachmentsSupported: false, limits, ... }` |
+| `POST /api/chat/run` | POST | Start assistant run (read-only MVP) | `{ jobId, runId, sessionId, status, mode: "read-only", readOnly: true, attachmentsSupported: false, readOnlyNotice, limits }` |
+| `POST /api/chat/run/status` | POST | Poll chat run status/result (`jobId` or `runId` accepted in request body) | `{ jobId, runId, status, progress, result?, error?, done, success, mode: "read-only", readOnly: true, attachmentsSupported: false }` |
 | `POST /api/compute/cognates` | POST | LexStat computation | `{ jobId }` |
 | `POST /api/compute/offset` | POST | Auto-offset detection | `{ jobId }` |
 | `POST /api/compute/spectrograms` | POST | Batch spectrograms | `{ jobId }` |
 | `GET /api/enrichments` | GET | Read enrichments | `{ enrichments }` |
 | `POST /api/enrichments` | POST | Write enrichments | `{ success }` |
 | `GET /api/config` | GET | Read config | `{ config }` |
-| `PUT /api/config` | PUT | Update config | `{ success }` |
+| `PUT /api/config` | PUT | Update config | `{ success, config }` |
 | `GET /*` | GET | Static files | File content |
 
 All long-running endpoints return immediately with `{ jobId }`.
@@ -915,23 +915,26 @@ All long-running endpoints return immediately with `{ jobId }`.
 Defense-in-depth layers currently present in code:
 
 1. **Route-level guardrails (`python/server.py`)**
-   - `/api/chat/run` rejects attachments and file-like context fields (`attachments`, `files`, `fileIds`, `contextFiles`, `context_paths`).
-   - Chat runs are created as server jobs (`type: "chat:run"`) and return `readOnly: true` + `attachmentsSupported: false`.
+   - `/api/chat/run` rejects attachments/file-like fields, including nested request payload keys such as `attachments`, `attachmentIds`, `files`, `fileIds`, `contextFiles`, and `context_paths`.
+   - Requests cannot opt out of read-only mode (`readOnly=false`, non-`read-only` modes, and `attachmentsSupported=true` are rejected).
+   - Chat routes expose explicit read-only policy metadata (`mode`, `readOnly`, `attachmentsSupported`, `readOnlyNotice`, `limits`) and `/api/chat/run/status` accepts either `jobId` or `runId`.
 2. **Orchestrator policy (`python/ai/chat_orchestrator.py`)**
    - System prompt hard-codes read-only behavior and explicitly forbids mutation claims.
+   - Final assistant text is post-guarded so write requests and attachment requests get an explicit read-only/no-attachments notice.
    - Tool execution is bounded by allowlist and max tool rounds.
 3. **Tool allowlist + validation (`python/ai/chat_tools.py`)**
    - Only PARSE-native tools are callable (`project_context_read`, `annotation_read`, `stt_start`, `stt_status`, `cognate_compute_preview`, `cross_speaker_match_preview`, `spectrogram_preview`).
    - Tool args are schema-validated; path-based tools are constrained to project-safe roots.
-   - Preview tools return explicit `readOnly/previewOnly` markers and do not write annotation/enrichment/config files.
+   - Tool results are normalized to include `mode: "read-only"`, `readOnly: true`, and `readOnlyNotice` metadata.
+   - Preview tools do not write annotation/enrichment/config files.
 4. **Config coercion (`python/ai/provider.py`)**
    - Chat runtime forces OpenAI-only + `read_only=true` + `attachments_supported=false` even if config attempts to disable those constraints.
+   - Chat numeric limits are coerced/clamped into sane bounds (`max_tool_rounds`, `max_history_messages`, `max_output_tokens`, `max_tool_result_chars`, `max_user_message_chars`, `max_session_messages`).
 5. **UI transparency (`js/shared/chat-client.js`, `js/shared/chat-panel.js`)**
    - Every run is seeded with a read-only policy transcript entry.
    - Panel labels mode as read-only and reminds reviewers that mutating tools are disabled.
 
-For the detailed contract and explicit in-scope/deferred split, see:
-`docs/mc-246-readonly-assistant-contract.md`.
+This section is the current source of truth for the read-only MVP contract in PR #5.
 
 ---
 

@@ -2131,21 +2131,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_post_chat_run_start(self) -> None:
         body = self._expect_object(self._read_json_body(required=True), "Request body")
+        policy = None
 
-        attachments = body.get("attachments")
-        if isinstance(attachments, list) and attachments:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Attachments are not supported in chat MVP")
-
-        for forbidden_key in ("files", "fileIds", "contextFiles", "context_paths"):
-            if forbidden_key in body and body.get(forbidden_key):
-                raise ApiError(
-                    HTTPStatus.BAD_REQUEST,
-                    "{0} is not supported in chat MVP".format(forbidden_key),
-                )
-
-        message_text = str(body.get("message") or body.get("text") or "").strip()
-        if not message_text:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "message is required")
+        try:
+            policy, message_text = _chat_validate_run_request(body)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
 
         raw_session_id = body.get("sessionId", body.get("session_id"))
         session_id = str(raw_session_id).strip() if raw_session_id is not None else ""
@@ -2171,22 +2162,30 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         )
         thread.start()
 
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "jobId": job_id,
-                "sessionId": resolved_session_id,
-                "status": "running",
-                "readOnly": True,
-                "attachmentsSupported": False,
-            },
-        )
+        response_payload = {
+            "jobId": job_id,
+            "runId": job_id,
+            "sessionId": resolved_session_id,
+            "status": "running",
+        }
+        response_payload.update(_chat_public_policy_payload())
+        if policy is not None:
+            response_payload["provider"] = str(policy.get("provider") or response_payload.get("provider") or "")
+            response_payload["model"] = str(policy.get("model") or response_payload.get("model") or "")
+
+        self._send_json(HTTPStatus.OK, response_payload)
 
     def _api_post_chat_run_status(self) -> None:
         body = self._expect_object(self._read_json_body(required=True), "Request body")
-        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
+        job_id = str(
+            body.get("jobId")
+            or body.get("job_id")
+            or body.get("runId")
+            or body.get("run_id")
+            or ""
+        ).strip()
         if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is required")
+            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId or runId is required")
 
         job = _get_job_snapshot(job_id)
         if job is None:
@@ -2277,7 +2276,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_enrichments(self) -> None:
         payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
-        self._send_json(HTTPStatus.OK, payload)
+        self._send_json(HTTPStatus.OK, {"enrichments": payload})
 
     def _api_post_enrichments(self) -> None:
         body = self._read_json_body(required=True)
@@ -2290,7 +2289,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())
-        self._send_json(HTTPStatus.OK, config)
+        self._send_json(HTTPStatus.OK, {"config": config})
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
