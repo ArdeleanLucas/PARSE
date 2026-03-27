@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import socket
 import sys
 import threading
@@ -15,7 +16,9 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
-from ai.provider import get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
+from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
+from ai.chat_tools import ParseChatTools
+from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -35,8 +38,30 @@ CORS_HEADERS = {
     "Accept-Ranges": "bytes",
 }
 
+ANNOTATION_FILENAME_SUFFIX = ".parse.json"
+ANNOTATION_LEGACY_FILENAME_SUFFIX = ".json"
+ANNOTATION_TIER_ORDER = {
+    "ipa": 1,
+    "ortho": 2,
+    "concept": 3,
+    "speaker": 4,
+}
+ANNOTATION_MATCH_EPSILON = 0.0005
+
+CHAT_SESSION_RETENTION_SECONDS = 8 * 60 * 60
+CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION = 200
+CHAT_DEFAULT_MAX_MESSAGE_CHARS = 8000
+CHAT_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+
+_chat_sessions: Dict[str, Dict[str, Any]] = {}
+_chat_sessions_lock = threading.Lock()
+
+_chat_runtime_lock = threading.Lock()
+_chat_tools_runtime: Optional[ParseChatTools] = None
+_chat_orchestrator_runtime: Optional[ChatOrchestrator] = None
 
 
 class ApiError(Exception):
@@ -214,6 +239,1121 @@ def _write_json_file(path: pathlib.Path, payload: Dict[str, Any]) -> None:
     )
 
 
+def _project_json_path() -> pathlib.Path:
+    return _project_root() / "project.json"
+
+
+def _source_index_path() -> pathlib.Path:
+    return _project_root() / "source_index.json"
+
+
+def _annotations_dir_path() -> pathlib.Path:
+    return _resolve_project_path("annotations")
+
+
+def _read_json_any_file(path: pathlib.Path) -> Any:
+    if not path.exists():
+        return None
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _coerce_finite_float(value: Any) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if number != number:
+        return None
+    if number in {float("inf"), float("-inf")}:
+        return None
+
+    return number
+
+
+def _coerce_bool_like(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "disabled"}:
+            return False
+
+    return bool(default)
+
+
+def _coerce_int_range(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = int(default)
+
+    if number < minimum:
+        number = minimum
+    if number > maximum:
+        number = maximum
+
+    return number
+
+
+def _coerce_float_range(value: Any, default: float, minimum: float, maximum: float) -> float:
+    number = _coerce_finite_float(value)
+    if number is None:
+        number = float(default)
+
+    if number < minimum:
+        number = minimum
+    if number > maximum:
+        number = maximum
+
+    return float(number)
+
+
+def _has_nonempty_value(value: Any) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, str):
+        return bool(value.strip())
+
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) > 0
+
+    return True
+
+
+def _chat_runtime_policy(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    source_config = config if isinstance(config, dict) else load_ai_config(_config_path())
+    chat_config = get_chat_config(source_config)
+
+    return {
+        "enabled": _coerce_bool_like(chat_config.get("enabled"), True),
+        "mode": "read-only",
+        "readOnly": True,
+        "attachmentsSupported": False,
+        "readOnlyNotice": READ_ONLY_NOTICE,
+        "provider": str(chat_config.get("provider") or "openai").strip() or "openai",
+        "model": str(chat_config.get("model") or "gpt54").strip() or "gpt54",
+        "apiKeyEnv": str(chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY",
+        "reasoningEffort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
+        "temperature": _coerce_float_range(chat_config.get("temperature"), 0.1, 0.0, 2.0),
+        "maxToolRounds": _coerce_int_range(chat_config.get("max_tool_rounds"), 4, 1, 8),
+        "maxHistoryMessages": _coerce_int_range(chat_config.get("max_history_messages"), 24, 1, 64),
+        "maxOutputTokens": _coerce_int_range(chat_config.get("max_output_tokens"), 1400, 128, 8192),
+        "maxToolResultChars": _coerce_int_range(chat_config.get("max_tool_result_chars"), 24000, 2000, 200000),
+        "maxUserMessageChars": _coerce_int_range(
+            chat_config.get("max_user_message_chars"),
+            CHAT_DEFAULT_MAX_MESSAGE_CHARS,
+            500,
+            50000,
+        ),
+        "maxSessionMessages": _coerce_int_range(
+            chat_config.get("max_session_messages"),
+            CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION,
+            10,
+            1000,
+        ),
+    }
+
+
+def _chat_public_policy_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    policy = _chat_runtime_policy(config)
+    return {
+        "mode": policy["mode"],
+        "readOnly": policy["readOnly"],
+        "attachmentsSupported": policy["attachmentsSupported"],
+        "readOnlyNotice": policy["readOnlyNotice"],
+        "provider": policy["provider"],
+        "model": policy["model"],
+        "reasoningEffort": policy["reasoningEffort"],
+        "limits": {
+            "maxUserMessageChars": policy["maxUserMessageChars"],
+            "maxSessionMessages": policy["maxSessionMessages"],
+            "maxHistoryMessages": policy["maxHistoryMessages"],
+            "maxToolRounds": policy["maxToolRounds"],
+            "maxToolResultChars": policy["maxToolResultChars"],
+            "maxOutputTokens": policy["maxOutputTokens"],
+        },
+    }
+
+
+def _find_nonempty_key_path(value: Any, forbidden_keys: Sequence[str], path: str = "$") -> Optional[str]:
+    normalized_keys = {str(item).strip().lower() for item in forbidden_keys if str(item).strip()}
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            next_path = "{0}.{1}".format(path, key_text)
+            if key_text.strip().lower() in normalized_keys and _has_nonempty_value(item):
+                return next_path
+
+            nested = _find_nonempty_key_path(item, tuple(normalized_keys), path=next_path)
+            if nested:
+                return nested
+        return None
+
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            nested = _find_nonempty_key_path(item, tuple(normalized_keys), path="{0}[{1}]".format(path, index))
+            if nested:
+                return nested
+
+    return None
+
+
+def _chat_validate_run_request(body: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    policy = _chat_runtime_policy()
+
+    if not policy.get("enabled", True):
+        raise ApiError(HTTPStatus.SERVICE_UNAVAILABLE, "Chat assistant is disabled in config")
+
+    if "readOnly" in body and not _coerce_bool_like(body.get("readOnly"), True):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Chat assistant only supports readOnly=true in this MVP")
+
+    requested_mode = str(body.get("mode") or "").strip().lower()
+    if requested_mode and requested_mode != "read-only":
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Chat assistant only supports mode='read-only'")
+
+    if "attachmentsSupported" in body and _coerce_bool_like(body.get("attachmentsSupported"), False):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "attachmentsSupported=true is not supported in chat MVP")
+
+    forbidden_path = _find_nonempty_key_path(
+        body,
+        forbidden_keys=(
+            "attachments",
+            "attachmentIds",
+            "files",
+            "fileIds",
+            "file_ids",
+            "contextFiles",
+            "context_files",
+            "context_paths",
+        ),
+    )
+    if forbidden_path:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            "{0} is not supported in chat MVP; file/context attachments are disabled".format(forbidden_path),
+        )
+
+    message_text = str(body.get("message") or body.get("text") or "").strip()
+    if not message_text:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "message is required")
+
+    max_chars = int(policy.get("maxUserMessageChars") or CHAT_DEFAULT_MAX_MESSAGE_CHARS)
+    if len(message_text) > max_chars:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            "message exceeds maxUserMessageChars={0}".format(max_chars),
+        )
+
+    return policy, message_text
+
+
+def _annotation_project_payload() -> Dict[str, Any]:
+    return _read_json_file(_project_json_path(), {})
+
+
+def _annotation_source_index_payload() -> Dict[str, Any]:
+    return _read_json_file(_source_index_path(), {})
+
+
+def _annotation_project_id() -> str:
+    project_id = str(_annotation_project_payload().get("project_id") or "").strip()
+    if project_id:
+        return project_id
+    return "parse-project"
+
+
+def _annotation_language_code(fallback_record: Optional[Dict[str, Any]] = None) -> str:
+    project = _annotation_project_payload()
+    language_block = project.get("language") if isinstance(project, dict) else {}
+
+    if isinstance(language_block, dict):
+        language_code = str(language_block.get("code") or "").strip()
+        if language_code:
+            return language_code
+
+    metadata_block = {}
+    if isinstance(fallback_record, dict):
+        metadata_raw = fallback_record.get("metadata")
+        if isinstance(metadata_raw, dict):
+            metadata_block = metadata_raw
+
+    metadata_language = str(metadata_block.get("language_code") or "").strip()
+    if metadata_language:
+        return metadata_language
+
+    return "und"
+
+
+def _annotation_source_entries_for_speaker(speaker: str) -> List[Dict[str, Any]]:
+    source_index = _annotation_source_index_payload()
+    speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
+    if not isinstance(speakers_block, dict):
+        return []
+
+    speaker_entry = speakers_block.get(speaker)
+    if not isinstance(speaker_entry, dict):
+        return []
+
+    for key in ("source_wavs", "source_files"):
+        entries = speaker_entry.get(key)
+        if isinstance(entries, list):
+            return [entry for entry in entries if isinstance(entry, dict)]
+
+    return []
+
+
+def _annotation_primary_source_wav(speaker: str) -> str:
+    source_entries = _annotation_source_entries_for_speaker(speaker)
+    if not source_entries:
+        return ""
+
+    selected = None
+    for entry in source_entries:
+        if entry.get("is_primary"):
+            selected = entry
+            break
+
+    if selected is None:
+        selected = source_entries[0]
+
+    filename = str(selected.get("filename") or "").strip()
+    if filename:
+        return filename
+
+    return str(selected.get("file") or "").strip()
+
+
+def _annotation_source_duration(speaker: str, source_wav: str) -> Optional[float]:
+    source_entries = _annotation_source_entries_for_speaker(speaker)
+    if not source_entries:
+        return None
+
+    requested = str(source_wav or "").strip()
+    selected = None
+
+    if requested:
+        for entry in source_entries:
+            filename = str(entry.get("filename") or "").strip()
+            if filename and filename == requested:
+                selected = entry
+                break
+
+    if selected is None:
+        for entry in source_entries:
+            if entry.get("is_primary"):
+                selected = entry
+                break
+
+    if selected is None:
+        selected = source_entries[0]
+
+    duration = _coerce_finite_float(selected.get("duration_sec"))
+    if duration is None or duration < 0:
+        return None
+
+    return duration
+
+
+def _annotation_empty_tier(display_order: int) -> Dict[str, Any]:
+    return {
+        "type": "interval",
+        "display_order": int(display_order),
+        "intervals": [],
+    }
+
+
+def _annotation_sort_intervals(intervals: List[Dict[str, Any]]) -> None:
+    intervals.sort(key=lambda interval: (float(interval.get("start", 0.0)), float(interval.get("end", 0.0))))
+
+
+def _annotation_normalize_interval(raw_interval: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_interval, dict):
+        return None
+
+    start = _coerce_finite_float(
+        raw_interval.get("start", raw_interval.get("xmin"))
+    )
+    end = _coerce_finite_float(
+        raw_interval.get("end", raw_interval.get("xmax"))
+    )
+
+    if start is None or end is None:
+        return None
+
+    if end < start:
+        return None
+
+    return {
+        "start": float(start),
+        "end": float(end),
+        "text": "" if raw_interval.get("text") is None else str(raw_interval.get("text")),
+    }
+
+
+def _annotation_tier_key(raw_name: Any) -> str:
+    tier_name = str(raw_name or "").strip()
+    if not tier_name:
+        return ""
+
+    lowered = tier_name.lower()
+    if lowered in ANNOTATION_TIER_ORDER:
+        return lowered
+
+    return tier_name
+
+
+def _annotation_normalize_tier(raw_tier: Any, default_display_order: int) -> Dict[str, Any]:
+    tier_payload = raw_tier if isinstance(raw_tier, dict) else {}
+
+    display_order_raw = _coerce_finite_float(tier_payload.get("display_order"))
+    if display_order_raw is None or display_order_raw <= 0:
+        display_order = int(default_display_order)
+    else:
+        display_order = int(display_order_raw)
+
+    intervals_raw = tier_payload.get("intervals")
+    intervals_out: List[Dict[str, Any]] = []
+
+    if isinstance(intervals_raw, list):
+        for raw_interval in intervals_raw:
+            interval = _annotation_normalize_interval(raw_interval)
+            if interval is not None:
+                intervals_out.append(interval)
+
+    _annotation_sort_intervals(intervals_out)
+
+    return {
+        "type": "interval",
+        "display_order": display_order,
+        "intervals": intervals_out,
+    }
+
+
+def _annotation_max_end(record: Dict[str, Any]) -> float:
+    tiers = record.get("tiers") if isinstance(record, dict) else {}
+    if not isinstance(tiers, dict):
+        return 0.0
+
+    max_end = 0.0
+    for tier in tiers.values():
+        if not isinstance(tier, dict):
+            continue
+        intervals = tier.get("intervals")
+        if not isinstance(intervals, list):
+            continue
+
+        for raw_interval in intervals:
+            interval = _annotation_normalize_interval(raw_interval)
+            if interval is None:
+                continue
+            if interval["end"] > max_end:
+                max_end = interval["end"]
+
+    return max_end
+
+
+def _annotation_sort_all_intervals(record: Dict[str, Any]) -> None:
+    tiers = record.get("tiers")
+    if not isinstance(tiers, dict):
+        return
+
+    for tier in tiers.values():
+        if not isinstance(tier, dict):
+            continue
+        intervals = tier.get("intervals")
+        if isinstance(intervals, list):
+            _annotation_sort_intervals(intervals)
+
+
+def _annotation_collect_speaker_intervals(record: Dict[str, Any]) -> List[Dict[str, float]]:
+    tiers = record.get("tiers") if isinstance(record, dict) else {}
+    if not isinstance(tiers, dict):
+        return []
+
+    for tier_key in ("concept", "ipa", "ortho"):
+        tier = tiers.get(tier_key)
+        if not isinstance(tier, dict):
+            continue
+
+        intervals = tier.get("intervals")
+        if not isinstance(intervals, list):
+            continue
+
+        dedupe: Dict[str, bool] = {}
+        aligned: List[Dict[str, float]] = []
+
+        for raw_interval in intervals:
+            interval = _annotation_normalize_interval(raw_interval)
+            if interval is None:
+                continue
+
+            if not str(interval.get("text") or "").strip():
+                continue
+
+            dedupe_key = "{0:.6f}|{1:.6f}".format(interval["start"], interval["end"])
+            if dedupe_key in dedupe:
+                continue
+
+            dedupe[dedupe_key] = True
+            aligned.append({"start": interval["start"], "end": interval["end"]})
+
+        if aligned:
+            return aligned
+
+    speaker_tier = tiers.get("speaker")
+    if not isinstance(speaker_tier, dict):
+        return []
+
+    fallback_intervals = speaker_tier.get("intervals")
+    if not isinstance(fallback_intervals, list):
+        return []
+
+    fallback: List[Dict[str, float]] = []
+    for raw_interval in fallback_intervals:
+        interval = _annotation_normalize_interval(raw_interval)
+        if interval is None:
+            continue
+
+        fallback.append({"start": interval["start"], "end": interval["end"]})
+
+    return fallback
+
+
+def _annotation_sync_speaker_tier(record: Dict[str, Any]) -> None:
+    if not isinstance(record, dict):
+        return
+
+    tiers = record.get("tiers")
+    if not isinstance(tiers, dict):
+        tiers = {}
+        record["tiers"] = tiers
+
+    speaker_tier = tiers.get("speaker")
+    if not isinstance(speaker_tier, dict):
+        speaker_tier = _annotation_empty_tier(ANNOTATION_TIER_ORDER["speaker"])
+        tiers["speaker"] = speaker_tier
+
+    speaker_tier["type"] = "interval"
+    speaker_tier["display_order"] = ANNOTATION_TIER_ORDER["speaker"]
+
+    duration = _coerce_finite_float(record.get("source_audio_duration_sec"))
+    if duration is None or duration < 0:
+        duration = 0.0
+
+    record["source_audio_duration_sec"] = float(duration)
+
+    speaker_text = str(record.get("speaker") or "").strip()
+    aligned_intervals = _annotation_collect_speaker_intervals(record)
+
+    speaker_tier["intervals"] = [
+        {
+            "start": interval["start"],
+            "end": interval["end"],
+            "text": speaker_text,
+        }
+        for interval in aligned_intervals
+    ]
+
+
+def _annotation_touch_metadata(record: Dict[str, Any], preserve_created: bool) -> None:
+    metadata = record.get("metadata") if isinstance(record, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+        record["metadata"] = metadata
+
+    if (not preserve_created) or not str(metadata.get("created") or "").strip():
+        metadata["created"] = _utc_now_iso()
+
+    metadata["modified"] = _utc_now_iso()
+
+    language_code = str(metadata.get("language_code") or "").strip()
+    if not language_code:
+        metadata["language_code"] = _annotation_language_code(record)
+
+
+def _annotation_empty_record(
+    speaker: str,
+    source_audio: Optional[str],
+    duration_sec: Optional[float],
+    existing_record: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    now_iso = _utc_now_iso()
+    speaker_text = str(speaker or "").strip()
+
+    duration = _coerce_finite_float(duration_sec)
+    if duration is None or duration < 0:
+        duration = 0.0
+
+    source_audio_text = str(source_audio or "").strip()
+    if not source_audio_text:
+        source_audio_text = _annotation_primary_source_wav(speaker_text)
+
+    return {
+        "version": 1,
+        "project_id": _annotation_project_id(),
+        "speaker": speaker_text,
+        "source_audio": source_audio_text,
+        "source_audio_duration_sec": float(duration),
+        "tiers": {
+            "ipa": _annotation_empty_tier(ANNOTATION_TIER_ORDER["ipa"]),
+            "ortho": _annotation_empty_tier(ANNOTATION_TIER_ORDER["ortho"]),
+            "concept": _annotation_empty_tier(ANNOTATION_TIER_ORDER["concept"]),
+            "speaker": _annotation_empty_tier(ANNOTATION_TIER_ORDER["speaker"]),
+        },
+        "metadata": {
+            "language_code": _annotation_language_code(existing_record),
+            "created": now_iso,
+            "modified": now_iso,
+        },
+    }
+
+
+def _annotation_upsert_interval(intervals: List[Dict[str, Any]], start: float, end: float, text: str) -> None:
+    for interval in intervals:
+        if abs(float(interval.get("start", 0.0)) - start) <= ANNOTATION_MATCH_EPSILON and abs(
+            float(interval.get("end", 0.0)) - end
+        ) <= ANNOTATION_MATCH_EPSILON:
+            interval["text"] = text
+            return
+
+    intervals.append({"start": start, "end": end, "text": text})
+    _annotation_sort_intervals(intervals)
+
+
+def _normalize_flat_annotation_entry(raw_entry: Any, defaults: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_entry, dict):
+        return None
+
+    start = _coerce_finite_float(
+        raw_entry.get(
+            "startSec",
+            raw_entry.get("start_sec", raw_entry.get("start", raw_entry.get("xmin"))),
+        )
+    )
+    end = _coerce_finite_float(
+        raw_entry.get(
+            "endSec",
+            raw_entry.get("end_sec", raw_entry.get("end", raw_entry.get("xmax"))),
+        )
+    )
+
+    if start is None or end is None or end < start:
+        return None
+
+    concept_text = ""
+    for key in ("concept", "concept_text", "conceptLabel", "concept_id", "conceptId"):
+        value = raw_entry.get(key)
+        if value is not None:
+            concept_text = str(value)
+            break
+
+    concept_id_raw = raw_entry.get("conceptId")
+    if concept_id_raw is None:
+        concept_id_raw = raw_entry.get("concept_id")
+
+    concept_id = str(concept_id_raw) if concept_id_raw is not None else _normalize_concept_id(concept_text)
+
+    source_wav = raw_entry.get("sourceWav")
+    if source_wav is None:
+        source_wav = raw_entry.get("source_wav")
+
+    return {
+        "speaker": str(raw_entry.get("speaker") or defaults.get("speaker") or "").strip(),
+        "conceptId": str(concept_id or "").strip(),
+        "concept": concept_text,
+        "startSec": float(start),
+        "endSec": float(end),
+        "ipa": "" if raw_entry.get("ipa") is None else str(raw_entry.get("ipa")),
+        "ortho": "" if raw_entry.get("ortho") is None else str(raw_entry.get("ortho")),
+        "sourceWav": str(source_wav or defaults.get("sourceWav") or "").strip(),
+    }
+
+
+def _annotation_record_from_flat_entries(
+    raw_entries: Any,
+    speaker_hint: str,
+    source_wav_hint: str,
+) -> Dict[str, Any]:
+    speaker = str(speaker_hint or "").strip()
+    source_wav = str(source_wav_hint or "").strip() or _annotation_primary_source_wav(speaker)
+    record = _annotation_empty_record(speaker, source_wav, 0.0, None)
+
+    entries = raw_entries if isinstance(raw_entries, list) else []
+    for raw_entry in entries:
+        normalized = _normalize_flat_annotation_entry(
+            raw_entry,
+            {
+                "speaker": speaker,
+                "sourceWav": source_wav,
+            },
+        )
+        if normalized is None:
+            continue
+
+        if normalized["sourceWav"] and not str(record.get("source_audio") or "").strip():
+            record["source_audio"] = normalized["sourceWav"]
+
+        if normalized["endSec"] > float(record.get("source_audio_duration_sec") or 0.0):
+            record["source_audio_duration_sec"] = float(normalized["endSec"])
+
+        concept_text = str(normalized.get("concept") or "").strip() or str(normalized.get("conceptId") or "").strip()
+
+        _annotation_upsert_interval(
+            record["tiers"]["ipa"]["intervals"],
+            normalized["startSec"],
+            normalized["endSec"],
+            str(normalized.get("ipa") or ""),
+        )
+        _annotation_upsert_interval(
+            record["tiers"]["ortho"]["intervals"],
+            normalized["startSec"],
+            normalized["endSec"],
+            str(normalized.get("ortho") or ""),
+        )
+        _annotation_upsert_interval(
+            record["tiers"]["concept"]["intervals"],
+            normalized["startSec"],
+            normalized["endSec"],
+            concept_text,
+        )
+
+    _annotation_sync_speaker_tier(record)
+    _annotation_touch_metadata(record, preserve_created=True)
+    return record
+
+
+def _normalize_annotation_record(raw_record: Any, speaker_hint: str) -> Dict[str, Any]:
+    speaker_from_hint = str(speaker_hint or "").strip()
+
+    if isinstance(raw_record, list):
+        return _annotation_record_from_flat_entries(raw_record, speaker_from_hint, "")
+
+    if not isinstance(raw_record, dict):
+        source_audio = _annotation_primary_source_wav(speaker_from_hint)
+        source_duration = _annotation_source_duration(speaker_from_hint, source_audio)
+        return _annotation_empty_record(speaker_from_hint, source_audio, source_duration or 0.0, None)
+
+    annotations_block = raw_record.get("annotations")
+    if isinstance(annotations_block, list):
+        speaker_from_record = str(raw_record.get("speaker") or speaker_from_hint).strip()
+        source_from_record = str(
+            raw_record.get("source_audio")
+            or raw_record.get("sourceWav")
+            or raw_record.get("source_wav")
+            or ""
+        ).strip()
+        return _annotation_record_from_flat_entries(annotations_block, speaker_from_record, source_from_record)
+
+    speaker = str(raw_record.get("speaker") or speaker_from_hint).strip()
+    source_audio = str(
+        raw_record.get("source_audio")
+        or raw_record.get("sourceWav")
+        or raw_record.get("source_wav")
+        or ""
+    ).strip()
+
+    source_duration = _coerce_finite_float(raw_record.get("source_audio_duration_sec"))
+    if source_duration is None or source_duration < 0:
+        source_duration = _annotation_source_duration(speaker, source_audio) or 0.0
+
+    normalized = _annotation_empty_record(speaker, source_audio, source_duration, raw_record)
+    normalized["version"] = 1
+
+    project_id = str(raw_record.get("project_id") or "").strip()
+    normalized["project_id"] = project_id or _annotation_project_id()
+
+    tiers_in = raw_record.get("tiers")
+    if not isinstance(tiers_in, dict):
+        tiers_in = {}
+
+    next_custom_display_order = 5
+
+    for original_key, raw_tier in tiers_in.items():
+        tier_key = _annotation_tier_key(original_key)
+        if not tier_key:
+            continue
+
+        default_order = ANNOTATION_TIER_ORDER.get(tier_key, next_custom_display_order)
+        tier = _annotation_normalize_tier(raw_tier, default_order)
+        normalized["tiers"][tier_key] = tier
+
+        if tier_key not in ANNOTATION_TIER_ORDER:
+            next_custom_display_order = max(next_custom_display_order, int(tier.get("display_order", default_order)) + 1)
+
+    for tier_key, display_order in ANNOTATION_TIER_ORDER.items():
+        if tier_key not in normalized["tiers"]:
+            normalized["tiers"][tier_key] = _annotation_empty_tier(display_order)
+
+    metadata_in = raw_record.get("metadata")
+    if not isinstance(metadata_in, dict):
+        metadata_in = {}
+
+    now_iso = _utc_now_iso()
+    language_code = str(metadata_in.get("language_code") or _annotation_language_code(raw_record) or "und").strip()
+    if not language_code:
+        language_code = "und"
+
+    normalized["metadata"] = {
+        "language_code": language_code,
+        "created": str(metadata_in.get("created") or now_iso),
+        "modified": str(metadata_in.get("modified") or now_iso),
+    }
+
+    max_end = _annotation_max_end(normalized)
+    if max_end > float(normalized.get("source_audio_duration_sec") or 0.0):
+        normalized["source_audio_duration_sec"] = float(max_end)
+
+    source_index_duration = _annotation_source_duration(speaker, str(normalized.get("source_audio") or ""))
+    if source_index_duration is not None and source_index_duration > float(normalized.get("source_audio_duration_sec") or 0.0):
+        normalized["source_audio_duration_sec"] = float(source_index_duration)
+
+    if not str(normalized.get("source_audio") or "").strip():
+        normalized["source_audio"] = _annotation_primary_source_wav(speaker)
+
+    _annotation_sync_speaker_tier(normalized)
+    _annotation_sort_all_intervals(normalized)
+
+    return normalized
+
+
+def _normalize_speaker_id(raw_speaker: Any) -> str:
+    speaker = str(raw_speaker or "").strip()
+    if not speaker:
+        raise ValueError("speaker is required")
+
+    if speaker in {".", ".."}:
+        raise ValueError("Invalid speaker id")
+
+    if "\x00" in speaker:
+        raise ValueError("speaker contains an invalid null byte")
+
+    if "/" in speaker or "\\" in speaker:
+        raise ValueError("speaker must not contain path separators")
+
+    if len(speaker) > 200:
+        raise ValueError("speaker is too long")
+
+    return speaker
+
+
+def _annotation_record_relative_path(speaker: str) -> pathlib.Path:
+    return pathlib.Path("annotations") / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
+
+
+def _annotation_legacy_record_relative_path(speaker: str) -> pathlib.Path:
+    return pathlib.Path("annotations") / "{0}{1}".format(speaker, ANNOTATION_LEGACY_FILENAME_SUFFIX)
+
+
+def _annotation_resolve_relative_path(relative_path: pathlib.Path) -> pathlib.Path:
+    annotations_dir = _annotations_dir_path()
+    candidate = _resolve_project_path(str(relative_path))
+
+    try:
+        candidate.relative_to(annotations_dir)
+    except ValueError as exc:
+        raise ValueError("Annotation path escapes annotations directory") from exc
+
+    return candidate
+
+
+def _annotation_record_path_for_speaker(speaker: str) -> pathlib.Path:
+    return _annotation_resolve_relative_path(_annotation_record_relative_path(speaker))
+
+
+def _annotation_legacy_record_path_for_speaker(speaker: str) -> pathlib.Path:
+    return _annotation_resolve_relative_path(_annotation_legacy_record_relative_path(speaker))
+
+
+def _annotation_read_path_for_speaker(speaker: str) -> pathlib.Path:
+    canonical_path = _annotation_record_path_for_speaker(speaker)
+    if canonical_path.is_file():
+        return canonical_path
+
+    legacy_path = _annotation_legacy_record_path_for_speaker(speaker)
+    if legacy_path.is_file():
+        return legacy_path
+
+    return canonical_path
+
+
+def _annotation_payload_from_request_body(raw_payload: Any) -> Any:
+    if isinstance(raw_payload, list):
+        return raw_payload
+
+    if isinstance(raw_payload, dict):
+        annotation_candidate = raw_payload.get("annotation")
+        if isinstance(annotation_candidate, (dict, list)):
+            return annotation_candidate
+
+        record_candidate = raw_payload.get("record")
+        if isinstance(record_candidate, (dict, list)):
+            return record_candidate
+
+        return raw_payload
+
+    raise ValueError("Annotation payload must be a JSON object or array")
+
+
+def _normalize_chat_session_id(raw_session_id: Any) -> str:
+    session_id = str(raw_session_id or "").strip()
+    if not session_id:
+        raise ValueError("sessionId is required")
+
+    if not CHAT_SESSION_ID_PATTERN.match(session_id):
+        raise ValueError("sessionId must match [A-Za-z0-9_-]{1,128}")
+
+    return session_id
+
+
+def _cleanup_old_chat_sessions() -> None:
+    now_ts = time.time()
+    stale_session_ids: List[str] = []
+
+    with _chat_sessions_lock:
+        for session_id, session in _chat_sessions.items():
+            updated_ts = session.get("updated_ts")
+            if not isinstance(updated_ts, (int, float)):
+                continue
+
+            if now_ts - float(updated_ts) > CHAT_SESSION_RETENTION_SECONDS:
+                stale_session_ids.append(session_id)
+
+        for session_id in stale_session_ids:
+            _chat_sessions.pop(session_id, None)
+
+
+def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
+    policy_payload = _chat_public_policy_payload()
+
+    messages_raw = session.get("messages")
+    messages_out: List[Dict[str, Any]] = []
+
+    if isinstance(messages_raw, list):
+        for message in messages_raw:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "").strip().lower()
+            if role not in {"user", "assistant", "system"}:
+                continue
+
+            content = str(message.get("content") or "")
+            created_at = message.get("created_at")
+            messages_out.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "created_at": created_at,
+                }
+            )
+
+    return {
+        "sessionId": str(session.get("sessionId") or ""),
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "ephemeral": True,
+        "sharedAcrossPages": True,
+        **policy_payload,
+        "messages": messages_out,
+    }
+
+
+def _chat_create_or_get_session(session_id: Optional[str] = None) -> Dict[str, Any]:
+    _cleanup_old_chat_sessions()
+
+    resolved_session_id = str(session_id or "").strip()
+    if resolved_session_id:
+        resolved_session_id = _normalize_chat_session_id(resolved_session_id)
+    else:
+        resolved_session_id = "chat_{0}".format(uuid.uuid4().hex)
+
+    now_iso = _utc_now_iso()
+    now_ts = time.time()
+
+    with _chat_sessions_lock:
+        existing = _chat_sessions.get(resolved_session_id)
+        if existing is not None:
+            existing["updated_at"] = now_iso
+            existing["updated_ts"] = now_ts
+            return copy.deepcopy(existing)
+
+        created = {
+            "sessionId": resolved_session_id,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "created_ts": now_ts,
+            "updated_ts": now_ts,
+            "messages": [],
+        }
+        _chat_sessions[resolved_session_id] = created
+        return copy.deepcopy(created)
+
+
+def _chat_get_session_snapshot(session_id: str) -> Optional[Dict[str, Any]]:
+    with _chat_sessions_lock:
+        session = _chat_sessions.get(session_id)
+        if session is None:
+            return None
+        return copy.deepcopy(session)
+
+
+def _chat_append_message(
+    session_id: str,
+    role: str,
+    content: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized_role = str(role or "").strip().lower()
+    if normalized_role not in {"user", "assistant", "system"}:
+        raise ValueError("Unsupported chat role: {0}".format(role))
+
+    policy = _chat_runtime_policy()
+    max_message_chars = int(policy.get("maxUserMessageChars") or CHAT_DEFAULT_MAX_MESSAGE_CHARS)
+    max_session_messages = int(policy.get("maxSessionMessages") or CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION)
+
+    text = str(content or "")
+    if len(text) > max_message_chars:
+        text = text[:max_message_chars]
+
+    with _chat_sessions_lock:
+        session = _chat_sessions.get(session_id)
+        if session is None:
+            raise ValueError("Unknown chat session: {0}".format(session_id))
+
+        messages = session.get("messages")
+        if not isinstance(messages, list):
+            messages = []
+            session["messages"] = messages
+
+        message_payload: Dict[str, Any] = {
+            "id": "msg_{0}".format(uuid.uuid4().hex),
+            "role": normalized_role,
+            "content": text,
+            "created_at": _utc_now_iso(),
+        }
+
+        if isinstance(metadata, dict) and metadata:
+            message_payload["meta"] = copy.deepcopy(metadata)
+
+        messages.append(message_payload)
+
+        if len(messages) > max_session_messages:
+            session["messages"] = messages[-max_session_messages:]
+
+        session["updated_at"] = _utc_now_iso()
+        session["updated_ts"] = time.time()
+
+        return copy.deepcopy(message_payload)
+
+
+def _chat_start_stt_job(speaker: str, source_wav: str, language: Optional[str]) -> str:
+    job_id = _create_job(
+        "stt",
+        {
+            "speaker": speaker,
+            "sourceWav": source_wav,
+            "language": language,
+            "origin": "chat_tool",
+        },
+    )
+
+    thread = threading.Thread(
+        target=_run_stt_job,
+        args=(job_id, speaker, source_wav, language),
+        daemon=True,
+    )
+    thread.start()
+
+    return job_id
+
+
+def _chat_get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
+    return _get_job_snapshot(job_id)
+
+
+def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
+    global _chat_tools_runtime
+    global _chat_orchestrator_runtime
+
+    with _chat_runtime_lock:
+        if _chat_tools_runtime is None:
+            _chat_tools_runtime = ParseChatTools(
+                project_root=_project_root(),
+                config_path=_config_path(),
+                start_stt_job=_chat_start_stt_job,
+                get_job_snapshot=_chat_get_job_snapshot,
+            )
+
+        if _chat_orchestrator_runtime is None:
+            _chat_orchestrator_runtime = ChatOrchestrator(
+                project_root=_project_root(),
+                tools=_chat_tools_runtime,
+                config_path=_config_path(),
+            )
+
+        return _chat_tools_runtime, _chat_orchestrator_runtime
+
+
+def _run_chat_job(job_id: str, session_id: str) -> None:
+    try:
+        _set_job_progress(job_id, 5.0, message="Preparing chat context")
+
+        session_snapshot = _chat_get_session_snapshot(session_id)
+        if session_snapshot is None:
+            raise RuntimeError("Unknown chat session: {0}".format(session_id))
+
+        _set_job_progress(job_id, 20.0, message="Running chat orchestration")
+        _, orchestrator = _get_chat_runtime()
+        result = orchestrator.run(
+            session_id=session_id,
+            session_messages=session_snapshot.get("messages", []),
+        )
+
+        assistant_payload = result.get("assistant") if isinstance(result, dict) else {}
+        if not isinstance(assistant_payload, dict):
+            assistant_payload = {}
+
+        assistant_content = str(assistant_payload.get("content") or "").strip()
+        if not assistant_content:
+            assistant_content = "I could not produce a response for this request."
+
+        _chat_append_message(
+            session_id,
+            role="assistant",
+            content=assistant_content,
+            metadata={
+                "model": result.get("model") if isinstance(result, dict) else None,
+                "toolTraceCount": len(result.get("toolTrace", [])) if isinstance(result, dict) else 0,
+            },
+        )
+
+        fresh_session = _chat_get_session_snapshot(session_id) or {}
+        response_payload = copy.deepcopy(result) if isinstance(result, dict) else {}
+        response_payload["session"] = _chat_session_public_payload(fresh_session)
+
+        _set_job_complete(
+            job_id,
+            response_payload,
+            message="Chat run complete",
+        )
+    except ChatOrchestratorError as exc:
+        _set_job_error(job_id, str(exc))
+    except Exception as exc:
+        _set_job_error(job_id, str(exc))
+
+
 def _cleanup_old_jobs() -> None:
     now_ts = time.time()
     stale_ids: List[str] = []
@@ -354,15 +1494,24 @@ def _get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
 
 def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     status = str(job.get("status") or "error")
+    job_id = str(job.get("jobId") or "")
     payload: Dict[str, Any] = {
-        "jobId": str(job.get("jobId") or ""),
+        "jobId": job_id,
         "status": status,
         "progress": _clamp_progress(job.get("progress", 0.0)),
         "result": job.get("result"),
     }
 
-    if job.get("type"):
-        payload["type"] = job.get("type")
+    job_type = str(job.get("type") or "")
+    if job_type:
+        payload["type"] = job_type
+
+    meta = job.get("meta") if isinstance(job.get("meta"), dict) else {}
+    if isinstance(meta, dict):
+        session_id = str(meta.get("sessionId") or "").strip()
+        if session_id:
+            payload["sessionId"] = session_id
+
     if job.get("message"):
         payload["message"] = job.get("message")
     if job.get("error"):
@@ -370,6 +1519,10 @@ def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
 
     payload["segmentsProcessed"] = int(job.get("segmentsProcessed", 0) or 0)
     payload["totalSegments"] = int(job.get("totalSegments", 0) or 0)
+
+    if job_type == "chat:run":
+        payload["runId"] = job_id
+        payload.update(_chat_public_policy_payload())
 
     done = status in {"complete", "error"}
     payload["done"] = done
@@ -703,6 +1856,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return False
 
         _cleanup_old_jobs()
+        _cleanup_old_chat_sessions()
 
         try:
             if method == "GET":
@@ -721,6 +1875,15 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         return True
 
     def _dispatch_api_get(self, request_path: str) -> None:
+        parts = self._path_parts(request_path)
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
+            self._api_get_annotation(parts[2])
+            return
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "chat" and parts[2] == "session":
+            self._api_get_chat_session(parts[3])
+            return
+
         if request_path == "/api/enrichments":
             self._api_get_enrichments()
             return
@@ -753,6 +1916,18 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_suggest()
             return
 
+        if request_path == "/api/chat/session":
+            self._api_post_chat_session()
+            return
+
+        if request_path == "/api/chat/run":
+            self._api_post_chat_run_start()
+            return
+
+        if request_path == "/api/chat/run/status":
+            self._api_post_chat_run_status()
+            return
+
         if request_path == "/api/enrichments":
             self._api_post_enrichments()
             return
@@ -762,6 +1937,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         parts = self._path_parts(request_path)
+
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
+            self._api_post_annotation(parts[2])
+            return
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "compute" and parts[2] == "status":
             self._api_post_compute_status(None)
@@ -790,6 +1969,49 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
+
+    def _api_get_annotation(self, speaker_part: str) -> None:
+        try:
+            speaker = _normalize_speaker_id(speaker_part)
+            annotation_path = _annotation_read_path_for_speaker(speaker)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        raw_payload = _read_json_any_file(annotation_path)
+        normalized = _normalize_annotation_record(raw_payload, speaker)
+        normalized["speaker"] = speaker
+        _annotation_sync_speaker_tier(normalized)
+
+        self._send_json(HTTPStatus.OK, normalized)
+
+    def _api_post_annotation(self, speaker_part: str) -> None:
+        try:
+            speaker = _normalize_speaker_id(speaker_part)
+            annotation_path = _annotation_record_path_for_speaker(speaker)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        body = self._read_json_body(required=True)
+        try:
+            payload = _annotation_payload_from_request_body(body)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        normalized = _normalize_annotation_record(payload, speaker)
+        normalized["speaker"] = speaker
+        _annotation_sync_speaker_tier(normalized)
+        _annotation_touch_metadata(normalized, preserve_created=True)
+
+        _write_json_file(annotation_path, normalized)
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "speaker": speaker,
+                "annotation": normalized,
+            },
+        )
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
@@ -881,6 +2103,99 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         self._send_json(HTTPStatus.OK, {"suggestions": suggestions})
 
+    def _api_get_chat_session(self, session_part: str) -> None:
+        try:
+            session_id = _normalize_chat_session_id(session_part)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        session = _chat_get_session_snapshot(session_id)
+        if session is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown sessionId")
+
+        self._send_json(HTTPStatus.OK, _chat_session_public_payload(session))
+
+    def _api_post_chat_session(self) -> None:
+        body = self._read_json_body(required=False)
+        body_obj = self._expect_object(body or {}, "Request body")
+
+        raw_session_id = body_obj.get("sessionId", body_obj.get("session_id"))
+        session_id = str(raw_session_id).strip() if raw_session_id is not None else ""
+
+        try:
+            session = _chat_create_or_get_session(session_id if session_id else None)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        self._send_json(HTTPStatus.OK, _chat_session_public_payload(session))
+
+    def _api_post_chat_run_start(self) -> None:
+        body = self._expect_object(self._read_json_body(required=True), "Request body")
+        policy = None
+
+        try:
+            policy, message_text = _chat_validate_run_request(body)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        raw_session_id = body.get("sessionId", body.get("session_id"))
+        session_id = str(raw_session_id).strip() if raw_session_id is not None else ""
+
+        try:
+            session = _chat_create_or_get_session(session_id if session_id else None)
+            resolved_session_id = str(session.get("sessionId") or "")
+            _chat_append_message(resolved_session_id, role="user", content=message_text)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        job_id = _create_job(
+            "chat:run",
+            {
+                "sessionId": resolved_session_id,
+            },
+        )
+
+        thread = threading.Thread(
+            target=_run_chat_job,
+            args=(job_id, resolved_session_id),
+            daemon=True,
+        )
+        thread.start()
+
+        response_payload = {
+            "jobId": job_id,
+            "runId": job_id,
+            "sessionId": resolved_session_id,
+            "status": "running",
+        }
+        response_payload.update(_chat_public_policy_payload())
+        if policy is not None:
+            response_payload["provider"] = str(policy.get("provider") or response_payload.get("provider") or "")
+            response_payload["model"] = str(policy.get("model") or response_payload.get("model") or "")
+
+        self._send_json(HTTPStatus.OK, response_payload)
+
+    def _api_post_chat_run_status(self) -> None:
+        body = self._expect_object(self._read_json_body(required=True), "Request body")
+        job_id = str(
+            body.get("jobId")
+            or body.get("job_id")
+            or body.get("runId")
+            or body.get("run_id")
+            or ""
+        ).strip()
+        if not job_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId or runId is required")
+
+        job = _get_job_snapshot(job_id)
+        if job is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown jobId")
+
+        if str(job.get("type") or "") != "chat:run":
+            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is not a chat run")
+
+        self._send_json(HTTPStatus.OK, _job_response_payload(job))
+
     def _api_post_compute_start(self, compute_type: str) -> None:
         normalized_type = str(compute_type or "").strip().lower()
         if not normalized_type or normalized_type == "status":
@@ -961,7 +2276,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_enrichments(self) -> None:
         payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
-        self._send_json(HTTPStatus.OK, payload)
+        self._send_json(HTTPStatus.OK, {"enrichments": payload})
 
     def _api_post_enrichments(self) -> None:
         body = self._read_json_body(required=True)
@@ -974,7 +2289,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())
-        self._send_json(HTTPStatus.OK, config)
+        self._send_json(HTTPStatus.OK, {"config": config})
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

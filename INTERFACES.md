@@ -1,4 +1,4 @@
-# INTERFACES.md — PARSE Module Contract v5.1 (Post-build audit)
+# INTERFACES.md — PARSE Module Contract v5.2 (Post-build audit + MC-246 assistant foundation)
 
 All modules attach to `window.PARSE`. Communication is via CustomEvents on `document`.
 
@@ -61,6 +61,9 @@ window.PARSE = {
     tags: null,                   // js/shared/tags.js
     audioPlayer: null,            // js/shared/audio-player.js
     aiClient: null,               // js/shared/ai-client.js
+    chatToolAdapters: null,       // js/shared/chat-tool-adapters.js (MC-246 foundation)
+    chatClient: null,             // js/shared/chat-client.js (MC-246 foundation)
+    chatPanel: null,              // js/shared/chat-panel.js (MC-246 foundation)
     spectrogram: null,
 
     // Annotate mode
@@ -348,6 +351,75 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 "parse:match-results" → { speaker, matches: Array<{ conceptId, candidates: Array<{ startSec, endSec, ipa, ortho, confidence }> }> }
 ```
 
+### Chat Assistant Foundation (NEW in MC-246 / PR #5)
+
+```js
+// Action events (UI → chat-client)
+"parse:chat-send" → {
+  text: string,
+  context?: {
+    mode?: "annotate" | "compare",
+    speaker?: string,
+    conceptId?: number | string,
+    selectedSpeakers?: string[]
+  },
+  provider?: string,
+  model?: string,
+  reasoning?: string,
+  intent?: string,
+  retryOf?: string,
+  attempt?: number
+}
+"parse:chat-cancel-run" → { runId: string }
+"parse:chat-retry-run" → { runId: string, context?: object }
+"parse:chat-launcher" → { open?: boolean, toggle?: boolean }
+"parse:chat-draft" → { text: string }
+"parse:chat-clear-history" → {}
+
+// State + lifecycle events (chat-client → UI)
+"parse:chat-state" → {
+  reason: string,
+  state: {
+    sessionId: string,
+    readOnly: boolean,
+    launcher: { isOpen: boolean, unread: number },
+    draft: string,
+    runOrder: string[],
+    runsById: Record<string, ChatRun>,
+    lastError?: { message: string, at: string, action?: string }
+  },
+  runId?: string,
+  open?: boolean
+}
+"parse:chat-run-created" → { runId: string, run: ChatRun }
+"parse:chat-run-updated" → { runId: string, reason: string, run: ChatRun }
+"parse:chat-run-finished" → { runId: string, status: string, success: boolean, run: ChatRun }
+"parse:chat-history-cleared" → {}
+"parse:chat-error" → { action: "send" | "cancel" | "retry", runId?: string, message: string }
+
+// ChatRun (normalized)
+ChatRun = {
+  id: string,
+  serverRunId: string | null,          // backend jobId for /api/chat/run
+  status: "queued" | "running" | "completed" | "error" | "cancelled",
+  userText: string,
+  assistantText: string,
+  error: string,
+  canCancel: boolean,
+  canRetry: boolean,
+  progress: number | null,
+  transcript: ChatTranscriptEntry[],
+  origin: {
+    mode?: "annotate" | "compare",
+    speaker?: string,
+    conceptId?: number | string,
+    selectedSpeakers?: string[]
+  }
+}
+```
+
+> Scope note: these events/contracts are implemented in `js/shared/chat-*.js` and `python/server.py`, but the dock is not yet wired into `parse.html`/`compare.html` in this PR.
+
 ---
 
 ## Module APIs (implemented)
@@ -533,6 +605,11 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 - `requestIPA(text, language) => Promise<string>`
 - `requestSuggestions(speaker, opts?) => Promise<Array|object>`
 - `requestCompute(type, speakers, conceptIds, opts?) => Promise<string>`
+- `startChatRun(payload?) => Promise<object>`
+- `pollChatRunStatus(runId, opts?) => Promise<object>`
+- `cancelChatRun(runId, opts?) => Promise<object>`
+- `retryChatRun(runId, opts?) => Promise<object>`
+- `extractChatRunId(payload) => string | null`
 - `getEnrichments() => Promise<object>`
 - `saveEnrichments(data) => Promise<object>`
 - `getConfig() => Promise<object>`
@@ -553,6 +630,105 @@ All events use `detail` for payload. All timestamps are in seconds (float).
 **Consumes**
 
 - none (`parse:*`)
+
+**Chat route probing behavior (MC-246 foundation)**
+
+- `startChatRun()` tries: `/api/chat` → `/api/chat/run` → `/api/chat/start`
+- `pollChatRunStatus()` tries: `/api/chat/status` → `/api/chat/run/status` → legacy/id variants
+- `cancelChatRun()` tries cancel aliases (`/api/chat/cancel`, `/api/chat/run/cancel`, `/api/chat/{id}/cancel`)
+- `retryChatRun()` tries retry aliases (`/api/chat/retry`, `/api/chat/run/retry`, `/api/chat/{id}/retry`)
+
+Canonical server routes implemented today are listed in **Server API Endpoints**.
+
+### `window.PARSE.modules.chatToolAdapters` (`js/shared/chat-tool-adapters.js`)
+
+**Exports**
+
+- `normalizeStatus(rawStatus, fallback?) => string`
+- `isDoneStatus(status) => boolean`
+- `isActiveStatus(status) => boolean`
+- `isErrorStatus(status) => boolean`
+- `statusMeta(status) => { status, label, tone }`
+- `extractRunId(payload) => string | null`
+- `normalizeRunPayload(payload, previousRun?, hint?) => object`
+- `mergeTranscriptEntries(existing, incoming) => ChatTranscriptEntry[]`
+- `collectTranscriptEntries(payload) => ChatTranscriptEntry[]`
+- `formatToolEntry(entry) => { id, title, status, statusLabel, tone, detail, mutating, ... }`
+
+**Purpose / contract notes**
+
+- Normalizes heterogeneous backend payloads into the `ChatRun` shape consumed by `chat-client`.
+- Marks transcript rows as `mutating` heuristically from tool names (`save|write|update|...`) for reviewer visibility.
+- Does **not** grant permissions; this is a UI adapter only.
+
+### `window.PARSE.modules.chatClient` (`js/shared/chat-client.js`)
+
+**Exports**
+
+- `init(options?) => object`
+- `destroy() => void`
+- `getState() => ChatSessionSnapshot`
+- `sendMessage(text, opts?) => Promise<string>`
+- `cancelRun(runRef) => Promise<boolean>`
+- `retryRun(runRef, opts?) => Promise<string>`
+- `setLauncherOpen(isOpen) => void`
+- `toggleLauncher() => boolean`
+- `setDraft(text) => void`
+- `clearHistory() => void`
+
+**Dispatches**
+
+- `parse:chat-state`
+- `parse:chat-run-created`
+- `parse:chat-run-updated`
+- `parse:chat-run-finished`
+- `parse:chat-history-cleared`
+- `parse:chat-error`
+
+**Consumes**
+
+- `parse:chat-send`
+- `parse:chat-cancel-run`
+- `parse:chat-retry-run`
+- `parse:chat-launcher`
+- `parse:chat-draft`
+- `parse:chat-clear-history`
+
+**Storage / retention semantics**
+
+- Defaults to `sessionStorage` key `parse.chat.session.v1` (falls back to `localStorage` if needed).
+- Snapshot includes `sessionId`, run history, draft, launcher state, and provider/model metadata.
+- On every new run, first transcript row is a client-side policy record declaring read-only MVP mode.
+
+### `window.PARSE.modules.chatPanel` (`js/shared/chat-panel.js`)
+
+**Exports**
+
+- `init(options?) => object`
+- `destroy() => void`
+- `open() => void`
+- `close() => void`
+- `toggle() => void`
+- `isOpen() => boolean`
+- `render() => void`
+
+**Dispatches**
+
+- `parse:chat-send`
+- `parse:chat-cancel-run`
+- `parse:chat-retry-run`
+- `parse:chat-launcher`
+- `parse:chat-draft`
+
+**Consumes**
+
+- `parse:chat-state`
+
+**DOM contract**
+
+- Injects a fixed-position dock into the provided mount element (default `document.body`).
+- Uses `data-parse-chat-dock="1"` root marker and internal `parse-chat-*` classnames.
+- No static HTML placeholder required.
 
 ### `window.PARSE.modules.audioPlayer` (`js/shared/audio-player.js`)
 
@@ -714,16 +890,51 @@ interface PeaksData {
 | `POST /api/stt/status` | POST | Poll STT progress | `{ jobId, progress, status, segments? }` |
 | `POST /api/ipa` | POST | Text → IPA | `{ ipa }` |
 | `POST /api/suggest` | POST | AI concept suggestions | `{ suggestions[] }` |
+| `POST /api/chat/session` | POST | Create/get ephemeral chat session | `{ sessionId, messages[], readOnly: true, attachmentsSupported: false, limits, ... }` |
+| `GET /api/chat/session/{sessionId}` | GET | Read current chat session snapshot | `{ sessionId, messages[], readOnly: true, attachmentsSupported: false, limits, ... }` |
+| `POST /api/chat/run` | POST | Start assistant run (read-only MVP) | `{ jobId, runId, sessionId, status, mode: "read-only", readOnly: true, attachmentsSupported: false, readOnlyNotice, limits }` |
+| `POST /api/chat/run/status` | POST | Poll chat run status/result (`jobId` or `runId` accepted in request body) | `{ jobId, runId, status, progress, result?, error?, done, success, mode: "read-only", readOnly: true, attachmentsSupported: false }` |
 | `POST /api/compute/cognates` | POST | LexStat computation | `{ jobId }` |
 | `POST /api/compute/offset` | POST | Auto-offset detection | `{ jobId }` |
 | `POST /api/compute/spectrograms` | POST | Batch spectrograms | `{ jobId }` |
 | `GET /api/enrichments` | GET | Read enrichments | `{ enrichments }` |
 | `POST /api/enrichments` | POST | Write enrichments | `{ success }` |
 | `GET /api/config` | GET | Read config | `{ config }` |
-| `PUT /api/config` | PUT | Update config | `{ success }` |
+| `PUT /api/config` | PUT | Update config | `{ success, config }` |
 | `GET /*` | GET | Static files | File content |
 
-All long-running endpoints return immediately with `{ jobId }`. Poll status via `/api/{type}/status`.
+All long-running endpoints return immediately with `{ jobId }`.
+
+- Canonical chat run polling endpoint is currently `POST /api/chat/run/status`.
+- `ai-client` probes legacy aliases (`/api/chat`, `/api/chat/status`, `/api/chat/cancel`, etc.) for compatibility; most are intentionally not implemented in this branch.
+
+---
+
+## Assistant Read-Only Boundary (MC-246 / PR #5)
+
+Defense-in-depth layers currently present in code:
+
+1. **Route-level guardrails (`python/server.py`)**
+   - `/api/chat/run` rejects attachments/file-like fields, including nested request payload keys such as `attachments`, `attachmentIds`, `files`, `fileIds`, `contextFiles`, and `context_paths`.
+   - Requests cannot opt out of read-only mode (`readOnly=false`, non-`read-only` modes, and `attachmentsSupported=true` are rejected).
+   - Chat routes expose explicit read-only policy metadata (`mode`, `readOnly`, `attachmentsSupported`, `readOnlyNotice`, `limits`) and `/api/chat/run/status` accepts either `jobId` or `runId`.
+2. **Orchestrator policy (`python/ai/chat_orchestrator.py`)**
+   - System prompt hard-codes read-only behavior and explicitly forbids mutation claims.
+   - Final assistant text is post-guarded so write requests and attachment requests get an explicit read-only/no-attachments notice.
+   - Tool execution is bounded by allowlist and max tool rounds.
+3. **Tool allowlist + validation (`python/ai/chat_tools.py`)**
+   - Only PARSE-native tools are callable (`project_context_read`, `annotation_read`, `stt_start`, `stt_status`, `cognate_compute_preview`, `cross_speaker_match_preview`, `spectrogram_preview`).
+   - Tool args are schema-validated; path-based tools are constrained to project-safe roots.
+   - Tool results are normalized to include `mode: "read-only"`, `readOnly: true`, and `readOnlyNotice` metadata.
+   - Preview tools do not write annotation/enrichment/config files.
+4. **Config coercion (`python/ai/provider.py`)**
+   - Chat runtime forces OpenAI-only + `read_only=true` + `attachments_supported=false` even if config attempts to disable those constraints.
+   - Chat numeric limits are coerced/clamped into sane bounds (`max_tool_rounds`, `max_history_messages`, `max_output_tokens`, `max_tool_result_chars`, `max_user_message_chars`, `max_session_messages`).
+5. **UI transparency (`js/shared/chat-client.js`, `js/shared/chat-panel.js`)**
+   - Every run is seeded with a read-only policy transcript entry.
+   - Panel labels mode as read-only and reminds reviewers that mutating tools are disabled.
+
+This section is the current source of truth for the read-only MVP contract in PR #5.
 
 ---
 
@@ -769,7 +980,35 @@ Used by `suggestions-panel.js` when the reviewer selects reference speakers.
 
 ---
 
-## Event Cross-reference (Wave 14 surface)
+## MC-246 Assistant Foundation Scope Snapshot (for reviewers)
+
+**Included in PR #5 (`feat/mc-246-chat-foundations`)**
+
+- Shared assistant foundation modules:
+  - `js/shared/chat-tool-adapters.js`
+  - `js/shared/chat-client.js`
+  - `js/shared/chat-panel.js`
+- Chat helper methods in `js/shared/ai-client.js`
+- Backend read-only assistant runtime:
+  - `python/server.py` chat session/run routes
+  - `python/ai/chat_orchestrator.py`
+  - `python/ai/chat_tools.py`
+  - `python/ai/provider.py` chat runtime/config normalization
+- Chat config block in `config/ai_config.json`
+
+**Intentionally deferred (NOT in this PR yet)**
+
+- Wiring chat scripts/dock into `parse.html` and `compare.html` boot flows
+- Backend cancel/retry chat run endpoints (`/api/chat/*/cancel`, `/api/chat/*/retry`)
+- Attachment/context file support
+- Any mutating assistant tools (annotation/config/enrichment writes)
+- Full transcript fidelity from backend `toolTrace` into UI transcript rows
+
+---
+
+## Event Cross-reference (Wave 14 surface + MC-246 foundation)
+
+Chat event rows below are contract-level and implemented in `js/shared/chat-*.js`, but the chat dock is still not bootstrapped in `parse.html` / `compare.html` in this PR.
 
 | Event | Dispatched by | Consumed by |
 |---|---|---|
@@ -811,3 +1050,15 @@ Used by `suggestions-panel.js` when the reviewer selects reference speakers.
 | `parse:tag-filter` | `js/compare/compare.js`, `js/shared/tags.js` | `js/compare/compare.js`, `js/compare/concept-table.js` |
 | `parse:video-extract-clips` | `[PLANNED]` | - |
 | `parse:export-wordlist` | `[PLANNED]` | - |
+| `parse:chat-send` | `js/shared/chat-panel.js` | `js/shared/chat-client.js` |
+| `parse:chat-cancel-run` | `js/shared/chat-panel.js` | `js/shared/chat-client.js` |
+| `parse:chat-retry-run` | `js/shared/chat-panel.js` | `js/shared/chat-client.js` |
+| `parse:chat-launcher` | `js/shared/chat-panel.js`, `js/shared/chat-panel.js` public helpers, external callers | `js/shared/chat-client.js` |
+| `parse:chat-draft` | `js/shared/chat-panel.js` | `js/shared/chat-client.js` |
+| `parse:chat-clear-history` | external callers (no UI button yet) | `js/shared/chat-client.js` |
+| `parse:chat-state` | `js/shared/chat-client.js` | `js/shared/chat-panel.js` |
+| `parse:chat-run-created` | `js/shared/chat-client.js` | - |
+| `parse:chat-run-updated` | `js/shared/chat-client.js` | - |
+| `parse:chat-run-finished` | `js/shared/chat-client.js` | - |
+| `parse:chat-history-cleared` | `js/shared/chat-client.js` | - |
+| `parse:chat-error` | `js/shared/chat-client.js` | - |
