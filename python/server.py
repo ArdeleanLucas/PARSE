@@ -16,9 +16,9 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
-from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError
+from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
-from ai.provider import get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
+from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -49,8 +49,8 @@ ANNOTATION_TIER_ORDER = {
 ANNOTATION_MATCH_EPSILON = 0.0005
 
 CHAT_SESSION_RETENTION_SECONDS = 8 * 60 * 60
-CHAT_MAX_MESSAGES_PER_SESSION = 200
-CHAT_MAX_MESSAGE_CHARS = 8000
+CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION = 200
+CHAT_DEFAULT_MAX_MESSAGE_CHARS = 8000
 CHAT_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _jobs: Dict[str, Dict[str, Any]] = {}
@@ -273,6 +273,191 @@ def _coerce_finite_float(value: Any) -> Optional[float]:
         return None
 
     return number
+
+
+def _coerce_bool_like(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "disabled"}:
+            return False
+
+    return bool(default)
+
+
+def _coerce_int_range(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = int(default)
+
+    if number < minimum:
+        number = minimum
+    if number > maximum:
+        number = maximum
+
+    return number
+
+
+def _coerce_float_range(value: Any, default: float, minimum: float, maximum: float) -> float:
+    number = _coerce_finite_float(value)
+    if number is None:
+        number = float(default)
+
+    if number < minimum:
+        number = minimum
+    if number > maximum:
+        number = maximum
+
+    return float(number)
+
+
+def _has_nonempty_value(value: Any) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, str):
+        return bool(value.strip())
+
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) > 0
+
+    return True
+
+
+def _chat_runtime_policy(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    source_config = config if isinstance(config, dict) else load_ai_config(_config_path())
+    chat_config = get_chat_config(source_config)
+
+    return {
+        "enabled": _coerce_bool_like(chat_config.get("enabled"), True),
+        "mode": "read-only",
+        "readOnly": True,
+        "attachmentsSupported": False,
+        "readOnlyNotice": READ_ONLY_NOTICE,
+        "provider": str(chat_config.get("provider") or "openai").strip() or "openai",
+        "model": str(chat_config.get("model") or "gpt54").strip() or "gpt54",
+        "apiKeyEnv": str(chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY",
+        "reasoningEffort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
+        "temperature": _coerce_float_range(chat_config.get("temperature"), 0.1, 0.0, 2.0),
+        "maxToolRounds": _coerce_int_range(chat_config.get("max_tool_rounds"), 4, 1, 8),
+        "maxHistoryMessages": _coerce_int_range(chat_config.get("max_history_messages"), 24, 1, 64),
+        "maxOutputTokens": _coerce_int_range(chat_config.get("max_output_tokens"), 1400, 128, 8192),
+        "maxToolResultChars": _coerce_int_range(chat_config.get("max_tool_result_chars"), 24000, 2000, 200000),
+        "maxUserMessageChars": _coerce_int_range(
+            chat_config.get("max_user_message_chars"),
+            CHAT_DEFAULT_MAX_MESSAGE_CHARS,
+            500,
+            50000,
+        ),
+        "maxSessionMessages": _coerce_int_range(
+            chat_config.get("max_session_messages"),
+            CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION,
+            10,
+            1000,
+        ),
+    }
+
+
+def _chat_public_policy_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    policy = _chat_runtime_policy(config)
+    return {
+        "mode": policy["mode"],
+        "readOnly": policy["readOnly"],
+        "attachmentsSupported": policy["attachmentsSupported"],
+        "readOnlyNotice": policy["readOnlyNotice"],
+        "provider": policy["provider"],
+        "model": policy["model"],
+        "reasoningEffort": policy["reasoningEffort"],
+        "limits": {
+            "maxUserMessageChars": policy["maxUserMessageChars"],
+            "maxSessionMessages": policy["maxSessionMessages"],
+            "maxHistoryMessages": policy["maxHistoryMessages"],
+            "maxToolRounds": policy["maxToolRounds"],
+            "maxToolResultChars": policy["maxToolResultChars"],
+            "maxOutputTokens": policy["maxOutputTokens"],
+        },
+    }
+
+
+def _find_nonempty_key_path(value: Any, forbidden_keys: Sequence[str], path: str = "$") -> Optional[str]:
+    normalized_keys = {str(item).strip().lower() for item in forbidden_keys if str(item).strip()}
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            next_path = "{0}.{1}".format(path, key_text)
+            if key_text.strip().lower() in normalized_keys and _has_nonempty_value(item):
+                return next_path
+
+            nested = _find_nonempty_key_path(item, tuple(normalized_keys), path=next_path)
+            if nested:
+                return nested
+        return None
+
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            nested = _find_nonempty_key_path(item, tuple(normalized_keys), path="{0}[{1}]".format(path, index))
+            if nested:
+                return nested
+
+    return None
+
+
+def _chat_validate_run_request(body: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    policy = _chat_runtime_policy()
+
+    if not policy.get("enabled", True):
+        raise ApiError(HTTPStatus.SERVICE_UNAVAILABLE, "Chat assistant is disabled in config")
+
+    if "readOnly" in body and not _coerce_bool_like(body.get("readOnly"), True):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Chat assistant only supports readOnly=true in this MVP")
+
+    requested_mode = str(body.get("mode") or "").strip().lower()
+    if requested_mode and requested_mode != "read-only":
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Chat assistant only supports mode='read-only'")
+
+    if "attachmentsSupported" in body and _coerce_bool_like(body.get("attachmentsSupported"), False):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "attachmentsSupported=true is not supported in chat MVP")
+
+    forbidden_path = _find_nonempty_key_path(
+        body,
+        forbidden_keys=(
+            "attachments",
+            "attachmentIds",
+            "files",
+            "fileIds",
+            "file_ids",
+            "contextFiles",
+            "context_files",
+            "context_paths",
+        ),
+    )
+    if forbidden_path:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            "{0} is not supported in chat MVP; file/context attachments are disabled".format(forbidden_path),
+        )
+
+    message_text = str(body.get("message") or body.get("text") or "").strip()
+    if not message_text:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "message is required")
+
+    max_chars = int(policy.get("maxUserMessageChars") or CHAT_DEFAULT_MAX_MESSAGE_CHARS)
+    if len(message_text) > max_chars:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            "message exceeds maxUserMessageChars={0}".format(max_chars),
+        )
+
+    return policy, message_text
 
 
 def _annotation_project_payload() -> Dict[str, Any]:
@@ -951,6 +1136,8 @@ def _cleanup_old_chat_sessions() -> None:
 
 
 def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
+    policy_payload = _chat_public_policy_payload()
+
     messages_raw = session.get("messages")
     messages_out: List[Dict[str, Any]] = []
 
@@ -978,6 +1165,7 @@ def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": session.get("updated_at"),
         "ephemeral": True,
         "sharedAcrossPages": True,
+        **policy_payload,
         "messages": messages_out,
     }
 
@@ -1031,9 +1219,13 @@ def _chat_append_message(
     if normalized_role not in {"user", "assistant", "system"}:
         raise ValueError("Unsupported chat role: {0}".format(role))
 
+    policy = _chat_runtime_policy()
+    max_message_chars = int(policy.get("maxUserMessageChars") or CHAT_DEFAULT_MAX_MESSAGE_CHARS)
+    max_session_messages = int(policy.get("maxSessionMessages") or CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION)
+
     text = str(content or "")
-    if len(text) > CHAT_MAX_MESSAGE_CHARS:
-        text = text[:CHAT_MAX_MESSAGE_CHARS]
+    if len(text) > max_message_chars:
+        text = text[:max_message_chars]
 
     with _chat_sessions_lock:
         session = _chat_sessions.get(session_id)
@@ -1057,8 +1249,8 @@ def _chat_append_message(
 
         messages.append(message_payload)
 
-        if len(messages) > CHAT_MAX_MESSAGES_PER_SESSION:
-            session["messages"] = messages[-CHAT_MAX_MESSAGES_PER_SESSION:]
+        if len(messages) > max_session_messages:
+            session["messages"] = messages[-max_session_messages:]
 
         session["updated_at"] = _utc_now_iso()
         session["updated_ts"] = time.time()
@@ -1302,8 +1494,9 @@ def _get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
 
 def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     status = str(job.get("status") or "error")
+    job_id = str(job.get("jobId") or "")
     payload: Dict[str, Any] = {
-        "jobId": str(job.get("jobId") or ""),
+        "jobId": job_id,
         "status": status,
         "progress": _clamp_progress(job.get("progress", 0.0)),
         "result": job.get("result"),
@@ -1326,6 +1519,10 @@ def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
 
     payload["segmentsProcessed"] = int(job.get("segmentsProcessed", 0) or 0)
     payload["totalSegments"] = int(job.get("totalSegments", 0) or 0)
+
+    if job_type == "chat:run":
+        payload["runId"] = job_id
+        payload.update(_chat_public_policy_payload())
 
     done = status in {"complete", "error"}
     payload["done"] = done

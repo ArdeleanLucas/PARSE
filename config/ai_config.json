@@ -17,6 +17,8 @@
   },
   "chat": {
     "enabled": true,
+    "read_only": true,
+    "attachments_supported": false,
     "provider": "openai",
     "model": "gpt54",
     "api_key_env": "OPENAI_API_KEY",
@@ -25,7 +27,9 @@
     "max_tool_rounds": 4,
     "max_history_messages": 24,
     "max_output_tokens": 1400,
-    "max_tool_result_chars": 24000
+    "max_tool_result_chars": 24000,
+    "max_user_message_chars": 8000,
+    "max_session_messages": 200
   },
   "specialized_layers": []
 }

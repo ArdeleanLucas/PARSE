@@ -30,6 +30,14 @@ ANNOTATION_FILENAME_SUFFIX = ".parse.json"
 ANNOTATION_LEGACY_FILENAME_SUFFIX = ".json"
 SPEAKER_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
 TOKEN_RE = re.compile(r"[\w\u0600-\u06FF\u0750-\u077F]+", flags=re.UNICODE)
+MUTATING_TOOL_NAME_RE = re.compile(
+    r"(save|write|update|edit|patch|delete|remove|create|insert|import|rename|commit)",
+    flags=re.IGNORECASE,
+)
+READ_ONLY_NOTICE = (
+    "PARSE chat MVP is read-only. Tools can inspect/analyze data and run background previews, "
+    "but they cannot persist annotation/config/enrichment writes."
+)
 
 
 class ChatToolError(Exception):
@@ -88,6 +96,13 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def _read_json_file(path: Path, default: Any) -> Any:
@@ -435,11 +450,31 @@ class ParseChatTools:
         """Return sorted tool names in allowlist."""
         return sorted(self._tool_specs.keys())
 
+    def _finalize_read_only_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = _deepcopy_jsonable(payload)
+        result["mode"] = "read-only"
+        result["readOnly"] = True
+        if "previewOnly" not in result:
+            result["previewOnly"] = True
+        if "readOnlyNotice" not in result:
+            result["readOnlyNotice"] = READ_ONLY_NOTICE
+        return result
+
     def execute(self, tool_name: str, raw_args: Any) -> Dict[str, Any]:
         """Execute a validated allowlisted tool."""
         name = str(tool_name or "").strip()
         if name not in self._tool_specs:
+            if MUTATING_TOOL_NAME_RE.search(name):
+                raise ChatToolValidationError(
+                    "Mutating tool calls are disabled: {0}. {1}".format(name, READ_ONLY_NOTICE)
+                )
             raise ChatToolValidationError("Tool is not allowlisted: {0}".format(name))
+
+        # Defense-in-depth: mutating tool names remain blocked even if added by mistake.
+        if MUTATING_TOOL_NAME_RE.search(name):
+            raise ChatToolValidationError(
+                "Mutating tool calls are disabled in read-only mode: {0}.".format(name)
+            )
 
         args = raw_args
         if args is None:
@@ -474,7 +509,7 @@ class ParseChatTools:
         return {
             "tool": name,
             "ok": True,
-            "result": result,
+            "result": self._finalize_read_only_result(result),
         }
 
     def _normalize_speaker(self, raw_speaker: Any) -> str:
@@ -649,6 +684,10 @@ class ParseChatTools:
                     "provider": _normalize_space(chat_config.get("provider")) if isinstance(chat_config, dict) else "",
                     "model": _normalize_space(chat_config.get("model")) if isinstance(chat_config, dict) else "",
                     "reasoning_effort": _normalize_space(chat_config.get("reasoning_effort")) if isinstance(chat_config, dict) else "",
+                    "read_only": bool(chat_config.get("read_only", True)) if isinstance(chat_config, dict) else True,
+                    "attachments_supported": bool(chat_config.get("attachments_supported", False)) if isinstance(chat_config, dict) else False,
+                    "max_user_message_chars": _coerce_int(chat_config.get("max_user_message_chars", 8000), 8000) if isinstance(chat_config, dict) else 8000,
+                    "max_session_messages": _coerce_int(chat_config.get("max_session_messages", 200), 200) if isinstance(chat_config, dict) else 200,
                 },
             }
 
@@ -657,6 +696,7 @@ class ParseChatTools:
                 "mode": "read-only",
                 "writesAllowed": False,
                 "attachmentsSupported": False,
+                "readOnlyNotice": READ_ONLY_NOTICE,
                 "toolAllowlist": self.tool_names(),
                 "safeRoots": [str(self.project_root / "annotations"), str(self.project_root / "audio"), str(self.project_root / "config")],
             }

@@ -10,12 +10,32 @@ This orchestrator is intentionally read-only in MVP:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .chat_tools import ChatToolError, ParseChatTools
 from .provider import OpenAIChatRuntime
+
+
+_MUTATION_REQUEST_RE = re.compile(
+    r"\b(write|save|update|edit|modify|patch|delete|remove|rename|apply|commit|overwrite|import|create|add)\b",
+    flags=re.IGNORECASE,
+)
+_ATTACHMENT_REQUEST_RE = re.compile(
+    r"\b(attach|attachment|upload|drag[- ]?and[- ]?drop|paste\s+file|drop\s+file)\b",
+    flags=re.IGNORECASE,
+)
+_WRITE_CLAIM_RE = re.compile(
+    r"\b(i|we)\s+(updated|saved|edited|modified|changed|deleted|removed|wrote|applied|renamed|created|added)\b",
+    flags=re.IGNORECASE,
+)
+READ_ONLY_NOTICE = (
+    "This PARSE assistant build is read-only. I can inspect data and draft previews, "
+    "but I cannot apply project writes from chat."
+)
+_ATTACHMENTS_NOTICE = "This build also does not support file/context attachments."
 
 
 class ChatOrchestratorError(Exception):
@@ -39,6 +59,14 @@ class ChatOrchestrator:
         self.max_tool_rounds = max(1, int(chat_config.get("max_tool_rounds", 4) or 4))
         self.max_history_messages = max(1, int(chat_config.get("max_history_messages", 24) or 24))
         self.max_tool_result_chars = max(1000, int(chat_config.get("max_tool_result_chars", 24000) or 24000))
+        self.read_only = bool(chat_config.get("read_only", True))
+        self.attachments_supported = bool(chat_config.get("attachments_supported", False))
+
+        # Chat MVP is intentionally locked to read-only + no attachments.
+        if not self.read_only:
+            self.read_only = True
+        if self.attachments_supported:
+            self.attachments_supported = False
 
         self._system_prompt = self._build_system_prompt()
 
@@ -51,8 +79,9 @@ class ChatOrchestrator:
             "1) READ-ONLY MVP: do not mutate project state. No annotation writes, no config writes, no enrichments writes, no file overwrites.\n"
             "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
             "3) No file/context attachments are supported in this MVP.\n"
-            "4) If asked to apply changes, explicitly state this build can only return previews/artifacts.\n"
-            "5) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+            "4) If asked to apply changes, explicitly state the environment is read-only and provide a preview plan instead.\n"
+            "5) Never imply a write happened unless a tool explicitly reports a persisted write (which is not available in this MVP).\n"
+            "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
             "\n"
             "Available tools:\n"
             "{0}\n"
@@ -60,7 +89,7 @@ class ChatOrchestrator:
             "Response style:\n"
             "- concise, technical, and accurate\n"
             "- when using tools, summarize what was checked\n"
-            "- do not claim writes were performed\n"
+            "- keep read-only limitations explicit when relevant\n"
         ).format(tool_lines)
 
     def _history_messages(self, session_messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -79,6 +108,14 @@ class ChatOrchestrator:
             )
 
         return filtered
+
+    def _latest_user_text(self, session_messages: Sequence[Mapping[str, Any]]) -> str:
+        for row in reversed(session_messages):
+            role = str(row.get("role") or "").strip().lower()
+            if role != "user":
+                continue
+            return str(row.get("content") or "").strip()
+        return ""
 
     def _extract_message_text(self, message: Any) -> str:
         content = getattr(message, "content", "")
@@ -101,6 +138,41 @@ class ChatOrchestrator:
             return "\n".join([chunk for chunk in chunks if chunk]).strip()
 
         return str(content or "").strip()
+
+    def _contains_read_only_notice(self, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return (
+            "read-only" in lowered
+            or "read only" in lowered
+            or "cannot apply" in lowered
+            or "can't apply" in lowered
+            or "cannot write" in lowered
+            or "can't write" in lowered
+        )
+
+    def _contains_attachments_notice(self, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return "attachment" in lowered or "upload" in lowered or "file/context" in lowered
+
+    def _apply_read_only_guard(self, assistant_text: str, latest_user_text: str) -> str:
+        text = str(assistant_text or "").strip()
+        user_text = str(latest_user_text or "").strip()
+
+        if not text:
+            text = READ_ONLY_NOTICE
+
+        if _WRITE_CLAIM_RE.search(text) and not self._contains_read_only_notice(text):
+            text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
+
+        if user_text and _MUTATION_REQUEST_RE.search(user_text):
+            if not self._contains_read_only_notice(text):
+                text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
+
+        if user_text and _ATTACHMENT_REQUEST_RE.search(user_text):
+            if not self._contains_attachments_notice(text):
+                text = "{0}\n\n{1}".format(_ATTACHMENTS_NOTICE, text)
+
+        return text
 
     def _extract_tool_calls(self, message: Any) -> List[Dict[str, str]]:
         raw_calls = getattr(message, "tool_calls", None)
@@ -202,6 +274,7 @@ class ChatOrchestrator:
 
         tool_trace: List[Dict[str, Any]] = []
         runtime_meta: Dict[str, Any] = {}
+        latest_user_text = self._latest_user_text(session_messages)
 
         for round_index in range(self.max_tool_rounds + 1):
             tools_payload = self.tools.openai_tool_schemas() if round_index < self.max_tool_rounds else None
@@ -268,6 +341,8 @@ class ChatOrchestrator:
                 else:
                     final_text = "I could not generate a response for this request."
 
+            final_text = self._apply_read_only_guard(final_text, latest_user_text)
+
             return {
                 "sessionId": session_id,
                 "assistant": {
@@ -277,8 +352,10 @@ class ChatOrchestrator:
                 "toolTrace": tool_trace,
                 "model": runtime_meta.get("model", self.runtime.model),
                 "reasoning": runtime_meta,
-                "readOnly": True,
-                "attachmentsSupported": False,
+                "mode": "read-only",
+                "readOnly": self.read_only,
+                "attachmentsSupported": self.attachments_supported,
+                "readOnlyNotice": READ_ONLY_NOTICE,
             }
 
         return {
@@ -287,15 +364,18 @@ class ChatOrchestrator:
                 "role": "assistant",
                 "content": (
                     "I hit the maximum tool-call rounds for this turn. "
-                    "Please narrow the request and try again."
+                    "Please narrow the request and try again.\n\n"
+                    "{0}".format(READ_ONLY_NOTICE)
                 ),
             },
             "toolTrace": tool_trace,
             "model": runtime_meta.get("model", self.runtime.model),
             "reasoning": runtime_meta,
-            "readOnly": True,
-            "attachmentsSupported": False,
+            "mode": "read-only",
+            "readOnly": self.read_only,
+            "attachmentsSupported": self.attachments_supported,
+            "readOnlyNotice": READ_ONLY_NOTICE,
         }
 
 
-__all__ = ["ChatOrchestrator", "ChatOrchestratorError"]
+__all__ = ["ChatOrchestrator", "ChatOrchestratorError", "READ_ONLY_NOTICE"]

@@ -48,6 +48,8 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     },
     "chat": {
         "enabled": True,
+        "read_only": True,
+        "attachments_supported": False,
         "provider": "openai",
         "model": "gpt54",
         "api_key_env": "OPENAI_API_KEY",
@@ -57,6 +59,8 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "max_history_messages": 24,
         "max_output_tokens": 1400,
         "max_tool_result_chars": 24000,
+        "max_user_message_chars": 8000,
+        "max_session_messages": 200,
     },
     "specialized_layers": [],
 }
@@ -73,6 +77,66 @@ def _deep_merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[st
             merged[key] = copy.deepcopy(value)
 
     return merged
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Coerce loose boolean-like values with a safe default."""
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "disabled"}:
+            return False
+
+    return bool(default)
+
+
+def _coerce_int(
+    value: Any,
+    default: int,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
+    """Coerce integer values with optional clamping."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = int(default)
+
+    if minimum is not None and number < minimum:
+        number = minimum
+
+    if maximum is not None and number > maximum:
+        number = maximum
+
+    return number
+
+
+def _coerce_float(
+    value: Any,
+    default: float,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+) -> float:
+    """Coerce float values with optional clamping."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float(default)
+
+    if minimum is not None and number < minimum:
+        number = minimum
+
+    if maximum is not None and number > maximum:
+        number = maximum
+
+    return number
 
 
 def resolve_ai_config_path(config_path: Optional[Path] = None) -> Path:
@@ -119,7 +183,7 @@ def load_ai_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve chat config from merged defaults/user config.
 
-    Chat is OpenAI-only in the current PARSE MVP backend.
+    Chat is OpenAI-only and read-only in the current PARSE MVP backend.
     """
     llm_config = merged_config.get("llm", {})
     if not isinstance(llm_config, dict):
@@ -131,16 +195,20 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
 
     defaults = {
         "enabled": True,
+        "read_only": True,
+        "attachments_supported": False,
         "provider": "openai",
         "model": str(chat_config.get("model") or llm_config.get("model") or "gpt54").strip() or "gpt54",
         "api_key_env": str(chat_config.get("api_key_env") or llm_config.get("api_key_env") or "OPENAI_API_KEY").strip()
         or "OPENAI_API_KEY",
         "reasoning_effort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
         "temperature": chat_config.get("temperature", 0.1),
-        "max_tool_rounds": int(chat_config.get("max_tool_rounds", 4) or 4),
-        "max_history_messages": int(chat_config.get("max_history_messages", 24) or 24),
-        "max_output_tokens": int(chat_config.get("max_output_tokens", 1400) or 1400),
-        "max_tool_result_chars": int(chat_config.get("max_tool_result_chars", 24000) or 24000),
+        "max_tool_rounds": chat_config.get("max_tool_rounds", 4),
+        "max_history_messages": chat_config.get("max_history_messages", 24),
+        "max_output_tokens": chat_config.get("max_output_tokens", 1400),
+        "max_tool_result_chars": chat_config.get("max_tool_result_chars", 24000),
+        "max_user_message_chars": chat_config.get("max_user_message_chars", 8000),
+        "max_session_messages": chat_config.get("max_session_messages", 200),
     }
 
     resolved = _deep_merge_dicts(defaults, chat_config)
@@ -151,24 +219,58 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
             "[WARN] chat.provider={0!r} is unsupported; forcing 'openai'".format(provider_name),
             file=sys.stderr,
         )
-        resolved["provider"] = "openai"
+    resolved["provider"] = "openai"
 
     model_name = str(resolved.get("model") or "").strip()
-    if not model_name:
-        resolved["model"] = "gpt54"
+    resolved["model"] = model_name or "gpt54"
 
     api_key_env = str(resolved.get("api_key_env") or "").strip()
-    if not api_key_env:
-        resolved["api_key_env"] = "OPENAI_API_KEY"
+    resolved["api_key_env"] = api_key_env or "OPENAI_API_KEY"
 
     reasoning_effort = str(resolved.get("reasoning_effort") or "").strip().lower()
     if reasoning_effort not in {"minimal", "low", "medium", "high"}:
-        resolved["reasoning_effort"] = "high"
+        reasoning_effort = "high"
+    resolved["reasoning_effort"] = reasoning_effort
 
-    try:
-        resolved["temperature"] = float(resolved.get("temperature", 0.1))
-    except (TypeError, ValueError):
-        resolved["temperature"] = 0.1
+    resolved["enabled"] = _coerce_bool(resolved.get("enabled"), True)
+    resolved["temperature"] = _coerce_float(resolved.get("temperature"), 0.1, minimum=0.0, maximum=2.0)
+    resolved["max_tool_rounds"] = _coerce_int(resolved.get("max_tool_rounds"), 4, minimum=1, maximum=8)
+    resolved["max_history_messages"] = _coerce_int(resolved.get("max_history_messages"), 24, minimum=1, maximum=64)
+    resolved["max_output_tokens"] = _coerce_int(resolved.get("max_output_tokens"), 1400, minimum=128, maximum=8192)
+    resolved["max_tool_result_chars"] = _coerce_int(
+        resolved.get("max_tool_result_chars"),
+        24000,
+        minimum=2000,
+        maximum=200000,
+    )
+    resolved["max_user_message_chars"] = _coerce_int(
+        resolved.get("max_user_message_chars"),
+        8000,
+        minimum=500,
+        maximum=50000,
+    )
+    resolved["max_session_messages"] = _coerce_int(
+        resolved.get("max_session_messages"),
+        200,
+        minimum=10,
+        maximum=1000,
+    )
+
+    read_only = _coerce_bool(resolved.get("read_only"), True)
+    if not read_only:
+        print(
+            "[WARN] chat.read_only=false is unsupported in MVP; forcing read-only",
+            file=sys.stderr,
+        )
+    resolved["read_only"] = True
+
+    attachments_supported = _coerce_bool(resolved.get("attachments_supported"), False)
+    if attachments_supported:
+        print(
+            "[WARN] chat.attachments_supported=true is unsupported in MVP; forcing false",
+            file=sys.stderr,
+        )
+    resolved["attachments_supported"] = False
 
     return resolved
 
