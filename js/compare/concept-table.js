@@ -310,10 +310,11 @@
     const selectedConcept = state.concepts.find(function (concept) {
       return concept.id === normalized;
     }) || null;
+    const conceptLabel = selectedConcept ? getConceptLabel(selectedConcept) : '';
 
     dispatch('parse:compare-concept-select', {
       conceptId: conceptIdToEventValue(normalized),
-      conceptLabel: selectedConcept ? selectedConcept.label : '',
+      conceptLabel: conceptLabel,
       speakers: state.selectedSpeakers.slice(),
     });
 
@@ -325,6 +326,8 @@
      */
     dispatch('parse:compare-concept-selected', {
       conceptId: normalized,
+      conceptLabel: conceptLabel,
+      speakers: state.selectedSpeakers.slice(),
     });
 
     render();
@@ -400,7 +403,8 @@
     const td = document.createElement('td');
     const empty = document.createElement('span');
     empty.className = 'compare-empty';
-    empty.textContent = '—';
+    empty.textContent = 'No form';
+    empty.title = 'No annotated form for this speaker at the selected concept.';
     td.appendChild(empty);
     return td;
   }
@@ -428,7 +432,7 @@
     const playButton = document.createElement('button');
     playButton.type = 'button';
     playButton.className = 'compare-play-btn';
-    playButton.textContent = '>';
+    playButton.textContent = '▶';
     playButton.setAttribute('aria-label', 'Play ' + speaker + ' concept ' + conceptId);
 
     const lines = document.createElement('div');
@@ -482,7 +486,17 @@
 
     if (!foundVisible) {
       state.selectedConceptId = null;
+      P.currentConcept = null;
+      P.compareState = toObject(P.compareState);
+      P.compareState.selectedConceptId = null;
+
       dispatch('parse:compare-concept-select', {
+        conceptId: null,
+        conceptLabel: '',
+        speakers: state.selectedSpeakers.slice(),
+      });
+
+      dispatch('parse:compare-concept-selected', {
         conceptId: null,
         conceptLabel: '',
         speakers: state.selectedSpeakers.slice(),
@@ -490,11 +504,38 @@
     }
   }
 
+  function renderEmptyBodyRow(tbody, message, columnCount) {
+    const tr = document.createElement('tr');
+    tr.className = 'compare-empty-row';
+
+    const td = document.createElement('td');
+    td.colSpan = Math.max(1, Number(columnCount) || 1);
+
+    const copy = document.createElement('div');
+    copy.className = 'panel-placeholder';
+    copy.textContent = String(message == null ? '' : message).trim();
+
+    td.appendChild(copy);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
   function render() {
     if (!state.tableEl) return;
 
+    state.tableEl.classList.remove('hidden');
+    state.tableEl.removeAttribute('aria-hidden');
     state.tableEl.innerHTML = '';
     state.visibleConceptIds = [];
+
+    const visibleConcepts = [];
+    for (let i = 0; i < state.concepts.length; i += 1) {
+      const concept = state.concepts[i];
+      if (!isConceptVisible(concept.id)) continue;
+
+      visibleConcepts.push(concept);
+      state.visibleConceptIds.push(conceptIdToEventValue(concept.id));
+    }
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -513,43 +554,57 @@
     state.tableEl.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    for (let i = 0; i < state.concepts.length; i += 1) {
-      const concept = state.concepts[i];
-      if (!isConceptVisible(concept.id)) continue;
 
-      state.visibleConceptIds.push(conceptIdToEventValue(concept.id));
+    if (!visibleConcepts.length) {
+      const compareState = toObject(P.compareState);
+      const queueHasConcepts = Array.isArray(compareState.concepts) && compareState.concepts.length > 0;
+      const message = queueHasConcepts
+        ? 'No concepts match current queue filters. Clear search, tag, or status filters in the sidebar.'
+        : 'Concept queue is empty. Add concept CSV/annotation data, then refresh Compare.';
 
-      const tr = document.createElement('tr');
-      tr.dataset.conceptId = concept.id;
-      if (state.selectedConceptId && state.selectedConceptId === concept.id) {
-        tr.classList.add('is-selected');
-      }
+      renderEmptyBodyRow(tbody, message, state.selectedSpeakers.length + 1);
+    } else if (!state.selectedSpeakers.length) {
+      renderEmptyBodyRow(
+        tbody,
+        'No speakers selected. Add speakers in Compare controls to populate this secondary matrix cross-check.',
+        1
+      );
+    } else {
+      for (let i = 0; i < visibleConcepts.length; i += 1) {
+        const concept = visibleConcepts[i];
 
-      const conceptCell = createConceptCell(concept);
-      conceptCell.addEventListener('click', function (event) {
-        const rowConceptId = event.currentTarget.parentElement
-          ? event.currentTarget.parentElement.dataset.conceptId
-          : concept.id;
-        selectConcept(rowConceptId);
-      });
-      tbody.appendChild(tr);
-      tr.appendChild(conceptCell);
+        const tr = document.createElement('tr');
+        tr.dataset.conceptId = concept.id;
+        if (state.selectedConceptId && state.selectedConceptId === concept.id) {
+          tr.classList.add('is-selected');
+        }
 
-      for (let j = 0; j < state.selectedSpeakers.length; j += 1) {
-        const speaker = state.selectedSpeakers[j];
-        const entry = getEntryForSpeakerConcept(speaker, concept.id);
+        const conceptCell = createConceptCell(concept);
+        conceptCell.addEventListener('click', function (event) {
+          const rowConceptId = event.currentTarget.parentElement
+            ? event.currentTarget.parentElement.dataset.conceptId
+            : concept.id;
+          selectConcept(rowConceptId);
+        });
+        tbody.appendChild(tr);
+        tr.appendChild(conceptCell);
 
-        if (!entry) {
-          const emptyCell = createEmptyCell();
-          emptyCell.addEventListener('click', function () {
-            selectConcept(concept.id);
-          });
-          emptyCell.addEventListener('dblclick', function () {
-            void navigateToAnnotateWithFlush(speaker, concept.id);
-          });
-          tr.appendChild(emptyCell);
-        } else {
-          tr.appendChild(createPopulatedCell(speaker, concept.id, entry));
+        for (let j = 0; j < state.selectedSpeakers.length; j += 1) {
+          const speaker = state.selectedSpeakers[j];
+          const entry = getEntryForSpeakerConcept(speaker, concept.id);
+
+          if (!entry) {
+            const emptyCell = createEmptyCell();
+            emptyCell.addEventListener('click', function () {
+              selectConcept(concept.id);
+            });
+            emptyCell.addEventListener('dblclick', function () {
+              void navigateToAnnotateWithFlush(speaker, concept.id);
+            });
+            tr.appendChild(emptyCell);
+          } else {
+            tr.appendChild(createPopulatedCell(speaker, concept.id, entry));
+          }
         }
       }
     }
@@ -619,7 +674,11 @@
 
     const title = document.createElement('div');
     title.className = 'panel-title';
-    title.textContent = 'Concept Matrix';
+    title.textContent = 'Concept × Speaker Matrix';
+
+    const note = document.createElement('div');
+    note.className = 'panel-placeholder';
+    note.textContent = 'Secondary cross-check surface. Primary review stays in the sidebar concept queue.';
 
     const scroll = document.createElement('div');
     scroll.className = 'compare-table-scroll';
@@ -629,6 +688,7 @@
 
     scroll.appendChild(table);
     state.containerEl.appendChild(title);
+    state.containerEl.appendChild(note);
     state.containerEl.appendChild(scroll);
 
     state.scrollEl = scroll;
@@ -657,6 +717,14 @@
 
   function onConceptSelect(event) {
     const detail = toObject(event && event.detail);
+
+    if (detail.conceptId == null || String(detail.conceptId).trim() === '') {
+      if (!state.selectedConceptId) return;
+      state.selectedConceptId = null;
+      render();
+      return;
+    }
+
     const conceptId = normalizeConceptId(detail.conceptId);
     if (!conceptId) return;
     if (state.selectedConceptId === conceptId) return;
@@ -800,5 +868,6 @@
     setData: setData,
     refresh: refresh,
     getVisibleConceptIds: getVisibleConceptIds,
+    getEntryForSpeakerConcept: getEntryForSpeakerConcept,
   };
 })();

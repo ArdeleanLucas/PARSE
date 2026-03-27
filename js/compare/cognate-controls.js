@@ -377,12 +377,14 @@
     return button;
   }
 
-  function renderPlaceholder() {
+  function renderPlaceholder(message) {
     if (!state.containerEl) return;
 
     state.containerEl.innerHTML =
       '<div class="panel-title">Cognate Controls</div>' +
-      '<div class="panel-placeholder">Select a concept row to manage cognate groups.</div>';
+      '<div class="panel-placeholder">' +
+      (String(message == null ? '' : message).trim() || 'Select a concept from the sidebar queue to manage cognate groups.') +
+      '</div>';
   }
 
   function renderSplitGroupChooser(wrapper) {
@@ -391,7 +393,7 @@
 
     const label = document.createElement('span');
     label.className = 'cognate-mode-note';
-    label.textContent = 'Assign selected speakers to:';
+    label.textContent = 'Split target group:';
     chooser.appendChild(label);
 
     for (let i = 0; i < GROUP_LETTERS.length; i += 1) {
@@ -429,7 +431,7 @@
 
     const badge = document.createElement('span');
     badge.className = 'cognate-speaker-badge';
-    badge.textContent = canGroup ? normalizedGroup : '-';
+    badge.textContent = canGroup ? normalizedGroup : '—';
     badge.style.borderColor = color;
     badge.style.color = color;
     badge.style.backgroundColor = canGroup ? hexToRgba(color, 0.15) : 'rgba(109, 127, 158, 0.2)';
@@ -439,10 +441,13 @@
     label.textContent = speaker;
 
     if (!canGroup) {
+      row.title = 'No annotated form for this speaker at the selected concept.';
       row.style.borderColor = 'rgba(109, 127, 158, 0.4)';
       row.style.opacity = '0.75';
       row.style.cursor = 'not-allowed';
       label.style.color = '#91a0ba';
+    } else {
+      row.title = 'Current group ' + normalizedGroup + '. Click in Split/Cycle mode to adjust.';
     }
 
     row.appendChild(badge);
