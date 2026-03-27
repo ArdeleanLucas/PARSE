@@ -263,11 +263,14 @@ textarea, input, select { font-family: inherit; }
 /* ═══════════════════════════════════════════════════════════════
    CONCEPT HEADER
 ══════════════════════════════════════════════════════════════ */
+#header-card {
+  padding: 10px 14px;
+}
 #concept-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 #concept-title {
   font-size: 1.5rem;
@@ -287,7 +290,7 @@ textarea, input, select { font-family: inherit; }
 }
 .nav-btn:hover { background: #eef2ff; border-color: #4461d4; }
 .nav-btn:disabled { opacity: 0.4; cursor: default; }
-#concept-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+#concept-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: nowrap; }
 .action-btn {
   border: none;
   border-radius: 6px;
@@ -1392,11 +1395,9 @@ textarea, input, select { font-family: inherit; }
 
     <!-- concept header card -->
     <div class="card" id="header-card">
-      <div class="card-title">Step 2 · Current Concept</div>
-      <p class="section-hint">Use Prev/Next and Accept/Flag after selecting a concept from the sidebar queue.</p>
       <div id="concept-header">
         <button class="nav-btn" id="btn-prev">← Prev</button>
-        <div id="concept-title">Select a concept from Step 1 queue…</div>
+        <div id="concept-title">Select a concept…</div>
         <button class="nav-btn" id="btn-next">Next →</button>
         <div id="concept-actions">
           <button class="action-btn accept" id="btn-accept">✓ Accept</button>
