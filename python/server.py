@@ -1892,9 +1892,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_config()
             return
 
-        parts = self._path_parts(request_path)
-        if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
-            self._api_get_annotation(parts[2])
+        if request_path == "/api/auth/status":
+            self._api_auth_status()
             return
 
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
@@ -1934,6 +1933,18 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/config":
             self._api_update_config()
+            return
+
+        if request_path == "/api/auth/start":
+            self._api_auth_start()
+            return
+
+        if request_path == "/api/auth/poll":
+            self._api_auth_poll()
+            return
+
+        if request_path == "/api/auth/logout":
+            self._api_auth_logout()
             return
 
         parts = self._path_parts(request_path)
@@ -2286,6 +2297,32 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         enrichments_payload = body.get("enrichments") if isinstance(body.get("enrichments"), dict) else body
         _write_json_file(_enrichments_path(), enrichments_payload)
         self._send_json(HTTPStatus.OK, {"success": True})
+
+    # ── Auth endpoints ──────────────────────────────────────────────
+
+    def _api_auth_status(self) -> None:
+        from ai.openai_auth import get_auth_status
+        self._send_json(HTTPStatus.OK, get_auth_status())
+
+    def _api_auth_start(self) -> None:
+        from ai.openai_auth import start_device_auth
+        try:
+            result = start_device_auth()
+            self._send_json(HTTPStatus.OK, result)
+        except RuntimeError as e:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(e)})
+
+    def _api_auth_poll(self) -> None:
+        from ai.openai_auth import poll_device_auth
+        result = poll_device_auth()
+        self._send_json(HTTPStatus.OK, result)
+
+    def _api_auth_logout(self) -> None:
+        from ai.openai_auth import clear_tokens
+        clear_tokens()
+        self._send_json(HTTPStatus.OK, {"success": True})
+
+    # ── Config endpoints ─────────────────────────────────────────
 
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())

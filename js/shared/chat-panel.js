@@ -196,7 +196,20 @@
       '.parse-chat-send{border:1px solid rgba(56,189,248,0.8);background:linear-gradient(180deg,#0ea5e9,#0284c7);color:#fff;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;}' +
       '.parse-chat-send:disabled{opacity:0.5;cursor:not-allowed;}' +
       '.parse-chat-send:not(:disabled):hover{filter:brightness(1.06);}' +
-      '@media (max-width: 700px){.parse-chat-dock{right:10px;left:10px;bottom:10px;}.parse-chat-panel{width:100%;right:0;}}';
+      '@media (max-width: 700px){.parse-chat-dock{right:10px;left:10px;bottom:10px;}.parse-chat-panel{width:100%;right:0;}}' +
+      '.parse-chat-auth{padding:24px 16px;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;flex:1;justify-content:center;}' +
+      '.parse-chat-auth-title{font-size:15px;font-weight:800;color:#f8fafc;}' +
+      '.parse-chat-auth-desc{font-size:12px;line-height:1.5;color:#cbd5e1;max-width:300px;}' +
+      '.parse-chat-auth-btn{border:1px solid rgba(56,189,248,0.8);background:linear-gradient(180deg,#0ea5e9,#0284c7);color:#fff;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer;transition:filter .15s;}' +
+      '.parse-chat-auth-btn:hover{filter:brightness(1.08);}' +
+      '.parse-chat-auth-btn:disabled{opacity:0.5;cursor:not-allowed;}' +
+      '.parse-chat-auth-code{font-family:monospace;font-size:24px;letter-spacing:0.15em;color:#38bdf8;font-weight:800;padding:8px 16px;border:2px dashed rgba(56,189,248,0.6);border-radius:10px;background:rgba(14,165,233,0.1);}' +
+      '.parse-chat-auth-step{font-size:11px;color:#94a3b8;line-height:1.4;}' +
+      '.parse-chat-auth-step a{color:#38bdf8;text-decoration:underline;}' +
+      '.parse-chat-auth-status{font-size:11px;color:#fde68a;font-weight:700;}' +
+      '.parse-chat-auth-error{font-size:11px;color:#fecaca;}' +
+      '.parse-chat-logout{border:1px solid rgba(100,116,139,0.6);background:rgba(15,23,42,0.46);color:#e2e8f0;border-radius:7px;padding:3px 7px;font-size:10px;font-weight:700;cursor:pointer;}' +
+      '.parse-chat-logout:hover{border-color:#f87171;color:#fecaca;}';
 
     document.head.appendChild(styleEl);
   }
@@ -484,12 +497,148 @@
     state.sendBtnEl.disabled = !hasText;
   }
 
+  // ── Auth flow state ────────────────────────────────────────────
+  var authState = {
+    checked: false,
+    authenticated: false,
+    flowActive: false,
+    userCode: '',
+    verificationUri: '',
+    pollTimer: null,
+    error: '',
+  };
+
+  function checkAuthStatus() {
+    fetch('/api/auth/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        authState.checked = true;
+        authState.authenticated = !!data.authenticated;
+        authState.flowActive = !!data.flow_active;
+        authState.userCode = data.user_code || '';
+        authState.verificationUri = data.verification_uri || '';
+        render();
+      })
+      .catch(function () {
+        authState.checked = true;
+        authState.authenticated = false;
+        render();
+      });
+  }
+
+  function startAuthFlow() {
+    authState.error = '';
+    fetch('/api/auth/start', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) {
+          authState.error = data.error;
+          render();
+          return;
+        }
+        authState.flowActive = true;
+        authState.userCode = data.user_code || '';
+        authState.verificationUri = data.verification_uri || '';
+        render();
+        startAuthPolling();
+      })
+      .catch(function (err) {
+        authState.error = 'Failed to start auth flow: ' + err.message;
+        render();
+      });
+  }
+
+  function startAuthPolling() {
+    if (authState.pollTimer) clearInterval(authState.pollTimer);
+    authState.pollTimer = setInterval(function () {
+      fetch('/api/auth/poll', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.status === 'complete') {
+            clearInterval(authState.pollTimer);
+            authState.pollTimer = null;
+            authState.authenticated = true;
+            authState.flowActive = false;
+            render();
+          } else if (data.status === 'expired' || data.status === 'error') {
+            clearInterval(authState.pollTimer);
+            authState.pollTimer = null;
+            authState.flowActive = false;
+            authState.error = data.error || 'Auth flow expired.';
+            render();
+          }
+        })
+        .catch(function () {
+          // silently retry on next interval
+        });
+    }, 5000);
+  }
+
+  function doLogout() {
+    fetch('/api/auth/logout', { method: 'POST' })
+      .then(function () {
+        authState.authenticated = false;
+        authState.flowActive = false;
+        authState.userCode = '';
+        authState.error = '';
+        render();
+      })
+      .catch(function () {});
+  }
+
+  function renderAuthScreen() {
+    if (!state.historyEl) return;
+
+    if (!authState.checked) {
+      state.historyEl.innerHTML = '<div class="parse-chat-auth"><div class="parse-chat-auth-status">Checking authentication…</div></div>';
+      if (state.composerFormEl) state.composerFormEl.style.display = 'none';
+      return;
+    }
+
+    if (authState.flowActive && authState.userCode) {
+      state.historyEl.innerHTML = '' +
+        '<div class="parse-chat-auth">' +
+          '<div class="parse-chat-auth-title">Sign in with OpenAI</div>' +
+          '<div class="parse-chat-auth-desc">Enter this code on the OpenAI page:</div>' +
+          '<div class="parse-chat-auth-code">' + escapeHtml(authState.userCode) + '</div>' +
+          '<div class="parse-chat-auth-step"><a href="' + escapeHtml(authState.verificationUri) + '" target="_blank" rel="noopener">Open OpenAI auth page →</a></div>' +
+          '<div class="parse-chat-auth-status">Waiting for approval…</div>' +
+          (authState.error ? '<div class="parse-chat-auth-error">' + escapeHtml(authState.error) + '</div>' : '') +
+        '</div>';
+      if (state.composerFormEl) state.composerFormEl.style.display = 'none';
+      return;
+    }
+
+    // Not authenticated, no active flow
+    state.historyEl.innerHTML = '' +
+      '<div class="parse-chat-auth">' +
+        '<div class="parse-chat-auth-title">Sign in to use PARSE Assistant</div>' +
+        '<div class="parse-chat-auth-desc">Sign in with your OpenAI account to enable AI-powered analysis of your linguistic data.</div>' +
+        '<button type="button" class="parse-chat-auth-btn" data-action="start-auth">Sign in with OpenAI</button>' +
+        (authState.error ? '<div class="parse-chat-auth-error">' + escapeHtml(authState.error) + '</div>' : '') +
+      '</div>';
+    if (state.composerFormEl) state.composerFormEl.style.display = 'none';
+  }
+
   function render() {
     if (!state.initialized) {
       return;
     }
 
     updateLauncher();
+
+    if (!authState.checked) {
+      checkAuthStatus();
+      return;
+    }
+
+    if (!authState.authenticated) {
+      renderAuthScreen();
+      return;
+    }
+
+    // Authenticated — show normal chat
+    if (state.composerFormEl) state.composerFormEl.style.display = '';
     updateMeta();
     renderHistory();
     updateComposer();
@@ -551,6 +700,17 @@
 
     if (action === 'toggle-transcript') {
       toggleTranscript(actionEl.dataset.runId);
+      return;
+    }
+
+    if (action === 'start-auth') {
+      startAuthFlow();
+      return;
+    }
+
+    if (action === 'logout') {
+      doLogout();
+      return;
     }
   }
 
@@ -606,6 +766,7 @@
         '<header class="parse-chat-header">' +
           '<div class="parse-chat-header-top">' +
             '<div class="parse-chat-title">PARSE Assistant</div>' +
+            '<button type="button" class="parse-chat-logout" data-action="logout" title="Sign out of OpenAI">Sign out</button>' +
             '<button type="button" class="parse-chat-close" data-action="close-panel">Close</button>' +
           '</div>' +
           '<div class="parse-chat-meta">' +

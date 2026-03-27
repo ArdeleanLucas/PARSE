@@ -1,3 +1,4 @@
 python/__pycache__/
 *.pyc
 .venv-ortho/
+config/auth_tokens.json
