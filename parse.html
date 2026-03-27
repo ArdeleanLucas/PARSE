@@ -178,6 +178,36 @@
     font-size: 12px;
   }
 
+  .concept-display-mode {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .display-mode-btn {
+    border: 1px solid #c8d0e8;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 11px;
+    background: #f8f9fc;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+
+  .display-mode-btn:hover {
+    border-color: var(--accent2);
+    color: var(--accent);
+  }
+
+  .display-mode-btn.active {
+    background: #e8eeff;
+    color: var(--accent);
+    border-color: var(--accent2);
+    font-weight: 600;
+  }
+
   #concept-items {
     overflow-y: auto;
     flex: 1;
@@ -197,6 +227,7 @@
   .concept-item.active { background: #eef2ff; border-left: 2px solid var(--accent); }
 
   .concept-item .ci-label { flex: 1; font-weight: 500; }
+  .concept-item .ci-label.placeholder { color: var(--muted); font-style: italic; }
   .concept-item .ci-time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
   .concept-item .ci-dot {
     width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
@@ -303,6 +334,11 @@
     color: var(--muted);
     display: flex;
     gap: 12px;
+  }
+
+  .annot-concept-context {
+    font-size: 12px;
+    color: var(--muted);
   }
 
   .field-group {
@@ -779,6 +815,12 @@
   <div id="concept-list">
     <div id="concept-search">
       <input type="text" id="search-input" placeholder="Filter concepts…" autocomplete="off">
+      <div id="concept-display-mode" class="concept-display-mode" role="group" aria-label="Concept list display mode">
+        <button type="button" class="display-mode-btn active" data-display-mode="ipa">IPA</button>
+        <button type="button" class="display-mode-btn" data-display-mode="ortho">Orthographic</button>
+        <button type="button" class="display-mode-btn" data-display-mode="survey">Survey</button>
+        <button type="button" class="display-mode-btn" data-display-mode="other">Other</button>
+      </div>
     </div>
     <div id="concept-items"></div>
   </div>
@@ -1012,6 +1054,7 @@ const STATE = {
   annotations: {},           // conceptKey → {ipa, ortho, startSec, endSec, status}
   currentSpeaker: null,
   currentSegmentIdx: null,
+  conceptDisplayMode: 'ipa',
   wavesurfer: null,
   regionsPlugin: null,
   segmentPlayMode: false,    // true = auto-stop at segment end; false = free scrub
@@ -2632,6 +2675,85 @@ function updateUndoButtons() {
 }
 
 // ─── Concept list ─────────────────────────────────────────────────────────────
+function getConceptDisplayInfo(seg, annot, segIdx) {
+  const mode = STATE.conceptDisplayMode || 'ipa';
+
+  if (mode === 'ipa') {
+    const ipa = String(annot?.ipa || '').trim();
+    return {
+      text: ipa || '—',
+      filterText: (ipa || '—').toLowerCase(),
+      isPlaceholder: !ipa,
+    };
+  }
+
+  if (mode === 'ortho') {
+    const ortho = String(annot?.ortho || seg?.ortho || '').trim();
+    return {
+      text: ortho || '—',
+      filterText: (ortho || '—').toLowerCase(),
+      isPlaceholder: !ortho,
+    };
+  }
+
+  if (mode === 'other') {
+    const notes = String(annot?.notes || '').trim();
+    return {
+      text: notes || '—',
+      filterText: (notes || '—').toLowerCase(),
+      isPlaceholder: !notes,
+    };
+  }
+
+  const survey = String(seg?.text || '').trim();
+  return {
+    text: survey || '—',
+    filterText: (survey || '—').toLowerCase(),
+    isPlaceholder: !survey,
+  };
+}
+
+function applyConceptSearchFilter() {
+  const container = document.getElementById('concept-items');
+  const searchInput = document.getElementById('search-input');
+  if (!container || !searchInput) return;
+
+  const q = searchInput.value.toLowerCase().trim();
+  container.querySelectorAll('.concept-item').forEach(el => {
+    const label = (el.dataset.filterText || '').toLowerCase();
+    el.style.display = label.includes(q) ? '' : 'none';
+  });
+}
+
+function updateConceptDisplayModeUI() {
+  document.querySelectorAll('#concept-display-mode [data-display-mode]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.displayMode === STATE.conceptDisplayMode);
+  });
+}
+
+function refreshConceptList() {
+  if (!STATE.currentSpeaker || !STATE.coarseTranscript) return;
+  const spkData = STATE.sourceIndex?.speakers?.[STATE.currentSpeaker] || null;
+  buildConceptList(STATE.currentSpeaker, STATE.coarseTranscript, spkData);
+}
+
+function wireConceptDisplayModeControl() {
+  const host = document.getElementById('concept-display-mode');
+  if (!host) return;
+
+  host.querySelectorAll('[data-display-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nextMode = btn.dataset.displayMode;
+      if (!nextMode || nextMode === STATE.conceptDisplayMode) return;
+      STATE.conceptDisplayMode = nextMode;
+      updateConceptDisplayModeUI();
+      refreshConceptList();
+    });
+  });
+
+  updateConceptDisplayModeUI();
+}
+
 function buildConceptList(speaker, transcript, spkData) {
   const segs = transcript.segments || [];
   const container = document.getElementById('concept-items');
@@ -2644,11 +2766,12 @@ function buildConceptList(speaker, transcript, spkData) {
     div.className = 'concept-item' + (annot ? (annot.status === 'ok' ? ' has-annotation' : ' has-ipa') : '');
     div.dataset.idx = i;
 
-    const label = seg.text || `segment ${i+1}`;
-    const orthoPreview = seg.ortho ? ` <span style="color:var(--muted);font-size:11px;direction:rtl">${escHtml(seg.ortho)}</span>` : '';
+    const display = getConceptDisplayInfo(seg, annot, i);
+    div.dataset.filterText = display.filterText;
+
     div.innerHTML = `
       <span class="ci-dot"></span>
-      <span class="ci-label">${escHtml(label)}${orthoPreview}</span>
+      <span class="ci-label${display.isPlaceholder ? ' placeholder' : ''}" title="${escHtml(seg.text || '')}">${escHtml(display.text)}</span>
       <span class="ci-time">${fmt(seg.start)}</span>
     `;
 
@@ -2671,18 +2794,21 @@ function buildConceptList(speaker, transcript, spkData) {
         }
       }
     });
+
     container.appendChild(div);
   });
 
-  // Search filter
+  if (STATE.currentSegmentIdx != null) {
+    const activeEl = container.querySelector(`.concept-item[data-idx="${STATE.currentSegmentIdx}"]`);
+    if (activeEl) activeEl.classList.add('active');
+  }
+
   const searchInput = document.getElementById('search-input');
-  searchInput.oninput = () => {
-    const q = searchInput.value.toLowerCase();
-    container.querySelectorAll('.concept-item').forEach(el => {
-      const label = el.querySelector('.ci-label').textContent.toLowerCase();
-      el.style.display = label.includes(q) ? '' : 'none';
-    });
-  };
+  if (searchInput) {
+    searchInput.oninput = applyConceptSearchFilter;
+  }
+
+  applyConceptSearchFilter();
 }
 
 function updateStatusPill(speakerArg, transcriptArg) {
@@ -2759,10 +2885,11 @@ function buildAnnotationPane(speaker, idx, seg) {
 
   // Collect reference IPA from other speakers' annotations for same concept position
   const refs = buildRefForms(speaker, idx, seg.text);
+  const conceptLabel = seg.text || `Segment ${idx + 1}`;
 
   pane.innerHTML = `
     <div class="annot-header">
-      <span class="annot-concept">${escHtml(seg.text || `Segment ${idx+1}`)}</span>
+      <span class="annot-concept">${escHtml(conceptLabel)}</span>
       <span class="annot-speaker-badge">${escHtml(speaker)}</span>
     </div>
     <div class="annot-segment-info">
@@ -2770,6 +2897,7 @@ function buildAnnotationPane(speaker, idx, seg) {
       <span>Duration: ${((absEnd - absStart) * 1000).toFixed(0)} ms</span>
       <span>Segment ${idx+1}</span>
     </div>
+    <div class="annot-concept-context">Survey label: ${escHtml(conceptLabel)}</div>
 
     ${refs.length ? `
     <div class="ref-forms">
@@ -2786,7 +2914,7 @@ function buildAnnotationPane(speaker, idx, seg) {
     <div class="field-group">
       <label class="field-label" for="field-ipa">IPA Transcription</label>
       <input class="field-input ltr" id="field-ipa" type="text"
-             placeholder="e.g. jak" value="${escHtml(existing.ipa || seg.text || '')}" autocomplete="off">
+             placeholder="e.g. jak" value="${escHtml(existing.ipa || '')}" autocomplete="off">
     </div>
 
     <div class="field-group">
@@ -2853,15 +2981,7 @@ function saveAndNext(speaker, idx, missing) {
   };
   saveAnnotations();
 
-  // Update dot in list
-  const listEl = document.querySelector(`.concept-item[data-idx="${idx}"]`);
-  if (listEl) {
-    listEl.classList.remove('has-annotation', 'has-ipa');
-    if (!missing) listEl.classList.add('has-annotation');
-    else          listEl.classList.add('has-ipa');
-    listEl.classList.remove('active');
-  }
-
+  refreshConceptList();
   updateStatusPill();
 
   if (missing) {
@@ -3025,6 +3145,7 @@ async function init() {
   STATE.annotations = loadAnnotations();
   wireControls();
   wireWizard();
+  wireConceptDisplayModeControl();
 
   setLoading('Loading source index…');
   try {
