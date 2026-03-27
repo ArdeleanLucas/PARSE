@@ -21,6 +21,14 @@
   const SHELL_DRAFT_STORAGE_KEY = 'parse.compare.shell-draft.v1';
   const SHELL_DRAFT_EXPORT_VERSION = 1;
   const NOTE_SAVE_DELAY_MS = 220;
+  const ENTRY_MATCH_EPSILON = 0.01;
+  const COGNATE_GROUP_COLORS = {
+    A: '#4a90d9',
+    B: '#27ae60',
+    C: '#e67e22',
+    D: '#8e44ad',
+    E: '#e74c3c',
+  };
 
   const ASSISTANT_MOUNT_ID = 'parse-assistant-dock';
   const ASSISTANT_HISTORY_KEY = 'parse-ai-chat-history-v1';
@@ -59,6 +67,7 @@
     shellStateEl: null,
     shellStateTitleEl: null,
     shellStateMessageEl: null,
+    shellStateMetaEl: null,
     navPrevButtons: [],
     navNextButtons: [],
     acceptButtons: [],
@@ -70,6 +79,7 @@
     refArabicIpaEl: null,
     refPersianFormEl: null,
     refPersianIpaEl: null,
+    formsTbodyEl: null,
     loadButtonEl: null,
     saveButtonEl: null,
     toastEl: null,
@@ -167,6 +177,103 @@
       conceptId: normalizeConceptId(text.slice(0, colonIndex)),
       conceptLabel: text.slice(colonIndex + 1).trim(),
     };
+  }
+
+  function conceptIdKeyCandidates(conceptId) {
+    const normalized = normalizeConceptId(conceptId);
+    if (!normalized) return [];
+
+    const out = [normalized];
+    const numeric = Number(normalized);
+    if (Number.isFinite(numeric)) {
+      const numericKey = String(numeric);
+      if (out.indexOf(numericKey) === -1) {
+        out.push(numericKey);
+      }
+    }
+
+    return out;
+  }
+
+  function valueForConceptId(record, conceptId) {
+    const map = toObject(record);
+    const candidates = conceptIdKeyCandidates(conceptId);
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const key = candidates[i];
+      if (Object.prototype.hasOwnProperty.call(map, key)) {
+        return map[key];
+      }
+    }
+
+    return undefined;
+  }
+
+  function approxEqual(left, right, epsilon) {
+    const a = Number(left);
+    const b = Number(right);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    return Math.abs(a - b) <= epsilon;
+  }
+
+  function intervalsFromTier(record, tierName) {
+    const tiers = toObject(record && record.tiers);
+    const tier = toObject(tiers[tierName]);
+    return Array.isArray(tier.intervals) ? tier.intervals : [];
+  }
+
+  function findIntervalTextByBounds(intervals, startSec, endSec) {
+    const list = Array.isArray(intervals) ? intervals : [];
+
+    for (let i = 0; i < list.length; i += 1) {
+      const interval = toObject(list[i]);
+      if (
+        approxEqual(interval.start, startSec, ENTRY_MATCH_EPSILON) &&
+        approxEqual(interval.end, endSec, ENTRY_MATCH_EPSILON)
+      ) {
+        return toString(interval.text);
+      }
+    }
+
+    return '';
+  }
+
+  function formatSecondsToClock(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return '--:--';
+
+    const total = Math.floor(value);
+    const hrs = Math.floor(total / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    if (hrs > 0) {
+      return String(hrs) + ':' + String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+    }
+
+    return String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+  }
+
+  function normalizeGroupLetter(value) {
+    const raw = toString(value).toUpperCase();
+    if (!raw) return '';
+
+    if (Object.prototype.hasOwnProperty.call(COGNATE_GROUP_COLORS, raw)) {
+      return raw;
+    }
+
+    const code = raw.charCodeAt(0) - 65;
+    if (Number.isFinite(code) && code >= 0) {
+      const letters = Object.keys(COGNATE_GROUP_COLORS);
+      return letters[code % letters.length] || '';
+    }
+
+    return '';
+  }
+
+  function colorForGroup(groupLetter) {
+    const normalized = normalizeGroupLetter(groupLetter);
+    return COGNATE_GROUP_COLORS[normalized] || '#94a3b8';
   }
 
   function numericOrTextConceptId(conceptId) {
@@ -612,6 +719,62 @@
     }, 2600);
   }
 
+  function shellMetaChipHtml(label, tone) {
+    const safeTone = toString(tone);
+    const toneClass = safeTone && ['ok', 'warn', 'error'].indexOf(safeTone) !== -1
+      ? (' ' + safeTone)
+      : '';
+    return '<span class="shell-meta-chip' + toneClass + '">' + escapeHtml(label) + '</span>';
+  }
+
+  function renderShellStateMeta() {
+    if (!state.shellStateMetaEl) return;
+
+    const summary = toObject(state.bootstrapSummary);
+    const chips = [];
+
+    chips.push(
+      shellMetaChipHtml(
+        summary.projectLoaded ? 'project.json loaded' : 'project.json missing',
+        summary.projectLoaded ? 'ok' : 'warn'
+      )
+    );
+
+    chips.push(
+      shellMetaChipHtml(
+        Number(summary.loadedAnnotationSpeakers || 0) + ' annotation speakers',
+        Number(summary.loadedAnnotationSpeakers || 0) > 0 ? 'ok' : 'warn'
+      )
+    );
+
+    chips.push(
+      shellMetaChipHtml(
+        state.concepts.length + ' concepts',
+        state.concepts.length > 0 ? 'ok' : 'warn'
+      )
+    );
+
+    chips.push(
+      shellMetaChipHtml(
+        state.selectedSpeakers.length + ' selected speakers',
+        state.selectedSpeakers.length > 0 ? 'ok' : 'warn'
+      )
+    );
+
+    chips.push(
+      shellMetaChipHtml(
+        state.filteredConcepts.length + ' visible concepts',
+        state.filteredConcepts.length > 0 ? 'ok' : 'warn'
+      )
+    );
+
+    if (state.bootstrapErrorMessage) {
+      chips.push(shellMetaChipHtml('bootstrap error', 'error'));
+    }
+
+    state.shellStateMetaEl.innerHTML = chips.join('');
+  }
+
   function setShellState(kind, title, message) {
     if (!state.shellStateEl) {
       return;
@@ -642,6 +805,8 @@
     if (state.shellStateMessageEl) {
       state.shellStateMessageEl.textContent = stateMessage;
     }
+
+    renderShellStateMeta();
   }
 
   function resetBootstrapSummary() {
@@ -828,7 +993,11 @@
     const manualFlags = toObject(toObject(toObject(enrichments).manual_overrides).borrowing_flags);
     const baseFlags = toObject(enrichments.borrowing_flags);
 
-    return Object.assign({}, toObject(baseFlags[key]), toObject(manualFlags[key]));
+    return Object.assign(
+      {},
+      toObject(valueForConceptId(baseFlags, key)),
+      toObject(valueForConceptId(manualFlags, key))
+    );
   }
 
   function conceptHasBorrowingFlag(conceptId) {
@@ -971,9 +1140,414 @@
     state.progressBarEl.style.width = String((reviewed / total) * 100) + '%';
   }
 
+  function valueForSpeakerId(record, speakerId) {
+    const map = toObject(record);
+    const wanted = toString(speakerId);
+    if (!wanted) return undefined;
+
+    if (Object.prototype.hasOwnProperty.call(map, wanted)) {
+      return map[wanted];
+    }
+
+    const wantedLower = wanted.toLowerCase();
+    const keys = Object.keys(map);
+    for (let i = 0; i < keys.length; i += 1) {
+      if (toString(keys[i]).toLowerCase() === wantedLower) {
+        return map[keys[i]];
+      }
+    }
+
+    return undefined;
+  }
+
+  function valueByAliases(source, aliases) {
+    const map = toObject(source);
+    const inAliases = Array.isArray(aliases) ? aliases : [aliases];
+    const wanted = [];
+
+    for (let i = 0; i < inAliases.length; i += 1) {
+      const alias = toString(inAliases[i]).toLowerCase();
+      if (!alias) continue;
+      if (wanted.indexOf(alias) === -1) {
+        wanted.push(alias);
+      }
+    }
+
+    if (!wanted.length) {
+      return undefined;
+    }
+
+    for (let i = 0; i < wanted.length; i += 1) {
+      if (Object.prototype.hasOwnProperty.call(map, wanted[i])) {
+        return map[wanted[i]];
+      }
+    }
+
+    const keys = Object.keys(map);
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = toString(keys[i]).toLowerCase();
+      if (wanted.indexOf(key) !== -1) {
+        return map[keys[i]];
+      }
+    }
+
+    return undefined;
+  }
+
+  function normalizedSimilarityScore(value) {
+    let score = toFiniteNumber(value);
+    if (!Number.isFinite(score)) return null;
+
+    if (score > 1 && score <= 100) {
+      score = score / 100;
+    }
+
+    if (score < 0) score = 0;
+    if (score > 1) score = 1;
+    return score;
+  }
+
+  function readScoreFromSimilarityValue(value) {
+    const direct = normalizedSimilarityScore(value);
+    if (Number.isFinite(direct)) {
+      return direct;
+    }
+
+    const node = toObject(value);
+    const scoreKeys = ['score', 'similarity', 'value', 'similarity_score', 'similarityScore'];
+    for (let i = 0; i < scoreKeys.length; i += 1) {
+      const score = normalizedSimilarityScore(node[scoreKeys[i]]);
+      if (Number.isFinite(score)) {
+        return score;
+      }
+    }
+
+    return null;
+  }
+
+  function collectReferenceForms(value, out, depth) {
+    const target = Array.isArray(out) ? out : [];
+    const level = Number.isFinite(Number(depth)) ? Number(depth) : 0;
+
+    if (target.length >= 8 || level > 4 || value == null) {
+      return target;
+    }
+
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = toString(value);
+      if (text && target.indexOf(text) === -1) {
+        target.push(text);
+      }
+      return target;
+    }
+
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i += 1) {
+        collectReferenceForms(value[i], target, level + 1);
+        if (target.length >= 8) break;
+      }
+      return target;
+    }
+
+    const node = toObject(value);
+    const keys = ['reference_forms', 'referenceForms', 'references', 'forms', 'form', 'ipa', 'orthography', 'ortho', 'transcription'];
+    for (let i = 0; i < keys.length; i += 1) {
+      if (!Object.prototype.hasOwnProperty.call(node, keys[i])) continue;
+      collectReferenceForms(node[keys[i]], target, level + 1);
+      if (target.length >= 8) break;
+    }
+
+    return target;
+  }
+
+  function similarityInfoForSpeaker(conceptId, speakerId, aliases) {
+    const info = {
+      score: null,
+      references: [],
+    };
+
+    const similarity = toObject(toObject(P.enrichments).similarity);
+    const conceptNode = valueForConceptId(similarity, conceptId);
+    const conceptMap = toObject(conceptNode);
+    if (!Object.keys(conceptMap).length) {
+      return info;
+    }
+
+    const candidates = [];
+
+    function pushCandidate(value) {
+      if (typeof value !== 'undefined' && value !== null) {
+        candidates.push(value);
+      }
+    }
+
+    const speakerNodes = [
+      valueForSpeakerId(conceptMap, speakerId),
+      valueForSpeakerId(toObject(conceptMap.speakers), speakerId),
+    ];
+
+    for (let i = 0; i < speakerNodes.length; i += 1) {
+      const speakerNode = toObject(speakerNodes[i]);
+      pushCandidate(valueByAliases(speakerNode, aliases));
+      pushCandidate(valueByAliases(toObject(speakerNode.languages), aliases));
+      pushCandidate(valueByAliases(toObject(speakerNode.scores), aliases));
+      pushCandidate(valueByAliases(toObject(speakerNode.similarity), aliases));
+    }
+
+    const languageNodes = [
+      valueByAliases(conceptMap, aliases),
+      valueByAliases(toObject(conceptMap.languages), aliases),
+    ];
+
+    for (let i = 0; i < languageNodes.length; i += 1) {
+      const languageNode = languageNodes[i];
+      pushCandidate(languageNode);
+
+      const languageMap = toObject(languageNode);
+      pushCandidate(valueForSpeakerId(languageMap, speakerId));
+      pushCandidate(valueForSpeakerId(toObject(languageMap.speakers), speakerId));
+      pushCandidate(valueForSpeakerId(toObject(languageMap.values), speakerId));
+      pushCandidate(valueForSpeakerId(toObject(languageMap.scores), speakerId));
+    }
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      if (!Number.isFinite(info.score)) {
+        const score = readScoreFromSimilarityValue(candidate);
+        if (Number.isFinite(score)) {
+          info.score = score;
+        }
+      }
+      collectReferenceForms(candidate, info.references, 0);
+    }
+
+    return info;
+  }
+
+  function referenceFormsForConceptLanguage(conceptId, aliases) {
+    const refs = [];
+
+    const speakers = state.selectedSpeakers.length
+      ? state.selectedSpeakers
+      : state.availableSpeakers;
+
+    for (let i = 0; i < speakers.length; i += 1) {
+      const info = similarityInfoForSpeaker(conceptId, speakers[i], aliases);
+      collectReferenceForms(info.references, refs, 0);
+      if (refs.length >= 8) break;
+    }
+
+    const similarity = toObject(toObject(P.enrichments).similarity);
+    const conceptNode = toObject(valueForConceptId(similarity, conceptId));
+    collectReferenceForms(valueByAliases(conceptNode, aliases), refs, 0);
+    collectReferenceForms(valueByAliases(toObject(conceptNode.languages), aliases), refs, 0);
+
+    return refs.slice(0, 4);
+  }
+
+  function renderReferenceCards(concept) {
+    if (!concept) {
+      setReferencePlaceholderValue(state.refArabicFormEl, '—');
+      setReferencePlaceholderValue(state.refArabicIpaEl, '—');
+      setReferencePlaceholderValue(state.refPersianFormEl, '—');
+      setReferencePlaceholderValue(state.refPersianIpaEl, '—');
+      return;
+    }
+
+    function applyReferenceValues(formEl, ipaEl, refs, languageLabel) {
+      if (!formEl || !ipaEl) return;
+
+      if (!refs.length) {
+        formEl.textContent = 'No data';
+        ipaEl.textContent = 'No ' + languageLabel + ' reference form available for this concept yet.';
+        return;
+      }
+
+      formEl.textContent = refs[0];
+      if (refs.length > 1) {
+        ipaEl.textContent = refs.slice(1).join(' · ');
+      } else {
+        ipaEl.textContent = 'Reference form available from enrichments.';
+      }
+    }
+
+    applyReferenceValues(
+      state.refArabicFormEl,
+      state.refArabicIpaEl,
+      referenceFormsForConceptLanguage(concept.id, ['ar', 'arabic']),
+      'Arabic'
+    );
+
+    applyReferenceValues(
+      state.refPersianFormEl,
+      state.refPersianIpaEl,
+      referenceFormsForConceptLanguage(concept.id, ['fa', 'persian']),
+      'Persian'
+    );
+  }
+
+  function annotationEntryForSpeakerConcept(speaker, conceptId) {
+    const speakerId = toString(speaker);
+    const conceptKey = normalizeConceptId(conceptId);
+    if (!speakerId || !conceptKey) {
+      return null;
+    }
+
+    const conceptTable = toObject(P.modules).conceptTable;
+    if (conceptTable && typeof conceptTable.getEntryForSpeakerConcept === 'function') {
+      const fromTable = conceptTable.getEntryForSpeakerConcept(speakerId, conceptKey);
+      if (fromTable && typeof fromTable === 'object') {
+        const startSec = toFiniteNumber(fromTable.startSec != null ? fromTable.startSec : fromTable.start);
+        const endSec = toFiniteNumber(fromTable.endSec != null ? fromTable.endSec : fromTable.end);
+        return {
+          sourceWav: toString(fromTable.sourceWav || fromTable.source_wav),
+          startSec: Number.isFinite(startSec) ? startSec : null,
+          endSec: Number.isFinite(endSec) ? endSec : null,
+          ipa: toString(fromTable.ipa),
+          ortho: toString(fromTable.ortho),
+        };
+      }
+    }
+
+    const record = toObject(toObject(P.annotations)[speakerId]);
+    const conceptIntervals = intervalsFromTier(record, 'concept');
+
+    for (let i = 0; i < conceptIntervals.length; i += 1) {
+      const interval = toObject(conceptIntervals[i]);
+      if (normalizeConceptId(interval.text) !== conceptKey) {
+        continue;
+      }
+
+      const startSec = toFiniteNumber(interval.start);
+      const endSec = toFiniteNumber(interval.end);
+      if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) {
+        continue;
+      }
+
+      return {
+        sourceWav: toString(record.source_audio),
+        startSec: startSec,
+        endSec: endSec,
+        ipa: findIntervalTextByBounds(intervalsFromTier(record, 'ipa'), startSec, endSec),
+        ortho: findIntervalTextByBounds(intervalsFromTier(record, 'ortho'), startSec, endSec),
+      };
+    }
+
+    return null;
+  }
+
+  function groupsForConcept(conceptId) {
+    const conceptKey = normalizeConceptId(conceptId);
+    if (!conceptKey) return {};
+
+    const enrichmentsIO = toObject(P.modules).enrichmentsIO;
+    if (enrichmentsIO && typeof enrichmentsIO.getCognateGroupsForConcept === 'function') {
+      return toObject(enrichmentsIO.getCognateGroupsForConcept(conceptKey));
+    }
+
+    const enrichments = toObject(P.enrichments);
+    const manual = toObject(toObject(enrichments.manual_overrides).cognate_sets);
+    const manualGroups = valueForConceptId(manual, conceptKey);
+    if (manualGroups) {
+      return toObject(manualGroups);
+    }
+
+    return toObject(valueForConceptId(toObject(enrichments.cognate_sets), conceptKey));
+  }
+
+  function cognateGroupForSpeaker(conceptId, speakerId) {
+    const conceptKey = normalizeConceptId(conceptId);
+    const speakerKey = toString(speakerId);
+    if (!conceptKey || !speakerKey) return '';
+
+    const enrichmentsIO = toObject(P.modules).enrichmentsIO;
+    if (enrichmentsIO && typeof enrichmentsIO.getGroupForSpeaker === 'function') {
+      return normalizeGroupLetter(enrichmentsIO.getGroupForSpeaker(conceptKey, speakerKey));
+    }
+
+    const groups = groupsForConcept(conceptKey);
+    const keys = Object.keys(groups);
+    for (let i = 0; i < keys.length; i += 1) {
+      const group = normalizeGroupLetter(keys[i]);
+      if (!group) continue;
+      const members = Array.isArray(groups[keys[i]]) ? groups[keys[i]] : [];
+      for (let j = 0; j < members.length; j += 1) {
+        if (toString(members[j]) === speakerKey) {
+          return group;
+        }
+      }
+    }
+
+    return '';
+  }
+
+  function normalizeBorrowingBadgeDecision(value) {
+    const raw = toString(value).toLowerCase();
+    if (!raw) return '';
+
+    if (
+      raw === 'borrowed' ||
+      raw === 'confirmed' ||
+      raw === 'borrowing' ||
+      raw === 'loan'
+    ) {
+      return 'borrowed';
+    }
+
+    if (
+      raw === 'native' ||
+      raw === 'not_borrowing' ||
+      raw === 'not-borrowing' ||
+      raw === 'not borrowing'
+    ) {
+      return 'native';
+    }
+
+    if (raw === 'uncertain' || raw === 'undecided' || raw === 'unknown') {
+      return 'uncertain';
+    }
+
+    return '';
+  }
+
+  function borrowingBadgeForSpeaker(conceptId, speakerId) {
+    const records = borrowingRecordForConcept(conceptId);
+    const entry = valueForSpeakerId(records, speakerId);
+    const decision = normalizeBorrowingBadgeDecision(toObject(entry).decision || toObject(entry).status || entry);
+
+    if (decision === 'borrowed') {
+      return { className: 'borrowed', label: 'Borrowed' };
+    }
+
+    if (decision === 'native') {
+      return { className: 'native', label: 'Native' };
+    }
+
+    if (decision === 'uncertain') {
+      return { className: 'uncertain', label: 'Uncertain' };
+    }
+
+    return { className: 'none', label: '—' };
+  }
+
+  function similarityCellHtml(info) {
+    if (!info || !Number.isFinite(info.score)) {
+      return '<span class="forms-sim empty">No data</span>';
+    }
+
+    const refs = Array.isArray(info.references) ? info.references : [];
+    const title = refs.length
+      ? ' title="' + escapeHtml('Refs: ' + refs.join(', ')) + '"'
+      : '';
+
+    return '<span class="forms-sim"' + title + '>' + info.score.toFixed(2) + '</span>';
+  }
+
   function renderSpeakerFormsPlaceholder(concept) {
-    const tbody = document.getElementById('forms-tbody');
+    const tbody = state.formsTbodyEl || document.getElementById('forms-tbody');
     if (!tbody) return;
+
+    state.formsTbodyEl = tbody;
 
     if (!concept) {
       tbody.innerHTML = '<tr class="forms-empty-row"><td colspan="6" class="empty-msg">Select a concept from the sidebar to begin speaker-by-speaker review.</td></tr>';
@@ -988,14 +1562,54 @@
     const rows = [];
     for (let i = 0; i < state.selectedSpeakers.length; i += 1) {
       const speaker = state.selectedSpeakers[i];
+      const entry = annotationEntryForSpeakerConcept(speaker, concept.id);
+      const hasEntry = !!entry;
+      const hasPlayableClip = !!(
+        hasEntry &&
+        entry.sourceWav &&
+        Number.isFinite(entry.startSec) &&
+        Number.isFinite(entry.endSec) &&
+        entry.endSec > entry.startSec
+      );
+
+      const arInfo = similarityInfoForSpeaker(concept.id, speaker, ['ar', 'arabic']);
+      const faInfo = similarityInfoForSpeaker(concept.id, speaker, ['fa', 'persian']);
+
+      const group = cognateGroupForSpeaker(concept.id, speaker);
+      const badgeColor = colorForGroup(group);
+      const borrowing = borrowingBadgeForSpeaker(concept.id, speaker);
+
+      const formCell = hasEntry
+        ? (
+          '<div class="forms-entry">' +
+            (hasPlayableClip
+              ? ('<button type="button" class="play-btn" data-action="play-speaker-form" data-source-wav="' + escapeHtml(entry.sourceWav) + '" data-start-sec="' + escapeHtml(entry.startSec) + '" data-end-sec="' + escapeHtml(entry.endSec) + '" data-speaker="' + escapeHtml(speaker) + '" data-concept-id="' + escapeHtml(concept.id) + '" title="Play annotated clip">▶</button>')
+              : '<button type="button" class="play-btn" disabled title="Audio clip unavailable for this entry">▶</button>') +
+            '<div class="forms-entry-lines">' +
+              '<div class="forms-entry-ipa">' + escapeHtml(entry.ipa || '—') + '</div>' +
+              '<div class="forms-entry-ortho">' + escapeHtml(entry.ortho || '—') + '</div>' +
+              '<div class="forms-entry-time">' +
+                (Number.isFinite(entry.startSec) && Number.isFinite(entry.endSec)
+                  ? (escapeHtml(formatSecondsToClock(entry.startSec)) + '–' + escapeHtml(formatSecondsToClock(entry.endSec)))
+                  : 'No timestamp') +
+              '</div>' +
+            '</div>' +
+          '</div>'
+        )
+        : '<span class="empty-msg">No annotated form available for this concept yet.</span>';
+
+      const cognateCell = group
+        ? '<span class="forms-cognate-chip" style="border-color:' + badgeColor + ';color:' + badgeColor + ';background:' + hexToRgba(badgeColor, 0.15) + '" title="Cognate group ' + escapeHtml(group) + '">' + escapeHtml(group) + '</span>'
+        : '<span class="forms-cognate-chip empty">—</span>';
+
       rows.push(
-        '<tr class="forms-empty-row">' +
-          '<td>' + escapeHtml(speaker) + '</td>' +
-          '<td><span class="empty-msg">No annotated form available for this concept yet.</span></td>' +
-          '<td class="empty-msg">No data</td>' +
-          '<td class="empty-msg">No data</td>' +
-          '<td class="empty-msg">—</td>' +
-          '<td><button class="row-flag-btn" disabled title="Requires live row data">⚑</button></td>' +
+        '<tr' + (borrowing.className === 'borrowed' ? ' class="borrowing-row"' : '') + '>' +
+          '<td class="forms-speaker">' + escapeHtml(speaker) + '</td>' +
+          '<td>' + formCell + '</td>' +
+          '<td>' + similarityCellHtml(arInfo) + '</td>' +
+          '<td>' + similarityCellHtml(faInfo) + '</td>' +
+          '<td>' + cognateCell + '</td>' +
+          '<td><span class="forms-flag-chip ' + borrowing.className + '">' + escapeHtml(borrowing.label) + '</span></td>' +
         '</tr>'
       );
     }
@@ -1021,12 +1635,9 @@
         : 'Compare review shell <span>(sidebar-first workflow)</span>';
     }
 
-    setReferencePlaceholderValue(state.refArabicFormEl, hasConcept ? 'No data' : '—');
-    setReferencePlaceholderValue(state.refArabicIpaEl, hasConcept ? 'No Arabic reference form available for this concept yet.' : '—');
-    setReferencePlaceholderValue(state.refPersianFormEl, hasConcept ? 'No data' : '—');
-    setReferencePlaceholderValue(state.refPersianIpaEl, hasConcept ? 'No Persian reference form available for this concept yet.' : '—');
-
+    renderReferenceCards(concept);
     renderSpeakerFormsPlaceholder(concept);
+    renderShellStateMeta();
 
     if (state.notesFieldEl) {
       state.notesFieldEl.disabled = !hasConcept;
@@ -1433,6 +2044,32 @@
     if (clickedElementMatches(target, state.saveButtonEl)) {
       downloadShellDraft();
     }
+  }
+
+  function onFormsTableClick(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return;
+
+    const playButton = target.closest('[data-action="play-speaker-form"]');
+    if (!playButton) {
+      return;
+    }
+
+    const sourceWav = toString(playButton.dataset.sourceWav);
+    const startSec = toFiniteNumber(playButton.dataset.startSec);
+    const endSec = toFiniteNumber(playButton.dataset.endSec);
+    if (!sourceWav || !Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) {
+      showToast('Audio clip unavailable for this row.');
+      return;
+    }
+
+    dispatchEvent('parse:audio-play', {
+      sourceWav: sourceWav,
+      startSec: startSec,
+      endSec: endSec,
+      speaker: toString(playButton.dataset.speaker),
+      conceptId: numericOrTextConceptId(playButton.dataset.conceptId),
+    });
   }
 
   function onShellKeydown(event) {
@@ -3486,6 +4123,9 @@
     if (state.notesFieldEl) {
       addListener(state.notesFieldEl, 'input', onSidebarInput);
     }
+    if (state.formsTbodyEl) {
+      addListener(state.formsTbodyEl, 'click', onFormsTableClick);
+    }
     for (let i = 0; i < state.navPrevButtons.length; i += 1) {
       addListener(state.navPrevButtons[i], 'click', onSidebarClick);
     }
@@ -3568,6 +4208,7 @@
     state.shellStateEl = firstById(['compare-shell-state']);
     state.shellStateTitleEl = firstById(['compare-shell-state-title']);
     state.shellStateMessageEl = firstById(['compare-shell-state-message']);
+    state.shellStateMetaEl = firstById(['compare-shell-state-meta']);
 
     const footerNavButtons = Array.prototype.slice.call(document.querySelectorAll('#nav-footer .nav-btn'));
     const primaryPrev = firstById(['btn-prev']) || (footerNavButtons.length ? footerNavButtons[0] : null);
@@ -3586,6 +4227,7 @@
     state.refArabicIpaEl = firstById(['ref-arabic-ipa']);
     state.refPersianFormEl = firstById(['ref-persian-form']);
     state.refPersianIpaEl = firstById(['ref-persian-ipa']);
+    state.formsTbodyEl = firstById(['forms-tbody']);
     state.loadButtonEl = firstById(['btn-load-decisions']) || findTopbarButtonByText(['load decisions']);
     state.saveButtonEl = firstById(['btn-save']) || findTopbarButtonByText(['save decisions', 'save']);
     state.legacyFileInputEl = firstById(['decision-input', 'file-input']);
@@ -3697,6 +4339,7 @@
     state.shellStateEl = null;
     state.shellStateTitleEl = null;
     state.shellStateMessageEl = null;
+    state.shellStateMetaEl = null;
     state.navPrevButtons = [];
     state.navNextButtons = [];
     state.acceptButtons = [];
@@ -3708,6 +4351,7 @@
     state.refArabicIpaEl = null;
     state.refPersianFormEl = null;
     state.refPersianIpaEl = null;
+    state.formsTbodyEl = null;
     state.loadButtonEl = null;
     state.saveButtonEl = null;
     state.toastEl = null;

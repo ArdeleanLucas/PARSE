@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PARSE Compare — Review Tool Shell</title>
+<title>PARSE Compare — Concept-first Review Workspace</title>
 
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -354,6 +354,89 @@ textarea, input, select { font-family: inherit; }
 .forms-empty-row .empty-msg {
   color: #5e6f9f;
   font-style: normal;
+}
+.forms-speaker {
+  font-weight: 700;
+  color: #283a74;
+}
+.forms-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.forms-entry-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.forms-entry-ipa {
+  font-family: 'Noto Sans', 'DejaVu Sans', monospace;
+  color: #1f3775;
+  line-height: 1.35;
+}
+.forms-entry-ortho {
+  font-size: 0.78rem;
+  color: #5f72a4;
+  line-height: 1.35;
+}
+.forms-entry-time {
+  font-size: 0.73rem;
+  color: #7a89af;
+}
+.forms-sim {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #3a4f8f;
+}
+.forms-sim.empty {
+  font-weight: 500;
+  color: #8d9ac0;
+}
+.forms-cognate-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.forms-cognate-chip.empty {
+  border-color: #d2d8eb;
+  background: #f8faff;
+  color: #8b99bf;
+}
+.forms-flag-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.forms-flag-chip.none {
+  border-color: #d1d9ec;
+  color: #7182ad;
+  background: #f8faff;
+}
+.forms-flag-chip.borrowed {
+  border-color: #fca5a5;
+  color: #b91c1c;
+  background: #fff1f2;
+}
+.forms-flag-chip.native {
+  border-color: #86efac;
+  color: #166534;
+  background: #f0fdf4;
+}
+.forms-flag-chip.uncertain {
+  border-color: #fcd34d;
+  color: #92400e;
+  background: #fffbeb;
 }
 
 /* IPA cell – inline edit */
@@ -765,6 +848,14 @@ textarea, input, select { font-family: inherit; }
   border-left-color: #eab308;
   background: linear-gradient(135deg, #fffef5 0%, #fff9dd 100%);
 }
+#compare-shell-state[data-state="no-data"] {
+  border-left-color: #f59e0b;
+  background: linear-gradient(135deg, #fffaf0 0%, #fff2d8 100%);
+}
+#compare-shell-state[data-state="error"] {
+  border-left-color: #ef4444;
+  background: linear-gradient(135deg, #fff5f5 0%, #ffe4e6 100%);
+}
 .shell-state-title {
   font-size: 1rem;
   font-weight: 700;
@@ -775,6 +866,37 @@ textarea, input, select { font-family: inherit; }
   font-size: 0.84rem;
   line-height: 1.45;
   color: #4f5f8f;
+}
+.shell-state-meta {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.shell-meta-chip {
+  border: 1px solid #d4dcf2;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #40548f;
+  background: rgba(255,255,255,0.65);
+}
+.shell-meta-chip.ok {
+  border-color: #86efac;
+  color: #166534;
+  background: #f0fdf4;
+}
+.shell-meta-chip.warn {
+  border-color: #fcd34d;
+  color: #92400e;
+  background: #fffbeb;
+}
+.shell-meta-chip.error {
+  border-color: #fca5a5;
+  color: #b91c1c;
+  background: #fff1f2;
 }
 .compare-flow-list {
   margin: 10px 0 0 18px;
@@ -1192,7 +1314,7 @@ textarea, input, select { font-family: inherit; }
 
 <!-- ── TOP BAR ──────────────────────────────────────────────── -->
 <div id="topbar">
-  <h1>Southern Kurdish <span>Review Tool v3</span></h1>
+  <h1>PARSE Compare <span>Concept-first review shell</span></h1>
   <div id="progress-badge">0 / 0 reviewed</div>
   <div id="phon-progress-badge" style="font-size:11px;color:#94a3b8;margin-top:2px">🔬 Phonetic flags: 0 / 0 resolved</div>
   <div id="progress-bar-wrap"><div id="progress-bar-fill" style="width:0%"></div></div>
@@ -1213,9 +1335,9 @@ textarea, input, select { font-family: inherit; }
 
 <!-- ── LOAD SCREEN ──────────────────────────────────────────── -->
 <div id="load-screen" class="hidden">
-  <h2>Southern Kurdish Linguistic Review</h2>
-  <p>Compare shell is preloaded from PARSE data adapters. This legacy review-data loader is kept only as a visual shell parity placeholder.</p>
-  <button class="load-btn" id="btn-load-review-data">📂 Load review_data.json</button>
+  <h2>PARSE Compare Fallback Loader</h2>
+  <p>This fallback loader remains for legacy shell parity only. Normal Compare workflow boots directly from project + annotation data.</p>
+  <button class="load-btn" id="btn-load-review-data">📂 Load review_data.json (legacy)</button>
   <p style="font-size:0.8rem;color:#9aa3c0">Keyboard shortcuts: ← → navigate · Enter accept · B/F flag</p>
 </div>
 
@@ -1245,23 +1367,26 @@ textarea, input, select { font-family: inherit; }
       <div class="card-title">Compare Workspace</div>
       <div class="shell-state-title" id="compare-shell-state-title">Loading compare workspace…</div>
       <p class="shell-state-message" id="compare-shell-state-message">Reading project config, annotations, and enrichments.</p>
+      <div class="shell-state-meta" id="compare-shell-state-meta">
+        <span class="shell-meta-chip">Booting…</span>
+      </div>
       <ol class="compare-flow-list">
-        <li>Pick a concept in the sidebar queue.</li>
-        <li>Review concept cards in order: references → forms → cognates → borrowing → notes.</li>
-        <li>Use matrix/spectrogram drawers only when you need a secondary cross-check.</li>
+        <li>Start with the sidebar concept queue.</li>
+        <li>Review cards in order: references → speaker forms → cognates → borrowing → notes.</li>
+        <li>Use matrix/spectrogram drawers only for secondary cross-checks.</li>
       </ol>
-      <p class="compare-flow-note">If a section is still waiting on data, it should explicitly say so (never a blank panel).</p>
+      <p class="compare-flow-note">Acceptance expectation: every section should show explicit loading/empty/error copy—never silent blank space.</p>
     </div>
 
     <!-- compare controls (secondary; concept workflow stays primary below) -->
     <div id="compare-header">
       <div class="compare-waiting-copy">
         <strong>Preparing speaker + compute controls…</strong>
-        <p>If this persists, Compare failed to initialize. Reload and verify project/annotation paths.</p>
+        <p>If this persists, Compare bootstrap likely failed. Reload and check project.json, source_index.json, and annotation/enrichment paths.</p>
       </div>
     </div>
     <div id="compare-compute-status">
-      <div class="compute-status-text">Waiting for compare bootstrap…</div>
+      <div class="compute-status-text">Bootstrapping compare workspace…</div>
       <div class="compute-progress-wrap"><div class="compute-progress-bar" style="width:2%"></div></div>
     </div>
 
@@ -1271,7 +1396,7 @@ textarea, input, select { font-family: inherit; }
       <p class="section-hint">Use Prev/Next and Accept/Flag after selecting a concept from the sidebar queue.</p>
       <div id="concept-header">
         <button class="nav-btn" id="btn-prev">← Prev</button>
-        <div id="concept-title">Waiting for concept selection…</div>
+        <div id="concept-title">Select a concept from Step 1 queue…</div>
         <button class="nav-btn" id="btn-next">Next →</button>
         <div id="concept-actions">
           <button class="action-btn accept" id="btn-accept">✓ Accept</button>
@@ -1288,12 +1413,12 @@ textarea, input, select { font-family: inherit; }
         <div class="ref-lang">
           <div class="ref-lang-label arabic">Arabic</div>
           <div class="ref-form" id="ref-arabic-form">—</div>
-          <div class="ref-ipa" id="ref-arabic-ipa">Waiting for concept…</div>
+          <div class="ref-ipa" id="ref-arabic-ipa">Select a concept to load Arabic reference details.</div>
         </div>
         <div class="ref-lang">
           <div class="ref-lang-label persian">Persian</div>
           <div class="ref-form" id="ref-persian-form">—</div>
-          <div class="ref-ipa" id="ref-persian-ipa">Waiting for concept…</div>
+          <div class="ref-ipa" id="ref-persian-ipa">Select a concept to load Persian reference details.</div>
         </div>
       </div>
     </div>
@@ -1315,7 +1440,7 @@ textarea, input, select { font-family: inherit; }
         </thead>
         <tbody id="forms-tbody">
           <tr class="forms-empty-row">
-            <td colspan="6" class="empty-msg">Waiting for concept + speaker selection. Missing speaker data should render as “No annotated form available for this concept yet.”</td>
+            <td colspan="6" class="empty-msg">Select a concept and at least one speaker to populate this primary review table.</td>
           </tr>
         </tbody>
       </table>
