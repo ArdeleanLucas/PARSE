@@ -7,6 +7,7 @@ interface UIStore {
   comparePanel: "table" | "borrowing" | "enrichments" | "tags";
   sidebarOpen: boolean;
   onboardingComplete: boolean;
+  selectedSpeakers: string[];
 
   setActiveSpeaker: (s: string | null) => void;
   setActiveConcept: (c: string | null) => void;
@@ -14,6 +15,7 @@ interface UIStore {
   setComparePanel: (p: UIStore["comparePanel"]) => void;
   toggleSidebar: () => void;
   setOnboardingComplete: (v: boolean) => void;
+  setSelectedSpeakers: (speakers: string[]) => void;
 }
 
 export const useUIStore = create<UIStore>()((set) => ({
@@ -23,6 +25,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   comparePanel: "table",
   sidebarOpen: true,
   onboardingComplete: false,
+  selectedSpeakers: [],
 
   setActiveSpeaker: (s) => set({ activeSpeaker: s }),
   setActiveConcept: (c) => set({ activeConcept: c }),
@@ -30,4 +33,5 @@ export const useUIStore = create<UIStore>()((set) => ({
   setComparePanel: (p) => set({ comparePanel: p }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
+  setSelectedSpeakers: (speakers) => set({ selectedSpeakers: speakers }),
 }));
