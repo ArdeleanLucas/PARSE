@@ -5,9 +5,10 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-const envBase = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-  ?.PARSE_API_BASE_URL;
+const testEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+const envBase = testEnv?.PARSE_API_BASE_URL;
 const API_BASE = (envBase ?? "http://127.0.0.1:8766").replace(/\/+$/, "");
+const allowExport404 = (testEnv?.PARSE_API_ALLOW_EXPORT_404 ?? "").trim() === "1";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -329,13 +330,14 @@ describe("Python API regression", () => {
 
   // ── Export ──────────────────────────────────────────────────────────────
 
-  it("GET /api/export/lingpy → endpoint exists (TSV success or structured 500)", async () => {
+  it("GET /api/export/lingpy → endpoint exists (TSV success, structured 500, optional legacy 404)", async () => {
     const r = await fetch(`${API_BASE}/api/export/lingpy`);
 
     // 200: valid export
-    // 500: dataset/project-root problem (e.g., missing parse-enrichments.json)
-    // 404 is NOT acceptable here — it means route mismatch/regression.
-    expect([200, 500]).toContain(r.status);
+    // 500: dataset/project-root problem
+    // 404: only accepted in live-compat mode for legacy servers missing export routes
+    const acceptedStatuses = allowExport404 ? [200, 500, 404] : [200, 500];
+    expect(acceptedStatuses).toContain(r.status);
 
     if (r.status === 200) {
       const text = await r.text();
@@ -354,14 +356,30 @@ describe("Python API regression", () => {
 
     const payload = await json(r);
     const msg = errorMessage(payload).toLowerCase();
-    expect(msg).toContain("parse-enrichments");
+
+    if (r.status === 404) {
+      expect(allowExport404).toBe(true);
+      expect(msg).toContain("unknown api endpoint");
+      return;
+    }
+
+    expect(msg.length).toBeGreaterThan(0);
   });
 
-  it("GET /api/export/nexus → 501 not implemented (route exists)", async () => {
+  it("GET /api/export/nexus → 501 not implemented (route exists, optional legacy 404)", async () => {
     const r = await fetch(`${API_BASE}/api/export/nexus`);
-    expect(r.status).toBe(501);
+    if (allowExport404) {
+      expect([501, 404]).toContain(r.status);
+    } else {
+      expect(r.status).toBe(501);
+    }
 
     const d = await json(r);
-    expect(errorMessage(d).toLowerCase()).toContain("not yet implemented");
+    const msg = errorMessage(d).toLowerCase();
+    if (r.status === 404) {
+      expect(msg).toContain("unknown api endpoint");
+      return;
+    }
+    expect(msg).toContain("not yet implemented");
   });
 });

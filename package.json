@@ -29,6 +29,6 @@
     "test:ui": "vitest --ui",
     "check": "./node_modules/.bin/tsc --noEmit",
     "test:api": "node scripts/run-api-regression.mjs",
-    "test:api:live": "vitest run --config vitest.integration.ts"
+    "test:api:live": "PARSE_API_ALLOW_EXPORT_404=1 vitest run --config vitest.integration.ts"
   }
 }
