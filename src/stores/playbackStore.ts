@@ -30,7 +30,7 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   selectedRegion: null,
   loopEnabled: false,
 
-  setActiveSpeaker: (speaker) => set({ activeSpeaker: speaker }),
+  setActiveSpeaker: (speaker) => set({ activeSpeaker: speaker, currentTime: 0 }),
   setCurrentTime: (t) => set({ currentTime: t }),
   setDuration: (d) => set({ duration: d }),
   setZoom: (z) => set({ zoom: z }),

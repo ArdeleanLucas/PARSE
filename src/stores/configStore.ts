@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ProjectConfig } from "../api/types";
+import { getConfig } from "../api/client";
 
 interface ConfigStore {
   config: ProjectConfig | null;
@@ -8,15 +9,25 @@ interface ConfigStore {
   update: (patch: Partial<ProjectConfig>) => Promise<void>;
 }
 
-export const useConfigStore = create<ConfigStore>()(() => ({
+export const useConfigStore = create<ConfigStore>()((set, get) => ({
   config: null,
   loading: false,
 
-  // TODO Track A: implement in phase A
   load: async () => {
-    throw new Error("Not implemented — Track A");
+    const { config, loading } = get();
+    if (config !== null && !loading) return; // idempotent
+    set({ loading: true });
+    try {
+      const data = await getConfig();
+      set({ config: data, loading: false });
+    } catch (err) {
+      set({ loading: false });
+      throw err;
+    }
   },
+
   update: async (_patch: Partial<ProjectConfig>) => {
-    throw new Error("Not implemented — Track A");
+    // TODO: implement PATCH /api/config when backend supports it
+    console.warn("[configStore] update() is not yet implemented");
   },
 }));
