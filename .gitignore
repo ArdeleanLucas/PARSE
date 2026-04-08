@@ -12,6 +12,9 @@ dist/
 # Claude Code agent state
 .claude/
 
+# Lexibank datasets (git clones — too large, use lexibank-setup.md to clone locally)
+config/lexibank_data/
+
 # PARSE data symlinks / runtime files (not source)
 Audio_Processed
 annotations
