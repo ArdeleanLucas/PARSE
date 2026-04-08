@@ -28,6 +28,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "check": "./node_modules/.bin/tsc --noEmit",
-    "test:api": "vitest run --config vitest.integration.ts"
+    "test:api": "node scripts/run-api-regression.mjs",
+    "test:api:live": "vitest run --config vitest.integration.ts"
   }
 }
