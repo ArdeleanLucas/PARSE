@@ -2410,14 +2410,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())
 
-        # Inject speakers from source_index.json
-        source_index = _read_json_file(_source_index_path(), {})
-        speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
-        if isinstance(speakers_block, dict):
-            config["speakers"] = sorted(speakers_block.keys())
-        else:
-            config["speakers"] = []
-
         # Inject concepts from concepts.csv
         concepts_path = _project_root() / "concepts.csv"
         concepts: list = []

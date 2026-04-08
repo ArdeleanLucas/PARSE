@@ -30,7 +30,7 @@ export interface ConceptEntry {
 export interface ProjectConfig {
   project_name: string;
   language_code: string;
-  speakers: string[];
+  speakers?: string[];
   concepts: ConceptEntry[];
   audio_dir: string;
   annotations_dir: string;

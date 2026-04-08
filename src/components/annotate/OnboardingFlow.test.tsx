@@ -72,19 +72,13 @@ describe("OnboardingFlow", () => {
     expect(screen.getByText(/sdh/)).toBeTruthy()
   })
 
-  it("speaker selection enables Start button", () => {
+  it("step 3 shows import speaker data prompt", () => {
     render(<OnboardingFlow onComplete={onComplete} />)
     // Advance to step 1
     fireEvent.click(screen.getByText("Next"))
     // Advance to step 2
     fireEvent.click(screen.getByText("Next"))
-    const startBtn = screen.getByText("Start annotating")
-    expect(startBtn).toBeTruthy()
-    expect((startBtn as HTMLButtonElement).disabled).toBe(true)
-
-    // Select a speaker
-    const select = screen.getByRole("combobox")
-    fireEvent.change(select, { target: { value: "SPK_01" } })
-    expect((startBtn as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText("Import speaker data")).toBeTruthy()
+    expect(screen.getByText("Open workspace")).toBeTruthy()
   })
 })
