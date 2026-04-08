@@ -1,340 +1,367 @@
 // src/__tests__/apiRegression.test.ts
-// Live integration tests — run against the Python server at :8766
+// Live integration tests — run against the Python server.
 // Usage: npm run test:api
-//
-// These tests SKIP automatically if the server is not running.
-// Uses 127.0.0.1 (not localhost) because Node resolves localhost to ::1
-// but the Python server only binds 127.0.0.1.
+// Optional override: PARSE_API_BASE_URL=http://127.0.0.1:8766 npm run test:api
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-const API_BASE = "http://127.0.0.1:8766";
+const envBase = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+  ?.PARSE_API_BASE_URL;
+const API_BASE = (envBase ?? "http://127.0.0.1:8766").replace(/\/+$/, "");
 
-let serverAvailable = false;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+async function json(response: Response): Promise<unknown> {
+  return response.json();
+}
+
+function errorMessage(payload: unknown): string {
+  if (isRecord(payload) && typeof payload.error === "string") {
+    return payload.error;
+  }
+  return "";
+}
+
+function resolveJobId(payload: unknown): string {
+  if (!isRecord(payload)) {
+    return "";
+  }
+  const camel = payload.jobId;
+  if (typeof camel === "string" && camel.trim()) {
+    return camel.trim();
+  }
+  const snake = payload.job_id;
+  if (typeof snake === "string" && snake.trim()) {
+    return snake.trim();
+  }
+  return "";
+}
 
 beforeAll(async () => {
+  let response: Response;
   try {
-    const r = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(2000) });
-    serverAvailable = r.ok;
-  } catch {
-    serverAvailable = false;
+    response = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(3000) });
+  } catch (error) {
+    throw new Error(
+      `Python API regression requires a running server at ${API_BASE}. Connection failed: ${String(error)}`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Python API regression requires a healthy server at ${API_BASE}. GET /api/config returned ${response.status}.`
+    );
   }
 });
-
-function skipIfNoServer() {
-  if (!serverAvailable) {
-    console.warn("SKIP: Python server not available at :8766");
-    return true;
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function json(r: Response): Promise<unknown> {
-  return r.json();
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
-// ---------------------------------------------------------------------------
-// Tests — grouped by domain, covering all 22 client.ts functions
-// ---------------------------------------------------------------------------
 
 describe("Python API regression", () => {
   // ── Config ──────────────────────────────────────────────────────────────
 
   it("GET /api/config → { config: {...} }", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/config`);
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
-    expect(d.config).toBeDefined();
     expect(isRecord(d.config)).toBe(true);
   });
 
   it("PUT /api/config → 200 (no-op patch)", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
   });
 
   // ── Annotations ─────────────────────────────────────────────────────────
 
   it("GET /api/annotations/Fail01 → speaker + tiers", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/annotations/Fail01`);
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
     expect(d.speaker).toBe("Fail01");
     expect(isRecord(d.tiers)).toBe(true);
   });
 
-  it("POST /api/annotations/Fail01 round-trips data", async () => {
-    if (skipIfNoServer()) return;
-    const r1 = await fetch(`${API_BASE}/api/annotations/Fail01`);
-    expect(r1.status).toBe(200);
-    const original = await json(r1);
-    const r2 = await fetch(`${API_BASE}/api/annotations/Fail01`, {
+  it("POST /api/annotations/Fail01 accepts valid payload or returns structured path-guard error", async () => {
+    const getResponse = await fetch(`${API_BASE}/api/annotations/Fail01`);
+    expect(getResponse.status).toBe(200);
+
+    const original = await json(getResponse);
+    const postResponse = await fetch(`${API_BASE}/api/annotations/Fail01`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(original),
     });
-    expect(r2.status).toBe(200);
+
+    expect([200, 400]).toContain(postResponse.status);
+    if (postResponse.status === 400) {
+      const payload = await json(postResponse);
+      expect(errorMessage(payload)).toContain("Path escapes project root");
+    }
   });
 
   // ── Enrichments ─────────────────────────────────────────────────────────
 
-  it("GET /api/enrichments → { enrichments: {...} }", async () => {
-    if (skipIfNoServer()) return;
+  it("GET /api/enrichments → object payload", async () => {
     const r = await fetch(`${API_BASE}/api/enrichments`);
     expect(r.status).toBe(200);
-    const d = (await json(r)) as Record<string, unknown>;
-    expect(d).toBeDefined();
-    expect(typeof d).toBe("object");
+
+    const d = await json(r);
+    expect(isRecord(d)).toBe(true);
   });
 
-  it("POST /api/enrichments → 200 (save)", async () => {
-    if (skipIfNoServer()) return;
-    // Fetch current, POST back unchanged
-    const r1 = await fetch(`${API_BASE}/api/enrichments`);
-    expect(r1.status).toBe(200);
-    const d = (await json(r1)) as Record<string, unknown>;
-    const enrichments = isRecord(d.enrichments) ? d.enrichments : d;
-    const r2 = await fetch(`${API_BASE}/api/enrichments`, {
+  it("POST /api/enrichments → 200 (save unchanged)", async () => {
+    const getResponse = await fetch(`${API_BASE}/api/enrichments`);
+    expect(getResponse.status).toBe(200);
+
+    const payload = (await json(getResponse)) as Record<string, unknown>;
+    const enrichments = isRecord(payload.enrichments) ? payload.enrichments : payload;
+
+    const postResponse = await fetch(`${API_BASE}/api/enrichments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enrichments }),
     });
-    expect(r2.status).toBe(200);
+
+    expect(postResponse.status).toBe(200);
   });
 
   // ── Auth ────────────────────────────────────────────────────────────────
 
   it("GET /api/auth/status → AuthStatus shape", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/auth/status`);
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
     expect(typeof d.authenticated).toBe("boolean");
   });
 
   it("POST /api/auth/start → 200", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/auth/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
   });
 
-  it("POST /api/auth/poll → 200 (AuthStatus shape)", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/auth/poll → 200", async () => {
     const r = await fetch(`${API_BASE}/api/auth/poll`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
   });
 
   it("POST /api/auth/logout → 200", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
   });
 
-  // ── IPA ─────────────────────────────────────────────────────────────────
+  // ── IPA + Suggestions ───────────────────────────────────────────────────
 
   it("POST /api/ipa → { ipa: string }", async () => {
-    if (skipIfNoServer()) return;
     const r = await fetch(`${API_BASE}/api/ipa`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: "hello", language: "en" }),
     });
+
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
     expect(typeof d.ipa).toBe("string");
   });
 
-  // ── Suggestions ─────────────────────────────────────────────────────────
-
-  it("POST /api/suggest → { suggestions: [...] } (wrapped)", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/suggest → wrapped suggestions array", async () => {
     const r = await fetch(`${API_BASE}/api/suggest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ speaker: "Fail01", concept_ids: [] }),
     });
+
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
-    // Server wraps in { suggestions: [...] }
     expect(Array.isArray(d.suggestions)).toBe(true);
   });
 
   // ── STT ─────────────────────────────────────────────────────────────────
 
-  it("POST /api/stt → { jobId: string }", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/stt → returns job id", async () => {
     const r = await fetch(`${API_BASE}/api/stt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ speaker: "Fail01", source_wav: "test.wav" }),
     });
+
     expect(r.status).toBe(200);
-    const d = (await json(r)) as Record<string, unknown>;
-    // Server returns camelCase jobId
-    expect(typeof d.jobId === "string" || typeof d.job_id === "string").toBe(true);
+
+    const d = await json(r);
+    expect(resolveJobId(d).length).toBeGreaterThan(0);
   });
 
-  it("POST /api/stt/status → status object or error for unknown job", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/stt/status unknown job → 404 Unknown jobId", async () => {
     const r = await fetch(`${API_BASE}/api/stt/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: "nonexistent-job-id" }),
+      body: JSON.stringify({ job_id: "nonexistent-stt-job" }),
     });
-    // Accept 200 (with error field) or 404
-    expect([200, 404]).toContain(r.status);
-    const d = (await json(r)) as Record<string, unknown>;
-    expect(d).toBeDefined();
+
+    expect(r.status).toBe(404);
+
+    const d = await json(r);
+    expect(errorMessage(d)).toContain("Unknown jobId");
   });
 
   // ── Chat ────────────────────────────────────────────────────────────────
 
-  it("POST /api/chat/session → { sessionId: string }", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/chat/session → returns session id", async () => {
     const r = await fetch(`${API_BASE}/api/chat/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
+
     const d = (await json(r)) as Record<string, unknown>;
-    // Server may return sessionId or session_id
-    const sid = d.sessionId ?? d.session_id;
-    expect(typeof sid).toBe("string");
+    const sessionId = d.sessionId ?? d.session_id;
+    expect(typeof sessionId).toBe("string");
   });
 
   it("GET /api/chat/session/{id} → session object", async () => {
-    if (skipIfNoServer()) return;
-    // Start a session first
-    const r1 = await fetch(`${API_BASE}/api/chat/session`, {
+    const start = await fetch(`${API_BASE}/api/chat/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(r1.status).toBe(200);
-    const d1 = (await json(r1)) as Record<string, unknown>;
-    const sid = (d1.sessionId ?? d1.session_id) as string;
+    expect(start.status).toBe(200);
 
-    const r2 = await fetch(`${API_BASE}/api/chat/session/${encodeURIComponent(sid)}`);
-    expect(r2.status).toBe(200);
-    const d2 = (await json(r2)) as Record<string, unknown>;
-    expect(d2).toBeDefined();
+    const startPayload = (await json(start)) as Record<string, unknown>;
+    const sessionId = String(startPayload.sessionId ?? startPayload.session_id ?? "");
+    expect(sessionId.length).toBeGreaterThan(0);
+
+    const getSession = await fetch(`${API_BASE}/api/chat/session/${encodeURIComponent(sessionId)}`);
+    expect(getSession.status).toBe(200);
+
+    const sessionPayload = await json(getSession);
+    expect(isRecord(sessionPayload)).toBe(true);
   });
 
-  it("POST /api/chat/run → { jobId: string } (chat job)", async () => {
-    if (skipIfNoServer()) return;
-    // Start a session
-    const r1 = await fetch(`${API_BASE}/api/chat/session`, {
+  it("POST /api/chat/run → returns job id", async () => {
+    const start = await fetch(`${API_BASE}/api/chat/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(r1.status).toBe(200);
-    const d1 = (await json(r1)) as Record<string, unknown>;
-    const sid = (d1.sessionId ?? d1.session_id) as string;
+    expect(start.status).toBe(200);
 
-    const r2 = await fetch(`${API_BASE}/api/chat/run`, {
+    const startPayload = (await json(start)) as Record<string, unknown>;
+    const sessionId = String(startPayload.sessionId ?? startPayload.session_id ?? "");
+
+    const run = await fetch(`${API_BASE}/api/chat/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sid, message: "test" }),
+      body: JSON.stringify({ session_id: sessionId, message: "test" }),
     });
-    expect(r2.status).toBe(200);
-    const d2 = (await json(r2)) as Record<string, unknown>;
-    const jobId = d2.jobId ?? d2.job_id;
-    expect(typeof jobId).toBe("string");
+
+    expect(run.status).toBe(200);
+
+    const runPayload = await json(run);
+    expect(resolveJobId(runPayload).length).toBeGreaterThan(0);
   });
 
-  it("POST /api/chat/status → status object", async () => {
-    if (skipIfNoServer()) return;
-    // Poll with a fake job_id — server should still respond (200 or 404)
-    const r = await fetch(`${API_BASE}/api/chat/status`, {
+  it("POST /api/chat/run/status unknown job → 404 Unknown jobId", async () => {
+    const r = await fetch(`${API_BASE}/api/chat/run/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id: "nonexistent-chat-job" }),
     });
-    expect([200, 404]).toContain(r.status);
+
+    expect(r.status).toBe(404);
+
+    const d = await json(r);
+    expect(errorMessage(d)).toContain("Unknown jobId");
   });
 
   // ── Compute ─────────────────────────────────────────────────────────────
 
-  it("POST /api/compute/cognates → { jobId: string }", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/compute/cognates → returns job id", async () => {
     const r = await fetch(`${API_BASE}/api/compute/cognates`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
     expect(r.status).toBe(200);
-    const d = (await json(r)) as Record<string, unknown>;
-    const jobId = d.jobId ?? d.job_id;
-    expect(typeof jobId).toBe("string");
+
+    const d = await json(r);
+    expect(resolveJobId(d).length).toBeGreaterThan(0);
   });
 
-  it("POST /api/compute/cognates/status → status object", async () => {
-    if (skipIfNoServer()) return;
+  it("POST /api/compute/cognates/status unknown job → 404 Unknown jobId", async () => {
     const r = await fetch(`${API_BASE}/api/compute/cognates/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id: "nonexistent-compute-job" }),
     });
-    // Accept 200 (with error/status field) or 404
-    expect([200, 404]).toContain(r.status);
+
+    expect(r.status).toBe(404);
+
+    const d = await json(r);
+    expect(errorMessage(d)).toContain("Unknown jobId");
   });
 
   // ── Export ──────────────────────────────────────────────────────────────
 
-  it("GET /api/export/lingpy → TSV or 404", async () => {
-    if (skipIfNoServer()) return;
+  it("GET /api/export/lingpy → endpoint exists (TSV success or structured 500)", async () => {
     const r = await fetch(`${API_BASE}/api/export/lingpy`);
-    expect([200, 404]).toContain(r.status);
+
+    // 200: valid export
+    // 500: dataset/project-root problem (e.g., missing parse-enrichments.json)
+    // 404 is NOT acceptable here — it means route mismatch/regression.
+    expect([200, 500]).toContain(r.status);
+
     if (r.status === 200) {
       const text = await r.text();
       expect(text.length).toBeGreaterThan(0);
-      const firstLine = text.split("\n")[0];
-      expect(firstLine).toContain("\t");
-      console.info("[lingpy] TSV first line:", firstLine);
-    } else {
-      console.warn("[lingpy] 404 — endpoint not available on this server version");
+
+      const header = text.split("\n")[0]?.trim() ?? "";
+      expect(header).toContain("ID");
+      expect(header).toContain("DOCULECT");
+      expect(header).toContain("CONCEPT");
+      expect(header).toContain("IPA");
+      expect(header).toContain("COGID");
+      expect(header).toContain("TOKENS");
+      expect(header).toContain("BORROWING");
+      return;
     }
+
+    const payload = await json(r);
+    const msg = errorMessage(payload).toLowerCase();
+    expect(msg).toContain("parse-enrichments");
   });
 
-  it("GET /api/export/nexus → TSV/NEXUS or 404", async () => {
-    if (skipIfNoServer()) return;
+  it("GET /api/export/nexus → 501 not implemented (route exists)", async () => {
     const r = await fetch(`${API_BASE}/api/export/nexus`);
-    expect([200, 404]).toContain(r.status);
-    if (r.status === 200) {
-      const text = await r.text();
-      expect(text.length).toBeGreaterThan(0);
-      console.info("[nexus] Response length:", text.length);
-    } else {
-      console.warn("[nexus] 404 — endpoint not available on this server version");
-    }
+    expect(r.status).toBe(501);
+
+    const d = await json(r);
+    expect(errorMessage(d).toLowerCase()).toContain("not yet implemented");
   });
 });

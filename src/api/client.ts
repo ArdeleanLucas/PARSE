@@ -191,7 +191,7 @@ export async function runChat(sessionId: string, message: string): Promise<ChatJ
 }
 
 export async function pollChat(jobId: string): Promise<ChatStatus> {
-  return apiFetch<ChatStatus>("/api/chat/status", {
+  return apiFetch<ChatStatus>("/api/chat/run/status", {
     method: "POST",
     body: JSON.stringify({ job_id: jobId }),
   });
