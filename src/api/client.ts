@@ -148,14 +148,25 @@ export async function requestIPA(text: string, language?: string): Promise<{ ipa
 }
 
 // Suggestions
+function unwrapSuggestions(payload: unknown): unknown[] {
+  if (isRecord(payload) && Array.isArray(payload.suggestions)) {
+    return payload.suggestions;
+  }
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  return [];
+}
+
 export async function requestSuggestions(
   speaker: string,
   conceptIds: string[]
 ): Promise<unknown[]> {
-  return apiFetch<unknown[]>("/api/suggest", {
+  const payload = await apiFetch<unknown>("/api/suggest", {
     method: "POST",
     body: JSON.stringify({ speaker, concept_ids: conceptIds }),
   });
+  return unwrapSuggestions(payload);
 }
 
 // Chat
@@ -171,10 +182,12 @@ export async function getChatSession(sessionId: string): Promise<unknown> {
 }
 
 export async function runChat(sessionId: string, message: string): Promise<ChatJob> {
-  return apiFetch<ChatJob>("/api/chat/run", {
+  const payload = await apiFetch<unknown>("/api/chat/run", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, message }),
   });
+  const id = resolveJobId(payload);
+  return { job_id: id, jobId: id };
 }
 
 export async function pollChat(jobId: string): Promise<ChatStatus> {

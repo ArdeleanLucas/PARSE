@@ -58,6 +58,7 @@ export interface STTStatus {
 
 export interface ChatJob {
   job_id: string;
+  jobId?: string;
 }
 
 export interface ChatStatus {
