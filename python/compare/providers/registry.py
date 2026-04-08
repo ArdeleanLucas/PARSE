@@ -7,12 +7,24 @@ from .asjp import AsjpProvider
 from .cldf import CldfProvider
 from .csv_override import CsvOverrideProvider
 from .grokipedia import GrokipediaProvider
+from .lingpy_wordlist import LingPyCldfProvider
 from .literature import LiteratureProvider
+from .pycldf_provider import PycldfProvider
+from .pylexibank_provider import PylexibankProvider
 from .wikidata import WikidataProvider
 from .wiktionary import WiktionaryProvider
 
 PROVIDER_PRIORITY = [
-    "csv_override", "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
+    "csv_override",
+    "lingpy_wordlist",  # local CLDF datasets via LingPy — highest offline quality
+    "pycldf",           # same datasets via pycldf — adds citation metadata
+    "pylexibank",       # installed pylexibank datasets (optional, may be no-op)
+    "asjp",             # ASJP REST API — 40 Swadesh concepts
+    "cldf",             # HTTP CSV download fallback
+    "wikidata",
+    "wiktionary",
+    "grokipedia",       # LLM fallback for anything not found above
+    "literature",
 ]
 
 
@@ -20,6 +32,9 @@ class ProviderRegistry:
     def __init__(self, ai_config: Dict = None):
         self._providers = {
             "csv_override": CsvOverrideProvider(),
+            "lingpy_wordlist": LingPyCldfProvider(),
+            "pycldf": PycldfProvider(),
+            "pylexibank": PylexibankProvider(),
             "asjp": AsjpProvider(),
             "cldf": CldfProvider(),
             "wikidata": WikidataProvider(),
