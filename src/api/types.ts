@@ -77,3 +77,19 @@ export interface ComputeStatus {
   message?: string;
   error?: string;
 }
+
+export interface ContactLexemeCoverage {
+  languages: Record<string, {
+    name: string;
+    total: number;
+    filled: number;
+    empty: number;
+    concepts: Record<string, string[]>;
+  }>;
+}
+
+export interface ContactLexemeFetchOptions {
+  providers?: string[];
+  languages?: string[];
+  overwrite?: boolean;
+}

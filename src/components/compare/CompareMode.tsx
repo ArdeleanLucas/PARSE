@@ -10,6 +10,7 @@ import { SpeakerImport } from "./SpeakerImport";
 import { useUIStore } from "../../stores/uiStore";
 import { useEnrichmentStore } from "../../stores/enrichmentStore";
 import { useTagStore } from "../../stores/tagStore";
+import { ContactLexemePanel } from "./ContactLexemePanel";
 
 const TABS = [
   { id: "cognate" as const, label: "Cognate" },
@@ -29,6 +30,7 @@ export function CompareMode() {
   const hydrateTags = useTagStore((store) => store.hydrate);
 
   const [importOpen, setImportOpen] = useState(false);
+  const [showLexemes, setShowLexemes] = useState(false);
 
   useEffect(() => {
     if (enrichmentData == null || Object.keys(enrichmentData).length === 0) {
@@ -99,6 +101,27 @@ export function CompareMode() {
               </div>
             )}
           </div>
+        </section>
+
+        <section style={{ borderTop: "1px solid #e5e7eb", flexShrink: 0 }}>
+          <button
+            data-testid="toggle-lexemes"
+            onClick={() => setShowLexemes((v) => !v)}
+            style={{
+              width: "100%",
+              padding: "0.5rem 1rem",
+              cursor: "pointer",
+              fontFamily: "monospace",
+              border: "none",
+              background: "transparent",
+              color: "#6b7280",
+              textAlign: "left",
+              fontSize: "0.85rem",
+            }}
+          >
+            Contact Lexemes {showLexemes ? "^" : "v"}
+          </button>
+          {showLexemes && <ContactLexemePanel />}
         </section>
       </main>
 

@@ -328,6 +328,29 @@ describe("Python API regression", () => {
     expect(errorMessage(d)).toContain("Unknown jobId");
   });
 
+  // ── Contact Lexemes ─────────────────────────────────────────────────────
+
+  it("GET /api/contact-lexemes/coverage returns expected shape", async () => {
+    const r = await fetch(`${API_BASE}/api/contact-lexemes/coverage`);
+    expect(r.status).toBe(200);
+    const d = (await json(r)) as { languages: Record<string, unknown> };
+    expect(d.languages).toBeDefined();
+    expect(typeof d.languages).toBe("object");
+    expect(d.languages["ar"]).toBeDefined();
+    expect(d.languages["fa"]).toBeDefined();
+  });
+
+  it("POST /api/compute/contact-lexemes returns running job", async () => {
+    const r = await fetch(`${API_BASE}/api/compute/contact-lexemes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providers: ["asjp"], languages: ["ar"], overwrite: false }),
+    });
+    expect(r.status).toBe(200);
+    const d = await json(r);
+    expect(resolveJobId(d).length).toBeGreaterThan(0);
+  });
+
   // ── Export ──────────────────────────────────────────────────────────────
 
   it("GET /api/export/lingpy → endpoint exists (TSV success, structured 500, optional legacy 404)", async () => {

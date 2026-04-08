@@ -1725,6 +1725,54 @@ def _compute_cognates(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch and merge contact language lexeme forms into sil_contact_languages.json."""
+    from compare.contact_lexeme_fetcher import fetch_and_merge
+
+    concepts_path = _project_root() / "concepts.csv"
+    config_path = _sil_config_path()
+
+    providers = _coerce_string_list(payload.get("providers")) or None
+    languages_raw = _coerce_string_list(payload.get("languages"))
+
+    if not languages_raw:
+        import json as _json
+        with open(config_path) as f:
+            sil_config = _json.load(f)
+        languages_raw = [k for k, v in sil_config.items() if isinstance(v, dict) and "name" in v]
+
+    overwrite = bool(payload.get("overwrite", False))
+
+    def _progress(pct: float, msg: str) -> None:
+        _set_job_progress(job_id, pct * 0.9, message=msg)
+
+    try:
+        ai_config_path = _project_root() / "config" / "ai_config.json"
+        import json as _json2
+        with open(ai_config_path) as f:
+            ai_config = _json2.load(f)
+    except Exception:
+        ai_config = {}
+
+    _set_job_progress(job_id, 5.0, message="Starting contact lexeme fetch")
+
+    filled = fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=languages_raw,
+        providers=providers,
+        overwrite=overwrite,
+        ai_config=ai_config,
+        progress_callback=_progress,
+    )
+
+    _set_job_progress(job_id, 100.0, message="Done")
+    return {
+        "filled": filled,
+        "config_path": str(config_path),
+    }
+
+
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
     try:
         normalized_type = str(compute_type or "").strip().lower()
@@ -1732,6 +1780,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
 
         if normalized_type in {"cognates", "similarity"}:
             result = _compute_cognates(job_id, payload)
+        elif normalized_type == "contact-lexemes":
+            result = _compute_contact_lexemes(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -1902,6 +1952,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/export/nexus":
             self._api_get_export_nexus()
+            return
+
+        if request_path == "/api/contact-lexemes/coverage":
+            self._api_get_contact_lexeme_coverage()
             return
 
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
@@ -2365,6 +2419,42 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_get_export_nexus(self) -> None:
         """NEXUS export placeholder — not yet implemented."""
         self._send_json_error(HTTPStatus.NOT_IMPLEMENTED, "NEXUS export not yet implemented")
+
+    def _api_get_contact_lexeme_coverage(self) -> None:
+        """Return coverage stats for contact language lexeme data."""
+        import json as _json
+        config_path = _sil_config_path()
+        try:
+            with open(config_path) as f:
+                config = _json.load(f)
+        except (OSError, ValueError):
+            config = {}
+
+        concepts_path = _project_root() / "concepts.csv"
+        try:
+            import csv as _csv
+            with open(concepts_path, newline="") as f:
+                reader = _csv.DictReader(f)
+                all_concepts = [row.get("concept_en", "").strip() for row in reader if row.get("concept_en")]
+        except (OSError, KeyError):
+            all_concepts = []
+
+        languages = {}
+        for lang_code, lang_data in config.items():
+            if not isinstance(lang_data, dict) or "name" not in lang_data:
+                continue
+            concepts_dict = lang_data.get("concepts", {})
+            filled = {c: v for c, v in concepts_dict.items() if v}
+            empty = [c for c in all_concepts if not filled.get(c)]
+            languages[lang_code] = {
+                "name": lang_data.get("name", lang_code),
+                "total": len(all_concepts),
+                "filled": len(filled),
+                "empty": len(empty),
+                "concepts": filled,
+            }
+
+        self._send_json(HTTPStatus.OK, {"languages": languages})
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

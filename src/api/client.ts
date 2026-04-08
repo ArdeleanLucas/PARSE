@@ -13,6 +13,8 @@ import type {
   ChatStatus,
   ComputeJob,
   ComputeStatus,
+  ContactLexemeCoverage,
+  ContactLexemeFetchOptions,
 } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -198,12 +200,16 @@ export async function pollChat(jobId: string): Promise<ChatStatus> {
 }
 
 // Compute
-export async function startCompute(computeType: string): Promise<ComputeJob> {
+export async function startCompute(
+  computeType: string,
+  body?: Record<string, unknown>,
+): Promise<ComputeJob> {
   const payload = await apiFetch<unknown>(`/api/compute/${encodeURIComponent(computeType)}`, {
     method: "POST",
+    body: body ? JSON.stringify(body) : undefined,
   });
 
-  return { job_id: resolveJobId(payload) };
+  return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
 }
 
 export async function pollCompute(computeType: string, jobId: string): Promise<ComputeStatus> {
@@ -242,6 +248,17 @@ export async function getLingPyExport(): Promise<Blob> {
     throw new Error(`GET /api/export/lingpy failed ${response.status}: ${text}`);
   }
   return response.blob();
+}
+
+// Contact Lexemes
+export async function getContactLexemeCoverage(): Promise<ContactLexemeCoverage> {
+  return apiFetch<ContactLexemeCoverage>("/api/contact-lexemes/coverage");
+}
+
+export async function startContactLexemeFetch(
+  options: ContactLexemeFetchOptions = {},
+): Promise<ComputeJob> {
+  return startCompute("contact-lexemes", options as Record<string, unknown>);
 }
 
 export async function getNEXUSExport(): Promise<Blob> {
