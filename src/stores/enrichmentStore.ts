@@ -1,6 +1,7 @@
-// enrichmentStore.ts — Oda (Track B) implements the body.
-// ParseBuilder defines the interface only.
+// enrichmentStore — Track B (ParseBuilder impl).
 import { create } from "zustand";
+import { getEnrichments, saveEnrichments } from "../api/client";
+import type { EnrichmentsPayload } from "../api/types";
 
 interface EnrichmentStore {
   data: Record<string, unknown>;
@@ -9,15 +10,23 @@ interface EnrichmentStore {
   save: (patch: Record<string, unknown>) => Promise<void>;
 }
 
-export const useEnrichmentStore = create<EnrichmentStore>()(() => ({
+export const useEnrichmentStore = create<EnrichmentStore>()((set, get) => ({
   data: {},
   loading: false,
 
-  // TODO Track B (Oda): implement
   load: async () => {
-    throw new Error("Not implemented — Track B");
+    set({ loading: true });
+    try {
+      const payload = await getEnrichments();
+      set({ data: payload as Record<string, unknown>, loading: false });
+    } catch {
+      set({ loading: false });
+    }
   },
-  save: async (_patch: Record<string, unknown>) => {
-    throw new Error("Not implemented — Track B");
+
+  save: async (patch: Record<string, unknown>) => {
+    const merged = { ...get().data, ...patch };
+    set({ data: merged });
+    await saveEnrichments(merged as EnrichmentsPayload);
   },
 }));

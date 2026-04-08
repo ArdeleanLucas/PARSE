@@ -1896,6 +1896,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_auth_status()
             return
 
+        if request_path == "/api/export/lingpy":
+            self._api_get_export_lingpy()
+            return
+
+        if request_path == "/api/export/nexus":
+            self._api_get_export_nexus()
+            return
+
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
@@ -2327,6 +2335,36 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())
         self._send_json(HTTPStatus.OK, {"config": config})
+
+    def _api_get_export_lingpy(self) -> None:
+        """Stream LingPy-compatible wordlist TSV as a file download."""
+        import tempfile
+        tmp_fd, tmp_str = tempfile.mkstemp(suffix=".tsv")
+        import os as _os
+        _os.close(tmp_fd)
+        tmp_path = pathlib.Path(tmp_str)
+        try:
+            cognate_compute_module.export_wordlist_tsv(
+                _enrichments_path(),
+                _project_root() / "annotations",
+                tmp_path,
+            )
+            content = tmp_path.read_bytes()
+        finally:
+            try:
+                _os.unlink(tmp_str)
+            except OSError:
+                pass
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/tab-separated-values; charset=utf-8")
+        self.send_header("Content-Disposition", 'attachment; filename="parse-wordlist.tsv"')
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _api_get_export_nexus(self) -> None:
+        """NEXUS export placeholder — not yet implemented."""
+        self._send_json_error(HTTPStatus.NOT_IMPLEMENTED, "NEXUS export not yet implemented")
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

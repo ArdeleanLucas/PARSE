@@ -71,4 +71,5 @@ export interface ComputeJob {
 export interface ComputeStatus {
   status: string;
   progress: number;
+  message?: string;
 }

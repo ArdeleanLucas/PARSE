@@ -1,6 +1,11 @@
+import React from "react";
 import { Link, useLocation } from "react-router-dom";
 
-export function TopBar() {
+interface TopBarProps {
+  children?: React.ReactNode;
+}
+
+export function TopBar({ children }: TopBarProps = {}) {
   const { pathname } = useLocation();
   const isAnnotate = pathname === "/" || pathname === "/annotate";
   const isCompare = pathname === "/compare";
@@ -43,6 +48,9 @@ export function TopBar() {
       >
         Compare
       </Link>
+      {children && (
+        <div style={{ marginLeft: "auto" }}>{children}</div>
+      )}
     </nav>
   );
 }

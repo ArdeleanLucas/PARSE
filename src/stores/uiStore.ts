@@ -4,7 +4,7 @@ interface UIStore {
   activeSpeaker: string | null;
   activeConcept: string | null;
   annotatePanel: "annotation" | "transcript" | "suggestions" | "chat";
-  comparePanel: "table" | "borrowing" | "enrichments" | "tags";
+  comparePanel: "cognate" | "borrowing" | "enrichments" | "tags";
   sidebarOpen: boolean;
   onboardingComplete: boolean;
   selectedSpeakers: string[];
@@ -22,7 +22,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   activeSpeaker: null,
   activeConcept: null,
   annotatePanel: "annotation",
-  comparePanel: "table",
+  comparePanel: "cognate",
   sidebarOpen: true,
   onboardingComplete: false,
   selectedSpeakers: [],

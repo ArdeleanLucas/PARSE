@@ -157,3 +157,22 @@ export async function pollCompute(speaker: string, jobId: string): Promise<Compu
     body: JSON.stringify({ job_id: jobId }),
   });
 }
+
+// Export — returns Blob (file download, not JSON)
+export async function getLingPyExport(): Promise<Blob> {
+  const response = await fetch("/api/export/lingpy");
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`GET /api/export/lingpy failed ${response.status}: ${text}`);
+  }
+  return response.blob();
+}
+
+export async function getNEXUSExport(): Promise<Blob> {
+  const response = await fetch("/api/export/nexus");
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`GET /api/export/nexus failed ${response.status}: ${text}`);
+  }
+  return response.blob();
+}
