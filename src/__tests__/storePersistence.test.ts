@@ -76,6 +76,7 @@ describe("Cross-session persistence", () => {
       project_name: "TestProject",
       language_code: "kmr",
       speakers: ["Fail01"],
+      concepts: [],
       audio_dir: "/audio",
       annotations_dir: "/annotations",
     };

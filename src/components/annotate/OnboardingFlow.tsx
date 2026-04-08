@@ -8,8 +8,14 @@ export interface OnboardingFlowProps {
 
 export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const config = useConfigStore((s) => s.config)
+  const load = useConfigStore((s) => s.load)
+  const loading = useConfigStore((s) => s.loading)
   const [currentStep, setCurrentStep] = useState(0)
   const [selectedSpeaker, setSelectedSpeaker] = useState("")
+
+  useEffect(() => {
+    load().catch(console.error)
+  }, [load])
 
   const projectName = config?.project_name ?? "PARSE Project"
   const languageCode = config?.language_code ?? "unknown"
@@ -149,6 +155,16 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
             Step 3 of 4
           </div>
           <h2 style={titleStyle}>Speaker selection</h2>
+          {loading && (
+            <p style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>
+              Loading speakers...
+            </p>
+          )}
+          {!loading && speakers.length === 0 && (
+            <p style={{ fontSize: 13, color: "#ef4444", marginBottom: 8 }}>
+              No speakers found. Check that source_index.json exists and contains speakers.
+            </p>
+          )}
           <label style={labelStyle}>Select a speaker</label>
           <select
             style={selectStyle}

@@ -7,20 +7,24 @@ let mockConfig: {
   project_name: string
   language_code: string
   speakers: string[]
+  concepts: { id: string; label: string }[]
   audio_dir: string
   annotations_dir: string
 } | null = {
   project_name: "Test Project",
   language_code: "sdh",
   speakers: ["SPK_01", "SPK_02"],
+  concepts: [],
   audio_dir: "audio",
   annotations_dir: "annotations",
 }
 
+const mockLoad = vi.fn().mockResolvedValue(undefined)
+
 vi.mock("../../stores/configStore", () => ({
   useConfigStore: (
-    selector: (s: { config: typeof mockConfig }) => unknown,
-  ) => selector({ config: mockConfig }),
+    selector: (s: { config: typeof mockConfig; load: () => Promise<void>; loading: boolean }) => unknown,
+  ) => selector({ config: mockConfig, load: mockLoad, loading: false }),
 }))
 
 const mockSetState = vi.fn()
@@ -39,6 +43,7 @@ describe("OnboardingFlow", () => {
       project_name: "Test Project",
       language_code: "sdh",
       speakers: ["SPK_01", "SPK_02"],
+      concepts: [],
       audio_dir: "audio",
       annotations_dir: "annotations",
     }

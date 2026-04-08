@@ -15,7 +15,8 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
 
   load: async () => {
     const { config, loading } = get();
-    if (config !== null && !loading) return; // idempotent
+    if (config !== null && !loading && (config.speakers?.length ?? 0) > 0) return;
+    if (loading) return; // don't double-fetch
     set({ loading: true });
     try {
       const data = await getConfig();

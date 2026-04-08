@@ -22,10 +22,16 @@ export interface AnnotationRecord {
   source_wav: string;
 }
 
+export interface ConceptEntry {
+  id: string;
+  label: string;
+}
+
 export interface ProjectConfig {
   project_name: string;
   language_code: string;
   speakers: string[];
+  concepts: ConceptEntry[];
   audio_dir: string;
   annotations_dir: string;
   [key: string]: unknown;
