@@ -41,7 +41,8 @@ with a React + Vite frontend, keeping the Python backend (port 8766) completely 
 | B7 useExport + useComputeJob | feat/compare-react | DONE aa2728e | 9 tests (4+5) |
 | B8 CompareMode root | feat/compare-react | DONE aa2728e | 6 tests |
 | B9 Browser integration | — | PENDING Lucas | manual |
-| Phase C merge | feat/parse-react-vite | NOT STARTED | — |
+| agent-gpt EnrichmentsPanel rebase | feat/compare-react | PENDING agent-gpt | rebase onto ad09bcf |
+| Phase C merge | feat/parse-react-vite | BLOCKED — wait for agent-gpt rebase | — |
 
 ---
 
