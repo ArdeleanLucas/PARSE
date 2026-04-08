@@ -15,6 +15,42 @@ import type {
   ComputeStatus,
 } from "./types";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function resolveJobId(payload: unknown): string {
+  if (!isRecord(payload)) {
+    return "";
+  }
+
+  const fromSnake = payload.job_id;
+  if (typeof fromSnake === "string" && fromSnake.trim()) {
+    return fromSnake.trim();
+  }
+
+  const fromCamel = payload.jobId;
+  if (typeof fromCamel === "string" && fromCamel.trim()) {
+    return fromCamel.trim();
+  }
+
+  return "";
+}
+
+function unwrapConfig(payload: unknown): ProjectConfig {
+  if (isRecord(payload) && isRecord(payload.config)) {
+    return payload.config as ProjectConfig;
+  }
+  return (payload ?? {}) as ProjectConfig;
+}
+
+function unwrapEnrichments(payload: unknown): EnrichmentsPayload {
+  if (isRecord(payload) && isRecord(payload.enrichments)) {
+    return payload.enrichments as EnrichmentsPayload;
+  }
+  return (payload ?? {}) as EnrichmentsPayload;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -41,19 +77,21 @@ export async function saveAnnotation(speaker: string, record: AnnotationRecord):
 
 // Enrichments
 export async function getEnrichments(): Promise<EnrichmentsPayload> {
-  return apiFetch<EnrichmentsPayload>("/api/enrichments");
+  const payload = await apiFetch<unknown>("/api/enrichments");
+  return unwrapEnrichments(payload);
 }
 
 export async function saveEnrichments(data: EnrichmentsPayload): Promise<void> {
   await apiFetch<void>("/api/enrichments", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ enrichments: data }),
   });
 }
 
 // Config
 export async function getConfig(): Promise<ProjectConfig> {
-  return apiFetch<ProjectConfig>("/api/config");
+  const payload = await apiFetch<unknown>("/api/config");
+  return unwrapConfig(payload);
 }
 
 export async function updateConfig(patch: Partial<ProjectConfig>): Promise<void> {
@@ -86,10 +124,12 @@ export async function startSTT(
   sourceWav: string,
   language?: string
 ): Promise<STTJob> {
-  return apiFetch<STTJob>("/api/stt", {
+  const payload = await apiFetch<unknown>("/api/stt", {
     method: "POST",
     body: JSON.stringify({ speaker, source_wav: sourceWav, language }),
   });
+
+  return { job_id: resolveJobId(payload) };
 }
 
 export async function pollSTT(jobId: string): Promise<STTStatus> {
@@ -145,22 +185,45 @@ export async function pollChat(jobId: string): Promise<ChatStatus> {
 }
 
 // Compute
-export async function startCompute(speaker: string): Promise<ComputeJob> {
-  return apiFetch<ComputeJob>(`/api/compute/${encodeURIComponent(speaker)}`, {
+export async function startCompute(computeType: string): Promise<ComputeJob> {
+  const payload = await apiFetch<unknown>(`/api/compute/${encodeURIComponent(computeType)}`, {
     method: "POST",
   });
+
+  return { job_id: resolveJobId(payload) };
 }
 
-export async function pollCompute(speaker: string, jobId: string): Promise<ComputeStatus> {
-  return apiFetch<ComputeStatus>(`/api/compute/${encodeURIComponent(speaker)}/status`, {
+export async function pollCompute(computeType: string, jobId: string): Promise<ComputeStatus> {
+  const payload = await apiFetch<unknown>(`/api/compute/${encodeURIComponent(computeType)}/status`, {
     method: "POST",
     body: JSON.stringify({ job_id: jobId }),
   });
+
+  if (!isRecord(payload)) {
+    return { status: "error", progress: 0, message: "Invalid compute status payload" };
+  }
+
+  const rawProgress = Number(payload.progress ?? 0);
+  const progress = Number.isFinite(rawProgress) ? rawProgress : 0;
+
+  return {
+    status: String(payload.status ?? "error"),
+    progress,
+    message:
+      typeof payload.message === "string"
+        ? payload.message
+        : typeof payload.error === "string"
+          ? payload.error
+          : undefined,
+    error: typeof payload.error === "string" ? payload.error : undefined,
+  };
 }
 
 // Export — returns Blob (file download, not JSON)
 export async function getLingPyExport(): Promise<Blob> {
-  const response = await fetch("/api/export/lingpy");
+  const response = await fetch("/api/export/lingpy", {
+    method: "GET",
+  });
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
     throw new Error(`GET /api/export/lingpy failed ${response.status}: ${text}`);
@@ -169,7 +232,9 @@ export async function getLingPyExport(): Promise<Blob> {
 }
 
 export async function getNEXUSExport(): Promise<Blob> {
-  const response = await fetch("/api/export/nexus");
+  const response = await fetch("/api/export/nexus", {
+    method: "GET",
+  });
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
     throw new Error(`GET /api/export/nexus failed ${response.status}: ${text}`);

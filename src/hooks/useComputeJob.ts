@@ -1,5 +1,3 @@
-// useComputeJob — phonetic compute job lifecycle for one speaker.
-// Used by EnrichmentsPanel [Run Compute] button.
 import { useState, useRef, useCallback, useEffect } from "react";
 import { startCompute, pollCompute } from "../api/client";
 import { useEnrichmentStore } from "../stores/enrichmentStore";
@@ -10,57 +8,118 @@ export interface ComputeJobState {
   error: string | null;
 }
 
-export function useComputeJob(speaker: string) {
+function toErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return fallback;
+}
+
+function normalizeProgress(progress: number): number {
+  if (!Number.isFinite(progress) || progress < 0) {
+    return 0;
+  }
+  if (progress > 1) {
+    return Math.min(1, progress / 100);
+  }
+  return Math.min(1, progress);
+}
+
+export function useComputeJob(computeType: string) {
   const [state, setState] = useState<ComputeJobState>({
     status: "idle",
     progress: 0,
     error: null,
   });
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const load = useEnrichmentStore((s) => s.load);
 
-  const clearPoll = useCallback(() => {
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inFlightRef = useRef(false);
+  const jobIdRef = useRef<string | null>(null);
+  const loadEnrichments = useEnrichmentStore((store) => store.load);
+
+  const stopPolling = useCallback(() => {
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    inFlightRef.current = false;
+    jobIdRef.current = null;
   }, []);
 
-  // Clear interval on unmount
-  useEffect(() => () => { clearPoll(); }, [clearPoll]);
-
-  const start = useCallback(async (): Promise<void> => {
-    clearPoll();
-    setState({ status: "running", progress: 0, error: null });
-
-    let jobId: string;
-    try {
-      const job = await startCompute(speaker);
-      jobId = job.job_id;
-    } catch (e) {
-      setState({ status: "error", progress: 0, error: String(e) });
+  const pollOnce = useCallback(async () => {
+    if (inFlightRef.current || !jobIdRef.current) {
       return;
     }
 
-    intervalRef.current = setInterval(async () => {
-      try {
-        const poll = await pollCompute(speaker, jobId);
-        setState((prev) => ({ ...prev, progress: poll.progress ?? prev.progress }));
+    inFlightRef.current = true;
+    try {
+      const poll = await pollCompute(computeType, jobIdRef.current);
+      const progress = normalizeProgress(Number(poll.progress ?? 0));
+      const status = String(poll.status || "running").toLowerCase();
 
-        if (poll.status === "complete") {
-          clearPoll();
-          await load();
-          setState({ status: "complete", progress: 1, error: null });
-        } else if (poll.status === "error") {
-          clearPoll();
-          setState({ status: "error", progress: 0, error: poll.message ?? "Compute failed" });
-        }
-      } catch (e) {
-        clearPoll();
-        setState({ status: "error", progress: 0, error: String(e) });
+      if (status === "complete" || status === "done") {
+        stopPolling();
+        await loadEnrichments();
+        setState({ status: "complete", progress: 1, error: null });
+        return;
       }
-    }, 1000);
-  }, [speaker, load, clearPoll]);
+
+      if (status === "error" || status === "failed") {
+        stopPolling();
+        setState({
+          status: "error",
+          progress,
+          error: poll.message ?? poll.error ?? "Compute failed",
+        });
+        return;
+      }
+
+      setState((prev) => ({ ...prev, status: "running", progress }));
+    } catch (error) {
+      stopPolling();
+      setState({
+        status: "error",
+        progress: 0,
+        error: toErrorMessage(error, "Compute polling failed"),
+      });
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [computeType, loadEnrichments, stopPolling]);
+
+  const start = useCallback(async (): Promise<void> => {
+    stopPolling();
+    setState({ status: "running", progress: 0, error: null });
+
+    try {
+      const job = await startCompute(computeType);
+      const resolvedJobId = String(job.job_id || job.jobId || "").trim();
+      if (!resolvedJobId) {
+        throw new Error("Missing compute job id");
+      }
+
+      jobIdRef.current = resolvedJobId;
+      intervalRef.current = setInterval(() => {
+        void pollOnce();
+      }, 1000);
+    } catch (error) {
+      stopPolling();
+      setState({
+        status: "error",
+        progress: 0,
+        error: toErrorMessage(error, "Compute start failed"),
+      });
+    }
+  }, [computeType, pollOnce, stopPolling]);
+
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
 
   return { start, state };
 }

@@ -3,10 +3,6 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Tag } from "../../api/types";
 
-/* ------------------------------------------------------------------ */
-/*  Mock state                                                         */
-/* ------------------------------------------------------------------ */
-
 let mockData: Record<string, unknown> = {};
 let mockLoading = false;
 const mockLoad = vi.fn(async () => {});
@@ -14,8 +10,21 @@ const mockSave = vi.fn(async () => {});
 let mockTags: Tag[] = [];
 const mockGetTagsForConcept = vi.fn((): Tag[] => mockTags);
 
+const mockExportLingPyTSV = vi.fn(async () => {});
+const mockComputeStart = vi.fn(async () => {});
+let mockComputeState: { status: "idle" | "running" | "complete" | "error"; progress: number; error: string | null } = {
+  status: "idle",
+  progress: 0,
+  error: null,
+};
+
 vi.mock("../../stores/enrichmentStore", () => ({
-  useEnrichmentStore: (selector: (s: unknown) => unknown) =>
+  useEnrichmentStore: (selector: (state: {
+    data: Record<string, unknown>;
+    loading: boolean;
+    load: () => Promise<void>;
+    save: (patch: Record<string, unknown>) => Promise<void>;
+  }) => unknown) =>
     selector({
       data: mockData,
       loading: mockLoading,
@@ -25,11 +34,29 @@ vi.mock("../../stores/enrichmentStore", () => ({
 }));
 
 vi.mock("../../stores/tagStore", () => ({
-  useTagStore: (selector: (s: unknown) => unknown) =>
+  useTagStore: (selector: (state: {
+    tags: Tag[];
+    getTagsForConcept: () => Tag[];
+  }) => unknown) =>
     selector({
       tags: mockTags,
       getTagsForConcept: mockGetTagsForConcept,
     }),
+}));
+
+vi.mock("../../hooks/useExport", () => ({
+  useExport: () => ({
+    exportLingPyTSV: mockExportLingPyTSV,
+    exportNEXUS: vi.fn(),
+    exportCSV: vi.fn(),
+  }),
+}));
+
+vi.mock("../../hooks/useComputeJob", () => ({
+  useComputeJob: () => ({
+    start: mockComputeStart,
+    state: mockComputeState,
+  }),
 }));
 
 import { EnrichmentsPanel } from "./EnrichmentsPanel";
@@ -41,6 +68,9 @@ beforeEach(() => {
   mockSave.mockClear();
   mockTags = [];
   mockGetTagsForConcept.mockReset().mockReturnValue([]);
+  mockExportLingPyTSV.mockClear();
+  mockComputeStart.mockClear();
+  mockComputeState = { status: "idle", progress: 0, error: null };
 });
 
 afterEach(() => {
@@ -96,26 +126,18 @@ describe("EnrichmentsPanel", () => {
     });
   });
 
-  it("Export LingPy triggers fetch", async () => {
+  it("Export LingPy calls useExport hook", async () => {
     mockData = {
       "42": {
         cognate_sets: { A: ["spk1"] },
       },
     };
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("col1\tcol2\nval1\tval2", {
-        status: 200,
-        headers: { "Content-Type": "text/tab-separated-values" },
-      })
-    );
-
     render(<EnrichmentsPanel activeConcept="42" />);
     fireEvent.click(screen.getByText("Export LingPy TSV"));
 
-    // Wait for async
     await vi.waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith("/api/export/lingpy");
+      expect(mockExportLingPyTSV).toHaveBeenCalledOnce();
     });
   });
 });

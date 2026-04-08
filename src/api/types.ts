@@ -47,6 +47,7 @@ export interface AuthStatus {
 
 export interface STTJob {
   job_id: string;
+  jobId?: string;
 }
 
 export interface STTStatus {
@@ -66,10 +67,12 @@ export interface ChatStatus {
 
 export interface ComputeJob {
   job_id: string;
+  jobId?: string;
 }
 
 export interface ComputeStatus {
   status: string;
   progress: number;
   message?: string;
+  error?: string;
 }

@@ -1,4 +1,3 @@
-// CompareMode — root component at /compare.
 import { useState, useEffect } from "react";
 import { TopBar } from "../shared/TopBar";
 import { Modal } from "../shared/Modal";
@@ -20,17 +19,19 @@ const TABS = [
 ] as const;
 
 export function CompareMode() {
-  const comparePanel = useUIStore((s) => s.comparePanel);
-  const setComparePanel = useUIStore((s) => s.setComparePanel);
-  const activeConcept = useUIStore((s) => s.activeConcept);
-  const enrichmentData = useEnrichmentStore((s) => s.data);
-  const loadEnrichments = useEnrichmentStore((s) => s.load);
-  const hydrateTags = useTagStore((s) => s.hydrate);
+  const comparePanel = useUIStore((store) => store.comparePanel);
+  const setComparePanel = useUIStore((store) => store.setComparePanel);
+  const activeConcept = useUIStore((store) => store.activeConcept);
+
+  const enrichmentData = useEnrichmentStore((store) => store.data);
+  const loadEnrichments = useEnrichmentStore((store) => store.load);
+
+  const hydrateTags = useTagStore((store) => store.hydrate);
 
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
-    if (Object.keys(enrichmentData).length === 0) {
+    if (enrichmentData == null || Object.keys(enrichmentData).length === 0) {
       loadEnrichments().catch(() => {});
     }
     hydrateTags();
@@ -44,6 +45,7 @@ export function CompareMode() {
     >
       <TopBar>
         <button
+          data-testid="open-speaker-import"
           onClick={() => setImportOpen(true)}
           style={{ padding: "0.25rem 0.75rem", cursor: "pointer", fontFamily: "monospace" }}
         >
@@ -51,46 +53,59 @@ export function CompareMode() {
         </button>
       </TopBar>
 
-      <div style={{ flex: 1, overflow: "auto" }}>
-        <ConceptTable />
-      </div>
-
-      <div style={{ borderTop: "1px solid #374151" }}>
-        {/* Sidebar tab bar */}
-        <div style={{ display: "flex", borderBottom: "1px solid #374151" }}>
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              data-testid={`tab-${tab.id}`}
-              onClick={() => setComparePanel(tab.id)}
-              style={{
-                padding: "0.5rem 1rem",
-                cursor: "pointer",
-                fontFamily: "monospace",
-                background: comparePanel === tab.id ? "#1f2937" : "transparent",
-                border: "none",
-                borderBottom: comparePanel === tab.id ? "2px solid #60a5fa" : "2px solid transparent",
-                color: comparePanel === tab.id ? "#f9fafb" : "#9ca3af",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <ConceptTable />
         </div>
 
-        {/* Sidebar panel */}
-        <div style={{ padding: "0.5rem", minHeight: "200px" }}>
-          {comparePanel === "cognate" && !activeConcept && (
-            <div style={{ padding: "1rem", color: "#9ca3af" }}>Select a concept to see cognates</div>
-          )}
-          {comparePanel === "cognate" && activeConcept && (
-            <CognateControls />
-          )}
-          {comparePanel === "borrowing" && <BorrowingPanel />}
-          {comparePanel === "enrichments" && <EnrichmentsPanel activeConcept={activeConcept} />}
-          {comparePanel === "tags" && <TagManager isOpen={true} onClose={() => {}} />}
-        </div>
-      </div>
+        <section style={{ borderTop: "1px solid #e5e7eb", flexShrink: 0 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb" }}>
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                data-testid={`tab-${tab.id}`}
+                onClick={() => setComparePanel(tab.id)}
+                style={{
+                  padding: "0.5rem 1rem",
+                  cursor: "pointer",
+                  fontFamily: "monospace",
+                  border: "none",
+                  borderBottom:
+                    comparePanel === tab.id ? "2px solid #3b82f6" : "2px solid transparent",
+                  background: "transparent",
+                  color: comparePanel === tab.id ? "#1f2937" : "#6b7280",
+                  fontWeight: comparePanel === tab.id ? 600 : 400,
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ minHeight: 200 }}>
+            {comparePanel === "cognate" && activeConcept === null && (
+              <div style={{ padding: "1rem", color: "#9ca3af" }}>
+                Select a concept to inspect cognate sets.
+              </div>
+            )}
+            {comparePanel === "cognate" && activeConcept !== null && <CognateControls />}
+            {comparePanel === "borrowing" && <BorrowingPanel />}
+            {comparePanel === "enrichments" && (
+              <EnrichmentsPanel activeConcept={activeConcept} />
+            )}
+            {comparePanel === "tags" && (
+              <div style={{ padding: "1rem", color: "#6b7280" }}>
+                Tag manager opened.
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+
+      <TagManager
+        isOpen={comparePanel === "tags"}
+        onClose={() => setComparePanel("cognate")}
+      />
 
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={() => setImportOpen(false)} />

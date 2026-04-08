@@ -4,6 +4,8 @@ import { Badge } from "../shared/Badge";
 import { Button } from "../shared/Button";
 import { useEnrichmentStore } from "../../stores/enrichmentStore";
 import { useTagStore } from "../../stores/tagStore";
+import { useExport } from "../../hooks/useExport";
+import { useComputeJob } from "../../hooks/useComputeJob";
 
 interface EnrichmentsPanelProps {
   activeConcept: string | null;
@@ -26,18 +28,19 @@ interface EnrichmentEntry {
   [key: string]: unknown;
 }
 
-function isRecord(val: unknown): val is Record<string, unknown> {
-  return val !== null && typeof val === "object" && !Array.isArray(val);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getEntry(data: Record<string, unknown>, key: string): EnrichmentEntry | null {
   const raw = data[key];
-  if (!isRecord(raw)) return null;
+  if (!isRecord(raw)) {
+    return null;
+  }
   return raw as EnrichmentEntry;
 }
 
 function getCognates(entry: EnrichmentEntry, conceptId: string): CognateSets | null {
-  // Prefer manual_overrides.cognate_sets[conceptId] first, fall back to entry.cognate_sets
   const manual = entry.manual_overrides;
   if (manual && isRecord(manual.cognate_sets)) {
     const manualForConcept = (manual.cognate_sets as Record<string, unknown>)[conceptId];
@@ -52,11 +55,14 @@ function getCognates(entry: EnrichmentEntry, conceptId: string): CognateSets | n
 }
 
 export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
-  const data = useEnrichmentStore((s) => s.data);
-  const loading = useEnrichmentStore((s) => s.loading);
-  const load = useEnrichmentStore((s) => s.load);
-  const save = useEnrichmentStore((s) => s.save);
-  const getTagsForConcept = useTagStore((s) => s.getTagsForConcept);
+  const data = useEnrichmentStore((store) => store.data);
+  const loading = useEnrichmentStore((store) => store.loading);
+  const load = useEnrichmentStore((store) => store.load);
+  const save = useEnrichmentStore((store) => store.save);
+  const getTagsForConcept = useTagStore((store) => store.getTagsForConcept);
+
+  const { exportLingPyTSV } = useExport();
+  const { start: startCompute, state: computeState } = useComputeJob("cognates");
 
   const [exportLoading, setExportLoading] = useState(false);
 
@@ -82,8 +88,9 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
     );
   }
 
-  const entry = getEntry(data, activeConcept);
-  const tags = getTagsForConcept(activeConcept);
+  const conceptId = activeConcept;
+  const entry = getEntry(data, conceptId);
+  const tags = getTagsForConcept(conceptId);
 
   if (!entry) {
     return (
@@ -93,31 +100,34 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
     );
   }
 
-  const cognates = getCognates(entry, activeConcept);
-  const ipaComputed = isRecord(entry.ipa_computed) ? (entry.ipa_computed as Record<string, string>) : null;
-  const phonemeDist = isRecord(entry.phoneme_distances) ? (entry.phoneme_distances as Record<string, Record<string, number>>) : null;
-
-  // Truncate phoneme distance table to 4 speakers max
+  const entryData = entry;
+  const cognates = getCognates(entryData, conceptId);
+  const ipaComputed = isRecord(entryData.ipa_computed)
+    ? (entryData.ipa_computed as Record<string, string>)
+    : null;
+  const phonemeDist = isRecord(entryData.phoneme_distances)
+    ? (entryData.phoneme_distances as Record<string, Record<string, number>>)
+    : null;
   const pdSpeakers = phonemeDist ? Object.keys(phonemeDist).slice(0, 4) : [];
 
   function handleVerifyCognates() {
-    const existing = entry?.manual_overrides ?? {};
+    const existing = entryData.manual_overrides ?? {};
     const currentCognates = cognates ?? {};
-    save({
+    void save({
       manual_overrides: {
         ...existing,
-        cognate_sets: { [activeConcept!]: currentCognates },
+        cognate_sets: { [conceptId]: currentCognates },
       },
     });
   }
 
   function handleFlagBorrowing() {
-    const existing = entry?.manual_overrides ?? {};
+    const existing = entryData.manual_overrides ?? {};
     const existingFlags = isRecord(existing.borrowing_flags) ? existing.borrowing_flags : {};
-    save({
+    void save({
       manual_overrides: {
         ...existing,
-        borrowing_flags: { ...existingFlags, [activeConcept!]: "flagged" },
+        borrowing_flags: { ...existingFlags, [conceptId]: "flagged" },
       },
     });
   }
@@ -125,40 +135,33 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
   async function handleExportLingPy() {
     setExportLoading(true);
     try {
-      const response = await fetch("/api/export/lingpy");
-      if (!response.ok) throw new Error("Export failed");
-      const text = await response.text();
-      const blob = new Blob([text], { type: "text/tab-separated-values" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "lingpy-export.tsv";
-      a.click();
-      URL.revokeObjectURL(url);
+      await exportLingPyTSV();
     } catch {
-      // export error handled silently
+      // handled by API-level errors and user retry
     } finally {
       setExportLoading(false);
     }
   }
 
+  async function handleRunCompute() {
+    await startCompute();
+  }
+
   return (
     <div data-testid="enrichments-panel" style={{ padding: "1rem", fontFamily: "monospace" }}>
-      {/* Header */}
       <div style={{ marginBottom: "0.75rem" }}>
         <div style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.375rem" }}>
           Enrichments — #{activeConcept}
         </div>
         {tags.length > 0 && (
           <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-            {tags.map((t) => (
-              <Badge key={t.id} label={t.label} color={t.color} />
+            {tags.map((tag) => (
+              <Badge key={tag.id} label={tag.label} color={tag.color} />
             ))}
           </div>
         )}
       </div>
 
-      {/* Cognate sets */}
       {cognates && Object.keys(cognates).length > 0 && (
         <div data-testid="cognate-sets" style={{ marginBottom: "0.75rem" }}>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.25rem" }}>Cognate Sets</div>
@@ -171,7 +174,6 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
         </div>
       )}
 
-      {/* IPA computed */}
       {ipaComputed && Object.keys(ipaComputed).length > 0 && (
         <div data-testid="ipa-computed" style={{ marginBottom: "0.75rem" }}>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.25rem" }}>IPA Computed</div>
@@ -183,7 +185,6 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
         </div>
       )}
 
-      {/* Phoneme distances */}
       {pdSpeakers.length > 0 && phonemeDist && (
         <div data-testid="phoneme-distances" style={{ marginBottom: "0.75rem" }}>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.25rem" }}>Phoneme Distances</div>
@@ -191,21 +192,27 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
             <thead>
               <tr>
                 <th style={{ padding: "0.25rem", border: "1px solid #d1d5db" }}></th>
-                {pdSpeakers.map((s) => (
-                  <th key={s} style={{ padding: "0.25rem", border: "1px solid #d1d5db" }}>{s}</th>
+                {pdSpeakers.map((speaker) => (
+                  <th key={speaker} style={{ padding: "0.25rem", border: "1px solid #d1d5db" }}>
+                    {speaker}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {pdSpeakers.map((row) => (
-                <tr key={row}>
-                  <td style={{ padding: "0.25rem", border: "1px solid #d1d5db", fontWeight: 500 }}>{row}</td>
-                  {pdSpeakers.map((col) => {
-                    const rowData = phonemeDist[row];
-                    const val = isRecord(rowData) ? (rowData as Record<string, number>)[col] : undefined;
+              {pdSpeakers.map((rowSpeaker) => (
+                <tr key={rowSpeaker}>
+                  <td style={{ padding: "0.25rem", border: "1px solid #d1d5db", fontWeight: 500 }}>
+                    {rowSpeaker}
+                  </td>
+                  {pdSpeakers.map((colSpeaker) => {
+                    const rowData = phonemeDist[rowSpeaker];
+                    const value = isRecord(rowData)
+                      ? (rowData as Record<string, number>)[colSpeaker]
+                      : undefined;
                     return (
-                      <td key={col} style={{ padding: "0.25rem", border: "1px solid #d1d5db", textAlign: "right" }}>
-                        {val !== undefined ? val.toFixed(2) : "-"}
+                      <td key={colSpeaker} style={{ padding: "0.25rem", border: "1px solid #d1d5db", textAlign: "right" }}>
+                        {value !== undefined ? value.toFixed(2) : "-"}
                       </td>
                     );
                   })}
@@ -216,18 +223,28 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
         </div>
       )}
 
-      {/* Actions */}
-      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
         <Button size="sm" variant="primary" onClick={handleVerifyCognates}>
           Verify Cognates
         </Button>
         <Button size="sm" variant="secondary" onClick={handleFlagBorrowing}>
           Flag Borrowing
         </Button>
+        <Button size="sm" variant="secondary" loading={computeState.status === "running"} onClick={handleRunCompute}>
+          Run Compute
+        </Button>
         <Button size="sm" variant="secondary" loading={exportLoading} onClick={handleExportLingPy}>
           Export LingPy TSV
         </Button>
       </div>
+
+      {computeState.status !== "idle" && (
+        <div data-testid="compute-status" style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.75rem" }}>
+          {computeState.status === "running" && `Compute running (${Math.round(computeState.progress * 100)}%)`}
+          {computeState.status === "complete" && "Compute complete"}
+          {computeState.status === "error" && `Compute failed: ${computeState.error ?? "unknown error"}`}
+        </div>
+      )}
     </div>
   );
 }

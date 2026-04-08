@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useExport } from "../useExport";
+
+let mockData: Record<string, unknown> = {};
 
 vi.mock("../../api/client", () => ({
   getLingPyExport: vi.fn(),
@@ -9,68 +11,110 @@ vi.mock("../../api/client", () => ({
 }));
 
 vi.mock("../../stores/enrichmentStore", () => ({
-  useEnrichmentStore: vi.fn((sel: (s: { data: Record<string, unknown> }) => unknown) =>
-    sel({ data: {} })
-  ),
+  useEnrichmentStore: (selector: (state: { data: Record<string, unknown> }) => unknown) =>
+    selector({ data: mockData }),
 }));
-
-const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
-const mockRevokeObjectURL = vi.fn();
-Object.defineProperty(URL, "createObjectURL", { value: mockCreateObjectURL, writable: true });
-Object.defineProperty(URL, "revokeObjectURL", { value: mockRevokeObjectURL, writable: true });
-
-const mockClick = vi.fn();
-const origCreateElement = document.createElement.bind(document);
-vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
-  if (tag === "a") {
-    const el = origCreateElement("a") as HTMLAnchorElement;
-    el.click = mockClick;
-    return el;
-  }
-  return origCreateElement(tag);
-});
 
 import { getLingPyExport, getNEXUSExport } from "../../api/client";
 
-describe("useExport", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
-  afterEach(() => { vi.clearAllMocks(); });
+const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
+const mockRevokeObjectURL = vi.fn();
+const mockClick = vi.fn();
+const originalCreateElement = document.createElement.bind(document);
 
-  it("exportCSV triggers a browser download", () => {
-    const { result } = renderHook(() => useExport());
-    act(() => { result.current.exportCSV(); });
-    expect(mockCreateObjectURL).toHaveBeenCalled();
-    expect(mockClick).toHaveBeenCalled();
+beforeEach(() => {
+  mockData = {};
+  vi.clearAllMocks();
+
+  Object.defineProperty(URL, "createObjectURL", {
+    value: mockCreateObjectURL,
+    writable: true,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    value: mockRevokeObjectURL,
+    writable: true,
   });
 
-  it("exportCSV blob contains correct column headers: ID DOCULECT CONCEPT IPA COGID TOKENS NOTE", () => {
-    let capturedParts: BlobPart[] = [];
-    const OrigBlob = globalThis.Blob;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).Blob = function (parts?: BlobPart[]) { capturedParts = parts ?? []; return new OrigBlob(parts); };
-    try {
+  vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+    if (tagName.toLowerCase() === "a") {
+      const anchor = originalCreateElement("a") as HTMLAnchorElement;
+      anchor.click = mockClick;
+      return anchor;
+    }
+    return originalCreateElement(tagName);
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("useExport", () => {
+  it("exportCSV triggers a browser download", () => {
     const { result } = renderHook(() => useExport());
-    act(() => { result.current.exportCSV(); });
-    const text = String(capturedParts[0] ?? "");
-    expect(text.split("\n")[0]).toBe("ID\tDOCULECT\tCONCEPT\tIPA\tCOGID\tTOKENS\tNOTE");
-    } finally { globalThis.Blob = OrigBlob; }
+
+    act(() => {
+      result.current.exportCSV();
+    });
+
+    expect(mockCreateObjectURL).toHaveBeenCalledOnce();
+    expect(mockClick).toHaveBeenCalledOnce();
+  });
+
+  it("exportCSV blob contains correct column headers: ID CONCEPT DOCULECT IPA COGID TOKENS BORROWING", () => {
+    mockData = {
+      water: {
+        ipa_computed: { Fail01: "awa" },
+      },
+    };
+
+    const OriginalBlob = globalThis.Blob;
+    let capturedBlobParts: BlobPart[] = [];
+    const blobSpy = vi
+      .spyOn(globalThis, "Blob")
+      .mockImplementation(((parts?: BlobPart[], options?: BlobPropertyBag) => {
+        capturedBlobParts = parts ?? [];
+        return new OriginalBlob(parts, options);
+      }) as (blobParts?: BlobPart[], options?: BlobPropertyBag) => Blob);
+
+    const { result } = renderHook(() => useExport());
+
+    act(() => {
+      result.current.exportCSV();
+    });
+
+    blobSpy.mockRestore();
+    const text = String(capturedBlobParts[0] ?? "");
+    expect(text.split("\n")[0]).toBe("ID\tCONCEPT\tDOCULECT\tIPA\tCOGID\tTOKENS\tBORROWING");
   });
 
   it("exportLingPyTSV calls client.ts getLingPyExport", async () => {
-    const mockBlob = new Blob(["ID\tDOCULECT\n"], { type: "text/tab-separated-values" });
-    vi.mocked(getLingPyExport).mockResolvedValueOnce(mockBlob);
+    const lingpyBlob = new Blob(["ID\tCONCEPT\n1\twater\n"], {
+      type: "text/tab-separated-values",
+    });
+    vi.mocked(getLingPyExport).mockResolvedValueOnce(lingpyBlob);
+
     const { result } = renderHook(() => useExport());
-    await act(async () => { await result.current.exportLingPyTSV(); });
+
+    await act(async () => {
+      await result.current.exportLingPyTSV();
+    });
+
     expect(getLingPyExport).toHaveBeenCalledOnce();
-    expect(mockCreateObjectURL).toHaveBeenCalledWith(mockBlob);
+    expect(mockCreateObjectURL).toHaveBeenCalledWith(lingpyBlob);
   });
 
   it("exportNEXUS calls client.ts getNEXUSExport", async () => {
-    const mockBlob = new Blob(["#NEXUS\n"], { type: "text/plain" });
-    vi.mocked(getNEXUSExport).mockResolvedValueOnce(mockBlob);
+    const nexusBlob = new Blob(["#NEXUS\n"], { type: "text/plain" });
+    vi.mocked(getNEXUSExport).mockResolvedValueOnce(nexusBlob);
+
     const { result } = renderHook(() => useExport());
-    await act(async () => { await result.current.exportNEXUS(); });
+
+    await act(async () => {
+      await result.current.exportNEXUS();
+    });
+
     expect(getNEXUSExport).toHaveBeenCalledOnce();
-    expect(mockCreateObjectURL).toHaveBeenCalledWith(mockBlob);
+    expect(mockCreateObjectURL).toHaveBeenCalledWith(nexusBlob);
   });
 });
