@@ -1997,6 +1997,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_update_config()
             return
 
+        if request_path == "/api/auth/key":
+            self._api_auth_key()
+            return
+
         if request_path == "/api/auth/start":
             self._api_auth_start()
             return
@@ -2361,6 +2365,23 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.OK, {"success": True})
 
     # ── Auth endpoints ──────────────────────────────────────────────
+
+    def _api_auth_key(self) -> None:
+        """POST /api/auth/key — store a direct API key."""
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            key = str(data.get("key") or "").strip()
+            provider = str(data.get("provider") or "xai").strip()
+            if not key:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "key is required"})
+                return
+            from ai.openai_auth import save_api_key, get_auth_status
+            save_api_key(key, provider)
+            status = get_auth_status()
+            self._send_json(HTTPStatus.OK, status)
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
     def _api_auth_status(self) -> None:
         from ai.openai_auth import get_auth_status

@@ -1,16 +1,42 @@
 import { useState, useRef, useEffect } from "react"
 import { useChatSession } from "../../hooks/useChatSession"
 import type { ChatMessage } from "../../hooks/useChatSession"
+import { getAuthStatus, startAuthFlow, pollAuth, saveApiKey, logoutAuth } from "../../api/client"
+import type { AuthStatus } from "../../api/types"
 
 export interface ChatPanelProps {
   speaker: string | null
   conceptId: string | null
 }
 
+type AuthState = "checking" | "unauthenticated" | "entering-xai" | "entering-openai" | "oauth" | "authenticated"
+
 export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
   const { messages, sending, send, clear } = useChatSession()
   const [inputText, setInputText] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const [authState, setAuthState] = useState<AuthState>("checking")
+  const [apiKeyInput, setApiKeyInput] = useState("")
+  const [authError, setAuthError] = useState("")
+  const [oauthInfo, setOauthInfo] = useState<{ user_code?: string; verification_uri?: string }>({})
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Check auth on mount
+  useEffect(() => {
+    getAuthStatus()
+      .then((s: AuthStatus) => {
+        setAuthState(s.authenticated ? "authenticated" : "unauthenticated")
+      })
+      .catch(() => setAuthState("unauthenticated"))
+  }, [])
+
+  // Clean up poll on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -26,6 +52,63 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     setInputText("")
   }
 
+  const handleSaveKey = async () => {
+    setAuthError("")
+    const provider = authState === "entering-xai" ? "xai" : "openai"
+    try {
+      const result = await saveApiKey(apiKeyInput, provider)
+      if (result.authenticated) {
+        setAuthState("authenticated")
+        setApiKeyInput("")
+      } else {
+        setAuthError("Failed to save key")
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Failed to save key")
+    }
+  }
+
+  const handleStartOAuth = async () => {
+    setAuthError("")
+    setAuthState("oauth")
+    try {
+      await startAuthFlow()
+      const status = await pollAuth()
+      if (status.user_code) {
+        setOauthInfo({ user_code: status.user_code, verification_uri: status.verification_uri })
+      }
+      // Start polling
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await pollAuth()
+          if (s.authenticated) {
+            if (pollRef.current) clearInterval(pollRef.current)
+            pollRef.current = null
+            setAuthState("authenticated")
+          }
+        } catch {
+          // keep polling
+        }
+      }, 5000)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "OAuth start failed")
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await logoutAuth()
+    } catch {
+      // ignore
+    }
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = null
+    setAuthState("unauthenticated")
+    setApiKeyInput("")
+    setAuthError("")
+    setOauthInfo({})
+  }
+
   const containerStyle: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
@@ -39,6 +122,9 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     borderBottom: "1px solid #e2e8f0",
     fontSize: 14,
     fontWeight: 700,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
   }
 
   const messageListStyle: React.CSSProperties = {
@@ -111,12 +197,152 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     maxWidth: "80%",
   }
 
+  const authBtnStyle: React.CSSProperties = {
+    padding: "10px 20px",
+    borderRadius: 8,
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: "1px solid #6366f1",
+    background: "#6366f1",
+    color: "#fff",
+    width: "100%",
+  }
+
+  const secondaryBtnStyle: React.CSSProperties = {
+    ...authBtnStyle,
+    background: "#fff",
+    color: "#6366f1",
+  }
+
+  const signOutStyle: React.CSSProperties = {
+    fontSize: 12,
+    color: "#6366f1",
+    cursor: "pointer",
+    background: "none",
+    border: "none",
+    padding: 0,
+    fontWeight: 500,
+  }
+
   const headerText = `AI Assistant${speaker ? ` — ${speaker}` : ""}${conceptId ? ` / ${conceptId}` : ""}`
   const canSend = inputText.trim() !== "" && !sending
 
+  // Auth screen
+  if (authState !== "authenticated") {
+    return (
+      <div style={containerStyle}>
+        <div style={headerStyle}>
+          <span>{headerText}</span>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
+          <div style={{ maxWidth: 340, width: "100%", textAlign: "center" }}>
+            {authState === "checking" && (
+              <div style={{ color: "#94a3b8", fontSize: 14 }}>Checking authentication...</div>
+            )}
+
+            {authState === "unauthenticated" && (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 24 }}>Connect AI Assistant</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <button style={authBtnStyle} onClick={() => { setAuthState("entering-xai"); setAuthError(""); setApiKeyInput(""); }}>
+                    Use xAI API Key
+                  </button>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>or</div>
+                  <button style={secondaryBtnStyle} onClick={() => { setAuthState("entering-openai"); setAuthError(""); setApiKeyInput(""); }}>
+                    Use OpenAI API Key
+                  </button>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>or</div>
+                  <button style={secondaryBtnStyle} onClick={handleStartOAuth}>
+                    Sign in with OpenAI (OAuth)
+                  </button>
+                </div>
+              </>
+            )}
+
+            {(authState === "entering-xai" || authState === "entering-openai") && (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
+                  {authState === "entering-xai" ? "xAI API Key" : "OpenAI API Key"}
+                </div>
+                <input
+                  type="password"
+                  style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+                  placeholder={authState === "entering-xai" ? "xai-..." : "sk-..."}
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  aria-label={authState === "entering-xai" ? "xAI API Key" : "OpenAI API Key"}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={secondaryBtnStyle}
+                    onClick={() => { setAuthState("unauthenticated"); setAuthError(""); setApiKeyInput(""); }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    style={apiKeyInput.trim() ? authBtnStyle : { ...authBtnStyle, opacity: 0.5, cursor: "not-allowed" }}
+                    disabled={!apiKeyInput.trim()}
+                    onClick={handleSaveKey}
+                  >
+                    Connect
+                  </button>
+                </div>
+              </>
+            )}
+
+            {authState === "oauth" && (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>OpenAI Sign In</div>
+                {oauthInfo.user_code ? (
+                  <div>
+                    <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>
+                      Enter this code at the verification page:
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>
+                      {oauthInfo.user_code}
+                    </div>
+                    {oauthInfo.verification_uri && (
+                      <div style={{ fontSize: 12, color: "#6366f1", marginBottom: 16, wordBreak: "break-all" }}>
+                        {oauthInfo.verification_uri}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Waiting for confirmation...</div>
+                  </div>
+                ) : (
+                  <div style={{ color: "#94a3b8", fontSize: 14 }}>Starting OAuth flow...</div>
+                )}
+                <button
+                  style={{ ...secondaryBtnStyle, marginTop: 16 }}
+                  onClick={() => {
+                    if (pollRef.current) clearInterval(pollRef.current)
+                    pollRef.current = null
+                    setAuthState("unauthenticated")
+                    setOauthInfo({})
+                    setAuthError("")
+                  }}
+                >
+                  Back
+                </button>
+              </>
+            )}
+
+            {authError && (
+              <div style={{ color: "#dc2626", fontSize: 13, marginTop: 12 }}>{authError}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Authenticated chat UI
   return (
     <div style={containerStyle}>
-      <div style={headerStyle}>{headerText}</div>
+      <div style={headerStyle}>
+        <span>{headerText}</span>
+        <button style={signOutStyle} onClick={handleSignOut}>Sign out</button>
+      </div>
       <div style={messageListStyle} data-testid="message-list">
         {messages.length === 0 && (
           <div style={{ color: "#94a3b8", fontSize: 13 }}>

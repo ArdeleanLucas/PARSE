@@ -116,6 +116,13 @@ export async function pollAuth(): Promise<AuthStatus> {
   return apiFetch<AuthStatus>("/api/auth/poll", { method: "POST" });
 }
 
+export async function saveApiKey(key: string, provider: string): Promise<AuthStatus> {
+  return apiFetch<AuthStatus>("/api/auth/key", {
+    method: "POST",
+    body: JSON.stringify({ key, provider }),
+  });
+}
+
 export async function logoutAuth(): Promise<void> {
   await apiFetch<void>("/api/auth/logout", { method: "POST" });
 }

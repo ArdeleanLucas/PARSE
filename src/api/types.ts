@@ -48,7 +48,11 @@ export interface Tag {
 
 export interface AuthStatus {
   authenticated: boolean;
-  provider: string;
+  provider?: string;
+  method?: "api_key" | "oauth";
+  flow_active?: boolean;
+  user_code?: string;
+  verification_uri?: string;
 }
 
 export interface STTJob {
