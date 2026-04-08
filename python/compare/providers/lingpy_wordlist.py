@@ -52,46 +52,47 @@ class LingPyCldfProvider(BaseProvider):
             return None
 
     def _build_index(self, wl) -> Dict[str, Dict[str, List[str]]]:
-        """
-        Build {lang_id_lower: {concept_lower: [forms]}} from the loaded Wordlist.
-        Uses case-insensitive substring matching for concept names.
-        """
+        """Build {lang_key: {concept_lower: [forms]}} from a loaded LingPy Wordlist."""
         index: Dict[str, Dict[str, List[str]]] = {}
         try:
             for idx in wl:
-                # Get language identifier
-                lang = ""
-                for key in ("glottolog", "doculect", "language_id", "language_name"):
-                    val = wl[idx].get(key, "")
-                    if val:
-                        lang = str(val).strip().lower()
-                        break
-                if not lang:
+                # Language: prefer doculect ID, fall back to language_name
+                lang_parts = []
+                for col in ("doculect", "language_name", "glottolog"):
+                    try:
+                        v = str(wl[idx, col] or "").strip().lower()
+                        if v:
+                            lang_parts.append(v)
+                    except Exception:
+                        pass
+                if not lang_parts:
                     continue
+                # Store under ALL lang identifiers for flexible matching
+                for lang_key in lang_parts:
+                    # Concept
+                    try:
+                        concept = str(wl[idx, "concept"] or "").strip().lower()
+                    except Exception:
+                        concept = ""
+                    if not concept:
+                        continue
+                    # Form: prefer "value" (native script / IPA), fall back to "form" (ASJP)
+                    form = ""
+                    for col in ("value", "form"):
+                        try:
+                            v = str(wl[idx, col] or "").strip()
+                            if v and v not in ("-", "0", ""):
+                                form = v
+                                break
+                        except Exception:
+                            pass
+                    if not form:
+                        continue
 
-                # Get concept name
-                concept = ""
-                for key in ("concept", "concept_name", "parameter_id"):
-                    val = wl[idx].get(key, "")
-                    if val:
-                        concept = str(val).strip().lower()
-                        break
-                if not concept:
-                    continue
-
-                # Get form
-                form = ""
-                for key in ("form", "value", "ipa"):
-                    val = wl[idx].get(key, "")
-                    if val and str(val).strip() not in ("", "-", "0"):
-                        form = str(val).strip()
-                        break
-                if not form:
-                    continue
-
-                index.setdefault(lang, {}).setdefault(concept, [])
-                if form not in index[lang][concept]:
-                    index[lang][concept].append(form)
+                    lang_entry = index.setdefault(lang_key, {})
+                    forms_list = lang_entry.setdefault(concept, [])
+                    if form not in forms_list:
+                        forms_list.append(form)
         except Exception as e:
             import sys
             print(f"[lingpy_wordlist] index build error: {e}", file=sys.stderr)
