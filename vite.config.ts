@@ -38,6 +38,12 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    exclude: [
+      '**/node_modules/**',
+      'src/__tests__/apiRegression*.test.ts',  // live integration tests — run with: npx vitest run --config vitest.integration.ts
+    ],
+  },
   build: {
     outDir: "dist",
     sourcemap: true,

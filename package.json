@@ -27,6 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "check": "./node_modules/.bin/tsc --noEmit"
+    "check": "./node_modules/.bin/tsc --noEmit",
+    "test:api": "vitest run --config vitest.integration.ts"
   }
 }
