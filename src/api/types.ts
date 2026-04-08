@@ -46,6 +46,10 @@ export interface Tag {
   concepts: string[]; // concept ids that carry this tag
 }
 
+export interface TagsResponse {
+  tags: Tag[];
+}
+
 export interface AuthStatus {
   authenticated: boolean;
   provider?: string;

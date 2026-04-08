@@ -15,6 +15,8 @@ import type {
   ComputeStatus,
   ContactLexemeCoverage,
   ContactLexemeFetchOptions,
+  Tag,
+  TagsResponse,
 } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -266,6 +268,18 @@ export async function startContactLexemeFetch(
   options: ContactLexemeFetchOptions = {},
 ): Promise<ComputeJob> {
   return startCompute("contact-lexemes", options as Record<string, unknown>);
+}
+
+// Tags
+export async function getTags(): Promise<TagsResponse> {
+  return apiFetch<TagsResponse>("/api/tags");
+}
+
+export async function mergeTags(tags: Tag[]): Promise<{ ok: boolean; tagCount: number }> {
+  return apiFetch<{ ok: boolean; tagCount: number }>("/api/tags/merge", {
+    method: "POST",
+    body: JSON.stringify({ tags }),
+  });
 }
 
 export async function getNEXUSExport(): Promise<Blob> {

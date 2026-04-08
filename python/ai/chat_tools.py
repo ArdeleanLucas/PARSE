@@ -247,6 +247,7 @@ class ParseChatTools:
         self.project_json_path = self.project_root / "project.json"
         self.source_index_path = self.project_root / "source_index.json"
         self.enrichments_path = self.project_root / "parse-enrichments.json"
+        self.tags_path = self.project_root / "parse-tags.json"
 
         self._start_stt_job = start_stt_job
         self._get_job_snapshot = get_job_snapshot
@@ -428,6 +429,67 @@ class ParseChatTools:
                     },
                 },
             ),
+            "read_csv_preview": ChatToolSpec(
+                name="read_csv_preview",
+                description=(
+                    "Read first N rows of any CSV file and return column names, delimiter, "
+                    "total row count, and a sample. Defaults to concepts.csv in project root "
+                    "if no path given. Read-only."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "csvPath": {"type": "string", "maxLength": 512},
+                        "maxRows": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
+                    },
+                },
+            ),
+            "import_tag_csv": ChatToolSpec(
+                name="import_tag_csv",
+                description=(
+                    "Import a CSV file as a custom tag list. Matches CSV rows to project concept IDs "
+                    "by label (case-insensitive), numeric ID, or fuzzy match (edit distance <= 1). "
+                    "When dryRun=true returns a preview of matched/unmatched rows and asks for tag name. "
+                    "When dryRun=false and tagName is provided, creates the tag and writes parse-tags.json. "
+                    "Always use dryRun=true first, then dryRun=false after explicit user confirmation."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["dryRun"],
+                    "properties": {
+                        "csvPath": {"type": "string", "maxLength": 512},
+                        "tagName": {"type": "string", "minLength": 1, "maxLength": 100},
+                        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                        "labelColumn": {"type": "string", "maxLength": 64},
+                        "dryRun": {"type": "boolean"},
+                    },
+                },
+            ),
+            "prepare_tag_import": ChatToolSpec(
+                name="prepare_tag_import",
+                description=(
+                    "Create or update a tag with a list of concept IDs and write to parse-tags.json. "
+                    "Always use dryRun=true first to preview, then dryRun=false after user confirms."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["tagName", "conceptIds", "dryRun"],
+                    "properties": {
+                        "tagName": {"type": "string", "minLength": 1, "maxLength": 100},
+                        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                        "conceptIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 500,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                        },
+                        "dryRun": {"type": "boolean"},
+                    },
+                },
+            ),
         }
 
     def openai_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -470,8 +532,10 @@ class ParseChatTools:
                 )
             raise ChatToolValidationError("Tool is not allowlisted: {0}".format(name))
 
-        # Defense-in-depth: mutating tool names remain blocked even if added by mistake.
-        if MUTATING_TOOL_NAME_RE.search(name):
+        # Defense-in-depth: mutating tool names remain blocked even if added by mistake,
+        # except for explicitly allowlisted tag-import tools which need write access.
+        _TAG_TOOL_ALLOWLIST = {"import_tag_csv", "prepare_tag_import"}
+        if MUTATING_TOOL_NAME_RE.search(name) and name not in _TAG_TOOL_ALLOWLIST:
             raise ChatToolValidationError(
                 "Mutating tool calls are disabled in read-only mode: {0}.".format(name)
             )
@@ -1218,6 +1282,288 @@ class ParseChatTools:
                 "plannedEndpoint": "/api/compute/spectrograms",
                 "notes": "Client-side spectrogram worker remains the active rendering path.",
             },
+        }
+
+    # ------------------------------------------------------------------
+    # Tag-import helpers
+    # ------------------------------------------------------------------
+
+    def _load_project_concepts(self) -> List[Dict[str, Any]]:
+        """Load project concepts from concepts.csv. Returns list of {id, label} dicts."""
+        concepts_path = self.project_root / "concepts.csv"
+        if not concepts_path.exists():
+            return []
+        import csv as _csv
+        concepts: List[Dict[str, Any]] = []
+        try:
+            with open(concepts_path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    cid = str(row.get("id") or "").strip()
+                    label = str(row.get("concept_en") or "").strip()
+                    if cid and label:
+                        concepts.append({"id": cid, "label": label})
+        except Exception:
+            pass
+        return concepts
+
+    def _tool_read_csv_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read first N rows of a CSV file."""
+        import csv as _csv
+        raw_path = str(args.get("csvPath") or "").strip()
+        max_rows = int(args.get("maxRows") or 20)
+
+        if raw_path:
+            csv_path = Path(raw_path).expanduser()
+            if not csv_path.is_absolute():
+                csv_path = self.project_root / csv_path
+            csv_path = csv_path.resolve()
+        else:
+            csv_path = self.project_root / "concepts.csv"
+
+        if not csv_path.exists():
+            return {"ok": False, "error": "File not found: {0}".format(csv_path)}
+
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                sample = f.read(8192)
+
+            delimiter = ","
+            try:
+                dialect = _csv.Sniffer().sniff(sample, delimiters=",\t;")
+                delimiter = dialect.delimiter
+            except Exception:
+                pass
+
+            rows: list = []
+            total = 0
+            columns: list = []
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f, delimiter=delimiter)
+                columns = list(reader.fieldnames or [])
+                for row in reader:
+                    total += 1
+                    if len(rows) < max_rows:
+                        rows.append(dict(row))
+
+            return {
+                "ok": True,
+                "path": str(csv_path),
+                "delimiter": delimiter,
+                "columns": columns,
+                "totalRows": total,
+                "sampleRows": rows,
+                "maxRowsShown": min(max_rows, total),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Match CSV rows to project concept IDs and optionally create a tag."""
+        import csv as _csv
+
+        raw_path = str(args.get("csvPath") or "").strip()
+        tag_name = str(args.get("tagName") or "").strip()
+        color = str(args.get("color") or "#4461d4").strip()
+        label_column = str(args.get("labelColumn") or "").strip()
+        dry_run = bool(args.get("dryRun", True))
+
+        # Resolve CSV path
+        if raw_path:
+            csv_path = Path(raw_path).expanduser()
+            if not csv_path.is_absolute():
+                csv_path = self.project_root / csv_path
+            csv_path = csv_path.resolve()
+        else:
+            csv_path = self.project_root / "concepts.csv"
+
+        if not csv_path.exists():
+            return {"ok": False, "error": "CSV file not found: {0}".format(csv_path)}
+
+        # Load project concepts for matching
+        project_concepts = self._load_project_concepts()
+        if not project_concepts:
+            return {"ok": False, "error": "No project concepts loaded. concepts.csv not found in project root."}
+
+        # Build lookup tables
+        label_to_id: Dict[str, str] = {c["label"].lower(): c["id"] for c in project_concepts}
+        id_to_label: Dict[str, str] = {c["id"]: c["label"] for c in project_concepts}
+
+        # Read input CSV
+        delimiter = ","
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                sample = f.read(8192)
+            try:
+                dialect = _csv.Sniffer().sniff(sample, delimiters=",\t;")
+                delimiter = dialect.delimiter
+            except Exception:
+                pass
+        except Exception as exc:
+            return {"ok": False, "error": "Could not read CSV: {0}".format(exc)}
+
+        # Detect label column
+        csv_rows: list = []
+        fieldnames: list = []
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f, delimiter=delimiter)
+                fieldnames = list(reader.fieldnames or [])
+                csv_rows = [dict(row) for row in reader]
+        except Exception as exc:
+            return {"ok": False, "error": "CSV parse error: {0}".format(exc)}
+
+        if not label_column:
+            hints = {"concept", "label", "english", "name", "gloss", "concept_en"}
+            for col in fieldnames:
+                if col.lower() in hints:
+                    label_column = col
+                    break
+            if not label_column and fieldnames:
+                label_column = fieldnames[0]
+
+        # Match each row
+        matched: list = []
+        unmatched: list = []
+
+        def _edit_distance(a: str, b: str) -> int:
+            a, b = a.lower(), b.lower()
+            if len(a) > len(b):
+                a, b = b, a
+            prev = list(range(len(b) + 1))
+            for i, ca in enumerate(a):
+                curr = [i + 1]
+                for j, cb in enumerate(b):
+                    curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (0 if ca == cb else 1)))
+                prev = curr
+            return prev[-1]
+
+        for row in csv_rows:
+            raw_label = str(row.get(label_column) or "").strip()
+            if not raw_label:
+                continue
+            concept_id = None
+            # 1. Exact case-insensitive label match
+            concept_id = label_to_id.get(raw_label.lower())
+            # 2. Numeric ID match
+            if not concept_id and raw_label in id_to_label:
+                concept_id = raw_label
+            # 3. Fuzzy edit-distance <= 1
+            if not concept_id:
+                for lbl, cid in label_to_id.items():
+                    if _edit_distance(raw_label, lbl) <= 1:
+                        concept_id = cid
+                        break
+            if concept_id:
+                matched.append({"csvLabel": raw_label, "conceptId": concept_id, "conceptLabel": id_to_label.get(concept_id, "")})
+            else:
+                unmatched.append({"csvLabel": raw_label})
+
+        result: Dict[str, Any] = {
+            "ok": True,
+            "matchedCount": len(matched),
+            "unmatchedCount": len(unmatched),
+            "matched": matched,
+            "unmatched": unmatched,
+            "dryRun": dry_run,
+        }
+
+        if not tag_name:
+            result["needsTagName"] = True
+            result["message"] = "Found {0} matches and {1} unmatched. What should this tag be called?".format(len(matched), len(unmatched))
+            return result
+
+        if dry_run:
+            result["preview"] = True
+            result["message"] = "Will create tag {0!r} with {1} concepts. Call again with dryRun=false to confirm.".format(tag_name, len(matched))
+            return result
+
+        # dryRun=false — create the tag
+        concept_ids = [m["conceptId"] for m in matched]
+        return self._tool_prepare_tag_import({
+            "tagName": tag_name,
+            "color": color,
+            "conceptIds": concept_ids,
+            "dryRun": False,
+        })
+
+    def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Create or update a named tag with concept IDs in parse-tags.json."""
+        import json as _json
+        import re as _re
+
+        tag_name = str(args.get("tagName") or "").strip()
+        color = str(args.get("color") or "#4461d4").strip()
+        concept_ids = [str(c).strip() for c in (args.get("conceptIds") or []) if str(c).strip()]
+        dry_run = bool(args.get("dryRun", True))
+
+        if not tag_name:
+            return {"ok": False, "error": "tagName is required"}
+        if not concept_ids:
+            return {"ok": False, "error": "conceptIds must not be empty"}
+
+        # Slugify tag name to ID
+        tag_id = _re.sub(r"[^a-z0-9]+", "-", tag_name.lower()).strip("-") or "tag"
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dryRun": True,
+                "preview": True,
+                "tagId": tag_id,
+                "tagName": tag_name,
+                "color": color,
+                "conceptCount": len(concept_ids),
+                "message": "Will create tag {0!r} (id={1}) with {2} concepts. Call with dryRun=false to apply.".format(tag_name, tag_id, len(concept_ids)),
+            }
+
+        # Load existing tags
+        tags: list = []
+        if self.tags_path.exists():
+            try:
+                with open(self.tags_path, "r", encoding="utf-8") as f:
+                    existing = _json.load(f)
+                if isinstance(existing, list):
+                    tags = existing
+            except Exception:
+                tags = []
+
+        # Upsert: update if tag_id exists, else append
+        found = False
+        for tag in tags:
+            if tag.get("id") == tag_id:
+                # Additive merge — never remove existing concept assignments
+                existing_ids = set(tag.get("concepts") or [])
+                existing_ids.update(concept_ids)
+                tag["concepts"] = sorted(existing_ids)
+                tag["label"] = tag_name
+                tag["color"] = color
+                found = True
+                break
+        if not found:
+            tags.append({
+                "id": tag_id,
+                "label": tag_name,
+                "color": color,
+                "concepts": sorted(set(concept_ids)),
+            })
+
+        # Write parse-tags.json
+        try:
+            with open(self.tags_path, "w", encoding="utf-8") as f:
+                _json.dump(tags, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            return {"ok": False, "error": "Failed to write parse-tags.json: {0}".format(exc)}
+
+        return {
+            "ok": True,
+            "dryRun": False,
+            "tagId": tag_id,
+            "tagName": tag_name,
+            "color": color,
+            "assignedCount": len(concept_ids),
+            "totalTagsInFile": len(tags),
+            "message": "Tag {0!r} created with {1} concepts. Refresh Compare to see it.".format(tag_name, len(concept_ids)),
         }
 
 
