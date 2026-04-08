@@ -1,146 +1,112 @@
-# AGENTS.md — PARSE Project v5.0
+# AGENTS.md — PARSE React + Vite Pivot (2026)
 
-## What This Is
+## Current State
 
-PARSE — **P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer
+PARSE is pivoting from vanilla JS to a modern **React 18 + TypeScript + Vite + Zustand** frontend while keeping the existing Python backend (`python/server.py` on port 8766) **frozen**. 
 
-A browser-based phonetic analysis workstation for linguists. Two work modes:
-- **Annotate** — per-speaker segmentation, transcription, and annotation
-- **Compare** — cross-speaker cognate analysis and phylogenetic data preparation
+Two specialized agents now run in parallel:
 
-Replaces Praat, Audacity, ELAN, and spreadsheet workflows with a single integrated tool.
+- **ParseBuilder** — owns Annotate Mode (`src/components/annotate/`, most stores, shared components, routing, `src/api/client.ts`, `src/api/types.ts`, `App.tsx`, Vite config, etc.).
+- **Oda** — owns **Compare Mode** (`src/components/compare/*`, `tagStore.ts`, `enrichmentStore.ts`, `useExport.ts`, `useComputeJob.ts`). Prompt entry point: `docs/plans/oda/oda-core.md`. Per-phase files: `docs/plans/oda/phase-0.md`, `docs/plans/oda/b1-concept-table.md` through `b9-compare-mode.md`, `docs/plans/oda/rules.md`, `docs/plans/oda/coordination.md`.
 
-**Tech stack:** Vanilla JS (ES2020, no build step), wavesurfer.js v7, Web Workers, Python 3.8+ backend, HTML served from a local Python HTTP server.
+You **must not** cross file boundaries. ParseBuilder never touches Oda’s files and vice versa. Coordination is restricted to Phase 0 (shared contract) and Phase C (final merge).
 
-## Project Structure
+**Oda’s prompt was condensed** on 2026-04-08 because the original was too large. It now consists of 11 dense paragraphs covering ownership, model preference (Gemini Flash + 3.1 Pro), client protocol, store rules, immutability, quality gates, and explicit Lucas sign-off on completion.
+
+## Pivot Status (updated 2026-04-08)
+
+**Track A (Annotate Mode) — COMPLETE.** A1-A10 committed on `feat/annotate-react` (9 commits, e9cf22f through ce5d6b1). 47 tests passing, 0 tsc errors, Vite proxy confirmed. A11 (browser integration) pending — Lucas must verify in browser.
+
+**Track B (Compare Mode) — B1-B6 COMPLETE, B7-B9 pending.** `feat/compare-react` has 2 commits (e8a446c scaffold, 44ee8de B1-B6). 32 new tests, full suite 79 tests passing, 0 tsc errors. Remaining: B7 (useExport), B8 (CompareMode root), B9 (browser integration — Lucas).
+
+**Note:** Oda’s original B1-B6 submission was audited and found incomplete — wrong branch, 3/6 files missing, 3/6 were stubs with no real logic, 0 tests. All six components were rebuilt by ParseBuilder on `feat/compare-react`. The only salvaged artifact was `tagStore.ts` (solid implementation, moved to the correct branch).
+
+**Shared barrel:** `src/components/shared/index.ts` now exists. Oda’s files can import shared primitives from `’../shared’`.
+
+**Branch status:** `feat/annotate-react` has 9 commits. `feat/compare-react` has 2 commits.
+
+## Project Structure (React + Vite)
 
 ```
-parse/
-├── parse.html                      ← Annotate mode (main app)
-├── compare.html                    ← Compare mode
-├── start_parse.sh                  ← Linux/Mac launcher
-├── Start Review Tool.bat           ← Windows launcher
-├── LICENSE, README.md, PROJECT_PLAN.md
-│
-├── js/
-│   ├── shared/                     ← shared across both modes
-│   │   ├── annotation-store.js     ← localStorage/disk persistence
-│   │   ├── project-config.js       ← project.json loader
-│   │   ├── tags.js                 ← tagging/filtering system
-│   │   ├── audio-player.js         ← shared audio playback from WAV regions
-│   │   ├── ai-client.js            ← JS ↔ Python AI server communication
-│   │   └── spectrogram-worker.js   ← Web Worker FFT
-│   ├── annotate/                   ← Annotate-specific
-│   │   ├── parse.js                ← main entry / router
-│   │   ├── annotation-panel.js     ← IPA/ortho/concept fields
-│   │   ├── region-manager.js       ← waveform region CRUD
-│   │   ├── waveform-controller.js  ← WaveSurfer wrapper
-│   │   ├── transcript-panel.js     ← coarse transcript display
-│   │   ├── suggestions-panel.js    ← AI suggestion rankings
-│   │   ├── fullscreen-mode.js      ← fullscreen overlay
-│   │   ├── onboarding.js           ← import wizard
-│   │   ├── import-export.js        ← CSV/TextGrid/ELAN
-│   │   └── video-sync-panel.js     ← video alignment UI
-│   └── compare/                    ← Compare-specific
-│       ├── compare.js              ← main entry
-│       ├── concept-table.js        ← concept × speaker matrix
-│       ├── cognate-controls.js     ← accept/split/merge/cycle
-│       ├── borrowing-panel.js      ← similarity bars, adjudication
-│       ├── speaker-import.js       ← new speaker import wizard
-│       └── enrichments.js          ← enrichments layer read/write
-│
-├── python/
-│   ├── server.py                   ← HTTP server + API endpoints
-│   ├── peaks.py                    ← waveform peak generation
-│   ├── source_index.py             ← source_index.json builder
-│   ├── normalize_audio.py          ← ffmpeg normalization
-│   ├── textgrid_io.py              ← Praat TextGrid read/write
-│   ├── elan_export.py              ← ELAN XML export
-│   ├── csv_export.py               ← CSV export
-│   ├── video_sync.py               ← FFT cross-correlation
-│   ├── video_clip_extract.py       ← video segment extraction
-│   ├── batch_reextract.py          ← batch re-extraction
-│   ├── reformat_transcripts.py     ← transcript reformatting
-│   ├── coarse_transcripts.py       ← coarse transcript generation
-│   ├── ai/                         ← AI abstraction layer
-│   │   ├── __init__.py
-│   │   ├── provider.py             ← abstract AI interface
-│   │   ├── stt_pipeline.py         ← faster-whisper full-file STT
-│   │   ├── ipa_transcribe.py       ← ortho → IPA conversion
-│   │   ├── model_manager.py        ← model download/cache/path resolution
-│   │   └── suggestions.py          ← AI concept suggestions
-│   └── compare/                    ← Compare pipeline scripts
-│       ├── cognate_compute.py      ← LexStat wrapper + enrichments
-│       ├── cross_speaker_match.py  ← STT + repetition detect + matching
-│       ├── offset_detect.py        ← auto-offset detection
-│       └── phonetic_rules.py       ← configurable phonetic variation
-│
-├── config/                         ← user-editable configuration
-│   ├── ai_config.json              ← model paths, API keys, providers
-│   ├── phonetic_rules.json         ← phonetic variation rules
-│   └── sil_contact_languages.json  ← contact language definitions
-│
-├── docs/                           ← development documentation
-│   ├── CODING.md, INTERFACES.md, ONBOARDING_PLAN.md
-│   ├── SPEAKERS.md, BUILD_SESSION.md
-│   └── reviews/                    ← code review reports
-│
-├── review_tool_dev.html            ← LEGACY (DO NOT TOUCH)
-└── tasks/
-    └── lessons.md
+src/
+├── components/
+│   ├── compare/          ← Oda owns all of this + tests
+│   ├── annotate/         ← ParseBuilder owns
+│   └── shared/           ← ParseBuilder owns (request primitives from them)
+├── stores/               ← Split between agents
+├── hooks/                ← Oda owns useExport + useComputeJob
+├── api/
+│   ├── client.ts         ← ParseBuilder (typed fetch wrapper)
+│   └── types.ts          ← ParseBuilder (shared interfaces)
+├── App.tsx, main.tsx
+├── vite.config.ts
+├── index.html
+└── package.json
 ```
 
-## Before You Write Code
+Python backend, audio files, and config directories remain unchanged.
 
-1. **Read `CODING.md`** — build protocol, sub-agent rules, build waves, execution order
-2. **Read `INTERFACES.md`** — shared types, events, function signatures, module init pattern
-3. **Read `PROJECT_PLAN.md`** — full architecture spec (v5.0), all schemas and design decisions
-4. **Check existing code** — if the file you're editing already exists, read it fully first
+## Repo Location
 
-## File Ownership
+`/home/lucas/gh/ardeleanlucas/parse` — use this as `workdir` for all Codex/subagent calls.
 
-Each task prompt tells you which files to create or modify. **Only touch those files.** Do not modify files outside your assignment — other agents may be working on them in parallel.
+## Branches
 
-## Coding Standards
+- `feat/annotate-react` — ParseBuilder's Track A branch
+- `feat/compare-react` — Oda's Track B branch
+- `feat/parse-react-vite` — integration merge target (ParseBuilder leads Phase C only)
+- Never commit to `main` during the pivot.
 
-### Python
-- Python 3.8+ (must run on Windows with standard Anaconda)
-- Type hints on all function signatures
-- `argparse` CLI with `--help` for all scripts
-- Use `pathlib.Path` for all file paths (Windows compatibility)
-- Use `soundfile` (libsndfile) for reading audio — NOT `wave` module
-- Logging via `print()` to stderr for errors, stdout for results
-- Scripts must be runnable standalone: `python script.py --input X --output Y`
-- **Never modify files in `Audio_Original/`** — that directory is read-only
+## Before You Write Code (Mandatory)
 
-### JavaScript
-- Vanilla JS, ES2020 (no TypeScript, no bundler, no npm)
-- IIFE module pattern: `(function() { 'use strict'; ... })();`
-- All modules attach to `window.PARSE.modules.<name>`
-- Events via `document.dispatchEvent(new CustomEvent('parse:event-name', { detail: {...} }))`
-- No `var` — use `const` and `let`
-- JSDoc comments on public functions
-- wavesurfer.js v7 loaded from CDN, accessed via `window.WaveSurfer`
+1. Read `docs/plans/react-vite-pivot.md` — full dual-agent architecture and plan.
+2. If you are **Oda**: load `docs/plans/oda/oda-core.md` first. Then load only the specific `docs/plans/oda/b{N}-*.md` file for your current task. Load `docs/plans/oda/rules.md` with every task.
+3. If you are **ParseBuilder**: your Track A plan is in `docs/plans/react-vite-pivot.md` under "Track A".
+4. **Phase 0 is a hard blocker.** No component code until `npm run dev` starts, `curl localhost:5173/api/config` returns JSON, and `npx tsc --noEmit` passes. Stop and fix if any of these fail.
+5. Always declare your exact model before spawning any coding sub-agent.
 
-### HTML
-- `parse.html` — Annotate mode entry point
-- `compare.html` — Compare mode entry point
-- All CSS inline in `<style>`, JS modules loaded via `<script src="js/...">`
-- No external CSS frameworks
+## File Ownership (Strict)
 
-## Audio Format Support
+**Oda (Compare Mode) owns only:**
+- `src/components/compare/*` (all components + tests)
+- `src/stores/tagStore.ts`, `src/stores/enrichmentStore.ts`
+- `src/hooks/useExport.ts`, `src/hooks/useComputeJob.ts`
 
-All Python scripts must handle: 16-bit PCM, 24-bit PCM, 32-bit float WAV, RF64/BWF, MP3.
-Use `soundfile` for reading. Normalize to float32 internally.
+**ParseBuilder owns everything else.**
+
+Oda may **read** any file but must **never write** outside the list above. Request shared primitives or new `client.ts` functions from ParseBuilder with exact interfaces.
+
+## Coding Standards (React Pivot)
+
+- **TypeScript strict** — no `any` without explicit comment.
+- **Zustand** for all persistent state. Never use `useState` for store data.
+- Vitest + Testing Library for all components and hooks.
+- All API calls via typed `client.ts` functions only.
+- No inline styles for layout. No CSS frameworks.
+- `persist()` after every tag mutation. Proper v1 → v2 localStorage migration.
+- LingPy TSV export is P0 — verify `/api/export/lingpy` before implementing `useExport`.
+
+**Oda Model Routing (codified):** `gemini-2.5-flash` for most work. `gemini-2.5-pro` for B1 (ConceptTable) and B4 (TagManager) only. Never default to Claude unless both Gemini options fail twice.
 
 ## What NOT To Do
 
-- Do not add npm, webpack, rollup, or any build tooling
-- Do not use TypeScript
-- Do not add external CSS frameworks
-- Do not modify `review_tool_dev.html` (legacy, sacred)
-- Do not modify files in `Audio_Original/`
-- Do not use Python's `wave` module — use `soundfile`
-- Do not use `var` in JavaScript
-- Do not hardcode Windows paths in JS — all paths are relative URLs
-- Do not fetch entire WAV files in JS — MediaElement + range requests handle streaming
+- Do not cross file ownership boundaries.
+- Do not modify the frozen Python backend.
+- Do not merge your own branch — ParseBuilder leads Phase C.
+- Do not ship without Lucas personally verifying the full browser checklist.
+- Do not use Claude models unless both Gemini options have failed twice.
+
+## Completion Gate (Track B — Compare Mode)
+
+Oda must deliver a clean `feat/compare-react` branch where:
+- All tests pass (`npm run test`)
+- TypeScript compiles cleanly
+- Lucas has verified every item on the browser checklist (grid, cognate operations, tags persist, compute jobs, LingPy export, no console errors, etc.)
+
+Until Lucas signs off, Track B is not complete.
+
+---
+
+**This AGENTS.md reflects the React pivot.** Old vanilla JS instructions archived in git history.
+Oda's entry point: `docs/plans/oda/oda-core.md`. Full plan: `docs/plans/react-vite-pivot.md`.
+Update this file when pivot status or agent responsibilities change.
