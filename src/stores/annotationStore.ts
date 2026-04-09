@@ -64,6 +64,7 @@ interface AnnotationStore {
 
   loadSpeaker: (speaker: string) => Promise<void>;
   saveSpeaker: (speaker: string) => Promise<void>;
+  setInterval: (speaker: string, tier: string, interval: AnnotationInterval) => void;
   updateInterval: (speaker: string, tier: string, index: number, text: string) => void;
   addInterval: (speaker: string, tier: string, interval: AnnotationInterval) => void;
   removeInterval: (speaker: string, tier: string, index: number) => void;
@@ -123,6 +124,37 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     } catch {
       // localStorage full or unavailable — ignore
     }
+  },
+
+  setInterval: (speaker: string, tier: string, interval: AnnotationInterval) => {
+    if (!Number.isFinite(interval.start) || !Number.isFinite(interval.end)) return;
+    if (interval.end < interval.start) return;
+
+    const state = get();
+    const record = state.records[speaker] ?? blankRecord(speaker);
+    const clone = deepClone(record);
+
+    if (!clone.tiers[tier]) {
+      const maxOrder = Math.max(0, ...Object.values(clone.tiers).map((t) => t.display_order));
+      clone.tiers[tier] = {
+        name: tier,
+        display_order: CANONICAL_TIER_ORDER[tier] ?? maxOrder + 1,
+        intervals: [],
+      };
+    }
+
+    clone.tiers[tier].intervals = clone.tiers[tier].intervals.filter(
+      (candidate) => !(Math.abs(candidate.start - interval.start) < 0.001 && Math.abs(candidate.end - interval.end) < 0.001),
+    );
+    clone.tiers[tier].intervals.push(interval);
+    clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
   },
 
   updateInterval: (speaker: string, tier: string, index: number, text: string) => {
