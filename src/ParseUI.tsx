@@ -11,6 +11,15 @@ import {
   Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
   Sun, Moon
 } from 'lucide-react';
+import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
+import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
+import { useWaveSurfer } from './hooks/useWaveSurfer';
+import { useAnnotationStore } from './stores/annotationStore';
+import { useAnnotationSync } from './hooks/useAnnotationSync';
+import { useConfigStore } from './stores/configStore';
+import { usePlaybackStore } from './stores/playbackStore';
+import { useTagStore } from './stores/tagStore';
+import { useUIStore } from './stores/uiStore';
 
 type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -21,14 +30,17 @@ interface LingTag {
   id: string; name: string; color: string; dotClass: string; count: number;
 }
 
-interface Concept { id: number; name: string; tag: ConceptTag; }
+interface Concept {
+  id: number;
+  key: string;
+  name: string;
+  tag: ConceptTag;
+}
+
 interface SpeakerForm {
   speaker: string; ipa: string; utterances: number;
   arabicSim: number; persianSim: number;
   cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
-}
-interface ChatMessage {
-  id: number; role: 'user' | 'ai'; content: string; streaming?: boolean;
 }
 
 const CONCEPTS: Concept[] = [
@@ -42,7 +54,9 @@ const CONCEPTS: Concept[] = [
   'sun','swim','tail','that','this','three','tongue','tooth','tree','two',
   'warm','water'
 ].map((name, i) => ({
-  id: i + 1, name,
+  id: i + 1,
+  key: String(i + 1),
+  name,
   tag: (['untagged','review','confirmed','problematic','untagged','confirmed'][i % 6]) as ConceptTag,
 }));
 
@@ -64,6 +78,48 @@ const simColor = (v: number) =>
   v >= 0.8 ? 'text-emerald-600' : v >= 0.5 ? 'text-amber-600' : 'text-slate-400';
 const simBar = (v: number) =>
   v >= 0.8 ? 'bg-emerald-500' : v >= 0.5 ? 'bg-amber-400' : 'bg-slate-300';
+
+const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
+
+function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
+  return a.start <= b.end && b.start <= a.end;
+}
+
+
+function conceptMatchesIntervalText(concept: Concept, text: string): boolean {
+  const normalizedText = text.trim().toLowerCase();
+  const normalizedName = concept.name.trim().toLowerCase();
+  const normalizedKey = concept.key.trim().toLowerCase();
+
+  return normalizedText === normalizedName
+    || normalizedText === normalizedKey
+    || normalizedText.includes(normalizedName);
+}
+
+function getConceptStatus(tags: StoreTag[]): ConceptTag {
+  if (tags.some((tag) => tag.id === 'problematic')) return 'problematic';
+  if (tags.some((tag) => tag.id === 'confirmed')) return 'confirmed';
+  if (tags.some((tag) => REVIEW_TAG_IDS.has(tag.id))) return 'review';
+  return 'untagged';
+}
+
+function findAnnotationForConcept(record: AnnotationRecord | null | undefined, concept: Concept) {
+  if (!record) {
+    return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
+  }
+
+  const conceptIntervals = record.tiers.concept?.intervals ?? [];
+  const conceptInterval = conceptIntervals.find((interval) => conceptMatchesIntervalText(concept, interval.text)) ?? null;
+
+  if (!conceptInterval) {
+    return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
+  }
+
+  const ipaInterval = (record.tiers.ipa?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
+  const orthoInterval = (record.tiers.ortho?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
+
+  return { conceptInterval, ipaInterval, orthoInterval };
+}
 
 const SimBar: React.FC<{ value: number }> = ({ value }) => (
   <div className="flex items-center gap-2">
@@ -100,8 +156,9 @@ interface AIChatProps {
   onResizeStart: (e: React.MouseEvent) => void;
   onMinimize: () => void;
   conceptName: string;
-  conceptId: number;
+  conceptId: number | string;
   speakerCount: number;
+  chatSession: UseChatSessionResult;
 }
 
 const QUICK_ACTIONS = [
@@ -112,10 +169,7 @@ const QUICK_ACTIONS = [
   'Compare IPA alignments',
 ];
 
-const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMinimize, conceptName, conceptId, speakerCount }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 1, role: 'ai', content: `Hi — I'm looking at concept "${conceptName}" across ${speakerCount} speakers. Fail01 /ramaːd/ stands out from the Persian cluster with a 0.92 Arabic similarity. Want me to investigate it as a potential borrowing?` },
-  ]);
+const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMinimize, conceptName, conceptId, speakerCount, chatSession }) => {
   const [input, setInput] = useState('');
   const [collapsedInput, setCollapsedInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -124,25 +178,14 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
     if (!minimized) {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, minimized]);
+  }, [chatSession.messages, minimized]);
 
   const send = (text: string) => {
     const q = text.trim();
-    if (!q) return;
-    const uid = Date.now();
-    setMessages(m => [...m, { id: uid, role: 'user', content: q }]);
+    if (!q || chatSession.sending) return;
     setInput('');
     setCollapsedInput('');
-    const aid = uid + 1;
-    setMessages(m => [...m, { id: aid, role: 'ai', content: '', streaming: true }]);
-    const full = `Analyzing "${conceptName}" across the selected speakers. Based on current cognate groupings, I'd recommend splitting Fail01 and Tbr07 (Group A, /ramaːd/-type) from the Persian cluster (Group B, /xɑkestær/-type). The 0.92 Arabic similarity on Fail01 strongly suggests an Arabic borrowing rather than a cognate.`;
-    let i = 0;
-    const tick = () => {
-      i += 3;
-      setMessages(m => m.map(msg => msg.id === aid ? { ...msg, content: full.slice(0, i), streaming: i < full.length } : msg));
-      if (i < full.length) setTimeout(tick, 18);
-    };
-    setTimeout(tick, 250);
+    void chatSession.send(q);
   };
 
   // ---------- Collapsed: thin command bar ----------
@@ -216,18 +259,24 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div className="mx-auto max-w-3xl space-y-3">
-          {messages.map(m => (
-            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
-                m.role === 'user'
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white text-slate-800 ring-1 ring-slate-200/70 shadow-sm'
-              }`}>
-                {m.content}
-                {m.streaming && <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>}
+          {chatSession.messages.length === 0 && !chatSession.sending && (
+            <p className="py-6 text-center text-[12px] text-slate-400">Ask PARSE AI about <span className="font-semibold">{conceptName}</span>…</p>
+          )}
+          {chatSession.messages.map((m, i) => {
+            const isLastAi = i === chatSession.messages.length - 1 && m.role === 'assistant';
+            return (
+              <div key={`${m.timestamp}-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
+                  m.role === 'user'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-white text-slate-800 ring-1 ring-slate-200/70 shadow-sm'
+                }`}>
+                  {m.content}
+                  {isLastAi && chatSession.sending && <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -445,104 +494,59 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
 };
 
 // ---------- Annotate View ----------
-/**
- * AnnotateView — full-page annotation workspace.
- *
- * The waveform below is a styled mock that visually mimics wavesurfer.js v7.8.0.
- * To replace with the real implementation:
- *
- *   // TODO: Replace mock with real hook
- *   import { useWaveSurfer } from 'src/hooks/useWaveSurfer';
- *   const containerRef = useRef<HTMLDivElement>(null);
- *   const { wavesurfer, isPlaying, currentTime, duration, play, pause,
- *           loadAudio, addRegion, zoom } = useWaveSurfer(containerRef, {
- *     plugins: [RegionsPlugin, TimelinePlugin],
- *     waveColor: '#c7d2fe',
- *     progressColor: '#4f46e5',
- *     cursorColor: '#0f172a',
- *   });
- *
- * The real hook (src/hooks/useWaveSurfer.ts) mounts WaveSurfer into a plain
- * <div ref={containerRef}/> and wires up RegionsPlugin + TimelinePlugin.
- *
- * Spectrogram: the Spectrogram toggle below should later be wired to a worker-
- * backed overlay. See src/workers/spectrogram-worker.ts — plan is a dedicated
- * useSpectrogram(containerRef) hook that posts PCM windows to the worker and
- * draws an FFT heatmap on a sibling canvas.
- */
-
 interface AnnotateViewProps {
   concept: Concept;
   speaker: string;
   totalConcepts: number;
   onPrev: () => void;
   onNext: () => void;
+  audioUrl: string;
+  peaksUrl?: string;
 }
 
-// Deterministic pseudo-waveform (stable per render)
-const WAVE_BARS = Array.from({ length: 220 }, (_, i) => {
-  const x = i / 220;
-  const env = Math.sin(x * Math.PI); // rise-and-fall envelope
-  const noise = Math.abs(Math.sin(i * 1.9) + Math.sin(i * 0.37) * 0.8 + Math.sin(i * 7.1) * 0.4);
-  return Math.max(0.08, Math.min(1, env * 0.85 * noise));
-});
+const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext, audioUrl, peaksUrl }) => {
+  const record = useAnnotationStore(s => s.records[speaker] ?? null);
+  const saveSpeaker = useAnnotationStore(s => s.saveSpeaker);
 
-// Mock segmented regions on the virtual timeline
-const REGIONS = [
-  { id: 'r1', start: 0.08, end: 0.18, label: 'one',   color: 'rgba(99,102,241,0.25)',  ring: 'rgba(99,102,241,0.7)'  },
-  { id: 'r2', start: 0.26, end: 0.41, label: 'two',   color: 'rgba(16,185,129,0.22)',  ring: 'rgba(16,185,129,0.7)'  },
-  { id: 'r3', start: 0.52, end: 0.66, label: 'three', color: 'rgba(244,114,182,0.22)', ring: 'rgba(244,114,182,0.7)' },
-  { id: 'r4', start: 0.74, end: 0.88, label: 'four',  color: 'rgba(251,191,36,0.25)',  ring: 'rgba(251,191,36,0.7)'  },
-];
+  // Pre-populate IPA/ortho from store when concept or speaker changes
+  const { ipaInterval, orthoInterval } = useMemo(
+    () => findAnnotationForConcept(record, concept),
+    [record, concept]
+  );
+  const [ipa, setIpa] = useState(ipaInterval?.text ?? '');
+  const [ortho, setOrtho] = useState(orthoInterval?.text ?? '');
+  useEffect(() => {
+    setIpa(ipaInterval?.text ?? '');
+    setOrtho(orthoInterval?.text ?? '');
+  }, [ipaInterval, orthoInterval]);
 
-const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext }) => {
-  const [ipa, setIpa] = useState('');
-  const [ortho, setOrtho] = useState('');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playhead, setPlayhead] = useState(0.32); // 0..1 fraction
-  const [zoom, setZoom] = useState(1);
   const [spectroOn, setSpectroOn] = useState(false);
-  const [activeRegion, setActiveRegion] = useState<string | null>('r2');
-  const [hoverRegion, setHoverRegion] = useState<string | null>(null);
+  const [activeRegion] = useState<string | null>(null);
   const [lexAnchor, setLexAnchor] = useState<'word' | 'concept'>('concept');
-  const waveRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
+  const [zoom, setZoom] = useState(10); // minPxPerSec
 
-  // Mock duration / current time derived from playhead
-  const duration = 4.82;
-  const currentTime = playhead * duration;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Playback state (written by useWaveSurfer via callbacks)
+  const isPlaying = usePlaybackStore(s => s.isPlaying);
+  const currentTime = usePlaybackStore(s => s.currentTime);
+  const duration = usePlaybackStore(s => s.duration);
+
+  const { playPause, skip, setZoom: wsSetZoom, setRate } = useWaveSurfer({
+    containerRef,
+    audioUrl,
+    peaksUrl,
+    onTimeUpdate: t => usePlaybackStore.setState({ currentTime: t }),
+    onReady:      d => usePlaybackStore.setState({ duration: d }),
+    onPlayStateChange: p => usePlaybackStore.setState({ isPlaying: p }),
+    onRegionUpdate: (start, end) => usePlaybackStore.setState({ selectedRegion: { start, end } }),
+  });
 
   const fmt = (t: number) => {
     const m = Math.floor(t / 60).toString().padStart(2, '0');
     const s = Math.floor(t % 60).toString().padStart(2, '0');
     const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
     return `${m}:${s}.${ms}`;
-  };
-
-  const handleSeek = (e: React.MouseEvent) => {
-    const rect = waveRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = (e.clientX - rect.left) / rect.width;
-    setPlayhead(Math.max(0, Math.min(1, x)));
-  };
-
-  const startDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    handleSeek(e);
-    const onMove = (ev: MouseEvent) => {
-      if (!draggingRef.current || !waveRef.current) return;
-      const rect = waveRef.current.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      setPlayhead(Math.max(0, Math.min(1, x)));
-    };
-    const onUp = () => {
-      draggingRef.current = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
   };
 
   return (
@@ -559,11 +563,11 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
               <SkipForward className="h-3.5 w-3.5"/>
             </button>
             <div className="mx-2 h-5 w-px bg-slate-200"/>
-            <button onClick={() => setZoom(z => Math.max(0.5, z - 0.25))} title="Zoom out" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+            <button onClick={() => { const z = Math.max(10, zoom - 20); setZoom(z); wsSetZoom(z); }} title="Zoom out" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
               <ZoomOut className="h-3.5 w-3.5"/>
             </button>
-            <div className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500">{zoom.toFixed(2)}×</div>
-            <button onClick={() => setZoom(z => Math.min(4, z + 0.25))} title="Zoom in" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+            <div className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500">{zoom}px/s</div>
+            <button onClick={() => { const z = Math.min(500, zoom + 20); setZoom(z); wsSetZoom(z); }} title="Zoom in" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
               <ZoomIn className="h-3.5 w-3.5"/>
             </button>
             <div className="mx-2 h-5 w-px bg-slate-200"/>
@@ -587,86 +591,25 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
         </div>
 
-        {/* Waveform container */}
+        {/* Waveform container — WaveSurfer owns this div */}
         <div className="relative px-5 pt-4 pb-2">
-          {/* TODO: Replace mock with real hook
-              const { wavesurfer, isPlaying, loadAudio, ... } = useWaveSurfer(containerRef, {
-                plugins: [RegionsPlugin, TimelinePlugin]
-              });
-              <div ref={containerRef} /> will be mounted by WaveSurfer. */}
-          <div
-            ref={waveRef}
-            onMouseDown={startDrag}
-            className="relative h-32 w-full cursor-crosshair select-none overflow-hidden rounded-lg bg-gradient-to-b from-slate-50 to-white ring-1 ring-slate-100"
-            style={{ backgroundImage: 'linear-gradient(to right, rgba(148,163,184,0.08) 1px, transparent 1px)', backgroundSize: `${100/20}% 100%` }}
-          >
-            {/* Optional spectrogram underlay placeholder */}
+          <div className="relative">
+            <div
+              ref={containerRef}
+              className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
+              style={{ minHeight: 110 }}
+            />
+            {/* Spectrogram overlay — wire to src/workers/spectrogram-worker.ts (MC-297) */}
             {spectroOn && (
               <div
-                className="pointer-events-none absolute inset-0 opacity-70"
+                className="pointer-events-none absolute inset-0 rounded-lg opacity-60"
                 style={{
                   background: 'repeating-linear-gradient(90deg, rgba(79,70,229,0.35) 0 2px, rgba(236,72,153,0.25) 2px 4px, rgba(16,185,129,0.25) 4px 6px, transparent 6px 8px)',
                   mixBlendMode: 'multiply',
                 }}
-                title="Spectrogram placeholder — real FFT heatmap via spectrogram-worker.ts"
+                title="Spectrogram placeholder — real FFT heatmap coming via MC-297"
               />
             )}
-
-            {/* Regions overlay */}
-            {REGIONS.map(r => (
-              <div
-                key={r.id}
-                onMouseEnter={() => setHoverRegion(r.id)}
-                onMouseLeave={() => setHoverRegion(null)}
-                onClick={(e) => { e.stopPropagation(); setActiveRegion(r.id); }}
-                className="absolute inset-y-0 cursor-pointer transition-all"
-                style={{
-                  left: `${r.start * 100}%`,
-                  width: `${(r.end - r.start) * 100}%`,
-                  background: r.color,
-                  boxShadow: (activeRegion === r.id || hoverRegion === r.id) ? `inset 0 0 0 2px ${r.ring}` : `inset 0 0 0 1px ${r.ring}`,
-                }}
-              >
-                <div className="absolute left-1 top-1 rounded bg-white/90 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-slate-700 shadow-sm">
-                  {r.label}
-                </div>
-              </div>
-            ))}
-
-            {/* Waveform bars */}
-            <div className="pointer-events-none absolute inset-0 flex items-center px-0.5">
-              {WAVE_BARS.map((h, i) => {
-                const frac = i / WAVE_BARS.length;
-                const played = frac <= playhead;
-                return (
-                  <div
-                    key={i}
-                    className="mx-[0.5px] flex-1 rounded-full"
-                    style={{
-                      height: `${h * 90}%`,
-                      background: played ? '#4f46e5' : '#c7d2fe',
-                    }}
-                  />
-                );
-              })}
-            </div>
-
-            {/* Playhead */}
-            <div
-              className="pointer-events-none absolute inset-y-0 w-[2px] bg-slate-900"
-              style={{ left: `calc(${playhead * 100}% - 1px)` }}
-            >
-              <div className="absolute -top-1 -left-1.5 h-3 w-3 rounded-full bg-slate-900 ring-2 ring-white shadow"/>
-            </div>
-          </div>
-
-          {/* Timeline ruler */}
-          <div className="relative mt-1 h-5 select-none font-mono text-[9px] text-slate-400">
-            {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
-              <span key={i} className="absolute -translate-x-1/2" style={{ left: `${f * 100}%` }}>
-                {fmt(f * duration)}
-              </span>
-            ))}
           </div>
         </div>
       </section>
@@ -730,7 +673,10 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
           {/* Action buttons */}
           <div className="flex items-center gap-3 pt-2">
-            <button className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700">
+            <button
+              onClick={() => { void saveSpeaker(speaker); }}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            >
               <Save className="h-4 w-4"/> Save Annotation
             </button>
             <button className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">
@@ -746,29 +692,29 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       {/* ======= BOTTOM PLAYBACK BAR ======= */}
       <section className="sticky bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-8 py-3">
-          <button className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4"/></button>
-          <button onClick={() => setPlayhead(p => Math.max(0, p - 0.05))} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4"/></button>
+          <button onClick={() => skip(-5)} title="-5s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4"/></button>
+          <button onClick={() => skip(-1)} title="-1s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4"/></button>
           <button
-            onClick={() => setIsPlaying(p => !p)}
+            onClick={() => playPause()}
             className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
           >
             {isPlaying ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 translate-x-[1px]"/>}
           </button>
-          <button onClick={() => setPlayhead(p => Math.min(1, p + 0.05))} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronRight className="h-4 w-4"/></button>
-          <button className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipForward className="h-4 w-4"/></button>
+          <button onClick={() => skip(1)} title="+1s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronRight className="h-4 w-4"/></button>
+          <button onClick={() => skip(5)} title="+5s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipForward className="h-4 w-4"/></button>
 
           <div className="ml-2 font-mono text-[11px] tabular-nums text-slate-500">
             {fmt(currentTime)} <span className="text-slate-300">/</span> {fmt(duration)}
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            <select className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
-              <option>0.5x</option>
-              <option>0.75x</option>
-              <option defaultValue="1">1.0x</option>
-              <option>1.25x</option>
-              <option>1.5x</option>
-              <option>2.0x</option>
+            <select defaultValue="1" onChange={e => setRate(Number(e.target.value))} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1">1.0x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2.0x</option>
             </select>
             <button className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
               <MessageSquare className="h-3 w-3"/> Chat
@@ -782,6 +728,25 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
 // ---------- Main Component ----------
 export function ParseUI() {
+  // — Stores —
+  const loadConfig       = useConfigStore(s => s.load);
+  const rawSpeakers      = useConfigStore(s => s.config?.speakers ?? []);
+  const rawConcepts      = useConfigStore(s => s.config?.concepts ?? []);
+  const storeTags        = useTagStore(s => s.tags);
+  const storeAddTag      = useTagStore(s => s.addTag);
+  const hydrateTagStore  = useTagStore(s => s.hydrate);
+  const getTagsForConcept = useTagStore(s => s.getTagsForConcept);
+  const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
+  // — Chat session (one instance for the whole UI) —
+  const chatSession = useChatSession();
+  // — Annotation sync (auto-loads record when activeSpeaker changes) —
+  useAnnotationSync();
+  // — Bootstrap —
+  useEffect(() => {
+    loadConfig().catch(console.error);
+    hydrateTagStore();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<'az'|'1n'>('1n');
   const [tagFilter, setTagFilter] = useState<TagState>('all');
@@ -796,11 +761,7 @@ export function ParseUI() {
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
-  const [tagsList, setTagsList] = useState<LingTag[]>([
-    { id: 'review', name: 'Review needed', color: '#f59e0b', dotClass: 'bg-amber-400', count: 14 },
-    { id: 'confirmed', name: 'Confirmed', color: '#10b981', dotClass: 'bg-emerald-500', count: 23 },
-    { id: 'problematic', name: 'Problematic', color: '#f43f5e', dotClass: 'bg-rose-500', count: 6 },
-  ]);
+
   const [tagSearch, setTagSearch] = useState('');
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#6366f1');
@@ -812,6 +773,26 @@ export function ParseUI() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
+
+  // — Derived: real speakers (fallback to mock while config loads) —
+  const speakers = rawSpeakers.length > 0 ? rawSpeakers : SPEAKERS;
+
+  // — Derived: real concepts with live tag state —
+  const concepts = useMemo<Concept[]>(() => {
+    if (rawConcepts.length === 0) return CONCEPTS;
+    return rawConcepts.map((c, i) => ({
+      id: i + 1,
+      key: c.id,
+      name: c.label,
+      tag: getConceptStatus(getTagsForConcept(c.id)),
+    }));
+  }, [rawConcepts, getTagsForConcept]);
+
+  // — Derived: tags list from store —
+  const tagsList = useMemo<LingTag[]>(() =>
+    storeTags.map(t => ({ id: t.id, name: t.label, color: t.color, dotClass: '', count: t.concepts.length })),
+    [storeTags]
+  );
 
   // AI bottom panel
   const [aiHeight, setAiHeight] = useState(() => Math.round(window.innerHeight * 0.4));
@@ -845,7 +826,7 @@ export function ParseUI() {
   };
 
   const filtered = useMemo(() => {
-    let list = CONCEPTS.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
+    let list = concepts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
     if (tagFilter !== 'all') list = list.filter(c => c.tag === tagFilter);
     if (modeTab === 'unreviewed') list = list.filter(c => c.tag === 'untagged' || c.tag === 'review');
     if (modeTab === 'flagged') list = list.filter(c => c.tag === 'problematic');
@@ -860,15 +841,17 @@ export function ParseUI() {
     return list;
   }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers]);
 
-  const concept = CONCEPTS.find(c => c.id === conceptId) ?? CONCEPTS[0];
-  const reviewed = 0;
-  const total = CONCEPTS.length;
+  const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, name: '—', tag: 'untagged' as ConceptTag };
+  const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
+  const total = concepts.length;
 
   const goPrev = () => setConceptId(id => Math.max(1, id - 1));
   const goNext = () => setConceptId(id => Math.min(total, id + 1));
   const toggleSpeaker = (s: string) => {
     if (currentMode === 'annotate') {
       setSelectedSpeakers([s]);
+      setActiveSpeakerUI(s);
+      usePlaybackStore.setState({ activeSpeaker: s });
       return;
     }
     setSelectedSpeakers(sel => sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s]);
@@ -1042,11 +1025,7 @@ export function ParseUI() {
           <>
             <ManageTagsView
               tags={tagsList}
-              onCreateTag={(name, color) => {
-                if (!name.trim()) return;
-                setTagsList(t => [...t, { id: name.toLowerCase().replace(/\s+/g,'-'), name, color, dotClass: '', count: 0 }]);
-                setNewTagName('');
-              }}
+              onCreateTag={(name, color) => { if (!name.trim()) return; storeAddTag(name, color); setNewTagName(''); }}
               tagSearch={tagSearch}
               setTagSearch={setTagSearch}
               newTagName={newTagName}
@@ -1068,6 +1047,7 @@ export function ParseUI() {
               conceptName={concept.name}
               conceptId={concept.id}
               speakerCount={selectedSpeakers.length}
+              chatSession={chatSession}
             />
           </>
           ) : currentMode === 'annotate' ? (
@@ -1078,6 +1058,8 @@ export function ParseUI() {
               totalConcepts={total}
               onPrev={goPrev}
               onNext={goNext}
+              audioUrl={selectedSpeakers[0] ? `/audio/${selectedSpeakers[0]}.wav` : ''}
+              peaksUrl={selectedSpeakers[0] ? `/peaks/${selectedSpeakers[0]}.json` : undefined}
             />
             <AIChat
               height={aiHeight}
@@ -1087,6 +1069,7 @@ export function ParseUI() {
               conceptName={concept.name}
               conceptId={concept.id}
               speakerCount={selectedSpeakers.length}
+              chatSession={chatSession}
             />
           </>
           ) : (
@@ -1245,6 +1228,7 @@ export function ParseUI() {
             conceptName={concept.name}
             conceptId={concept.id}
             speakerCount={selectedSpeakers.length}
+            chatSession={chatSession}
           />
           </>
           )}
@@ -1297,7 +1281,7 @@ export function ParseUI() {
                   Speakers {currentMode === 'annotate' && <span className="ml-1 rounded bg-indigo-50 px-1 py-0.5 font-mono text-[8px] text-indigo-600">SINGLE</span>}
                 </h4>
                 <span className="text-[10px] text-slate-400">
-                  {currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {SPEAKERS.length}
+                  {currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {speakers.length}
                 </span>
               </div>
               <div className="mb-2 flex gap-1">
@@ -1308,7 +1292,7 @@ export function ParseUI() {
                     else setSpeakerPicker(e.target.value);
                   }}
                   className="flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
-                  {SPEAKERS.map(s => <option key={s}>{s}</option>)}
+                  {speakers.map(s => <option key={s}>{s}</option>)}
                 </select>
                 {currentMode === 'compare' && (
                   <button onClick={addSpeaker} className="grid h-6 w-6 place-items-center rounded-md bg-slate-900 text-white hover:bg-slate-700">
@@ -1317,7 +1301,7 @@ export function ParseUI() {
                 )}
               </div>
               <div className="flex flex-wrap gap-1">
-                {SPEAKERS.map(s => {
+                {speakers.map(s => {
                   const active = currentMode === 'annotate' ? selectedSpeakers[0] === s : selectedSpeakers.includes(s);
                   return (
                     <button key={s} onClick={() => toggleSpeaker(s)}
