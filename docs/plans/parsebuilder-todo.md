@@ -2,7 +2,15 @@
 
 > **Owner:** ParseBuilder (@parse-builder)
 > **Domain:** Annotate mode + shared platform (waveform, spectrogram, phonetic tools)
-> **Updated:** 2026-04-10
+> **Updated:** 2026-06-14
+
+---
+
+## Current execution plan
+
+- Live execution guide: `docs/plans/parseui-current-state-plan.md`
+- Historical archive only: `docs/plans/parseui-wiring-todo.md`
+- Short version: most early ParseUI wiring tasks are already done; the remaining work is contract reconciliation around Actions / compute / decisions, followed by C5/C6 evidence.
 
 ---
 
@@ -34,7 +42,7 @@ When Lucas signals C5 cleared:
 - [x] **MC-299 prep** — ParseUI integration tests, 111/111 passing · PR #12 (2026-04-10)
 - [x] **Compare notes** — localStorage persistence per concept · PR #12 (2026-04-10)
 - [x] **Compare real data** — MOCK_FORMS → `buildSpeakerForm` from `annotationRecords` · PR #12 (2026-04-10)
-- [x] **MC-297** — `spectrogram-worker.ts` (TS port) + `useSpectrogram` hook + AnnotateView canvas · PR #11 (2026-04-10)
+- [x] **MC-297** — `spectrogram-worker.ts` (TS port) + `useSpectrogram` hook + AnnotateView canvas · PR #11 (2026-04-10), UI wiring PR #31 (2026-06-14)
 - [x] **MC-298** — `server.py` startup messaging — React `:5173` + legacy fallback labels · main `b930b1b`
 - [x] **MC-296** — ParseUI stale reference cleanup · PR #9
 - [x] **MC-295** — Annotate wiring: IPA/ortho pre-populate, Save (setInterval × 3 tiers + saveSpeaker), Mark Done (tagConcept), Annotated/Missing badge · PR #9 + #11
@@ -45,7 +53,7 @@ When Lucas signals C5 cleared:
 ## Test baseline (main, 2026-04-10)
 
 ```
-npm run test -- --run   →  111 / 111 passing
+npm run test -- --run   →  119 / 119 passing (23 files)
 tsc --noEmit            →  0 errors
 ```
 
@@ -57,4 +65,4 @@ tsc --noEmit            →  0 errors
 
 ## Status
 
-AI login wired and deployed. **MC-299 activates on Lucas's C5 signal.**
+AI login wired and deployed. MC-297 spectrogram UI wired (PR #31). **MC-299 activates on Lucas's C5 signal.**
