@@ -29,17 +29,22 @@ Do not start C7 early.
 ## Branch + Worktree Policy
 
 ### Canonical repository path
-- `/home/lucas/gh/ArdeleanLucas/PARSE`
+- **Active execution repo:** `/home/lucas/gh/ardeleanlucas/parse`
+- **Archive/divergent clone:** `/home/lucas/gh/ArdeleanLucas/PARSE`
+  - This uppercase clone currently follows archival/worktree history and may not match `origin/main`.
+  - Do not use it as branch truth without an explicit fetch/prune check.
 
 ### Canonical worktrees
-- Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → `feat/parse-react-vite`
-- Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
-- Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
+- Historical React pivot worktrees remain useful for traceability:
+  - Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → `feat/parse-react-vite`
+  - Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
+  - Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
+- These worktrees describe migration history; they are not automatically the current runtime source of truth.
 
 ### Active development rule
-- `feat/annotate-react` and `feat/compare-react` are now merged into integration.
-- **New work should branch off `feat/parse-react-vite`.**
-- Do not commit new feature work on stale track branches.
+- **New work should branch from `origin/main` in `/home/lucas/gh/ardeleanlucas/parse` unless Lucas explicitly changes repo policy.**
+- `feat/annotate-react`, `feat/compare-react`, and `feat/parse-react-vite` are historical pivot lanes, not default bases for new work.
+- Do not assume stale track branches or archival clones reflect current `main`.
 
 ## Ownership + Coordination
 
@@ -48,7 +53,7 @@ Historical split remains useful for boundaries:
 - ParseBuilder domain: Annotate + shared platform
 - Oda domain: Compare mode components/stores/hooks
 
-However, on integration branch, coordinate shared-surface edits.
+However, on current `main`, coordinate shared-surface edits carefully.
 
 ### Shared surfaces requiring coordination before commit
 - `src/api/client.ts`
@@ -60,11 +65,12 @@ However, on integration branch, coordinate shared-surface edits.
 - Add provider test coverage under `python/compare/providers/test_*.py`
 - Improve Lexibank/WOLD setup docs and CKB coverage strategy
 - Expand provider metadata and scholarly-source coverage plans
+- Non-destructive documentation/policy clarification about React (`:5173`) vs legacy (`parse.html`/`compare.html`) entrypoints is allowed when needed to reduce operator confusion
 
 ## Do Not Touch
 
 - `src/components/compare/*` (ContactLexemePanel + compare components currently stable)
-- `python/server.py` beyond existing CLEF endpoints
+- `python/server.py` destructive routing/cutover changes before C5+C6 signoff
 - `config/sil_contact_languages.json` directly (runtime output file)
 - Any C7 cleanup/deletion before C5+C6 signoff
 
