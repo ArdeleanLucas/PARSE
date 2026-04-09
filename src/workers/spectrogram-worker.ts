@@ -168,6 +168,7 @@ function computeSTFT(
   const maxBin      = Math.min(totalBins - 1, Math.floor((freqCeiling * fftSize) / sampleRate));
   const numBins     = maxBin + 1;
 
+  // Enough left-aligned windows to cover the tail with zero-padding.
   const numFrames = Math.max(1, Math.ceil((samples.length - windowSize) / hopSize) + 1);
 
   const re = new Float64Array(fftSize);
