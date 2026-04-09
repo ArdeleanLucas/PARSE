@@ -270,6 +270,19 @@ export async function startContactLexemeFetch(
   return startCompute("contact-lexemes", options as Record<string, unknown>);
 }
 
+// Normalize
+export async function startNormalize(speaker: string): Promise<{ job_id: string }> {
+  const payload = await apiFetch<unknown>("/api/normalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speaker }),
+  });
+  if (isRecord(payload) && (typeof payload.job_id === 'string' || typeof payload.jobId === 'string')) {
+    return { job_id: String(payload.job_id ?? payload.jobId) };
+  }
+  return { job_id: '' };
+}
+
 // Tags
 export async function getTags(): Promise<TagsResponse> {
   return apiFetch<TagsResponse>("/api/tags");
