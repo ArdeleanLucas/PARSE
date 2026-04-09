@@ -8,15 +8,17 @@ Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
 
 PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, and comparative analysis in one workspace, so researchers can move from raw recordings to analysis-ready linguistic data without switching between disconnected tools.
 
-Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes run in the browser and are built around precise time-aligned annotations with a unified tag system shared across modes.
+Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are built around precise time-aligned annotations with a unified tag system shared across workflows.
 
-No frontend build tooling is required. Run the local Python server, open the interface in a browser, and start working. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
+PARSE is currently in a **hybrid transition**. The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while C5/C6 validation is completed ahead of C7 cleanup.
+
+The Python backend continues to power AI/API routes for both architectures. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
 
 ---
 
 ## Modes
 
-### Annotate mode (`parse.html`)
+### Annotate mode (React route `/`, legacy fallback `parse.html`)
 
 Per-speaker segmentation and transcription workstation.
 
@@ -28,7 +30,7 @@ Per-speaker segmentation and transcription workstation.
 - AI chat dock for in-session analysis assistance
 - Tag and filter concepts for selective annotation
 
-### Compare mode (`compare.html`)
+### Compare mode (React route `/compare`, legacy fallback `compare.html`)
 
 Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 
@@ -38,6 +40,12 @@ Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 - Enrichments overlay for computed analysis metadata
 - Unified tag system (shared with Annotate mode) for scoped filtering
 - Export to LingPy-compatible TSV for downstream pipelines (LexStat, BEAST 2)
+
+### Current entrypoint status
+
+- **Preferred development UI:** `http://localhost:5173/` and `http://localhost:5173/compare`
+- **Legacy fallback UI:** `http://localhost:8766/parse.html` and `http://localhost:8766/compare.html`
+- **Cleanup gate:** legacy fallback pages remain only until C5/C6 are manually cleared and C7 removes them
 
 ---
 
@@ -126,57 +134,76 @@ The assistant operates with read and write access to the project. It can stage f
 
 ## Quick Start
 
-### Windows (recommended)
+### 1) Start the Python backend
+
+#### Windows
 
 PARSE requires the `kurdish_asr` conda environment which has all Python dependencies pre-installed (faster-whisper, torch, torchaudio, soundfile, ctranslate2).
 
-```bat
-Start Review Tool.bat
-```
-
-Or from WSL/terminal directly:
+For the current React/Vite UI, start the backend directly:
 
 ```bash
 /path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py --project-root C:/path/to/parse_v2
 ```
 
-### macOS / Linux
+Optional legacy launcher:
 
-```bash
-bash start_parse.sh
+```bat
+Start Review Tool.bat
 ```
 
-Or manually:
+> **Important:** `Start Review Tool.bat` is still a legacy launcher that opens `review_tool_dev.html` and depends on the old thesis/review server script. For the current React/Vite UI, start `python/server.py`, then run the Vite dev server as shown below and open `http://localhost:5173/`.
+
+#### macOS / Linux
 
 ```bash
 python3 python/server.py
 ```
 
-The server runs on port `8766` by default (`PARSE_PORT` env var overrides).
+> **Note:** `bash start_parse.sh` still opens the legacy `review_tool_dev.html` flow. Prefer the React/Vite workflow below unless you intentionally need legacy fallback tooling.
 
-### Open in browser
+The backend runs on port `8766` by default and serves the API routes used by both the React/Vite frontend and the temporary legacy fallback pages.
 
-- Annotate mode: `http://localhost:8766/parse.html`
-- Compare mode: `http://localhost:8766/compare.html`
+### 2) Start the active React/Vite frontend
+
+Run this once per clone:
+
+```bash
+npm install
+```
+
+Then start the frontend dev server:
+
+```bash
+npm run dev
+```
+
+### 3) Open in browser
+
+#### Preferred React/Vite routes
+
+- Annotate mode: `http://localhost:5173/`
+- Compare mode: `http://localhost:5173/compare`
+
+#### Legacy fallback routes (pre-C7 only)
+
+Use these only if you intentionally need the legacy HTML pages while cleanup is still in progress:
+
+- Annotate fallback: `http://localhost:8766/parse.html`
+- Compare fallback: `http://localhost:8766/compare.html`
 
 ---
 
 ## Project Structure
 
 ```text
-parse.html              -- Annotate mode (modular, loads js/shared/ and js/annotate/)
-compare.html            -- Compare mode (self-contained, loads js/shared/ modules)
-js/
-  annotate/             -- Annotate-specific JS modules
-  shared/               -- Shared modules used by both modes
-    tags.js             -- Unified tag system (single localStorage store)
-    chat-panel.js       -- AI chat dock
-    chat-client.js      -- Chat state and polling
-    ai-client.js        -- AI provider client
-    annotation-store.js -- Annotation I/O
-    audio-player.js     -- Audio playback utilities
+index.html              -- React/Vite entry HTML
+src/                    -- Current React frontend (Annotate + Compare)
+parse.html              -- Legacy Annotate fallback page (pre-C7)
+compare.html            -- Legacy Compare fallback page (pre-C7)
+js/                     -- Legacy frontend modules retained until C7 cleanup
 python/
-  server.py             -- Local HTTP server (port 8766)
+  server.py             -- Backend API server + legacy static serving (port 8766)
   ai/                   -- AI provider layer
     provider.py         -- STT / IPA / LLM provider factory
     chat_orchestrator.py-- Chat session management
@@ -188,6 +215,7 @@ config/
   ai_config.json        -- AI provider configuration
 annotations/            -- Per-speaker annotation JSON files (runtime, untracked)
 parse-enrichments.json  -- Computed comparative overlays (runtime, untracked)
+desktop/                -- Electron shell scaffold
 docs/                   -- Documentation
 ```
 
@@ -272,9 +300,10 @@ The enrichments layer stores computed structures while preserving manual adjudic
 
 ## Technology
 
-- Vanilla JavaScript (no build step required)
+- React 18 + TypeScript + Vite (current frontend architecture)
+- Legacy vanilla JavaScript + HTML entrypoints (temporary pre-C7 fallback)
 - Python 3.10+ with conda environment
-- WaveSurfer 7 (CDN)
+- WaveSurfer 7
 - faster-whisper + CTranslate2 (local STT)
 - wav2vec2 via HuggingFace transformers (local IPA)
 - CUDA 12/13 + PyTorch (GPU inference)

@@ -44,12 +44,17 @@ function printHelp() {
   console.log(`PARSE desktop scaffold launcher
 
 Usage:
-  npm run dev -- [--url <http://127.0.0.1:8766/parse.html>] [--with-backend]
+  npm run dev -- [--url <http://127.0.0.1:5173/>] [--with-backend]
 
 Options:
   --url, --app-url   App URL loaded by Electron
   --with-backend     Starts backend command inside Electron main process
   -h, --help         Show this help
+
+Notes:
+  Current React UI: http://127.0.0.1:5173/ or /compare
+  Default without --url: http://127.0.0.1:8766/parse.html (legacy fallback, pre-C7)
+  --with-backend starts only python/server.py; Vite must be launched separately for React routes
 `);
 }
 

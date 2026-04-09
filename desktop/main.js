@@ -97,7 +97,8 @@ function buildLoadFailurePage(url, errorMessage) {
     <code>${escapeHtml(url)}</code>
     <p><strong>Error:</strong> ${escapeHtml(errorMessage)}</p>
     <ul>
-      <li>Start the existing PARSE web/Python stack first, or run with <code>PARSE_AUTO_BACKEND=1</code>.</li>
+      <li>For the current React UI, start the PARSE backend and Vite first, then set <code>PARSE_APP_URL</code> to <code>http://127.0.0.1:5173/</code> or <code>/compare</code>.</li>
+      <li>The default desktop shell target still points at <code>http://127.0.0.1:8766/parse.html</code>, which is a legacy fallback path retained only until C7 cleanup.</li>
       <li>If your server uses a different host/port/path, set <code>PARSE_APP_URL</code> before launch.</li>
       <li>This is scaffold behavior only; production packaging and backend supervision are not wired yet.</li>
     </ul>

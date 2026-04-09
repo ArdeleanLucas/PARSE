@@ -7,14 +7,17 @@
 
 ---
 
-## A. User-facing / operator-facing references that should be cleaned up in Phase 3
+## A. User-facing / operator-facing references clarified in Phase 3
 
-| Path | Current reference | Why it matters | Planned phase |
+| Path | Current state after Phase 3 | Why it matters | Handled in |
 |---|---|---|---|
-| `README.md` | Describes Annotate as `parse.html`, Compare as `compare.html`; browser section points to `http://localhost:8766/parse.html` and `/compare.html` | Primary onboarding doc still points users to legacy UI | **Phase 3** |
-| `python/server.py` | Startup banner prints `http://localhost:{PORT}/parse.html` and `/compare.html` | Server output still tells users legacy is canonical | **Phase 3** |
-| `desktop/README.md` | Default desktop URLs still reference `http://127.0.0.1:8766/parse.html` and `/compare.html` | Desktop-oriented instructions still privilege legacy pages | **Phase 3** |
-| `Start Review Tool.bat` | Opens `http://localhost:8766/review_tool_dev.html` | Legacy launcher path remains user-visible; needs explicit archival/legacy labeling | **Phase 3 review**, possibly Phase 5 if replaced |
+| `README.md` | Now distinguishes React/Vite routes (`:5173`) from legacy fallback pages (`:8766/parse.html`, `/compare.html`) | Primary onboarding doc no longer implies legacy is canonical | **Phase 3** |
+| `python/server.py` | Startup banner now separates React dev guidance from Python-served legacy fallback pages | Server output no longer implies legacy is the only frontend path | **Phase 3** |
+| `desktop/README.md` | Now labels `:8766/parse.html` as legacy fallback and documents React/Vite targets on `:5173` | Desktop scaffold instructions now match the current frontend architecture | **Phase 3** |
+| `desktop/dev-launch.js` | `--help` now explains that `:5173` is the current React UI and that the `:8766/parse.html` default is legacy fallback | CLI help is operator-facing and now clarifies React vs legacy | **Phase 3** |
+| `desktop/main.js` | Load-failure guidance now points users toward the React/Vite route when appropriate | Runtime failure UX now reduces entrypoint confusion | **Phase 3** |
+| `start_parse.sh` | Still opens `review_tool_dev.html`, but now explicitly labels itself as a legacy launcher and points users to React/Vite for current UI work | Linux/macOS launcher remains user-visible but is no longer mislabeled as current PARSE | **Phase 3 review**, possibly Phase 5 if replaced |
+| `Start Review Tool.bat` | Still opens `review_tool_dev.html`, but now explicitly labels itself as legacy and points users to React/Vite for current UI work | Windows launcher remains user-visible but is no longer mislabeled as current PARSE | **Phase 3 review**, possibly Phase 5 if replaced |
 
 ---
 
@@ -72,6 +75,9 @@ They often refer to the API backend, which remains valid.
 - `README.md`
 - `python/server.py` startup messaging
 - `desktop/README.md`
+- `desktop/dev-launch.js` help text
+- `desktop/main.js` failure guidance
+- `start_parse.sh` (at minimum label as legacy/special-purpose)
 - `Start Review Tool.bat` (at minimum label as legacy/special-purpose)
 - any additional operator-facing launcher/docs found during implementation
 

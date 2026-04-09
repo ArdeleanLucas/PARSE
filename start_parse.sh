@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
-# start_parse.sh — PARSE macOS/Linux launcher
-# Starts the local server and opens the review tool in the default browser.
+# start_parse.sh — PARSE macOS/Linux legacy launcher
+# Starts the legacy thesis/review server and opens review_tool_dev.html.
+# Current React development uses python/server.py + npm run dev on http://localhost:5173/.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${PARSE_PORT:-8766}"
+SERVER_SCRIPT="python/thesis_server.py"
 URL="http://localhost:${PORT}/review_tool_dev.html"
 
-echo "Starting PARSE server on port ${PORT}..."
+echo "Starting PARSE legacy review-tool server on port ${PORT}..."
 echo "Project directory: ${SCRIPT_DIR}"
+echo "Note: this launcher opens review_tool_dev.html (legacy)."
+echo "For the current React UI, run python/server.py + npm run dev and open http://localhost:5173/."
+
+if [ ! -f "${SCRIPT_DIR}/${SERVER_SCRIPT}" ]; then
+    echo "ERROR: missing legacy server script: ${SCRIPT_DIR}/${SERVER_SCRIPT}" >&2
+    echo "This launcher only works with the old thesis/review stack." >&2
+    echo "For the current React UI, run python/server.py + npm run dev and open http://localhost:5173/." >&2
+    exit 1
+fi
 
 # Kill any existing process on the port
 if command -v lsof >/dev/null 2>&1; then
@@ -23,7 +34,7 @@ fi
 
 # Start the server in the background
 cd "${SCRIPT_DIR}"
-python3 python/thesis_server.py &
+python3 "${SERVER_SCRIPT}" &
 SERVER_PID=$!
 echo "Server PID: ${SERVER_PID}"
 
@@ -48,7 +59,7 @@ else
 fi
 
 echo ""
-echo "PARSE is running. Press Ctrl+C to stop."
+echo "Legacy review tool is running. Press Ctrl+C to stop."
 
 # Wait for server process
 wait "${SERVER_PID}"
