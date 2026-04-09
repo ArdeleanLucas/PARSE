@@ -1,0 +1,311 @@
+// @vitest-environment jsdom
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
+
+let mockConfig: ProjectConfig | null = null;
+let mockTags: Tag[] = [];
+let mockRecords: Record<string, AnnotationRecord> = {};
+let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
+
+const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
+const mockHydrateTags = vi.fn();
+const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
+const mockSetInterval = vi.fn();
+const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
+const mockTagConcept = vi.fn();
+const mockUntagConcept = vi.fn();
+const mockSetSelectedRegion = vi.fn();
+const mockSetActiveSpeaker = vi.fn();
+const mockSetActiveConcept = vi.fn();
+const mockSetSelectedSpeakers = vi.fn();
+const mockChatSend = vi.fn();
+const mockPlayPause = vi.fn();
+const mockSkip = vi.fn();
+const mockSetWaveZoom = vi.fn();
+const mockSetRate = vi.fn();
+let mockEnrichmentData: Record<string, unknown> = {};
+
+vi.mock("./stores/configStore", () => ({
+  useConfigStore: (selector: (s: unknown) => unknown) =>
+    selector({ config: mockConfig, load: mockLoadConfig }),
+}));
+
+vi.mock("./stores/tagStore", () => ({
+  useTagStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      tags: mockTags,
+      hydrate: mockHydrateTags,
+      tagConcept: mockTagConcept,
+      untagConcept: mockUntagConcept,
+      getTagsForConcept: (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId)),
+    }),
+}));
+
+vi.mock("./stores/annotationStore", () => ({
+  useAnnotationStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      records: mockRecords,
+      loadSpeaker: mockLoadSpeaker,
+      setInterval: mockSetInterval,
+      saveSpeaker: mockSaveSpeaker,
+    }),
+}));
+
+vi.mock("./stores/playbackStore", () => ({
+  usePlaybackStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      activeSpeaker: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 4,
+      selectedRegion: mockSelectedRegion,
+      setSelectedRegion: mockSetSelectedRegion,
+    }),
+  setState: vi.fn(),
+}));
+
+vi.mock("./hooks/useChatSession", () => ({
+  useChatSession: () => ({
+    messages: [],
+    sessionId: "test-session",
+    sending: false,
+    error: null,
+    send: mockChatSend,
+    clear: vi.fn(),
+  }),
+}));
+
+vi.mock("./hooks/useWaveSurfer", () => ({
+  useWaveSurfer: () => ({
+    playPause: mockPlayPause,
+    skip: mockSkip,
+    setZoom: mockSetWaveZoom,
+    setRate: mockSetRate,
+  }),
+}));
+
+vi.mock("./stores/enrichmentStore", () => ({
+  useEnrichmentStore: (selector: (s: unknown) => unknown) =>
+    selector({ data: mockEnrichmentData, loading: false, load: vi.fn(), save: vi.fn() }),
+}));
+
+vi.mock("./stores/uiStore", () => ({
+  useUIStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      setActiveSpeaker: mockSetActiveSpeaker,
+      setActiveConcept: mockSetActiveConcept,
+      setSelectedSpeakers: mockSetSelectedSpeakers,
+    }),
+}));
+
+import { ParseUI } from "./ParseUI";
+
+function makeRecord(
+  speaker: string,
+  concepts: Array<{ conceptText: string; ipa?: string; ortho?: string; start: number; end: number }>,
+): AnnotationRecord {
+  const tier = (intervals: AnnotationInterval[]) => ({
+    name: "tier",
+    display_order: 1,
+    intervals,
+  });
+
+  return {
+    speaker,
+    tiers: {
+      ipa: tier(concepts.filter((c) => c.ipa != null).map((c) => ({ start: c.start, end: c.end, text: c.ipa ?? "" }))),
+      ortho: tier(concepts.filter((c) => c.ortho != null).map((c) => ({ start: c.start, end: c.end, text: c.ortho ?? "" }))),
+      concept: {
+        name: "concept",
+        display_order: 3,
+        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText })),
+      },
+      speaker: { name: "speaker", display_order: 4, intervals: [] },
+    },
+    created_at: "2026-01-01T00:00:00.000Z",
+    modified_at: "2026-01-01T00:00:00.000Z",
+    source_wav: `${speaker}.wav`,
+  };
+}
+
+async function switchToAnnotateMode() {
+  fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Annotate" }));
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  mockConfig = {
+    project_name: "PARSE",
+    language_code: "ku",
+    speakers: ["Fail01", "Kalh01"],
+    concepts: [
+      { id: "1", label: "water" },
+      { id: "2", label: "fire" },
+    ],
+    audio_dir: "audio",
+    annotations_dir: "annotations",
+  };
+  mockTags = [
+    { id: "review-needed", label: "Review needed", color: "#f59e0b", concepts: [] },
+    { id: "confirmed", label: "Confirmed", color: "#10b981", concepts: [] },
+    { id: "problematic", label: "Problematic", color: "#ef4444", concepts: [] },
+  ];
+  mockRecords = {};
+  mockEnrichmentData = {};
+  mockSelectedRegion = { start: 1.25, end: 2.5 };
+
+  mockLoadConfig.mockClear();
+  mockHydrateTags.mockClear();
+  mockLoadSpeaker.mockClear();
+  mockSetInterval.mockClear();
+  mockSaveSpeaker.mockClear();
+  mockTagConcept.mockClear();
+  mockUntagConcept.mockClear();
+  mockSetSelectedRegion.mockClear();
+  mockSetActiveSpeaker.mockClear();
+  mockSetActiveConcept.mockClear();
+  mockSetSelectedSpeakers.mockClear();
+  mockChatSend.mockClear();
+  mockPlayPause.mockClear();
+  mockSkip.mockClear();
+  mockSetWaveZoom.mockClear();
+  mockSetRate.mockClear();
+});
+
+afterEach(cleanup);
+
+describe("ParseUI", () => {
+  it("loads config and tag hydration on mount and computes reviewed count from confirmed tags", () => {
+    mockTags = mockTags.map((tag) =>
+      tag.id === "confirmed" ? { ...tag, concepts: ["1"] } : tag,
+    );
+
+    render(<ParseUI />);
+
+    expect(mockLoadConfig).toHaveBeenCalledOnce();
+    expect(mockHydrateTags).toHaveBeenCalledOnce();
+    expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
+  });
+
+  it("pre-populates annotate fields from stored intervals and shows Annotated badge", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    expect(await screen.findByDisplayValue("aw")).toBeTruthy();
+    expect(screen.getByDisplayValue("ئاو")).toBeTruthy();
+    expect(screen.getByText("Annotated")).toBeTruthy();
+  });
+
+  it("saves annotation tiers for the selected region and persists the speaker record", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", []),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.change(screen.getByPlaceholderText("Enter IPA…"), { target: { value: "aβ" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter orthographic form…"), { target: { value: "ئاو" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /Save Annotation/i })[0]);
+
+    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "ipa", {
+      start: 1.25,
+      end: 2.5,
+      text: "aβ",
+    });
+    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "ortho", {
+      start: 1.25,
+      end: 2.5,
+      text: "ئاو",
+    });
+    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "concept", {
+      start: 1.25,
+      end: 2.5,
+      text: "water",
+    });
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith("Fail01"));
+  });
+
+  it("marks the current concept confirmed from annotate mode", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", []),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+  });
+
+  it("renders compare speaker forms from annotation data instead of MOCK_FORMS placeholders", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kzn03"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاو", start: 3, end: 4 },
+      ]),
+      Kzn03: makeRecord("Kzn03", [
+        { conceptText: "water", ipa: "awa", ortho: "ئاوا", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByText("/aw/")).toBeTruthy();
+    expect(screen.getByText("/awa/")).toBeTruthy();
+    expect(screen.getByText("2 utterances")).toBeTruthy();
+    expect(screen.queryByText("/ramaːd/")).toBeNull();
+  });
+
+  it("wires compare Flag and Accept concept buttons to tag actions", () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Flag$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Accept concept/i }));
+
+    expect(mockTagConcept).toHaveBeenCalledWith("problematic", "1");
+    expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+  });
+
+  it("toggles the compare table row flag button from tagStore state", () => {
+    mockTags = mockTags.map((tag) =>
+      tag.id === "problematic" ? { ...tag, concepts: ["1"] } : tag,
+    );
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTitle("Toggle speaker flag for Fail01"));
+    expect(mockUntagConcept).toHaveBeenCalledWith("problematic", "1");
+  });
+
+  it("persists compare notes per concept via localStorage on blur", () => {
+    const { unmount } = render(<ParseUI />);
+    const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
+
+    fireEvent.change(notesField, { target: { value: "Loanword candidate from Arabic." } });
+    fireEvent.blur(notesField);
+    unmount();
+
+    render(<ParseUI />);
+    expect(screen.getByDisplayValue("Loanword candidate from Arabic.")).toBeTruthy();
+  });
+});
