@@ -79,6 +79,24 @@ describe("OnboardingFlow", () => {
     // Advance to step 2
     fireEvent.click(screen.getByText("Next"))
     expect(screen.getByText("Import speaker data")).toBeTruthy()
-    expect(screen.getByText("Open workspace")).toBeTruthy()
+    expect(screen.getByText("Open AI assistant")).toBeTruthy()
+  })
+
+  it("completing onboarding routes the workspace to the chat panel", () => {
+    render(<OnboardingFlow onComplete={onComplete} />)
+    fireEvent.click(screen.getByText("Next"))
+    fireEvent.click(screen.getByText("Next"))
+    fireEvent.click(screen.getByText("Open AI assistant"))
+
+    expect(screen.getByText("Opening AI assistant…")).toBeTruthy()
+
+    vi.advanceTimersByTime(1000)
+
+    expect(mockSetState).toHaveBeenCalledWith({
+      onboardingComplete: true,
+      activeSpeaker: null,
+      annotatePanel: "chat",
+    })
+    expect(onComplete).toHaveBeenCalledTimes(1)
   })
 })
