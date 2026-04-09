@@ -17,6 +17,7 @@ import { useChatSession, type UseChatSessionResult } from './hooks/useChatSessio
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
+import { useComputeJob } from './hooks/useComputeJob';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
@@ -1204,6 +1205,7 @@ export function ParseUI() {
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['Fail01','Kzn03','Shz05','Tbr07','Isf09']);
   const [speakerPicker, setSpeakerPicker] = useState('Fail02');
   const [computeMode, setComputeMode] = useState('cognates');
+  const { start: startComputeJob, state: computeJobState } = useComputeJob(computeMode);
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -1277,6 +1279,7 @@ export function ParseUI() {
   const [aiHeight, setAiHeight] = useState(() => Math.round(window.innerHeight * 0.4));
   const [aiMinimized, setAiMinimized] = useState(true);
   const resizingRef = useRef(false);
+  const loadDecisionsRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (currentMode === 'annotate') {
@@ -1719,16 +1722,42 @@ export function ParseUI() {
 
               <SectionCard title="Cognate decision" aside={<Pill tone="indigo">2 groups proposed</Pill>}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">
+                  <button
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                    onClick={() => {
+                      const patch = { cognate_decisions: { [concept.key]: { decision: 'accepted', ts: Date.now() } } };
+                      void useEnrichmentStore.getState().save(patch);
+                    }}
+                  >
                     <Check className="h-3.5 w-3.5"/> Accept grouping
                   </button>
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <button
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      const patch = { cognate_decisions: { [concept.key]: { decision: 'split', ts: Date.now() } } };
+                      void useEnrichmentStore.getState().save(patch);
+                    }}
+                  >
                     <Split className="h-3.5 w-3.5"/> Split
                   </button>
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <button
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      const patch = { cognate_decisions: { [concept.key]: { decision: 'merge', ts: Date.now() } } };
+                      void useEnrichmentStore.getState().save(patch);
+                    }}
+                  >
                     <GitMerge className="h-3.5 w-3.5"/> Merge
                   </button>
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <button
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      const current = (enrichmentData?.cognate_decisions as Record<string,{decision:string}>)?.[concept.key]?.decision ?? 'accepted';
+                      const next = current === 'accepted' ? 'split' : current === 'split' ? 'merge' : 'accepted';
+                      const patch = { cognate_decisions: { [concept.key]: { decision: next, ts: Date.now() } } };
+                      void useEnrichmentStore.getState().save(patch);
+                    }}
+                  >
                     <RotateCw className="h-3.5 w-3.5"/> Cycle
                   </button>
                 </div>
@@ -1892,13 +1921,26 @@ export function ParseUI() {
                     <option value="borrowings">Borrowing detection</option>
                   </select>
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700">
+                    <button
+                      className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                      onClick={() => { void startComputeJob(); }}
+                      disabled={computeJobState.status === 'running'}
+                    >
                       <Play className="h-3 w-3"/> Run
                     </button>
-                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
+                    <button
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                      onClick={() => { void useEnrichmentStore.getState().load(); }}
+                    >
                       <RefreshCw className="h-3 w-3"/> Refresh
                     </button>
                   </div>
+                  {computeJobState.status === 'running' && (
+                    <div className="mt-1 text-[10px] text-indigo-600">Running… {Math.round(computeJobState.progress * 100)}%</div>
+                  )}
+                  {computeJobState.status === 'error' && (
+                    <div className="mt-1 text-[10px] text-rose-600">{computeJobState.error}</div>
+                  )}
                 </div>
 
                 {/* --- COMPARE: Status --- */}
@@ -1945,10 +1987,25 @@ export function ParseUI() {
                 <div className="p-4">
                   <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Decisions</h4>
                   <div className="space-y-1.5">
-                    <button className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50">
+                    <button
+                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => loadDecisionsRef.current?.click()}
+                    >
                       <Upload className="h-3 w-3"/> Load decisions
                     </button>
-                    <button className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700">
+                    <button
+                      className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                      onClick={() => {
+                        const json = JSON.stringify(enrichmentData, null, 2);
+                        const blob = new Blob([json], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'parse-decisions.json';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
                       <Save className="h-3 w-3"/> Save decisions
                     </button>
                     <button
@@ -2039,6 +2096,24 @@ export function ParseUI() {
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
       </Modal>
+      <input
+        type="file"
+        accept=".json"
+        ref={loadDecisionsRef}
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const data = JSON.parse(text) as Record<string, unknown>;
+            await useEnrichmentStore.getState().save(data);
+          } catch {
+            // non-fatal
+          }
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }
