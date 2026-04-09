@@ -12,7 +12,7 @@ import {
   Sun, Moon
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport } from './api/client';
+import { getLingPyExport, saveApiKey } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -288,25 +288,32 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
     }
   }, [isConnected, hasData, conceptName, speakerCount, messages.length]);
 
-  const handleConnect = (p: AIProvider) => {
+  const handleConnect = async (p: AIProvider) => {
+    if (apiKey.trim()) {
+      try {
+        await saveApiKey(apiKey.trim(), p);
+      } catch {
+        // non-fatal — key saved in session even if persist fails
+      }
+    }
     setProvider(p);
     setView('connected');
     setTestStatus('idle');
     setTestMessage('');
   };
 
-  const handleTestConnection = () => {
+  const handleTestConnection = async () => {
+    if (!apiKey.trim()) return;
     setTestStatus('testing');
     setTestMessage('');
-    setTimeout(() => {
-      if (provider === 'openai' && apiKey.trim().length < 8) {
-        setTestStatus('error');
-        setTestMessage('Invalid API key format.');
-        return;
-      }
+    try {
+      await saveApiKey(apiKey.trim(), provider ?? 'openai');
       setTestStatus('success');
-      setTestMessage('Connection verified.');
-    }, 900);
+      setTestMessage('Connection verified — key saved.');
+    } catch (err) {
+      setTestStatus('error');
+      setTestMessage(err instanceof Error ? err.message : 'Connection failed.');
+    }
   };
 
   const handleDisconnect = () => {
@@ -543,12 +550,40 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
 
               {view === 'form-xai' && (
                 <div className="space-y-3">
-                  <button
-                    onClick={() => handleConnect('xai')}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-[12px] font-semibold text-white transition hover:bg-slate-700"
-                  >
-                    <Zap className="h-3.5 w-3.5"/> xAI API
-                  </button>
+                  <label className="block">
+                    <span className="text-[11px] font-medium text-slate-600">xAI API Key</span>
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={e => { setApiKey(e.target.value); setTestStatus('idle'); }}
+                      placeholder="xai-..."
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 font-mono text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-100"
+                    />
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleTestConnection}
+                      disabled={!apiKey.trim() || testStatus === 'testing'}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {testStatus === 'testing' && <Loader2 className="h-3 w-3 animate-spin"/>}
+                      {testStatus === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-600"/>}
+                      {testStatus === 'error' && <AlertCircle className="h-3 w-3 text-rose-600"/>}
+                      Test Connection
+                    </button>
+                    <button
+                      onClick={() => handleConnect('xai')}
+                      disabled={!apiKey.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      <Zap className="h-3.5 w-3.5"/> Connect
+                    </button>
+                  </div>
+                  {testMessage && (
+                    <div className={`text-[11px] ${testStatus === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {testMessage}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -609,7 +644,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
 
             <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
               <ShieldCheck className="h-3.5 w-3.5"/>
-              Keys are stored locally in your browser only.
+              Keys are saved to your local server config.
             </div>
           </div>
         </div>
@@ -620,15 +655,24 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
             <div className="mx-auto max-w-3xl space-y-3">
-              {messages.map(m => (
-                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {chatSession.messages.length === 0 && !chatSession.sending && messages.length > 0 && messages.map(m => (
+                <div key={m.id} className="flex justify-start">
+                  <div className="max-w-[78%] rounded-2xl bg-white px-4 py-2.5 text-[13px] leading-relaxed text-slate-800 ring-1 ring-slate-200/70 shadow-sm">
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {chatSession.messages.map((m, i) => (
+                <div key={`${m.timestamp}-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
                     m.role === 'user'
                       ? 'bg-slate-900 text-white'
                       : 'bg-white text-slate-800 ring-1 ring-slate-200/70 shadow-sm'
                   }`}>
                     {m.content}
-                    {m.streaming && <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>}
+                    {chatSession.sending && i === chatSession.messages.length - 1 && m.role === 'assistant' && (
+                      <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>
+                    )}
                   </div>
                 </div>
               ))}
