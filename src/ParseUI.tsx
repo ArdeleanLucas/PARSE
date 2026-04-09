@@ -1,0 +1,1482 @@
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  Search, ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
+  RotateCw, Play, RefreshCw, Save, Upload, Sparkles,
+  Layers, ChevronDown, ChevronUp, Plus, X, AlertCircle,
+  CheckCircle2, ArrowUpDown, Volume2, Filter, Send, Minus,
+  GripHorizontal, Bot, User, Database, Users as UsersIcon, Cpu,
+  PanelRightClose, Tag, Tags, Import, AudioLines, Type, Mic,
+  Workflow, Network, Trash2, ChevronDown as CDown,
+  Video, Scissors, Activity, SlidersHorizontal,
+  Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
+  Sun, Moon
+} from 'lucide-react';
+
+type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
+type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
+type ModeTab = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
+type AppMode = 'annotate' | 'compare' | 'tags';
+
+interface LingTag {
+  id: string; name: string; color: string; dotClass: string; count: number;
+}
+
+interface Concept { id: number; name: string; tag: ConceptTag; }
+interface SpeakerForm {
+  speaker: string; ipa: string; utterances: number;
+  arabicSim: number; persianSim: number;
+  cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
+}
+interface ChatMessage {
+  id: number; role: 'user' | 'ai'; content: string; streaming?: boolean;
+}
+
+const CONCEPTS: Concept[] = [
+  'ash','bark','big','bird','black','blood','bone','bride','claw','cloud',
+  'cold','dog','dry','ear','egg','eye','feather','finger','fire','fish',
+  'five','fly','foot','four','full','good','green','hair','hand','head',
+  'heart','honey','horn','hot','i','knee','leaf','liver','long','louse',
+  'man','milk','moon','mouth','name','neck','new','night','nose','not',
+  'one','person','rain','red','road','root','round','salt','sand','say',
+  'see','seed','sit','skin','sleep','small','smoke','stand','star','stone',
+  'sun','swim','tail','that','this','three','tongue','tooth','tree','two',
+  'warm','water'
+].map((name, i) => ({
+  id: i + 1, name,
+  tag: (['untagged','review','confirmed','problematic','untagged','confirmed'][i % 6]) as ConceptTag,
+}));
+
+const SPEAKERS = ['Fail01','Fail02','Kzn03','Kzn04','Shz05','Shz06','Tbr07','Tbr08','Isf09','Isf10','Teh11'];
+
+const MOCK_FORMS: SpeakerForm[] = [
+  { speaker: 'Fail01', ipa: 'ramaːd',   utterances: 3, arabicSim: 0.92, persianSim: 0.41, cognate: 'A', flagged: false },
+  { speaker: 'Kzn03',  ipa: 'xɑːkestæɾ', utterances: 2, arabicSim: 0.18, persianSim: 0.96, cognate: 'B', flagged: false },
+  { speaker: 'Shz05',  ipa: 'xakestær',  utterances: 4, arabicSim: 0.20, persianSim: 0.94, cognate: 'B', flagged: false },
+  { speaker: 'Tbr07',  ipa: 'ramɑd',     utterances: 1, arabicSim: 0.88, persianSim: 0.39, cognate: 'A', flagged: true  },
+  { speaker: 'Isf09',  ipa: 'xɑkestaɾ',  utterances: 2, arabicSim: 0.21, persianSim: 0.93, cognate: 'B', flagged: false },
+];
+
+const tagDot: Record<ConceptTag, string> = {
+  untagged: 'bg-slate-300', review: 'bg-amber-400',
+  confirmed: 'bg-emerald-500', problematic: 'bg-rose-500',
+};
+const simColor = (v: number) =>
+  v >= 0.8 ? 'text-emerald-600' : v >= 0.5 ? 'text-amber-600' : 'text-slate-400';
+const simBar = (v: number) =>
+  v >= 0.8 ? 'bg-emerald-500' : v >= 0.5 ? 'bg-amber-400' : 'bg-slate-300';
+
+const SimBar: React.FC<{ value: number }> = ({ value }) => (
+  <div className="flex items-center gap-2">
+    <div className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden">
+      <div className={`h-full rounded-full ${simBar(value)}`} style={{ width: `${value * 100}%` }} />
+    </div>
+    <span className={`text-xs font-mono tabular-nums ${simColor(value)}`}>{value.toFixed(2)}</span>
+  </div>
+);
+
+const Pill: React.FC<{ children: React.ReactNode; tone?: 'slate'|'emerald'|'indigo' }> = ({ children, tone='slate' }) => {
+  const tones: Record<string,string> = {
+    slate: 'bg-slate-100 text-slate-600 ring-slate-200',
+    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  };
+  return <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ${tones[tone]}`}>{children}</span>;
+};
+
+const SectionCard: React.FC<{ title: string; aside?: React.ReactNode; children: React.ReactNode }> = ({ title, aside, children }) => (
+  <section className="rounded-xl border border-slate-200/80 bg-white shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+    <header className="flex items-center justify-between px-5 pt-4 pb-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-slate-500">{title}</h3>
+      {aside}
+    </header>
+    <div className="px-5 pb-5">{children}</div>
+  </section>
+);
+
+// ---------- AI Chat Panel ----------
+interface AIChatProps {
+  height: number;
+  minimized: boolean;
+  onResizeStart: (e: React.MouseEvent) => void;
+  onMinimize: () => void;
+  conceptName: string;
+  conceptId: number;
+  speakerCount: number;
+}
+
+const QUICK_ACTIONS = [
+  'Analyze cognates',
+  'Explain why Fail01 diverges',
+  'Suggest borrowings',
+  'Help decide grouping',
+  'Compare IPA alignments',
+];
+
+const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMinimize, conceptName, conceptId, speakerCount }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: 1, role: 'ai', content: `Hi — I'm looking at concept "${conceptName}" across ${speakerCount} speakers. Fail01 /ramaːd/ stands out from the Persian cluster with a 0.92 Arabic similarity. Want me to investigate it as a potential borrowing?` },
+  ]);
+  const [input, setInput] = useState('');
+  const [collapsedInput, setCollapsedInput] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!minimized) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, minimized]);
+
+  const send = (text: string) => {
+    const q = text.trim();
+    if (!q) return;
+    const uid = Date.now();
+    setMessages(m => [...m, { id: uid, role: 'user', content: q }]);
+    setInput('');
+    setCollapsedInput('');
+    const aid = uid + 1;
+    setMessages(m => [...m, { id: aid, role: 'ai', content: '', streaming: true }]);
+    const full = `Analyzing "${conceptName}" across the selected speakers. Based on current cognate groupings, I'd recommend splitting Fail01 and Tbr07 (Group A, /ramaːd/-type) from the Persian cluster (Group B, /xɑkestær/-type). The 0.92 Arabic similarity on Fail01 strongly suggests an Arabic borrowing rather than a cognate.`;
+    let i = 0;
+    const tick = () => {
+      i += 3;
+      setMessages(m => m.map(msg => msg.id === aid ? { ...msg, content: full.slice(0, i), streaming: i < full.length } : msg));
+      if (i < full.length) setTimeout(tick, 18);
+    };
+    setTimeout(tick, 250);
+  };
+
+  // ---------- Collapsed: thin command bar ----------
+  if (minimized) {
+    return (
+      <div
+        className="relative flex h-14 shrink-0 items-center border-t border-slate-200 bg-slate-50/80 backdrop-blur-sm transition-all duration-300 shadow-[0_-1px_0_rgba(15,23,42,0.02)]"
+      >
+        <form
+          onClick={() => onMinimize()}
+          onSubmit={e => { e.preventDefault(); if (collapsedInput.trim()) { onMinimize(); setTimeout(() => send(collapsedInput), 250); } }}
+          className="mx-auto flex w-full max-w-4xl items-center gap-3 px-6"
+        >
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">PARSE AI</span>
+          <div className="h-4 w-px bg-slate-200"/>
+          <input
+            value={collapsedInput}
+            onChange={e => setCollapsedInput(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            onFocus={() => onMinimize()}
+            placeholder={`Ask PARSE AI about ${conceptName} (#${conceptId})…`}
+            className="flex-1 bg-transparent text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none"
+          />
+          <button
+            type="submit"
+            onClick={e => e.stopPropagation()}
+            className="grid h-8 w-8 place-items-center rounded-md text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-700"
+            title="Send"
+          >
+            <Send className="h-3.5 w-3.5"/>
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // ---------- Expanded: elevated panel ----------
+  return (
+    <div
+      className="relative flex flex-col overflow-hidden border-t-2 border-slate-200 bg-indigo-50/40 backdrop-blur-md transition-[height] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] shadow-[0_-12px_40px_-12px_rgba(15,23,42,0.18)]"
+      style={{ height }}
+    >
+      {/* Resize handle */}
+      <div
+        onMouseDown={onResizeStart}
+        className="group absolute inset-x-0 top-0 z-10 flex h-2.5 cursor-ns-resize items-center justify-center"
+      >
+        <div className="h-1 w-12 rounded-full bg-slate-300 transition group-hover:bg-slate-500"/>
+      </div>
+
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200/70 px-6 pt-4 pb-3">
+        <div>
+          <div className="text-[13px] font-semibold tracking-tight text-slate-900">PARSE AI</div>
+          <div className="mt-0.5 text-[11px] text-slate-500">
+            Asking about: <span className="font-semibold text-slate-700">{conceptName}</span>
+            <span className="font-mono text-slate-400"> (#{conceptId})</span>
+            <span className="mx-1.5 text-slate-300">•</span>
+            {speakerCount} speakers selected
+          </div>
+        </div>
+        <button
+          onClick={onMinimize}
+          title="Minimize"
+          className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-white/60 hover:text-slate-700"
+        >
+          <ChevronDown className="h-4 w-4"/>
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="mx-auto max-w-3xl space-y-3">
+          {messages.map(m => (
+            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
+                m.role === 'user'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-800 ring-1 ring-slate-200/70 shadow-sm'
+              }`}>
+                {m.content}
+                {m.streaming && <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick actions + input */}
+      <div className="shrink-0 border-t border-slate-200/70 bg-white/50 px-6 py-3 backdrop-blur-sm">
+        <div className="mx-auto max-w-3xl">
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {QUICK_ACTIONS.map(a => (
+              <button
+                key={a}
+                onClick={() => send(a)}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+          <form
+            onSubmit={e => { e.preventDefault(); send(input); }}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-100"
+          >
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={`Ask PARSE AI about ${conceptName}…`}
+              className="flex-1 bg-transparent text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Send <Send className="h-3 w-3"/>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------- Manage Tags View ----------
+interface ManageTagsProps {
+  tags: LingTag[];
+  onCreateTag: (name: string, color: string) => void;
+  tagSearch: string; setTagSearch: (s: string) => void;
+  newTagName: string; setNewTagName: (s: string) => void;
+  newTagColor: string; setNewTagColor: (s: string) => void;
+  showUntagged: boolean; setShowUntagged: (b: boolean) => void;
+  selectedTagId: string | null; setSelectedTagId: (s: string | null) => void;
+  conceptSearch: string; setConceptSearch: (s: string) => void;
+}
+
+const SWATCHES = ['#6366f1','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4','#ec4899','#64748b'];
+
+const ManageTagsView: React.FC<ManageTagsProps> = ({
+  tags, onCreateTag, tagSearch, setTagSearch, newTagName, setNewTagName,
+  newTagColor, setNewTagColor, showUntagged, setShowUntagged,
+  selectedTagId, setSelectedTagId, conceptSearch, setConceptSearch
+}) => {
+  const filteredTags = tags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
+  const selectedTag = tags.find(t => t.id === selectedTagId);
+  const filteredConcepts = CONCEPTS.filter(c => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
+
+  return (
+    <div className="flex flex-1 min-h-0 bg-slate-50">
+      {/* LEFT: tags panel */}
+      <div className="w-[360px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
+        <div className="p-6">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Linguistic tags</h2>
+          <p className="mt-1 text-xs text-slate-400">Organize concepts by review state, borrowing, or custom labels.</p>
+
+          <div className="relative mt-5">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"/>
+            <input
+              value={tagSearch}
+              onChange={e => setTagSearch(e.target.value)}
+              placeholder="Filter tags…"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
+            />
+          </div>
+
+          {/* Create new tag */}
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Create tag</div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={newTagName}
+                onChange={e => setNewTagName(e.target.value)}
+                placeholder="New tag name…"
+                className="flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              />
+              <div className="relative">
+                <div
+                  className="h-7 w-7 rounded-md ring-2 ring-white"
+                  style={{ background: newTagColor, boxShadow: '0 0 0 1px rgb(226 232 240)' }}
+                />
+              </div>
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              {SWATCHES.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setNewTagColor(c)}
+                  className={`h-5 w-5 rounded-full transition ${newTagColor===c ? 'ring-2 ring-offset-1 ring-slate-400' : 'ring-1 ring-slate-200 hover:scale-110'}`}
+                  style={{ background: c }}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => onCreateTag(newTagName, newTagColor)}
+              disabled={!newTagName.trim()}
+              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-200"
+            >
+              <Plus className="h-3 w-3"/> Create
+            </button>
+          </div>
+
+          {/* Toggle */}
+          <div className="mt-5 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+            <span className="text-xs font-medium text-slate-700">Show untagged</span>
+            <button
+              onClick={() => setShowUntagged(!showUntagged)}
+              className={`relative h-5 w-9 rounded-full transition ${showUntagged ? 'bg-indigo-600' : 'bg-slate-300'}`}
+            >
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${showUntagged ? 'left-4' : 'left-0.5'}`}/>
+            </button>
+          </div>
+
+          {/* Tag list */}
+          <div className="mt-5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Tags · {filteredTags.length}</div>
+            <div className="mt-2 space-y-1">
+              {filteredTags.map(t => {
+                const active = selectedTagId === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedTagId(t.id)}
+                    className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition ${active ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'}`}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: t.color, boxShadow: '0 0 0 1px rgb(226 232 240)' }}/>
+                    <span className={`flex-1 text-[13px] ${active ? 'font-semibold text-indigo-900' : 'font-medium text-slate-700'}`}>{t.name}</span>
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{t.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* RIGHT: main content */}
+      <div className="flex-1 overflow-y-auto">
+        {!selectedTag ? (
+          <div className="grid h-full place-items-center px-10 py-20">
+            <div className="text-center">
+              <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 ring-1 ring-indigo-100">
+                <Tag className="h-6 w-6 text-indigo-500"/>
+              </div>
+              <h3 className="mt-5 text-lg font-semibold text-slate-900">Select a tag to assign concepts</h3>
+              <p className="mt-2 max-w-md text-sm text-slate-500">
+                Choose a linguistic tag on the left to browse and bulk-assign it across your 82 concepts.
+                You can also create a new tag above.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="px-10 py-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: selectedTag.color, boxShadow: '0 0 0 1px rgb(226 232 240)' }}/>
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{selectedTag.name}</h1>
+                <Pill tone="indigo">{selectedTag.count} concepts</Pill>
+              </div>
+              <div className="flex gap-2">
+                <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <X className="h-3.5 w-3.5"/> Clear selection
+                </button>
+                <button className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                  <Check className="h-3.5 w-3.5"/> Apply to selected
+                </button>
+              </div>
+            </div>
+
+            <div className="relative mt-6">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"/>
+              <input
+                value={conceptSearch}
+                onChange={e => setConceptSearch(e.target.value)}
+                placeholder="Search concepts to assign…"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
+              />
+            </div>
+
+            <div className="mt-6 grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredConcepts.map(c => (
+                <label
+                  key={c.id}
+                  className="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-indigo-300 hover:shadow-sm"
+                >
+                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"/>
+                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`}/>
+                  <span className="flex-1 text-sm font-medium text-slate-800">{c.name}</span>
+                  <span className="font-mono text-[10px] text-slate-300">#{c.id}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ---------- Annotate View ----------
+/**
+ * AnnotateView — full-page annotation workspace.
+ *
+ * The waveform below is a styled mock that visually mimics wavesurfer.js v7.8.0.
+ * To replace with the real implementation:
+ *
+ *   // TODO: Replace mock with real hook
+ *   import { useWaveSurfer } from 'src/hooks/useWaveSurfer';
+ *   const containerRef = useRef<HTMLDivElement>(null);
+ *   const { wavesurfer, isPlaying, currentTime, duration, play, pause,
+ *           loadAudio, addRegion, zoom } = useWaveSurfer(containerRef, {
+ *     plugins: [RegionsPlugin, TimelinePlugin],
+ *     waveColor: '#c7d2fe',
+ *     progressColor: '#4f46e5',
+ *     cursorColor: '#0f172a',
+ *   });
+ *
+ * The real hook (src/hooks/useWaveSurfer.ts) mounts WaveSurfer into a plain
+ * <div ref={containerRef}/> and wires up RegionsPlugin + TimelinePlugin.
+ *
+ * Spectrogram: the Spectrogram toggle below should later be wired to a worker-
+ * backed overlay. See src/workers/spectrogram-worker.ts — plan is a dedicated
+ * useSpectrogram(containerRef) hook that posts PCM windows to the worker and
+ * draws an FFT heatmap on a sibling canvas.
+ */
+
+interface AnnotateViewProps {
+  concept: Concept;
+  speaker: string;
+  totalConcepts: number;
+  onPrev: () => void;
+  onNext: () => void;
+}
+
+// Deterministic pseudo-waveform (stable per render)
+const WAVE_BARS = Array.from({ length: 220 }, (_, i) => {
+  const x = i / 220;
+  const env = Math.sin(x * Math.PI); // rise-and-fall envelope
+  const noise = Math.abs(Math.sin(i * 1.9) + Math.sin(i * 0.37) * 0.8 + Math.sin(i * 7.1) * 0.4);
+  return Math.max(0.08, Math.min(1, env * 0.85 * noise));
+});
+
+// Mock segmented regions on the virtual timeline
+const REGIONS = [
+  { id: 'r1', start: 0.08, end: 0.18, label: 'one',   color: 'rgba(99,102,241,0.25)',  ring: 'rgba(99,102,241,0.7)'  },
+  { id: 'r2', start: 0.26, end: 0.41, label: 'two',   color: 'rgba(16,185,129,0.22)',  ring: 'rgba(16,185,129,0.7)'  },
+  { id: 'r3', start: 0.52, end: 0.66, label: 'three', color: 'rgba(244,114,182,0.22)', ring: 'rgba(244,114,182,0.7)' },
+  { id: 'r4', start: 0.74, end: 0.88, label: 'four',  color: 'rgba(251,191,36,0.25)',  ring: 'rgba(251,191,36,0.7)'  },
+];
+
+const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext }) => {
+  const [ipa, setIpa] = useState('');
+  const [ortho, setOrtho] = useState('');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playhead, setPlayhead] = useState(0.32); // 0..1 fraction
+  const [zoom, setZoom] = useState(1);
+  const [spectroOn, setSpectroOn] = useState(false);
+  const [activeRegion, setActiveRegion] = useState<string | null>('r2');
+  const [hoverRegion, setHoverRegion] = useState<string | null>(null);
+  const [lexAnchor, setLexAnchor] = useState<'word' | 'concept'>('concept');
+  const waveRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  // Mock duration / current time derived from playhead
+  const duration = 4.82;
+  const currentTime = playhead * duration;
+
+  const fmt = (t: number) => {
+    const m = Math.floor(t / 60).toString().padStart(2, '0');
+    const s = Math.floor(t % 60).toString().padStart(2, '0');
+    const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
+    return `${m}:${s}.${ms}`;
+  };
+
+  const handleSeek = (e: React.MouseEvent) => {
+    const rect = waveRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = (e.clientX - rect.left) / rect.width;
+    setPlayhead(Math.max(0, Math.min(1, x)));
+  };
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    handleSeek(e);
+    const onMove = (ev: MouseEvent) => {
+      if (!draggingRef.current || !waveRef.current) return;
+      const rect = waveRef.current.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) / rect.width;
+      setPlayhead(Math.max(0, Math.min(1, x)));
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <main className="flex-1 overflow-y-auto bg-slate-50">
+      {/* ======= WAVEFORM / VIRTUAL TIMELINE ======= */}
+      <section className="border-b border-slate-200 bg-white">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-2.5">
+          <div className="flex items-center gap-1">
+            <button title="Previous segment" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <SkipBack className="h-3.5 w-3.5"/>
+            </button>
+            <button title="Next segment" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <SkipForward className="h-3.5 w-3.5"/>
+            </button>
+            <div className="mx-2 h-5 w-px bg-slate-200"/>
+            <button onClick={() => setZoom(z => Math.max(0.5, z - 0.25))} title="Zoom out" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <ZoomOut className="h-3.5 w-3.5"/>
+            </button>
+            <div className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500">{zoom.toFixed(2)}×</div>
+            <button onClick={() => setZoom(z => Math.min(4, z + 0.25))} title="Zoom in" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <ZoomIn className="h-3.5 w-3.5"/>
+            </button>
+            <div className="mx-2 h-5 w-px bg-slate-200"/>
+            {/* Lexical anchor align — word vs concept alignment */}
+            <div className="inline-flex items-center gap-1 rounded-md bg-slate-100 p-0.5" title="Lexical anchor align — snap regions to concept boundaries or individual word anchors">
+              <Anchor className="ml-1 h-3 w-3 text-slate-400"/>
+              <button onClick={() => setLexAnchor('concept')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='concept' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Concept</button>
+              <button onClick={() => setLexAnchor('word')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='word' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Word</button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* Spectrogram toggle — wire to src/workers/spectrogram-worker.ts later */}
+            <button
+              onClick={() => setSpectroOn(v => !v)}
+              title="Toggle spectrogram (worker-backed, coming soon)"
+              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold transition ${spectroOn ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Activity className="h-3 w-3"/> Spectrogram
+            </button>
+          </div>
+        </div>
+
+        {/* Waveform container */}
+        <div className="relative px-5 pt-4 pb-2">
+          {/* TODO: Replace mock with real hook
+              const { wavesurfer, isPlaying, loadAudio, ... } = useWaveSurfer(containerRef, {
+                plugins: [RegionsPlugin, TimelinePlugin]
+              });
+              <div ref={containerRef} /> will be mounted by WaveSurfer. */}
+          <div
+            ref={waveRef}
+            onMouseDown={startDrag}
+            className="relative h-32 w-full cursor-crosshair select-none overflow-hidden rounded-lg bg-gradient-to-b from-slate-50 to-white ring-1 ring-slate-100"
+            style={{ backgroundImage: 'linear-gradient(to right, rgba(148,163,184,0.08) 1px, transparent 1px)', backgroundSize: `${100/20}% 100%` }}
+          >
+            {/* Optional spectrogram underlay placeholder */}
+            {spectroOn && (
+              <div
+                className="pointer-events-none absolute inset-0 opacity-70"
+                style={{
+                  background: 'repeating-linear-gradient(90deg, rgba(79,70,229,0.35) 0 2px, rgba(236,72,153,0.25) 2px 4px, rgba(16,185,129,0.25) 4px 6px, transparent 6px 8px)',
+                  mixBlendMode: 'multiply',
+                }}
+                title="Spectrogram placeholder — real FFT heatmap via spectrogram-worker.ts"
+              />
+            )}
+
+            {/* Regions overlay */}
+            {REGIONS.map(r => (
+              <div
+                key={r.id}
+                onMouseEnter={() => setHoverRegion(r.id)}
+                onMouseLeave={() => setHoverRegion(null)}
+                onClick={(e) => { e.stopPropagation(); setActiveRegion(r.id); }}
+                className="absolute inset-y-0 cursor-pointer transition-all"
+                style={{
+                  left: `${r.start * 100}%`,
+                  width: `${(r.end - r.start) * 100}%`,
+                  background: r.color,
+                  boxShadow: (activeRegion === r.id || hoverRegion === r.id) ? `inset 0 0 0 2px ${r.ring}` : `inset 0 0 0 1px ${r.ring}`,
+                }}
+              >
+                <div className="absolute left-1 top-1 rounded bg-white/90 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-slate-700 shadow-sm">
+                  {r.label}
+                </div>
+              </div>
+            ))}
+
+            {/* Waveform bars */}
+            <div className="pointer-events-none absolute inset-0 flex items-center px-0.5">
+              {WAVE_BARS.map((h, i) => {
+                const frac = i / WAVE_BARS.length;
+                const played = frac <= playhead;
+                return (
+                  <div
+                    key={i}
+                    className="mx-[0.5px] flex-1 rounded-full"
+                    style={{
+                      height: `${h * 90}%`,
+                      background: played ? '#4f46e5' : '#c7d2fe',
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Playhead */}
+            <div
+              className="pointer-events-none absolute inset-y-0 w-[2px] bg-slate-900"
+              style={{ left: `calc(${playhead * 100}% - 1px)` }}
+            >
+              <div className="absolute -top-1 -left-1.5 h-3 w-3 rounded-full bg-slate-900 ring-2 ring-white shadow"/>
+            </div>
+          </div>
+
+          {/* Timeline ruler */}
+          <div className="relative mt-1 h-5 select-none font-mono text-[9px] text-slate-400">
+            {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
+              <span key={i} className="absolute -translate-x-1/2" style={{ left: `${f * 100}%` }}>
+                {fmt(f * duration)}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ======= CONCEPT HEADER ======= */}
+      <section className="px-8 pt-6">
+        <div className="mx-auto max-w-4xl">
+          <div className="flex items-center gap-3">
+            <button onClick={onPrev} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
+              <ChevronLeft className="h-4 w-4"/>
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                Concept <span className="font-mono">#{concept.id}</span> <span>·</span> {concept.id} of {totalConcepts}
+              </div>
+              <div className="mt-0.5 flex items-center gap-3">
+                <h1 className="text-[32px] font-semibold tracking-tight text-slate-900">{concept.name}</h1>
+                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                  {speaker}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600 ring-1 ring-rose-200">
+                  Missing
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
+                <span className="text-[9px] uppercase tracking-wider text-slate-400">Source</span>
+                <span className="text-slate-500">{speaker}.wav</span>
+              </div>
+            </div>
+            <button onClick={onNext} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
+              <ChevronRight className="h-4 w-4"/>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ======= TRANSCRIPTION FIELDS ======= */}
+      <section className="px-8 py-6">
+        <div className="mx-auto max-w-4xl space-y-5">
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">IPA Transcription</label>
+            <input
+              value={ipa}
+              onChange={e => setIpa(e.target.value)}
+              placeholder="Enter IPA…"
+              dir="ltr"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-lg text-slate-900 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic (Kurdish)</label>
+            <input
+              value={ortho}
+              onChange={e => setOrtho(e.target.value)}
+              placeholder="Enter orthographic form…"
+              dir="rtl"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-serif text-xl text-slate-900 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
+            />
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-3 pt-2">
+            <button className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700">
+              <Save className="h-4 w-4"/> Save Annotation
+            </button>
+            <button className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">
+              <Check className="h-4 w-4"/> Mark Done
+            </button>
+            <div className="ml-auto text-[11px] text-slate-400">
+              Region <span className="font-mono text-slate-600">{activeRegion ?? '—'}</span> · Anchor: <span className="font-mono text-slate-600">{lexAnchor}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ======= BOTTOM PLAYBACK BAR ======= */}
+      <section className="sticky bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-4xl items-center gap-3 px-8 py-3">
+          <button className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4"/></button>
+          <button onClick={() => setPlayhead(p => Math.max(0, p - 0.05))} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4"/></button>
+          <button
+            onClick={() => setIsPlaying(p => !p)}
+            className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
+          >
+            {isPlaying ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 translate-x-[1px]"/>}
+          </button>
+          <button onClick={() => setPlayhead(p => Math.min(1, p + 0.05))} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronRight className="h-4 w-4"/></button>
+          <button className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipForward className="h-4 w-4"/></button>
+
+          <div className="ml-2 font-mono text-[11px] tabular-nums text-slate-500">
+            {fmt(currentTime)} <span className="text-slate-300">/</span> {fmt(duration)}
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <select className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
+              <option>0.5x</option>
+              <option>0.75x</option>
+              <option defaultValue="1">1.0x</option>
+              <option>1.25x</option>
+              <option>1.5x</option>
+              <option>2.0x</option>
+            </select>
+            <button className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
+              <MessageSquare className="h-3 w-3"/> Chat
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+};
+
+// ---------- Main Component ----------
+export function ParseUI() {
+  const [query, setQuery] = useState('');
+  const [sortMode, setSortMode] = useState<'az'|'1n'>('1n');
+  const [tagFilter, setTagFilter] = useState<TagState>('all');
+  const [conceptId, setConceptId] = useState(1);
+  const [modeTab, setModeTab] = useState<ModeTab>('all');
+  const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['Fail01','Kzn03','Shz05','Tbr07','Isf09']);
+  const [speakerPicker, setSpeakerPicker] = useState('Fail02');
+  const [computeMode, setComputeMode] = useState('cognates');
+  const [notes, setNotes] = useState('');
+  const [borrowingsOpen, setBorrowingsOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [currentMode, setCurrentMode] = useState<AppMode>('compare');
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [tagsList, setTagsList] = useState<LingTag[]>([
+    { id: 'review', name: 'Review needed', color: '#f59e0b', dotClass: 'bg-amber-400', count: 14 },
+    { id: 'confirmed', name: 'Confirmed', color: '#10b981', dotClass: 'bg-emerald-500', count: 23 },
+    { id: 'problematic', name: 'Problematic', color: '#f43f5e', dotClass: 'bg-rose-500', count: 6 },
+  ]);
+  const [tagSearch, setTagSearch] = useState('');
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#6366f1');
+  const [showUntagged, setShowUntagged] = useState(true);
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+  const [tagConceptSearch, setTagConceptSearch] = useState('');
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+  }, [darkMode]);
+
+  // AI bottom panel
+  const [aiHeight, setAiHeight] = useState(() => Math.round(window.innerHeight * 0.4));
+  const [aiMinimized, setAiMinimized] = useState(true);
+  const resizingRef = useRef(false);
+
+  useEffect(() => {
+    if (currentMode === 'annotate') {
+      setSelectedSpeakers(sel => sel.length ? [sel[0]] : ['Fail01']);
+    }
+  }, [currentMode]);
+
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    const startY = e.clientY;
+    const startH = aiHeight;
+    const onMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const dy = startY - ev.clientY;
+      const next = Math.min(Math.max(startH + dy, 120), window.innerHeight - 180);
+      setAiHeight(next);
+    };
+    const onUp = () => {
+      resizingRef.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const filtered = useMemo(() => {
+    let list = CONCEPTS.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
+    if (tagFilter !== 'all') list = list.filter(c => c.tag === tagFilter);
+    if (modeTab === 'unreviewed') list = list.filter(c => c.tag === 'untagged' || c.tag === 'review');
+    if (modeTab === 'flagged') list = list.filter(c => c.tag === 'problematic');
+    if (modeTab === 'borrowings') list = list.filter(c => c.id % 5 === 0);
+    // In annotate mode, scope concept list to the single selected speaker's dataset
+    if (currentMode === 'annotate' && selectedSpeakers[0]) {
+      const seed = selectedSpeakers[0].charCodeAt(0) + selectedSpeakers[0].charCodeAt(1);
+      list = list.filter(c => (c.id + seed) % 3 !== 0);
+    }
+    if (sortMode === 'az') list = [...list].sort((a,b) => a.name.localeCompare(b.name));
+    else list = [...list].sort((a,b) => a.id - b.id);
+    return list;
+  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers]);
+
+  const concept = CONCEPTS.find(c => c.id === conceptId) ?? CONCEPTS[0];
+  const reviewed = 0;
+  const total = CONCEPTS.length;
+
+  const goPrev = () => setConceptId(id => Math.max(1, id - 1));
+  const goNext = () => setConceptId(id => Math.min(total, id + 1));
+  const toggleSpeaker = (s: string) => {
+    if (currentMode === 'annotate') {
+      setSelectedSpeakers([s]);
+      return;
+    }
+    setSelectedSpeakers(sel => sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s]);
+  };
+  const addSpeaker = () => {
+    if (!selectedSpeakers.includes(speakerPicker)) setSelectedSpeakers([...selectedSpeakers, speakerPicker]);
+  };
+
+  const modeTabs: { key: ModeTab; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'unreviewed', label: 'Unreviewed' },
+    { key: 'flagged', label: 'Flagged' },
+    { key: 'borrowings', label: 'Borrowings' },
+  ];
+
+  return (
+    <div className="h-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased flex flex-col">
+      {/* ============ MINIMAL TOP BAR ============ */}
+      <header className="relative z-50 shrink-0 h-14 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
+        <div className="flex h-full items-center justify-between px-5">
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2">
+              <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm">
+                <Layers className="h-4 w-4" />
+              </div>
+              <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE Compare</span>
+            </div>
+            <div className="hidden items-center gap-3 md:flex">
+              <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewed} / {total} reviewed</div>
+              <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${(reviewed/total)*100}%` }}/>
+              </div>
+            </div>
+          </div>
+
+          <nav className="hidden items-center gap-1 rounded-lg bg-slate-100/80 p-0.5 md:flex">
+            {modeTabs.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setModeTab(t.key)}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition ${modeTab === t.key ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-2">
+            {/* Mode dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => { setModeMenuOpen(v => !v); setActionsMenuOpen(false); }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {currentMode === 'annotate' ? 'Annotate' : currentMode === 'compare' ? 'Compare' : 'Manage Tags'}
+                <CDown className="h-3 w-3 text-slate-400"/>
+              </button>
+              {modeMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setModeMenuOpen(false)}/>
+                  <div className="absolute right-0 z-[60] mt-1.5 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                    {([
+                      ['annotate','Annotate', Type],
+                      ['compare','Compare', Layers],
+                      ['tags','Manage Tags', Tags],
+                    ] as const).map(([key,label,Icon]) => (
+                      <button
+                        key={key}
+                        onClick={() => { setCurrentMode(key); setModeMenuOpen(false); }}
+                        className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition ${currentMode===key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        <Icon className="h-3.5 w-3.5 text-slate-400"/>
+                        <span className="flex-1">{label}</span>
+                        {currentMode===key && <Check className="h-3.5 w-3.5 text-indigo-600"/>}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Actions dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => { setActionsMenuOpen(v => !v); setModeMenuOpen(false); }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Actions
+                <CDown className="h-3 w-3 text-slate-400"/>
+              </button>
+              {actionsMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setActionsMenuOpen(false)}/>
+                  <div className="absolute right-0 z-[60] mt-1.5 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                    {([
+                      ['Import Speaker Data…', Import],
+                      ['Run Audio Normalization', AudioLines],
+                      ['Run Orthographic STT', Mic],
+                      ['Run IPA Transcription', Type],
+                      ['Run Full Pipeline', Workflow],
+                      ['Run Cross-Speaker Match', Network],
+                    ] as const).map(([label, Icon]) => (
+                      <button key={label} onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+                        <Icon className="h-3.5 w-3.5 text-slate-400"/> {label}
+                      </button>
+                    ))}
+                    <div className="my-1 border-t border-slate-100"/>
+                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Load Decisions
+                    </button>
+                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+                      <Save className="h-3.5 w-3.5 text-slate-400"/> Save Decisions
+                    </button>
+                    <div className="my-1 border-t border-slate-100"/>
+                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50">
+                      <Trash2 className="h-3.5 w-3.5"/> Reset Project
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              onClick={() => setDarkMode(v => !v)}
+              title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            >
+              {darkMode ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}
+            </button>
+            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-amber-200 to-rose-300 ring-2 ring-white" />
+          </div>
+        </div>
+      </header>
+
+      {/* ============ BODY: left sidebar / main / right panel ============ */}
+      <div className="flex min-h-0 flex-1">
+        {/* LEFT SIDEBAR */}
+        <aside className="w-[250px] shrink-0 border-r border-slate-200/80 bg-white flex flex-col">
+          <div className="p-4 shrink-0">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search concepts…"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <div className="inline-flex rounded-md bg-slate-100 p-0.5">
+                <button onClick={() => setSortMode('az')} className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='az'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>A→Z</button>
+                <button onClick={() => setSortMode('1n')} className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='1n'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>1→N</button>
+              </div>
+              <span className="text-[10px] text-slate-400">{filtered.length} concepts</span>
+            </div>
+          </div>
+          <nav className="flex-1 overflow-y-auto px-2 pb-6">
+            {filtered.map(c => {
+              const active = c.id === conceptId;
+              return (
+                <button key={c.id} onClick={() => setConceptId(c.id)}
+                  className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`} />
+                  <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
+                  <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>#{c.id}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+
+        {/* MAIN + AI STACK */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {currentMode === 'tags' ? (
+          <>
+            <ManageTagsView
+              tags={tagsList}
+              onCreateTag={(name, color) => {
+                if (!name.trim()) return;
+                setTagsList(t => [...t, { id: name.toLowerCase().replace(/\s+/g,'-'), name, color, dotClass: '', count: 0 }]);
+                setNewTagName('');
+              }}
+              tagSearch={tagSearch}
+              setTagSearch={setTagSearch}
+              newTagName={newTagName}
+              setNewTagName={setNewTagName}
+              newTagColor={newTagColor}
+              setNewTagColor={setNewTagColor}
+              showUntagged={showUntagged}
+              setShowUntagged={setShowUntagged}
+              selectedTagId={selectedTagId}
+              setSelectedTagId={setSelectedTagId}
+              conceptSearch={tagConceptSearch}
+              setConceptSearch={setTagConceptSearch}
+            />
+            <AIChat
+              height={aiHeight}
+              minimized={aiMinimized}
+              onResizeStart={onResizeStart}
+              onMinimize={() => setAiMinimized(v => !v)}
+              conceptName={concept.name}
+              conceptId={concept.id}
+              speakerCount={selectedSpeakers.length}
+            />
+          </>
+          ) : currentMode === 'annotate' ? (
+          <>
+            <AnnotateView
+              concept={concept}
+              speaker={selectedSpeakers[0] ?? 'Mand01'}
+              totalConcepts={total}
+              onPrev={goPrev}
+              onNext={goNext}
+            />
+            <AIChat
+              height={aiHeight}
+              minimized={aiMinimized}
+              onResizeStart={onResizeStart}
+              onMinimize={() => setAiMinimized(v => !v)}
+              conceptName={concept.name}
+              conceptId={concept.id}
+              speakerCount={selectedSpeakers.length}
+            />
+          </>
+          ) : (
+          <>
+          <main className="flex-1 overflow-y-auto px-8 py-6">
+            <div className="mx-auto max-w-5xl space-y-5">
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <button onClick={goPrev} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-800">
+                    <ChevronLeft className="h-4 w-4"/>
+                  </button>
+                  <div>
+                    <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                      Concept <span className="font-mono">#{concept.id}</span> <span>·</span> <span>{concept.id} of {total}</span>
+                    </div>
+                    <h1 className="mt-0.5 text-[28px] font-semibold tracking-tight text-slate-900">{concept.name}</h1>
+                  </div>
+                  <button onClick={goNext} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-800">
+                    <ChevronRight className="h-4 w-4"/>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                    <Flag className="h-3.5 w-3.5"/> Flag
+                  </button>
+                  <button className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700">
+                    <Check className="h-3.5 w-3.5"/> Accept concept
+                  </button>
+                </div>
+              </div>
+
+              <SectionCard title="Reference forms">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-500">Arabic</span>
+                      <button className="text-slate-300 hover:text-slate-500"><Volume2 className="h-3.5 w-3.5"/></button>
+                    </div>
+                    <div className="mt-2 font-serif text-2xl text-slate-900" dir="rtl">رماد</div>
+                    <div className="mt-1 font-mono text-[11px] text-slate-400">/ra.maːd/</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">Persian</span>
+                      <button className="text-slate-300 hover:text-slate-500"><Volume2 className="h-3.5 w-3.5"/></button>
+                    </div>
+                    <div className="mt-2 font-serif text-2xl text-slate-900" dir="rtl">خاکستر</div>
+                    <div className="mt-1 font-mono text-[11px] text-slate-400">/xɑː.kes.tær/</div>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
+                aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
+                <div className="overflow-hidden rounded-lg border border-slate-100">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-500">
+                        <th className="px-3 py-2 text-left font-semibold">Speaker</th>
+                        <th className="px-3 py-2 text-left font-semibold">IPA & utterances</th>
+                        <th className="px-3 py-2 text-left font-semibold">Arabic sim.</th>
+                        <th className="px-3 py-2 text-left font-semibold">Persian sim.</th>
+                        <th className="px-3 py-2 text-left font-semibold">Cognate</th>
+                        <th className="px-3 py-2 text-right font-semibold">Flag</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {MOCK_FORMS.filter(f => selectedSpeakers.includes(f.speaker)).map(f => (
+                        <tr key={f.speaker} className="bg-white transition hover:bg-indigo-50/30">
+                          <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-mono text-[13px] text-slate-800">/{f.ipa}/</div>
+                            <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
+                          </td>
+                          <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
+                          <td className="px-3 py-2.5"><SimBar value={f.persianSim}/></td>
+                          <td className="px-3 py-2.5">
+                            <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded px-1 font-mono text-[10px] font-bold ${
+                              f.cognate==='A'?'bg-indigo-100 text-indigo-700':
+                              f.cognate==='B'?'bg-violet-100 text-violet-700':
+                              f.cognate==='C'?'bg-fuchsia-100 text-fuchsia-700':
+                              'bg-slate-100 text-slate-400'
+                            }`}>{f.cognate}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <button className={`inline-grid h-6 w-6 place-items-center rounded-md ${f.flagged?'bg-amber-100 text-amber-600':'text-slate-300 hover:bg-slate-100 hover:text-slate-500'}`}>
+                              <Flag className="h-3 w-3"/>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Cognate decision" aside={<Pill tone="indigo">2 groups proposed</Pill>}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">
+                    <Check className="h-3.5 w-3.5"/> Accept grouping
+                  </button>
+                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    <Split className="h-3.5 w-3.5"/> Split
+                  </button>
+                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    <GitMerge className="h-3.5 w-3.5"/> Merge
+                  </button>
+                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    <RotateCw className="h-3.5 w-3.5"/> Cycle
+                  </button>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Potential borrowings"
+                aside={<button onClick={() => setBorrowingsOpen(v=>!v)} className="text-slate-400 hover:text-slate-700">{borrowingsOpen ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}</button>}>
+                {borrowingsOpen ? (
+                  <div className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500"/>
+                    <div className="text-xs text-slate-600">
+                      <span className="font-semibold text-amber-800">Fail01</span> /ramaːd/ shows a strong Arabic match (0.92) within a predominantly Persian cluster —
+                      possible <span className="font-semibold">Arabic borrowing</span>.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-400">1 candidate hidden</div>
+                )}
+              </SectionCard>
+
+              <SectionCard title="Notes">
+                <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  placeholder="Add observations, etymological notes, or questions for review…"
+                  className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
+              </SectionCard>
+
+              <div className="flex items-center justify-between border-t border-slate-200 pt-5">
+                <span className="text-[11px] text-slate-400">Concept {concept.id} of {total}</span>
+                <div className="flex gap-2">
+                  <button onClick={goPrev} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                    <ChevronLeft className="h-3.5 w-3.5"/> Previous
+                  </button>
+                  <button onClick={goNext} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                    Next <ChevronRight className="h-3.5 w-3.5"/>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </main>
+
+          {/* BOTTOM AI CHAT */}
+          <AIChat
+            height={aiHeight}
+            minimized={aiMinimized}
+            onResizeStart={onResizeStart}
+            onMinimize={() => setAiMinimized(v => !v)}
+            conceptName={concept.name}
+            conceptId={concept.id}
+            speakerCount={selectedSpeakers.length}
+          />
+          </>
+          )}
+        </div>
+
+        {/* RIGHT PANEL */}
+        <aside
+          className={`relative shrink-0 border-l border-slate-200/80 bg-white transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${panelOpen ? 'w-[250px]' : 'w-[52px]'}`}
+        >
+          {/* Toggle */}
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/90 px-3 py-2.5 backdrop-blur">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider text-slate-500 transition-opacity duration-300 ${panelOpen ? 'opacity-100' : 'opacity-0'}`}>
+              Controls
+            </span>
+            <button
+              onClick={() => setPanelOpen(v => !v)}
+              title={panelOpen ? 'Collapse' : 'Expand'}
+              className="grid h-7 w-7 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+            >
+              <PanelRightClose className={`h-3.5 w-3.5 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${panelOpen ? '' : 'rotate-180'}`}/>
+            </button>
+          </div>
+
+          {/* Collapsed icon rail */}
+          <div className={`absolute inset-x-0 top-[46px] flex flex-col items-center gap-1 py-3 transition-opacity duration-300 ${panelOpen ? 'pointer-events-none opacity-0' : 'opacity-100 delay-200'}`}>
+            {[
+              { icon: Database, label: 'Project' },
+              { icon: UsersIcon, label: 'Speakers' },
+              { icon: Cpu, label: 'Compute' },
+              { icon: Filter, label: 'Filters' },
+              { icon: Save, label: 'Decisions' },
+            ].map(({ icon: Icon, label }) => (
+              <button
+                key={label}
+                title={label}
+                onClick={() => setPanelOpen(true)}
+                className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
+              >
+                <Icon className="h-4 w-4"/>
+              </button>
+            ))}
+          </div>
+
+          {/* Expanded content */}
+          <div className={`h-[calc(100%-46px)] overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${panelOpen ? 'opacity-100 delay-200' : 'pointer-events-none opacity-0'}`} style={{ width: 250 }}>
+            {/* --- COMMON: Speakers --- */}
+            <div className="border-b border-slate-100 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  Speakers {currentMode === 'annotate' && <span className="ml-1 rounded bg-indigo-50 px-1 py-0.5 font-mono text-[8px] text-indigo-600">SINGLE</span>}
+                </h4>
+                <span className="text-[10px] text-slate-400">
+                  {currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {SPEAKERS.length}
+                </span>
+              </div>
+              <div className="mb-2 flex gap-1">
+                <select
+                  value={currentMode === 'annotate' ? (selectedSpeakers[0] ?? '') : speakerPicker}
+                  onChange={e => {
+                    if (currentMode === 'annotate') setSelectedSpeakers([e.target.value]);
+                    else setSpeakerPicker(e.target.value);
+                  }}
+                  className="flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
+                  {SPEAKERS.map(s => <option key={s}>{s}</option>)}
+                </select>
+                {currentMode === 'compare' && (
+                  <button onClick={addSpeaker} className="grid h-6 w-6 place-items-center rounded-md bg-slate-900 text-white hover:bg-slate-700">
+                    <Plus className="h-3 w-3"/>
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {SPEAKERS.map(s => {
+                  const active = currentMode === 'annotate' ? selectedSpeakers[0] === s : selectedSpeakers.includes(s);
+                  return (
+                    <button key={s} onClick={() => toggleSpeaker(s)}
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] transition ${active ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' : 'bg-slate-50 text-slate-400 ring-1 ring-slate-100 hover:text-slate-600'}`}>
+                      {s}{active && currentMode === 'compare' && <X className="h-2.5 w-2.5"/>}
+                      {active && currentMode === 'annotate' && <Check className="h-2.5 w-2.5"/>}
+                    </button>
+                  );
+                })}
+              </div>
+              {currentMode === 'annotate' && (
+                <p className="mt-2 text-[10px] leading-snug text-slate-400">
+                  Concept list scoped to <span className="font-mono text-slate-600">{selectedSpeakers[0]}</span>'s dataset.
+                </p>
+              )}
+            </div>
+
+            {currentMode === 'compare' ? (
+              <>
+                {/* --- COMPARE: Compute --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compute</h4>
+                  <select value={computeMode} onChange={e => setComputeMode(e.target.value)}
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
+                    <option value="cognates">Cognates</option>
+                    <option value="similarity">Phonetic similarity</option>
+                    <option value="alignment">Alignment</option>
+                    <option value="borrowings">Borrowing detection</option>
+                  </select>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700">
+                      <Play className="h-3 w-3"/> Run
+                    </button>
+                    <button className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
+                      <RefreshCw className="h-3 w-3"/> Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {/* --- COMPARE: Status --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Status</h4>
+                  <div className="mb-2 flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500"/>
+                    <span className="text-[11px] font-semibold text-slate-700">project.json</span>
+                    <span className="ml-auto text-[10px] text-slate-400">loaded</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                      <div className="font-mono text-sm font-semibold text-slate-900">11</div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">speakers</div>
+                    </div>
+                    <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                      <div className="font-mono text-sm font-semibold text-slate-900">82</div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">concepts</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* --- COMPARE: Filter by tag --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Filter className="h-3 w-3"/> Filter by tag
+                  </h4>
+                  <div className="space-y-1">
+                    {([
+                      ['all','All concepts','bg-slate-400'],
+                      ['untagged','Untagged','bg-slate-300'],
+                      ['review','Review needed','bg-amber-400'],
+                      ['confirmed','Confirmed','bg-emerald-500'],
+                      ['problematic','Problematic','bg-rose-500'],
+                    ] as const).map(([key,label,dot]) => (
+                      <button key={key} onClick={() => setTagFilter(key)}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter===key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`}/>{label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Decisions</h4>
+                  <div className="space-y-1.5">
+                    <button className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50">
+                      <Upload className="h-3 w-3"/> Load decisions
+                    </button>
+                    <button className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700">
+                      <Save className="h-3 w-3"/> Save decisions
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* --- ANNOTATE: Phonetic Tools --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Activity className="h-3 w-3"/> Phonetic tools
+                  </h4>
+                  <p className="mb-3 text-[10px] leading-snug text-slate-400">
+                    Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
+                  </p>
+
+                  <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
+                    <Layers className="h-3.5 w-3.5"/>
+                    <span className="flex-1 text-left">Spectrogram workspace</span>
+                    <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-indigo-600">ON</span>
+                  </button>
+
+                  <div className="space-y-1">
+                    {([
+                      { icon: AudioLines, label: 'Waveform view', hint: 'Segment-aware' },
+                      { icon: Video, label: 'Video clip', hint: 'Synced to timeline' },
+                      { icon: Scissors, label: 'Segment controls', hint: 'Split · Trim · Join' },
+                      { icon: SlidersHorizontal, label: 'Formant tracker', hint: 'Praat-compatible' },
+                      { icon: Mic, label: 'Re-record utterance', hint: 'Overlay on segment' },
+                    ] as const).map(({ icon: Icon, label, hint }) => (
+                      <button key={label} className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-slate-50">
+                        <Icon className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-600"/>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
+                          <div className="text-[9px] text-slate-400 truncate">{hint}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* --- ANNOTATE: Tag filter + Save --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Filter className="h-3 w-3"/> Filter concepts
+                  </h4>
+                  <div className="space-y-1">
+                    {([
+                      ['all','All concepts','bg-slate-400'],
+                      ['untagged','Untagged','bg-slate-300'],
+                      ['review','Review needed','bg-amber-400'],
+                      ['confirmed','Confirmed','bg-emerald-500'],
+                      ['problematic','Problematic','bg-rose-500'],
+                    ] as const).map(([key,label,dot]) => (
+                      <button key={key} onClick={() => setTagFilter(key)}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter===key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`}/>{label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  <button className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700">
+                    <Save className="h-3 w-3"/> Save annotations
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
