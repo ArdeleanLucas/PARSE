@@ -12,7 +12,7 @@ import {
   Sun, Moon
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, startSTT, startCompute } from './api/client';
+import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -1507,9 +1507,7 @@ export function ParseUI() {
                         setActionsMenuOpen(false);
                         const speaker = selectedSpeakers[0];
                         if (!speaker) return;
-                        import('./api/client').then(({ startNormalize }) => {
-                          void startNormalize(speaker).catch(err => console.error('[ParseUI] normalize failed:', err));
-                        });
+                        void startNormalize(speaker).catch(err => console.error('[ParseUI] normalize failed:', err));
                       }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
                     >
