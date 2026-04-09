@@ -1,9 +1,16 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
-## Current State (updated 2026-04-08)
+## Current State (updated 2026-05-14)
 
 PARSE has already crossed the React pivot integration point on **`feat/parse-react-vite`**.
 
+- **UI Redesign complete** on `feat/annotate-ui-redesign` (MC-294):
+  - `src/ParseUI.tsx` — 1482-line unified shell (Annotate + Compare + Tags + AI Chat in one layout)
+  - `App.tsx` simplified to `<BrowserRouter><ParseUI /></BrowserRouter>`
+  - Dependencies added: `lucide-react`, `tailwindcss v3`, `postcss`, `autoprefixer`
+  - Wired: `useWaveSurfer`, `useChatSession`, `useConfigStore`, `useTagStore`, `usePlaybackStore`, `useUIStore`, `useAnnotationSync`
+  - tsc: clean compile · pending PR merge to `main`
+  - TODO next: MOCK_FORMS → real store, Save Annotation intervals, spectrogram Worker, Cognate compute
 - **Phase C1–C4 complete** on integration branch:
   - Track merge (`feat/annotate-react` + `feat/compare-react`)
   - Cross-mode navigation (Annotate ↔ Compare)

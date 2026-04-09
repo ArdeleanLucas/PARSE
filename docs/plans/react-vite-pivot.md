@@ -43,6 +43,7 @@ with a React + Vite frontend, keeping the Python backend (port 8766) completely 
 | B9 Browser integration | — | PENDING Lucas | manual |
 | agent-gpt EnrichmentsPanel rebase | feat/compare-react | PENDING agent-gpt | rebase onto ad09bcf |
 | Phase C merge | feat/parse-react-vite | BLOCKED — wait for agent-gpt rebase | — |
+| **UI Redesign — ParseUI unified shell** | **feat/annotate-ui-redesign** | **DONE fd955cc** | **tsc clean** |
 
 ---
 
