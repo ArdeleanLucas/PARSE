@@ -17,6 +17,7 @@ import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useConfigStore } from './stores/configStore';
+import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
@@ -61,14 +62,6 @@ const CONCEPTS: Concept[] = [
 }));
 
 const SPEAKERS = ['Fail01','Fail02','Kzn03','Kzn04','Shz05','Shz06','Tbr07','Tbr08','Isf09','Isf10','Teh11'];
-
-const MOCK_FORMS: SpeakerForm[] = [
-  { speaker: 'Fail01', ipa: 'ramaːd',   utterances: 3, arabicSim: 0.92, persianSim: 0.41, cognate: 'A', flagged: false },
-  { speaker: 'Kzn03',  ipa: 'xɑːkestæɾ', utterances: 2, arabicSim: 0.18, persianSim: 0.96, cognate: 'B', flagged: false },
-  { speaker: 'Shz05',  ipa: 'xakestær',  utterances: 4, arabicSim: 0.20, persianSim: 0.94, cognate: 'B', flagged: false },
-  { speaker: 'Tbr07',  ipa: 'ramɑd',     utterances: 1, arabicSim: 0.88, persianSim: 0.39, cognate: 'A', flagged: true  },
-  { speaker: 'Isf09',  ipa: 'xɑkestaɾ',  utterances: 2, arabicSim: 0.21, persianSim: 0.93, cognate: 'B', flagged: false },
-];
 
 const tagDot: Record<ConceptTag, string> = {
   untagged: 'bg-slate-300', review: 'bg-amber-400',
@@ -119,6 +112,50 @@ function findAnnotationForConcept(record: AnnotationRecord | null | undefined, c
   const orthoInterval = (record.tiers.ortho?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
 
   return { conceptInterval, ipaInterval, orthoInterval };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildSpeakerForm(
+  record: AnnotationRecord | null | undefined,
+  concept: Concept,
+  speaker: string,
+  enrichments: Record<string, unknown>,
+  flagged: boolean,
+): SpeakerForm {
+  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.text));
+  const ipaIntervals = record?.tiers.ipa?.intervals ?? [];
+  const matchingIpaIntervals = ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval)));
+
+  const similarityRoot = isRecord(enrichments.similarity) ? enrichments.similarity : null;
+  const conceptSimilarity = similarityRoot && isRecord(similarityRoot[concept.key]) ? similarityRoot[concept.key] as Record<string, unknown> : null;
+  const speakerSimilarity = conceptSimilarity && isRecord(conceptSimilarity[speaker]) ? conceptSimilarity[speaker] as Record<string, unknown> : null;
+  const arabicSim = typeof speakerSimilarity?.ar === 'number' ? speakerSimilarity.ar : 0;
+  const persianSim = typeof speakerSimilarity?.tr === 'number' ? speakerSimilarity.tr : 0;
+
+  const cognateSets = isRecord(enrichments.cognate_sets) ? enrichments.cognate_sets : null;
+  const conceptCognates = cognateSets && isRecord(cognateSets[concept.key]) ? cognateSets[concept.key] as Record<string, unknown> : null;
+  let cognate: SpeakerForm['cognate'] = '—';
+  if (conceptCognates) {
+    for (const [group, members] of Object.entries(conceptCognates)) {
+      if (Array.isArray(members) && members.includes(speaker) && (group === 'A' || group === 'B' || group === 'C')) {
+        cognate = group;
+        break;
+      }
+    }
+  }
+
+  return {
+    speaker,
+    ipa: matchingIpaIntervals[0]?.text ?? '',
+    utterances: matchingIpaIntervals.length,
+    arabicSim,
+    persianSim,
+    cognate,
+    flagged,
+  };
 }
 
 const SimBar: React.FC<{ value: number }> = ({ value }) => (
@@ -753,7 +790,11 @@ export function ParseUI() {
   const storeTags        = useTagStore(s => s.tags);
   const storeAddTag      = useTagStore(s => s.addTag);
   const hydrateTagStore  = useTagStore(s => s.hydrate);
+  const tagConcept       = useTagStore(s => s.tagConcept);
+  const untagConcept     = useTagStore(s => s.untagConcept);
   const getTagsForConcept = useTagStore(s => s.getTagsForConcept);
+  const annotationRecords = useAnnotationStore(s => s.records);
+  const enrichmentData = useEnrichmentStore(s => s.data);
   const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
   // — Chat session (one instance for the whole UI) —
   const chatSession = useChatSession();
@@ -859,7 +900,19 @@ export function ParseUI() {
     return list;
   }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers]);
 
-  const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, name: '—', tag: 'untagged' as ConceptTag };
+  const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
+  const speakerForms = useMemo<SpeakerForm[]>(() => {
+    const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
+    const flagged = getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic');
+
+    return activeSpeakers.map((speaker) => buildSpeakerForm(
+      annotationRecords[speaker],
+      concept,
+      speaker,
+      enrichmentData,
+      flagged,
+    ));
+  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, selectedSpeakers, speakers]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
 
@@ -1111,10 +1164,20 @@ export function ParseUI() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                  <button
+                    onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic')
+                      ? null
+                      : tagConcept('problematic', concept.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic') ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                  >
                     <Flag className="h-3.5 w-3.5"/> Flag
                   </button>
-                  <button className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700">
+                  <button
+                    onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed')
+                      ? null
+                      : tagConcept('confirmed', concept.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                  >
                     <Check className="h-3.5 w-3.5"/> Accept concept
                   </button>
                 </div>
@@ -1156,7 +1219,7 @@ export function ParseUI() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {MOCK_FORMS.filter(f => selectedSpeakers.includes(f.speaker)).map(f => (
+                      {speakerForms.map(f => (
                         <tr key={f.speaker} className="bg-white transition hover:bg-indigo-50/30">
                           <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
                           <td className="px-3 py-2.5">
@@ -1174,7 +1237,11 @@ export function ParseUI() {
                             }`}>{f.cognate}</span>
                           </td>
                           <td className="px-3 py-2.5 text-right">
-                            <button className={`inline-grid h-6 w-6 place-items-center rounded-md ${f.flagged?'bg-amber-100 text-amber-600':'text-slate-300 hover:bg-slate-100 hover:text-slate-500'}`}>
+                            <button
+                              title={`Toggle speaker flag for ${f.speaker}`}
+                              onClick={() => f.flagged ? untagConcept('problematic', concept.key) : tagConcept('problematic', concept.key)}
+                              className={`inline-grid h-6 w-6 place-items-center rounded-md ${f.flagged?'bg-amber-100 text-amber-600':'text-slate-300 hover:bg-slate-100 hover:text-slate-500'}`}
+                            >
                               <Flag className="h-3 w-3"/>
                             </button>
                           </td>
