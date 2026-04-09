@@ -1958,6 +1958,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_contact_lexeme_coverage()
             return
 
+        if request_path == "/api/tags":
+            self._api_get_tags()
+            return
+
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
@@ -1997,6 +2001,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_update_config()
             return
 
+        if request_path == "/api/auth/key":
+            self._api_auth_key()
+            return
+
         if request_path == "/api/auth/start":
             self._api_auth_start()
             return
@@ -2007,6 +2015,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/auth/logout":
             self._api_auth_logout()
+            return
+
+        if request_path == "/api/tags/merge":
+            self._api_post_tags_merge()
             return
 
         parts = self._path_parts(request_path)
@@ -2362,6 +2374,23 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Auth endpoints ──────────────────────────────────────────────
 
+    def _api_auth_key(self) -> None:
+        """POST /api/auth/key — store a direct API key."""
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            key = str(data.get("key") or "").strip()
+            provider = str(data.get("provider") or "xai").strip()
+            if not key:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "key is required"})
+                return
+            from ai.openai_auth import save_api_key, get_auth_status
+            save_api_key(key, provider)
+            status = get_auth_status()
+            self._send_json(HTTPStatus.OK, status)
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
     def _api_auth_status(self) -> None:
         from ai.openai_auth import get_auth_status
         self._send_json(HTTPStatus.OK, get_auth_status())
@@ -2384,10 +2413,93 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         clear_tokens()
         self._send_json(HTTPStatus.OK, {"success": True})
 
+    # ── Tag endpoints ────────────────────────────────────────────
+
+    def _api_get_tags(self) -> None:
+        """GET /api/tags — return parse-tags.json as tag array."""
+        tags_path = _project_root() / "parse-tags.json"
+        if not tags_path.exists():
+            self._send_json(HTTPStatus.OK, {"tags": []})
+            return
+        try:
+            with open(tags_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self._send_json(HTTPStatus.OK, {"tags": data})
+            else:
+                self._send_json(HTTPStatus.OK, {"tags": []})
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
+    def _api_post_tags_merge(self) -> None:
+        """POST /api/tags/merge — additive merge of incoming tags into parse-tags.json."""
+        try:
+            data = self._expect_object(self._read_json_body(required=True), "Request body")
+            incoming = data.get("tags")
+            if not isinstance(incoming, list):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "tags must be an array"})
+                return
+
+            tags_path = _project_root() / "parse-tags.json"
+            existing: list = []
+            if tags_path.exists():
+                try:
+                    with open(tags_path, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    if isinstance(raw, list):
+                        existing = raw
+                except Exception:
+                    existing = []
+
+            existing_by_id = {t["id"]: t for t in existing if isinstance(t, dict) and "id" in t}
+            for tag in incoming:
+                if not isinstance(tag, dict) or "id" not in tag:
+                    continue
+                tid = str(tag["id"])
+                if tid in existing_by_id:
+                    prev = existing_by_id[tid]
+                    merged = set(prev.get("concepts") or [])
+                    merged.update(tag.get("concepts") or [])
+                    prev["concepts"] = sorted(merged)
+                    prev["label"] = tag.get("label", prev.get("label", ""))
+                    prev["color"] = tag.get("color", prev.get("color", "#6b7280"))
+                else:
+                    existing_by_id[tid] = {
+                        "id": tid,
+                        "label": str(tag.get("label") or ""),
+                        "color": str(tag.get("color") or "#6b7280"),
+                        "concepts": sorted(set(tag.get("concepts") or [])),
+                    }
+
+            merged_list = list(existing_by_id.values())
+            with open(tags_path, "w", encoding="utf-8") as f:
+                json.dump(merged_list, f, indent=2, ensure_ascii=False)
+
+            self._send_json(HTTPStatus.OK, {"ok": True, "tagCount": len(merged_list)})
+        except ApiError:
+            raise
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
     # ── Config endpoints ─────────────────────────────────────────
 
     def _api_get_config(self) -> None:
         config = load_ai_config(_config_path())
+
+        # Inject concepts from concepts.csv
+        concepts_path = _project_root() / "concepts.csv"
+        concepts: list = []
+        if concepts_path.exists():
+            import csv as _csv
+            with open(concepts_path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    cid = str(row.get("id") or "").strip()
+                    label = str(row.get("concept_en") or "").strip()
+                    if cid and label:
+                        concepts.append({"id": cid, "label": label})
+        config["concepts"] = concepts
+
         self._send_json(HTTPStatus.OK, {"config": config})
 
     def _api_get_export_lingpy(self) -> None:

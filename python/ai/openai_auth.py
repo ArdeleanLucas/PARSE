@@ -307,11 +307,27 @@ def poll_device_auth() -> Dict[str, Any]:
 
 def get_auth_status() -> Dict[str, Any]:
     """Return current auth status."""
+    # Check direct API key first
+    path = _token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw_tokens = json.load(f)
+        if raw_tokens.get("direct_api_key", "").strip():
+            return {
+                "authenticated": True,
+                "method": "api_key",
+                "provider": raw_tokens.get("direct_api_key_provider", "xai"),
+            }
+    except (json.JSONDecodeError, OSError):
+        pass
+
     tokens = load_tokens()
     if tokens:
         expires = tokens.get("expires", 0)
         return {
             "authenticated": True,
+            "method": "oauth",
+            "provider": "openai",
             "expires_in": max(0, int(expires - time.time())) if expires else None,
         }
 
@@ -325,3 +341,43 @@ def get_auth_status() -> Dict[str, Any]:
             }
 
     return {"authenticated": False, "flow_active": False}
+
+
+def save_api_key(key: str, provider: str = "xai") -> None:
+    """Save a direct API key to auth_tokens.json."""
+    path = _token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        tokens = {}
+    tokens["direct_api_key"] = key.strip()
+    tokens["direct_api_key_provider"] = provider.strip()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, indent=2)
+
+
+def get_api_key() -> Optional[str]:
+    """Return saved direct API key, or None."""
+    path = _token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+        key = tokens.get("direct_api_key", "").strip()
+        return key if key else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def clear_api_key() -> None:
+    """Remove the stored direct API key."""
+    path = _token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+        tokens.pop("direct_api_key", None)
+        tokens.pop("direct_api_key_provider", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(tokens, f, indent=2)
+    except (json.JSONDecodeError, OSError):
+        pass

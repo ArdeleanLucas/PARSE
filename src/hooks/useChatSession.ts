@@ -113,6 +113,14 @@ export function useChatSession(): UseChatSessionResult {
         timestamp: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, assistantMsg])
+
+      // Sync tags from server after every agent response
+      try {
+        const { useTagStore } = await import("../stores/tagStore")
+        useTagStore.getState().syncFromServer()
+      } catch {
+        // non-fatal
+      }
     } catch (e) {
       if (!(e instanceof Error && e.message === "Aborted")) {
         setError(e instanceof Error ? e.message : "Send failed")

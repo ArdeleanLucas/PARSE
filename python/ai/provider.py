@@ -214,12 +214,14 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
     resolved = _deep_merge_dicts(defaults, chat_config)
 
     provider_name = str(resolved.get("provider") or "openai").strip().lower()
-    if provider_name != "openai":
+    _SUPPORTED_CHAT_PROVIDERS = {"openai", "xai", "grok", "x.ai"}
+    if provider_name not in _SUPPORTED_CHAT_PROVIDERS:
         print(
             "[WARN] chat.provider={0!r} is unsupported; forcing 'openai'".format(provider_name),
             file=sys.stderr,
         )
-    resolved["provider"] = "openai"
+        provider_name = "openai"
+    resolved["provider"] = provider_name
 
     model_name = str(resolved.get("model") or "").strip()
     resolved["model"] = model_name or "gpt54"
@@ -315,6 +317,25 @@ class OpenAIChatRuntime:
     def _load_client(self) -> Any:
         if self._client is not None:
             return self._client
+
+        # Check direct API key first (paste-key flow)
+        try:
+            try:
+                from python.ai.openai_auth import get_api_key as _get_direct_key
+            except ImportError:
+                from .openai_auth import get_api_key as _get_direct_key
+            _direct_key = _get_direct_key()
+            if _direct_key:
+                # Build client with direct key and correct base_url for provider
+                _base_url = self.chat_config.get("base_url") or None
+                try:
+                    from openai import OpenAI
+                except ImportError as exc:
+                    raise RuntimeError("openai dependency missing") from exc
+                self._client = OpenAI(api_key=_direct_key, base_url=_base_url)
+                return self._client
+        except Exception:
+            pass
 
         api_key = os.environ.get(self.api_key_env, "").strip()
 

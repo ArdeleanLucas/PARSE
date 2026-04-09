@@ -20,6 +20,9 @@ interface TagStore {
   untagConcept: (tagId: string, conceptId: string) => void;
   getTagsForConcept: (conceptId: string) => Tag[];
 
+  syncFromServer: () => Promise<void>;
+  mergeFromServer: (tags: Tag[]) => void;
+
   persist: () => void;
   hydrate: () => void;
 }
@@ -93,6 +96,42 @@ export const useTagStore = create<TagStore>()((set, get) => ({
     const normalized = conceptId?.toString().trim() || "";
     if (!normalized) return [];
     return get().tags.filter((tag) => tag.concepts.includes(normalized));
+  },
+
+  mergeFromServer: (incomingTags: Tag[]) => {
+    set((state) => {
+      const existingById: Record<string, Tag> = {};
+      for (const t of state.tags) {
+        existingById[t.id] = { ...t };
+      }
+      for (const t of incomingTags) {
+        if (existingById[t.id]) {
+          const merged = new Set([...existingById[t.id].concepts, ...t.concepts]);
+          existingById[t.id] = {
+            ...existingById[t.id],
+            label: t.label,
+            color: t.color,
+            concepts: Array.from(merged),
+          };
+        } else {
+          existingById[t.id] = { ...t };
+        }
+      }
+      return { tags: Object.values(existingById) };
+    });
+    get().persist();
+  },
+
+  syncFromServer: async () => {
+    try {
+      const { getTags } = await import("../api/client");
+      const resp = await getTags();
+      if (resp.tags && resp.tags.length > 0) {
+        get().mergeFromServer(resp.tags);
+      }
+    } catch {
+      // non-fatal — localStorage tags remain
+    }
   },
 
   persist: () => {

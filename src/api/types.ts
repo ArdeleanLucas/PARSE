@@ -22,10 +22,16 @@ export interface AnnotationRecord {
   source_wav: string;
 }
 
+export interface ConceptEntry {
+  id: string;
+  label: string;
+}
+
 export interface ProjectConfig {
   project_name: string;
   language_code: string;
-  speakers: string[];
+  speakers?: string[];
+  concepts: ConceptEntry[];
   audio_dir: string;
   annotations_dir: string;
   [key: string]: unknown;
@@ -40,9 +46,17 @@ export interface Tag {
   concepts: string[]; // concept ids that carry this tag
 }
 
+export interface TagsResponse {
+  tags: Tag[];
+}
+
 export interface AuthStatus {
   authenticated: boolean;
-  provider: string;
+  provider?: string;
+  method?: "api_key" | "oauth";
+  flow_active?: boolean;
+  user_code?: string;
+  verification_uri?: string;
 }
 
 export interface STTJob {
