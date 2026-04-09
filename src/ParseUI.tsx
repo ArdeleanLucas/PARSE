@@ -959,10 +959,36 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
         {/* Toolbar */}
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-2.5">
           <div className="flex items-center gap-1">
-            <button title="Previous segment" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+            <button
+              title="Previous segment"
+              className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              onClick={() => {
+                const intervals = record?.tiers.concept?.intervals ?? [];
+                const prev = intervals
+                  .filter(iv => iv.end < currentTime - 0.1)
+                  .sort((a, b) => b.end - a.end)[0];
+                if (prev) {
+                  skip(-(currentTime - prev.start));
+                } else {
+                  skip(-currentTime);
+                }
+              }}
+            >
               <SkipBack className="h-3.5 w-3.5"/>
             </button>
-            <button title="Next segment" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+            <button
+              title="Next segment"
+              className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              onClick={() => {
+                const intervals = record?.tiers.concept?.intervals ?? [];
+                const next = intervals
+                  .filter(iv => iv.start > currentTime + 0.1)
+                  .sort((a, b) => a.start - b.start)[0];
+                if (next) {
+                  skip(next.start - currentTime);
+                }
+              }}
+            >
               <SkipForward className="h-3.5 w-3.5"/>
             </button>
             <div className="mx-2 h-5 w-px bg-slate-200"/>
@@ -1994,7 +2020,13 @@ export function ParseUI() {
                 </div>
 
                 <div className="p-4">
-                  <button className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700">
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                    onClick={() => {
+                      const speaker = selectedSpeakers[0];
+                      if (speaker) void useAnnotationStore.getState().saveSpeaker(speaker);
+                    }}
+                  >
                     <Save className="h-3 w-3"/> Save annotations
                   </button>
                 </div>
