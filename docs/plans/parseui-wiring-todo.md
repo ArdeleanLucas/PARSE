@@ -1,9 +1,11 @@
-# ParseUI Wiring TODO — for parse-gpt
+# ParseUI Wiring TODO — historical archive
 
-> **Branch:** `feat/annotate-ui-redesign`
-> **File:** `src/ParseUI.tsx`
-> **Status:** UI shell complete, hooks/stores partially wired. Work through this list top to bottom — priority order.
-> **Rule:** Run `npm run check` (tsc --noEmit) after every task. Do not proceed if it errors.
+> **Status:** Historical plan only — do **not** use this file as the live execution guide.
+> **Original branch context:** `feat/annotate-ui-redesign`
+> **Why archived:** this file predates the current `origin/main` state, the strict branch policy in `AGENTS.md`, and multiple merged ParseUI wiring slices.
+> **Already landed since this plan was written:** annotate prefill/save/mark/badge, compare real speaker forms/reference/reviewed count, import modal, notes persistence, compute run/refresh basic wiring, and decisions load/save basics.
+> **Current source of truth:** `docs/plans/parseui-current-state-plan.md`
+> **Rule:** For new work, start from `origin/main` and use the live client/server contract (`src/api/client.ts`, `python/server.py`) rather than the raw endpoint suggestions below.
 
 ---
 

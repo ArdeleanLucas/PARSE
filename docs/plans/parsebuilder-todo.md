@@ -6,6 +6,14 @@
 
 ---
 
+## Current execution plan
+
+- Live execution guide: `docs/plans/parseui-current-state-plan.md`
+- Historical archive only: `docs/plans/parseui-wiring-todo.md`
+- Short version: most early ParseUI wiring tasks are already done; the remaining work is contract reconciliation around Actions / compute / decisions, followed by C5/C6 evidence.
+
+---
+
 ## 🔒 Blocked
 
 ### MC-299 — C6 Browser Regression Checklist
