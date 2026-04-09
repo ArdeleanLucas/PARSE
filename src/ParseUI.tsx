@@ -506,10 +506,11 @@ interface AnnotateViewProps {
 
 const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext, audioUrl, peaksUrl }) => {
   const record = useAnnotationStore(s => s.records[speaker] ?? null);
+  const setInterval = useAnnotationStore(s => s.setInterval);
   const saveSpeaker = useAnnotationStore(s => s.saveSpeaker);
+  const tagConcept = useTagStore(s => s.tagConcept);
 
-  // Pre-populate IPA/ortho from store when concept or speaker changes
-  const { ipaInterval, orthoInterval } = useMemo(
+  const { conceptInterval, ipaInterval, orthoInterval } = useMemo(
     () => findAnnotationForConcept(record, concept),
     [record, concept]
   );
@@ -518,7 +519,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   useEffect(() => {
     setIpa(ipaInterval?.text ?? '');
     setOrtho(orthoInterval?.text ?? '');
-  }, [ipaInterval, orthoInterval]);
+  }, [speaker, concept.key, ipaInterval, orthoInterval]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [activeRegion] = useState<string | null>(null);
@@ -527,10 +528,11 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Playback state (written by useWaveSurfer via callbacks)
   const isPlaying = usePlaybackStore(s => s.isPlaying);
   const currentTime = usePlaybackStore(s => s.currentTime);
   const duration = usePlaybackStore(s => s.duration);
+  const selectedRegion = usePlaybackStore(s => s.selectedRegion);
+  const annotated = Boolean(conceptInterval && ipaInterval);
 
   const { playPause, skip, setZoom: wsSetZoom, setRate } = useWaveSurfer({
     containerRef,
@@ -630,9 +632,15 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
                 <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
                   {speaker}
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600 ring-1 ring-rose-200">
-                  Missing
-                </span>
+                {annotated ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                    Annotated
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600 ring-1 ring-rose-200">
+                    Missing
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
                 <span className="text-[9px] uppercase tracking-wider text-slate-400">Source</span>
@@ -674,16 +682,26 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           {/* Action buttons */}
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={() => { void saveSpeaker(speaker); }}
+              onClick={() => {
+                if (!selectedRegion) return;
+                const interval = { start: selectedRegion.start, end: selectedRegion.end };
+                setInterval(speaker, 'ipa', { ...interval, text: ipa });
+                setInterval(speaker, 'ortho', { ...interval, text: ortho });
+                setInterval(speaker, 'concept', { ...interval, text: concept.name });
+                void saveSpeaker(speaker);
+              }}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
             >
               <Save className="h-4 w-4"/> Save Annotation
             </button>
-            <button className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">
+            <button
+              onClick={() => tagConcept('confirmed', concept.key)}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
+            >
               <Check className="h-4 w-4"/> Mark Done
             </button>
             <div className="ml-auto text-[11px] text-slate-400">
-              Region <span className="font-mono text-slate-600">{activeRegion ?? '—'}</span> · Anchor: <span className="font-mono text-slate-600">{lexAnchor}</span>
+              Region <span className="font-mono text-slate-600">{selectedRegion ? `${fmt(selectedRegion.start)}–${fmt(selectedRegion.end)}` : (activeRegion ?? '—')}</span> · Anchor: <span className="font-mono text-slate-600">{lexAnchor}</span>
             </div>
           </div>
         </div>
