@@ -316,6 +316,15 @@ describe("ParseUI", () => {
     expect(mockUntagConcept).toHaveBeenCalledWith("problematic", "1");
   });
 
+  it("opens the speaker import modal from the Actions menu", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import Speaker Data…" }));
+
+    expect(await screen.findByTestId("speaker-import")).toBeTruthy();
+  });
+
   it("persists compare notes per concept via localStorage on blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
