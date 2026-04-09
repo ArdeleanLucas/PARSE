@@ -73,6 +73,7 @@ const simBar = (v: number) =>
   v >= 0.8 ? 'bg-emerald-500' : v >= 0.5 ? 'bg-amber-400' : 'bg-slate-300';
 
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
+const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 
 function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
   return a.start <= b.end && b.start <= a.end;
@@ -833,6 +834,16 @@ export function ParseUI() {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
+      const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
+      setNotes(stored[conceptId.toString()] ?? '');
+    } catch {
+      setNotes('');
+    }
+  }, [conceptId]);
+
   // — Derived: real speakers (fallback to mock while config loads) —
   const speakers = rawSpeakers.length > 0 ? rawSpeakers : SPEAKERS;
 
@@ -1286,6 +1297,16 @@ export function ParseUI() {
 
               <SectionCard title="Notes">
                 <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  onBlur={() => {
+                    try {
+                      const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
+                      const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
+                      stored[conceptId.toString()] = notes;
+                      window.localStorage.setItem(COMPARE_NOTES_STORAGE_KEY, JSON.stringify(stored));
+                    } catch {
+                      // non-fatal localStorage failure
+                    }
+                  }}
                   placeholder="Add observations, etymological notes, or questions for review…"
                   className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
               </SectionCard>
