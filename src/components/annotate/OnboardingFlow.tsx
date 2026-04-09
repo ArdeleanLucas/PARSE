@@ -23,7 +23,8 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     const timer = setTimeout(() => {
       useUIStore.setState({
         onboardingComplete: true,
-        activeSpeaker: "",
+        activeSpeaker: null,
+        annotatePanel: "chat",
       })
       onComplete()
     }, 1000)
@@ -138,7 +139,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
             style={btnStyle}
             onClick={() => setCurrentStep(3)}
           >
-            Open workspace
+            Open AI assistant
           </button>
         </div>
       </div>
@@ -152,7 +153,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
           Step 4 of 4
         </div>
-        <h2 style={titleStyle}>Ready.</h2>
+        <h2 style={titleStyle}>Opening AI assistant…</h2>
       </div>
     </div>
   )
