@@ -724,6 +724,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
 // ---------- Manage Tags View ----------
 interface ManageTagsProps {
   tags: LingTag[];
+  concepts: Concept[];
   onCreateTag: (name: string, color: string) => void;
   tagSearch: string; setTagSearch: (s: string) => void;
   newTagName: string; setNewTagName: (s: string) => void;
@@ -731,18 +732,22 @@ interface ManageTagsProps {
   showUntagged: boolean; setShowUntagged: (b: boolean) => void;
   selectedTagId: string | null; setSelectedTagId: (s: string | null) => void;
   conceptSearch: string; setConceptSearch: (s: string) => void;
+  tagConcept: (tagId: string, conceptKey: string) => void;
+  untagConcept: (tagId: string, conceptKey: string) => void;
 }
 
 const SWATCHES = ['#6366f1','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4','#ec4899','#64748b'];
 
 const ManageTagsView: React.FC<ManageTagsProps> = ({
-  tags, onCreateTag, tagSearch, setTagSearch, newTagName, setNewTagName,
+  tags, concepts, onCreateTag, tagSearch, setTagSearch, newTagName, setNewTagName,
   newTagColor, setNewTagColor, showUntagged, setShowUntagged,
-  selectedTagId, setSelectedTagId, conceptSearch, setConceptSearch
+  selectedTagId, setSelectedTagId, conceptSearch, setConceptSearch,
+  tagConcept, untagConcept,
 }) => {
+  const [checkedConceptIds, setCheckedConceptIds] = useState<Set<string>>(new Set());
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
   const selectedTag = tags.find(t => t.id === selectedTagId);
-  const filteredConcepts = CONCEPTS.filter(c => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
+  const filteredConcepts = concepts.filter(c => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
 
   return (
     <div className="flex flex-1 min-h-0 bg-slate-50">
@@ -842,7 +847,7 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
               </div>
               <h3 className="mt-5 text-lg font-semibold text-slate-900">Select a tag to assign concepts</h3>
               <p className="mt-2 max-w-md text-sm text-slate-500">
-                Choose a linguistic tag on the left to browse and bulk-assign it across your 82 concepts.
+                Choose a linguistic tag on the left to browse and bulk-assign it across your {concepts.length} concepts.
                 You can also create a new tag above.
               </p>
             </div>
@@ -856,10 +861,18 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
                 <Pill tone="indigo">{selectedTag.count} concepts</Pill>
               </div>
               <div className="flex gap-2">
-                <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <button
+                  onClick={() => setCheckedConceptIds(new Set())}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                   <X className="h-3.5 w-3.5"/> Clear selection
                 </button>
-                <button className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                <button
+                  onClick={() => {
+                    if (!selectedTagId) return;
+                    checkedConceptIds.forEach(id => tagConcept(selectedTagId, id));
+                    setCheckedConceptIds(new Set());
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
                   <Check className="h-3.5 w-3.5"/> Apply to selected
                 </button>
               </div>
@@ -881,7 +894,22 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
                   key={c.id}
                   className="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-indigo-300 hover:shadow-sm"
                 >
-                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"/>
+                  <input
+                    type="checkbox"
+                    checked={checkedConceptIds.has(c.key)}
+                    onChange={e => {
+                      const next = new Set(checkedConceptIds);
+                      if (e.target.checked) {
+                        next.add(c.key);
+                        if (selectedTagId) tagConcept(selectedTagId, c.key);
+                      } else {
+                        next.delete(c.key);
+                        if (selectedTagId) untagConcept(selectedTagId, c.key);
+                      }
+                      setCheckedConceptIds(next);
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
                   <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`}/>
                   <span className="flex-1 text-sm font-medium text-slate-800">{c.name}</span>
                   <span className="font-mono text-[10px] text-slate-300">#{c.id}</span>
@@ -1328,6 +1356,13 @@ export function ParseUI() {
     () => resolveReferenceForms(enrichmentData, concept),
     [concept, enrichmentData],
   );
+  const borrowingCandidates = useMemo<unknown>(() => {
+    const borrowingRoot = isRecord(enrichmentData.borrowings) ? enrichmentData.borrowings
+      : isRecord(enrichmentData.borrowing_candidates) ? enrichmentData.borrowing_candidates
+      : null;
+    if (!borrowingRoot) return null;
+    return borrowingRoot[concept.key] ?? borrowingRoot[concept.name] ?? null;
+  }, [concept, enrichmentData]);
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
     const flagged = getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic');
@@ -1552,6 +1587,7 @@ export function ParseUI() {
           <>
             <ManageTagsView
               tags={tagsList}
+              concepts={concepts}
               onCreateTag={(name, color) => { if (!name.trim()) return; storeAddTag(name, color); setNewTagName(''); }}
               tagSearch={tagSearch}
               setTagSearch={setTagSearch}
@@ -1565,6 +1601,8 @@ export function ParseUI() {
               setSelectedTagId={setSelectedTagId}
               conceptSearch={tagConceptSearch}
               setConceptSearch={setTagConceptSearch}
+              tagConcept={tagConcept}
+              untagConcept={untagConcept}
             />
             <AIChat
               height={aiHeight}
@@ -1766,15 +1804,25 @@ export function ParseUI() {
               <SectionCard title="Potential borrowings"
                 aside={<button onClick={() => setBorrowingsOpen(v=>!v)} className="text-slate-400 hover:text-slate-700">{borrowingsOpen ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}</button>}>
                 {borrowingsOpen ? (
-                  <div className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500"/>
-                    <div className="text-xs text-slate-600">
-                      <span className="font-semibold text-amber-800">Fail01</span> /ramaːd/ shows a strong Arabic match (0.92) within a predominantly Persian cluster —
-                      possible <span className="font-semibold">Arabic borrowing</span>.
-                    </div>
-                  </div>
+                  borrowingCandidates != null ? (
+                    Array.isArray(borrowingCandidates)
+                      ? <div className="space-y-2">
+                          {(borrowingCandidates as unknown[]).map((entry, i) => (
+                            <div key={i} className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500"/>
+                              <div className="text-xs text-slate-600">{String(entry)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      : <div className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500"/>
+                          <div className="text-xs text-slate-600">{String(borrowingCandidates)}</div>
+                        </div>
+                  ) : (
+                    <div className="text-xs text-slate-400">No borrowing candidates detected for this concept.</div>
+                  )
                 ) : (
-                  <div className="text-xs text-slate-400">1 candidate hidden</div>
+                  <div className="text-xs text-slate-400">{borrowingCandidates != null ? '1 candidate hidden' : 'No borrowing data'}</div>
                 )}
               </SectionCard>
 
@@ -1953,11 +2001,11 @@ export function ParseUI() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                      <div className="font-mono text-sm font-semibold text-slate-900">11</div>
+                      <div className="font-mono text-sm font-semibold text-slate-900">{speakers.length}</div>
                       <div className="text-[9px] uppercase tracking-wider text-slate-400">speakers</div>
                     </div>
                     <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                      <div className="font-mono text-sm font-semibold text-slate-900">82</div>
+                      <div className="font-mono text-sm font-semibold text-slate-900">{concepts.length}</div>
                       <div className="text-[9px] uppercase tracking-wider text-slate-400">concepts</div>
                     </div>
                   </div>
