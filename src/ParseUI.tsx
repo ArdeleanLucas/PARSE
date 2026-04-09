@@ -22,6 +22,8 @@ import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
+import { Modal } from './components/shared/Modal';
+import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -865,6 +867,7 @@ export function ParseUI() {
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const handleExportLingPy = async () => {
@@ -1008,6 +1011,22 @@ export function ParseUI() {
   const addSpeaker = () => {
     if (!selectedSpeakers.includes(speakerPicker)) setSelectedSpeakers([...selectedSpeakers, speakerPicker]);
   };
+  const openImportModal = () => {
+    setActionsMenuOpen(false);
+    setImportModalOpen(true);
+  };
+  const handleImportComplete = (speakerId: string) => {
+    setImportModalOpen(false);
+    if (!speakerId) return;
+    setSpeakerPicker(speakerId);
+    if (currentMode === 'annotate') {
+      setSelectedSpeakers([speakerId]);
+      setActiveSpeakerUI(speakerId);
+      usePlaybackStore.setState({ activeSpeaker: speakerId });
+      return;
+    }
+    setSelectedSpeakers((existing) => existing.includes(speakerId) ? existing : [...existing, speakerId]);
+  };
 
   const modeTabs: { key: ModeTab; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -1095,8 +1114,13 @@ export function ParseUI() {
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setActionsMenuOpen(false)}/>
                   <div className="absolute right-0 z-[60] mt-1.5 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                    <button
+                      onClick={openImportModal}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Import className="h-3.5 w-3.5 text-slate-400"/> Import Speaker Data…
+                    </button>
                     {([
-                      ['Import Speaker Data…', Import],
                       ['Run Audio Normalization', AudioLines],
                       ['Run Orthographic STT', Mic],
                       ['Run IPA Transcription', Type],
@@ -1662,6 +1686,10 @@ export function ParseUI() {
           </div>
         </aside>
       </div>
+
+      <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
+        <SpeakerImport onImportComplete={handleImportComplete} />
+      </Modal>
     </div>
   );
 }
