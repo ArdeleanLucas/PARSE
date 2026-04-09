@@ -1,8 +1,8 @@
 # ParseUI current-state execution plan
 
-**Updated:** 2026-04-10
+**Updated:** 2026-06-14
 **Applies to:** `origin/main`
-**Code branch for implementation:** `feat/parseui-unified-shell`
+**Code branch policy:** new work branches from `origin/main` (per `AGENTS.md`); historical pivot branches like `feat/parseui-unified-shell` are archived
 **Docs branch for planning:** `docs/parseui-planning`
 
 ## TLDR
@@ -34,6 +34,7 @@ These are no longer open execution tasks:
 - Compute panel basic Run / Refresh wiring
 - Decisions basic load/save wiring in the unified shell
 - Manage Tags bulk-selection wiring
+- Spectrogram Worker — TS port (`src/workers/spectrogram-worker.ts`), `useSpectrogram` hook, AnnotateView `<canvas>` overlay wired (MC-297, PR #31)
 
 ## What is genuinely still open
 
