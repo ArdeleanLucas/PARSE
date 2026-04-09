@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
-  RotateCw, Play, RefreshCw, Save, Upload, Sparkles,
+  RotateCw, Play, RefreshCw, Save, Upload,
   Layers, ChevronDown, ChevronUp, Plus, X, AlertCircle,
-  CheckCircle2, ArrowUpDown, Volume2, Filter, Send, Minus,
-  GripHorizontal, Bot, User, Database, Users as UsersIcon, Cpu,
+  CheckCircle2, ArrowUpDown, Volume2, Filter, Send,
+  Database, Users as UsersIcon, Cpu,
   PanelRightClose, Tag, Tags, Import, AudioLines, Type, Mic,
   Workflow, Network, Trash2, ChevronDown as CDown,
   Video, Scissors, Activity, SlidersHorizontal,
