@@ -12,7 +12,7 @@ import {
   Sun, Moon
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey } from './api/client';
+import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -1308,6 +1308,7 @@ export function ParseUI() {
   const [aiMinimized, setAiMinimized] = useState(true);
   const resizingRef = useRef(false);
   const loadDecisionsRef = useRef<HTMLInputElement>(null);
+  const loadDecisionsMenuRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (currentMode === 'annotate') {
@@ -1501,19 +1502,69 @@ export function ParseUI() {
                     >
                       <Import className="h-3.5 w-3.5 text-slate-400"/> Import Speaker Data…
                     </button>
-                    {([
-                      ['Run Audio Normalization', AudioLines],
-                      ['Run Orthographic STT', Mic],
-                      ['Run IPA Transcription', Type],
-                      ['Run Full Pipeline', Workflow],
-                      ['Run Cross-Speaker Match', Network],
-                    ] as const).map(([label, Icon]) => (
-                      <button key={label} onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
-                        <Icon className="h-3.5 w-3.5 text-slate-400"/> {label}
-                      </button>
-                    ))}
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        const speaker = selectedSpeakers[0];
+                        if (!speaker) return;
+                        void startNormalize(speaker).catch(err => console.error('[ParseUI] normalize failed:', err));
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <AudioLines className="h-3.5 w-3.5 text-slate-400"/> Run Audio Normalization
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        const speaker = selectedSpeakers[0];
+                        if (!speaker) return;
+                        // STT requires a source_wav path — derive from speaker name convention
+                        void startSTT(speaker, `${speaker}.wav`, 'ckb').catch(err =>
+                          console.error('[ParseUI] STT failed:', err)
+                        );
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Mic className="h-3.5 w-3.5 text-slate-400"/> Run Orthographic STT
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        void startCompute('ipa_only').catch(err =>
+                          console.error('[ParseUI] IPA compute failed:', err)
+                        );
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Type className="h-3.5 w-3.5 text-slate-400"/> Run IPA Transcription
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        void startCompute('full_pipeline').catch(err =>
+                          console.error('[ParseUI] Full pipeline failed:', err)
+                        );
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Workflow className="h-3.5 w-3.5 text-slate-400"/> Run Full Pipeline
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        void startCompute('contact-lexemes').catch(err =>
+                          console.error('[ParseUI] Cross-speaker match failed:', err)
+                        );
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Network className="h-3.5 w-3.5 text-slate-400"/> Run Cross-Speaker Match
+                    </button>
                     <div className="my-1 border-t border-slate-100"/>
-                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+                    <button
+                      onClick={() => { setActionsMenuOpen(false); loadDecisionsMenuRef.current?.click(); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
                       <Upload className="h-3.5 w-3.5 text-slate-400"/> Load Decisions
                     </button>
                     <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
@@ -1528,7 +1579,18 @@ export function ParseUI() {
                       {exporting ? 'Exporting…' : 'Export LingPy TSV'}
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
-                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50">
+                    <button
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        if (!window.confirm('Reset project? This will clear all in-memory store state. Saved files on disk are not affected.')) return;
+                        useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
+                        useEnrichmentStore.setState({ data: {}, loading: false });
+                        useTagStore.setState({ tags: [] });
+                        usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
+                        useConfigStore.setState({ config: null, loading: false });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50"
+                    >
                       <Trash2 className="h-3.5 w-3.5"/> Reset Project
                     </button>
                   </div>
@@ -2141,6 +2203,24 @@ export function ParseUI() {
         </aside>
       </div>
 
+      <input
+        type="file"
+        accept=".json"
+        ref={loadDecisionsMenuRef}
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const data = JSON.parse(text) as Record<string, unknown>;
+            await useEnrichmentStore.getState().save(data);
+          } catch {
+            // non-fatal
+          }
+          e.target.value = '';
+        }}
+      />
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
       </Modal>
