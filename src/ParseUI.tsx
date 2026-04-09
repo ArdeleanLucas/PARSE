@@ -7,11 +7,12 @@ import {
   Database, Users as UsersIcon, Cpu,
   PanelRightClose, Tag, Tags, Import, AudioLines, Type, Mic,
   Workflow, Network, Trash2, ChevronDown as CDown,
-  Video, Scissors, Activity, SlidersHorizontal,
+  Video, Scissors, Activity, SlidersHorizontal, Download,
   Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
   Sun, Moon
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
+import { getLingPyExport } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -821,6 +822,25 @@ export function ParseUI() {
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportLingPy = async () => {
+    setExporting(true);
+    setActionsMenuOpen(false);
+    try {
+      const blob = await getLingPyExport();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'parse-wordlist.tsv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[ParseUI] LingPy export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const [tagSearch, setTagSearch] = useState('');
   const [newTagName, setNewTagName] = useState('');
@@ -1046,6 +1066,14 @@ export function ParseUI() {
                     </button>
                     <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
                       <Save className="h-3.5 w-3.5 text-slate-400"/> Save Decisions
+                    </button>
+                    <button
+                      onClick={handleExportLingPy}
+                      disabled={exporting}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      <Download className="h-3.5 w-3.5 text-indigo-400"/>
+                      {exporting ? 'Exporting…' : 'Export LingPy TSV'}
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50">
@@ -1496,6 +1524,14 @@ export function ParseUI() {
                     </button>
                     <button className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700">
                       <Save className="h-3 w-3"/> Save decisions
+                    </button>
+                    <button
+                      onClick={handleExportLingPy}
+                      disabled={exporting}
+                      className="flex w-full items-center gap-2 rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Download className="h-3 w-3"/>
+                      {exporting ? 'Exporting…' : 'Export LingPy TSV'}
                     </button>
                   </div>
                 </div>
