@@ -1,10 +1,11 @@
 @echo off
 setlocal
 
-rem Source Explorer dev launcher
+rem PARSE legacy review tool launcher
 rem - Runs from this project folder no matter where the batch file was launched from
-rem - Starts the custom range-request server
+rem - Starts the legacy thesis/review server
 rem - Opens review_tool_dev.html through http://localhost:8766/
+rem - Current React development uses python/server.py + npm run dev -> http://localhost:5173/
 
 set "PROJECT_DIR=%~dp0"
 set "SERVER_SCRIPT=python\thesis_server.py"
@@ -19,7 +20,9 @@ pushd "%PROJECT_DIR%" >nul 2>&1 || (
 )
 
 if not exist "%SERVER_SCRIPT%" (
-  echo [ERROR] Missing server script: %SERVER_SCRIPT%
+  echo [ERROR] Missing legacy server script: %SERVER_SCRIPT%
+  echo         This launcher only works with the old thesis/review stack.
+  echo         For the current React UI, run python\server.py and npm run dev, then open http://localhost:5173/.
   pause
   popd >nul
   exit /b 1
@@ -45,10 +48,13 @@ if not defined PYTHON_CMD (
 )
 
 echo ============================================================
-echo Source Explorer - Dev Launcher
+echo PARSE - Legacy Review Tool Launcher
 echo ============================================================
 echo [1/3] Project directory:
 echo       %CD%
+echo.
+echo Note: this launcher opens review_tool_dev.html (legacy).
+echo       For the current React UI, run python/server.py + npm run dev and open http://localhost:5173/.
 echo.
 echo [2/3] Starting local server in a separate window...
 echo       Command: %PYTHON_CMD% %SERVER_SCRIPT%
@@ -74,7 +80,7 @@ if defined CHROME_EXE (
 )
 
 echo.
-echo Done. Leave the server window open while you use the review tool.
+echo Done. Leave the server window open while you use the legacy review tool.
 
 popd >nul
 endlocal
