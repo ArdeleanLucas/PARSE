@@ -159,6 +159,49 @@ function buildSpeakerForm(
   };
 }
 
+interface ReferenceFormDisplay {
+  script: string;
+  ipa: string;
+  audioUrl: string | null;
+  available: boolean;
+}
+
+function parseReferenceForm(raw: unknown): ReferenceFormDisplay {
+  if (typeof raw === 'string') {
+    return { script: '', ipa: raw.trim(), audioUrl: null, available: raw.trim().length > 0 };
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.length > 0 ? parseReferenceForm(raw[0]) : { script: '', ipa: '', audioUrl: null, available: false };
+  }
+
+  if (!isRecord(raw)) {
+    return { script: '', ipa: '', audioUrl: null, available: false };
+  }
+
+  const script = [raw.script, raw.orthography, raw.form, raw.text].find((value) => typeof value === 'string' && value.trim().length > 0);
+  const ipa = [raw.ipa, raw.phonetic, raw.transcription].find((value) => typeof value === 'string' && value.trim().length > 0);
+  const audioUrl = [raw.audioUrl, raw.audio, raw.url].find((value) => typeof value === 'string' && value.trim().length > 0);
+
+  return {
+    script: typeof script === 'string' ? script : '',
+    ipa: typeof ipa === 'string' ? ipa : '',
+    audioUrl: typeof audioUrl === 'string' ? audioUrl : null,
+    available: Boolean(script || ipa),
+  };
+}
+
+function resolveReferenceForms(enrichments: Record<string, unknown>, concept: Concept) {
+  const root = isRecord(enrichments.reference_forms) ? enrichments.reference_forms as Record<string, unknown> : null;
+  const conceptEntry = root ? root[concept.key] ?? root[concept.name] : null;
+  const conceptRecord = isRecord(conceptEntry) ? conceptEntry : {};
+
+  return {
+    arabic: parseReferenceForm(conceptRecord.ar ?? conceptRecord.arabic),
+    persian: parseReferenceForm(conceptRecord.fa ?? conceptRecord.persian),
+  };
+}
+
 const SimBar: React.FC<{ value: number }> = ({ value }) => (
   <div className="flex items-center gap-2">
     <div className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden">
@@ -912,6 +955,10 @@ export function ParseUI() {
   }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
+  const referenceForms = useMemo(
+    () => resolveReferenceForms(enrichmentData, concept),
+    [concept, enrichmentData],
+  );
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
     const flagged = getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic');
@@ -1196,22 +1243,34 @@ export function ParseUI() {
 
               <SectionCard title="Reference forms">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-500">Arabic</span>
-                      <button className="text-slate-300 hover:text-slate-500"><Volume2 className="h-3.5 w-3.5"/></button>
+                  {[
+                    { label: 'Arabic', tone: 'text-rose-500', dir: 'rtl' as const, data: referenceForms.arabic },
+                    { label: 'Persian', tone: 'text-indigo-500', dir: 'rtl' as const, data: referenceForms.persian },
+                  ].map((entry) => (
+                    <div key={entry.label} className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${entry.tone}`}>{entry.label}</span>
+                        <button
+                          title={entry.data.audioUrl ? `Play ${entry.label} reference audio` : 'Reference audio not available'}
+                          onClick={() => {
+                            if (!entry.data.audioUrl) return;
+                            void new Audio(entry.data.audioUrl).play().catch(() => {});
+                          }}
+                          className="text-slate-300 hover:text-slate-500"
+                        >
+                          <Volume2 className="h-3.5 w-3.5"/>
+                        </button>
+                      </div>
+                      {entry.data.available ? (
+                        <>
+                          <div className="mt-2 font-serif text-2xl text-slate-900" dir={entry.dir}>{entry.data.script || '—'}</div>
+                          <div className="mt-1 font-mono text-[11px] text-slate-400">/{entry.data.ipa || '—'}/</div>
+                        </>
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-400">No reference data</div>
+                      )}
                     </div>
-                    <div className="mt-2 font-serif text-2xl text-slate-900" dir="rtl">رماد</div>
-                    <div className="mt-1 font-mono text-[11px] text-slate-400">/ra.maːd/</div>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">Persian</span>
-                      <button className="text-slate-300 hover:text-slate-500"><Volume2 className="h-3.5 w-3.5"/></button>
-                    </div>
-                    <div className="mt-2 font-serif text-2xl text-slate-900" dir="rtl">خاکستر</div>
-                    <div className="mt-1 font-mono text-[11px] text-slate-400">/xɑː.kes.tær/</div>
-                  </div>
+                  ))}
                 </div>
               </SectionCard>
 

@@ -246,6 +246,25 @@ describe("ParseUI", () => {
     expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
   });
 
+  it("renders compare reference forms from enrichment data", () => {
+    mockEnrichmentData = {
+      reference_forms: {
+        "1": {
+          ar: { script: "ماء", ipa: "maːʔ" },
+          fa: { script: "آب", ipa: "ɒːb" },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByText("ماء")).toBeTruthy();
+    expect(screen.getByText("/maːʔ/")).toBeTruthy();
+    expect(screen.getByText("آب")).toBeTruthy();
+    expect(screen.getByText("/ɒːb/")).toBeTruthy();
+    expect(screen.queryByText("رماد")).toBeNull();
+  });
+
   it("renders compare speaker forms from annotation data instead of MOCK_FORMS placeholders", () => {
     mockConfig = {
       project_name: "PARSE",
@@ -307,5 +326,10 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
     expect(screen.getByDisplayValue("Loanword candidate from Arabic.")).toBeTruthy();
+  });
+
+  it("shows a reference placeholder when enrichmentStore has no reference forms", () => {
+    render(<ParseUI />);
+    expect(screen.getAllByText("No reference data").length).toBeGreaterThanOrEqual(1);
   });
 });
