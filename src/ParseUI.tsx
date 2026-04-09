@@ -14,6 +14,7 @@ import {
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
 import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
+import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
@@ -952,11 +953,13 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   }, [speaker, concept.key, ipaInterval, orthoInterval]);
 
   const [spectroOn, setSpectroOn] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [activeRegion] = useState<string | null>(null);
   const [lexAnchor, setLexAnchor] = useState<'word' | 'concept'>('concept');
   const [zoom, setZoom] = useState(10); // minPxPerSec
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const spectroCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const isPlaying = usePlaybackStore(s => s.isPlaying);
   const currentTime = usePlaybackStore(s => s.currentTime);
@@ -964,15 +967,17 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   const selectedRegion = usePlaybackStore(s => s.selectedRegion);
   const annotated = Boolean(conceptInterval && ipaInterval);
 
-  const { playPause, skip, setZoom: wsSetZoom, setRate } = useWaveSurfer({
+  const { playPause, skip, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
     containerRef,
     audioUrl,
     peaksUrl,
     onTimeUpdate: t => usePlaybackStore.setState({ currentTime: t }),
-    onReady:      d => usePlaybackStore.setState({ duration: d }),
+    onReady: d => { usePlaybackStore.setState({ duration: d }); setAudioReady(true); },
     onPlayStateChange: p => usePlaybackStore.setState({ isPlaying: p }),
     onRegionUpdate: (start, end) => usePlaybackStore.setState({ selectedRegion: { start, end } }),
   });
+
+  useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
   const fmt = (t: number) => {
     const m = Math.floor(t / 60).toString().padStart(2, '0');
@@ -1038,10 +1043,9 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Spectrogram toggle — wire to src/workers/spectrogram-worker.ts later */}
             <button
               onClick={() => setSpectroOn(v => !v)}
-              title="Toggle spectrogram (worker-backed, coming soon)"
+              title="Toggle spectrogram"
               className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold transition ${spectroOn ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
             >
               <Activity className="h-3 w-3"/> Spectrogram
@@ -1057,15 +1061,11 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
               className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
               style={{ minHeight: 110 }}
             />
-            {/* Spectrogram overlay — wire to src/workers/spectrogram-worker.ts (MC-297) */}
             {spectroOn && (
-              <div
-                className="pointer-events-none absolute inset-0 rounded-lg opacity-60"
-                style={{
-                  background: 'repeating-linear-gradient(90deg, rgba(79,70,229,0.35) 0 2px, rgba(236,72,153,0.25) 2px 4px, rgba(16,185,129,0.25) 4px 6px, transparent 6px 8px)',
-                  mixBlendMode: 'multiply',
-                }}
-                title="Spectrogram placeholder — real FFT heatmap coming via MC-297"
+              <canvas
+                ref={spectroCanvasRef}
+                className="pointer-events-none absolute inset-0 rounded-lg"
+                style={{ width: '100%', height: '100%', opacity: 0.6, mixBlendMode: 'multiply' }}
               />
             )}
           </div>
