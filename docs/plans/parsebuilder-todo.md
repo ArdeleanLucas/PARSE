@@ -26,6 +26,11 @@ When Lucas signals C5 cleared:
 
 ## ✅ Done
 
+- [x] **AI login wired** — xAI key form, real `saveApiKey()` → `POST /api/auth/key`, `chatSession.messages` display, key persisted to server config · PR #22 (2026-04-10)
+- [x] **AI connect panel** — xAI/OpenAI provider selection, connection state machine, welcome greeting · PR #20 → fixed base in PR #21 (2026-04-10)
+- [x] **`/api/onboard/speaker`** — multipart POST, background job, saves audio + CSV, scaffolds annotation, registers in `source_index.json` · main (2026-04-10)
+- [x] **`src/main.tsx` CSS import** — `import './index.css'` missing, Tailwind not loading · main (2026-04-10)
+- [x] **MC-301** — Actions menu Import Speaker Data → modal with `SpeakerImport` · PR #18 (2026-04-10)
 - [x] **MC-299 prep** — ParseUI integration tests, 111/111 passing · PR #12 (2026-04-10)
 - [x] **Compare notes** — localStorage persistence per concept · PR #12 (2026-04-10)
 - [x] **Compare real data** — MOCK_FORMS → `buildSpeakerForm` from `annotationRecords` · PR #12 (2026-04-10)
@@ -44,6 +49,12 @@ npm run test -- --run   →  111 / 111 passing
 tsc --noEmit            →  0 errors
 ```
 
+## PR workflow
+
+- Branch → push → `gh pr create --base main --reviewer TrueNorth49` under TarahAssistant
+- Never push directly to main
+- Deploy: `bash parse-deploy.sh` after merge (pulls `parse_v2` from `origin/main`)
+
 ## Status
 
-All ParseBuilder tasks complete. **MC-299 activates on Lucas's C5 signal.**
+AI login wired and deployed. **MC-299 activates on Lucas's C5 signal.**
