@@ -4,6 +4,8 @@
 > Oda (Gemini + Flash/Pro) owns Track B — Compare Mode.
 > Both tracks share a pre-agreed contract (Phase 0) before any parallel work begins.
 > Integration happens in Phase C after both tracks pass their own gate tests.
+>
+> **Historical note (post-merge):** the React/Vite pivot has already landed on `main`. Branch references in this document such as `feat/parse-react-vite` are historical only. Do not branch from or recreate them; start new work from `origin/main`.
 
 **Goal:** Replace the vanilla-JS monolith (36,951 lines across parse.html, compare.html, 25 JS modules)
 with a React + Vite frontend, keeping the Python backend (port 8766) completely unchanged.

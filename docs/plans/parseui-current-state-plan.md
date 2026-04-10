@@ -3,7 +3,7 @@
 **Updated:** 2026-06-14
 **Applies to:** `origin/main`
 **Code branch policy:** new work branches from `origin/main` (per `AGENTS.md`); historical pivot branches like `feat/parseui-unified-shell` are archived
-**Docs branch for planning:** `docs/parseui-planning`
+**Docs branch for planning:** branch from `origin/main` (historical docs lane `docs/parseui-planning` was deleted after merge cleanup)
 
 ## TLDR
 

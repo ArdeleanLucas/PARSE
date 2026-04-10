@@ -1,9 +1,11 @@
 # Contact Language Lexeme Fetcher — Design Plan
 
-**Status:** Unimplemented  
-**Priority:** High — required for borrowing adjudication in thesis  
-**Branch target:** `feat/parse-react-vite` → merge to `feat/contact-lexemes` first  
+**Status:** Partially implemented / design reference
+**Priority:** High — required for borrowing adjudication in thesis
+**Branch target:** branch from `origin/main` (historical note: `feat/parse-react-vite` was the old pivot lane and has been deleted)
 **Thesis relevance:** §4.4 PARSE pipeline — similarity scores underpin the borrowing detection in the comparative analysis
+
+> **Update (post-pivot merge):** provider registry code, `ContactLexemePanel`, provider tests, and coverage/fetch endpoints now exist on `main`. Use this document as a design/reference plan for the remaining fetch-and-fill work, not as a reason to branch from the deleted pivot lane.
 
 ---
 
@@ -436,9 +438,8 @@ These thresholds are informed by the existing `lexstat_threshold: 0.6` and shoul
 ## Branch Strategy
 
 ```
-main
-  └── feat/parse-react-vite  (current — C5/C6/C7 pending)
-        └── feat/contact-lexemes  (new branch from feat/parse-react-vite)
+origin/main
+  └── feat/contact-lexemes  (new additive branch from current trunk)
 ```
 
 Do **not** start this until C6 (Lucas's browser regression checklist) is green. This is additive work, not a blocker for thesis submission — but having real similarity scores would make the borrowing adjudication section of the thesis concrete.

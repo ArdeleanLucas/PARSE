@@ -1,10 +1,12 @@
 # Generic Comparison Data Pipeline for PARSE — Design Document
 
-**MC-294**  
-**Status:** Design Complete  
-**Author:** dr-kurd (spawned Opus session equivalent via orchestration)  
-**Date:** 2026-04-08  
-**Branch target:** feat/generic-comparison-pipeline (from feat/parse-react-vite)
+**MC-294**
+**Status:** Design Complete / historical reference
+**Author:** dr-kurd (spawned Opus session equivalent via orchestration)
+**Date:** 2026-04-08
+**Branch target:** `feat/generic-comparison-pipeline` (from `origin/main`; historical note: `feat/parse-react-vite` has been merged and deleted)
+
+> **Update (post-pivot merge):** core provider plumbing now lives on `main` under `python/compare/providers/`. Use this design doc for future expansion work, but branch from `origin/main`, not the deleted pivot lane.
 
 ## Executive Summary
 

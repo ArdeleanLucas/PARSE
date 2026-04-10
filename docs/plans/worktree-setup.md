@@ -1,42 +1,56 @@
 # PARSE Worktree Setup — Multi-Agent Parallel Development
 
-**Purpose:** Give ParseBuilder and parse-gpt isolated checkouts of the same repo with no file conflicts.
+**Purpose:** Give multiple PARSE agents isolated checkouts of the same repository with no file conflicts while treating `origin/main` as the only base for new work.
 
-## Repo
+## Canonical Repo
 
-`https://github.com/ArdeleanLucas/PARSE` (new canonical home)
+`https://github.com/ArdeleanLucas/PARSE`
+
+- **Source of truth:** `/home/lucas/gh/ardeleanlucas/parse`
+- **Archive/divergent clone:** `/home/lucas/gh/ArdeleanLucas/PARSE` (do **not** use this as branch truth)
+
+> **Historical note:** older plans referenced `feat/parse-react-vite`, `feat/parseui-unified-shell`, and `docs/parseui-planning` as rolling branches. Those branches have been merged and deleted. Do not recreate them; branch from `origin/main` instead.
 
 ---
 
 ## Directory Layout
 
-```
+```text
 /home/lucas/gh/ardeleanlucas/
-  PARSE/                       ← primary clone (main branch, bare reference)
-    .git/                      ← shared git object store
-  PARSE-parse-builder/         ← ParseBuilder worktree (feat/parse-react-vite)
-  PARSE-parse-gpt/             ← parse-gpt worktree  (feat/parse-gpt or new feat branches)
+  parse/                       ← canonical clone on `main`
+/home/lucas/gh/worktrees/parse/
+  <branch-name>/               ← optional worktree for a new branch from `origin/main`
+/home/lucas/gh/ArdeleanLucas/PARSE/
+  ...                          ← archival/divergent clone; traceability only
 ```
 
-Each worktree shares `.git/` from `PARSE/` — no duplication of history or objects.
+Each worktree shares the git object store from the canonical lowercase clone.
 
 ---
 
-## Setup Commands (run once after repo is created on GitHub)
+## Setup Commands (current workflow)
 
 ```bash
-# 1. Clone the new repo as primary
+# 1. Clone the canonical repo once
 cd /home/lucas/gh/ardeleanlucas
-git clone https://github.com/ArdeleanLucas/PARSE PARSE
-cd PARSE
+git clone https://github.com/ArdeleanLucas/PARSE parse
+cd parse
 
-# 2. ParseBuilder worktree — feat/parse-react-vite (all Phase C + CLEF work)
-git worktree add ../PARSE-parse-builder feat/parse-react-vite
+git fetch origin --prune
+git switch main
 
-# 3. parse-gpt worktree — new branch for its tasks
-git worktree add ../PARSE-parse-gpt -b feat/parse-gpt-work
+# 2. Create a worktree root for new branches
+mkdir -p /home/lucas/gh/worktrees/parse
 
-# 4. Verify
+# 3. Create an example docs worktree from origin/main
+git worktree add /home/lucas/gh/worktrees/parse/docs-stale-branch-reference-cleanup \
+  -b docs/stale-branch-reference-cleanup origin/main
+
+# 4. Create an example feature worktree from origin/main
+git worktree add /home/lucas/gh/worktrees/parse/feat-example \
+  -b feat/example origin/main
+
+# 5. Verify
 git worktree list
 ```
 
@@ -44,37 +58,35 @@ git worktree list
 
 ## Agent Assignment
 
-| Agent | Worktree | Branch | MESSAGING_CWD |
+| Agent | Recommended checkout | Branch policy | MESSAGING_CWD |
 |---|---|---|---|
-| ParseBuilder (you) | `/home/lucas/gh/ardeleanlucas/PARSE-parse-builder` | `feat/parse-react-vite` | N/A (Discord) |
-| parse-gpt | `/home/lucas/gh/ardeleanlucas/PARSE-parse-gpt` | `feat/parse-gpt-work` | Set to worktree path |
+| ParseBuilder | `/home/lucas/gh/ardeleanlucas/parse` or a dedicated worktree | branch from `origin/main` | N/A (Discord) |
+| parse-gpt | dedicated worktree under `/home/lucas/gh/worktrees/parse/` | branch from `origin/main` | set to that worktree path |
 
----
+Example Hermes config:
 
-## parse-gpt Gateway Config
-
-In parse-gpt's Hermes config, set:
 ```yaml
-MESSAGING_CWD: /home/lucas/gh/ardeleanlucas/PARSE-parse-gpt
+MESSAGING_CWD: /home/lucas/gh/worktrees/parse/feat-example
 ```
 
-This ensures parse-gpt's file edits, terminal commands, and context files all land in its own worktree — never touching ParseBuilder's working files.
+This ensures each agent edits only its own checkout.
 
 ---
 
 ## Merge Strategy
 
-1. Both agents commit + push to their own branches
-2. ParseBuilder leads Phase C integration merges (unchanged from current plan)
-3. PRs: each agent's branch → `main` via Lucas review
-4. No direct pushes to `main`
+1. Start every new branch from `origin/main`.
+2. Give each agent its own worktree / branch.
+3. Open PRs back to `main`.
+4. Do not use the uppercase archival clone for branch conclusions.
+5. Delete temporary worktrees once the PR is merged or abandoned.
 
 ---
 
-## What parse-gpt Can Work On (suggested)
+## Historical Worktrees
 
-Since `feat/parse-react-vite` is mid-Phase C (C5/C6 pending Lucas browser check, C7 cleanup next), parse-gpt can start:
-- Phase D work in its own branch: deploy workflow, PARSE server bundling, Electron packaging
-- Or any of the contact lexeme pipeline tasks that don't conflict with Phase C
+These may still exist locally for traceability:
+- `/home/lucas/gh/worktrees/PARSE/annotate-react`
+- `/home/lucas/gh/worktrees/PARSE/compare-react`
 
-Coordinate via Discord before touching shared files (server.py, enrichments schema).
+Treat them as historical lanes, not the default basis for new work.

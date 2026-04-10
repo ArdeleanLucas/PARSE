@@ -1,6 +1,8 @@
 # Rules — Hard Constraints (Load with Every Task)
 
 > Every rule here is a blocker. Violation = stop and fix before continuing.
+>
+> **Historical note (post-pivot merge):** this file documents the original Compare-track lane. References to `feat/compare-react` and `feat/parse-react-vite` are historical lane notes, not the current default branch policy. New work now branches from `origin/main` unless Lucas explicitly asks for a historical lane.
 
 ---
 
@@ -57,8 +59,9 @@
 
 ## Branch and File Discipline
 
-15. **Branch is `feat/compare-react`.** Never commit to `main`, `feat/annotate-react`,
-    or any other branch.
+15. **Historical lane note:** the original Compare track worked on `feat/compare-react`.
+    Do not treat that as the current default policy; for new work, branch from
+    `origin/main` unless Lucas explicitly revives the historical lane.
 
 16. **Write only to your owned files.** Never touch:
     `src/components/annotate/`, `src/hooks/useWaveSurfer.ts`,
@@ -68,8 +71,9 @@
     `vite.config.ts`, `package.json`, `index.html`, `src/App.tsx`,
     or anything under `python/`.
 
-17. **Do not merge into `feat/parse-react-vite`.** ParseBuilder leads Phase C.
-    You deliver a passing `feat/compare-react` branch and stop there.
+17. **Do not merge into historical pivot branches** such as `feat/parse-react-vite`.
+    That lane has already been merged and deleted. Current work should go back to
+    `main` via PRs from `origin/main`-based feature branches.
 
 ---
 

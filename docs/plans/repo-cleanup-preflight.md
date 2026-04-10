@@ -6,6 +6,8 @@
 **Active repo:** `/home/lucas/gh/ardeleanlucas/parse`
 **Active branch when captured:** `docs/phase0-repo-cleanup-preflight`
 
+> **Historical note (post-cleanup):** this preflight captured the repo before the later branch-pruning pass. Treat branch lists here as historical snapshots. Current work should branch from `origin/main`, and the remote is now down to 4 branches.
+
 ---
 
 ## 1. Current `origin/main`
