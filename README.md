@@ -134,60 +134,82 @@ The assistant operates with read and write access to the project. It can stage f
 
 ## Quick Start
 
-### 1) Start the Python backend
+### One-command launch (recommended)
 
-#### Windows
-
-PARSE requires the `kurdish_asr` conda environment which has all Python dependencies pre-installed (faster-whisper, torch, torchaudio, soundfile, ctranslate2).
-
-For the current React/Vite UI, start the backend directly:
+The `parse-run` shell alias starts both servers, pulls the latest code, and
+health-checks the API before printing URLs. It is defined in `~/.bash_aliases`
+and sourced automatically by Bash.
 
 ```bash
-/path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py --project-root C:/path/to/parse_v2
+parse-run          # pull main → start API + Vite → health-check → print URLs
 ```
 
-Optional legacy launcher:
+On success you will see:
 
-```bat
-Start Review Tool.bat
+```
+[parse-run] ════════════════════════════════════════
+[parse-run]   PARSE is running
+[parse-run]   React UI:  http://localhost:5173/
+[parse-run]   Compare:   http://localhost:5173/compare
+[parse-run]   API:       http://localhost:8766/api/config
+[parse-run] ════════════════════════════════════════
 ```
 
-> **Important:** `Start Review Tool.bat` is still a legacy launcher that opens `review_tool_dev.html` and depends on the old thesis/review server script. For the current React/Vite UI, start `python/server.py`, then run the Vite dev server as shown below and open `http://localhost:5173/`.
+Open **http://localhost:5173/** in your browser for the React UI.
 
-#### macOS / Linux
+Two companion commands are also available:
 
 ```bash
-python3 python/server.py
+parse-stop         # kill both servers
+parse-logs api     # tail Python API stderr
+parse-logs vite    # tail Vite dev server output
 ```
 
-> **Note:** `bash start_parse.sh` still opens the legacy `review_tool_dev.html` flow. Prefer the React/Vite workflow below unless you intentionally need legacy fallback tooling.
+#### What `parse-run` does
 
-The backend runs on port `8766` by default and serves the API routes used by both the React/Vite frontend and the temporary legacy fallback pages.
+1. `git pull origin main --ff-only` — fast-forward to latest main
+2. Kills any stale Python or Vite processes on ports 8766 / 5173
+3. Starts the **Python API server** (`python/server.py`) on `:8766`
+4. Waits for `/api/config` to return 200 (up to 12 s)
+5. Starts the **Vite dev server** (`npx vite --host`) on `:5173`
+6. Waits for Vite to respond, then prints URLs
 
-### 2) Start the active React/Vite frontend
+Both servers must be running. The Python backend serves the API routes;
+the Vite dev server serves the React/TypeScript frontend with Tailwind CSS
+and hot module replacement.
 
-Run this once per clone:
+#### Requirements
+
+- **WSL / Linux** — the alias uses Bash and `pkill`/`fuser`
+- **`kurdish_asr` conda env** — Python interpreter path is hardcoded in the
+  alias (`/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe`)
+- **Node.js 18+** and `npm install` run once per clone
+
+### Manual launch (alternative)
+
+If you prefer to start each server individually:
 
 ```bash
-npm install
-```
+# Terminal 1 — Python API backend
+cd /path/to/parse_v2
+/path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py
 
-Then start the frontend dev server:
-
-```bash
+# Terminal 2 — Vite frontend
+cd /path/to/parse_v2
+npm install   # once per clone
 npm run dev
 ```
 
-### 3) Open in browser
+The backend runs on port `8766`; Vite runs on port `5173`.
 
-#### Preferred React/Vite routes
+### Open in browser
+
+#### React UI (active)
 
 - Annotate mode: `http://localhost:5173/`
 - Compare mode: `http://localhost:5173/compare`
 
-#### Legacy fallback routes (pre-C7 only)
-
-Use these only if you intentionally need the legacy HTML pages while cleanup is still in progress:
+#### Legacy fallback (pre-C7 only)
 
 - Annotate fallback: `http://localhost:8766/parse.html`
 - Compare fallback: `http://localhost:8766/compare.html`
