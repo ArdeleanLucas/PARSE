@@ -23,16 +23,21 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
     - `POST /api/compute/contact-lexemes`
     - `GET /api/contact-lexemes/coverage`
 
-## Known Client/Server Contract Gaps
+## Client/Server Contract Surface
 
-These exist in `src/api/client.ts` without matching routes in `python/server.py`:
+All `src/api/client.ts` helpers have matching routes in `python/server.py`:
 
 | Client helper | Endpoint | Server status |
 |---|---|---|
-| `startNormalize()` | `POST /api/normalize` | ❌ No route in `server.py` — planned in MC-271 but never implemented |
-| *(raw fetch in `SpeakerImport.tsx`)* | `POST /api/onboard/speaker` | ❌ No route in `server.py` dispatch — component bypasses typed client |
+| `onboardSpeaker()` | `POST /api/onboard/speaker` | ✅ Multipart upload, background job |
+| `pollOnboardSpeaker()` | `POST /api/onboard/speaker/status` | ✅ Job poll |
+| `startNormalize()` | `POST /api/normalize` | ✅ ffmpeg loudnorm pipeline |
+| `pollNormalize()` | `POST /api/normalize/status` | ✅ Job poll |
+| `startSTT()` | `POST /api/stt` | ✅ |
+| `startCompute()` | `POST /api/compute/{type}` | ✅ Dynamic dispatch |
+| `getLingPyExport()` | `GET /api/export/lingpy` | ✅ |
 
-**Rule:** Do not build more UI on top of these until the server routes are implemented or the client helpers are removed.
+**Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 
 ## Release Gates (hard)
 
