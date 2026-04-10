@@ -3095,7 +3095,7 @@ def main() -> None:
         print("    Annotate: http://{0}:{1}/parse.html".format(ip, PORT))
         print("    Compare : http://{0}:{1}/compare.html".format(ip, PORT))
     print()
-    print("  Features: Range requests ✓  CORS ✓  Threaded ✓  API ✓")
+    print("  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]")
     print("  Press Ctrl+C to stop.")
     print("=" * 60)
 
