@@ -1,16 +1,16 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
-## Current State (updated 2026-05-14)
+## Current State (updated 2026-06-14)
 
-PARSE has already crossed the React pivot integration point on **`feat/parse-react-vite`**.
+PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
-- **UI Redesign complete** on `feat/annotate-ui-redesign` (MC-294):
-  - `src/ParseUI.tsx` — 1482-line unified shell (Annotate + Compare + Tags + AI Chat in one layout)
+- **UI Redesign landed** (MC-294, merged via multiple PRs through PR #31):
+  - `src/ParseUI.tsx` — unified shell (Annotate + Compare + Tags + AI Chat in one layout)
   - `App.tsx` simplified to `<BrowserRouter><ParseUI /></BrowserRouter>`
-  - Dependencies added: `lucide-react`, `tailwindcss v3`, `postcss`, `autoprefixer`
+  - Dependencies: `lucide-react`, `tailwindcss v3`, `postcss`, `autoprefixer`
   - Wired: `useWaveSurfer`, `useChatSession`, `useConfigStore`, `useTagStore`, `usePlaybackStore`, `useUIStore`, `useAnnotationSync`
-  - tsc: clean compile · pending PR merge to `main`
-  - TODO next: MOCK_FORMS → real store, Save Annotation intervals, spectrogram Worker, Cognate compute
+  - Spectrogram Worker TS port + `useSpectrogram` hook (MC-297, PR #31)
+  - Annotate prefill/save/mark/badge, compare real data, import modal, notes, compute basics, decisions basics, tags bulk-selection — all landed
 - **Phase C1–C4 complete** on integration branch:
   - Track merge (`feat/annotate-react` + `feat/compare-react`)
   - Cross-mode navigation (Annotate ↔ Compare)
@@ -22,6 +22,17 @@ PARSE has already crossed the React pivot integration point on **`feat/parse-rea
   - Server endpoints:
     - `POST /api/compute/contact-lexemes`
     - `GET /api/contact-lexemes/coverage`
+
+## Known Client/Server Contract Gaps
+
+These exist in `src/api/client.ts` without matching routes in `python/server.py`:
+
+| Client helper | Endpoint | Server status |
+|---|---|---|
+| `startNormalize()` | `POST /api/normalize` | ❌ No route in `server.py` — planned in MC-271 but never implemented |
+| *(raw fetch in `SpeakerImport.tsx`)* | `POST /api/onboard/speaker` | ❌ No route in `server.py` dispatch — component bypasses typed client |
+
+**Rule:** Do not build more UI on top of these until the server routes are implemented or the client helpers are removed.
 
 ## Release Gates (hard)
 
@@ -41,16 +52,15 @@ Do not start C7 early.
   - This uppercase clone currently follows archival/worktree history and may not match `origin/main`.
   - Do not use it as branch truth without an explicit fetch/prune check.
 
-### Canonical worktrees
-- Historical React pivot worktrees remain useful for traceability:
-  - Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → `feat/parse-react-vite`
-  - Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
-  - Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
-- These worktrees describe migration history; they are not automatically the current runtime source of truth.
+### Historical worktrees (traceability only)
+- Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → `feat/parse-react-vite`
+- Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
+- Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
+- These worktrees describe migration history; they are not the current runtime source of truth.
 
 ### Active development rule
 - **New work should branch from `origin/main` in `/home/lucas/gh/ardeleanlucas/parse` unless Lucas explicitly changes repo policy.**
-- `feat/annotate-react`, `feat/compare-react`, and `feat/parse-react-vite` are historical pivot lanes, not default bases for new work.
+- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite`, and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new work.
 - Do not assume stale track branches or archival clones reflect current `main`.
 
 ## Ownership + Coordination
@@ -90,7 +100,7 @@ npm run test -- --run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-Expected floor: **>=102 passing tests** and clean TypeScript compile.
+Expected floor: **>=119 passing tests** and clean TypeScript compile.
 
 ## Baseline Architecture
 
