@@ -271,16 +271,59 @@ export async function startContactLexemeFetch(
 }
 
 // Normalize
-export async function startNormalize(speaker: string): Promise<{ job_id: string }> {
+export async function startNormalize(speaker: string, sourceWav?: string): Promise<{ job_id: string }> {
+  const body: Record<string, string> = { speaker };
+  if (sourceWav) {
+    body.source_wav = sourceWav;
+  }
   const payload = await apiFetch<unknown>("/api/normalize", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ speaker }),
+    body: JSON.stringify(body),
   });
-  if (isRecord(payload) && (typeof payload.job_id === 'string' || typeof payload.jobId === 'string')) {
-    return { job_id: String(payload.job_id ?? payload.jobId) };
+  return { job_id: resolveJobId(payload) };
+}
+
+export async function pollNormalize(jobId: string): Promise<STTStatus> {
+  return apiFetch<STTStatus>("/api/normalize/status", {
+    method: "POST",
+    body: JSON.stringify({ job_id: jobId }),
+  });
+}
+
+// Onboard Speaker
+export async function onboardSpeaker(
+  speakerId: string,
+  audioFile: File,
+  csvFile?: File | null,
+): Promise<{ job_id: string }> {
+  const formData = new FormData();
+  formData.append("speaker_id", speakerId);
+  formData.append("audio", audioFile);
+  if (csvFile) {
+    formData.append("csv", csvFile);
   }
-  return { job_id: '' };
+
+  // Use raw fetch — FormData sets its own Content-Type with boundary
+  const response = await fetch("/api/onboard/speaker", {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Onboarding endpoint not available");
+    }
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`Upload failed (${response.status}): ${text}`);
+  }
+  const payload = await response.json();
+  return { job_id: resolveJobId(payload) };
+}
+
+export async function pollOnboardSpeaker(jobId: string): Promise<STTStatus> {
+  return apiFetch<STTStatus>("/api/onboard/speaker/status", {
+    method: "POST",
+    body: JSON.stringify({ job_id: jobId }),
+  });
 }
 
 // Tags
