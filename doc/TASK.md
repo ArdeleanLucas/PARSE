@@ -1,11 +1,13 @@
 # ParseUI — Wiring Task List
 
 > **File:** `src/ParseUI.tsx`
-> **Branch target:** `feat/parseui-unified-shell`
+> **Branch target:** branch from `origin/main` (historical note: `feat/parseui-unified-shell` was merged and deleted)
 > **Last audited:** 2026-05-14
 > **Items:** 46 total — 9 data, 7 annotate actions, 14 compare actions, 9 actions-menu items, 3 tags-mode, 4 minor cleanup
+> **Status:** historical recovery/audit checklist — do not recreate the deleted rolling branch.
 
-All items reference line numbers in the **current** `src/ParseUI.tsx` on `feat/parseui-unified-shell`.
+All items reference line numbers in the `src/ParseUI.tsx` snapshot that existed when this memo was authored.
+For new work, compare against the current file on `main` / your fresh feature branch from `origin/main`.
 Each item lists the real hook or store it should call instead of the current mock/stub.
 
 ---

@@ -3,7 +3,7 @@
 **Updated:** 2026-06-14
 **Applies to:** `origin/main`
 **Code branch policy:** new work branches from `origin/main` (per `AGENTS.md`); historical pivot branches like `feat/parseui-unified-shell` are archived
-**Docs branch for planning:** `docs/parseui-planning`
+**Docs branch for planning:** branch from `origin/main` (historical docs lane `docs/parseui-planning` was deleted after merge cleanup)
 
 ## TLDR
 
@@ -120,7 +120,7 @@ Once the Actions / compute / decisions contract is coherent, the next gate is ev
 
 ## Explicit non-goals for the next slice
 
-- Do not branch from `feat/annotate-ui-redesign`
+- Do not branch from historical/deleted pivot lanes such as `feat/annotate-ui-redesign`; start from `origin/main`
 - Do not add raw `fetch()` calls to `ParseUI.tsx` just because the historical TODO says so
 - Do not start C7 cleanup / legacy deletion before Lucas clears C5 and C6
 

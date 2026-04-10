@@ -4,6 +4,8 @@
 > Oda (Gemini + Flash/Pro) owns Track B — Compare Mode.
 > Both tracks share a pre-agreed contract (Phase 0) before any parallel work begins.
 > Integration happens in Phase C after both tracks pass their own gate tests.
+>
+> **Historical note (post-merge):** the React/Vite pivot has already landed on `main`. Branch references in this document such as `feat/parse-react-vite` are historical only. Do not branch from or recreate them; start new work from `origin/main`.
 
 **Goal:** Replace the vanilla-JS monolith (36,951 lines across parse.html, compare.html, 25 JS modules)
 with a React + Vite frontend, keeping the Python backend (port 8766) completely unchanged.
@@ -43,7 +45,7 @@ with a React + Vite frontend, keeping the Python backend (port 8766) completely 
 | B9 Browser integration | — | PENDING Lucas | manual |
 | agent-gpt EnrichmentsPanel rebase | feat/compare-react | PENDING agent-gpt | rebase onto ad09bcf |
 | Phase C merge | feat/parse-react-vite | BLOCKED — wait for agent-gpt rebase | — |
-| **UI Redesign — ParseUI unified shell** | **feat/annotate-ui-redesign** | **DONE fd955cc** | **tsc clean** |
+| **UI Redesign — ParseUI unified shell** | **historical `feat/annotate-ui-redesign` lane** | **DONE fd955cc** | **tsc clean** |
 
 ---
 

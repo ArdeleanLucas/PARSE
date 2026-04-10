@@ -1,10 +1,12 @@
 # MC-301 — ParseUI actions menu import speaker modal wiring
 
+> **Historical note:** this task was completed during the deleted rolling ParseUI branch era. Keep it as task history; for new work, branch from `origin/main` rather than recreating `feat/parseui-unified-shell`.
+
 ## Objective
 Complete the next ParseUI wiring slice by turning the top-bar Actions > Import Speaker Data entry into a real modal-backed flow that reuses the existing `SpeakerImport` component inside the unified shell.
 
 ## Scope
-1. Work on the canonical code branch path for ParseUI: `feat/parseui-unified-shell` -> `main`.
+1. Work on a feature branch cut from `origin/main` (historical note: `feat/parseui-unified-shell` was the old rolling code lane and has been deleted).
 2. Add a failing ParseUI regression test that proves the action opens the import modal.
 3. Wire the action menu item to open a shared modal and render `SpeakerImport`.
 4. Close the dropdown after invocation and allow the modal to close cleanly.
@@ -32,4 +34,4 @@ Complete the next ParseUI wiring slice by turning the top-bar Actions > Import S
 - Typecheck passes.
 - Targeted ParseUI tests pass.
 - Full test suite passes.
-- A PR to `main` is opened from `feat/parseui-unified-shell` with reviewer request to `TrueNorth49`.
+- A PR to `main` is opened from an `origin/main`-based feature branch with reviewer request to `TrueNorth49`.

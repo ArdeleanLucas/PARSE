@@ -1,6 +1,8 @@
 # Oda — Core Identity, Ownership, and Summary Rules
 
 > Load this file in every session. It is always required.
+>
+> **Historical note (post-pivot merge):** this document captures the original Oda Compare-track lane. References to `feat/compare-react` and `feat/parse-react-vite` are historical branch notes; current PARSE work branches from `origin/main` unless Lucas explicitly asks otherwise.
 
 ---
 
@@ -142,8 +144,10 @@ without an explanatory comment.
 **Exports.** LingPy TSV is P0. Verify `GET /api/export/lingpy` returns 200 before
 implementing `useExport`. If it returns 404, stop and report immediately.
 
-**Branch.** `feat/compare-react`. Never commit to `main` or `feat/annotate-react`.
-Never merge into `feat/parse-react-vite` yourself — ParseBuilder leads Phase C.
+**Historical branch note.** The original Compare lane used `feat/compare-react`.
+Treat that as history only unless Lucas explicitly revives it. For new work, branch
+from `origin/main` and open PRs back to `main`. Do not merge into historical pivot
+branches such as `feat/parse-react-vite` yourself.
 
 **Phase 0 gate.** Do not write a single component until `npm run dev` starts,
 `curl localhost:5173/api/config` returns JSON, and `npx tsc --noEmit` passes.

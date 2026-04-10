@@ -58,14 +58,14 @@ Do not start C7 early.
   - Do not use it as branch truth without an explicit fetch/prune check.
 
 ### Historical worktrees (traceability only)
-- Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → `feat/parse-react-vite`
+- Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → historical `feat/parse-react-vite` lane (merged/deleted)
 - Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
 - Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
 - These worktrees describe migration history; they are not the current runtime source of truth.
 
 ### Active development rule
 - **New work should branch from `origin/main` in `/home/lucas/gh/ardeleanlucas/parse` unless Lucas explicitly changes repo policy.**
-- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite`, and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new work.
+- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite` (merged/deleted), and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new work.
 - Do not assume stale track branches or archival clones reflect current `main`.
 
 ## Ownership + Coordination

@@ -1,6 +1,8 @@
 # PARSE Repository State Cleanup and Architecture Unification Plan
 
 > **For Hermes:** Execute from the lowercase clone `/home/lucas/gh/ardeleanlucas/parse` unless Lucas explicitly decides otherwise. Do **not** merge to `main` directly. Open PRs; **Lucas must merge them**.
+>
+> **Historical note (post-cleanup):** this plan was written before the later branch-pruning pass. Any branch lists that still mention `feat/parse-react-vite` or other removed branches are historical snapshots, not current policy. New work branches from `origin/main`.
 
 **Goal:** Get PARSE into a clean post-pivot state with one canonical active repo, explicit React-vs-legacy boundaries, a defensible branch cleanup sequence, and a gated path to removing legacy HTML/JS.
 
