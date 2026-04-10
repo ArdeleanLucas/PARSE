@@ -10,7 +10,7 @@
 
 - Delete the clearly merged or superseded remote branches.
 - Keep `feat/parseui-unified-shell` and `docs/parseui-planning` as the rolling delivery branches.
-- Do **not** delete `feat/annotate-ui-redesign` or `feat/parse-ai-connect-onboarding` yet.
+- At capture time, do **not** delete `feat/annotate-ui-redesign` or `feat/parse-ai-connect-onboarding` yet; both were deleted in the later cleanup pass.
 - Do **not** delete `docs/phase4-c5-c6-signoff` until PR #7 is resolved.
 - `feat/compare-react` is safe to delete on GitHub, but local worktree cleanup should happen separately.
 
@@ -41,18 +41,18 @@
 | `docs/parseui-planning` | Canonical rolling docs branch targeting `main`. |
 | `main` | Protected trunk. |
 
-## Do not delete yet
+## Historical "do not delete yet" set at capture time
 
 | Branch | Reason |
 | --- | --- |
 | `docs/phase4-c5-c6-signoff` | PR #7 is still open. Resolve the PR first. |
-| `feat/annotate-ui-redesign` | PR #8 was closed, not merged. Branch still shows commits not present on `main`. |
-| `feat/parse-ai-connect-onboarding` | PR #19 merged into `feat/annotate-ui-redesign`, not into `main`. Branch still carries commits outside `main`. |
+| `feat/annotate-ui-redesign` | Historical note: PR #8 was closed, not merged; this branch was later deleted in the cleanup pass. |
+| `feat/parse-ai-connect-onboarding` | Historical note: PR #19 merged into `feat/annotate-ui-redesign`, not into `main`; this branch was later deleted in the cleanup pass. |
 
-## Required follow-up before deleting the two unresolved feature branches
+## Historical follow-up that was recommended at capture time
 
-1. Review `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding` together.
-2. Cherry-pick or re-land anything still wanted onto `feat/parseui-unified-shell`.
+1. Review `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding` together (this was later superseded by the cleanup pass that deleted both branches).
+2. Cherry-pick or re-land anything still wanted onto `feat/parseui-unified-shell` (historical note: that rolling branch was later deleted after merge cleanup).
 3. Only then delete those two remote branches.
 
 ## Local worktree caveat
@@ -73,13 +73,13 @@ Recommendation:
   - PR #2, #3, #4, #5, #6, #11, #12, #14, #17, #20, #23
 - Closed superseded PR observed:
   - PR #15 — `feat/mc-300-reference-forms`
-- Branches still carrying commits not on `main`:
-  - `feat/annotate-ui-redesign`
-  - `feat/parse-ai-connect-onboarding`
+- Branches that still carried commits not on `main` at capture time:
+  - `feat/annotate-ui-redesign` (later deleted in the cleanup pass)
+  - `feat/parse-ai-connect-onboarding` (later deleted in the cleanup pass)
 
 ## Recommended execution order
 
 1. Merge or close PR #7.
-2. Salvage any still-needed commits from `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding`.
+2. At capture time: salvage any still-needed commits from `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding` (both were later deleted in the cleanup pass).
 3. Delete the safe merged/superseded remote branches.
 4. Run a separate local worktree cleanup pass.

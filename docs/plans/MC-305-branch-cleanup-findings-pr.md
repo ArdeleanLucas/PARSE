@@ -19,7 +19,7 @@ Submit a docs-only PR that captures the current PARSE GitHub branch-cleanup reco
 - `docs/phase4-c5-c6-signoff` still has open PR #7, so it should not be deleted.
 - Historical finding at capture time: `feat/parseui-unified-shell` was still treated as the rolling code branch.
 - Historical finding at capture time: `docs/parseui-planning` was still treated as the rolling docs branch.
-- `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding` still carry commits not present on `main`.
+- Historical finding at capture time: `feat/annotate-ui-redesign` and `feat/parse-ai-connect-onboarding` still carried commits not present on `main`; both were deleted in the later cleanup pass.
 - `feat/compare-react` has no surviving code delta relative to `main`, but still has a local attached worktree.
 
 ## Completion criteria
