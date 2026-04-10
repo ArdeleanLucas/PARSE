@@ -3,13 +3,15 @@ import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /* ------------------------------------------------------------------ */
-/*  Mock pollSTT from client                                           */
+/*  Mock client helpers                                                */
 /* ------------------------------------------------------------------ */
 
-const mockPollSTT = vi.fn();
+const mockOnboardSpeaker = vi.fn();
+const mockPollOnboardSpeaker = vi.fn();
 
 vi.mock("../../api/client", () => ({
-  pollSTT: (...args: unknown[]) => mockPollSTT(...args),
+  onboardSpeaker: (...args: unknown[]) => mockOnboardSpeaker(...args),
+  pollOnboardSpeaker: (...args: unknown[]) => mockPollOnboardSpeaker(...args),
 }));
 
 import { SpeakerImport } from "./SpeakerImport";
@@ -32,7 +34,8 @@ function fillFormAndStart() {
 }
 
 beforeEach(() => {
-  mockPollSTT.mockReset();
+  mockOnboardSpeaker.mockReset();
+  mockPollOnboardSpeaker.mockReset();
   vi.useFakeTimers();
 });
 
@@ -58,17 +61,12 @@ describe("SpeakerImport", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("Successful import: fetch called with FormData, onImportComplete called", async () => {
+  it("Successful import: onboardSpeaker called, onImportComplete called", async () => {
     const onComplete = vi.fn();
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ job_id: "job-123" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    mockOnboardSpeaker.mockResolvedValueOnce({ job_id: "job-123" });
 
-    mockPollSTT.mockResolvedValueOnce({
+    mockPollOnboardSpeaker.mockResolvedValueOnce({
       status: "done",
       progress: 100,
       segments: [],
@@ -82,9 +80,10 @@ describe("SpeakerImport", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/onboard/speaker",
-      expect.objectContaining({ method: "POST" })
+    expect(mockOnboardSpeaker).toHaveBeenCalledWith(
+      "spk1",
+      expect.any(File),
+      null,
     );
 
     // Advance past the 2s poll delay
@@ -92,13 +91,13 @@ describe("SpeakerImport", () => {
       await vi.advanceTimersByTimeAsync(2100);
     });
 
-    expect(mockPollSTT).toHaveBeenCalledWith("job-123");
+    expect(mockPollOnboardSpeaker).toHaveBeenCalledWith("job-123");
     expect(onComplete).toHaveBeenCalledWith("spk1");
   });
 
-  it("HTTP error shows error message", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response("Not Found", { status: 404 })
+  it("Upload error shows error message", async () => {
+    mockOnboardSpeaker.mockRejectedValueOnce(
+      new Error("Onboarding endpoint not available")
     );
 
     render(<SpeakerImport />);
@@ -113,14 +112,9 @@ describe("SpeakerImport", () => {
   });
 
   it("Poll error status shows error message", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ job_id: "job-456" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    mockOnboardSpeaker.mockResolvedValueOnce({ job_id: "job-456" });
 
-    mockPollSTT.mockResolvedValueOnce({
+    mockPollOnboardSpeaker.mockResolvedValueOnce({
       status: "error",
       progress: 50,
       segments: [],

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Button } from "../shared/Button";
 import { ProgressBar } from "../shared/ProgressBar";
-import { pollSTT } from "../../api/client";
+import { onboardSpeaker, pollOnboardSpeaker } from "../../api/client";
 
 interface SpeakerImportProps {
   onImportComplete?: (speakerId: string) => void;
@@ -43,34 +43,17 @@ export function SpeakerImport({ onImportComplete }: SpeakerImportProps) {
     setErrorMsg(null);
 
     try {
-      // Step 1: POST FormData
-      const formData = new FormData();
-      formData.append("speaker_id", speakerId.trim());
-      formData.append("audio", audioFile);
-      if (csvFile) {
-        formData.append("csv", csvFile);
-      }
-
-      const uploadResponse = await fetch("/api/onboard/speaker", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        if (uploadResponse.status === 404) {
-          throw new Error("Onboarding endpoint not available");
-        }
-        const text = await uploadResponse.text().catch(() => uploadResponse.statusText);
-        throw new Error(`Upload failed (${uploadResponse.status}): ${text}`);
-      }
-
-      const uploadResult = (await uploadResponse.json()) as { job_id: string };
-      const newJobId = uploadResult.job_id;
+      // Step 1: Upload via typed client
+      const { job_id: newJobId } = await onboardSpeaker(
+        speakerId.trim(),
+        audioFile,
+        csvFile,
+      );
       setJobId(newJobId);
       setStatus("polling");
       setProgress(30);
 
-      // Step 2: Poll
+      // Step 2: Poll via typed client
       let pollCount = 0;
       const MAX_POLLS = 120;
 
@@ -78,7 +61,7 @@ export function SpeakerImport({ onImportComplete }: SpeakerImportProps) {
         await new Promise<void>((resolve) => setTimeout(resolve, 2000));
         pollCount++;
 
-        const pollResult = await pollSTT(newJobId);
+        const pollResult = await pollOnboardSpeaker(newJobId);
         const mappedProgress = 30 + Math.floor(pollResult.progress * 0.7);
         setProgress(mappedProgress);
 

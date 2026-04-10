@@ -1,12 +1,16 @@
 """PARSE HTTP server with static range serving and API endpoints."""
 
+import cgi
 import copy
 import http.server
+import io
 import json
 import os
 import pathlib
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -47,6 +51,10 @@ ANNOTATION_TIER_ORDER = {
     "speaker": 4,
 }
 ANNOTATION_MATCH_EPSILON = 0.0005
+
+ONBOARD_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB hard cap
+ONBOARD_AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
+NORMALIZE_LUFS_TARGET = -16.0
 
 CHAT_SESSION_RETENTION_SECONDS = 8 * 60 * 60
 CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION = 200
@@ -1617,6 +1625,185 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[
         _set_job_error(job_id, str(exc))
 
 
+def _run_onboard_speaker_job(
+    job_id: str,
+    speaker: str,
+    wav_dest: pathlib.Path,
+    csv_dest: Optional[pathlib.Path],
+) -> None:
+    """Background worker for onboard/speaker — scaffold annotation + register in source_index."""
+    try:
+        _set_job_progress(job_id, 30.0, message="Scaffolding annotation record")
+
+        # Build empty annotation record with source audio reference
+        wav_relative = str(wav_dest.relative_to(_project_root()))
+        annotation = _annotation_empty_record(speaker, wav_relative, None, None)
+        annotation["speaker"] = speaker
+        _annotation_touch_metadata(annotation, preserve_created=False)
+
+        annotation_path = _annotation_record_path_for_speaker(speaker)
+        _write_json_file(annotation_path, annotation)
+
+        _set_job_progress(job_id, 60.0, message="Updating source index")
+
+        # Register in source_index.json
+        source_index_path = _source_index_path()
+        source_index = _read_json_file(source_index_path, {})
+        speakers_block = source_index.get("speakers")
+        if not isinstance(speakers_block, dict):
+            speakers_block = {}
+            source_index["speakers"] = speakers_block
+
+        speaker_entry = speakers_block.get(speaker)
+        if not isinstance(speaker_entry, dict):
+            speaker_entry = {"source_wavs": []}
+            speakers_block[speaker] = speaker_entry
+
+        source_wavs = speaker_entry.get("source_wavs")
+        if not isinstance(source_wavs, list):
+            source_wavs = []
+            speaker_entry["source_wavs"] = source_wavs
+
+        wav_filename = wav_dest.name
+        already_registered = any(
+            isinstance(entry, dict) and str(entry.get("filename", "")) == wav_filename
+            for entry in source_wavs
+        )
+        if not already_registered:
+            source_wavs.append({
+                "filename": wav_filename,
+                "path": wav_relative,
+                "is_primary": len(source_wavs) == 0,
+                "added_at": _utc_now_iso(),
+            })
+
+        _write_json_file(source_index_path, source_index)
+
+        _set_job_progress(job_id, 90.0, message="Finalizing")
+
+        result: Dict[str, Any] = {
+            "speaker": speaker,
+            "wavPath": wav_relative,
+            "csvPath": str(csv_dest.relative_to(_project_root())) if csv_dest else None,
+            "annotationPath": str(annotation_path.relative_to(_project_root())),
+        }
+        _set_job_complete(job_id, result, message="Speaker onboarded")
+    except Exception as exc:
+        _set_job_error(job_id, str(exc))
+
+
+def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
+    """Background worker — runs ffmpeg loudnorm to normalize audio to LUFS target."""
+    try:
+        audio_path = _resolve_project_path(source_wav)
+        if not audio_path.exists():
+            raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
+
+        _set_job_progress(job_id, 5.0, message="Checking ffmpeg availability")
+
+        # Verify ffmpeg is available
+        try:
+            subprocess.run(
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("ffmpeg is not installed or not on PATH")
+
+        _set_job_progress(job_id, 10.0, message="Scanning loudness (pass 1)")
+
+        # Pass 1: measure current loudness
+        measure_cmd = [
+            "ffmpeg", "-i", str(audio_path),
+            "-af", "loudnorm=print_format=json",
+            "-f", "null", "-"
+        ]
+        measure_result = subprocess.run(
+            measure_cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        # Parse measured loudness from stderr (ffmpeg outputs stats there)
+        stderr_text = measure_result.stderr or ""
+        measured_i = None
+        measured_tp = None
+        measured_lra = None
+        measured_thresh = None
+
+        # Look for the JSON block that loudnorm prints
+        json_start = stderr_text.rfind("{")
+        json_end = stderr_text.rfind("}") + 1
+        if json_start >= 0 and json_end > json_start:
+            try:
+                loudnorm_stats = json.loads(stderr_text[json_start:json_end])
+                measured_i = str(loudnorm_stats.get("input_i", ""))
+                measured_tp = str(loudnorm_stats.get("input_tp", ""))
+                measured_lra = str(loudnorm_stats.get("input_lra", ""))
+                measured_thresh = str(loudnorm_stats.get("input_thresh", ""))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        _set_job_progress(job_id, 40.0, message="Normalizing audio (pass 2)")
+
+        # Determine output path: audio/working/<Speaker>/<filename>
+        working_dir = _project_root() / "audio" / "working" / speaker
+        working_dir.mkdir(parents=True, exist_ok=True)
+        output_path = working_dir / audio_path.name
+
+        # Pass 2: apply loudnorm with measured stats for precise normalization
+        normalize_filter = "loudnorm=I={target}".format(target=NORMALIZE_LUFS_TARGET)
+        if measured_i and measured_tp and measured_lra and measured_thresh:
+            normalize_filter = (
+                "loudnorm=I={target}"
+                ":measured_I={mi}"
+                ":measured_TP={mtp}"
+                ":measured_LRA={mlra}"
+                ":measured_thresh={mt}"
+                ":linear=true"
+            ).format(
+                target=NORMALIZE_LUFS_TARGET,
+                mi=measured_i,
+                mtp=measured_tp,
+                mlra=measured_lra,
+                mt=measured_thresh,
+            )
+
+        normalize_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(audio_path),
+            "-af", normalize_filter,
+            str(output_path),
+        ]
+        proc = subprocess.run(
+            normalize_cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        if proc.returncode != 0:
+            error_tail = (proc.stderr or "")[-500:]
+            raise RuntimeError("ffmpeg normalize failed: {0}".format(error_tail))
+
+        if not output_path.exists():
+            raise RuntimeError("ffmpeg produced no output file")
+
+        _set_job_progress(job_id, 95.0, message="Finalizing")
+
+        output_relative = str(output_path.relative_to(_project_root()))
+        result: Dict[str, Any] = {
+            "speaker": speaker,
+            "sourcePath": source_wav,
+            "normalizedPath": output_relative,
+        }
+        _set_job_complete(job_id, result, message="Normalization complete")
+    except Exception as exc:
+        _set_job_error(job_id, str(exc))
+
+
 def _compute_cognates(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if cognate_compute_module is None:
         raise RuntimeError("compare.cognate_compute is unavailable")
@@ -1965,6 +2152,22 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
+        if request_path == "/api/onboard/speaker":
+            self._api_post_onboard_speaker()
+            return
+
+        if request_path == "/api/onboard/speaker/status":
+            self._api_post_onboard_speaker_status()
+            return
+
+        if request_path == "/api/normalize":
+            self._api_post_normalize()
+            return
+
+        if request_path == "/api/normalize/status":
+            self._api_post_normalize_status()
+            return
+
         if request_path == "/api/stt":
             self._api_post_stt_start()
             return
@@ -2097,6 +2300,187 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "annotation": normalized,
             },
         )
+
+    def _api_post_onboard_speaker(self) -> None:
+        """Handle multipart POST /api/onboard/speaker — upload WAV + optional CSV."""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
+
+        raw_length = self.headers.get("Content-Length", "")
+        try:
+            content_length = int(raw_length)
+        except (ValueError, TypeError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
+
+        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
+            raise ApiError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                "Upload exceeds {0} byte limit".format(ONBOARD_MAX_UPLOAD_BYTES),
+            )
+
+        # Parse multipart using cgi.FieldStorage
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": str(content_length),
+        }
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ=environ,
+            keep_blank_values=True,
+        )
+
+        # Extract speaker_id
+        speaker_id_field = form.getfirst("speaker_id", "")
+        if isinstance(speaker_id_field, bytes):
+            speaker_id_field = speaker_id_field.decode("utf-8", errors="replace")
+        speaker_id_raw = str(speaker_id_field or "").strip()
+
+        try:
+            speaker = _normalize_speaker_id(speaker_id_raw)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        # Extract audio file
+        audio_item = form["audio"] if "audio" in form else None
+        if audio_item is None or not getattr(audio_item, "filename", None):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "audio file is required")
+
+        audio_filename = os.path.basename(audio_item.filename or "upload.wav")
+        audio_ext = pathlib.Path(audio_filename).suffix.lower()
+        if audio_ext not in ONBOARD_AUDIO_EXTENSIONS:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "Unsupported audio format: {0} (allowed: {1})".format(
+                    audio_ext, ", ".join(sorted(ONBOARD_AUDIO_EXTENSIONS))
+                ),
+            )
+
+        # Write audio to audio/original/<speaker>/
+        speaker_audio_dir = _project_root() / "audio" / "original" / speaker
+        speaker_audio_dir.mkdir(parents=True, exist_ok=True)
+        wav_dest = speaker_audio_dir / audio_filename
+
+        audio_data = audio_item.file.read()
+        wav_dest.write_bytes(audio_data)
+
+        # Extract optional CSV
+        csv_dest: Optional[pathlib.Path] = None
+        csv_item = form["csv"] if "csv" in form else None
+        if csv_item is not None and getattr(csv_item, "filename", None):
+            csv_filename = os.path.basename(csv_item.filename or "elicitation.csv")
+            csv_dest = speaker_audio_dir / csv_filename
+            csv_data = csv_item.file.read()
+            csv_dest.write_bytes(csv_data)
+
+        # Create background job
+        job_id = _create_job(
+            "onboard:speaker",
+            {
+                "speaker": speaker,
+                "wavPath": str(wav_dest.relative_to(_project_root())),
+                "csvPath": str(csv_dest.relative_to(_project_root())) if csv_dest else None,
+            },
+        )
+
+        thread = threading.Thread(
+            target=_run_onboard_speaker_job,
+            args=(job_id, speaker, wav_dest, csv_dest),
+            daemon=True,
+        )
+        thread.start()
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "job_id": job_id,
+                "jobId": job_id,
+                "status": "running",
+                "speaker": speaker,
+            },
+        )
+
+    def _api_post_normalize(self) -> None:
+        """Handle POST /api/normalize — start audio normalization job."""
+        body = self._expect_object(self._read_json_body(), "Request body")
+        speaker = str(body.get("speaker") or "").strip()
+
+        if not speaker:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
+
+        try:
+            speaker = _normalize_speaker_id(speaker)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        # Resolve source WAV — use explicit path if provided, else look up primary source
+        source_wav = str(body.get("sourceWav") or body.get("source_wav") or "").strip()
+        if not source_wav:
+            source_wav = _annotation_primary_source_wav(speaker)
+
+        if not source_wav:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "No source audio found for speaker '{0}'. Provide sourceWav explicitly.".format(speaker),
+            )
+
+        job_id = _create_job(
+            "normalize",
+            {
+                "speaker": speaker,
+                "sourceWav": source_wav,
+            },
+        )
+
+        thread = threading.Thread(
+            target=_run_normalize_job,
+            args=(job_id, speaker, source_wav),
+            daemon=True,
+        )
+        thread.start()
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "job_id": job_id,
+                "jobId": job_id,
+                "status": "running",
+            },
+        )
+
+    def _api_post_onboard_speaker_status(self) -> None:
+        """Poll status for an onboard:speaker job."""
+        body = self._expect_object(self._read_json_body(), "Request body")
+        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
+        if not job_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is required")
+
+        job = _get_job_snapshot(job_id)
+        if job is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown job_id")
+
+        if str(job.get("type") or "") != "onboard:speaker":
+            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is not an onboard:speaker job")
+
+        self._send_json(HTTPStatus.OK, _job_response_payload(job))
+
+    def _api_post_normalize_status(self) -> None:
+        """Poll status for a normalize job."""
+        body = self._expect_object(self._read_json_body(), "Request body")
+        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
+        if not job_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is required")
+
+        job = _get_job_snapshot(job_id)
+        if job is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown job_id")
+
+        if str(job.get("type") or "") != "normalize":
+            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is not a normalize job")
+
+        self._send_json(HTTPStatus.OK, _job_response_payload(job))
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
