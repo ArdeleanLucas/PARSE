@@ -105,7 +105,7 @@ npm run test -- --run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-Expected floor: **>=119 passing tests** and clean TypeScript compile.
+Expected floor: **>=132 passing tests** and clean TypeScript compile.
 
 ## Baseline Architecture
 
