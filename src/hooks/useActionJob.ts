@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, type SetStateAction } from "react";
 
 export interface PollResult {
   status: string;
@@ -56,12 +56,38 @@ function normalizeProgress(progress: number): number {
   return Math.min(1, progress);
 }
 
+function isCompleteStatus(status: string): boolean {
+  return status === "complete" || status === "done" || status === "success" || status === "succeeded";
+}
+
+function isErrorStatus(status: string): boolean {
+  return status === "error" || status === "failed" || status === "failure";
+}
+
 export function useActionJob(config: ActionJobConfig): ActionJobHandle {
   const [state, setState] = useState<ActionJobState>(IDLE_STATE);
+  const stateRef = useRef<ActionJobState>(IDLE_STATE);
+  const mountedRef = useRef(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const inFlightRef = useRef(false);
+  const pollInFlightRef = useRef(false);
+  const startInFlightRef = useRef(false);
   const jobIdRef = useRef<string | null>(null);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRunIdRef = useRef(0);
+
+  const setStateIfMounted = useCallback((nextState: SetStateAction<ActionJobState>) => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    setState((previousState) => {
+      const resolvedState = typeof nextState === "function"
+        ? nextState(previousState)
+        : nextState;
+      stateRef.current = resolvedState;
+      return resolvedState;
+    });
+  }, []);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current !== null) {
@@ -72,30 +98,55 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
       clearTimeout(dismissTimeoutRef.current);
       dismissTimeoutRef.current = null;
     }
-    inFlightRef.current = false;
+    pollInFlightRef.current = false;
     jobIdRef.current = null;
   }, []);
 
   const reset = useCallback(() => {
+    activeRunIdRef.current += 1;
+    startInFlightRef.current = false;
     stopPolling();
-    setState(IDLE_STATE);
-  }, [stopPolling]);
+    stateRef.current = IDLE_STATE;
+    setStateIfMounted(IDLE_STATE);
+  }, [setStateIfMounted, stopPolling]);
 
-  const pollOnce = useCallback(async () => {
-    if (inFlightRef.current || !jobIdRef.current) {
+  const pollOnce = useCallback(async (runId: number) => {
+    if (pollInFlightRef.current || !jobIdRef.current || activeRunIdRef.current !== runId) {
       return;
     }
 
-    inFlightRef.current = true;
+    pollInFlightRef.current = true;
     try {
       const poll = await config.poll(jobIdRef.current);
+      if (activeRunIdRef.current !== runId) {
+        return;
+      }
+
       const progress = normalizeProgress(Number(poll.progress ?? 0));
       const status = String(poll.status || "running").toLowerCase();
 
-      if (status === "complete" || status === "done") {
+      if (isCompleteStatus(status)) {
         stopPolling();
-        await config.onComplete?.();
-        setState({
+        try {
+          await config.onComplete?.();
+        } catch (error) {
+          if (activeRunIdRef.current !== runId) {
+            return;
+          }
+          setStateIfMounted({
+            status: "error",
+            progress,
+            error: toErrorMessage(error, `${config.label} follow-up failed`),
+            label: config.label,
+          });
+          return;
+        }
+
+        if (activeRunIdRef.current !== runId) {
+          return;
+        }
+
+        setStateIfMounted({
           status: "complete",
           progress: 1,
           error: null,
@@ -104,16 +155,17 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
 
         if (config.autoDismissMs !== 0) {
           dismissTimeoutRef.current = setTimeout(() => {
-            setState(IDLE_STATE);
+            stateRef.current = IDLE_STATE;
+            setStateIfMounted(IDLE_STATE);
             dismissTimeoutRef.current = null;
           }, config.autoDismissMs ?? 3000);
         }
         return;
       }
 
-      if (status === "error" || status === "failed") {
+      if (isErrorStatus(status)) {
         stopPolling();
-        setState({
+        setStateIfMounted({
           status: "error",
           progress,
           error: poll.message ?? poll.error ?? "Job failed",
@@ -122,34 +174,45 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         return;
       }
 
-      setState((prev) => ({
+      setStateIfMounted((prev) => ({
         ...prev,
         status: "running",
         progress,
       }));
     } catch (error) {
+      if (activeRunIdRef.current !== runId) {
+        return;
+      }
       stopPolling();
-      setState({
+      setStateIfMounted({
         status: "error",
         progress: 0,
         error: toErrorMessage(error, "Job polling failed"),
         label: config.label,
       });
     } finally {
-      inFlightRef.current = false;
+      pollInFlightRef.current = false;
     }
-  }, [config, stopPolling]);
+  }, [config, setStateIfMounted, stopPolling]);
 
   const run = useCallback(async (): Promise<void> => {
-    if (state.status === "running") {
+    if (startInFlightRef.current || stateRef.current.status === "running") {
       return;
     }
 
+    activeRunIdRef.current += 1;
+    const runId = activeRunIdRef.current;
+
+    startInFlightRef.current = true;
     stopPolling();
-    setState({ status: "running", progress: 0, error: null, label: config.label });
+    setStateIfMounted({ status: "running", progress: 0, error: null, label: config.label });
 
     try {
       const job = await config.start();
+      if (activeRunIdRef.current !== runId) {
+        return;
+      }
+
       const resolvedJobId = String(job.job_id || "").trim();
       if (!resolvedJobId) {
         throw new Error("Missing action job id");
@@ -157,21 +220,32 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
 
       jobIdRef.current = resolvedJobId;
       intervalRef.current = setInterval(() => {
-        void pollOnce();
+        void pollOnce(runId);
       }, config.pollIntervalMs ?? 1000);
     } catch (error) {
+      if (activeRunIdRef.current !== runId) {
+        return;
+      }
       stopPolling();
-      setState({
+      setStateIfMounted({
         status: "error",
         progress: 0,
         error: toErrorMessage(error, "Job start failed"),
         label: config.label,
       });
+    } finally {
+      if (activeRunIdRef.current === runId) {
+        startInFlightRef.current = false;
+      }
     }
-  }, [config.label, config.pollIntervalMs, config.start, pollOnce, state.status, stopPolling]);
+  }, [config.label, config.pollIntervalMs, config.start, pollOnce, setStateIfMounted, stopPolling]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      startInFlightRef.current = false;
+      activeRunIdRef.current += 1;
       stopPolling();
     };
   }, [stopPolling]);

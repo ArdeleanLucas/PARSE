@@ -1235,35 +1235,46 @@ export function ParseUI() {
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['Fail01','Kzn03','Shz05','Tbr07','Isf09']);
   const [speakerPicker, setSpeakerPicker] = useState('Fail02');
   const [computeMode, setComputeMode] = useState('cognates');
-  const { start: startComputeJob, state: computeJobState } = useComputeJob(computeMode);
+  const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
-  const speaker = selectedSpeakers[0];
+  const activeActionSpeaker = selectedSpeakers[0] ?? null;
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
 
+  const reloadSpeakerAnnotation = async (speakerId: string | null) => {
+    if (!speakerId) {
+      return;
+    }
+
+    useAnnotationStore.setState((store: { dirty: Record<string, boolean> }) => ({
+      dirty: { ...store.dirty, [speakerId]: true },
+    }));
+    await loadSpeaker(speakerId);
+  };
+
   const normalizeJob = useActionJob({
     start: () => {
-      if (!speaker) return Promise.reject(new Error('No speaker selected'));
-      return startNormalize(speaker);
+      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
+      return startNormalize(activeActionSpeaker);
     },
     poll: (id) => pollNormalize(id) as Promise<PollResult>,
     label: 'Normalizing audio…',
-    onComplete: () => { if (speaker) loadSpeaker(speaker); },
+    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
   });
 
   const sttJob = useActionJob({
     start: () => {
-      if (!speaker) return Promise.reject(new Error('No speaker selected'));
-      return startSTT(speaker, `${speaker}.wav`, 'ckb');
+      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
+      return startSTT(activeActionSpeaker, `${activeActionSpeaker}.wav`, 'ckb');
     },
     poll: (id) => pollSTT(id) as Promise<PollResult>,
     label: 'Running STT…',
-    onComplete: () => { if (speaker) loadSpeaker(speaker); },
+    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
   });
 
   const ipaJob = useActionJob({
@@ -1292,6 +1303,18 @@ export function ParseUI() {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  const resetProject = () => {
+    setActionsMenuOpen(false);
+    if (!window.confirm('Reset project? This will clear all in-memory store state. Saved files on disk are not affected.')) return;
+    useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
+    useEnrichmentStore.setState({ data: {}, loading: false });
+    useTagStore.setState({ tags: [] });
+    usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
+    useConfigStore.setState({ config: null, loading: false });
+    allJobs.forEach(j => j.reset());
+    resetComputeJob();
+  };
 
   const handleExportLingPy = async () => {
     setExporting(true);
@@ -1554,7 +1577,7 @@ export function ParseUI() {
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void normalizeJob.run(); }}
-                      disabled={normalizeJob.state.status === 'running'}
+                      disabled={!activeActionSpeaker || normalizeJob.state.status === 'running'}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <AudioLines className="h-3.5 w-3.5 text-slate-400"/>
@@ -1562,7 +1585,7 @@ export function ParseUI() {
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void sttJob.run(); }}
-                      disabled={sttJob.state.status === 'running'}
+                      disabled={!activeActionSpeaker || sttJob.state.status === 'running'}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Mic className="h-3.5 w-3.5 text-slate-400"/>
@@ -1612,16 +1635,7 @@ export function ParseUI() {
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        if (!window.confirm('Reset project? This will clear all in-memory store state. Saved files on disk are not affected.')) return;
-                        useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
-                        useEnrichmentStore.setState({ data: {}, loading: false });
-                        useTagStore.setState({ tags: [] });
-                        usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
-                        useConfigStore.setState({ config: null, loading: false });
-                        allJobs.forEach(j => j.reset());
-                      }}
+                      onClick={resetProject}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50"
                     >
                       <Trash2 className="h-3.5 w-3.5"/> Reset Project
@@ -1632,7 +1646,7 @@ export function ParseUI() {
             </div>
 
             {activeJobs.length > 0 && (
-              <div className="ml-2 flex flex-col gap-1">
+              <div className="ml-2 flex flex-col gap-1" data-testid="topbar-action-statuses">
                 {activeJobs.map((job, i) => (
                   <div key={i} className="flex items-center gap-2 text-[11px]">
                     {job.state.status === 'running' && (
@@ -1658,6 +1672,12 @@ export function ParseUI() {
                       <>
                         <XCircle className="h-3 w-3 text-rose-500" />
                         <span className="max-w-[200px] truncate text-rose-600">{job.state.error}</span>
+                        <button
+                          onClick={() => { void job.run(); }}
+                          className="text-[10px] text-rose-600 underline hover:text-rose-700"
+                        >
+                          Retry
+                        </button>
                         <button
                           onClick={job.reset}
                           className="text-[10px] text-slate-500 underline hover:text-slate-700"

@@ -223,4 +223,60 @@ describe("useActionJob", () => {
     expect(start).toHaveBeenCalledTimes(1);
     expect(result.current.state.status).toBe("running");
   });
+
+  it("ignores concurrent run() calls while start() is still resolving", async () => {
+    let releaseStart: (() => void) | null = null;
+    const start = vi.fn(
+      () =>
+        new Promise<{ job_id: string }>((resolve) => {
+          releaseStart = () => resolve({ job_id: "j9" });
+        }),
+    );
+    const poll = vi.fn().mockResolvedValue({ status: "running", progress: 0.2 });
+
+    const { result } = renderHook(() =>
+      useActionJob({
+        start,
+        poll,
+        label: "Running action…",
+      }),
+    );
+
+    await act(async () => {
+      const firstRun = result.current.run();
+      const secondRun = result.current.run();
+      expect(start).toHaveBeenCalledTimes(1);
+      releaseStart?.();
+      await firstRun;
+      await secondRun;
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(result.current.state.status).toBe("running");
+  });
+
+  it("surfaces start failures immediately without polling", async () => {
+    const start = vi.fn().mockRejectedValue(new Error("Start failed"));
+    const poll = vi.fn();
+
+    const { result } = renderHook(() =>
+      useActionJob({
+        start,
+        poll,
+        label: "Running action…",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+
+    expect(result.current.state).toEqual({
+      status: "error",
+      progress: 0,
+      error: "Start failed",
+      label: "Running action…",
+    });
+    expect(poll).not.toHaveBeenCalled();
+  });
 });

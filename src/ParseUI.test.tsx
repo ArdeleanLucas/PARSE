@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 
@@ -218,7 +218,10 @@ beforeEach(() => {
   mockConfigSetState.mockClear();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("ParseUI", () => {
   it("loads config and tag hydration on mount and computes reviewed count from confirmed tags", () => {
@@ -401,13 +404,32 @@ describe("Actions menu job lifecycle", () => {
     expect(screen.getByText("Run Cross-Speaker Match")).toBeTruthy();
   });
 
-  it("action buttons show running label while job is in progress", async () => {
+  it("shows topbar normalize progress and disables the button while running", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.startNormalize).mockResolvedValue({ job_id: "normalize-1" });
+    vi.mocked(apiClient.pollNormalize).mockResolvedValue({ status: "running", progress: 25, segments: [] });
+
     render(<ParseUI />);
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
 
-    await waitFor(() => expect(apiClient.startNormalize).toHaveBeenCalledWith("Fail01"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
+      await Promise.resolve();
+    });
+
+    expect(apiClient.startNormalize).toHaveBeenCalledWith("Fail01");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByTestId("topbar-action-statuses")).toBeTruthy();
+    expect(screen.getByText("Normalizing audio…")).toBeTruthy();
+    expect(screen.getByText("25%")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    expect((screen.getByRole("button", { name: "Normalizing…" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("action buttons have disabled class when applicable", () => {
@@ -420,14 +442,56 @@ describe("Actions menu job lifecycle", () => {
     expect(normalizeButton.className).toContain("disabled:cursor-not-allowed");
   });
 
-  it("Reset Project clears action job states", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("shows retry for action errors and reruns the job", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.startNormalize)
+      .mockResolvedValueOnce({ job_id: "normalize-error-1" })
+      .mockResolvedValueOnce({ job_id: "normalize-error-2" });
+    vi.mocked(apiClient.pollNormalize)
+      .mockResolvedValueOnce({ status: "error", progress: 40, segments: [], message: "Normalize failed" } as unknown as Awaited<ReturnType<typeof apiClient.pollNormalize>>)
+      .mockResolvedValue({ status: "running", progress: 60, segments: [] });
 
     render(<ParseUI />);
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByText("Normalize failed")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await Promise.resolve();
+    });
+
+    expect(apiClient.startNormalize).toHaveBeenCalledTimes(2);
+  });
+
+  it("Reset Project clears action job states", async () => {
+    vi.useFakeTimers();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(apiClient.startNormalize).mockResolvedValue({ job_id: "normalize-reset" });
+    vi.mocked(apiClient.pollNormalize).mockResolvedValue({ status: "running", progress: 10, segments: [] });
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByTestId("topbar-action-statuses")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset Project" }));
 
+    expect(screen.queryByTestId("topbar-action-statuses")).toBeNull();
     expect(confirmSpy).toHaveBeenCalled();
     expect(mockAnnotationSetState).toHaveBeenCalledWith({ records: {}, dirty: {}, loading: {} });
     expect(mockEnrichmentSetState).toHaveBeenCalledWith({ data: {}, loading: false });
