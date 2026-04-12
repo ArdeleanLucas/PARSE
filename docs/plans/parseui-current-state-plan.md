@@ -62,22 +62,9 @@ The next implementation work is not "add raw fetch calls from the old TODO." It 
 - normalize remaining ParseUI action handlers to the typed client surface where possible
 - avoid creating a second ad hoc API path in `ParseUI.tsx`
 
-### 3. Finish Actions menu job behavior, not just button clicks
+### 3. ~~Finish Actions menu job behavior, not just button clicks~~ ✅ DONE (PR #38)
 
-The remaining Actions work is about **progress, polling, and explicit success/error handling**:
-
-- Audio normalization
-- Orthographic STT
-- IPA transcription / pipeline step
-- Full pipeline orchestration
-- Cross-speaker match feedback
-- Reset Project confirmation + state reset review
-
-#### Desired outcome
-- one action state model for in-flight jobs
-- explicit progress/error UI
-- no silent background trigger with console-only failure reporting
-- action handlers grounded in the current contract, not the historical TODO doc
+All 5 processing actions (normalize, STT, IPA, full pipeline, cross-speaker match) now use `useActionJob` with proper start → poll → progress → complete/error lifecycle. Topbar status indicator shows progress bars, completion flashes, and error messages with dismiss. Buttons disabled while running. Reset Project clears all in-flight jobs. No `console.error`-only failure paths remain. Tests: 132 passing.
 
 ### 4. Unify the decisions story
 

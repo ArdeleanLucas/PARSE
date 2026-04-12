@@ -9,16 +9,18 @@ import {
   Workflow, Network, Trash2, ChevronDown as CDown,
   Video, Scissors, Activity, SlidersHorizontal, Download,
   Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
-  Sun, Moon
+  Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize } from './api/client';
+import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
+import { useActionJob } from './hooks/useActionJob';
+import type { PollResult } from './hooks/useActionJob';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
@@ -1240,6 +1242,54 @@ export function ParseUI() {
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const speaker = selectedSpeakers[0];
+  const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
+  const loadEnrichments = useEnrichmentStore((s) => s.load);
+
+  const normalizeJob = useActionJob({
+    start: () => {
+      if (!speaker) return Promise.reject(new Error('No speaker selected'));
+      return startNormalize(speaker);
+    },
+    poll: (id) => pollNormalize(id) as Promise<PollResult>,
+    label: 'Normalizing audio…',
+    onComplete: () => { if (speaker) loadSpeaker(speaker); },
+  });
+
+  const sttJob = useActionJob({
+    start: () => {
+      if (!speaker) return Promise.reject(new Error('No speaker selected'));
+      return startSTT(speaker, `${speaker}.wav`, 'ckb');
+    },
+    poll: (id) => pollSTT(id) as Promise<PollResult>,
+    label: 'Running STT…',
+    onComplete: () => { if (speaker) loadSpeaker(speaker); },
+  });
+
+  const ipaJob = useActionJob({
+    start: () => startCompute('ipa_only'),
+    poll: (id) => pollCompute('ipa_only', id),
+    label: 'Transcribing IPA…',
+    onComplete: loadEnrichments,
+  });
+
+  const pipelineJob = useActionJob({
+    start: () => startCompute('full_pipeline'),
+    poll: (id) => pollCompute('full_pipeline', id),
+    label: 'Running full pipeline…',
+    onComplete: loadEnrichments,
+  });
+
+  const crossSpeakerJob = useActionJob({
+    start: () => startCompute('contact-lexemes'),
+    poll: (id) => pollCompute('contact-lexemes', id),
+    label: 'Matching cross-speaker…',
+    onComplete: loadEnrichments,
+  });
+
+  const allJobs = [normalizeJob, sttJob, ipaJob, pipelineJob, crossSpeakerJob];
+  const activeJobs = allJobs.filter(j => j.state.status !== 'idle');
+
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -1503,62 +1553,44 @@ export function ParseUI() {
                       <Import className="h-3.5 w-3.5 text-slate-400"/> Import Speaker Data…
                     </button>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        const speaker = selectedSpeakers[0];
-                        if (!speaker) return;
-                        void startNormalize(speaker).catch(err => console.error('[ParseUI] normalize failed:', err));
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => { setActionsMenuOpen(false); void normalizeJob.run(); }}
+                      disabled={normalizeJob.state.status === 'running'}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <AudioLines className="h-3.5 w-3.5 text-slate-400"/> Run Audio Normalization
+                      <AudioLines className="h-3.5 w-3.5 text-slate-400"/>
+                      {normalizeJob.state.status === 'running' ? 'Normalizing…' : 'Run Audio Normalization'}
                     </button>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        const speaker = selectedSpeakers[0];
-                        if (!speaker) return;
-                        // STT requires a source_wav path — derive from speaker name convention
-                        void startSTT(speaker, `${speaker}.wav`, 'ckb').catch(err =>
-                          console.error('[ParseUI] STT failed:', err)
-                        );
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => { setActionsMenuOpen(false); void sttJob.run(); }}
+                      disabled={sttJob.state.status === 'running'}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Mic className="h-3.5 w-3.5 text-slate-400"/> Run Orthographic STT
+                      <Mic className="h-3.5 w-3.5 text-slate-400"/>
+                      {sttJob.state.status === 'running' ? 'Running STT…' : 'Run Orthographic STT'}
                     </button>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        void startCompute('ipa_only').catch(err =>
-                          console.error('[ParseUI] IPA compute failed:', err)
-                        );
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => { setActionsMenuOpen(false); void ipaJob.run(); }}
+                      disabled={ipaJob.state.status === 'running'}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Type className="h-3.5 w-3.5 text-slate-400"/> Run IPA Transcription
+                      <Type className="h-3.5 w-3.5 text-slate-400"/>
+                      {ipaJob.state.status === 'running' ? 'Transcribing…' : 'Run IPA Transcription'}
                     </button>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        void startCompute('full_pipeline').catch(err =>
-                          console.error('[ParseUI] Full pipeline failed:', err)
-                        );
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => { setActionsMenuOpen(false); void pipelineJob.run(); }}
+                      disabled={pipelineJob.state.status === 'running'}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Workflow className="h-3.5 w-3.5 text-slate-400"/> Run Full Pipeline
+                      <Workflow className="h-3.5 w-3.5 text-slate-400"/>
+                      {pipelineJob.state.status === 'running' ? 'Running pipeline…' : 'Run Full Pipeline'}
                     </button>
                     <button
-                      onClick={() => {
-                        setActionsMenuOpen(false);
-                        void startCompute('contact-lexemes').catch(err =>
-                          console.error('[ParseUI] Cross-speaker match failed:', err)
-                        );
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => { setActionsMenuOpen(false); void crossSpeakerJob.run(); }}
+                      disabled={crossSpeakerJob.state.status === 'running'}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Network className="h-3.5 w-3.5 text-slate-400"/> Run Cross-Speaker Match
+                      <Network className="h-3.5 w-3.5 text-slate-400"/>
+                      {crossSpeakerJob.state.status === 'running' ? 'Matching…' : 'Run Cross-Speaker Match'}
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
@@ -1588,6 +1620,7 @@ export function ParseUI() {
                         useTagStore.setState({ tags: [] });
                         usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
                         useConfigStore.setState({ config: null, loading: false });
+                        allJobs.forEach(j => j.reset());
                       }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50"
                     >
@@ -1597,6 +1630,46 @@ export function ParseUI() {
                 </>
               )}
             </div>
+
+            {activeJobs.length > 0 && (
+              <div className="ml-2 flex flex-col gap-1">
+                {activeJobs.map((job, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                    {job.state.status === 'running' && (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                        <span className="text-slate-600">{job.state.label}</span>
+                        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                            style={{ width: `${Math.round(job.state.progress * 100)}%` }}
+                          />
+                        </div>
+                        <span className="tabular-nums text-slate-400">{Math.round(job.state.progress * 100)}%</span>
+                      </>
+                    )}
+                    {job.state.status === 'complete' && (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-500" />
+                        <span className="text-emerald-600">{job.state.label?.replace('…', '')} done</span>
+                      </>
+                    )}
+                    {job.state.status === 'error' && (
+                      <>
+                        <XCircle className="h-3 w-3 text-rose-500" />
+                        <span className="max-w-[200px] truncate text-rose-600">{job.state.error}</span>
+                        <button
+                          onClick={job.reset}
+                          className="text-[10px] text-slate-500 underline hover:text-slate-700"
+                        >
+                          Dismiss
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={() => setDarkMode(v => !v)}
