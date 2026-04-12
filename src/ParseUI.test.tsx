@@ -24,36 +24,50 @@ const mockPlayPause = vi.fn();
 const mockSkip = vi.fn();
 const mockSetWaveZoom = vi.fn();
 const mockSetRate = vi.fn();
+const mockAnnotationSetState = vi.fn();
+const mockEnrichmentSetState = vi.fn();
+const mockTagSetState = vi.fn();
+const mockPlaybackSetState = vi.fn();
+const mockConfigSetState = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
 
-vi.mock("./stores/configStore", () => ({
-  useConfigStore: (selector: (s: unknown) => unknown) =>
-    selector({ config: mockConfig, load: mockLoadConfig }),
-}));
+vi.mock("./stores/configStore", () => {
+  const useConfigStore = (selector: (s: unknown) => unknown) =>
+    selector({ config: mockConfig, load: mockLoadConfig });
+  (useConfigStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
+    mockConfigSetState(...args);
+  return { useConfigStore };
+});
 
-vi.mock("./stores/tagStore", () => ({
-  useTagStore: (selector: (s: unknown) => unknown) =>
+vi.mock("./stores/tagStore", () => {
+  const useTagStore = (selector: (s: unknown) => unknown) =>
     selector({
       tags: mockTags,
       hydrate: mockHydrateTags,
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
       getTagsForConcept: (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId)),
-    }),
-}));
+    });
+  (useTagStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
+    mockTagSetState(...args);
+  return { useTagStore };
+});
 
-vi.mock("./stores/annotationStore", () => ({
-  useAnnotationStore: (selector: (s: unknown) => unknown) =>
+vi.mock("./stores/annotationStore", () => {
+  const useAnnotationStore = (selector: (s: unknown) => unknown) =>
     selector({
       records: mockRecords,
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
       saveSpeaker: mockSaveSpeaker,
-    }),
-}));
+    });
+  (useAnnotationStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
+    mockAnnotationSetState(...args);
+  return { useAnnotationStore };
+});
 
-vi.mock("./stores/playbackStore", () => ({
-  usePlaybackStore: (selector: (s: unknown) => unknown) =>
+vi.mock("./stores/playbackStore", () => {
+  const usePlaybackStore = (selector: (s: unknown) => unknown) =>
     selector({
       activeSpeaker: null,
       isPlaying: false,
@@ -61,9 +75,11 @@ vi.mock("./stores/playbackStore", () => ({
       duration: 4,
       selectedRegion: mockSelectedRegion,
       setSelectedRegion: mockSetSelectedRegion,
-    }),
-  setState: vi.fn(),
-}));
+    });
+  (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
+    mockPlaybackSetState(...args);
+  return { usePlaybackStore };
+});
 
 vi.mock("./hooks/useChatSession", () => ({
   useChatSession: () => ({
@@ -85,10 +101,13 @@ vi.mock("./hooks/useWaveSurfer", () => ({
   }),
 }));
 
-vi.mock("./stores/enrichmentStore", () => ({
-  useEnrichmentStore: (selector: (s: unknown) => unknown) =>
-    selector({ data: mockEnrichmentData, loading: false, load: vi.fn(), save: vi.fn() }),
-}));
+vi.mock("./stores/enrichmentStore", () => {
+  const useEnrichmentStore = (selector: (s: unknown) => unknown) =>
+    selector({ data: mockEnrichmentData, loading: false, load: vi.fn(), save: vi.fn() });
+  (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
+    mockEnrichmentSetState(...args);
+  return { useEnrichmentStore };
+});
 
 vi.mock("./stores/uiStore", () => ({
   useUIStore: (selector: (s: unknown) => unknown) =>
@@ -99,7 +118,19 @@ vi.mock("./stores/uiStore", () => ({
     }),
 }));
 
+vi.mock("./api/client", () => ({
+  getLingPyExport: vi.fn().mockResolvedValue(''),
+  saveApiKey: vi.fn().mockResolvedValue(undefined),
+  startSTT: vi.fn().mockResolvedValue({ job_id: 'stt-job-1' }),
+  startCompute: vi.fn().mockResolvedValue({ job_id: 'compute-job-1' }),
+  startNormalize: vi.fn().mockResolvedValue({ job_id: 'normalize-job-1' }),
+  pollSTT: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+  pollNormalize: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+  pollCompute: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+}));
+
 import { ParseUI } from "./ParseUI";
+import * as apiClient from "./api/client";
 
 function makeRecord(
   speaker: string,
@@ -172,6 +203,19 @@ beforeEach(() => {
   mockSkip.mockClear();
   mockSetWaveZoom.mockClear();
   mockSetRate.mockClear();
+  vi.mocked(apiClient.startNormalize).mockClear();
+  vi.mocked(apiClient.pollNormalize).mockClear();
+  vi.mocked(apiClient.startSTT).mockClear();
+  vi.mocked(apiClient.pollSTT).mockClear();
+  vi.mocked(apiClient.startCompute).mockClear();
+  vi.mocked(apiClient.pollCompute).mockClear();
+  vi.mocked(apiClient.getLingPyExport).mockClear();
+  vi.mocked(apiClient.saveApiKey).mockClear();
+  mockAnnotationSetState.mockClear();
+  mockEnrichmentSetState.mockClear();
+  mockTagSetState.mockClear();
+  mockPlaybackSetState.mockClear();
+  mockConfigSetState.mockClear();
 });
 
 afterEach(cleanup);
@@ -340,5 +384,57 @@ describe("ParseUI", () => {
   it("shows a reference placeholder when enrichmentStore has no reference forms", () => {
     render(<ParseUI />);
     expect(screen.getAllByText("No reference data").length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+
+describe("Actions menu job lifecycle", () => {
+  it("Actions menu renders all 5 processing action buttons", () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+
+    expect(screen.getByText("Run Audio Normalization")).toBeTruthy();
+    expect(screen.getByText("Run Orthographic STT")).toBeTruthy();
+    expect(screen.getByText("Run IPA Transcription")).toBeTruthy();
+    expect(screen.getByText("Run Full Pipeline")).toBeTruthy();
+    expect(screen.getByText("Run Cross-Speaker Match")).toBeTruthy();
+  });
+
+  it("action buttons show running label while job is in progress", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
+
+    await waitFor(() => expect(apiClient.startNormalize).toHaveBeenCalledWith("Fail01"));
+  });
+
+  it("action buttons have disabled class when applicable", () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    const normalizeButton = screen.getByRole("button", { name: "Run Audio Normalization" });
+
+    expect(normalizeButton.className).toContain("disabled:opacity-50");
+    expect(normalizeButton.className).toContain("disabled:cursor-not-allowed");
+  });
+
+  it("Reset Project clears action job states", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset Project" }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockAnnotationSetState).toHaveBeenCalledWith({ records: {}, dirty: {}, loading: {} });
+    expect(mockEnrichmentSetState).toHaveBeenCalledWith({ data: {}, loading: false });
+    expect(mockTagSetState).toHaveBeenCalledWith({ tags: [] });
+    expect(mockPlaybackSetState).toHaveBeenCalledWith({ activeSpeaker: null, currentTime: 0 });
+    expect(mockConfigSetState).toHaveBeenCalledWith({ config: null, loading: false });
+
+    confirmSpy.mockRestore();
   });
 });
