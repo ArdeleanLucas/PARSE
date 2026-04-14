@@ -121,6 +121,47 @@ def display_path(path: Path, base_dir: Path) -> str:
         return path.as_posix()
 
 
+def describe_working_root_issue(working_root: Path, original_root: Path) -> str:
+    try:
+        if working_root.is_symlink():
+            return (
+                "audio/working is a symlink: "
+                f"{working_root} -> {working_root.resolve()}"
+            )
+    except (OSError, RuntimeError):
+        return "audio/working could not be inspected safely"
+
+    try:
+        working_resolved = working_root.resolve()
+        original_resolved = original_root.resolve()
+    except (OSError, RuntimeError) as exc:
+        return "audio/working could not be resolved safely: {0}".format(exc)
+
+    if working_resolved == original_resolved:
+        return (
+            "audio/working resolves to the same directory as audio/original: "
+            f"{working_resolved}"
+        )
+
+    try:
+        working_resolved.relative_to(original_resolved)
+        return (
+            "audio/working resolves inside audio/original: "
+            f"{working_resolved}"
+        )
+    except ValueError:
+        return ""
+
+
+def ensure_safe_working_root(working_root: Path, original_root: Path) -> None:
+    issue = describe_working_root_issue(working_root, original_root)
+    if issue:
+        raise ValueError(
+            "Unsafe audio pipeline configuration: {0}. Refusing to normalize "
+            "because outputs must stay isolated from read-only originals.".format(issue)
+        )
+
+
 def is_supported_audio_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
 
@@ -443,6 +484,8 @@ def build_pass2_command(ffmpeg_bin: str, source_path: Path, output_path: Path, s
         TARGET_SR,
         "-ac",
         TARGET_CHANNELS,
+        "-c:a",
+        "pcm_s16le",
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
         to_ffmpeg_path(output_path, ffmpeg_bin),
@@ -462,6 +505,8 @@ def build_single_pass_command(ffmpeg_bin: str, source_path: Path, output_path: P
         TARGET_SR,
         "-ac",
         TARGET_CHANNELS,
+        "-c:a",
+        "pcm_s16le",
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
         to_ffmpeg_path(output_path, ffmpeg_bin),
@@ -513,10 +558,11 @@ def main() -> int:
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir).expanduser().resolve()
-    original_root = (base_dir / "audio" / "original").resolve()
-    working_root = (base_dir / "audio" / "working").resolve()
+    original_root = base_dir / "audio" / "original"
+    working_root = base_dir / "audio" / "working"
 
     try:
+        ensure_safe_working_root(working_root, original_root)
         jobs = build_jobs(args, base_dir, original_root, working_root)
     except ValueError as exc:
         print_error(f"ERROR: {exc}")

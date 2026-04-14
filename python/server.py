@@ -55,6 +55,10 @@ ANNOTATION_MATCH_EPSILON = 0.0005
 ONBOARD_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB hard cap
 ONBOARD_AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
 NORMALIZE_LUFS_TARGET = -16.0
+NORMALIZE_SAMPLE_RATE = "44100"
+NORMALIZE_CHANNELS = "1"
+NORMALIZE_SAMPLE_FORMAT = "s16"
+NORMALIZE_AUDIO_CODEC = "pcm_s16le"
 
 CHAT_SESSION_RETENTION_SECONDS = 8 * 60 * 60
 CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION = 200
@@ -87,6 +91,50 @@ def _utc_now_iso() -> str:
 
 def _project_root() -> pathlib.Path:
     return pathlib.Path.cwd().resolve()
+
+
+def _describe_working_root_issue(project_root: Optional[pathlib.Path] = None) -> str:
+    root = pathlib.Path(project_root) if project_root is not None else _project_root()
+    original_root = root / "audio" / "original"
+    working_root = root / "audio" / "working"
+
+    try:
+        if working_root.is_symlink():
+            return "audio/working is a symlink: {0} -> {1}".format(
+                working_root,
+                working_root.resolve(),
+            )
+    except (OSError, RuntimeError):
+        return "audio/working could not be inspected safely"
+
+    try:
+        working_resolved = working_root.resolve()
+        original_resolved = original_root.resolve()
+    except (OSError, RuntimeError) as exc:
+        return "audio/working could not be resolved safely: {0}".format(exc)
+
+    if working_resolved == original_resolved:
+        return "audio/working resolves to the same directory as audio/original: {0}".format(
+            working_resolved,
+        )
+
+    try:
+        working_resolved.relative_to(original_resolved)
+        return "audio/working resolves inside audio/original: {0}".format(working_resolved)
+    except ValueError:
+        return ""
+
+
+def _ensure_safe_working_root(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
+    root = pathlib.Path(project_root) if project_root is not None else _project_root()
+    working_root = root / "audio" / "working"
+    issue = _describe_working_root_issue(root)
+    if issue:
+        raise RuntimeError(
+            "Unsafe audio pipeline configuration: {0}. Normalize jobs are disabled until "
+            "audio/working is a real working directory separate from audio/original.".format(issue)
+        )
+    return working_root
 
 
 def _config_path() -> pathlib.Path:
@@ -1699,6 +1747,8 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         if not audio_path.exists():
             raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
 
+        working_root = _ensure_safe_working_root()
+
         _set_job_progress(job_id, 5.0, message="Checking ffmpeg availability")
 
         # Verify ffmpeg is available
@@ -1748,10 +1798,10 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
 
         _set_job_progress(job_id, 40.0, message="Normalizing audio (pass 2)")
 
-        # Determine output path: audio/working/<Speaker>/<filename>
-        working_dir = _project_root() / "audio" / "working" / speaker
+        # Determine output path: audio/working/<Speaker>/<stem>.wav
+        working_dir = working_root / speaker
         working_dir.mkdir(parents=True, exist_ok=True)
-        output_path = working_dir / audio_path.name
+        output_path = working_dir / audio_path.with_suffix(".wav").name
 
         # Pass 2: apply loudnorm with measured stats for precise normalization
         normalize_filter = "loudnorm=I={target}".format(target=NORMALIZE_LUFS_TARGET)
@@ -1775,6 +1825,10 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
             "ffmpeg", "-y",
             "-i", str(audio_path),
             "-af", normalize_filter,
+            "-ar", NORMALIZE_SAMPLE_RATE,
+            "-ac", NORMALIZE_CHANNELS,
+            "-c:a", NORMALIZE_AUDIO_CODEC,
+            "-sample_fmt", NORMALIZE_SAMPLE_FORMAT,
             str(output_path),
         ]
         proc = subprocess.run(
@@ -2424,6 +2478,15 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ApiError(
                 HTTPStatus.BAD_REQUEST,
                 "No source audio found for speaker '{0}'. Provide sourceWav explicitly.".format(speaker),
+            )
+
+        working_root_issue = _describe_working_root_issue()
+        if working_root_issue:
+            raise ApiError(
+                HTTPStatus.CONFLICT,
+                "Unsafe audio pipeline configuration: {0}. Fix audio/working before starting normalization jobs.".format(
+                    working_root_issue,
+                ),
             )
 
         job_id = _create_job(
@@ -3077,9 +3140,11 @@ def main() -> None:
     server_address = (HOST, PORT)
     httpd = http.server.ThreadingHTTPServer(server_address, RangeRequestHandler)
     local_ips = _get_local_ips()
+    working_root_issue = _describe_working_root_issue(serve_dir)
 
+    print()
     print("=" * 60)
-    print("  PARSE — HTTP Server")
+    print("  PARSE - HTTP Server")
     print("=" * 60)
     print("  Serving: {0}".format(serve_dir))
     print("  Port   : {0}".format(PORT))
@@ -3096,6 +3161,10 @@ def main() -> None:
         print("    Compare : http://{0}:{1}/compare.html".format(ip, PORT))
     print()
     print("  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]")
+    if working_root_issue:
+        print()
+        print("  WARNING: {0}".format(working_root_issue))
+        print("  Normalize jobs will refuse to run until audio/working is a real working directory.")
     print("  Press Ctrl+C to stop.")
     print("=" * 60)
 
