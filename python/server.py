@@ -23,10 +23,7 @@ from urllib.parse import unquote, urlparse
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
 from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
-from audio_pipeline_paths import (
-    build_normalized_output_path,
-    describe_working_root_issue as shared_describe_working_root_issue,
-)
+from audio_pipeline_paths import build_normalized_output_path
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -95,25 +92,6 @@ def _utc_now_iso() -> str:
 
 def _project_root() -> pathlib.Path:
     return pathlib.Path.cwd().resolve()
-
-
-def _describe_working_root_issue(project_root: Optional[pathlib.Path] = None) -> str:
-    root = pathlib.Path(project_root) if project_root is not None else _project_root()
-    original_root = root / "audio" / "original"
-    working_root = root / "audio" / "working"
-    return shared_describe_working_root_issue(working_root, original_root)
-
-
-def _ensure_safe_working_root(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
-    root = pathlib.Path(project_root) if project_root is not None else _project_root()
-    working_root = root / "audio" / "working"
-    issue = _describe_working_root_issue(root)
-    if issue:
-        raise RuntimeError(
-            "Unsafe audio pipeline configuration: {0}. Normalize jobs are disabled until "
-            "audio/working is a real working directory separate from audio/original.".format(issue)
-        )
-    return working_root
 
 
 def _config_path() -> pathlib.Path:
@@ -1726,7 +1704,7 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         if not audio_path.exists():
             raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
 
-        working_root = _ensure_safe_working_root()
+        working_root = _project_root() / "audio" / "working"
 
         _set_job_progress(job_id, 5.0, message="Checking ffmpeg availability")
 
@@ -2459,15 +2437,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "No source audio found for speaker '{0}'. Provide sourceWav explicitly.".format(speaker),
             )
 
-        working_root_issue = _describe_working_root_issue()
-        if working_root_issue:
-            raise ApiError(
-                HTTPStatus.CONFLICT,
-                "Unsafe audio pipeline configuration: {0}. Fix audio/working before starting normalization jobs.".format(
-                    working_root_issue,
-                ),
-            )
-
         job_id = _create_job(
             "normalize",
             {
@@ -3115,7 +3084,6 @@ def _get_local_ips() -> List[str]:
 def _startup_banner_lines(
     serve_dir: pathlib.Path,
     local_ips: Sequence[str],
-    working_root_issue: str,
 ) -> List[str]:
     lines = [
         "",
@@ -3139,14 +3107,6 @@ def _startup_banner_lines(
     lines.extend([
         "",
         "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]",
-    ])
-    if working_root_issue:
-        lines.extend([
-            "",
-            "  WARNING: {0}".format(working_root_issue),
-            "  Normalize jobs will refuse to run until audio/working is a real working directory.",
-        ])
-    lines.extend([
         "  Press Ctrl+C to stop.",
         "=" * 60,
     ])
@@ -3160,9 +3120,8 @@ def main() -> None:
     server_address = (HOST, PORT)
     httpd = http.server.ThreadingHTTPServer(server_address, RangeRequestHandler)
     local_ips = _get_local_ips()
-    working_root_issue = _describe_working_root_issue(serve_dir)
 
-    for line in _startup_banner_lines(serve_dir, local_ips, working_root_issue):
+    for line in _startup_banner_lines(serve_dir, local_ips):
         print(line)
 
     try:

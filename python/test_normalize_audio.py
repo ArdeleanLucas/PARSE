@@ -5,28 +5,23 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import normalize_audio as mod
 
 
-def test_describe_working_root_issue_detects_symlink(tmp_path: pathlib.Path) -> None:
-    original_root = tmp_path / "audio" / "original"
-    original_root.mkdir(parents=True)
-    symlink_target = tmp_path / "raw-originals"
-    symlink_target.mkdir()
-
-    working_root = tmp_path / "audio" / "working"
-    working_root.symlink_to(symlink_target, target_is_directory=True)
-
-    issue = mod.describe_working_root_issue(working_root, original_root)
-
-    assert "symlink" in issue
-    assert str(symlink_target) in issue
+def test_normalize_audio_no_longer_exports_working_root_guard_wrappers() -> None:
+    assert not hasattr(mod, "describe_working_root_issue")
+    assert not hasattr(mod, "ensure_safe_working_root")
 
 
-def test_ensure_safe_working_root_allows_real_sibling_dirs(tmp_path: pathlib.Path) -> None:
+def test_build_jobs_for_speaker_preserves_nested_relative_output_dirs(tmp_path: pathlib.Path) -> None:
     original_root = tmp_path / "audio" / "original"
     working_root = tmp_path / "audio" / "working"
-    original_root.mkdir(parents=True)
-    working_root.mkdir(parents=True)
+    nested_source_dir = original_root / "Fail01" / "session-a"
+    nested_source_dir.mkdir(parents=True)
+    source_path = nested_source_dir / "recording.mp3"
+    source_path.write_bytes(b"fake")
 
-    mod.ensure_safe_working_root(working_root, original_root)
+    jobs = mod.build_jobs_for_speaker("Fail01", original_root, working_root)
+
+    assert len(jobs) == 1
+    assert jobs[0]["output"] == (working_root / "Fail01" / "session-a" / "recording.wav").resolve()
 
 
 def test_normalize_commands_force_pcm_s16le_output() -> None:

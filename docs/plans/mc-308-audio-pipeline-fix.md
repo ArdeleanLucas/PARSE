@@ -5,7 +5,7 @@
 - **Blocks:** C5 (export verification), C6 (browser regression), C7 (legacy cleanup)
 - **Priority:** Critical — data safety violation
 
-> Execution note (2026-04-14): the live `audio/working` repair, speaker rebuild, and repo hardening shipped in PR #43. This document started as the build plan and now serves as the completion record for MC-308. It does **not** claim C5/C6 signoff; those remain separate manual gates.
+> Execution note (2026-04-14): the live `audio/working` repair and speaker rebuild shipped in PR #43. A later review pass removed the temporary symlink-guard code and kept only the canonical `.wav` working-output helper, so this document now records the final merged scope. It does **not** claim C5/C6 signoff; those remain separate manual gates.
 
 ---
 
@@ -242,53 +242,17 @@ source_index but the original files are `Mand_M_1962_01.wav` and
 `Mand_M_1962_02.wav`), update the source_index entry manually or
 re-run `python/source_index.py`.
 
-### Step 5: Add symlink detection guard
+### Step 5: Keep canonical working output paths
 
-Add a startup check in `python/server.py` `main()` to warn if
-`audio/working` is a symlink. This prevents the problem from recurring.
-
-**Location:** `python/server.py`, in `main()` before `httpd.serve_forever()`:
+Keep one shared helper for the behavior that remains useful after the repair:
 
 ```python
-# --- Symlink safety check ---
-working_dir = serve_dir / "audio" / "working"
-if working_dir.is_symlink():
-    target = working_dir.resolve()
-    print()
-    print("!" * 60)
-    print("  WARNING: audio/working is a symlink")
-    print("  Target: {0}".format(target))
-    print()
-    print("  The normalization pipeline will write into the")
-    print("  symlink target, which may corrupt original recordings.")
-    print("  Remove the symlink and create a real directory:")
-    print()
-    print("    rm audio/working")
-    print("    mkdir -p audio/working")
-    print("    python python/normalize_audio.py --all --base-dir .")
-    print("!" * 60)
-    print()
+def build_normalized_output_path(source_path: Path, working_dir: Path) -> Path:
+    return working_dir / source_path.with_suffix(".wav").name
 ```
 
-Also add the same check to `normalize_audio.py` before building jobs:
-
-```python
-def check_working_not_symlink(working_root: Path) -> None:
-    """Refuse to run if audio/working is a symlink (would overwrite originals)."""
-    if working_root.is_symlink():
-        target = working_root.resolve()
-        print_error(
-            f"ERROR: {working_root} is a symlink → {target}\n"
-            "Normalization would write into the symlink target, which may\n"
-            "corrupt original recordings. Remove the symlink and create\n"
-            "a real directory:\n\n"
-            f"  rm {working_root}\n"
-            f"  mkdir -p {working_root}\n"
-        )
-        raise SystemExit(1)
-```
-
-Call this at the top of `build_jobs()` before any file operations.
+This ensures both normalization entry points still write canonical working
+copies as `.wav`, even when the staged source recording was `.mp3` or `.flac`.
 
 ### Step 6: Verify end-to-end
 
@@ -302,21 +266,24 @@ Call this at the top of `build_jobs()` before any file operations.
    amplitude)
 5. **Check Compare mode** — concept × speaker matrix should load with
    audio playback working across speakers
+6. **Spot-check non-WAV sources** — if a staged source was `.mp3`/`.flac`,
+   confirm the working copy is still emitted as `.wav`
 
 ---
 
 ## 4. Code changes (PR scope)
 
 The data operations (Steps 1–4) are manual and happen on the local machine.
-The PR contains only code changes:
+The final PR contains only the code changes that remained justified after review:
 
 | File | Change |
 |------|--------|
-| `python/server.py` | Add symlink detection warning in `main()` |
-| `python/normalize_audio.py` | Add `check_working_not_symlink()` guard before `build_jobs()` |
+| `python/audio_pipeline_paths.py` | Shared `build_normalized_output_path()` helper |
+| `python/server.py` | Use canonical `.wav` output-path helper in normalize jobs |
+| `python/normalize_audio.py` | Use canonical `.wav` output-path helper in CLI normalization |
 
-Both are non-destructive warnings/guards — no behavioral changes to
-existing normalization or serving logic.
+The temporary symlink-guard code was removed in the final cleanup pass because
+it addressed a one-time setup mistake rather than an ongoing runtime feature.
 
 ---
 
@@ -341,8 +308,8 @@ existing normalization or serving logic.
 - [x] `source_index.json` paths resolve to existing files
 - [x] PARSE serves audio correctly (waveform renders, playback works)
 - [x] Annotation timestamps still align with audio after normalization
-- [x] `python/server.py` warns on startup if `audio/working` is unsafe
-- [x] `normalize_audio.py` refuses to run if `audio/working` is unsafe
+- [x] Both normalization entry points write canonical `.wav` working copies
+- [x] The stale backup symlink has been retired from the live thesis runtime
 
 ## 7. External gates still pending
 

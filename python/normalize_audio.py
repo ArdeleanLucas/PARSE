@@ -23,11 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from audio_pipeline_paths import (
-    build_normalized_output_path,
-    describe_working_root_issue as shared_describe_working_root_issue,
-    ensure_safe_working_root as shared_ensure_safe_working_root,
-)
+from audio_pipeline_paths import build_normalized_output_path
 
 
 TARGET_I = "-16"
@@ -125,14 +121,6 @@ def display_path(path: Path, base_dir: Path) -> str:
         return path.resolve().relative_to(base_dir.resolve()).as_posix()
     except (ValueError, OSError, RuntimeError):
         return path.as_posix()
-
-
-def describe_working_root_issue(working_root: Path, original_root: Path) -> str:
-    return shared_describe_working_root_issue(working_root, original_root)
-
-
-def ensure_safe_working_root(working_root: Path, original_root: Path) -> None:
-    shared_ensure_safe_working_root(working_root, original_root)
 
 
 def is_supported_audio_file(path: Path) -> bool:
@@ -535,7 +523,6 @@ def main() -> int:
     working_root = base_dir / "audio" / "working"
 
     try:
-        ensure_safe_working_root(working_root, original_root)
         jobs = build_jobs(args, base_dir, original_root, working_root)
     except ValueError as exc:
         print_error(f"ERROR: {exc}")
