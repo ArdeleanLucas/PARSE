@@ -8,9 +8,9 @@ Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
 
 PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, and comparative analysis in one workspace, so researchers can move from raw recordings to analysis-ready linguistic data without switching between disconnected tools.
 
-Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are built around precise time-aligned annotations with a unified tag system shared across workflows.
+Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
 
-PARSE is currently in a **hybrid transition**. The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while C5/C6 validation is completed ahead of C7 cleanup.
+The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while C5/C6 validation is completed ahead of C7 cleanup.
 
 The Python backend continues to power AI/API routes for both architectures. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
 
@@ -38,8 +38,32 @@ Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 - Cognate controls: **accept**, **split**, **merge**, and **cycle**
 - Borrowing adjudication aided by contact-language similarity signals
 - Enrichments overlay for computed analysis metadata
+- **CLEF** (Contact Lexeme Explorer Feature) — multi-source contact-language similarity panel powered by a provider registry (see below)
 - Unified tag system (shared with Annotate mode) for scoped filtering
-- Export to LingPy-compatible TSV for downstream pipelines (LexStat, BEAST 2)
+- Export to LingPy-compatible TSV and NEXUS (placeholder) for downstream pipelines (LexStat, BEAST 2)
+
+### CLEF — Contact Lexeme Explorer Feature
+
+CLEF provides contact-language similarity data for borrowing adjudication in Compare mode. It fetches lexical data from multiple third-party and local sources via a **provider registry** (`python/compare/providers/`), then surfaces similarity signals in the `ContactLexemePanel` UI component.
+
+**Providers (11):**
+
+| Provider | Source type |
+|---|---|
+| `asjp` | ASJP database |
+| `cldf` | CLDF datasets |
+| `csv_override` | Local CSV overrides |
+| `grokipedia` | LLM-assisted lookup (xAI/Grok) |
+| `lingpy_wordlist` | LingPy wordlist data |
+| `literature` | Published literature references |
+| `pycldf_provider` | pycldf library |
+| `pylexibank_provider` | pylexibank library |
+| `wikidata` | Wikidata lexemes |
+| `wiktionary` | Wiktionary entries |
+
+**Endpoints:**
+- `POST /api/compute/contact-lexemes` — trigger contact-lexeme fetch job
+- `GET /api/contact-lexemes/coverage` — check coverage status across providers
 
 ### Current entrypoint status
 
@@ -102,7 +126,7 @@ The system presents ranked candidates. The annotator verifies, adjusts boundarie
 
 Both Annotate and Compare modes include a built-in AI chat dock powered by the configured LLM provider (xAI/Grok, OpenAI, or Ollama). This is not a general-purpose chatbot — it is a domain-specific assistant designed to guide users through the entire PARSE workflow from start to finish.
 
-The assistant has full access to project state via the MCP tool interface and can:
+The assistant has full access to project state via the `ParseChatTools` interface (`python/ai/chat_tools.py`) and can:
 
 **Audio setup and file management**
 - Help locate and load `.wav` source files into the workspace
@@ -220,91 +244,124 @@ The backend runs on port `8766`; Vite runs on port `5173`.
 
 ```text
 index.html              -- React/Vite entry HTML
-src/                    -- Current React frontend (Annotate + Compare)
+src/
+  App.tsx               -- BrowserRouter shell → <ParseUI />
+  ParseUI.tsx           -- Unified UI shell (Annotate + Compare + Tags + AI Chat)
+  api/
+    client.ts           -- Typed API client (all fetch calls go through here)
+    types.ts            -- Shared TypeScript types
+  components/
+    annotate/           -- Annotate mode components
+    compare/            -- Compare mode (CompareMode, ConceptTable, CognateControls,
+                           BorrowingPanel, EnrichmentsPanel, ContactLexemePanel,
+                           SpeakerImport, TagManager)
+    shared/             -- Cross-mode shared components
+  hooks/                -- React hooks (useWaveSurfer, useChatSession,
+                           useAnnotationSync, useSpectrogram, useActionJob,
+                           useComputeJob, useExport, useImportExport, useSuggestions)
+  stores/               -- Zustand stores (annotationStore, configStore,
+                           enrichmentStore, playbackStore, tagStore, uiStore)
 parse.html              -- Legacy Annotate fallback page (pre-C7)
 compare.html            -- Legacy Compare fallback page (pre-C7)
 js/                     -- Legacy frontend modules retained until C7 cleanup
 python/
   server.py             -- Backend API server + legacy static serving (port 8766)
   ai/                   -- AI provider layer
-    provider.py         -- STT / IPA / LLM provider factory
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (10 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
     word_finder.py      -- Segment location in full recordings
   compare/              -- Compare pipeline (cognates, offsets, matching)
+    providers/          -- CLEF provider registry (11 providers)
+  shared/               -- Shared Python utilities
 config/
   ai_config.json        -- AI provider configuration
 annotations/            -- Per-speaker annotation JSON files (runtime, untracked)
 parse-enrichments.json  -- Computed comparative overlays (runtime, untracked)
 desktop/                -- Electron shell scaffold
-docs/                   -- Documentation
+docs/                   -- Documentation and plans
 ```
 
 ---
 
-## MCP Tool Interface
+## AI Chat Tools
 
-PARSE exposes a full **Model Context Protocol (MCP)** interface for external agents and AI coding assistants to interact with the project programmatically. The MCP server runs as a subprocess and communicates via standard input/output (stdio), making it compatible with any MCP-capable client.
+The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. These tools are invoked by the LLM during chat sessions — they are not exposed as a standalone server.
 
-```bash
-python python/adapters/mcp_adapter.py
-```
+### Tools (10)
 
-### Tools (14 total)
-
-**Read-only (6)**
+**Read-only**
 
 | Tool | Description |
 |---|---|
-| `parse_project_context_read` | Full project metadata and speaker status |
-| `parse_find_workspace_files` | List files by category (speakers, audio, all) |
-| `parse_read_csv_preview` | Preview a CSV file (e.g. `concepts.csv`) |
-| `parse_annotation_read` | Read annotation data for a speaker |
-| `parse_check_file` | Check file existence and return metadata |
-| `parse_lufs_check` | Audio health check — format, duration, LUFS |
+| `project_context_read` | Full project metadata and speaker status |
+| `annotation_read` | Read annotation data for a speaker (with optional tier/concept filtering) |
+| `read_csv_preview` | Preview a CSV file (e.g. `concepts.csv`) |
+| `cognate_compute_preview` | Preview cognate computation results |
+| `cross_speaker_match_preview` | Preview cross-speaker matching candidates |
+| `spectrogram_preview` | Generate spectrogram preview for a segment |
 
-**Mutating (5)**
-
-| Tool | Description |
-|---|---|
-| `parse_copy_to_workspace` | Copy a file into the project workspace (conflict signaling) |
-| `parse_update_source_index` | Update `source_index.json` — speaker key collision detection |
-| `parse_update_project_json` | Update `project.json` — protected key guard |
-| `parse_import_audition_csv` | Import Adobe Audition marker CSV for speaker onboarding |
-| `parse_onboard_speaker` | Full speaker onboarding (stages audio, registers metadata) |
-
-**Job-based (3) — require HTTP server running**
+**Job-triggering**
 
 | Tool | Description |
 |---|---|
-| `parse_normalize_audio` | Start audio normalization job. Returns `jobId` + `statusUrl` |
-| `parse_trigger_pipeline` | Start STT / IPA / matching pipeline. Returns `jobId` |
-| `parse_job_status` | Poll status of any running job by ID |
+| `stt_start` | Start STT pipeline on a recording. Returns job ID |
+| `stt_status` | Poll status of a running STT job |
 
-### Built-in Prompts (4)
+**Tag operations**
 
-| Prompt | Description |
+| Tool | Description |
 |---|---|
-| `import-speaker` | Guided speaker import workflow |
-| `run-audio-health-check` | Full audio health report for a speaker |
-| `review-speaker-status` | Review annotation completeness and gaps |
-| `prepare-compare-session` | Prepare a cross-speaker compare session |
+| `prepare_tag_import` | Validate and preview a tag CSV before import |
+| `import_tag_csv` | Import tags from a prepared CSV file |
 
-### HTTP mirrors
+---
 
-Several MCP tools are also available as HTTP endpoints on port `8766` for direct server-side calls without the MCP transport layer:
+## HTTP API
 
-- `POST /api/onboard/speaker` — mirrors `parse_onboard_speaker`
-- `GET /api/project/status` — mirrors `parse_project_context_read`
+The Python backend (`python/server.py`, port `8766`) exposes the following endpoints. The React frontend communicates exclusively through the typed client in `src/api/client.ts`.
 
-### Conflict contract
+### GET
 
-Mutating tools use an explicit conflict signaling contract:
-- `force=False` (default) — returns a conflict signal if the target key or file already exists
-- `force=True` — overwrites without confirmation
+| Endpoint | Description |
+|---|---|
+| `/api/config` | Project configuration |
+| `/api/enrichments` | Computed comparative enrichments |
+| `/api/auth/status` | Auth provider status |
+| `/api/export/lingpy` | LingPy-compatible TSV export |
+| `/api/export/nexus` | NEXUS export *(placeholder — not yet implemented)* |
+| `/api/contact-lexemes/coverage` | CLEF provider coverage status |
+| `/api/tags` | Tag definitions and assignments |
 
-Read tools never modify state.
+### POST
+
+| Endpoint | Description |
+|---|---|
+| `/api/onboard/speaker` | Speaker onboarding (multipart upload, background job) |
+| `/api/onboard/speaker/status` | Poll onboarding job status |
+| `/api/normalize` | Start audio normalization (ffmpeg loudnorm) |
+| `/api/normalize/status` | Poll normalization job status |
+| `/api/stt` | Start STT pipeline |
+| `/api/stt/status` | Poll STT job status |
+| `/api/ipa` | Request IPA transcription for text |
+| `/api/suggest` | Request annotation suggestions |
+| `/api/chat/session` | Create or resume a chat session |
+| `/api/chat/run` | Send a message to the chat assistant |
+| `/api/chat/run/status` | Poll chat run status |
+| `/api/enrichments` | Save enrichments (POST overwrites) |
+| `/api/config` | Update project configuration (partial) |
+| `/api/auth/key` | Save API key for a provider |
+| `/api/auth/start` | Start OAuth flow |
+| `/api/auth/poll` | Poll OAuth status |
+| `/api/auth/logout` | Clear auth credentials |
+| `/api/tags/merge` | Merge tag definitions |
+
+### PUT
+
+| Endpoint | Description |
+|---|---|
+| `/api/config` | Full project configuration update |
 
 ---
 
@@ -323,6 +380,8 @@ The enrichments layer stores computed structures while preserving manual adjudic
 ## Technology
 
 - React 18 + TypeScript + Vite (current frontend architecture)
+- Zustand (state management)
+- Tailwind CSS v3 (styling)
 - Legacy vanilla JavaScript + HTML entrypoints (temporary pre-C7 fallback)
 - Python 3.10+ with conda environment
 - WaveSurfer 7
