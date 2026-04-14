@@ -23,6 +23,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from audio_pipeline_paths import (
+    build_normalized_output_path,
+    describe_working_root_issue as shared_describe_working_root_issue,
+    ensure_safe_working_root as shared_ensure_safe_working_root,
+)
+
 
 TARGET_I = "-16"
 TARGET_I_FLOAT = -16.0
@@ -122,44 +128,11 @@ def display_path(path: Path, base_dir: Path) -> str:
 
 
 def describe_working_root_issue(working_root: Path, original_root: Path) -> str:
-    try:
-        if working_root.is_symlink():
-            return (
-                "audio/working is a symlink: "
-                f"{working_root} -> {working_root.resolve()}"
-            )
-    except (OSError, RuntimeError):
-        return "audio/working could not be inspected safely"
-
-    try:
-        working_resolved = working_root.resolve()
-        original_resolved = original_root.resolve()
-    except (OSError, RuntimeError) as exc:
-        return "audio/working could not be resolved safely: {0}".format(exc)
-
-    if working_resolved == original_resolved:
-        return (
-            "audio/working resolves to the same directory as audio/original: "
-            f"{working_resolved}"
-        )
-
-    try:
-        working_resolved.relative_to(original_resolved)
-        return (
-            "audio/working resolves inside audio/original: "
-            f"{working_resolved}"
-        )
-    except ValueError:
-        return ""
+    return shared_describe_working_root_issue(working_root, original_root)
 
 
 def ensure_safe_working_root(working_root: Path, original_root: Path) -> None:
-    issue = describe_working_root_issue(working_root, original_root)
-    if issue:
-        raise ValueError(
-            "Unsafe audio pipeline configuration: {0}. Refusing to normalize "
-            "because outputs must stay isolated from read-only originals.".format(issue)
-        )
+    shared_ensure_safe_working_root(working_root, original_root)
 
 
 def is_supported_audio_file(path: Path) -> bool:
@@ -260,8 +233,8 @@ def build_jobs_for_speaker(
     jobs = []
     for source_path in source_files:
         relative_inside_speaker = source_path.relative_to(speaker_input_dir)
-        output_relative = relative_inside_speaker.with_suffix(".wav")
-        output_path = (working_root / speaker_name / output_relative).resolve()
+        working_dir = (working_root / speaker_name / relative_inside_speaker.parent).resolve()
+        output_path = build_normalized_output_path(source_path, working_dir).resolve()
         source_label = f"{speaker_name}/{relative_inside_speaker.as_posix()}"
         jobs.append(make_job(source_path.resolve(), output_path, source_label))
 

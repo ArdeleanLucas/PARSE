@@ -1,9 +1,11 @@
 # MC-308: Fix audio/working symlink — restore proper copy+normalize pipeline
 
-**Status:** Open  
-**Assignee:** @parse-builder  
-**Blocks:** C5 (export verification), C6 (browser regression), C7 (legacy cleanup)  
-**Priority:** Critical — data safety violation
+- **Status:** Completed for MC-308 scope; release gates still pending
+- **Assignee:** @parse-builder
+- **Blocks:** C5 (export verification), C6 (browser regression), C7 (legacy cleanup)
+- **Priority:** Critical — data safety violation
+
+> Execution note (2026-04-14): the live `audio/working` repair, speaker rebuild, and repo hardening shipped in PR #43. This document started as the build plan and now serves as the completion record for MC-308. It does **not** claim C5/C6 signoff; those remain separate manual gates.
 
 ---
 
@@ -331,14 +333,19 @@ existing normalization or serving logic.
 
 ---
 
-## 6. Acceptance criteria
+## 6. MC-308 completion criteria
 
-- [ ] `audio/working` is a real directory, not a symlink
-- [ ] All 6 annotated speakers have WAVs in `audio/original/<Speaker>/`
-- [ ] All 6 speakers have normalized WAVs in `audio/working/<Speaker>/`
-- [ ] `source_index.json` paths resolve to existing files
-- [ ] PARSE serves audio correctly (waveform renders, playback works)
-- [ ] Annotation timestamps still align with audio after normalization
-- [ ] `python/server.py` warns on startup if `audio/working` is a symlink
-- [ ] `normalize_audio.py` refuses to run if `audio/working` is a symlink
-- [ ] C5/C6 testing is unblocked
+- [x] `audio/working` is a real directory, not a symlink
+- [x] All 6 annotated speakers have WAVs in `audio/original/<Speaker>/`
+- [x] All 6 speakers have normalized WAVs in `audio/working/<Speaker>/`
+- [x] `source_index.json` paths resolve to existing files
+- [x] PARSE serves audio correctly (waveform renders, playback works)
+- [x] Annotation timestamps still align with audio after normalization
+- [x] `python/server.py` warns on startup if `audio/working` is unsafe
+- [x] `normalize_audio.py` refuses to run if `audio/working` is unsafe
+
+## 7. External gates still pending
+
+- C5 LingPy export verification remains a separate manual gate.
+- C6 full browser regression remains a separate manual gate.
+- C7 cleanup and legacy deletion stay blocked until C5 and C6 are explicitly cleared.

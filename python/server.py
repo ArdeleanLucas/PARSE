@@ -23,6 +23,10 @@ from urllib.parse import unquote, urlparse
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
 from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
+from audio_pipeline_paths import (
+    build_normalized_output_path,
+    describe_working_root_issue as shared_describe_working_root_issue,
+)
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -97,32 +101,7 @@ def _describe_working_root_issue(project_root: Optional[pathlib.Path] = None) ->
     root = pathlib.Path(project_root) if project_root is not None else _project_root()
     original_root = root / "audio" / "original"
     working_root = root / "audio" / "working"
-
-    try:
-        if working_root.is_symlink():
-            return "audio/working is a symlink: {0} -> {1}".format(
-                working_root,
-                working_root.resolve(),
-            )
-    except (OSError, RuntimeError):
-        return "audio/working could not be inspected safely"
-
-    try:
-        working_resolved = working_root.resolve()
-        original_resolved = original_root.resolve()
-    except (OSError, RuntimeError) as exc:
-        return "audio/working could not be resolved safely: {0}".format(exc)
-
-    if working_resolved == original_resolved:
-        return "audio/working resolves to the same directory as audio/original: {0}".format(
-            working_resolved,
-        )
-
-    try:
-        working_resolved.relative_to(original_resolved)
-        return "audio/working resolves inside audio/original: {0}".format(working_resolved)
-    except ValueError:
-        return ""
+    return shared_describe_working_root_issue(working_root, original_root)
 
 
 def _ensure_safe_working_root(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
@@ -1798,10 +1777,10 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
 
         _set_job_progress(job_id, 40.0, message="Normalizing audio (pass 2)")
 
-        # Determine output path: audio/working/<Speaker>/<stem>.wav
+        # Working copies are always PCM WAV, even when the staged source is MP3/FLAC.
         working_dir = working_root / speaker
         working_dir.mkdir(parents=True, exist_ok=True)
-        output_path = working_dir / audio_path.with_suffix(".wav").name
+        output_path = build_normalized_output_path(audio_path, working_dir)
 
         # Pass 2: apply loudnorm with measured stats for precise normalization
         normalize_filter = "loudnorm=I={target}".format(target=NORMALIZE_LUFS_TARGET)
@@ -3133,8 +3112,49 @@ def _get_local_ips() -> List[str]:
     return ips
 
 
+def _startup_banner_lines(
+    serve_dir: pathlib.Path,
+    local_ips: Sequence[str],
+    working_root_issue: str,
+) -> List[str]:
+    lines = [
+        "",
+        "=" * 60,
+        "  PARSE - HTTP Server",
+        "=" * 60,
+        "  Serving: {0}".format(serve_dir),
+        "  Port   : {0}".format(PORT),
+        "",
+        "  React dev UI (current workflow; requires `npm run dev`):",
+        "    Annotate: http://localhost:5173/",
+        "    Compare : http://localhost:5173/compare",
+        "",
+        "  Legacy fallback pages (served by this Python server; pre-C7 only):",
+        "    Annotate: http://localhost:{0}/parse.html".format(PORT),
+        "    Compare : http://localhost:{0}/compare.html".format(PORT),
+    ]
+    for ip in local_ips:
+        lines.append("    Annotate: http://{0}:{1}/parse.html".format(ip, PORT))
+        lines.append("    Compare : http://{0}:{1}/compare.html".format(ip, PORT))
+    lines.extend([
+        "",
+        "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]",
+    ])
+    if working_root_issue:
+        lines.extend([
+            "",
+            "  WARNING: {0}".format(working_root_issue),
+            "  Normalize jobs will refuse to run until audio/working is a real working directory.",
+        ])
+    lines.extend([
+        "  Press Ctrl+C to stop.",
+        "=" * 60,
+    ])
+    return lines
+
+
 def main() -> None:
-    serve_dir = pathlib.Path.cwd()
+    serve_dir = _project_root()
     os.chdir(serve_dir)
 
     server_address = (HOST, PORT)
@@ -3142,31 +3162,8 @@ def main() -> None:
     local_ips = _get_local_ips()
     working_root_issue = _describe_working_root_issue(serve_dir)
 
-    print()
-    print("=" * 60)
-    print("  PARSE - HTTP Server")
-    print("=" * 60)
-    print("  Serving: {0}".format(serve_dir))
-    print("  Port   : {0}".format(PORT))
-    print()
-    print("  React dev UI (current workflow; requires `npm run dev`):")
-    print("    Annotate: http://localhost:5173/")
-    print("    Compare : http://localhost:5173/compare")
-    print()
-    print("  Legacy fallback pages (served by this Python server; pre-C7 only):")
-    print("    Annotate: http://localhost:{0}/parse.html".format(PORT))
-    print("    Compare : http://localhost:{0}/compare.html".format(PORT))
-    for ip in local_ips:
-        print("    Annotate: http://{0}:{1}/parse.html".format(ip, PORT))
-        print("    Compare : http://{0}:{1}/compare.html".format(ip, PORT))
-    print()
-    print("  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]")
-    if working_root_issue:
-        print()
-        print("  WARNING: {0}".format(working_root_issue))
-        print("  Normalize jobs will refuse to run until audio/working is a real working directory.")
-    print("  Press Ctrl+C to stop.")
-    print("=" * 60)
+    for line in _startup_banner_lines(serve_dir, local_ips, working_root_issue):
+        print(line)
 
     try:
         httpd.serve_forever()
