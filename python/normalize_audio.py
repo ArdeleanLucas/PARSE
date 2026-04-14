@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from audio_pipeline_paths import build_normalized_output_path
+
 
 TARGET_I = "-16"
 TARGET_I_FLOAT = -16.0
@@ -219,8 +221,8 @@ def build_jobs_for_speaker(
     jobs = []
     for source_path in source_files:
         relative_inside_speaker = source_path.relative_to(speaker_input_dir)
-        output_relative = relative_inside_speaker.with_suffix(".wav")
-        output_path = (working_root / speaker_name / output_relative).resolve()
+        working_dir = (working_root / speaker_name / relative_inside_speaker.parent).resolve()
+        output_path = build_normalized_output_path(source_path, working_dir).resolve()
         source_label = f"{speaker_name}/{relative_inside_speaker.as_posix()}"
         jobs.append(make_job(source_path.resolve(), output_path, source_label))
 
@@ -443,6 +445,8 @@ def build_pass2_command(ffmpeg_bin: str, source_path: Path, output_path: Path, s
         TARGET_SR,
         "-ac",
         TARGET_CHANNELS,
+        "-c:a",
+        "pcm_s16le",
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
         to_ffmpeg_path(output_path, ffmpeg_bin),
@@ -462,6 +466,8 @@ def build_single_pass_command(ffmpeg_bin: str, source_path: Path, output_path: P
         TARGET_SR,
         "-ac",
         TARGET_CHANNELS,
+        "-c:a",
+        "pcm_s16le",
         "-sample_fmt",
         TARGET_SAMPLE_FMT,
         to_ffmpeg_path(output_path, ffmpeg_bin),
@@ -513,8 +519,8 @@ def main() -> int:
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir).expanduser().resolve()
-    original_root = (base_dir / "audio" / "original").resolve()
-    working_root = (base_dir / "audio" / "working").resolve()
+    original_root = base_dir / "audio" / "original"
+    working_root = base_dir / "audio" / "working"
 
     try:
         jobs = build_jobs(args, base_dir, original_root, working_root)
