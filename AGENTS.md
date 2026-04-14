@@ -29,13 +29,37 @@ All `src/api/client.ts` helpers have matching routes in `python/server.py`:
 
 | Client helper | Endpoint | Server status |
 |---|---|---|
-| `onboardSpeaker()` | `POST /api/onboard/speaker` | ✅ Multipart upload, background job |
-| `pollOnboardSpeaker()` | `POST /api/onboard/speaker/status` | ✅ Job poll |
-| `startNormalize()` | `POST /api/normalize` | ✅ ffmpeg loudnorm pipeline |
-| `pollNormalize()` | `POST /api/normalize/status` | ✅ Job poll |
+| `getAnnotation()` | `GET /api/annotations/{speaker}` | ✅ |
+| `saveAnnotation()` | `POST /api/annotations/{speaker}` | ✅ |
+| `getEnrichments()` | `GET /api/enrichments` | ✅ |
+| `saveEnrichments()` | `POST /api/enrichments` | ✅ |
+| `getConfig()` | `GET /api/config` | ✅ |
+| `updateConfig()` | `PUT /api/config` | ✅ |
+| `getAuthStatus()` | `GET /api/auth/status` | ✅ |
+| `startAuthFlow()` | `POST /api/auth/start` | ✅ |
+| `pollAuth()` | `POST /api/auth/poll` | ✅ |
+| `saveApiKey()` | `POST /api/auth/key` | ✅ |
+| `logoutAuth()` | `POST /api/auth/logout` | ✅ |
 | `startSTT()` | `POST /api/stt` | ✅ |
+| `pollSTT()` | `POST /api/stt/status` | ✅ |
+| `requestIPA()` | `POST /api/ipa` | ✅ |
+| `requestSuggestions()` | `POST /api/suggest` | ✅ |
+| `startChatSession()` | `POST /api/chat/session` | ✅ |
+| `getChatSession()` | `GET /api/chat/session/{id}` | ✅ |
+| `runChat()` | `POST /api/chat/run` | ✅ |
+| `pollChat()` | `POST /api/chat/run/status` | ✅ |
 | `startCompute()` | `POST /api/compute/{type}` | ✅ Dynamic dispatch |
+| `pollCompute()` | `POST /api/compute/{type}/status` | ✅ |
 | `getLingPyExport()` | `GET /api/export/lingpy` | ✅ |
+| `getNEXUSExport()` | `GET /api/export/nexus` | ⏳ Placeholder |
+| `getContactLexemeCoverage()` | `GET /api/contact-lexemes/coverage` | ✅ |
+| `startContactLexemeFetch()` | `POST /api/compute/contact-lexemes` | ✅ |
+| `startNormalize()` | `POST /api/normalize` | ✅ ffmpeg loudnorm pipeline |
+| `pollNormalize()` | `POST /api/normalize/status` | ✅ |
+| `onboardSpeaker()` | `POST /api/onboard/speaker` | ✅ Multipart upload, background job |
+| `pollOnboardSpeaker()` | `POST /api/onboard/speaker/status` | ✅ |
+| `getTags()` | `GET /api/tags` | ✅ |
+| `mergeTags()` | `POST /api/tags/merge` | ✅ |
 
 **Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 
