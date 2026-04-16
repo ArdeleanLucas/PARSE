@@ -83,7 +83,7 @@ PARSE (Phase 5) supports multiple AI backends, routed per task type:
 | IPA transcription | wav2vec2 (local), epitran (fallback) |
 | LLM / chat | xAI (Grok), OpenAI, Ollama |
 
-Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`.
+Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
 **GPU requirement:** PARSE is designed for CUDA inference. The recommended local STT setup is faster-whisper with `device=cuda, compute_type=float16`. CPU inference is not supported for production use.
 
@@ -214,6 +214,10 @@ and hot module replacement.
 If you prefer to start each server individually:
 
 ```bash
+# One-time per clone: create your local AI config from the template
+cp config/ai_config.example.json config/ai_config.json
+# then edit config/ai_config.json — especially stt.model_path (local Razhan CT2 path)
+
 # Terminal 1 — Python API backend
 cd /path/to/parse_v2
 /path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py
@@ -276,7 +280,8 @@ python/
     providers/          -- CLEF provider registry (11 providers)
   shared/               -- Shared Python utilities
 config/
-  ai_config.json        -- AI provider configuration
+  ai_config.example.json -- Template for AI provider configuration (tracked)
+  ai_config.json          -- AI provider configuration (gitignored — copy from example)
 annotations/            -- Per-speaker annotation JSON files (runtime, untracked)
 parse-enrichments.json  -- Computed comparative overlays (runtime, untracked)
 desktop/                -- Electron shell scaffold
