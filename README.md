@@ -160,12 +160,17 @@ The assistant operates with read and write access to the project. It can stage f
 
 ### One-command launch (recommended)
 
-The `parse-run` shell alias starts both servers, pulls the latest code, and
-health-checks the API before printing URLs. It is defined in `~/.bash_aliases`
-and sourced automatically by Bash.
+The `scripts/parse-run.sh` launcher (tracked in this repo) starts both servers, pulls the latest code, cleans up stale processes on both WSL and Windows sides, and health-checks the API before printing URLs. A shell alias (`parse-run`) is typically wired to call this script.
 
 ```bash
-parse-run          # pull main → start API + Vite → health-check → print URLs
+scripts/parse-run.sh    # same as `parse-run` alias; run directly from repo root
+```
+
+The alias version lives in `~/.bash_aliases`:
+
+```bash
+alias parse-run='/path/to/parse/scripts/parse-run.sh'
+alias parse-stop='/path/to/parse/scripts/parse-stop.sh'
 ```
 
 On success you will see:
@@ -181,17 +186,31 @@ On success you will see:
 
 Open **http://localhost:5173/** in your browser for the React UI.
 
+Environment overrides:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PARSE_PY` | `python3` | Python interpreter. Set to a Windows `python.exe` (e.g. `/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe`) when running from WSL against a Windows conda env. |
+| `PARSE_ROOT` | auto-detected | Repo root. |
+| `PARSE_API_PORT` | `8766` | API server port. |
+| `PARSE_VITE_PORT` | `5173` | Vite dev server port. |
+| `PARSE_SKIP_PULL` | `0` | Set to `1` to skip the `git pull` step. |
+
 Two companion commands are also available:
 
 ```bash
-parse-stop         # kill both servers
-parse-logs api     # tail Python API stderr
-parse-logs vite    # tail Vite dev server output
+scripts/parse-stop.sh   # kill both servers (WSL + Windows-side zombies)
+parse-logs api          # tail Python API stderr
+parse-logs vite         # tail Vite dev server output
 ```
 
-#### What `parse-run` does
+#### WSL + Windows python.exe note
 
-1. `git pull origin main --ff-only` — fast-forward to latest main
+When `PARSE_PY` points at a Windows `python.exe` (a conda env on `C:`), the actual server process runs on the Windows side. WSL's `pkill`/`fuser` cannot signal Windows processes, so `parse-run.sh` detects this case and additionally calls `taskkill.exe` via `/mnt/c/Windows/System32/` to clean up zombie `python.exe` instances holding port 8766. This prevents the "empty reply from server" failure mode where a broken prior process blocks the port.
+
+#### What `scripts/parse-run.sh` does
+
+1. `git pull origin main --ff-only` — fast-forward to latest main (skipped if `PARSE_SKIP_PULL=1`)
 2. Kills any stale Python or Vite processes on ports 8766 / 5173
 3. Starts the **Python API server** (`python/server.py`) on `:8766`
 4. Waits for `/api/config` to return 200 (up to 12 s)
