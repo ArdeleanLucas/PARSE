@@ -1,0 +1,42 @@
+{
+  "_comment": "Template for config/ai_config.json. Copy this file to config/ai_config.json and edit for your machine. The real config is gitignored because it contains machine-specific paths (e.g. local Razhan CT2 model_path) that should never be committed. load_ai_config() in python/ai/provider.py falls back to built-in defaults if config/ai_config.json is missing, so the server will still start without it — but STT will fall back to a generic Whisper 'base' model instead of Razhan.",
+  "stt": {
+    "provider": "faster-whisper",
+    "model_path": "",
+    "language": "ku",
+    "device": "cuda",
+    "compute_type": "float16",
+    "beam_size": 5
+  },
+  "ipa": {
+    "provider": "local",
+    "model": "epitran"
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "chat": {
+    "enabled": true,
+    "read_only": false,
+    "attachments_supported": false,
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY",
+    "reasoning_effort": "",
+    "temperature": 0.1,
+    "max_tool_rounds": 4,
+    "max_history_messages": 24,
+    "max_output_tokens": 1400,
+    "max_tool_result_chars": 24000,
+    "max_user_message_chars": 8000,
+    "max_session_messages": 200
+  },
+  "specialized_layers": [],
+  "wav2vec2": {
+    "provider": "wav2vec2-ipa",
+    "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
+    "device": "cuda"
+  }
+}
