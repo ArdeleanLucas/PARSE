@@ -51,24 +51,7 @@ interface SpeakerForm {
   cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
 }
 
-const CONCEPTS: Concept[] = [
-  'ash','bark','big','bird','black','blood','bone','bride','claw','cloud',
-  'cold','dog','dry','ear','egg','eye','feather','finger','fire','fish',
-  'five','fly','foot','four','full','good','green','hair','hand','head',
-  'heart','honey','horn','hot','i','knee','leaf','liver','long','louse',
-  'man','milk','moon','mouth','name','neck','new','night','nose','not',
-  'one','person','rain','red','road','root','round','salt','sand','say',
-  'see','seed','sit','skin','sleep','small','smoke','stand','star','stone',
-  'sun','swim','tail','that','this','three','tongue','tooth','tree','two',
-  'warm','water'
-].map((name, i) => ({
-  id: i + 1,
-  key: String(i + 1),
-  name,
-  tag: (['untagged','review','confirmed','problematic','untagged','confirmed'][i % 6]) as ConceptTag,
-}));
-
-const SPEAKERS = ['Fail01','Fail02','Kzn03','Kzn04','Shz05','Shz06','Tbr07','Tbr08','Isf09','Isf10','Teh11'];
+// No fallback data — workspace must supply real speakers and concepts via /api/config.
 
 const tagDot: Record<ConceptTag, string> = {
   untagged: 'bg-slate-300', review: 'bg-amber-400',
@@ -1232,13 +1215,21 @@ export function ParseUI() {
   const [tagFilter, setTagFilter] = useState<TagState>('all');
   const [conceptId, setConceptId] = useState(1);
   const [modeTab, setModeTab] = useState<ModeTab>('all');
-  const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['Fail01','Kzn03','Shz05','Tbr07','Isf09']);
-  const [speakerPicker, setSpeakerPicker] = useState('Fail02');
+  const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
+  const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState('cognates');
   const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
+
+  // Auto-select speakers when config loads and we have none selected
+  useEffect(() => {
+    if (rawSpeakers.length > 0 && selectedSpeakers.length === 0) {
+      setSelectedSpeakers(rawSpeakers);
+      setSpeakerPicker(rawSpeakers.find(s => !rawSpeakers.includes(s)) ?? rawSpeakers[0] ?? null);
+    }
+  }, [rawSpeakers]); // eslint-disable-line react-hooks/exhaustive-deps
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
@@ -1356,12 +1347,12 @@ export function ParseUI() {
     }
   }, [conceptId]);
 
-  // — Derived: real speakers (fallback to mock while config loads) —
-  const speakers = rawSpeakers.length > 0 ? rawSpeakers : SPEAKERS;
+  // — Derived: real speakers (no fallback — empty until workspace provides them) —
+  const speakers = rawSpeakers;
 
   // — Derived: real concepts with live tag state —
   const concepts = useMemo<Concept[]>(() => {
-    if (rawConcepts.length === 0) return CONCEPTS;
+    if (rawConcepts.length === 0) return [];
     return rawConcepts.map((c, i) => ({
       id: i + 1,
       key: c.id,
@@ -1414,16 +1405,19 @@ export function ParseUI() {
     if (tagFilter !== 'all') list = list.filter(c => c.tag === tagFilter);
     if (modeTab === 'unreviewed') list = list.filter(c => c.tag === 'untagged' || c.tag === 'review');
     if (modeTab === 'flagged') list = list.filter(c => c.tag === 'problematic');
-    if (modeTab === 'borrowings') list = list.filter(c => c.id % 5 === 0);
-    // In annotate mode, scope concept list to the single selected speaker's dataset
-    if (currentMode === 'annotate' && selectedSpeakers[0]) {
-      const seed = selectedSpeakers[0].charCodeAt(0) + selectedSpeakers[0].charCodeAt(1);
-      list = list.filter(c => (c.id + seed) % 3 !== 0);
+    if (modeTab === 'borrowings') list = list.filter(c => {
+      // TODO: wire to real borrowing data from enrichments
+      const borrowingRoot = isRecord(enrichmentData?.borrowings) ? enrichmentData.borrowings : {};
+      return c.key in borrowingRoot;
+    });
+    // In annotate mode, show all concepts for the selected speaker (filter by real data when available)
+    if (currentMode === 'annotate') {
+      // No synthetic filtering — show the full concept list
     }
     if (sortMode === 'az') list = [...list].sort((a,b) => a.name.localeCompare(b.name));
     else list = [...list].sort((a,b) => a.id - b.id);
     return list;
-  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers]);
+  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceForms = useMemo(
@@ -1464,7 +1458,7 @@ export function ParseUI() {
     setSelectedSpeakers(sel => sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s]);
   };
   const addSpeaker = () => {
-    if (!selectedSpeakers.includes(speakerPicker)) setSelectedSpeakers([...selectedSpeakers, speakerPicker]);
+    if (speakerPicker && !selectedSpeakers.includes(speakerPicker)) setSelectedSpeakers([...selectedSpeakers, speakerPicker]);
   };
   const openImportModal = () => {
     setActionsMenuOpen(false);
@@ -2078,7 +2072,7 @@ export function ParseUI() {
               </div>
               <div className="mb-2 flex gap-1">
                 <select
-                  value={currentMode === 'annotate' ? (selectedSpeakers[0] ?? '') : speakerPicker}
+                  value={currentMode === 'annotate' ? (selectedSpeakers[0] ?? '') : (speakerPicker ?? '')}
                   onChange={e => {
                     if (currentMode === 'annotate') setSelectedSpeakers([e.target.value]);
                     else setSpeakerPicker(e.target.value);
@@ -2150,20 +2144,35 @@ export function ParseUI() {
                 <div className="border-b border-slate-100 p-4">
                   <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Status</h4>
                   <div className="mb-2 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500"/>
-                    <span className="text-[11px] font-semibold text-slate-700">project.json</span>
-                    <span className="ml-auto text-[10px] text-slate-400">loaded</span>
+                    {speakers.length > 0 || concepts.length > 0 ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500"/>
+                        <span className="text-[11px] font-semibold text-slate-700">project.json</span>
+                        <span className="ml-auto text-[10px] text-slate-400">loaded</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-500"/>
+                        <span className="text-[11px] font-semibold text-slate-700">Workspace empty</span>
+                      </>
+                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                      <div className="font-mono text-sm font-semibold text-slate-900">{speakers.length}</div>
-                      <div className="text-[9px] uppercase tracking-wider text-slate-400">speakers</div>
+                  {speakers.length === 0 && concepts.length === 0 ? (
+                    <div className="rounded-md bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                      No speakers or concepts imported yet. Use <span className="font-semibold">Import</span> to add data to this workspace.
                     </div>
-                    <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                      <div className="font-mono text-sm font-semibold text-slate-900">{concepts.length}</div>
-                      <div className="text-[9px] uppercase tracking-wider text-slate-400">concepts</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                        <div className="font-mono text-sm font-semibold text-slate-900">{speakers.length}</div>
+                        <div className="text-[9px] uppercase tracking-wider text-slate-400">speakers</div>
+                      </div>
+                      <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                        <div className="font-mono text-sm font-semibold text-slate-900">{concepts.length}</div>
+                        <div className="text-[9px] uppercase tracking-wider text-slate-400">concepts</div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* --- COMPARE: Filter by tag --- */}

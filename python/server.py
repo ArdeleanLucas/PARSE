@@ -3115,6 +3115,20 @@ def _startup_banner_lines(
 
 def main() -> None:
     serve_dir = _project_root()
+
+    # Guard: refuse to run if workspace is on a Windows mount (WSL /mnt/ path).
+    # PARSE workspaces must live on WSL-native ext4 for performance with large WAVs.
+    resolved = str(serve_dir.resolve())
+    if resolved.startswith("/mnt/"):
+        print("=" * 60, file=sys.stderr)
+        print("FATAL: workspace is on a Windows mount:", file=sys.stderr)
+        print("  " + resolved, file=sys.stderr)
+        print("", file=sys.stderr)
+        print("PARSE requires a WSL-native workspace (e.g. /home/lucas/parse-workspace/).", file=sys.stderr)
+        print("Run the server with:  cd /home/lucas/parse-workspace && python server.py", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        sys.exit(1)
+
     os.chdir(serve_dir)
 
     server_address = (HOST, PORT)
