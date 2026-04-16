@@ -397,6 +397,30 @@ PARSE was built for a Southern Kurdish dialect phylogenetics thesis at the Unive
 
 ---
 
+## Citation
+
+If you use PARSE in academic work, please cite it as research software. A machine-readable `CITATION.cff` is included in the repository root, so GitHub's **"Cite this repository"** sidebar button will produce APA/BibTeX entries automatically.
+
+Suggested citation:
+
+> Ardelean, L. M. (2026). *PARSE: Phonetic Analysis & Review Source Explorer* [Computer software]. University of Bamberg. https://github.com/ArdeleanLucas/PARSE
+
+BibTeX:
+
+```bibtex
+@software{ardelean_parse_2026,
+  author  = {Ardelean, Lucas M.},
+  title   = {{PARSE}: Phonetic Analysis \& Review Source Explorer},
+  year    = {2026},
+  url     = {https://github.com/ArdeleanLucas/PARSE},
+  note    = {Research software for Southern Kurdish dialect phylogenetics}
+}
+```
+
+PARSE is research software developed alongside a Southern Kurdish dialect phylogenetics thesis at the University of Bamberg; please also cite the associated thesis if/when it is published.
+
+---
+
 ## License
 
 MIT

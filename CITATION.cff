@@ -1,0 +1,30 @@
+# This CITATION.cff file was generated for GitHub's "Cite this repository" feature.
+# See: https://citation-file-format.github.io/
+cff-version: 1.2.0
+message: "If you use PARSE in academic work, please cite it as research software."
+title: "PARSE: Phonetic Analysis & Review Source Explorer"
+abstract: >-
+  PARSE is a browser-based dual-mode research workstation for linguistic
+  fieldwork and cross-speaker comparison. It combines waveform review,
+  tiered annotation (IPA, orthography, concept, speaker), AI-assisted STT,
+  cognate adjudication, and contact-lexeme similarity analysis (CLEF) in
+  a single React + Vite frontend backed by a Python API server. PARSE was
+  developed for a Southern Kurdish dialect phylogenetics thesis at the
+  University of Bamberg and targets downstream Bayesian phylogenetic
+  analysis in BEAST 2.
+type: software
+authors:
+  - family-names: Ardelean
+    given-names: Lucas M.
+repository-code: "https://github.com/ArdeleanLucas/PARSE"
+url: "https://github.com/ArdeleanLucas/PARSE"
+license: MIT
+keywords:
+  - computational-linguistics
+  - phonetics
+  - annotation
+  - cognate-detection
+  - phylogenetics
+  - southern-kurdish
+  - fieldwork
+  - speech-to-text
