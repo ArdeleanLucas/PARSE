@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { useChatSession } from "../../hooks/useChatSession"
 import type { ChatMessage } from "../../hooks/useChatSession"
-import { getAuthStatus, startAuthFlow, pollAuth, saveApiKey, logoutAuth } from "../../api/client"
+import { getAuthStatus, startAuthFlow, saveApiKey, logoutAuth } from "../../api/client"
 import type { AuthStatus } from "../../api/types"
 
 export interface ChatPanelProps {
@@ -73,14 +73,14 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     setAuthState("oauth")
     try {
       await startAuthFlow()
-      const status = await pollAuth()
+      const status = await getAuthStatus()
       if (status.user_code) {
         setOauthInfo({ user_code: status.user_code, verification_uri: status.verification_uri })
       }
       // Start polling
       pollRef.current = setInterval(async () => {
         try {
-          const s = await pollAuth()
+          const s = await getAuthStatus()
           if (s.authenticated) {
             if (pollRef.current) clearInterval(pollRef.current)
             pollRef.current = null

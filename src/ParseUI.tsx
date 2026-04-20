@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
@@ -257,6 +257,10 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
   const [apiKey, setApiKey] = useState('');
   const [testStatus, setTestStatus] = useState<TestStatus>('idle');
   const [testMessage, setTestMessage] = useState('');
+  const [oauthPending, setOauthPending] = useState(false);
+  const [oauthCode, setOauthCode] = useState('');
+  const [oauthUri, setOauthUri] = useState('');
+  const oauthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isConnected = view === 'connected' && provider !== null;
   const hasData = speakerCount > 0;
 
@@ -301,7 +305,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
     setTestStatus('testing');
     setTestMessage('');
     try {
-      await saveApiKey(apiKey.trim(), provider ?? 'openai');
+      await saveApiKey(apiKey.trim(), provider ?? (view === 'form-xai' ? 'xai' : 'openai'));
       setTestStatus('success');
       setTestMessage('Connection verified — key saved.');
     } catch (err) {
@@ -330,6 +334,42 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
     setView('welcome');
     setTestStatus('idle');
     setTestMessage('');
+  };
+
+  // Cleanup OAuth poll on unmount
+  useEffect(() => {
+    return () => { if (oauthPollRef.current) clearInterval(oauthPollRef.current); };
+  }, []);
+
+  const handleCodexSignIn = async () => {
+    setOauthPending(true);
+    setOauthCode('');
+    setOauthUri('');
+    setTestMessage('');
+    try {
+      await startAuthFlow();
+      const status = await getAuthStatus();
+      if (status.user_code) {
+        setOauthCode(status.user_code);
+        setOauthUri(status.verification_uri ?? '');
+      }
+      oauthPollRef.current = setInterval(async () => {
+        try {
+          const s = await getAuthStatus();
+          if (s.authenticated) {
+            if (oauthPollRef.current) clearInterval(oauthPollRef.current);
+            oauthPollRef.current = null;
+            setOauthPending(false);
+            setProvider('openai');
+            setView('connected');
+          }
+        } catch { /* keep polling */ }
+      }, 5000);
+    } catch (err) {
+      setOauthPending(false);
+      setTestStatus('error');
+      setTestMessage(err instanceof Error ? err.message : 'OAuth start failed.');
+    }
   };
 
   useEffect(() => {
@@ -627,11 +667,27 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
                   </div>
 
                   <button
-                    onClick={() => { setProvider('openai'); setView('connected'); }}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-800 transition hover:bg-slate-50"
+                    onClick={handleCodexSignIn}
+                    disabled={oauthPending}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Sign in with Codex
+                    {oauthPending ? 'Waiting for sign-in...' : 'Sign in with Codex'}
                   </button>
+                  {oauthPending && oauthCode && (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-center">
+                      <div className="text-[11px] text-slate-500 mb-1">Enter this code:</div>
+                      <div className="text-lg font-mono font-bold tracking-widest text-slate-900">
+                        {oauthCode}
+                      </div>
+                      {oauthUri && (
+                        <a href={oauthUri} target="_blank" rel="noreferrer"
+                           className="mt-1 block text-[11px] text-indigo-600 hover:underline">
+                          {oauthUri}
+                        </a>
+                      )}
+                      <div className="mt-2 text-[10px] text-slate-400">Waiting for confirmation...</div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
