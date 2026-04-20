@@ -10,16 +10,17 @@
 
 - Live execution guide: `docs/plans/parseui-current-state-plan.md`
 - Historical archive only: `docs/plans/parseui-wiring-todo.md`
-- Short version: most early ParseUI wiring tasks are already done; the remaining work is contract reconciliation around Actions / compute / decisions, followed by C5/C6 evidence.
+- Short version: most early ParseUI wiring tasks are already done; the remaining work is contract reconciliation around Actions / compute / decisions, while export/regression checks now live on a deferred to-test list until onboarding/import and end-to-end testing are ready.
 
 ---
 
-## 🔒 Blocked
+## 🧪 Deferred validation
 
-### MC-299 — C6 Browser Regression Checklist
-> Waiting on Lucas / C5 clearance. See `docs/plans/phase4-c5-c6-signoff-checklist.md`.
+### MC-299 — browser regression backlog
+> Keep this on the to-test list. Do **not** block other implementation stages on it. See `docs/plans/deferred-validation-backlog.md`.
 
-When Lucas signals C5 cleared:
+When onboarding/import and real-data testing are usable enough to make regression results meaningful:
+- [ ] Confirm onboarding/import path works end-to-end with real data
 - [ ] Annotate: real audio loads, waveform renders
 - [ ] Annotate: IPA/ortho pre-populate from store on concept/speaker change
 - [ ] Annotate: region draw → Save Annotation round-trip persists to disk
@@ -27,7 +28,7 @@ When Lucas signals C5 cleared:
 - [ ] Annotate: Mark Done → concept dot turns green
 - [ ] Compare: speaker forms table shows real IPA (not mock data) ✓ wired
 - [ ] Compare: Accept/Flag concept writes to tagStore ✓ wired
-- [ ] Compare: Export LingPy TSV downloads correctly (also C5 gate)
+- [ ] Compare: Export LingPy TSV downloads correctly once export testing is meaningful
 - [ ] Chat: send message → real xAI response
 
 ---
@@ -65,4 +66,4 @@ tsc --noEmit            →  0 errors
 
 ## Status
 
-AI login wired and deployed. MC-297 spectrogram UI wired (PR #31). **MC-299 activates on Lucas's C5 signal.**
+AI login wired and deployed. MC-297 spectrogram UI wired (PR #31). **MC-299 stays on the deferred validation list until onboarding/import testing is live.**

@@ -4,9 +4,9 @@
 >
 > **Historical note (post-cleanup):** this plan was written before the later branch-pruning pass. Any branch lists that still mention `feat/parse-react-vite` or other removed branches are historical snapshots, not current policy. New work branches from `origin/main`.
 
-**Goal:** Get PARSE into a clean post-pivot state with one canonical active repo, explicit React-vs-legacy boundaries, a defensible branch cleanup sequence, and a gated path to removing legacy HTML/JS.
+**Goal:** Get PARSE into a clean post-pivot state with one canonical active repo, explicit React-vs-legacy boundaries, a defensible branch cleanup sequence, and a realistic path to removing legacy HTML/JS without pretending deferred testing items are blockers before onboarding/import is even usable.
 
-**Architecture:** PARSE is currently hybrid. The React + Vite app is live at `index.html` + `src/`, while legacy `parse.html`, `compare.html`, and `js/` still remain on `main` and are still advertised by the Python server and README. Cleanup must happen in phases so thesis-critical workflows are not broken before C5/C6 validation.
+**Architecture:** PARSE is currently hybrid. The React + Vite app is live at `index.html` + `src/`, while legacy `parse.html`, `compare.html`, and `js/` still remain on `main` and are still advertised by the Python server and README. Cleanup must happen in phases so thesis-critical workflows are not broken, but LingPy export and full browser regression now sit on a deferred to-test list rather than blocking other implementation stages.
 
 **Tech Stack:** Git/GitHub, React 18, Vite, TypeScript, Zustand, Python `server.py`, legacy static HTML/JS.
 
@@ -37,8 +37,8 @@
   - additional docs/scripts may still assume the legacy flow
 - **Policy conflict to reconcile:**
   - current `AGENTS.md` still treats the uppercase clone/worktree model as canonical
-  - current `AGENTS.md` also warns against touching `python/server.py` pre-C6 except for CLEF endpoints
-- **Gate:** C7 cleanup is still blocked until Lucas explicitly clears **C5** and **C6**.
+  - current `AGENTS.md` no longer treats deferred validation as a hard blocker, so cleanup sequencing should follow explicit stage scope rather than a fake pre-C6 freeze
+- **Policy change to honor:** deferred validation items (`C5` LingPy export, `C6` browser regression) should no longer be treated as hard blockers when Lucas asks for work on other implementation stages
 
 ---
 
@@ -47,7 +47,7 @@
 1. **No direct merge to `main` by Hermes.**
    - If a code/doc change is needed, Hermes opens a PR.
    - **Lucas merges it.**
-2. **No legacy deletion before C5/C6 signoff.**
+2. **No broad legacy deletion without a scoped PR, rollback point, and Lucas approval/merge.**
 3. **No branch deletion without Lucas approval.**
 4. **No force-reset of the uppercase archival clone without Lucas approval.**
 5. **Lowercase repo is the source of truth for active dev until policy docs are explicitly updated.**
@@ -65,9 +65,8 @@
 | Merge to `main` | No | **Yes** |
 | Branch deletion | Prepare recommendation | **Approve / execute or authorize** |
 | Uppercase clone reset/repoint | Recommend only | **Approve** |
-| C5 signoff | Support / verify evidence | **Yes** |
-| C6 signoff | Support / verify evidence | **Yes** |
-| C7 destructive cleanup authorization | Recommend | **Yes** |
+| Deferred validation backlog (`C5`/`C6`) | Keep current / help execute later | **Yes** |
+| Destructive C7 cleanup authorization | Recommend | **Yes** |
 
 ---
 
@@ -88,7 +87,7 @@ Remove ambiguity before any cleanup work starts.
 **Required change:**
 - State that active execution currently uses `/home/lucas/gh/ardeleanlucas/parse`
 - State that `/home/lucas/gh/ArdeleanLucas/PARSE` is currently archive/divergent unless Lucas later repoints it
-- Explicitly note that `python/server.py` messaging cleanup is allowed as a non-destructive documentation/UX fix, but legacy removal remains blocked until C5/C6
+- Explicitly note that `python/server.py` messaging cleanup is allowed as a non-destructive documentation/UX fix, and that deferred validation items should not be used to block other implementation stages
 
 **Verification:**
 - Read updated docs and confirm there is no longer a canonical-path contradiction
@@ -224,7 +223,7 @@ Stop misleading users while legacy still exists.
   - `http://localhost:8766/parse.html`
   - `http://localhost:8766/compare.html`
 - Update any sections that still describe PARSE as exclusively “no build step” or exclusively legacy-HTML based
-- Note that full legacy removal is gated on C5/C6 → C7
+- Note that full legacy removal is now a staged scope decision, while C5/C6 stay on the deferred validation backlog
 
 **Verification:**
 - README no longer implies legacy is the primary architecture
@@ -276,33 +275,25 @@ Stop misleading users while legacy still exists.
 
 ---
 
-## Phase 4 — Clear C5 and C6 Before Any Legacy Removal
+## Phase 4 — Keep Deferred Validation Current While Cleanup Work Proceeds
 
 ### Objective
-Reach the cleanup gate honestly, not aspirationally.
+Keep export/regression testing in the right order without letting it masquerade as a fake blocker before onboarding/import testing is even usable.
 
-### Task 4.1 — C5 LingPy export signoff
+### Task 4.1 — Maintain the deferred validation backlog
 
-**Objective:** Lucas verifies LingPy TSV export correctness in browser.
+**Objective:** Keep the later-stage testing list honest and ordered.
 
-**Verification target:**
-- Row counts correct
-- Columns correct
-- Export reflects current React workflow outputs
+**Files:**
+- Modify: `docs/plans/deferred-validation-backlog.md`
+- Modify: any active planning docs that still treat C5/C6 as hard gates
 
-**Needs Lucas action?** Yes — manual signoff.
+**Required change:**
+- Record LingPy TSV export checks as a later-stage test item
+- Record full browser regression as a later-stage test item
+- Make onboarding/import readiness the real prerequisite for meaningful execution of those tests
 
----
-
-### Task 4.2 — C6 browser regression signoff
-
-**Objective:** Lucas verifies full user workflow in the React app.
-
-**Coverage:**
-- Annotate waveform / regions / STT / onboarding / chat
-- Compare grid / tags / nav / import / export affordances
-
-**Needs Lucas action?** Yes — manual signoff.
+**Needs Lucas action?** Not immediately. Lucas runs the real testing later when the workflow is ready.
 
 ---
 
@@ -344,8 +335,9 @@ Make PARSE expose only the new architecture.
 - Modify: any file needed to support built frontend serving
 
 **Preconditions:**
-- Lucas has explicitly cleared C5 and C6
+- Lucas has asked for the destructive cleanup stage to proceed
 - rollback point recorded in `docs/archive/plans/repo-cleanup-preflight.md`
+- onboarding/import and other core workflows are working well enough that the cleanup scope is grounded in real usage rather than blocked by deferred test items
 
 **Acceptance criteria:**
 - `npm run build` succeeds and produces `dist/index.html` and required assets
@@ -418,11 +410,10 @@ Prune the branch list only after the repo is in a stable, documented state.
 2. **Audit `feat/compare-react` and give Lucas a delete/keep/revive recommendation**
 3. **PR: Phase 3 non-destructive README / AGENTS / server / doc messaging cleanup**
 4. **Lucas merges those non-destructive PRs to `main`**
-5. **Lucas clears C5**
-6. **Lucas clears C6**
-7. **PR: Phase 5 C7 unification (build serving + legacy removal + launcher/doc cleanup)**
-8. **Lucas merges the C7 PR to `main`**
-9. **After stable merge/signoff, delete clearly historical branches with Lucas approval**
+5. **Keep the deferred validation backlog current while onboarding/import testing is still coming online**
+6. **If Lucas asks for destructive cleanup work, open the scoped Phase 5 / C7 unification PR**
+7. **Lucas merges the C7 PR to `main` if the cleanup scope is ready**
+8. **After stable merge/signoff, delete clearly historical branches with Lucas approval**
 
 ---
 
@@ -431,10 +422,9 @@ Prune the branch list only after the repo is in a stable, documented state.
 1. Whether the uppercase clone should remain archive-only or later be reset to track `origin/main`
 2. Approval to merge any non-destructive policy/docs/server cleanup PRs
 3. Final decision on whether `feat/compare-react` should be preserved, deleted, or revived after audit
-4. C5 signoff
-5. C6 signoff
-6. Approval for destructive C7 cleanup PR merge
-7. Approval for branch deletions
+4. When the deferred validation backlog should be run in real testing
+5. Approval for destructive C7 cleanup PR merge
+6. Approval for branch deletions
 
 ---
 
@@ -445,8 +435,8 @@ PARSE is in a proper final state when all of the following are true:
 - One local clone is treated as canonical for active development
 - The GitHub branch list is pruned to active work only
 - README, AGENTS, server output, and launchers no longer mislead users toward legacy entrypoints
-- Lucas has signed off on C5 and C6
-- Legacy `parse.html`, `compare.html`, and `js/` are removed
+- Deferred validation items are documented in the right testing order rather than used as fake blockers
+- Legacy `parse.html`, `compare.html`, and `js/` are removed when Lucas chooses that stage
 - Python server serves the current React frontend as the canonical non-dev UI
 - `/` and `/compare` resolve correctly after cutover
 - `main` is the obvious single source of truth

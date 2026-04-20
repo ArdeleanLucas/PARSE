@@ -7,12 +7,12 @@
 
 ## TLDR
 
-The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archived — its early tasks all landed. The remaining ParseUI work is now mostly **contract reconciliation and verification** around Actions menu flows, compute/decisions persistence, and C5/C6 evidence.
+The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archived — its early tasks all landed. The remaining ParseUI work is now mostly **contract reconciliation and verification** around Actions menu flows and compute/decisions persistence, with export/regression checks now tracked on a deferred validation backlog rather than a hard gate.
 
 ## Live sources of truth
 
-1. `AGENTS.md` — branch policy, release gates, and known contract gaps
-2. `docs/plans/parsebuilder-todo.md` — high-level current status / blocked gate
+1. `AGENTS.md` — branch policy, deferred-validation policy, and known contract gaps
+2. `docs/plans/parsebuilder-todo.md` — high-level current status / deferred validation backlog
 3. `src/ParseUI.tsx` — implemented UI state and current affordances
 4. `src/ParseUI.test.tsx` — regression coverage for landed ParseUI slices
 5. `src/api/client.ts` + `python/server.py` — authoritative client/server integration surface
@@ -87,13 +87,13 @@ Decisions are partially wired, but the plan now needs to answer:
 - whether additional payload is needed (speaker subset / concept scope)
 - whether refresh semantics should reload enrichments only or also re-run compute
 
-### 6. C5 / C6 evidence after contract reconciliation
+### 6. Deferred validation backlog after contract reconciliation
 
-Once the Actions / compute / decisions contract is coherent, the next gate is evidence:
+Once the Actions / compute / decisions contract is coherent, keep the downstream testing list current — but do **not** let it block other implementation stages:
 
-- use `docs/plans/phase4-c5-c6-signoff-checklist.md`
-- verify LingPy TSV export in the browser (C5)
-- verify full Annotate/Compare regression in the browser (C6)
+- use `docs/plans/deferred-validation-backlog.md`
+- return to LingPy TSV export checks when onboarding/import and real-data testing make them meaningful
+- return to full Annotate/Compare browser regression when end-to-end testing is actually underway
 
 ## Execution order
 
@@ -103,16 +103,16 @@ Once the Actions / compute / decisions contract is coherent, the next gate is ev
 4. Wire remaining Actions menu handlers to the typed client surface.
 5. Unify decision persistence/load-save behavior.
 6. Re-run targeted tests and full test suite.
-7. Collect C5/C6 evidence.
+7. Keep the deferred validation backlog current and return to it when real-data testing is ready.
 
 ## Explicit non-goals for the next slice
 
 - Do not branch from historical/deleted pivot lanes such as `feat/annotate-ui-redesign`; start from `origin/main`
 - Do not add raw `fetch()` calls to `ParseUI.tsx` just because the historical TODO says so
-- Do not start C7 cleanup / legacy deletion before Lucas clears C5 and C6
+- Do not treat C5/C6 as prerequisites for other implementation stages; keep them on the deferred validation backlog until real onboarding/import testing is live
 
 ## Suggested next implementation brief
 
 If starting the next code slice now, the brief should be:
 
-> Contract gaps are fixed. Audit remaining ParseUI Actions menu handlers against the live typed client/server contract, wire progress/error UI for in-flight jobs, unify decisions persistence/load-save behavior, and proceed to C5/C6 browser evidence.
+> Contract gaps are fixed. Audit remaining ParseUI Actions menu handlers against the live typed client/server contract, wire progress/error UI for in-flight jobs, unify decisions persistence/load-save behavior, keep the deferred validation backlog current, and continue broader JS-removal/unification work as Lucas requests.

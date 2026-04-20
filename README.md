@@ -10,7 +10,7 @@ PARSE is a browser-based research tool for linguists working with long field rec
 
 Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
 
-The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while C5/C6 validation is completed ahead of C7 cleanup.
+The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while broader JS-removal/unification work proceeds. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
 
 The Python backend continues to power AI/API routes for both architectures. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
 
@@ -69,7 +69,7 @@ CLEF provides contact-language similarity data for borrowing adjudication in Com
 
 - **Preferred development UI:** `http://localhost:5173/` and `http://localhost:5173/compare`
 - **Legacy fallback UI:** `http://localhost:8766/parse.html` and `http://localhost:8766/compare.html`
-- **Cleanup gate:** legacy fallback pages remain only until C5/C6 are manually cleared and C7 removes them
+- **Cleanup sequencing:** legacy fallback pages remain while staged cleanup work proceeds; C5/C6 are deferred validation tasks rather than hard blockers
 
 ---
 

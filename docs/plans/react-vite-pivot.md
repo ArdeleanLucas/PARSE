@@ -1090,23 +1090,25 @@ Run: `npm run test -- src/__tests__/apiRegression.test.ts`
 
 ---
 
-### C5 — LingPy TSV Export Verification
+### C5 — Deferred LingPy TSV export verification
 
-This is the primary thesis output. Must be verified manually by Lucas.
+This remains a thesis-critical check, but it now lives on the deferred validation backlog rather than blocking current implementation work. Run it once onboarding/import and real-data testing are far enough along to make the export meaningful.
 
 ```bash
-# With both Vite dev server and Python server running:
+# Later-stage test once real data is flowing:
 # 1. Navigate to /compare
 # 2. Click Export → LingPy TSV
 # 3. Open downloaded file in spreadsheet
-# Verify columns: ID, DOCULECT, CONCEPT, IPA, COGID, TOKENS, NOTE
-# Verify row count matches expected concept × speaker count
-# Verify IPA values match annotations for known speakers (e.g. Fail01)
+# Verify columns: ID, CONCEPT, DOCULECT, IPA, COGID, TOKENS, BORROWING
+# Verify row count matches the dataset actually under test
+# Verify IPA / cognate / borrowing values against known speakers where possible
 ```
 
 ---
 
-### C6 — Full Regression Checklist (Lucas runs personally)
+### C6 — Deferred full regression checklist
+
+Keep this as a later-stage browser test list rather than a blocker. Run it when onboarding/import and end-to-end real-data testing are actually live.
 
 **Annotate Mode:**
 - [ ] Waveform loads for each of: Fail01, Fail02, Kalh01, Mand01, Qasr01, Saha01
@@ -1135,7 +1137,7 @@ This is the primary thesis output. Must be verified manually by Lucas.
 
 ### C7 — Final Cleanup
 
-1. Delete old HTML/JS files (ONLY after C6 checklist is 100% green):
+1. Delete old HTML/JS files when Lucas chooses the cleanup stage and the scope is grounded in working real-data workflows (do **not** use deferred C6 as a fake blocker):
    ```bash
    git rm parse.html compare.html
    git rm -r js/
