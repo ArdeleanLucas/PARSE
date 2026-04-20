@@ -137,6 +137,17 @@ def _normalize_openai_model_name(model_name: Any, default: str = "gpt-5.4") -> s
     return _LEGACY_OPENAI_MODEL_NAMES.get(normalized, normalized)
 
 
+def _chat_supports_reasoning_effort(provider_name: Any, model_name: Any) -> bool:
+    """Return True when the resolved chat provider/model should receive reasoning hints."""
+    provider = str(provider_name or "").strip().lower()
+    model = str(model_name or "").strip().lower()
+    if provider in _CHAT_PROVIDER_BASE_URLS:
+        return False
+    if model.startswith("grok"):
+        return False
+    return True
+
+
 def _coerce_int(
     value: Any,
     default: int,
@@ -292,8 +303,11 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
     resolved["base_url"] = base_url
 
     reasoning_effort = str(resolved.get("reasoning_effort") or "").strip().lower()
-    if reasoning_effort not in {"minimal", "low", "medium", "high"}:
-        reasoning_effort = "high"
+    if _chat_supports_reasoning_effort(provider_name, resolved.get("model")):
+        if reasoning_effort not in {"minimal", "low", "medium", "high"}:
+            reasoning_effort = "high"
+    else:
+        reasoning_effort = ""
     resolved["reasoning_effort"] = reasoning_effort
 
     resolved["enabled"] = _coerce_bool(resolved.get("enabled"), True)
@@ -370,7 +384,7 @@ class OpenAIChatRuntime:
         self.chat_config = _build_chat_config(merged_config)
         self.model = str(self.chat_config.get("model") or "gpt-5.4").strip() or "gpt-5.4"
         self.api_key_env = str(self.chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
-        self.reasoning_effort = str(self.chat_config.get("reasoning_effort") or "high").strip() or "high"
+        self.reasoning_effort = str(self.chat_config.get("reasoning_effort") or "").strip().lower()
 
         try:
             self.temperature = float(self.chat_config.get("temperature", 0.1))
