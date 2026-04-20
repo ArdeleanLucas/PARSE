@@ -35,9 +35,15 @@ MUTATING_TOOL_NAME_RE = re.compile(
     flags=re.IGNORECASE,
 )
 READ_ONLY_NOTICE = (
-    "PARSE chat MVP is read-only. Tools can inspect/analyze data and run background previews, "
-    "but they cannot persist annotation/config/enrichment writes."
+    "PARSE chat MVP is mostly read-only. Tools can inspect/analyze data and run background previews; "
+    "only specific allowlisted tools may write dedicated support files such as contact lexeme config or parse-tags, "
+    "not annotations or enrichments."
 )
+WRITE_ALLOWED_TOOL_NAMES = frozenset({
+    "contact_lexeme_lookup",
+    "import_tag_csv",
+    "prepare_tag_import",
+})
 
 
 class ChatToolError(Exception):
@@ -490,6 +496,52 @@ class ParseChatTools:
                     },
                 },
             ),
+            "contact_lexeme_lookup": ChatToolSpec(
+                name="contact_lexeme_lookup",
+                description=(
+                    "Fetch reference forms (IPA transcriptions) for contact/comparison languages "
+                    "from third-party sources. Uses a priority chain of providers: local CLDF datasets, "
+                    "ASJP, Wikidata, Wiktionary, Grokipedia (LLM-backed), and literature. "
+                    "Use this to get Arabic, Persian, Sorani, or any other reference language data "
+                    "for comparison with project speakers. Returns IPA forms per concept per language. "
+                    "Results are merged into sil_contact_languages.json for use by cognate_compute_preview."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "languages": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 10,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 16},
+                            "description": "ISO 639 language codes, e.g. [\"ar\", \"fa\", \"ckb\"]",
+                        },
+                        "conceptIds": {
+                            "type": "array",
+                            "maxItems": 100,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 100},
+                            "description": "Project concept IDs or English concept labels to look up. Defaults to all project concepts.",
+                        },
+                        "providers": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
+                                    "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
+                                ],
+                            },
+                            "description": "Provider priority order. Defaults to full chain.",
+                        },
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "If true, re-fetch even if forms already exist. Default false.",
+                        },
+                    },
+                },
+            ),
         }
 
     def openai_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -522,6 +574,32 @@ class ParseChatTools:
             result["readOnlyNotice"] = READ_ONLY_NOTICE
         return result
 
+    def _finalize_write_allowed_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = _deepcopy_jsonable(payload)
+
+        preview_only = bool(
+            result.get("previewOnly")
+            or result.get("preview")
+            or result.get("dryRun")
+            or result.get("needsTagName")
+        )
+        if "previewOnly" not in result:
+            result["previewOnly"] = preview_only
+
+        if "readOnly" not in result:
+            result["readOnly"] = preview_only
+
+        if "mode" not in result:
+            result["mode"] = "read-only" if bool(result.get("readOnly")) else "write-allowed"
+
+        if bool(result.get("readOnly")):
+            if "readOnlyNotice" not in result:
+                result["readOnlyNotice"] = READ_ONLY_NOTICE
+        else:
+            result.pop("readOnlyNotice", None)
+
+        return result
+
     def execute(self, tool_name: str, raw_args: Any) -> Dict[str, Any]:
         """Execute a validated allowlisted tool."""
         name = str(tool_name or "").strip()
@@ -533,9 +611,8 @@ class ParseChatTools:
             raise ChatToolValidationError("Tool is not allowlisted: {0}".format(name))
 
         # Defense-in-depth: mutating tool names remain blocked even if added by mistake,
-        # except for explicitly allowlisted tag-import tools which need write access.
-        _TAG_TOOL_ALLOWLIST = {"import_tag_csv", "prepare_tag_import"}
-        if MUTATING_TOOL_NAME_RE.search(name) and name not in _TAG_TOOL_ALLOWLIST:
+        # except for explicitly allowlisted tools that may write dedicated support files.
+        if MUTATING_TOOL_NAME_RE.search(name) and name not in WRITE_ALLOWED_TOOL_NAMES:
             raise ChatToolValidationError(
                 "Mutating tool calls are disabled in read-only mode: {0}.".format(name)
             )
@@ -573,7 +650,11 @@ class ParseChatTools:
         return {
             "tool": name,
             "ok": True,
-            "result": self._finalize_read_only_result(result),
+            "result": (
+                self._finalize_write_allowed_result(result)
+                if name in WRITE_ALLOWED_TOOL_NAMES
+                else self._finalize_read_only_result(result)
+            ),
         }
 
     def _normalize_speaker(self, raw_speaker: Any) -> str:
@@ -757,8 +838,9 @@ class ParseChatTools:
 
         if "constraints" in include:
             out["constraints"] = {
-                "mode": "read-only",
+                "mode": "mostly-read-only",
                 "writesAllowed": False,
+                "writeAllowedTools": sorted(WRITE_ALLOWED_TOOL_NAMES),
                 "attachmentsSupported": False,
                 "readOnlyNotice": READ_ONLY_NOTICE,
                 "toolAllowlist": self.tool_names(),
@@ -1282,6 +1364,175 @@ class ParseChatTools:
                 "plannedEndpoint": "/api/compute/spectrograms",
                 "notes": "Client-side spectrogram worker remains the active rendering path.",
             },
+        }
+
+    # ------------------------------------------------------------------
+    # Contact lexeme / reference form lookup
+    # ------------------------------------------------------------------
+
+    def _tool_contact_lexeme_lookup(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch reference forms for contact languages via the provider registry."""
+        try:
+            from compare.contact_lexeme_fetcher import fetch_and_merge
+        except ImportError:
+            return {
+                "readOnly": True,
+                "status": "unavailable",
+                "message": (
+                    "compare.contact_lexeme_fetcher module is unavailable. "
+                    "Ensure the compare package is importable."
+                ),
+            }
+
+        concepts_path = self.project_root / "concepts.csv"
+        if not concepts_path.exists():
+            return {
+                "ok": False,
+                "error": "concepts.csv not found in project root. Import concepts first.",
+            }
+
+        config_path = self.sil_config_path
+        if not config_path.exists():
+            # Create minimal config so fetch_and_merge can proceed
+            import json as _json
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                _json.dump({}, f)
+
+        # Parse arguments
+        languages_raw = args.get("languages")
+        if isinstance(languages_raw, list) and languages_raw:
+            languages = [str(lc).strip().lower() for lc in languages_raw if str(lc).strip()]
+        else:
+            # Default: read configured languages from sil_contact_languages.json
+            import json as _json
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    sil_config = _json.load(f)
+                languages = [k for k, v in sil_config.items() if isinstance(v, dict) and "name" in v]
+            except Exception:
+                languages = []
+            if not languages:
+                return {
+                    "ok": False,
+                    "error": (
+                        "No languages specified and none configured in sil_contact_languages.json. "
+                        "Provide languages parameter, e.g. [\"ar\", \"fa\"]."
+                    ),
+                }
+
+        providers_raw = args.get("providers")
+        providers = None
+        if isinstance(providers_raw, list) and providers_raw:
+            providers = [str(p).strip() for p in providers_raw if str(p).strip()]
+
+        overwrite = bool(args.get("overwrite", False))
+
+        # Concept filter
+        concept_ids_raw = args.get("conceptIds")
+        concept_filter = None
+        if isinstance(concept_ids_raw, list) and concept_ids_raw:
+            project_concepts = self._load_project_concepts()
+            label_by_id = {
+                str(concept.get("id") or "").strip(): str(concept.get("label") or "").strip()
+                for concept in project_concepts
+                if str(concept.get("id") or "").strip() and str(concept.get("label") or "").strip()
+            }
+            label_by_label = {
+                str(concept.get("label") or "").strip().lower(): str(concept.get("label") or "").strip()
+                for concept in project_concepts
+                if str(concept.get("label") or "").strip()
+            }
+            concept_filter = []
+            for raw_concept in concept_ids_raw:
+                token = str(raw_concept).strip()
+                if not token:
+                    continue
+                concept_label = label_by_id.get(token) or label_by_label.get(token.lower()) or token
+                if concept_label not in concept_filter:
+                    concept_filter.append(concept_label)
+
+        # Load ai_config for provider credentials (grokipedia needs API keys)
+        ai_config = _read_json_file(self.config_path, {})
+
+        # If concept filter is given, write a temporary concepts CSV with only those
+        import tempfile
+        import csv as _csv
+        if concept_filter:
+            tmp_concepts = Path(tempfile.mktemp(suffix=".csv"))
+            try:
+                with open(tmp_concepts, "w", newline="", encoding="utf-8") as f:
+                    writer = _csv.DictWriter(f, fieldnames=["id", "concept_en"])
+                    writer.writeheader()
+                    for i, c in enumerate(concept_filter, 1):
+                        writer.writerow({"id": str(i), "concept_en": c})
+                effective_concepts_path = tmp_concepts
+            except Exception:
+                effective_concepts_path = concepts_path
+                concept_filter = None
+        else:
+            effective_concepts_path = concepts_path
+            tmp_concepts = None
+
+        try:
+            filled = fetch_and_merge(
+                concepts_path=effective_concepts_path,
+                config_path=config_path,
+                language_codes=languages,
+                providers=providers,
+                overwrite=overwrite,
+                ai_config=ai_config if isinstance(ai_config, dict) else {},
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": "Contact lexeme fetch failed: {0}".format(exc),
+            }
+        finally:
+            if tmp_concepts and tmp_concepts.exists():
+                try:
+                    tmp_concepts.unlink()
+                except Exception:
+                    pass
+
+        # Read back what was fetched to provide a summary
+        import json as _json
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                updated_config = _json.load(f)
+        except Exception:
+            updated_config = {}
+
+        sample_forms: Dict[str, Dict[str, List[str]]] = {}
+        for lc in languages:
+            lang_data = updated_config.get(lc, {})
+            concepts_data = lang_data.get("concepts", {})
+            # Show first 5 concepts as sample
+            sample: Dict[str, List[str]] = {}
+            for concept_en, forms in list(concepts_data.items())[:5]:
+                sample[concept_en] = forms if isinstance(forms, list) else []
+            sample_forms[lc] = sample
+
+        return {
+            "ok": True,
+            "readOnly": False,
+            "previewOnly": False,
+            "languages": languages,
+            "filled": filled,
+            "totalConceptsFetched": sum(filled.values()),
+            "providersUsed": providers or [
+                "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
+                "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
+            ],
+            "overwrite": overwrite,
+            "configPath": str(config_path),
+            "sampleForms": sample_forms,
+            "message": (
+                "Fetched reference forms for {0} language(s). "
+                "Total concepts filled: {1}. "
+                "Results written to sil_contact_languages.json. "
+                "Use cognate_compute_preview with contactLanguages to compare."
+            ).format(len(languages), sum(filled.values())),
         }
 
     # ------------------------------------------------------------------
