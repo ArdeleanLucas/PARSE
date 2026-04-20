@@ -97,6 +97,55 @@ _CHAT_OPENAI_ONLY_MODELS = {
 
 _CHAT_SUPPORTED_PROVIDERS = {"openai", "xai", "grok", "x.ai"}
 
+# Approximate context windows in tokens. Values are conservative — the usable
+# window is smaller than the absolute model ceiling because we reserve room
+# for tool results, system instructions, and the assistant reply.
+_CHAT_MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+    "gpt-5.4": 128000,
+    "gpt-4o": 128000,
+    "gpt-4": 8192,
+    "gpt-3.5-turbo": 16384,
+    "o1": 200000,
+    "o1-mini": 128000,
+    "o1-preview": 128000,
+    "o3": 200000,
+    "o3-mini": 200000,
+    "grok-4.20-0309-reasoning": 131072,
+}
+_CHAT_CONTEXT_WINDOW_DEFAULT = 32000
+
+
+def resolve_context_window(model_name: Any) -> int:
+    """Return the approximate context window (in tokens) for a chat model."""
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return _CHAT_CONTEXT_WINDOW_DEFAULT
+    if normalized in _CHAT_MODEL_CONTEXT_WINDOWS:
+        return _CHAT_MODEL_CONTEXT_WINDOWS[normalized]
+    for prefix, window in _CHAT_MODEL_CONTEXT_WINDOWS.items():
+        if normalized.startswith(prefix):
+            return window
+    return _CHAT_CONTEXT_WINDOW_DEFAULT
+
+
+def _extract_total_tokens(response: Any) -> Optional[int]:
+    """Pull usage.total_tokens from an SDK response, tolerating object or dict shapes."""
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return None
+    total = getattr(usage, "total_tokens", None)
+    if total is None and isinstance(usage, dict):
+        total = usage.get("total_tokens")
+    if total is None:
+        return None
+    try:
+        total_int = int(total)
+    except (TypeError, ValueError):
+        return None
+    return total_int if total_int >= 0 else None
+
 
 def _deep_merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge dictionaries without mutating inputs."""
@@ -541,6 +590,7 @@ class OpenAIChatRuntime:
                         "reasoningAttempt": label,
                         "reasoningApplied": label != "none",
                         "tokenParameter": token_key,
+                        "totalTokens": _extract_total_tokens(response),
                     },
                 )
             except TypeError as exc:
@@ -566,6 +616,7 @@ class OpenAIChatRuntime:
                 "reasoningApplied": False,
                 "warnings": errors,
                 "tokenParameter": "none",
+                "totalTokens": _extract_total_tokens(response),
             },
         )
 

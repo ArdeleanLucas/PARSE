@@ -224,8 +224,40 @@ export async function startChatSession(sessionId?: string): Promise<{ session_id
   return { session_id: id, sessionId: id };
 }
 
-export async function getChatSession(sessionId: string): Promise<unknown> {
-  return apiFetch<unknown>(`/api/chat/session/${encodeURIComponent(sessionId)}`);
+export interface ChatSessionPayload {
+  sessionId: string;
+  tokensUsed: number | null;
+  tokensLimit: number | null;
+  model?: string;
+  messages?: Array<{ role: string; content: string }>;
+}
+
+function isRecordShape(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function coerceTokenField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+  return null;
+}
+
+function unwrapChatSession(payload: unknown): ChatSessionPayload {
+  const empty: ChatSessionPayload = { sessionId: "", tokensUsed: null, tokensLimit: null };
+  if (!isRecordShape(payload)) return empty;
+  return {
+    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : "",
+    tokensUsed: coerceTokenField(payload.tokensUsed),
+    tokensLimit: coerceTokenField(payload.tokensLimit),
+    model: typeof payload.model === "string" ? payload.model : undefined,
+    messages: Array.isArray(payload.messages) ? (payload.messages as ChatSessionPayload["messages"]) : undefined,
+  };
+}
+
+export async function getChatSession(sessionId: string): Promise<ChatSessionPayload> {
+  const payload = await apiFetch<unknown>(`/api/chat/session/${encodeURIComponent(sessionId)}`);
+  return unwrapChatSession(payload);
 }
 
 export async function runChat(sessionId: string, message: string): Promise<ChatJob> {

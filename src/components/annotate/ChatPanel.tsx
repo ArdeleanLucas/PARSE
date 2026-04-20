@@ -3,6 +3,7 @@ import { useChatSession } from "../../hooks/useChatSession"
 import type { ChatMessage } from "../../hooks/useChatSession"
 import { getAuthStatus, startAuthFlow, saveApiKey, logoutAuth } from "../../api/client"
 import type { AuthStatus } from "../../api/types"
+import { ContextRing } from "../shared/ContextRing"
 
 export interface ChatPanelProps {
   speaker: string | null
@@ -12,7 +13,7 @@ export interface ChatPanelProps {
 type AuthState = "checking" | "unauthenticated" | "entering-xai" | "entering-openai" | "oauth" | "authenticated"
 
 export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
-  const { messages, sending, send, clear } = useChatSession()
+  const { messages, sending, tokensUsed, tokensLimit, send, clear } = useChatSession()
   const [inputText, setInputText] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -341,7 +342,10 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     <div style={containerStyle}>
       <div style={headerStyle}>
         <span>{headerText}</span>
-        <button style={signOutStyle} onClick={handleSignOut}>Sign out</button>
+        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ContextRing used={tokensUsed} limit={tokensLimit} />
+          <button style={signOutStyle} onClick={handleSignOut}>Sign out</button>
+        </span>
       </div>
       <div style={messageListStyle} data-testid="message-list">
         {messages.length === 0 && (

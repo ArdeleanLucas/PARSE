@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlparse
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
-from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config
+from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config, resolve_context_window
 from audio_pipeline_paths import build_normalized_output_path
 
 try:
@@ -1196,6 +1196,7 @@ def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
 
     messages_raw = session.get("messages")
     messages_out: List[Dict[str, Any]] = []
+    tokens_used: Optional[int] = None
 
     if isinstance(messages_raw, list):
         for message in messages_raw:
@@ -1215,6 +1216,18 @@ def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
 
+            # Last assistant turn's total_tokens approximates the current
+            # conversation size (prompt_tokens of the next turn ≈ this).
+            if role == "assistant":
+                meta = message.get("meta")
+                if isinstance(meta, dict):
+                    candidate = meta.get("tokensUsed")
+                    if isinstance(candidate, int) and candidate >= 0:
+                        tokens_used = candidate
+
+    model_name = str(policy_payload.get("model") or "")
+    tokens_limit = resolve_context_window(model_name)
+
     return {
         "sessionId": str(session.get("sessionId") or ""),
         "created_at": session.get("created_at"),
@@ -1223,6 +1236,8 @@ def _chat_session_public_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "sharedAcrossPages": True,
         **policy_payload,
         "messages": messages_out,
+        "tokensUsed": tokens_used,
+        "tokensLimit": tokens_limit,
     }
 
 
@@ -1385,6 +1400,13 @@ def _run_chat_job(job_id: str, session_id: str) -> None:
         if not assistant_content:
             assistant_content = "I could not produce a response for this request."
 
+        reasoning_meta = result.get("reasoning") if isinstance(result, dict) else None
+        total_tokens = None
+        if isinstance(reasoning_meta, dict):
+            total_tokens_raw = reasoning_meta.get("totalTokens")
+            if isinstance(total_tokens_raw, int) and total_tokens_raw >= 0:
+                total_tokens = total_tokens_raw
+
         _chat_append_message(
             session_id,
             role="assistant",
@@ -1392,6 +1414,7 @@ def _run_chat_job(job_id: str, session_id: str) -> None:
             metadata={
                 "model": result.get("model") if isinstance(result, dict) else None,
                 "toolTraceCount": len(result.get("toolTrace", [])) if isinstance(result, dict) else 0,
+                "tokensUsed": total_tokens,
             },
         )
 

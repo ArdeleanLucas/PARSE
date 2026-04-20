@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { startChatSession, runChat, pollChat } from "../api/client"
+import { startChatSession, runChat, pollChat, getChatSession } from "../api/client"
 
 export interface ChatMessage {
   role: "user" | "assistant"
@@ -12,6 +12,8 @@ export interface UseChatSessionResult {
   sessionId: string | null
   sending: boolean
   error: string | null
+  tokensUsed: number | null
+  tokensLimit: number | null
   send: (text: string) => Promise<void>
   clear: () => void
 }
@@ -42,7 +44,19 @@ export function useChatSession(): UseChatSessionResult {
   )
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tokensUsed, setTokensUsed] = useState<number | null>(null)
+  const [tokensLimit, setTokensLimit] = useState<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  const refreshTokens = useCallback(async (sid: string) => {
+    try {
+      const s = await getChatSession(sid)
+      setTokensUsed(s.tokensUsed)
+      setTokensLimit(s.tokensLimit)
+    } catch {
+      // Token refresh is best-effort — the chat works fine without the ring.
+    }
+  }, [])
 
   // Initialize session on mount
   useEffect(() => {
@@ -133,6 +147,9 @@ export function useChatSession(): UseChatSessionResult {
       }
       setMessages((prev) => [...prev, assistantMsg])
 
+      // Refresh context-window usage from the server-side session state.
+      void refreshTokens(sid)
+
       // Sync tags from server after every agent response
       try {
         const { useTagStore } = await import("../stores/tagStore")
@@ -153,8 +170,10 @@ export function useChatSession(): UseChatSessionResult {
     setMessages([])
     setSessionId(null)
     setError(null)
+    setTokensUsed(null)
+    setTokensLimit(null)
     sessionStorage.removeItem(SESSION_KEY)
   }, [])
 
-  return { messages, sessionId, sending, error, send, clear }
+  return { messages, sessionId, sending, error, tokensUsed, tokensLimit, send, clear }
 }
