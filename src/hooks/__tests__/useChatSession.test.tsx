@@ -28,6 +28,10 @@ describe("useChatSession", () => {
     sessionStorage.clear();
     vi.useFakeTimers();
     vi.clearAllMocks();
+    startChatSession.mockReset();
+    runChat.mockReset();
+    pollChat.mockReset();
+    syncFromServer.mockReset();
   });
 
   afterEach(() => {
@@ -80,5 +84,41 @@ describe("useChatSession", () => {
     expect(result.current.error).toBeNull();
     expect(pollChat).toHaveBeenCalledTimes(1);
     expect(syncFromServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("extracts assistant content when the server returns a dict result (blank-UI crash fix)", async () => {
+    startChatSession.mockResolvedValue({ session_id: "chat_123" });
+    runChat.mockResolvedValue({ job_id: "job_123" });
+    pollChat
+      .mockResolvedValueOnce({
+        status: "complete",
+        result: {
+          assistant: { content: "hi from grok" },
+          session: { id: "chat_123", messages: [] },
+          model: "grok-4.20-0309-reasoning",
+        },
+      })
+      .mockResolvedValueOnce({ status: "error", error: "should not poll twice" });
+
+    const { result } = renderHook(() => useChatSession());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      void result.current.send("hello");
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.messages.map((m) => m.content)).toEqual([
+      "hello",
+      "hi from grok",
+    ]);
   });
 });

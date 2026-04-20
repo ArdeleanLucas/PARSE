@@ -77,7 +77,7 @@ export interface ChatJob {
 
 export interface ChatStatus {
   status: string;
-  result?: string;
+  result?: string | Record<string, unknown>;
   error?: string;
 }
 
