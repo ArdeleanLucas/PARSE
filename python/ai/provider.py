@@ -266,10 +266,7 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
 
     stored_provider = ""
     try:
-        try:
-            from python.ai.openai_auth import get_api_key as _get_direct_key, get_api_key_provider as _get_provider
-        except ImportError:
-            from .openai_auth import get_api_key as _get_direct_key, get_api_key_provider as _get_provider
+        from .openai_auth import get_api_key as _get_direct_key, get_api_key_provider as _get_provider
 
         if (_get_direct_key() or "").strip():
             stored_provider = str(_get_provider() or "").strip().lower()
@@ -403,18 +400,11 @@ class OpenAIChatRuntime:
         if self._client is not None:
             return self._client
 
-        try:
-            from python.ai.openai_auth import (
-                get_access_token as _get_access_token,
-                get_api_key as _get_direct_key,
-                get_api_key_provider as _get_provider,
-            )
-        except ImportError:
-            from .openai_auth import (
-                get_access_token as _get_access_token,
-                get_api_key as _get_direct_key,
-                get_api_key_provider as _get_provider,
-            )
+        from .openai_auth import (
+            get_access_token as _get_access_token,
+            get_api_key as _get_direct_key,
+            get_api_key_provider as _get_provider,
+        )
 
         _direct_key = (_get_direct_key() or "").strip()
         _provider = _get_provider().strip().lower() if _direct_key else ""
