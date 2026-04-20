@@ -15,6 +15,15 @@
 #   PARSE_API_PORT   API server port (default: 8766)
 #   PARSE_VITE_PORT  Vite dev server port (default: 5173)
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
+#   PARSE_PULL_MODE  How to integrate origin/main (default: "auto")
+#                      auto   — try fast-forward; on divergence fall back
+#                               to `rebase --autostash`; warn and continue
+#                               only if both fail
+#                      ff     — fast-forward only; warn and continue on
+#                               divergence (previous behavior)
+#                      rebase — always `rebase --autostash`
+#                      reset  — hard-reset local main to origin/main
+#                               (destructive — drops local commits)
 #
 # WSL + Windows python.exe note
 # -----------------------------
@@ -34,6 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_API_PORT:=8766}"
 : "${PARSE_VITE_PORT:=5173}"
 : "${PARSE_SKIP_PULL:=0}"
+: "${PARSE_PULL_MODE:=auto}"
 
 API_STDOUT_LOG="/tmp/parse_api_stdout.log"
 API_STDERR_LOG="/tmp/parse_api_stderr.log"
@@ -119,7 +129,7 @@ pull_main() {
     log "PARSE_SKIP_PULL=1 — skipping git pull"
     return 0
   fi
-  log "Pulling latest main..."
+  log "Pulling latest main (mode: ${PARSE_PULL_MODE})..."
   (
     cd "${PARSE_ROOT}" || return 1
     # Only stash if there are actual modifications — avoids empty-stash churn.
@@ -127,14 +137,49 @@ pull_main() {
     if ! git diff --quiet || ! git diff --cached --quiet; then
       git stash push -q -m "parse-run autostash $(date +%Y-%m-%d_%H:%M:%S)" && stashed=1
     fi
-    if git pull origin main --ff-only; then
-      [ "${stashed}" = "1" ] && git stash pop -q 2>/dev/null || true
-      return 0
-    else
-      log "WARNING: git pull failed — running on current checkout"
-      [ "${stashed}" = "1" ] && git stash pop -q 2>/dev/null || true
-      return 0
-    fi
+    local pop=0
+    [ "${stashed}" = "1" ] && pop=1
+
+    # Always fetch so the chosen strategy has a current view of origin/main.
+    git fetch origin main --quiet 2>/dev/null || true
+
+    case "${PARSE_PULL_MODE}" in
+      reset)
+        if git reset --hard origin/main; then
+          log "Local main reset to origin/main (destructive)"
+          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          return 0
+        fi
+        ;;
+      rebase)
+        if git pull origin main --rebase --autostash; then
+          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          return 0
+        fi
+        ;;
+      ff)
+        if git pull origin main --ff-only; then
+          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          return 0
+        fi
+        ;;
+      auto|*)
+        if git pull origin main --ff-only 2>/dev/null; then
+          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          return 0
+        fi
+        log "Fast-forward not possible — trying rebase --autostash"
+        if git pull origin main --rebase --autostash; then
+          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          return 0
+        fi
+        log "Rebase also failed — inspect local commits or set PARSE_PULL_MODE=reset"
+        ;;
+    esac
+
+    log "WARNING: git pull failed — running on current checkout"
+    [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+    return 0
   )
 }
 
