@@ -399,7 +399,7 @@ def _chat_runtime_policy(config: Optional[Dict[str, Any]] = None) -> Dict[str, A
         "attachmentsSupported": False,
         "readOnlyNotice": READ_ONLY_NOTICE,
         "provider": str(chat_config.get("provider") or "openai").strip() or "openai",
-        "model": str(chat_config.get("model") or "gpt54").strip() or "gpt54",
+        "model": str(chat_config.get("model") or "gpt-5.4").strip() or "gpt-5.4",
         "apiKeyEnv": str(chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY",
         "reasoningEffort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
         "temperature": _coerce_float_range(chat_config.get("temperature"), 0.1, 0.0, 2.0),

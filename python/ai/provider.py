@@ -43,7 +43,7 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     },
     "llm": {
         "provider": "openai",
-        "model": "gpt-4o",
+        "model": "gpt-5.4",
         "api_key_env": "OPENAI_API_KEY",
     },
     "chat": {
@@ -51,7 +51,7 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "read_only": True,
         "attachments_supported": False,
         "provider": "openai",
-        "model": "gpt54",
+        "model": "gpt-5.4",
         "api_key_env": "OPENAI_API_KEY",
         "reasoning_effort": "high",
         "temperature": 0.1,
@@ -75,12 +75,17 @@ _CHAT_PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
     "xai": "grok-4.20-0309-reasoning",
     "grok": "grok-4.20-0309-reasoning",
     "x.ai": "grok-4.20-0309-reasoning",
-    "openai": "gpt-4o",
+    "openai": "gpt-5.4",
+}
+
+_LEGACY_OPENAI_MODEL_NAMES = {
+    "gpt54": "gpt-5.4",
 }
 
 _CHAT_OPENAI_ONLY_MODELS = {
     "gpt54",
     "gpt-4o",
+    "gpt-5.4",
     "gpt-4",
     "gpt-3.5-turbo",
     "o1",
@@ -122,6 +127,14 @@ def _coerce_bool(value: Any, default: bool) -> bool:
             return False
 
     return bool(default)
+
+
+def _normalize_openai_model_name(model_name: Any, default: str = "gpt-5.4") -> str:
+    """Rewrite legacy OpenAI placeholder model names to the canonical default."""
+    normalized = str(model_name or "").strip()
+    if not normalized:
+        return default
+    return _LEGACY_OPENAI_MODEL_NAMES.get(normalized, normalized)
 
 
 def _coerce_int(
@@ -225,7 +238,7 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
         "read_only": True,
         "attachments_supported": False,
         "provider": "openai",
-        "model": str(chat_config.get("model") or llm_config.get("model") or "gpt54").strip() or "gpt54",
+        "model": str(chat_config.get("model") or llm_config.get("model") or "gpt-5.4").strip() or "gpt-5.4",
         "api_key_env": str(chat_config.get("api_key_env") or llm_config.get("api_key_env") or "OPENAI_API_KEY").strip()
         or "OPENAI_API_KEY",
         "reasoning_effort": str(chat_config.get("reasoning_effort") or "high").strip() or "high",
@@ -263,10 +276,10 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
         provider_name = "openai"
     resolved["provider"] = provider_name
 
-    model_name = str(resolved.get("model") or "").strip()
+    model_name = _normalize_openai_model_name(resolved.get("model"), default="")
     if provider_name in _CHAT_PROVIDER_BASE_URLS and model_name in _CHAT_OPENAI_ONLY_MODELS:
         model_name = _CHAT_PROVIDER_DEFAULT_MODELS[provider_name]
-    resolved["model"] = model_name or _CHAT_PROVIDER_DEFAULT_MODELS.get(provider_name, "gpt54")
+    resolved["model"] = model_name or _CHAT_PROVIDER_DEFAULT_MODELS.get(provider_name, "gpt-5.4")
 
     api_key_env = str(resolved.get("api_key_env") or "").strip()
     if provider_name in _CHAT_PROVIDER_BASE_URLS and (not api_key_env or api_key_env == "OPENAI_API_KEY"):
@@ -355,7 +368,7 @@ class OpenAIChatRuntime:
         merged_config = _deep_merge_dicts(file_config, config or {})
 
         self.chat_config = _build_chat_config(merged_config)
-        self.model = str(self.chat_config.get("model") or "gpt54").strip() or "gpt54"
+        self.model = str(self.chat_config.get("model") or "gpt-5.4").strip() or "gpt-5.4"
         self.api_key_env = str(self.chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
         self.reasoning_effort = str(self.chat_config.get("reasoning_effort") or "high").strip() or "high"
 
@@ -976,7 +989,7 @@ class OpenAIProvider(AIProvider):
 
         self.stt_model = str(stt_config.get("model", "whisper-1")).strip() or "whisper-1"
         self.language = str(stt_config.get("language", "")).strip() or None
-        self.llm_model = str(llm_config.get("model", "gpt-4o")).strip() or "gpt-4o"
+        self.llm_model = _normalize_openai_model_name(llm_config.get("model"), default="gpt-5.4")
         self.api_key_env = (
             str(llm_config.get("api_key_env", "OPENAI_API_KEY")).strip()
             or "OPENAI_API_KEY"
@@ -1144,8 +1157,8 @@ class XAIProvider(OpenAIProvider):
         self.api_key_env = configured_api_key_env
 
         configured_llm_model = str(llm_config.get("model", "")).strip()
-        if not configured_llm_model or configured_llm_model == "gpt-4o":
-            configured_llm_model = "grok-4-0201"
+        if not configured_llm_model or configured_llm_model in {"gpt54", "gpt-4o", "gpt-5.4"}:
+            configured_llm_model = "grok-4.20-0309-reasoning"
         self.llm_model = configured_llm_model
 
         self.stt_model = (
