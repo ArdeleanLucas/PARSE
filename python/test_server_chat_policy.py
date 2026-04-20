@@ -17,7 +17,7 @@ def test_chat_runtime_policy_uses_saved_xai_provider_defaults(monkeypatch) -> No
     policy = server._chat_runtime_policy()
 
     assert policy["provider"] == "xai"
-    assert policy["model"] == "grok-3-mini"
+    assert policy["model"] == "grok-4.20-0309-reasoning"
     assert policy["apiKeyEnv"] == "XAI_API_KEY"
 
 

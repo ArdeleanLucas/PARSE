@@ -72,9 +72,9 @@ _CHAT_PROVIDER_BASE_URLS: Dict[str, str] = {
 }
 
 _CHAT_PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
-    "xai": "grok-3-mini",
-    "grok": "grok-3-mini",
-    "x.ai": "grok-3-mini",
+    "xai": "grok-4.20-0309-reasoning",
+    "grok": "grok-4.20-0309-reasoning",
+    "x.ai": "grok-4.20-0309-reasoning",
     "openai": "gpt-4o",
 }
 
