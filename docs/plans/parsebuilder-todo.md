@@ -17,7 +17,7 @@
 ## 🔒 Blocked
 
 ### MC-299 — C6 Browser Regression Checklist
-> Waiting on Lucas / C5 clearance. See `docs/plans/phase4-c5-c6-signoff-checklist.md` (PR #7).
+> Waiting on Lucas / C5 clearance. See `docs/plans/phase4-c5-c6-signoff-checklist.md`.
 
 When Lucas signals C5 cleared:
 - [ ] Annotate: real audio loads, waveform renders
