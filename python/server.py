@@ -2772,8 +2772,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_auth_key(self) -> None:
         """POST /api/auth/key — store a direct API key."""
         try:
-            body = self._read_body()
-            data = json.loads(body)
+            data = self._read_json_body()
             key = str(data.get("key") or "").strip()
             provider = str(data.get("provider") or "xai").strip()
             if not key:
