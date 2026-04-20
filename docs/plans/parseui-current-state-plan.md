@@ -7,7 +7,7 @@
 
 ## TLDR
 
-Do not execute `docs/plans/parseui-wiring-todo.md` literally anymore. Most of its early wiring tasks have already landed. The remaining ParseUI work is now mostly **contract reconciliation and verification** around Actions menu flows, compute/decisions persistence, and C5/C6 evidence.
+The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archived — its early tasks all landed. The remaining ParseUI work is now mostly **contract reconciliation and verification** around Actions menu flows, compute/decisions persistence, and C5/C6 evidence.
 
 ## Live sources of truth
 

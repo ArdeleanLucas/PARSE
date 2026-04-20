@@ -127,7 +127,7 @@ Remove ambiguity before any cleanup work starts.
 **Objective:** Ensure destructive steps can be reversed and branch decisions are evidence-based.
 
 **Files:**
-- Create: `docs/plans/repo-cleanup-preflight.md`
+- Create: `docs/archive/plans/repo-cleanup-preflight.md` *(archived 2026-04-20 — task complete)*
 
 **Required contents:**
 - current `origin/main` SHA
@@ -184,7 +184,7 @@ Decide whether `feat/compare-react` is stale residue or still meaningful.
 **Objective:** Determine whether the branch-only divergence should be preserved, rebased, or discarded.
 
 **Files:**
-- Create: `docs/plans/compare-branch-audit.md`
+- Create: `docs/archive/plans/compare-branch-audit.md` *(archived 2026-04-20 — task complete)*
 
 **Required analysis:**
 1. Inspect `origin/main..origin/feat/compare-react`
@@ -345,7 +345,7 @@ Make PARSE expose only the new architecture.
 
 **Preconditions:**
 - Lucas has explicitly cleared C5 and C6
-- rollback point recorded in `docs/plans/repo-cleanup-preflight.md`
+- rollback point recorded in `docs/archive/plans/repo-cleanup-preflight.md`
 
 **Acceptance criteria:**
 - `npm run build` succeeds and produces `dist/index.html` and required assets
