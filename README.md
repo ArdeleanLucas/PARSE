@@ -8,7 +8,7 @@ Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
 
 PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, and comparative analysis in one workspace, so researchers can move from raw recordings to analysis-ready linguistic data without switching between disconnected tools.
 
-Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
+PARSE has a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
 
 The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). The legacy HTML entrypoints, old review page, and root vanilla-JS tree have been removed. For non-dev/local-server usage, run `npm run build` and the Python backend will serve the built frontend from `http://localhost:8766/` and `http://localhost:8766/compare`. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
 
@@ -46,7 +46,7 @@ Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 
 CLEF provides contact-language similarity data for borrowing adjudication in Compare mode. It fetches lexical data from multiple third-party and local sources via a **provider registry** (`python/compare/providers/`), then surfaces similarity signals in the `ContactLexemePanel` UI component.
 
-**Providers (11):**
+**Providers (10):**
 
 | Provider | Source type |
 |---|---|
@@ -75,13 +75,13 @@ CLEF provides contact-language similarity data for borrowing adjudication in Com
 
 ## AI Provider System
 
-PARSE (Phase 5) supports multiple AI backends, routed per task type:
+PARSE supports multiple AI backends, routed per task type:
 
 | Task | Supported providers |
 |---|---|
 | STT (speech-to-text) | faster-whisper (local, GPU), OpenAI Whisper API |
 | IPA transcription | wav2vec2 (local), epitran (fallback) |
-| LLM / chat | xAI (Grok), OpenAI, Ollama |
+| LLM / chat | xAI (Grok), OpenAI |
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
@@ -124,7 +124,7 @@ The system presents ranked candidates. The annotator verifies, adjusts boundarie
 
 ## AI Workflow Assistant
 
-Both Annotate and Compare modes include a built-in AI chat dock powered by the configured LLM provider (xAI/Grok, OpenAI, or Ollama). This is not a general-purpose chatbot — it is a domain-specific assistant designed to guide users through the entire PARSE workflow from start to finish.
+Both Annotate and Compare modes include a built-in AI chat dock powered by the configured LLM provider (xAI/Grok or OpenAI). This is not a general-purpose chatbot — it is a domain-specific assistant designed to guide users through the entire PARSE workflow from start to finish.
 
 The assistant has full access to project state via the `ParseChatTools` interface (`python/ai/chat_tools.py`) and can:
 
@@ -404,7 +404,7 @@ The enrichments layer stores computed structures while preserving manual adjudic
 - React 18 + TypeScript + Vite (current frontend architecture)
 - Zustand (state management)
 - Tailwind CSS v3 (styling)
-- Python 3.10+ backend serving API routes and the built frontend (`dist/`) for non-dev usage
+- Python 3.10–3.12 backend serving API routes and the built frontend (`dist/`) for non-dev usage (3.13+ is blocked by `cgi.FieldStorage` removal until `python/server.py` migrates off it)
 - WaveSurfer 7
 - faster-whisper + CTranslate2 (local STT)
 - wav2vec2 via HuggingFace transformers (local IPA)
