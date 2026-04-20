@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { useChatSession } from "../../hooks/useChatSession"
 import type { ChatMessage } from "../../hooks/useChatSession"
-import { getAuthStatus, startAuthFlow, saveApiKey, logoutAuth } from "../../api/client"
+import { getAuthStatus, startAuthFlow, pollAuth, saveApiKey, logoutAuth } from "../../api/client"
 import type { AuthStatus } from "../../api/types"
 import { ContextRing } from "../shared/ContextRing"
 
@@ -88,14 +88,25 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
       }
       pollRef.current = setInterval(async () => {
         try {
-          const s = await getAuthStatus()
-          if (s.authenticated) {
+          // pollAuth drives the actual OpenAI device-token exchange.
+          // getAuthStatus alone only reads cached server state, so without
+          // this call _auth_state.status stays "pending" forever.
+          const result = await pollAuth()
+          if (result.status === "complete") {
             if (pollRef.current) clearInterval(pollRef.current)
             pollRef.current = null
             setAuthState("authenticated")
+            return
+          }
+          if (result.status === "expired" || result.status === "error") {
+            if (pollRef.current) clearInterval(pollRef.current)
+            pollRef.current = null
+            setAuthState("unauthenticated")
+            setAuthError(result.error ?? (result.status === "expired" ? "Login code expired — try again" : "OAuth failed"))
+            setOauthInfo({})
           }
         } catch {
-          // keep polling
+          // keep polling — transient network failures shouldn't abort the flow
         }
       }, 5000)
     } catch (err) {

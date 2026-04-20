@@ -37,7 +37,7 @@ All `src/api/client.ts` helpers have matching routes in `python/server.py`:
 | `updateConfig()` | `PUT /api/config` | ✅ |
 | `getAuthStatus()` | `GET /api/auth/status` | ✅ |
 | `startAuthFlow()` | `POST /api/auth/start` | ✅ |
-| ~~`pollAuth()`~~ | `POST /api/auth/poll` | ✅ (server route exists; client helper removed — use `getAuthStatus()`) |
+| `pollAuth()` | `POST /api/auth/poll` | ✅ (required to drive Codex device-token exchange; `getAuthStatus` only reads cached state) |
 | `saveApiKey()` | `POST /api/auth/key` | ✅ |
 | `logoutAuth()` | `POST /api/auth/logout` | ✅ |
 | `startSTT()` | `POST /api/stt` | ✅ |
