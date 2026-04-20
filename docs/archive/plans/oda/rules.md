@@ -1,4 +1,8 @@
-# Rules — Hard Constraints (Load with Every Task)
+# Rules — Hard Constraints (Load with Every Task) — **ARCHIVED**
+
+> **Archived 2026-04-20.** Still-valid rules (Code Quality #1–7, Architecture #8–14, Testing #18–20) were lifted into `AGENTS.md` § Frontend Rules. Branch/File Discipline rules (#15–17) were Compare-track-lane specific and no longer apply after the track merge.
+>
+> This file is kept for historical reference only. For current frontend rules, see `AGENTS.md`.
 
 > Every rule here is a blocker. Violation = stop and fix before continuing.
 >

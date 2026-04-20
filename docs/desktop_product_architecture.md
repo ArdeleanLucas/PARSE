@@ -82,10 +82,10 @@ Reasoning: lowest migration risk because current frontend already expects HTTP A
 +---------------------------+        +--------------------------------------+
 | Electron Main Process     |        | Python Backend Process               |
 |---------------------------| spawn  |--------------------------------------|
-| - app lifecycle           +------->| - static UI serving (parse/compare)  |
+| - app lifecycle           +------->| - static UI serving (dist/)          |
 | - window creation         |        | - /api/* endpoints                   |
 | - auto-update             |        | - job queue (stt/compute/export)     |
-| - settings persistence    |        | - project IO + annotation IO          |
+| - settings persistence    |        | - project IO + annotation IO         |
 | - secure preload bridge   |        | - model orchestration                |
 +-------------+-------------+        +------------------+-------------------+
               |                                            ^
@@ -93,8 +93,8 @@ Reasoning: lowest migration risk because current frontend already expects HTTP A
               v                                            |
 +---------------------------+                              |
 | Renderer (PARSE UI)       |--- local HTTP API ----------+
-| - parse.html / compare    |
-| - existing JS modules     |
+| - React SPA (src/)        |
+| - Tailwind + lucide-react |
 +---------------------------+
 ```
 
@@ -440,11 +440,9 @@ Exit criteria:
 - Make annotation APIs canonical across Annotate + Compare.
 - Ensure project creation/saving endpoints are consistent and implemented.
 
-## Stream 3 — Frontend unification path
+## Stream 3 — Frontend unification path ✅ complete
 
-- Compare already uses modular JS + API path.
-- Annotate (`parse.html`) currently remains legacy monolith/localStorage-heavy.
-- Plan migration so Annotate uses shared module/data contracts incrementally.
+Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores, hooks, and the typed API client. Vanilla-JS deletion (`js/`, `parse.html`, `compare.html`, legacy launchers) is tracked separately as Stage 3 of the 2026-04-20 docs audit; once that lands, the React SPA is the sole frontend.
 
 ## Stream 4 — Packaging and dependencies
 
@@ -455,11 +453,10 @@ Exit criteria:
 
 ## 17) Biggest portability blockers identified (current codebase)
 
-1. **Legacy launcher mismatch**
-   - `start_parse.sh` and `Start Review Tool.bat` still reference `python/thesis_server.py` and `review_tool_dev.html` (legacy paths), not current server/UI entrypoints.
+1. **Legacy launcher mismatch** — scheduled for Stage 3 removal
+   - `start_parse.sh` and `Start Review Tool.bat` still reference legacy paths (`python/thesis_server.py`, `review_tool_dev.html`). Deleted in the vanilla-JS cleanup PR.
 
-2. **Annotate mode is still monolithic/localStorage-first**
-   - `parse.html` contains large inline app logic and localStorage persistence patterns rather than fully sharing the modular API-driven architecture.
+2. ~~Annotate mode is still monolithic/localStorage-first~~ — **resolved.** `src/ParseUI.tsx` hosts Annotate + Compare in one React shell with Zustand stores; `parse.html` is being removed in Stage 3.
 
 3. **Project API contract mismatch**
    - Frontend modules call `/api/project` and `/project.json` save paths, but backend currently does not expose `/api/project` write route.
@@ -473,8 +470,7 @@ Exit criteria:
 6. **Security defaults not desktop-hardened**
    - Backend defaults include `0.0.0.0` host and permissive CORS, which is unsafe for packaged desktop defaults.
 
-7. **External CDN dependency in core UI**
-   - `parse.html`/`compare.html` currently load WaveSurfer from `unpkg` CDN, which is fragile/offline-unfriendly for desktop packaging.
+7. ~~External CDN dependency in core UI~~ — **resolved.** React SPA bundles dependencies via Vite; `rg unpkg src/` returns zero hits. Vanilla-JS `parse.html`/`compare.html` that loaded from CDN are being removed in Stage 3.
 
 8. **Residual hardcoded platform paths in scripts/docs**
    - Legacy scripts/docs include machine-specific paths and Windows-specific assumptions that need explicit desktop compatibility policy.
@@ -552,3 +548,12 @@ When any of the following changes, update this file in the same PR:
 - release gate criteria,
 - security default policy,
 - milestone readiness definitions.
+
+---
+
+## Decision log
+
+| Date | Decision | Rationale |
+|---|---|---|
+| 2026-04-20 | Remove all vanilla JS (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, legacy launchers) — React SPA becomes the sole frontend | Annotate/Compare divergence and CDN dependency already resolved by the unified React shell; eliminating legacy entrypoints removes packaging fragility, offline risk, and operator confusion. Tracked as Stage 3 of the 2026-04-20 docs audit. |
+| 2026-04-20 | Speaker onboarding requires explicit xAI/OpenAI provider selection at import time | No implicit default; per-provider chat runtime already validated. Ollama/offline deferred until a real offline-field requirement reappears. |

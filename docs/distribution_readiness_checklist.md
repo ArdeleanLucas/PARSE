@@ -161,9 +161,10 @@ These items should be tracked continuously, not only at gate boundaries.
 
 ## D2) Legacy compatibility cleanup
 
-- [ ] Launcher scripts no longer reference legacy `thesis_server.py` or `review_tool_dev.html` paths for primary product flow.
+- [ ] Legacy vanilla-JS entrypoints (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`) removed from the repo — tracked as Stage 3 of the 2026-04-20 docs audit.
+- [ ] Legacy launchers (`start_parse.sh`, `Start Review Tool.bat`) removed or rewritten to boot the React SPA via `python/server.py` only.
 - [ ] Legacy hardcoded machine paths removed from runtime-critical code paths.
-- [ ] Annotate + Compare persistence expectations are documented and converging.
+- [x] Annotate + Compare persistence expectations are documented and converging — unified in `src/ParseUI.tsx` with shared Zustand stores.
 
 ## D3) Security and privacy
 
@@ -184,11 +185,12 @@ These items should be tracked continuously, not only at gate boundaries.
 
 - [ ] Frontend/Backend project save contract mismatch (`/api/project` expectations vs implementation).
 - [ ] Compute endpoint mismatch for offset/spectrogram flows.
-- [ ] Legacy launcher references still present in repo.
-- [ ] Annotate mode still monolithic/localStorage-heavy vs modular API-first architecture.
+- [ ] Legacy vanilla-JS entrypoints still in the repo — Stage 3 of docs audit 2026-04-20.
+- [ ] Legacy launcher scripts (`start_parse.sh`, `Start Review Tool.bat`) still reference legacy paths — cleared in Stage 3.
 - [ ] Desktop security defaults not yet hardened (`0.0.0.0`/CORS policy in current backend defaults).
 - [ ] No release-grade dependency lock/runtime packaging manifest in repo yet.
-- [ ] Packaged build still depends on remote CDN assets unless vendored.
+- [x] ~~Annotate mode still monolithic/localStorage-heavy~~ — resolved by the unified React shell (`src/ParseUI.tsx`).
+- [x] ~~Packaged build still depends on remote CDN assets~~ — React SPA bundles via Vite; no `unpkg`/CDN hits in `src/`. Vanilla-JS pages that used CDN are being removed in Stage 3.
 
 ---
 

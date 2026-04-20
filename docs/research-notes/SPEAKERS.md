@@ -1,10 +1,11 @@
-# SPEAKERS.md — PARSE Data Inventory
+# SPEAKERS.md — Personal Research Data Inventory
+
+> **Personal research data inventory — not a project plan.**
+> This file tracks which audio data, transcriptions, and pipeline artefacts exist for each speaker in Lucas's Southern Kurdish thesis dataset. It is specific to that dataset and not authoritative for PARSE itself.
 
 Last updated: 2026-03-24
 
-This file is the authoritative record of which audio data, transcriptions, and
-pipeline artefacts are associated with each speaker. Update this file whenever
-new processing is completed.
+Update whenever new processing is completed on the thesis corpus.
 
 ---
 
@@ -123,7 +124,7 @@ No speaker metadata assigned yet. Located in `Audio_Original/New_Lexicons/`.
 
 ## review_data.json
 
-- **Path:** `C:\Users\Lucas\Thesis\review_data.json`
+- **Location:** thesis corpus root (`review_data.json`)
 - **Generated:** 2026-03-19, 448KB
 - **Covers:** Fail01, Fail02, Kalh01, Mand01, Qasr01, Saha01 (6 speakers)
 - **Method:** edit_distance_clustering, threshold 0.6
@@ -144,18 +145,10 @@ No speaker metadata assigned yet. Located in `Audio_Original/New_Lexicons/`.
 
 ---
 
-## Key Paths (WSL)
+## Related repos
 
-| Resource | Path |
-|----------|------|
-| Audio_Original | `/mnt/c/Users/Lucas/Thesis/Audio_Original/` |
-| Audio_Working | `/mnt/c/Users/Lucas/Thesis/Audio_Working/` |
-| Audio_Processed | `/mnt/c/Users/Lucas/Thesis/Audio_Processed/` |
-| WSL symlink (for scripts) | `/mnt/c/Users/Lucas/Thesis/audio/` → both above |
-| source_index.json | `/mnt/c/Users/Lucas/Thesis/source_index.json` |
-| peaks/ | `/mnt/c/Users/Lucas/Thesis/peaks/` |
-| review_data.json | `/mnt/c/Users/Lucas/Thesis/review_data.json` |
-| manifest.json | `/mnt/c/Users/Lucas/Thesis/manifest.json` |
-| PARSE workspace | `/home/lucas/.openclaw/workspace/parse/` |
-| PARSE repo | `TarahAssistant/PARSE` (GitHub) |
-| Thesis repo | `ArdeleanLucas/thesis` (GitHub) |
+- PARSE application: `ArdeleanLucas/PARSE` (GitHub)
+- Thesis corpus / scripts: `ArdeleanLucas/thesis` (GitHub)
+
+Machine-specific working paths (WSL layout, workspace directories) belong in a
+personal notes file, not in the public repo. Keep those out of this document.

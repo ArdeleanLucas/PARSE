@@ -1,6 +1,6 @@
 # ParseUI current-state execution plan
 
-**Updated:** 2026-06-14
+**Updated:** 2026-04-20
 **Applies to:** `origin/main`
 **Code branch policy:** new work branches from `origin/main` (per `AGENTS.md`); historical pivot branches like `feat/parseui-unified-shell` are archived
 **Docs branch for planning:** branch from `origin/main` (historical docs lane `docs/parseui-planning` was deleted after merge cleanup)
@@ -37,6 +37,15 @@ These are no longer open execution tasks:
 - Spectrogram Worker — TS port (`src/workers/spectrogram-worker.ts`), `useSpectrogram` hook, AnnotateView `<canvas>` overlay wired (MC-297, PR #31)
 
 ## What is genuinely still open
+
+### 0. xAI/OpenAI onboarding selector ✅ DONE (Stage 2 of docs audit 2026-04-20)
+
+Speaker onboarding now requires an explicit provider choice:
+
+- `src/components/compare/SpeakerImport.tsx` — provider radio group (xAI / OpenAI) pre-populated from `getAuthStatus()`; Start is disabled until one is selected.
+- `src/api/client.ts::onboardSpeaker(speakerId, audioFile, csvFile, provider)` — provider included as multipart field.
+- `python/server.py::_api_post_onboard_speaker` — validates provider in `{"xai", "openai"}` and that its API key env var is set.
+- Chat runtime provider routing in `python/ai/provider.py::OpenAIChatRuntime` (merged via PR #48, #56) — xAI keys route to `https://api.x.ai/v1` with model swap to `grok-3-mini`.
 
 ### 1. ~~Fix known client/server contract mismatches~~ ✅ DONE
 
@@ -91,9 +100,13 @@ Decisions are partially wired, but the plan now needs to answer:
 
 Once the Actions / compute / decisions contract is coherent, keep the downstream testing list current — but do **not** let it block other implementation stages:
 
-- use `docs/plans/deferred-validation-backlog.md`
-- return to LingPy TSV export checks when onboarding/import and real-data testing make them meaningful
-- return to full Annotate/Compare browser regression when end-to-end testing is actually underway
+- Use `docs/plans/deferred-validation-backlog.md` as the single source.
+- C5 (LingPy TSV export verification) and C6 (full Annotate/Compare browser regression) live on that backlog — run them in the order of real testing once onboarding/import and end-to-end flows are usable.
+- C7 / legacy-cleanup is no longer mechanically blocked on C5/C6; it still requires a scoped PR and Lucas review/merge (see AGENTS.md § Deferred Validation Backlog).
+
+### 7. Remove vanilla JS entrypoints (Stage 3 of docs audit 2026-04-20)
+
+Legacy surface still on disk: `js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, `start_parse.sh`, `Start Review Tool.bat`, and the `forceSpaCompareRoute` Vite plugin that only exists to redirect away from `compare.html`. These are scheduled for deletion under a scoped Stage-3 PR (tracked by the ongoing Stage-3 branch). Once that lands, `src/ParseUI.tsx` + the React SPA is the sole frontend.
 
 ## Execution order
 

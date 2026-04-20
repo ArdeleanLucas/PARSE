@@ -115,7 +115,7 @@ Work through B7 → B9 in sequence (B1-B6 already done). Each phase has its own 
 | `docs/plans/oda/b7-export.md` | useExport hook |
 | `docs/plans/oda/b8-compute-job.md` | useComputeJob hook |
 | `docs/plans/oda/b9-compare-mode.md` | CompareMode root + assembly |
-| `docs/plans/oda/rules.md` | Hard rules (load with every task) |
+| `docs/archive/plans/oda/rules.md` (archived; active rules live in `AGENTS.md` § Frontend Rules) | Hard rules (load with every task) |
 | `docs/plans/oda/coordination.md` | Protocol + completion gate |
 
 ---
