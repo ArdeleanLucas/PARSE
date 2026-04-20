@@ -119,6 +119,29 @@ However, on current `main`, coordinate shared-surface edits carefully.
 - `config/sil_contact_languages.json` directly (runtime output file)
 - Broad destructive cleanup without a scoped PR, rollback plan, and Lucas review/merge
 
+## Frontend Rules (hard constraints)
+
+These apply to every `src/` file. Violation = stop and fix before merge.
+
+**API & state**
+1. **No bare `fetch()` calls.** Every API call goes through `src/api/client.ts`.
+2. **No `window.PARSE` references.** The old global namespace is dead in React.
+3. **No `localStorage` reads/writes** except inside `tagStore.persist()` and `tagStore.hydrate()`.
+4. **Zustand is the only state for data.** `useState` is allowed only for pure UI state (modal open/close, which tab is active).
+5. **`enrichmentStore.save()` is the only write path for enrichment data.** No direct `POST /api/enrichments` from components.
+6. **`tagStore.persist()` after every mutation.** A tag that is not persisted is lost on page reload.
+
+**Data invariants**
+7. **Timestamps are immutable.** `start` and `end` on `AnnotationInterval` are set once and never changed.
+8. **Concept IDs are stable identifiers.** Never normalize, trim, lowercase, or transform. The entire pipeline (annotations, enrichments, LingPy, BEAST2) breaks silently if IDs drift.
+
+**Code quality**
+9. **TypeScript strict mode.** Every file must compile with `npx tsc --noEmit`.
+10. **No `any` types** unless unavoidable. If you use `any`, add an inline comment explaining exactly why.
+11. **Prefer classes / Tailwind / CSS modules over inline styles.** Inline `style={{…}}` is allowed for values that are genuinely dynamic (computed widths, progress bars) — don't use it as a shortcut for static layout. Existing files with heavy inline styles (e.g. `ParseUI.tsx`, shared primitives) should migrate as they're touched, not via broad churn.
+12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
+13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The floor in Test Gates below (≥132 passing) is the enforced check; this rule is the target for new features.
+
 ## Test Gates (pre-push)
 
 Run both before pushing integration changes:

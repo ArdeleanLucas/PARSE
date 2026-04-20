@@ -1,10 +1,11 @@
-# SPEAKERS.md — PARSE Data Inventory
+# SPEAKERS.md — Personal Research Data Inventory
+
+> **Personal research data inventory — not a project plan.**
+> This file tracks which audio data, transcriptions, and pipeline artefacts exist for each speaker in Lucas's Southern Kurdish thesis dataset. It is specific to that dataset and not authoritative for PARSE itself.
 
 Last updated: 2026-03-24
 
-This file is the authoritative record of which audio data, transcriptions, and
-pipeline artefacts are associated with each speaker. Update this file whenever
-new processing is completed.
+Update whenever new processing is completed on the thesis corpus.
 
 ---
 
@@ -35,20 +36,7 @@ These speakers are complete through step 3 of the pipeline.
 
 ---
 
-## Tier 2 — Have WAV + Audition CSV, not yet normalized
-
-These speakers have the same data quality as Tier 1 but haven't been run through
-`normalize_audio.py` or `generate_peaks.py` yet.
-
-| Speaker | WAV (Audio_Original) | WAV size | Audition CSV | Notes |
-|---------|----------------------|----------|--------------|-------|
-| Kala01  | `Kala01/Kalari_F_2001.wav` | 3.1G | `Kalari_F_2001.csv` | — |
-| Kifr01  | `Kifr01/Kifri_M_1990_01.wav` | 3.7G | `Kifri_M_1990_01_01 - Kaso Solav.csv` | — |
-| Zang01  | `Zang01/Zangana_F_1987.wav` | 1.9G | `Zangana_F_1987_01 - Kaso Solav.csv` | — |
-
----
-
-## Tier 3 — Khan speakers (video/multi-WAV, no Audition CSV, segments already done)
+## Tier 2 — Khan speakers (video/multi-WAV, no Audition CSV, segments already done)
 
 These speakers have no Audition-style timestamp CSV for the full recording.
 Segmentation was done via a separate pipeline (video alignment / cluster detection).
@@ -123,7 +111,7 @@ No speaker metadata assigned yet. Located in `Audio_Original/New_Lexicons/`.
 
 ## review_data.json
 
-- **Path:** `C:\Users\Lucas\Thesis\review_data.json`
+- **Location:** thesis corpus root (`review_data.json`)
 - **Generated:** 2026-03-19, 448KB
 - **Covers:** Fail01, Fail02, Kalh01, Mand01, Qasr01, Saha01 (6 speakers)
 - **Method:** edit_distance_clustering, threshold 0.6
@@ -132,30 +120,22 @@ No speaker metadata assigned yet. Located in `Audio_Original/New_Lexicons/`.
 
 ---
 
-## Pipeline Step Status (2026-03-24)
+## Pipeline Step Status (2026-04-20)
 
-| Step | Script | Tier 1 (6 spk) | Tier 2 (4 spk) | Khan (4 spk) |
-|------|--------|----------------|----------------|--------------|
-| 1. Normalize | `normalize_audio.py` | ✅ done | ❌ todo | ❌ todo |
-| 2. Source index | `generate_source_index.py` | ✅ done | ❌ todo | ❌ todo |
-| 3. Peaks | `generate_peaks.py` | ✅ done | ❌ todo | ❌ todo |
-| 4. Coarse transcripts | `reformat_transcripts.py` | ❌ todo | ❌ todo | segments exist |
-| 5. AI suggestions | `generate_ai_suggestions.py` | ❌ todo | ❌ todo | ❌ todo |
+| Step | Script | Tier 1 (6 spk) | Tier 2 / Khan (4 spk) |
+|------|--------|----------------|------------------------|
+| 1. Normalize | `normalize_audio.py` | ✅ done | ❌ todo |
+| 2. Source index | `generate_source_index.py` | ✅ done | ❌ todo |
+| 3. Peaks | `generate_peaks.py` | ✅ done | ❌ todo |
+| 4. Coarse transcripts | `reformat_transcripts.py` | ❌ todo | segments exist |
+| 5. AI suggestions | `generate_ai_suggestions.py` | ❌ todo | ❌ todo |
 
 ---
 
-## Key Paths (WSL)
+## Related repos
 
-| Resource | Path |
-|----------|------|
-| Audio_Original | `/mnt/c/Users/Lucas/Thesis/Audio_Original/` |
-| Audio_Working | `/mnt/c/Users/Lucas/Thesis/Audio_Working/` |
-| Audio_Processed | `/mnt/c/Users/Lucas/Thesis/Audio_Processed/` |
-| WSL symlink (for scripts) | `/mnt/c/Users/Lucas/Thesis/audio/` → both above |
-| source_index.json | `/mnt/c/Users/Lucas/Thesis/source_index.json` |
-| peaks/ | `/mnt/c/Users/Lucas/Thesis/peaks/` |
-| review_data.json | `/mnt/c/Users/Lucas/Thesis/review_data.json` |
-| manifest.json | `/mnt/c/Users/Lucas/Thesis/manifest.json` |
-| PARSE workspace | `/home/lucas/.openclaw/workspace/parse/` |
-| PARSE repo | `TarahAssistant/PARSE` (GitHub) |
-| Thesis repo | `ArdeleanLucas/thesis` (GitHub) |
+- PARSE application: `ArdeleanLucas/PARSE` (GitHub)
+- Thesis corpus / scripts: `ArdeleanLucas/thesis` (GitHub)
+
+Machine-specific working paths (WSL layout, workspace directories) belong in a
+personal notes file, not in the public repo. Keep those out of this document.

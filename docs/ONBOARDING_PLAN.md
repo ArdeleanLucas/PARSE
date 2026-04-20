@@ -1,8 +1,13 @@
 # PARSE — Onboarding & Import Planning Document
 
-**Status:** Draft  
-**Date:** 2026-03-25  
-**Author:** dr-kurd (dictated by Lucas Ardelean)
+**Status:** Living design doc
+**Updated:** 2026-04-20
+**Original author:** dr-kurd (dictated by Lucas Ardelean)
+
+> This doc describes the full import-wizard design intent. The runtime contract
+> actually shipped today is the simpler `POST /api/onboard/speaker` multipart
+> upload surfaced in `src/components/compare/SpeakerImport.tsx`. Treat this
+> document as the roadmap the wizard should grow into, not the current behavior.
 
 ---
 
@@ -65,6 +70,18 @@ See section below.
 - Show a table: concept label | start time | end time | IPA (if available) | WAV source
 - Linguist can correct any row before saving.
 - On confirm: PARSE writes a `project.json` and a `coarse_transcripts/<Speaker>.json` internally.
+
+---
+
+## Current shipped contract (reference)
+
+Until the wizard below lands, the live onboarding path is:
+
+- **Frontend:** `src/components/compare/SpeakerImport.tsx` — speaker ID, audio WAV, optional audition CSV, required xAI/OpenAI provider radio → calls `onboardSpeaker(speakerId, audioFile, csvFile, provider)`.
+- **API client:** `src/api/client.ts` → `POST /api/onboard/speaker` multipart form (`speaker_id`, `audio`, `csv?`, `provider`).
+- **Server:** `python/server.py::_api_post_onboard_speaker` → background job that writes audio, scaffolds the annotation record, and returns `{ job_id }`. Progress is polled via `POST /api/onboard/speaker/status`.
+
+The AI-assisted resolution described below (Tasks A–D) is the target richer behavior, not the current runtime.
 
 ---
 
@@ -187,7 +204,7 @@ Once the first "reference speaker" is imported and confirmed:
 
 1. **File access model:** Can the browser access local folders directly (File System Access API)? Supported in Chrome/Edge — Safari limited. This avoids needing to upload files to the server. The linguist just selects a folder and PARSE reads it directly.
 
-2. **AI provider:** Which API is available in the field? Anthropic Claude is the default. Must also support Ollama (offline) for fieldwork without internet.
+2. **AI provider (resolved):** At onboarding the user must explicitly choose **xAI/Grok** or **OpenAI**. There is no implicit default and no Anthropic/Ollama path in the current scope. The provider is stored on the speaker record and surfaced in `SpeakerImport.tsx` as a required radio selection before Start. Ollama/offline mode is deferred until a real offline-field requirement reappears.
 
 3. **Lexicon ordering:** Does the import wizard need to know the concept list in advance (e.g. JBIL/KLQ ordering), or should it derive it from the CSV? For general use: derive from CSV. For PARSE thesis mode: use the known 85-item list as a validation schema.
 
