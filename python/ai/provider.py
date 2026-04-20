@@ -336,76 +336,71 @@ class OpenAIChatRuntime:
         if self._client is not None:
             return self._client
 
-        # Check direct API key first (paste-key flow)
         try:
-            try:
-                from python.ai.openai_auth import get_api_key as _get_direct_key
-                from python.ai.openai_auth import get_api_key_provider as _get_provider
-            except ImportError:
-                from .openai_auth import get_api_key as _get_direct_key
-                from .openai_auth import get_api_key_provider as _get_provider
-            _direct_key = _get_direct_key()
-            if _direct_key:
-                # Resolve provider and route to correct base_url + model
-                _provider = _get_provider()
-                _base_url = self.chat_config.get("base_url") or self._PROVIDER_BASE_URLS.get(_provider)
+            from python.ai.openai_auth import (
+                get_access_token as _get_access_token,
+                get_api_key as _get_direct_key,
+                get_api_key_provider as _get_provider,
+            )
+        except ImportError:
+            from .openai_auth import (
+                get_access_token as _get_access_token,
+                get_api_key as _get_direct_key,
+                get_api_key_provider as _get_provider,
+            )
 
-                # Swap model if it's an OpenAI-only model and we're using a different provider
-                if _provider in self._PROVIDER_DEFAULT_MODELS and self.model in self._OPENAI_ONLY_MODELS:
-                    self.model = self._PROVIDER_DEFAULT_MODELS[_provider]
+        _direct_key = (_get_direct_key() or "").strip()
+        _provider = _get_provider().strip().lower() if _direct_key else ""
 
-                try:
-                    from openai import OpenAI
-                except ImportError as exc:
-                    raise RuntimeError("openai dependency missing") from exc
-                self._client = OpenAI(api_key=_direct_key, base_url=_base_url)
-                return self._client
-        except Exception:
-            pass
-
-        api_key = os.environ.get(self.api_key_env, "").strip()
+        api_key = _direct_key
+        if not api_key:
+            api_key = os.environ.get(self.api_key_env, "").strip()
 
         if not api_key:
-            oauth_token = ""
-            _get_access_token = None
-
             try:
-                from python.ai.openai_auth import get_access_token as _get_access_token
-            except ImportError:
-                try:
-                    from .openai_auth import get_access_token as _get_access_token
-                except ImportError:
-                    _get_access_token = None
-
-            if callable(_get_access_token):
-                try:
-                    oauth_token = str(_get_access_token() or "").strip()
-                except Exception:
-                    oauth_token = ""
-
+                oauth_token = str(_get_access_token() or "").strip()
+            except Exception:
+                oauth_token = ""
             if oauth_token:
                 api_key = oauth_token
+                _provider = _provider or "openai"
 
         if not api_key:
+            label, env_hint = self._credential_labels(_provider)
             raise RuntimeError(
-                "OpenAI credentials are missing. Set {0} env var or sign in via the PARSE UI".format(
-                    self.api_key_env
+                "{0} credentials are missing. Set {1} env var or sign in via the PARSE UI".format(
+                    label, env_hint,
                 )
             )
+
+        if _provider in self._PROVIDER_DEFAULT_MODELS and self.model in self._OPENAI_ONLY_MODELS:
+            self.model = self._PROVIDER_DEFAULT_MODELS[_provider]
+
+        _base_url = (
+            self.base_url
+            or self.chat_config.get("base_url")
+            or self._PROVIDER_BASE_URLS.get(_provider)
+            or ""
+        )
 
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("openai dependency missing") from exc
+            raise RuntimeError("openai dependency missing — run: pip install openai") from exc
 
-        client_kwargs: Dict[str, Any] = {
-            "api_key": api_key,
-        }
-        if self.base_url:
-            client_kwargs["base_url"] = self.base_url
+        client_kwargs: Dict[str, Any] = {"api_key": api_key}
+        if _base_url:
+            client_kwargs["base_url"] = _base_url
 
         self._client = OpenAI(**client_kwargs)
         return self._client
+
+    @classmethod
+    def _credential_labels(cls, provider: str) -> tuple:
+        """Return (display_label, env_var_hint) for a provider."""
+        if provider in cls._PROVIDER_BASE_URLS:
+            return ("xAI", "XAI_API_KEY")
+        return ("OpenAI", "OPENAI_API_KEY")
 
     def _call_with_token_fallback(self, client: Any, payload: Dict[str, Any]) -> Tuple[Any, str]:
         """Call chat.completions.create while handling token-parameter differences."""
