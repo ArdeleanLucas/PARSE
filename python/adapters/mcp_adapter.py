@@ -107,13 +107,10 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         ),
     )
 
-    # Available tool names from the current ParseChatTools instance
-    _available_tools = set(tools.tool_names())
-
     # -- Register each ParseChatTools tool as an MCP tool --------------------
-    # Tools are registered unconditionally; the execute() call validates names
-    # at runtime, so if a tool isn't in the current ParseChatTools build it
-    # returns a clear validation error rather than a silent failure.
+    # The cross-check test in python/adapters/test_mcp_adapter.py enforces
+    # that every @mcp.tool() below maps to a name in tools.tool_names(), so
+    # phantom registrations fail in CI rather than at runtime.
 
     @mcp.tool()
     def project_context_read(
@@ -281,16 +278,21 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         languages: Optional[list] = None,
         conceptIds: Optional[list] = None,
         providers: Optional[list] = None,
-        overwrite: Optional[bool] = None,
+        maxConcepts: Optional[int] = None,
     ) -> str:
-        """Fetch reference forms (IPA) for contact/comparison languages from third-party sources.
-        Results are merged into sil_contact_languages.json.
+        """Preview reference forms (IPA) for contact/comparison languages. Read-only —
+        returns fetched forms without writing to sil_contact_languages.json. To
+        persist results, run the contact-lexemes compute job from the Compare UI.
 
         Args:
-            languages: ISO 639 language codes, e.g. ["ar", "fa", "ckb"]
-            conceptIds: Project concept IDs or English labels to look up (defaults to all)
-            providers: Provider priority order (csv_override, lingpy_wordlist, pycldf, pylexibank, asjp, cldf, wikidata, wiktionary, grokipedia, literature)
-            overwrite: If true, re-fetch even if forms already exist
+            languages: ISO 639 language codes registered in sil_contact_languages.json
+                (e.g. ["ar", "fa", "ckb"]). Defaults to all configured languages.
+            conceptIds: Concept labels matching the concept_en column in concepts.csv.
+                Defaults to all concepts.
+            providers: Provider priority order (csv_override, lingpy_wordlist, pycldf,
+                pylexibank, asjp, cldf, wikidata, wiktionary, grokipedia, literature).
+            maxConcepts: Cap on concepts processed this call (1–200). Prevents runaway
+                fetches for sessions that only want a small sample.
         """
         args: Dict[str, Any] = {}
         if languages is not None:
@@ -299,8 +301,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             args["conceptIds"] = conceptIds
         if providers is not None:
             args["providers"] = providers
-        if overwrite is not None:
-            args["overwrite"] = overwrite
+        if maxConcepts is not None:
+            args["maxConcepts"] = maxConcepts
         result = tools.execute("contact_lexeme_lookup", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 

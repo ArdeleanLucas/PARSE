@@ -289,7 +289,7 @@ python/
   adapters/
     mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (10 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (11 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
@@ -382,7 +382,7 @@ All tools from `ParseChatTools` are available over MCP with the same semantics a
 | `cognate_compute_preview` | Compute cognate/similarity preview from annotations (read-only) |
 | `cross_speaker_match_preview` | Cross-speaker match candidates from STT output |
 | `spectrogram_preview` | Spectrogram preview for a time-bounded segment |
-| `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.) |
+| `contact_lexeme_lookup` | Preview reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); read-only — does not write to sil_contact_languages.json |
 | `stt_start` | Start STT background job on an audio file |
 | `stt_status` | Poll status/progress of an STT job |
 | `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
