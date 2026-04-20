@@ -1769,7 +1769,6 @@ export function ParseUI() {
             >
               {darkMode ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}
             </button>
-            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-amber-200 to-rose-300 ring-2 ring-white" />
           </div>
         </div>
       </header>

@@ -12,6 +12,17 @@ export interface ChatPanelProps {
 
 type AuthState = "checking" | "unauthenticated" | "entering-xai" | "entering-openai" | "oauth" | "authenticated"
 
+const primaryBtnClass =
+  "rounded-md border border-indigo-600 bg-indigo-600 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+const clearBtnClass =
+  "rounded-md border border-slate-300 bg-white px-3.5 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
+const inputClass =
+  "flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+const authPrimaryBtnClass =
+  "w-full rounded-md border border-indigo-600 bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+const authSecondaryBtnClass =
+  "w-full rounded-md border border-indigo-600 bg-white px-5 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-slate-50"
+
 export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
   const { messages, sending, tokensUsed, tokensLimit, send, clear } = useChatSession()
   const [inputText, setInputText] = useState("")
@@ -23,7 +34,6 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
   const [oauthInfo, setOauthInfo] = useState<{ user_code?: string; verification_uri?: string }>({})
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Check auth on mount
   useEffect(() => {
     getAuthStatus()
       .then((s: AuthStatus) => {
@@ -32,14 +42,12 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
       .catch(() => setAuthState("unauthenticated"))
   }, [])
 
-  // Clean up poll on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [])
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === "function") {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
@@ -78,7 +86,6 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
       if (status.user_code) {
         setOauthInfo({ user_code: status.user_code, verification_uri: status.verification_uri })
       }
-      // Start polling
       pollRef.current = setInterval(async () => {
         try {
           const s = await getAuthStatus()
@@ -110,151 +117,56 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     setOauthInfo({})
   }
 
-  const containerStyle: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-    color: "#0f172a",
-  }
-
-  const headerStyle: React.CSSProperties = {
-    padding: "12px 16px",
-    borderBottom: "1px solid #e2e8f0",
-    fontSize: 14,
-    fontWeight: 700,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  }
-
-  const messageListStyle: React.CSSProperties = {
-    flex: 1,
-    overflowY: "auto",
-    padding: 16,
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  }
-
-  const inputRowStyle: React.CSSProperties = {
-    display: "flex",
-    gap: 8,
-    padding: "12px 16px",
-    borderTop: "1px solid #e2e8f0",
-  }
-
-  const inputStyle: React.CSSProperties = {
-    flex: 1,
-    padding: "8px 10px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-    fontSize: 14,
-  }
-
-  const btnStyle: React.CSSProperties = {
-    padding: "8px 14px",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid #6366f1",
-    background: "#6366f1",
-    color: "#fff",
-  }
-
-  const disabledBtnStyle: React.CSSProperties = {
-    ...btnStyle,
-    opacity: 0.5,
-    cursor: "not-allowed",
-  }
-
-  const clearBtnStyle: React.CSSProperties = {
-    padding: "8px 14px",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid #cbd5e1",
-    background: "#fff",
-    color: "#374151",
-  }
-
-  const userMsgStyle: React.CSSProperties = {
-    alignSelf: "flex-end",
-    background: "#eff6ff",
-    border: "1px solid #bfdbfe",
-    borderRadius: 10,
-    padding: "8px 12px",
-    maxWidth: "80%",
-  }
-
-  const assistantMsgStyle: React.CSSProperties = {
-    alignSelf: "flex-start",
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    padding: "8px 12px",
-    maxWidth: "80%",
-  }
-
-  const authBtnStyle: React.CSSProperties = {
-    padding: "10px 20px",
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "1px solid #6366f1",
-    background: "#6366f1",
-    color: "#fff",
-    width: "100%",
-  }
-
-  const secondaryBtnStyle: React.CSSProperties = {
-    ...authBtnStyle,
-    background: "#fff",
-    color: "#6366f1",
-  }
-
-  const signOutStyle: React.CSSProperties = {
-    fontSize: 12,
-    color: "#6366f1",
-    cursor: "pointer",
-    background: "none",
-    border: "none",
-    padding: 0,
-    fontWeight: 500,
-  }
-
   const headerText = `AI Assistant${speaker ? ` — ${speaker}` : ""}${conceptId ? ` / ${conceptId}` : ""}`
   const canSend = inputText.trim() !== "" && !sending
+
+  const headerRow = (
+    <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900">
+      <span>{headerText}</span>
+      {authState === "authenticated" && (
+        <span className="flex items-center gap-3">
+          <ContextRing used={tokensUsed} limit={tokensLimit} />
+          <button
+            onClick={handleSignOut}
+            className="border-none bg-transparent p-0 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            Sign out
+          </button>
+        </span>
+      )}
+    </div>
+  )
 
   // Auth screen
   if (authState !== "authenticated") {
     return (
-      <div style={containerStyle}>
-        <div style={headerStyle}>
-          <span>{headerText}</span>
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
-          <div style={{ maxWidth: 340, width: "100%", textAlign: "center" }}>
+      <div className="flex h-full flex-col bg-white text-slate-900">
+        {headerRow}
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="w-full max-w-[340px] text-center">
             {authState === "checking" && (
-              <div style={{ color: "#94a3b8", fontSize: 14 }}>Checking authentication...</div>
+              <div className="text-sm text-slate-400">Checking authentication...</div>
             )}
 
             {authState === "unauthenticated" && (
               <>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 24 }}>Connect AI Assistant</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <button style={authBtnStyle} onClick={() => { setAuthState("entering-xai"); setAuthError(""); setApiKeyInput(""); }}>
+                <div className="mb-6 text-lg font-bold">Connect AI Assistant</div>
+                <div className="flex flex-col gap-3">
+                  <button
+                    className={authPrimaryBtnClass}
+                    onClick={() => { setAuthState("entering-xai"); setAuthError(""); setApiKeyInput(""); }}
+                  >
                     Use xAI API Key
                   </button>
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>or</div>
-                  <button style={secondaryBtnStyle} onClick={() => { setAuthState("entering-openai"); setAuthError(""); setApiKeyInput(""); }}>
+                  <div className="text-xs text-slate-400">or</div>
+                  <button
+                    className={authSecondaryBtnClass}
+                    onClick={() => { setAuthState("entering-openai"); setAuthError(""); setApiKeyInput(""); }}
+                  >
                     Use OpenAI API Key
                   </button>
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>or</div>
-                  <button style={secondaryBtnStyle} onClick={handleStartOAuth}>
+                  <div className="text-xs text-slate-400">or</div>
+                  <button className={authSecondaryBtnClass} onClick={handleStartOAuth}>
                     Sign in with OpenAI (OAuth)
                   </button>
                 </div>
@@ -263,26 +175,26 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
 
             {(authState === "entering-xai" || authState === "entering-openai") && (
               <>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
+                <div className="mb-4 text-lg font-bold">
                   {authState === "entering-xai" ? "xAI API Key" : "OpenAI API Key"}
                 </div>
                 <input
                   type="password"
-                  style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+                  className={`${inputClass} mb-3 w-full`}
                   placeholder={authState === "entering-xai" ? "xai-..." : "sk-..."}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   aria-label={authState === "entering-xai" ? "xAI API Key" : "OpenAI API Key"}
                 />
-                <div style={{ display: "flex", gap: 8 }}>
+                <div className="flex gap-2">
                   <button
-                    style={secondaryBtnStyle}
+                    className={authSecondaryBtnClass}
                     onClick={() => { setAuthState("unauthenticated"); setAuthError(""); setApiKeyInput(""); }}
                   >
                     Back
                   </button>
                   <button
-                    style={apiKeyInput.trim() ? authBtnStyle : { ...authBtnStyle, opacity: 0.5, cursor: "not-allowed" }}
+                    className={authPrimaryBtnClass}
                     disabled={!apiKeyInput.trim()}
                     onClick={handleSaveKey}
                   >
@@ -294,27 +206,21 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
 
             {authState === "oauth" && (
               <>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>OpenAI Sign In</div>
+                <div className="mb-4 text-lg font-bold">OpenAI Sign In</div>
                 {oauthInfo.user_code ? (
                   <div>
-                    <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>
-                      Enter this code at the verification page:
-                    </div>
-                    <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>
-                      {oauthInfo.user_code}
-                    </div>
+                    <div className="mb-2 text-[13px] text-slate-500">Enter this code at the verification page:</div>
+                    <div className="mb-3 text-2xl font-bold tracking-widest">{oauthInfo.user_code}</div>
                     {oauthInfo.verification_uri && (
-                      <div style={{ fontSize: 12, color: "#6366f1", marginBottom: 16, wordBreak: "break-all" }}>
-                        {oauthInfo.verification_uri}
-                      </div>
+                      <div className="mb-4 break-all text-xs text-indigo-600">{oauthInfo.verification_uri}</div>
                     )}
-                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Waiting for confirmation...</div>
+                    <div className="text-xs text-slate-400">Waiting for confirmation...</div>
                   </div>
                 ) : (
-                  <div style={{ color: "#94a3b8", fontSize: 14 }}>Starting OAuth flow...</div>
+                  <div className="text-sm text-slate-400">Starting OAuth flow...</div>
                 )}
                 <button
-                  style={{ ...secondaryBtnStyle, marginTop: 16 }}
+                  className={`${authSecondaryBtnClass} mt-4`}
                   onClick={() => {
                     if (pollRef.current) clearInterval(pollRef.current)
                     pollRef.current = null
@@ -329,7 +235,7 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
             )}
 
             {authError && (
-              <div style={{ color: "#dc2626", fontSize: 13, marginTop: 12 }}>{authError}</div>
+              <div className="mt-3 text-[13px] text-rose-600">{authError}</div>
             )}
           </div>
         </div>
@@ -339,64 +245,40 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
 
   // Authenticated chat UI
   return (
-    <div style={containerStyle}>
-      <div style={headerStyle}>
-        <span>{headerText}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ContextRing used={tokensUsed} limit={tokensLimit} />
-          <button style={signOutStyle} onClick={handleSignOut}>Sign out</button>
-        </span>
-      </div>
-      <div style={messageListStyle} data-testid="message-list">
+    <div className="flex h-full flex-col bg-white text-slate-900">
+      {headerRow}
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4" data-testid="message-list">
         {messages.length === 0 && (
-          <div style={{ color: "#94a3b8", fontSize: 13 }}>
-            No messages yet. Start a conversation.
-          </div>
+          <div className="text-[13px] text-slate-400">No messages yet. Start a conversation.</div>
         )}
         {messages.map((msg: ChatMessage, i: number) => (
           <div
             key={i}
-            style={msg.role === "user" ? userMsgStyle : assistantMsgStyle}
+            className={
+              msg.role === "user"
+                ? "max-w-[80%] self-end rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2"
+                : "max-w-[80%] self-start rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+            }
           >
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: "#64748b",
-                marginBottom: 4,
-                textTransform: "uppercase",
-              }}
-            >
-              {msg.role}
-            </div>
-            <div style={{ fontSize: 13, lineHeight: 1.45 }}>{msg.content}</div>
-            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-              {msg.timestamp}
-            </div>
+            <div className="mb-1 text-[10px] font-bold uppercase text-slate-500">{msg.role}</div>
+            <div className="text-[13px] leading-snug">{msg.content}</div>
+            <div className="mt-1 text-[10px] text-slate-400">{msg.timestamp}</div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <form onSubmit={handleSubmit} style={inputRowStyle}>
+      <form onSubmit={handleSubmit} className="flex gap-2 border-t border-slate-200 bg-white px-4 py-3">
         <input
-          style={inputStyle}
+          className={inputClass}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Type a message..."
           aria-label="Chat input"
         />
-        <button
-          type="submit"
-          style={canSend ? btnStyle : disabledBtnStyle}
-          disabled={!canSend}
-        >
+        <button type="submit" className={primaryBtnClass} disabled={!canSend}>
           Send
         </button>
-        <button
-          type="button"
-          style={clearBtnStyle}
-          onClick={clear}
-        >
+        <button type="button" className={clearBtnClass} onClick={clear}>
           Clear session
         </button>
       </form>
