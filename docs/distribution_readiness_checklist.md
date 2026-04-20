@@ -2,6 +2,7 @@
 
 This checklist is the release gate companion to:
 - `docs/desktop_product_architecture.md` (canonical architecture/living plan)
+- `docs/plans/generalize-beyond-southern-kurdish.md` (linguistic portability work tied to the Beta gate)
 
 Use this file to track practical readiness for shipping PARSE Desktop on macOS + Windows.
 
@@ -99,7 +100,17 @@ Goal: usable by external testers on macOS + Windows with managed runtime.
 - [ ] Path normalization and file permissions tested across both OSes.
 - [ ] Long-running jobs (STT/compute/export) tested on both OSes.
 
-## B6) Security hardening for beta
+## B6) Linguistic portability (Beta gate)
+
+See `docs/plans/generalize-beyond-southern-kurdish.md` for the full work breakdown.
+
+- [ ] No hardcoded `"sdh"` / `"ku"` / `"kur-Arab"` language defaults on server or compute paths.
+- [ ] STT model is selected per project, not hardcoded to `razhan/whisper-base-sdh`.
+- [ ] `config/phonetic_rules.json` ships empty; SK rules available as a named preset.
+- [ ] Orthography→IPA conversion dispatches by `(language, script)` — no implicit SK-Arabic fallback.
+- [ ] At least one non-SK language validated end-to-end through annotate + compare.
+
+## B7) Security hardening for beta
 
 - [ ] Session auth token between renderer and backend implemented.
 - [ ] Navigation hardening blocks unexpected external page loads.
