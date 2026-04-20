@@ -13,7 +13,7 @@
 ## Background (historical, for context)
 
 - **Original scope:** replace the vanilla-JS monolith (36,951 lines across `parse.html`, `compare.html`, and 25 JS modules) with React + Vite, keeping the Python backend (`127.0.0.1:8766`) unchanged.
-- **Execution:** dual-agent — ParseBuilder (Track A, Annotate) and Oda (Track B, Compare). Tracks agreed a shared contract in Phase 0, worked in parallel, and integrated in Phase C.
+- **Execution:** dual-agent — ParseBuilder (Track A, Annotate) and Oda (Track B, Compare). Tracks agreed a shared contract up front, worked in parallel, and integrated after each track passed its own gates.
 - **Constraint:** no emoji in the UI; annotation timestamps are immutable.
 - **Result:** React SPA in `src/ParseUI.tsx` is the sole runtime frontend. Stage 3 / PR #58 removed the remaining vanilla-JS runtime (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, legacy launchers).
 
