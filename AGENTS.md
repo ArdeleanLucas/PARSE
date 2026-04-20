@@ -110,7 +110,6 @@ However, on current `main`, coordinate shared-surface edits carefully.
 - Add provider test coverage under `python/compare/providers/test_*.py`
 - Improve Lexibank/WOLD setup docs and CKB coverage strategy
 - Expand provider metadata and scholarly-source coverage plans
-- Non-destructive documentation/policy clarification about React (`:5173`) vs legacy (`parse.html`/`compare.html`) entrypoints is allowed when needed to reduce operator confusion
 - Work other PR stages directly when Lucas asks; do not use C5/C6 as a reason to defer implementation work
 
 ## Do Not Touch

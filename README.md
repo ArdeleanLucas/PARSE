@@ -10,7 +10,7 @@ PARSE is a browser-based research tool for linguists working with long field rec
 
 Phase 5 of the project introduces a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
 
-The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). Legacy `parse.html` and `compare.html` pages still remain on `main` as temporary fallback entrypoints served by the Python backend on port `8766` while broader JS-removal/unification work proceeds. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
+The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). The legacy HTML entrypoints, old review page, and root vanilla-JS tree have been removed. For non-dev/local-server usage, run `npm run build` and the Python backend will serve the built frontend from `http://localhost:8766/` and `http://localhost:8766/compare`. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
 
 The Python backend continues to power AI/API routes for both architectures. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
 
@@ -18,7 +18,7 @@ The Python backend continues to power AI/API routes for both architectures. PARS
 
 ## Modes
 
-### Annotate mode (React route `/`, legacy fallback `parse.html`)
+### Annotate mode (React route `/`)
 
 Per-speaker segmentation and transcription workstation.
 
@@ -30,7 +30,7 @@ Per-speaker segmentation and transcription workstation.
 - AI chat dock for in-session analysis assistance
 - Tag and filter concepts for selective annotation
 
-### Compare mode (React route `/compare`, legacy fallback `compare.html`)
+### Compare mode (React route `/compare`)
 
 Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 
@@ -68,8 +68,8 @@ CLEF provides contact-language similarity data for borrowing adjudication in Com
 ### Current entrypoint status
 
 - **Preferred development UI:** `http://localhost:5173/` and `http://localhost:5173/compare`
-- **Legacy fallback UI:** `http://localhost:8766/parse.html` and `http://localhost:8766/compare.html`
-- **Cleanup sequencing:** legacy fallback pages remain while staged cleanup work proceeds; C5/C6 are deferred validation tasks rather than hard blockers
+- **Python-served built UI:** `http://localhost:8766/` and `http://localhost:8766/compare` after `npm run build`
+- **Cleanup status:** legacy vanilla-JS entrypoints have been removed from the repo; broader validation still lives on the deferred testing backlog
 
 ---
 
@@ -251,15 +251,15 @@ The backend runs on port `8766`; Vite runs on port `5173`.
 
 ### Open in browser
 
-#### React UI (active)
+#### React UI (active dev workflow)
 
 - Annotate mode: `http://localhost:5173/`
 - Compare mode: `http://localhost:5173/compare`
 
-#### Legacy fallback (pre-C7 only)
+#### Python-served built UI (after `npm run build`)
 
-- Annotate fallback: `http://localhost:8766/parse.html`
-- Compare fallback: `http://localhost:8766/compare.html`
+- Annotate mode: `http://localhost:8766/`
+- Compare mode: `http://localhost:8766/compare`
 
 ---
 
@@ -284,11 +284,8 @@ src/
                            useComputeJob, useExport, useImportExport, useSuggestions)
   stores/               -- Zustand stores (annotationStore, configStore,
                            enrichmentStore, playbackStore, tagStore, uiStore)
-parse.html              -- Legacy Annotate fallback page (pre-C7)
-compare.html            -- Legacy Compare fallback page (pre-C7)
-js/                     -- Legacy frontend modules retained until C7 cleanup
 python/
-  server.py             -- Backend API server + legacy static serving (port 8766)
+  server.py             -- Backend API server + built-frontend static serving (port 8766)
   ai/                   -- AI provider layer
     chat_tools.py       -- ParseChatTools — AI assistant tool interface (10 tools)
     chat_orchestrator.py-- Chat session management
@@ -305,6 +302,7 @@ annotations/            -- Per-speaker annotation JSON files (runtime, untracked
 parse-enrichments.json  -- Computed comparative overlays (runtime, untracked)
 desktop/                -- Electron shell scaffold
 docs/                   -- Documentation and plans
+dist/                   -- Vite build output (generated, gitignored)
 ```
 
 ---
@@ -395,7 +393,7 @@ PARSE uses a hybrid data model:
 
 - **Live annotations** — per-speaker JSON files in `annotations/<Speaker>.json` (primary source of truth; timestamps are never modified by AI)
 - **Computed enrichments** — `parse-enrichments.json`, generated by the compare pipeline for cognate sets, similarity scores, and borrowing decisions
-- **Tag store** — `js/shared/tags.js` persists tag definitions to localStorage, shared across both Annotate and Compare modes under a single project-scoped key
+- **Tag store** — Zustand `tagStore` persists tag definitions to localStorage, shared across both Annotate and Compare modes under a single project-scoped key
 
 The enrichments layer stores computed structures while preserving manual adjudications. Annotations and enrichments are both excluded from version control as runtime data.
 
@@ -406,8 +404,7 @@ The enrichments layer stores computed structures while preserving manual adjudic
 - React 18 + TypeScript + Vite (current frontend architecture)
 - Zustand (state management)
 - Tailwind CSS v3 (styling)
-- Legacy vanilla JavaScript + HTML entrypoints (temporary pre-C7 fallback)
-- Python 3.10+ with conda environment
+- Python 3.10+ backend serving API routes and the built frontend (`dist/`) for non-dev usage
 - WaveSurfer 7
 - faster-whisper + CTranslate2 (local STT)
 - wav2vec2 via HuggingFace transformers (local IPA)

@@ -104,9 +104,9 @@ Once the Actions / compute / decisions contract is coherent, keep the downstream
 - C5 (LingPy TSV export verification) and C6 (full Annotate/Compare browser regression) live on that backlog — run them in the order of real testing once onboarding/import and end-to-end flows are usable.
 - C7 / legacy-cleanup is no longer mechanically blocked on C5/C6; it still requires a scoped PR and Lucas review/merge (see AGENTS.md § Deferred Validation Backlog).
 
-### 7. Remove vanilla JS entrypoints (Stage 3 of docs audit 2026-04-20)
+### 7. Remove vanilla JS entrypoints ✅ DONE (PR #58)
 
-Legacy surface still on disk: `js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, `start_parse.sh`, `Start Review Tool.bat`, and the `forceSpaCompareRoute` Vite plugin that only exists to redirect away from `compare.html`. These are scheduled for deletion under a scoped Stage-3 PR (tracked by the ongoing Stage-3 branch). Once that lands, `src/ParseUI.tsx` + the React SPA is the sole frontend.
+Stage 3 landed in PR #58: `js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, `start_parse.sh`, `Start Review Tool.bat`, and the `forceSpaCompareRoute` Vite plugin are gone. `src/ParseUI.tsx` + the React SPA is now the sole frontend.
 
 ## Execution order
 

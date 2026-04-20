@@ -8,7 +8,7 @@ Phases 0–4 (preflight, canonicalization, non-destructive messaging, deferred-v
 
 ---
 
-## Phase 5 — Legacy removal and Python-served React build
+## Phase 5 — Legacy removal and Python-served React build ✅ complete on PR #58
 
 ### Objective
 
@@ -20,7 +20,7 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 
 ---
 
-### Task 5.1 — Decide build artifact strategy for Python-served frontend
+### Task 5.1 — Decide build artifact strategy for Python-served frontend ✅ done
 
 **Objective:** Specify exactly what the Python server serves after legacy removal.
 
@@ -31,13 +31,13 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 - Python server serves the built React app from `dist/` for production-like / local-server usage.
 - Vite `:5173` remains dev-only.
 
-**Verification:** decision is documented in the same PR as the cleanup, before any file deletion.
+**Verification:** ✅ Documented in PR #58 alongside the cleanup and runtime cutover.
 
 **Merge:** PR required; Lucas merges.
 
 ---
 
-### Task 5.2 — Remove legacy frontend files and switch canonical serving
+### Task 5.2 — Remove legacy frontend files and switch canonical serving ✅ done
 
 **Objective:** Delete the no-longer-authoritative legacy UI and make the Python server serve the React build.
 
@@ -52,27 +52,31 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 - Onboarding/import flow is usable enough that cleanup scope is grounded in real behavior rather than speculation.
 
 **Acceptance criteria:**
-- `npm run build` produces `dist/index.html` + required assets.
-- Python server serves the built frontend for non-API routes.
-- `GET /` returns the React app shell.
-- `GET /compare` returns the React app shell via SPA fallback.
-- `/api/*` routes still return JSON as before.
-- Audio/static behavior needed by existing thesis workflows still works.
-- No remaining references to `parse.html` / `compare.html` in source, launchers, or docs outside `docs/archive/`.
+- [x] `npm run build` produces `dist/index.html` + required assets.
+- [x] Python server serves the built frontend for non-API routes.
+- [x] `GET /` returns the React app shell.
+- [x] `GET /compare` returns the React app shell via SPA fallback.
+- [x] `/api/*` routes still return JSON as before.
+- [x] Audio/static behavior needed by existing thesis workflows still works.
+- [x] No remaining references to the removed HTML entrypoints remain in source, launchers, or docs outside `docs/archive/`.
+
+**Completion note:** Completed in PR #58.
 
 **Merge:** destructive — Lucas authorizes and merges.
 
 ---
 
-### Task 5.3 — Remove remaining legacy references from docs and launchers
+### Task 5.3 — Remove remaining legacy references from docs and launchers ✅ done
 
 **Objective:** Finish cleanup so docs match reality on the same architecture cutover.
 
 **Files:** `README.md`, `AGENTS.md`, launcher scripts (`start_parse.sh`, `Start Review Tool.bat`, `run-parse.sh`), relevant docs under `docs/` (not `docs/archive/`).
 
 **Verification:**
-- No user-facing doc implies `parse.html` / `compare.html` are the primary interface.
-- No launcher still assumes legacy HTML entrypoints are canonical; launchers either boot the React SPA (via `python/server.py` + `dist/`) or are deleted.
+- [x] No user-facing doc implies removed HTML entrypoints are the primary interface.
+- [x] No launcher still assumes legacy HTML entrypoints are canonical; the obsolete launchers were deleted in PR #58.
+
+**Completion note:** Completed in PR #58.
 
 **Merge:** PR required; Lucas merges.
 
@@ -80,6 +84,8 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 
 ## Exit criteria (Phase 5 overall)
 
-- `rg -l 'parse\.html\|compare\.html\|review_tool_dev\.html\|^js/' -- . ':!docs/archive'` returns no hits.
-- `npm run build && python/server.py` serves the React SPA on `127.0.0.1:8766` with `/api/*` still returning JSON.
-- `AGENTS.md` Client/Server Contract Surface table still matches the live routes after the cutover.
+- [x] `rg -l 'parse\.html\|compare\.html\|review_tool_dev\.html\|^js/' -- . ':!docs/archive'` returns no hits.
+- [x] `npm run build && python/server.py` serves the React SPA on `127.0.0.1:8766` with `/api/*` still returning JSON.
+- [x] `AGENTS.md` Client/Server Contract Surface table still matches the live routes after the cutover.
+
+**Status:** Complete via PR #58.

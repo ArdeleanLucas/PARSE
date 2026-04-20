@@ -252,6 +252,49 @@ def _write_json_file(path: pathlib.Path, payload: Dict[str, Any]) -> None:
     )
 
 
+def _dist_dir(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
+    root = (project_root or _project_root()).resolve()
+    return root / "dist"
+
+
+def _dist_index_path(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
+    return _dist_dir(project_root) / "index.html"
+
+
+def _has_built_frontend(project_root: Optional[pathlib.Path] = None) -> bool:
+    return _dist_index_path(project_root).is_file()
+
+
+def _static_request_parts(raw_path: str) -> List[str]:
+    request_path = urlparse(raw_path).path or "/"
+    pure_path = pathlib.PurePosixPath(unquote(request_path))
+    return [part for part in pure_path.parts if part not in {"/", "", ".", ".."}]
+
+
+def _resolve_static_request_path(
+    raw_path: str,
+    project_root: Optional[pathlib.Path] = None,
+) -> pathlib.Path:
+    root = (project_root or _project_root()).resolve()
+    parts = _static_request_parts(raw_path)
+    root_candidate = root.joinpath(*parts) if parts else root
+
+    if not _has_built_frontend(root):
+        return root_candidate
+
+    dist_candidate = _dist_dir(root).joinpath(*parts) if parts else _dist_index_path(root)
+    if parts and dist_candidate.exists():
+        return dist_candidate
+    if parts and root_candidate.exists():
+        return root_candidate
+
+    request_suffix = pathlib.PurePosixPath("/".join(parts)).suffix if parts else ""
+    if not parts or request_suffix == "":
+        return _dist_index_path(root)
+
+    return root_candidate
+
+
 def _project_json_path() -> pathlib.Path:
     return _project_root() / "project.json"
 
@@ -1989,7 +2032,10 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
 
 
 class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """HTTP handler with static range support and PARSE JSON API routes."""
+    """HTTP handler with static range support and API routes."""
+
+    def translate_path(self, path: str) -> str:
+        return str(_resolve_static_request_path(path))
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -3095,14 +3141,23 @@ def _startup_banner_lines(
         "  React dev UI (current workflow; requires `npm run dev`):",
         "    Annotate: http://localhost:5173/",
         "    Compare : http://localhost:5173/compare",
-        "",
-        "  Legacy fallback pages (served by this Python server; pre-C7 only):",
-        "    Annotate: http://localhost:{0}/parse.html".format(PORT),
-        "    Compare : http://localhost:{0}/compare.html".format(PORT),
     ]
-    for ip in local_ips:
-        lines.append("    Annotate: http://{0}:{1}/parse.html".format(ip, PORT))
-        lines.append("    Compare : http://{0}:{1}/compare.html".format(ip, PORT))
+    if _has_built_frontend(serve_dir):
+        lines.extend([
+            "",
+            "  Built UI (served by this Python server after `npm run build`):",
+            "    PARSE   : http://localhost:{0}/".format(PORT),
+            "    Compare : http://localhost:{0}/compare".format(PORT),
+        ])
+        for ip in local_ips:
+            lines.append("    PARSE   : http://{0}:{1}/".format(ip, PORT))
+            lines.append("    Compare : http://{0}:{1}/compare".format(ip, PORT))
+    else:
+        lines.extend([
+            "",
+            "  Built UI (served by this Python server after `npm run build`):",
+            "    dist/index.html not found — run `npm run build` to serve the frontend here.",
+        ])
     lines.extend([
         "",
         "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]",

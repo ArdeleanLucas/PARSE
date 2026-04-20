@@ -12,8 +12,8 @@ This directory is an **isolated Electron scaffold** for PARSE's desktop directio
 
 1. Start a minimal Electron main process (`main.js`).
 2. Open a local PARSE URL.
-   - Current React/Vite dev target: `http://127.0.0.1:5173/` or `http://127.0.0.1:5173/compare`
-   - Current default shell target: `http://127.0.0.1:8766/parse.html` (**legacy fallback, pre-C7**)
+   - Current React/Vite dev target (default): `http://127.0.0.1:5173/` or `http://127.0.0.1:5173/compare`
+   - Optional Python-served built UI after `npm run build`: `http://127.0.0.1:8766/` or `http://127.0.0.1:8766/compare`
 3. Use secure Electron defaults for a shell app:
    - `contextIsolation: true`
    - `sandbox: true`
@@ -48,12 +48,13 @@ npm run dev -- --url http://127.0.0.1:5173/compare
 
 > `--with-backend` only sketches Python backend launch. It does **not** launch Vite, so the React UI still requires `npm run dev` in the repo root.
 
-### C) Legacy fallback target (pre-C7 only)
+### C) Target the Python-served built UI
 
-If you intentionally need the frozen HTML page while cleanup is still in progress:
+If you have already run `npm run build` in the repo root and want Electron to load the Python-served frontend shell:
 
 ```bash
-npm run dev -- --url http://127.0.0.1:8766/compare.html
+npm run dev -- --url http://127.0.0.1:8766/
+npm run dev -- --url http://127.0.0.1:8766/compare
 ```
 
 ## Environment variables
