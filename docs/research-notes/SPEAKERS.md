@@ -36,20 +36,7 @@ These speakers are complete through step 3 of the pipeline.
 
 ---
 
-## Tier 2 — Have WAV + Audition CSV, not yet normalized
-
-These speakers have the same data quality as Tier 1 but haven't been run through
-`normalize_audio.py` or `generate_peaks.py` yet.
-
-| Speaker | WAV (Audio_Original) | WAV size | Audition CSV | Notes |
-|---------|----------------------|----------|--------------|-------|
-| Kala01  | `Kala01/Kalari_F_2001.wav` | 3.1G | `Kalari_F_2001.csv` | — |
-| Kifr01  | `Kifr01/Kifri_M_1990_01.wav` | 3.7G | `Kifri_M_1990_01_01 - Kaso Solav.csv` | — |
-| Zang01  | `Zang01/Zangana_F_1987.wav` | 1.9G | `Zangana_F_1987_01 - Kaso Solav.csv` | — |
-
----
-
-## Tier 3 — Khan speakers (video/multi-WAV, no Audition CSV, segments already done)
+## Tier 2 — Khan speakers (video/multi-WAV, no Audition CSV, segments already done)
 
 These speakers have no Audition-style timestamp CSV for the full recording.
 Segmentation was done via a separate pipeline (video alignment / cluster detection).
@@ -133,15 +120,15 @@ No speaker metadata assigned yet. Located in `Audio_Original/New_Lexicons/`.
 
 ---
 
-## Pipeline Step Status (2026-03-24)
+## Pipeline Step Status (2026-04-20)
 
-| Step | Script | Tier 1 (6 spk) | Tier 2 (4 spk) | Khan (4 spk) |
-|------|--------|----------------|----------------|--------------|
-| 1. Normalize | `normalize_audio.py` | ✅ done | ❌ todo | ❌ todo |
-| 2. Source index | `generate_source_index.py` | ✅ done | ❌ todo | ❌ todo |
-| 3. Peaks | `generate_peaks.py` | ✅ done | ❌ todo | ❌ todo |
-| 4. Coarse transcripts | `reformat_transcripts.py` | ❌ todo | ❌ todo | segments exist |
-| 5. AI suggestions | `generate_ai_suggestions.py` | ❌ todo | ❌ todo | ❌ todo |
+| Step | Script | Tier 1 (6 spk) | Tier 2 / Khan (4 spk) |
+|------|--------|----------------|------------------------|
+| 1. Normalize | `normalize_audio.py` | ✅ done | ❌ todo |
+| 2. Source index | `generate_source_index.py` | ✅ done | ❌ todo |
+| 3. Peaks | `generate_peaks.py` | ✅ done | ❌ todo |
+| 4. Coarse transcripts | `reformat_transcripts.py` | ❌ todo | segments exist |
+| 5. AI suggestions | `generate_ai_suggestions.py` | ❌ todo | ❌ todo |
 
 ---
 
