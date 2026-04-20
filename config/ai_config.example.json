@@ -14,7 +14,7 @@
   },
   "llm": {
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "gpt-5.4",
     "api_key_env": "OPENAI_API_KEY"
   },
   "chat": {
@@ -22,7 +22,7 @@
     "read_only": false,
     "attachments_supported": false,
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "gpt-5.4",
     "api_key_env": "OPENAI_API_KEY",
     "reasoning_effort": "",
     "temperature": 0.1,

@@ -90,7 +90,11 @@ export function useChatSession(): UseChatSessionResult {
             polls++
             pollChat(job.job_id)
               .then((status) => {
-                if (status.status === "done" || status.status === "completed") {
+                if (
+                  status.status === "done"
+                  || status.status === "completed"
+                  || status.status === "complete"
+                ) {
                   resolve(status.result ?? "")
                 } else if (status.status === "error") {
                   reject(new Error(status.error ?? status.result ?? "Chat error"))

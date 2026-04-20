@@ -55,11 +55,46 @@ function unwrapEnrichments(payload: unknown): EnrichmentsPayload {
   return (payload ?? {}) as EnrichmentsPayload;
 }
 
+function resolveSessionId(payload: unknown): string {
+  if (!isRecord(payload)) {
+    return "";
+  }
+
+  const fromSnake = payload.session_id;
+  if (typeof fromSnake === "string" && fromSnake.trim()) {
+    return fromSnake.trim();
+  }
+
+  const fromCamel = payload.sessionId;
+  if (typeof fromCamel === "string" && fromCamel.trim()) {
+    return fromCamel.trim();
+  }
+
+  return "";
+}
+
+function networkError(path: string, options: RequestInit | undefined, error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
+  if (/failed to fetch|networkerror/i.test(message)) {
+    return new Error(
+      `Could not reach the PARSE API for ${options?.method ?? "GET"} ${path}. `
+      + `Check that the Python server is running on http://127.0.0.1:8766 and that the Vite /api proxy is active.`,
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      ...options,
+    });
+  } catch (error) {
+    throw networkError(path, options, error);
+  }
+
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
     throw new Error(`API ${options?.method ?? "GET"} ${path} failed ${response.status}: ${text}`);
@@ -177,11 +212,16 @@ export async function requestSuggestions(
 }
 
 // Chat
-export async function startChatSession(sessionId?: string): Promise<{ session_id: string }> {
-  return apiFetch<{ session_id: string }>("/api/chat/session", {
+export async function startChatSession(sessionId?: string): Promise<{ session_id: string; sessionId?: string }> {
+  const payload = await apiFetch<unknown>("/api/chat/session", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId }),
   });
+  const id = resolveSessionId(payload);
+  if (!id) {
+    throw new Error("API POST /api/chat/session returned no sessionId");
+  }
+  return { session_id: id, sessionId: id };
 }
 
 export async function getChatSession(sessionId: string): Promise<unknown> {
