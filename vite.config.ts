@@ -1,13 +1,20 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+export function resolveParseApiTarget(env: Record<string, string | undefined> = process.env): string {
+  const port = (env.PARSE_API_PORT ?? env.PARSE_PORT ?? "8766").trim() || "8766";
+  return `http://127.0.0.1:${port}`;
+}
+
+const parseApiTarget = resolveParseApiTarget();
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8766",
+        target: parseApiTarget,
         changeOrigin: true,
         ws: false,
         configure: (proxy) => {
@@ -17,22 +24,22 @@ export default defineConfig({
         },
       },
       "/project.json": {
-        target: "http://127.0.0.1:8766",
+        target: parseApiTarget,
         changeOrigin: true,
         ws: false,
       },
       "/source_index.json": {
-        target: "http://127.0.0.1:8766",
+        target: parseApiTarget,
         changeOrigin: true,
         ws: false,
       },
       "/annotations": {
-        target: "http://127.0.0.1:8766",
+        target: parseApiTarget,
         changeOrigin: true,
         ws: false,
       },
       "/audio": {
-        target: "http://127.0.0.1:8766",
+        target: parseApiTarget,
         changeOrigin: true,
         ws: false,
       },
