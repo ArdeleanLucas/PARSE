@@ -276,17 +276,24 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
   }, [isConnected, hasData, conceptName, speakerCount, messages.length]);
 
   const handleConnect = async (p: AIProvider) => {
-    if (apiKey.trim()) {
-      try {
-        await saveApiKey(apiKey.trim(), p);
-      } catch {
-        // non-fatal — key saved in session even if persist fails
-      }
-    }
-    setProvider(p);
-    setView('connected');
-    setTestStatus('idle');
+    if (!apiKey.trim()) return;
+    setTestStatus('testing');
     setTestMessage('');
+    try {
+      const result = await saveApiKey(apiKey.trim(), p);
+      if (result && result.authenticated) {
+        setProvider(p);
+        setView('connected');
+        setTestStatus('idle');
+        setTestMessage('');
+      } else {
+        setTestStatus('error');
+        setTestMessage('Key was saved but could not be verified.');
+      }
+    } catch (err) {
+      setTestStatus('error');
+      setTestMessage(err instanceof Error ? err.message : 'Connection failed.');
+    }
   };
 
   const handleTestConnection = async () => {
@@ -620,7 +627,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
                   </div>
 
                   <button
-                    onClick={() => handleConnect('openai')}
+                    onClick={() => { setProvider('openai'); setView('connected'); }}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-800 transition hover:bg-slate-50"
                   >
                     Sign in with Codex
@@ -665,6 +672,15 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
               ))}
             </div>
           </div>
+
+          {/* Error display */}
+          {chatSession.error && (
+            <div className="shrink-0 px-6 py-2">
+              <div className="mx-auto max-w-3xl rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-[12px] text-rose-700">
+                <span className="font-semibold">Error:</span> {chatSession.error}
+              </div>
+            </div>
+          )}
 
           {/* Quick actions + input */}
           <div className="shrink-0 border-t border-slate-200/70 bg-white/50 px-6 py-3 backdrop-blur-sm">

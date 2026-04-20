@@ -369,6 +369,18 @@ def get_api_key() -> Optional[str]:
         return None
 
 
+def get_api_key_provider() -> str:
+    """Return the provider associated with the saved API key, or 'openai'."""
+    path = _token_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+        provider = tokens.get("direct_api_key_provider", "").strip().lower()
+        return provider if provider else "openai"
+    except (json.JSONDecodeError, OSError):
+        return "openai"
+
+
 def clear_api_key() -> None:
     """Remove the stored direct API key."""
     path = _token_path()

@@ -287,6 +287,24 @@ def get_chat_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 class OpenAIChatRuntime:
     """Thin OpenAI chat runtime wrapper with tool-call support and reasoning fallback."""
 
+    # Provider-specific base URLs for the OpenAI-compatible API
+    _PROVIDER_BASE_URLS: Dict[str, str] = {
+        "xai": "https://api.x.ai/v1",
+        "grok": "https://api.x.ai/v1",
+        "x.ai": "https://api.x.ai/v1",
+    }
+
+    # Default models per provider (used when config still has a placeholder/OpenAI model)
+    _PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
+        "xai": "grok-3-mini",
+        "grok": "grok-3-mini",
+        "x.ai": "grok-3-mini",
+        "openai": "gpt-4o",
+    }
+
+    # Model names that are clearly OpenAI-only and should be swapped for xAI
+    _OPENAI_ONLY_MODELS = {"gpt54", "gpt-4o", "gpt-4", "gpt-3.5-turbo", "o1", "o1-mini", "o1-preview", "o3", "o3-mini"}
+
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
@@ -322,12 +340,20 @@ class OpenAIChatRuntime:
         try:
             try:
                 from python.ai.openai_auth import get_api_key as _get_direct_key
+                from python.ai.openai_auth import get_api_key_provider as _get_provider
             except ImportError:
                 from .openai_auth import get_api_key as _get_direct_key
+                from .openai_auth import get_api_key_provider as _get_provider
             _direct_key = _get_direct_key()
             if _direct_key:
-                # Build client with direct key and correct base_url for provider
-                _base_url = self.chat_config.get("base_url") or None
+                # Resolve provider and route to correct base_url + model
+                _provider = _get_provider()
+                _base_url = self.chat_config.get("base_url") or self._PROVIDER_BASE_URLS.get(_provider)
+
+                # Swap model if it's an OpenAI-only model and we're using a different provider
+                if _provider in self._PROVIDER_DEFAULT_MODELS and self.model in self._OPENAI_ONLY_MODELS:
+                    self.model = self._PROVIDER_DEFAULT_MODELS[_provider]
+
                 try:
                     from openai import OpenAI
                 except ImportError as exc:

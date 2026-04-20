@@ -78,6 +78,7 @@ export interface ChatJob {
 export interface ChatStatus {
   status: string;
   result?: string;
+  error?: string;
 }
 
 export interface ComputeJob {
