@@ -66,7 +66,7 @@ This is especially important because the project plan explicitly says unsupporte
 - positive integers for `file_size_bytes`, `sample_rate`, `channels`, `bit_depth`
 - boolean type for `has_csv`
 - optional string-only `notes`
-- project-specific constraints such as `bit_depth == 16` and `channels in {1, 2}` if this script is meant to enforce Phase 0 output
+- project-specific constraints such as `bit_depth == 16` and `channels in {1, 2}` if this script is meant to enforce the normalized-audio pipeline invariants
 
 ---
 
@@ -137,7 +137,7 @@ I did not find obvious companion tests for this script under `parse/`. At minimu
 5. **Audio metadata validation**
    - negative/zero duration
    - non-integer `channels`, `sample_rate`, `bit_depth`
-   - unsupported `bit_depth` / channel counts if Phase 0 invariants are enforced here
+   - unsupported `bit_depth` / channel counts if normalized-audio invariants are enforced here
 
 6. **Path normalization**
    - Windows backslash paths normalized or rejected

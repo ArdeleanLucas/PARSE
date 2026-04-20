@@ -4,11 +4,11 @@
 
 **Goal:** Finish the React cutover by deleting the vanilla-JS legacy surface and making the Python server serve the React build — in a scoped, reversible PR that can only run once Lucas authorizes destructive cleanup.
 
-Phases 0–4 (preflight, canonicalization, non-destructive messaging, deferred-validation maintenance) and Phase 6 (post-merge branch pruning) are no longer active execution work; see the Stage 1 archive under `docs/archive/` for their history. This doc is now the Phase 5 slice only.
+Earlier prep steps (preflight, canonicalization, non-destructive messaging, deferred-validation maintenance) and later post-merge branch pruning are no longer active execution work; see the Stage 1 archive under `docs/archive/` for their history. This doc is now the legacy-removal slice only.
 
 ---
 
-## Phase 5 — Legacy removal and Python-served React build ✅ complete on PR #58
+## Legacy removal and Python-served React build ✅ complete on PR #58
 
 ### Objective
 
@@ -16,7 +16,7 @@ Make PARSE expose only the React SPA at runtime and remove every vanilla-JS entr
 
 ### Gating note
 
-This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Backlog, C5 (LingPy TSV export verification) and C6 (full Annotate/Compare browser regression) are **not hard gates** for this PR. They stay on the deferred-validation list and are run once onboarding/import testing is usable enough for them to be meaningful. Phase 5 still requires a scoped PR, rollback notes, and Lucas-review-before-merge.
+This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Backlog, C5 (LingPy TSV export verification) and C6 (full Annotate/Compare browser regression) are **not hard gates** for this PR. They stay on the deferred-validation list and are run once onboarding/import testing is usable enough for them to be meaningful. The slice still requires a scoped PR, rollback notes, and Lucas-review-before-merge.
 
 ---
 
@@ -82,7 +82,7 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 
 ---
 
-## Exit criteria (Phase 5 overall)
+## Exit criteria (overall)
 
 - [x] `rg -l 'parse\.html\|compare\.html\|review_tool_dev\.html\|^js/' -- . ':!docs/archive'` returns no hits.
 - [x] `npm run build && python/server.py` serves the React SPA on `127.0.0.1:8766` with `/api/*` still returning JSON.

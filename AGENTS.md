@@ -11,7 +11,7 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - Wired: `useWaveSurfer`, `useChatSession`, `useConfigStore`, `useTagStore`, `usePlaybackStore`, `useUIStore`, `useAnnotationSync`
   - Spectrogram Worker TS port + `useSpectrogram` hook (MC-297, PR #31)
   - Annotate prefill/save/mark/badge, compare real data, import modal, notes, compute basics, decisions basics, tags bulk-selection — all landed
-- **Phase C1–C4 complete** on integration branch:
+- **Cross-mode integration complete** on integration branch:
   - Track merge (`feat/annotate-react` + `feat/compare-react`)
   - Cross-mode navigation (Annotate ↔ Compare)
   - Store persistence regression coverage
@@ -160,4 +160,4 @@ Expected floor: **>=132 passing tests** and clean TypeScript compile.
 
 ---
 
-If pivot status changes (new phase completion, gating updates, ownership shifts), update this file immediately to prevent stale coordination instructions.
+If pivot status changes (new milestone completion, gating updates, ownership shifts), update this file immediately to prevent stale coordination instructions.

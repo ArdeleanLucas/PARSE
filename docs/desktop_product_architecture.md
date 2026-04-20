@@ -219,7 +219,7 @@ Use Electron `app.getPath('userData')` as root.
 
 ## 8) Python runtime strategy
 
-## 8.1 Target strategy by phase
+## 8.1 Target strategy by milestone
 
 ### Alpha (internal)
 - Allow system Python for speed of iteration.
@@ -286,7 +286,7 @@ Use Electron `app.getPath('userData')` as root.
 - Runtime capability detection should happen at startup and on demand.
 - If GPU init fails, auto-fallback to CPU with clear messaging.
 
-### Phase policy
+### Milestone policy
 
 - **Alpha:** prioritize CPU correctness.
 - **Beta:** Windows CUDA path support with fallback.
@@ -490,7 +490,7 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 
 ## 19) Concrete recommended next tasks (buildable sequence)
 
-## Phase 0 — Foundation contracts (no disruptive rewrites)
+## Foundation contracts (no disruptive rewrites)
 
 1. **Define desktop bootstrap contract**
    - Add backend startup flags spec (`project_root`, host/port, auth token, user-data root).
@@ -499,19 +499,19 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 3. **Define compute capability matrix**
    - Explicitly document which `/api/compute/*` routes are implemented vs planned.
 
-## Phase 1 — Desktop shell spike
+## Desktop shell spike
 
 4. Create `desktop/` shell prototype with Electron main + preload.
 5. Spawn existing backend and load Compare mode in desktop window.
 6. Add startup health check, backend logs, and graceful shutdown.
 
-## Phase 2 — Packaging viability
+## Packaging viability
 
 7. Introduce Python dependency manifest/lock strategy and CI smoke install for Windows/macOS.
 8. Vendor frontend third-party JS needed for offline packaged builds (remove mandatory CDN dependency).
 9. Harden default backend bind/CORS/token behavior for desktop runtime.
 
-## Phase 3 — Product-level polish
+## Product-level polish
 
 10. Implement settings UI for storage/model/performance/update controls.
 11. Implement updater channels (`alpha` first).
