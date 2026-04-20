@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 
 const electronBinary = require('electron');
 
-const DEFAULT_APP_URL = 'http://127.0.0.1:8766/parse.html';
+const DEFAULT_APP_URL = 'http://127.0.0.1:5173/';
 const desktopDir = __dirname;
 const repoRoot = path.resolve(desktopDir, '..');
 
@@ -52,8 +52,8 @@ Options:
   -h, --help         Show this help
 
 Notes:
-  Current React UI: http://127.0.0.1:5173/ or /compare
-  Default without --url: http://127.0.0.1:8766/parse.html (legacy fallback, pre-C7)
+  Current React UI default: http://127.0.0.1:5173/ or /compare
+  Optional built-UI target after \`npm run build\`: http://127.0.0.1:8766/ or /compare
   --with-backend starts only python/server.py; Vite must be launched separately for React routes
 `);
 }

@@ -161,8 +161,8 @@ These items should be tracked continuously, not only at gate boundaries.
 
 ## D2) Legacy compatibility cleanup
 
-- [ ] Legacy vanilla-JS entrypoints (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`) removed from the repo — tracked as Stage 3 of the 2026-04-20 docs audit.
-- [ ] Legacy launchers (`start_parse.sh`, `Start Review Tool.bat`) removed or rewritten to boot the React SPA via `python/server.py` only.
+- [x] Legacy vanilla-JS entrypoints (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`) removed from the repo — completed in Stage 3 / PR #58.
+- [x] Legacy launchers (`start_parse.sh`, `Start Review Tool.bat`) removed from the primary product flow in Stage 3 / PR #58.
 - [ ] Legacy hardcoded machine paths removed from runtime-critical code paths.
 - [x] Annotate + Compare persistence expectations are documented and converging — unified in `src/ParseUI.tsx` with shared Zustand stores.
 
@@ -185,12 +185,12 @@ These items should be tracked continuously, not only at gate boundaries.
 
 - [ ] Frontend/Backend project save contract mismatch (`/api/project` expectations vs implementation).
 - [ ] Compute endpoint mismatch for offset/spectrogram flows.
-- [ ] Legacy vanilla-JS entrypoints still in the repo — Stage 3 of docs audit 2026-04-20.
-- [ ] Legacy launcher scripts (`start_parse.sh`, `Start Review Tool.bat`) still reference legacy paths — cleared in Stage 3.
+- [x] ~~Legacy vanilla-JS entrypoints still in the repo — Stage 3 of docs audit 2026-04-20.~~ Cleared in PR #58.
+- [x] ~~Legacy launcher scripts (`start_parse.sh`, `Start Review Tool.bat`) still reference legacy paths — cleared in Stage 3.~~ Cleared in PR #58.
 - [ ] Desktop security defaults not yet hardened (`0.0.0.0`/CORS policy in current backend defaults).
 - [ ] No release-grade dependency lock/runtime packaging manifest in repo yet.
 - [x] ~~Annotate mode still monolithic/localStorage-heavy~~ — resolved by the unified React shell (`src/ParseUI.tsx`).
-- [x] ~~Packaged build still depends on remote CDN assets~~ — React SPA bundles via Vite; no `unpkg`/CDN hits in `src/`. Vanilla-JS pages that used CDN are being removed in Stage 3.
+- [x] ~~Packaged build still depends on remote CDN assets~~ — React SPA bundles via Vite; no `unpkg`/CDN hits in `src/`, and the vanilla-JS pages that depended on CDN assets were removed in PR #58.
 
 ---
 

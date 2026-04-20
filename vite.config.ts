@@ -1,29 +1,8 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Keep /compare on the React SPA route while legacy compare.html still exists at repo root.
-const forceSpaCompareRoute = (): Plugin => ({
-  name: "force-spa-compare-route",
-  configureServer(server) {
-    server.middlewares.use((req, _res, next) => {
-      if (req.url === "/compare" || req.url?.startsWith("/compare?")) {
-        req.url = "/";
-      }
-      next();
-    });
-  },
-  configurePreviewServer(server) {
-    server.middlewares.use((req, _res, next) => {
-      if (req.url === "/compare" || req.url?.startsWith("/compare?")) {
-        req.url = "/";
-      }
-      next();
-    });
-  },
-});
-
 export default defineConfig({
-  plugins: [react(), forceSpaCompareRoute()],
+  plugins: [react()],
   server: {
     port: 5173,
     proxy: {

@@ -15,7 +15,7 @@
 - **Original scope:** replace the vanilla-JS monolith (36,951 lines across `parse.html`, `compare.html`, and 25 JS modules) with React + Vite, keeping the Python backend (`127.0.0.1:8766`) unchanged.
 - **Execution:** dual-agent — ParseBuilder (Track A, Annotate) and Oda (Track B, Compare). Tracks agreed a shared contract in Phase 0, worked in parallel, and integrated in Phase C.
 - **Constraint:** no emoji in the UI; annotation timestamps are immutable.
-- **Result:** React SPA in `src/ParseUI.tsx` is the sole runtime frontend. Vanilla-JS deletion (`js/`, `parse.html`, `compare.html`, legacy launchers) is scheduled for Stage 3 of the 2026-04-20 docs audit.
+- **Result:** React SPA in `src/ParseUI.tsx` is the sole runtime frontend. Stage 3 / PR #58 removed the remaining vanilla-JS runtime (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, legacy launchers).
 
 Historical branch names like `feat/parse-react-vite`, `feat/annotate-react`, `feat/compare-react` referenced throughout the original plan are merged/deleted. Do not recreate them; branch new work from `origin/main`.
 
@@ -55,7 +55,7 @@ Canonical record of which legacy module became which React surface. Every row ha
 | `js/shared/chat-tool-adapters.js` | 639 | A | `src/hooks/useChatSession.ts` |
 | `js/shared/spectrogram-worker.js` | 273 | A | `src/workers/spectrogram-worker.ts` |
 
-The Stage 3 deletion PR will remove the left column entirely; the right column is the current runtime.
+Stage 3 / PR #58 removed the left-column files from the live repo; the right column is the current runtime surface.
 
 ---
 

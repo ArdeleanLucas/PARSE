@@ -393,7 +393,7 @@ Use staged rollout with rollback path:
 
 Exit criteria:
 - App launches and starts backend automatically.
-- `parse.html` and `compare.html` open from desktop shell.
+- React routes or the Python-served built UI open from the desktop shell.
 - Basic annotation read/write works on a sample project.
 
 ## Milestone B — Internal Alpha
@@ -442,7 +442,7 @@ Exit criteria:
 
 ## Stream 3 — Frontend unification path ✅ complete
 
-Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores, hooks, and the typed API client. Vanilla-JS deletion (`js/`, `parse.html`, `compare.html`, legacy launchers) is tracked separately as Stage 3 of the 2026-04-20 docs audit; once that lands, the React SPA is the sole frontend.
+Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores, hooks, and the typed API client. Stage 3 landed in PR #58, removing `js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, and the legacy launchers, so the React SPA is now the sole frontend.
 
 ## Stream 4 — Packaging and dependencies
 
@@ -453,10 +453,9 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 
 ## 17) Biggest portability blockers identified (current codebase)
 
-1. **Legacy launcher mismatch** — scheduled for Stage 3 removal
-   - `start_parse.sh` and `Start Review Tool.bat` still reference legacy paths (`python/thesis_server.py`, `review_tool_dev.html`). Deleted in the vanilla-JS cleanup PR.
+1. ~~Legacy launcher mismatch~~ — **resolved.** Stage 3 / PR #58 removed the obsolete shell scripts and review-page entrypoint from the primary product flow.
 
-2. ~~Annotate mode is still monolithic/localStorage-first~~ — **resolved.** `src/ParseUI.tsx` hosts Annotate + Compare in one React shell with Zustand stores; `parse.html` is being removed in Stage 3.
+2. ~~Annotate mode is still monolithic/localStorage-first~~ — **resolved as a portability blocker.** Annotate + Compare now live in the unified React shell with shared Zustand stores; remaining workflow hardening is follow-up polish rather than a legacy-architecture blocker.
 
 3. **Project API contract mismatch**
    - Frontend modules call `/api/project` and `/project.json` save paths, but backend currently does not expose `/api/project` write route.
@@ -470,7 +469,7 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 6. **Security defaults not desktop-hardened**
    - Backend defaults include `0.0.0.0` host and permissive CORS, which is unsafe for packaged desktop defaults.
 
-7. ~~External CDN dependency in core UI~~ — **resolved.** React SPA bundles dependencies via Vite; `rg unpkg src/` returns zero hits. Vanilla-JS `parse.html`/`compare.html` that loaded from CDN are being removed in Stage 3.
+7. ~~External CDN dependency in core UI~~ — **resolved.** React SPA bundles dependencies via Vite; `rg unpkg src/` returns zero hits, and the legacy HTML shells that depended on CDN assets were removed in Stage 3 / PR #58.
 
 8. **Residual hardcoded platform paths in scripts/docs**
    - Legacy scripts/docs include machine-specific paths and Windows-specific assumptions that need explicit desktop compatibility policy.
@@ -555,5 +554,5 @@ When any of the following changes, update this file in the same PR:
 
 | Date | Decision | Rationale |
 |---|---|---|
-| 2026-04-20 | Remove all vanilla JS (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, legacy launchers) — React SPA becomes the sole frontend | Annotate/Compare divergence and CDN dependency already resolved by the unified React shell; eliminating legacy entrypoints removes packaging fragility, offline risk, and operator confusion. Tracked as Stage 3 of the 2026-04-20 docs audit. |
+| 2026-04-20 | Remove all vanilla JS (`js/`, `parse.html`, `compare.html`, `review_tool_dev.html`, legacy launchers) — React SPA becomes the sole frontend | Annotate/Compare divergence and CDN dependency were already resolved by the unified React shell; PR #58 completed the runtime cutover and removed the remaining packaging/offline/operator-confusion risks from the legacy frontend surface. |
 | 2026-04-20 | Speaker onboarding requires explicit xAI/OpenAI provider selection at import time | No implicit default; per-provider chat runtime already validated. Ollama/offline deferred until a real offline-field requirement reappears. |

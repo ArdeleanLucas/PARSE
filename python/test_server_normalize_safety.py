@@ -51,7 +51,11 @@ def test_api_post_normalize_does_not_consult_working_root_guard(monkeypatch) -> 
     ]
 
 
-def test_startup_banner_lines_do_not_include_working_root_warning(tmp_path: pathlib.Path) -> None:
+def test_startup_banner_lines_point_to_built_ui_without_working_root_warning(tmp_path: pathlib.Path) -> None:
+    dist_index = tmp_path / "dist" / "index.html"
+    dist_index.parent.mkdir(parents=True)
+    dist_index.write_text("<html></html>", encoding="utf-8")
+
     lines = server._startup_banner_lines(
         serve_dir=tmp_path,
         local_ips=["192.168.0.9"],
@@ -60,7 +64,8 @@ def test_startup_banner_lines_do_not_include_working_root_warning(tmp_path: path
     banner = "\n".join(lines)
 
     assert "PARSE - HTTP Server" in banner
-    assert "http://192.168.0.9:8766/compare.html" in banner
+    assert "http://192.168.0.9:8766/compare" in banner
+    assert ".html" not in banner
     assert "WARNING:" not in banner
     assert "Normalize jobs will refuse to run" not in banner
 
