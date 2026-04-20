@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useActionJob } from "../useActionJob";
+import { useActionJob, projectEtaMs, formatEta } from "../useActionJob";
 
 describe("useActionJob", () => {
   beforeEach(() => {
@@ -30,6 +30,7 @@ describe("useActionJob", () => {
       progress: 0,
       error: null,
       label: null,
+      etaMs: null,
     });
   });
 
@@ -197,6 +198,7 @@ describe("useActionJob", () => {
       progress: 0,
       error: null,
       label: null,
+      etaMs: null,
     });
   });
 
@@ -276,7 +278,36 @@ describe("useActionJob", () => {
       progress: 0,
       error: "Start failed",
       label: "Running action…",
+      etaMs: null,
     });
     expect(poll).not.toHaveBeenCalled();
+  });
+});
+
+describe("projectEtaMs / formatEta", () => {
+  it("returns null below the 5% progress threshold", () => {
+    expect(projectEtaMs(0.03, 10_000)).toBeNull();
+  });
+
+  it("returns null below the 1.5s elapsed threshold (noisy early estimates)", () => {
+    expect(projectEtaMs(0.3, 500)).toBeNull();
+  });
+
+  it("returns 0 when progress is 1", () => {
+    expect(projectEtaMs(1, 5_000)).toBe(0);
+  });
+
+  it("projects remaining time from elapsed and progress", () => {
+    // 25% done in 5s → 75% remaining, projected at the same rate → 15s
+    expect(projectEtaMs(0.25, 5_000)).toBe(15_000);
+  });
+
+  it("formats sub-second / second / minute / hour ranges", () => {
+    expect(formatEta(400)).toBe("<1s");
+    expect(formatEta(2_600)).toBe("3s");
+    expect(formatEta(45_000)).toBe("45s");
+    expect(formatEta(90_000)).toBe("1m 30s");
+    expect(formatEta(600_000)).toBe("10m");
+    expect(formatEta(4_500_000)).toBe("1h 15m");
   });
 });
