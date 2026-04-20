@@ -473,6 +473,51 @@ class ParseChatTools:
                     },
                 },
             ),
+            "contact_lexeme_lookup": ChatToolSpec(
+                name="contact_lexeme_lookup",
+                description=(
+                    "Preview reference forms (IPA) for contact/comparison languages from "
+                    "third-party providers (ASJP, Wiktionary, Wikidata, etc.). Read-only — "
+                    "returns fetched forms without writing to sil_contact_languages.json. "
+                    "Use the Compare UI's contact-lexeme fetch to persist results."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "languages": {
+                            "type": "array",
+                            "maxItems": 20,
+                            "items": {"type": "string", "minLength": 2, "maxLength": 16},
+                        },
+                        "conceptIds": {
+                            "type": "array",
+                            "maxItems": 200,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                        },
+                        "providers": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "csv_override",
+                                    "lingpy_wordlist",
+                                    "pycldf",
+                                    "pylexibank",
+                                    "asjp",
+                                    "cldf",
+                                    "wikidata",
+                                    "wiktionary",
+                                    "grokipedia",
+                                    "literature",
+                                ],
+                            },
+                        },
+                        "maxConcepts": {"type": "integer", "minimum": 1, "maximum": 200},
+                    },
+                },
+            ),
             "prepare_tag_import": ChatToolSpec(
                 name="prepare_tag_import",
                 description=(
@@ -1737,6 +1782,125 @@ class ParseChatTools:
             "conceptIds": concept_ids,
             "dryRun": False,
         })
+
+    def _tool_contact_lexeme_lookup(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Preview contact-language reference forms without writing to the sil config.
+
+        Calls the ProviderRegistry directly (not fetch_and_merge) so the filesystem
+        stays untouched — the caller gets a structured summary of what the
+        registered providers returned. To persist results, run the contact-lexemes
+        compute job from the Compare UI.
+        """
+        import csv as _csv
+        import json as _json
+
+        if not self.sil_config_path.exists():
+            return {
+                "ok": False,
+                "error": "sil_contact_languages.json not found at {0}".format(self.sil_config_path),
+            }
+
+        try:
+            with open(self.sil_config_path, encoding="utf-8") as f:
+                sil_config = _json.load(f)
+        except (OSError, _json.JSONDecodeError) as exc:
+            return {"ok": False, "error": "Failed to read sil config: {0}".format(exc)}
+
+        language_meta = {k: v for k, v in sil_config.items() if isinstance(v, dict)}
+        all_languages = [k for k in language_meta.keys() if "name" in language_meta[k]]
+
+        requested_langs_raw = args.get("languages")
+        if isinstance(requested_langs_raw, list) and requested_langs_raw:
+            requested_langs = [str(x).strip() for x in requested_langs_raw if str(x).strip()]
+            unknown = [lc for lc in requested_langs if lc not in language_meta]
+            if unknown:
+                return {
+                    "ok": False,
+                    "error": "Unknown language codes (not in sil config): {0}".format(", ".join(unknown)),
+                    "known": sorted(all_languages),
+                }
+            languages = requested_langs
+        else:
+            languages = all_languages
+
+        if not languages:
+            return {"ok": False, "error": "No languages available to look up"}
+
+        concepts_path = self.project_root / "concepts.csv"
+        if not concepts_path.exists():
+            return {"ok": False, "error": "concepts.csv not found at {0}".format(concepts_path)}
+
+        try:
+            with open(concepts_path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                all_concepts = [
+                    (row.get("concept_en") or "").strip()
+                    for row in reader
+                    if (row.get("concept_en") or "").strip()
+                ]
+        except OSError as exc:
+            return {"ok": False, "error": "Failed to read concepts.csv: {0}".format(exc)}
+
+        requested_concepts_raw = args.get("conceptIds")
+        if isinstance(requested_concepts_raw, list) and requested_concepts_raw:
+            requested_concepts = {str(x).strip() for x in requested_concepts_raw if str(x).strip()}
+            # Match by English label or stripped ID — concepts.csv is keyed on concept_en
+            concepts_list = [c for c in all_concepts if c in requested_concepts]
+            if not concepts_list:
+                return {
+                    "ok": False,
+                    "error": "None of the requested conceptIds matched concepts.csv",
+                    "hint": "conceptIds must match the concept_en column; first 10 available: {0}".format(
+                        ", ".join(all_concepts[:10])
+                    ),
+                }
+        else:
+            concepts_list = list(all_concepts)
+
+        max_concepts = args.get("maxConcepts")
+        if isinstance(max_concepts, int) and max_concepts > 0:
+            concepts_list = concepts_list[:max_concepts]
+
+        providers_raw = args.get("providers")
+        priority_order: Optional[List[str]] = None
+        if isinstance(providers_raw, list) and providers_raw:
+            priority_order = [str(p).strip() for p in providers_raw if str(p).strip()]
+
+        ai_config_path = self.project_root / "config" / "ai_config.json"
+        try:
+            with open(ai_config_path, encoding="utf-8") as f:
+                ai_config = _json.load(f)
+        except (OSError, _json.JSONDecodeError):
+            ai_config = {}
+
+        from ..compare.providers.registry import ProviderRegistry, PROVIDER_PRIORITY
+
+        registry = ProviderRegistry(ai_config)
+        fetched = registry.fetch_all(
+            concepts=concepts_list,
+            language_codes=languages,
+            language_meta=language_meta,
+            priority_order=priority_order,
+        )
+
+        filled_counts = {
+            lc: sum(1 for forms in fetched.get(lc, {}).values() if forms)
+            for lc in languages
+        }
+
+        return {
+            "ok": True,
+            "languages": languages,
+            "concepts": concepts_list,
+            "conceptCount": len(concepts_list),
+            "providerOrderUsed": priority_order or list(PROVIDER_PRIORITY),
+            "filledCounts": filled_counts,
+            "forms": fetched,
+            "note": (
+                "Preview only — no writes to sil_contact_languages.json. "
+                "To persist these results, run the contact-lexemes compute job."
+            ),
+        }
 
     def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Create or update a named tag with concept IDs in parse-tags.json."""

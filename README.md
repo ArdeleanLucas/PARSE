@@ -286,8 +286,10 @@ src/
                            enrichmentStore, playbackStore, tagStore, uiStore)
 python/
   server.py             -- Backend API server + built-frontend static serving (port 8766)
+  adapters/
+    mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (10 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (11 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
@@ -337,6 +339,56 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 |---|---|
 | `prepare_tag_import` | Validate and preview a tag CSV before import |
 | `import_tag_csv` | Import tags from a prepared CSV file |
+
+---
+
+## MCP Server Mode
+
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing all of its AI chat tools over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
+
+```bash
+python python/adapters/mcp_adapter.py                          # auto-detect project root
+python python/adapters/mcp_adapter.py --project-root /path/to  # explicit root
+python python/adapters/mcp_adapter.py --verbose                # debug logging
+```
+
+### Client Configuration
+
+Add PARSE as an MCP server in your client config. Example for Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+    "mcpServers": {
+        "parse": {
+            "command": "python",
+            "args": ["/path/to/parse/python/adapters/mcp_adapter.py"],
+            "env": {
+                "PARSE_PROJECT_ROOT": "/path/to/your/parse/project"
+            }
+        }
+    }
+}
+```
+
+### Exposed Tools
+
+All tools from `ParseChatTools` are available over MCP with the same semantics as the built-in AI chat dock:
+
+| Tool | Description |
+|---|---|
+| `project_context_read` | Project metadata, source index, annotation inventory, enrichments summary |
+| `annotation_read` | Read speaker annotation data with optional concept/tier filtering |
+| `read_csv_preview` | Preview CSV files (columns, row count, sample rows) |
+| `cognate_compute_preview` | Compute cognate/similarity preview from annotations (read-only) |
+| `cross_speaker_match_preview` | Cross-speaker match candidates from STT output |
+| `spectrogram_preview` | Spectrogram preview for a time-bounded segment |
+| `contact_lexeme_lookup` | Preview reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); read-only — does not write to sil_contact_languages.json |
+| `stt_start` | Start STT background job on an audio file |
+| `stt_status` | Poll status/progress of an STT job |
+| `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
+| `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
+
+> **Requires:** `pip install 'mcp[cli]'`
 
 ---
 
