@@ -307,7 +307,16 @@ def poll_device_auth() -> Dict[str, Any]:
 
 def get_auth_status() -> Dict[str, Any]:
     """Return current auth status."""
-    # Check direct API key first
+    with _auth_lock:
+        if _auth_state.get("status") == "pending":
+            return {
+                "authenticated": False,
+                "flow_active": True,
+                "user_code": _auth_state.get("user_code", ""),
+                "verification_uri": _auth_state.get("verification_uri", ""),
+            }
+
+    # Check direct API key first once no device flow is active.
     path = _token_path()
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -330,15 +339,6 @@ def get_auth_status() -> Dict[str, Any]:
             "provider": "openai",
             "expires_in": max(0, int(expires - time.time())) if expires else None,
         }
-
-    with _auth_lock:
-        if _auth_state.get("status") == "pending":
-            return {
-                "authenticated": False,
-                "flow_active": True,
-                "user_code": _auth_state.get("user_code", ""),
-                "verification_uri": _auth_state.get("verification_uri", ""),
-            }
 
     return {"authenticated": False, "flow_active": False}
 
