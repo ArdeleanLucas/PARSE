@@ -16,9 +16,12 @@ html.dark .bg-white\/95 { background-color: #0a0a0a !important; }
 html.dark .bg-slate-50,
 html.dark .bg-slate-50\/40,
 html.dark .bg-slate-50\/60,
-html.dark .bg-slate-50\/70 { background-color: #000 !important; }
+html.dark .bg-slate-50\/70,
+html.dark .bg-slate-50\/80 { background-color: #000 !important; }
 html.dark .bg-slate-100,
 html.dark .bg-slate-100\/80 { background-color: #141414 !important; }
+html.dark .bg-slate-200,
+html.dark .bg-slate-200\/60 { background-color: #1f1f1f !important; }
 
 /* Gradients flatten to black */
 html.dark .from-slate-50 { --tw-gradient-from: #000 !important; }
@@ -27,6 +30,7 @@ html.dark .to-white { --tw-gradient-to: #0a0a0a !important; }
 /* Borders / rings: subtle hairlines */
 html.dark .border-slate-100,
 html.dark .border-slate-200,
+html.dark .border-slate-200\/70,
 html.dark .border-slate-200\/80 { border-color: #1f1f1f !important; }
 html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1f1f1f !important; }
 html.dark .ring-slate-100,
@@ -50,6 +54,7 @@ html.dark .hover\:text-slate-700:hover { color: #e4e4e7 !important; }
 /* Accent: bright blue instead of indigo/violet */
 html.dark .bg-indigo-50 { background-color: rgb(59 130 246 / 0.12) !important; }
 html.dark .bg-indigo-50\/30 { background-color: rgb(59 130 246 / 0.08) !important; }
+html.dark .bg-indigo-50\/40 { background-color: rgb(59 130 246 / 0.10) !important; }
 html.dark .bg-indigo-50\/50 { background-color: rgb(59 130 246 / 0.15) !important; }
 html.dark .bg-indigo-100 { background-color: rgb(59 130 246 / 0.2) !important; }
 html.dark .bg-indigo-600 { background-color: #3b82f6 !important; }
@@ -70,14 +75,17 @@ html.dark .via-violet-600 { --tw-gradient-from: #3b82f6 !important; --tw-gradien
 html.dark .to-violet-600,
 html.dark .to-fuchsia-600 { --tw-gradient-to: #2563eb !important; }
 
-/* Amber / rose / emerald soft badges remain readable */
+/* Amber / rose / emerald soft badges remain readable.
+   Low-opacity warm tint keeps the card visibly "warning" without reading
+   as rust/red under bright yellow text. */
 html.dark .bg-amber-50,
-html.dark .bg-amber-50\/40 { background-color: rgb(120 53 15 / 0.35) !important; }
+html.dark .bg-amber-50\/40 { background-color: rgba(255, 193, 7, 0.08) !important; }
+html.dark .bg-amber-100 { background-color: rgba(255, 193, 7, 0.14) !important; }
 html.dark .text-amber-700,
-html.dark .text-amber-800 { color: rgb(252 211 77) !important; }
+html.dark .text-amber-800 { color: rgb(251 191 36) !important; }
 html.dark .border-amber-100,
-html.dark .border-amber-200 { border-color: rgb(180 83 9 / 0.5) !important; }
-html.dark .ring-amber-200 { --tw-ring-color: rgb(180 83 9 / 0.6) !important; }
+html.dark .border-amber-200 { border-color: rgba(180, 83, 9, 0.4) !important; }
+html.dark .ring-amber-200 { --tw-ring-color: rgba(180, 83, 9, 0.5) !important; }
 
 html.dark .bg-rose-50 { background-color: rgb(136 19 55 / 0.35) !important; }
 html.dark .text-rose-600,
