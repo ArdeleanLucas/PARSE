@@ -138,9 +138,9 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 **Code quality**
 9. **TypeScript strict mode.** Every file must compile with `npx tsc --noEmit`.
 10. **No `any` types** unless unavoidable. If you use `any`, add an inline comment explaining exactly why.
-11. **No inline styles for layout.** Use CSS classes / Tailwind / CSS modules.
+11. **Prefer classes / Tailwind / CSS modules over inline styles.** Inline `style={{…}}` is allowed for values that are genuinely dynamic (computed widths, progress bars) — don't use it as a shortcut for static layout. Existing files with heavy inline styles (e.g. `ParseUI.tsx`, shared primitives) should migrate as they're touched, not via broad churn.
 12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
-13. **Every component and hook has a co-located test file.**
+13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The floor in Test Gates below (≥132 passing) is the enforced check; this rule is the target for new features.
 
 ## Test Gates (pre-push)
 

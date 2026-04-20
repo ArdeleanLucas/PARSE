@@ -37,8 +37,8 @@ Canonical record of which legacy module became which React surface. Every row ha
 | `js/annotate/suggestions-panel.js` | 885 | A | `src/components/annotate/SuggestionsPanel.tsx` |
 | `js/annotate/import-export.js` | 807 | A | `src/hooks/useImportExport.ts` |
 | `js/annotate/onboarding.js` | 663 | A | `src/components/annotate/OnboardingFlow.tsx` |
-| `js/annotate/fullscreen-mode.js` | 620 | A | `src/components/annotate/FullscreenMode.tsx` |
-| `js/annotate/video-sync-panel.js` | 1,376 | A | `src/components/annotate/VideoSyncPanel.tsx` |
+| `js/annotate/fullscreen-mode.js` | 620 | A | **Not ported.** Feature dropped from React scope — if still needed, open a scoped issue before Stage 3 deletion. |
+| `js/annotate/video-sync-panel.js` | 1,376 | A | **Not ported.** Feature dropped from React scope — if still needed, open a scoped issue before Stage 3 deletion. |
 | `js/compare/compare.js` | 4,654 | B | Decomposed into `src/ParseUI.tsx` + compare components |
 | `js/compare/concept-table.js` | 873 | B | `src/components/compare/ConceptTable.tsx` |
 | `js/compare/cognate-controls.js` | 854 | B | `src/components/compare/CognateControls.tsx` |
