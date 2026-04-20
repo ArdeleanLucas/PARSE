@@ -65,6 +65,33 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     "specialized_layers": [],
 }
 
+_CHAT_PROVIDER_BASE_URLS: Dict[str, str] = {
+    "xai": "https://api.x.ai/v1",
+    "grok": "https://api.x.ai/v1",
+    "x.ai": "https://api.x.ai/v1",
+}
+
+_CHAT_PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
+    "xai": "grok-3-mini",
+    "grok": "grok-3-mini",
+    "x.ai": "grok-3-mini",
+    "openai": "gpt-4o",
+}
+
+_CHAT_OPENAI_ONLY_MODELS = {
+    "gpt54",
+    "gpt-4o",
+    "gpt-4",
+    "gpt-3.5-turbo",
+    "o1",
+    "o1-mini",
+    "o1-preview",
+    "o3",
+    "o3-mini",
+}
+
+_CHAT_SUPPORTED_PROVIDERS = {"openai", "xai", "grok", "x.ai"}
+
 
 def _deep_merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge dictionaries without mutating inputs."""
@@ -213,9 +240,22 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
 
     resolved = _deep_merge_dicts(defaults, chat_config)
 
+    stored_provider = ""
+    try:
+        try:
+            from python.ai.openai_auth import get_api_key as _get_direct_key, get_api_key_provider as _get_provider
+        except ImportError:
+            from .openai_auth import get_api_key as _get_direct_key, get_api_key_provider as _get_provider
+
+        if (_get_direct_key() or "").strip():
+            stored_provider = str(_get_provider() or "").strip().lower()
+    except Exception:
+        stored_provider = ""
+
     provider_name = str(resolved.get("provider") or "openai").strip().lower()
-    _SUPPORTED_CHAT_PROVIDERS = {"openai", "xai", "grok", "x.ai"}
-    if provider_name not in _SUPPORTED_CHAT_PROVIDERS:
+    if stored_provider in _CHAT_SUPPORTED_PROVIDERS:
+        provider_name = stored_provider
+    if provider_name not in _CHAT_SUPPORTED_PROVIDERS:
         print(
             "[WARN] chat.provider={0!r} is unsupported; forcing 'openai'".format(provider_name),
             file=sys.stderr,
@@ -224,10 +264,19 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
     resolved["provider"] = provider_name
 
     model_name = str(resolved.get("model") or "").strip()
-    resolved["model"] = model_name or "gpt54"
+    if provider_name in _CHAT_PROVIDER_BASE_URLS and model_name in _CHAT_OPENAI_ONLY_MODELS:
+        model_name = _CHAT_PROVIDER_DEFAULT_MODELS[provider_name]
+    resolved["model"] = model_name or _CHAT_PROVIDER_DEFAULT_MODELS.get(provider_name, "gpt54")
 
     api_key_env = str(resolved.get("api_key_env") or "").strip()
+    if provider_name in _CHAT_PROVIDER_BASE_URLS and (not api_key_env or api_key_env == "OPENAI_API_KEY"):
+        api_key_env = "XAI_API_KEY"
     resolved["api_key_env"] = api_key_env or "OPENAI_API_KEY"
+
+    base_url = str(resolved.get("base_url") or "").strip()
+    if not base_url and provider_name in _CHAT_PROVIDER_BASE_URLS:
+        base_url = _CHAT_PROVIDER_BASE_URLS[provider_name]
+    resolved["base_url"] = base_url
 
     reasoning_effort = str(resolved.get("reasoning_effort") or "").strip().lower()
     if reasoning_effort not in {"minimal", "low", "medium", "high"}:
@@ -288,22 +337,13 @@ class OpenAIChatRuntime:
     """Thin OpenAI chat runtime wrapper with tool-call support and reasoning fallback."""
 
     # Provider-specific base URLs for the OpenAI-compatible API
-    _PROVIDER_BASE_URLS: Dict[str, str] = {
-        "xai": "https://api.x.ai/v1",
-        "grok": "https://api.x.ai/v1",
-        "x.ai": "https://api.x.ai/v1",
-    }
+    _PROVIDER_BASE_URLS: Dict[str, str] = dict(_CHAT_PROVIDER_BASE_URLS)
 
     # Default models per provider (used when config still has a placeholder/OpenAI model)
-    _PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
-        "xai": "grok-3-mini",
-        "grok": "grok-3-mini",
-        "x.ai": "grok-3-mini",
-        "openai": "gpt-4o",
-    }
+    _PROVIDER_DEFAULT_MODELS: Dict[str, str] = dict(_CHAT_PROVIDER_DEFAULT_MODELS)
 
     # Model names that are clearly OpenAI-only and should be swapped for xAI
-    _OPENAI_ONLY_MODELS = {"gpt54", "gpt-4o", "gpt-4", "gpt-3.5-turbo", "o1", "o1-mini", "o1-preview", "o3", "o3-mini"}
+    _OPENAI_ONLY_MODELS = set(_CHAT_OPENAI_ONLY_MODELS)
 
     def __init__(
         self,
