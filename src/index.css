@@ -1,3 +1,107 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Dark mode — "Noir": pure black + bright blue accent.
+   Toggled via `html.dark` in ParseUI.tsx. Overrides Tailwind utility classes
+   already in use so existing markup doesn't need dark: variants. */
+
+html.dark { color-scheme: dark; background: #000; }
+
+/* Surfaces: pure black page, slightly lifted cards */
+html.dark .bg-white,
+html.dark .bg-white\/80,
+html.dark .bg-white\/90,
+html.dark .bg-white\/95 { background-color: #0a0a0a !important; }
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/60,
+html.dark .bg-slate-50\/70 { background-color: #000 !important; }
+html.dark .bg-slate-100,
+html.dark .bg-slate-100\/80 { background-color: #141414 !important; }
+
+/* Gradients flatten to black */
+html.dark .from-slate-50 { --tw-gradient-from: #000 !important; }
+html.dark .to-white { --tw-gradient-to: #0a0a0a !important; }
+
+/* Borders / rings: subtle hairlines */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/80 { border-color: #1f1f1f !important; }
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1f1f1f !important; }
+html.dark .ring-slate-100,
+html.dark .ring-slate-200 { --tw-ring-color: #1f1f1f !important; }
+
+/* Text: white → muted gray scale */
+html.dark .text-slate-900 { color: #fafafa !important; }
+html.dark .text-slate-800 { color: #f4f4f5 !important; }
+html.dark .text-slate-700 { color: #e4e4e7 !important; }
+html.dark .text-slate-600 { color: #a1a1aa !important; }
+html.dark .text-slate-500 { color: #71717a !important; }
+html.dark .text-slate-400 { color: #52525b !important; }
+html.dark .text-slate-300 { color: #3f3f46 !important; }
+
+/* Hover surfaces */
+html.dark .hover\:bg-slate-50:hover { background-color: #141414 !important; }
+html.dark .hover\:bg-slate-100:hover { background-color: #1f1f1f !important; }
+html.dark .hover\:text-slate-800:hover { color: #fafafa !important; }
+html.dark .hover\:text-slate-700:hover { color: #e4e4e7 !important; }
+
+/* Accent: bright blue instead of indigo/violet */
+html.dark .bg-indigo-50 { background-color: rgb(59 130 246 / 0.12) !important; }
+html.dark .bg-indigo-50\/30 { background-color: rgb(59 130 246 / 0.08) !important; }
+html.dark .bg-indigo-50\/50 { background-color: rgb(59 130 246 / 0.15) !important; }
+html.dark .bg-indigo-100 { background-color: rgb(59 130 246 / 0.2) !important; }
+html.dark .bg-indigo-600 { background-color: #3b82f6 !important; }
+html.dark .bg-indigo-700 { background-color: #2563eb !important; }
+html.dark .hover\:bg-indigo-700:hover { background-color: #2563eb !important; }
+html.dark .text-indigo-900,
+html.dark .text-indigo-800,
+html.dark .text-indigo-700,
+html.dark .text-indigo-600 { color: #60a5fa !important; }
+html.dark .ring-indigo-200 { --tw-ring-color: rgb(59 130 246 / 0.4) !important; }
+html.dark .border-indigo-100 { border-color: rgb(59 130 246 / 0.3) !important; }
+html.dark .border-indigo-300 { border-color: #3b82f6 !important; }
+html.dark .focus\:ring-indigo-100:focus { --tw-ring-color: rgb(59 130 246 / 0.25) !important; }
+html.dark .focus\:ring-indigo-50:focus { --tw-ring-color: rgb(59 130 246 / 0.15) !important; }
+html.dark .from-indigo-500,
+html.dark .from-indigo-600,
+html.dark .via-violet-600 { --tw-gradient-from: #3b82f6 !important; --tw-gradient-via: #3b82f6 !important; }
+html.dark .to-violet-600,
+html.dark .to-fuchsia-600 { --tw-gradient-to: #2563eb !important; }
+
+/* Amber / rose / emerald soft badges remain readable */
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/40 { background-color: rgb(120 53 15 / 0.35) !important; }
+html.dark .text-amber-700,
+html.dark .text-amber-800 { color: rgb(252 211 77) !important; }
+html.dark .border-amber-100,
+html.dark .border-amber-200 { border-color: rgb(180 83 9 / 0.5) !important; }
+html.dark .ring-amber-200 { --tw-ring-color: rgb(180 83 9 / 0.6) !important; }
+
+html.dark .bg-rose-50 { background-color: rgb(136 19 55 / 0.35) !important; }
+html.dark .text-rose-600,
+html.dark .text-rose-700 { color: rgb(253 164 175) !important; }
+html.dark .border-rose-200 { border-color: rgb(159 18 57 / 0.5) !important; }
+html.dark .ring-rose-200 { --tw-ring-color: rgb(159 18 57 / 0.6) !important; }
+
+html.dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.35) !important; }
+html.dark .text-emerald-700 { color: rgb(110 231 183) !important; }
+html.dark .ring-emerald-200 { --tw-ring-color: rgb(6 95 70 / 0.6) !important; }
+
+/* Violet / fuchsia cognate badges */
+html.dark .bg-violet-100 { background-color: rgb(91 33 182 / 0.5) !important; }
+html.dark .text-violet-700 { color: rgb(196 181 253) !important; }
+html.dark .bg-fuchsia-100 { background-color: rgb(134 25 143 / 0.5) !important; }
+html.dark .text-fuchsia-700 { color: rgb(232 121 249) !important; }
+
+/* Waveform bars: invert light indigo */
+html.dark [style*="background: rgb(199, 210, 254)"] { background: rgb(67 56 202) !important; }
+
+/* kbd tags */
+html.dark kbd.bg-slate-100 { background-color: rgb(30 41 59) !important; color: rgb(148 163 184) !important; }
+
+/* Shadows need stronger contrast */
+html.dark .shadow-sm,
+html.dark .shadow { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4) !important; }
+html.dark .shadow-lg { box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.6) !important; }
