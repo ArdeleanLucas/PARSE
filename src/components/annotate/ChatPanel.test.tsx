@@ -23,7 +23,6 @@ vi.mock("../../hooks/useChatSession", () => ({
 vi.mock("../../api/client", () => ({
   getAuthStatus: () => Promise.resolve({ authenticated: true, method: "api_key", provider: "xai" }),
   startAuthFlow: vi.fn(),
-  pollAuth: vi.fn(),
   saveApiKey: vi.fn(),
   logoutAuth: vi.fn(),
 }))

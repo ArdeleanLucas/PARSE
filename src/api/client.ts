@@ -114,10 +114,6 @@ export async function startAuthFlow(): Promise<void> {
   await apiFetch<void>("/api/auth/start", { method: "POST" });
 }
 
-export async function pollAuth(): Promise<AuthStatus> {
-  return apiFetch<AuthStatus>("/api/auth/poll", { method: "POST" });
-}
-
 export async function saveApiKey(key: string, provider: string): Promise<AuthStatus> {
   return apiFetch<AuthStatus>("/api/auth/key", {
     method: "POST",
