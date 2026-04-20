@@ -249,3 +249,26 @@ def test_read_only_guard_allows_contact_lexeme_lookup_write_messages(project_dir
 
     assert not text.startswith(ORCHESTRATOR_READ_ONLY_NOTICE)
     assert "wrote them to sil_contact_languages.json" in text
+
+
+def test_write_applied_tool_names_only_include_successful_persisted_tools(project_dir):
+    """Only successful write-capable tool calls should bypass the read-only guard."""
+    ai_config = project_dir / "config" / "ai_config.json"
+    ai_config.write_text(json.dumps({
+        "chat": {"provider": "openai", "model": "gpt-5.4", "read_only": True}
+    }), encoding="utf-8")
+
+    orchestrator = ChatOrchestrator(
+        project_root=project_dir,
+        tools=ParseChatTools(project_root=project_dir),
+        config_path=ai_config,
+    )
+
+    write_tools = orchestrator._write_applied_tool_names([
+        {"tool": "contact_lexeme_lookup", "ok": False, "readOnly": False},
+        {"tool": "contact_lexeme_lookup", "ok": True, "readOnly": True},
+        {"tool": "contact_lexeme_lookup", "ok": True, "readOnly": False},
+        {"tool": "annotation_read", "ok": True, "readOnly": True},
+    ])
+
+    assert write_tools == ["contact_lexeme_lookup"]

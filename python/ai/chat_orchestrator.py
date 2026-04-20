@@ -161,6 +161,22 @@ class ChatOrchestrator:
         lowered = str(text or "").lower()
         return "attachment" in lowered or "upload" in lowered or "file/context" in lowered
 
+    def _write_applied_tool_names(self, tool_trace: Sequence[Mapping[str, Any]]) -> List[str]:
+        names: List[str] = []
+        for entry in tool_trace:
+            tool_name = str(entry.get("tool") or "").strip()
+            if not tool_name:
+                continue
+            if tool_name not in WRITE_ALLOWED_TOOL_NAMES:
+                continue
+            if not bool(entry.get("ok", False)):
+                continue
+            if bool(entry.get("readOnly", True)):
+                continue
+            if tool_name not in names:
+                names.append(tool_name)
+        return names
+
     def _apply_read_only_guard(
         self,
         assistant_text: str,
@@ -346,6 +362,7 @@ class ChatOrchestrator:
                             "callId": call.get("id"),
                             "tool": tool_name,
                             "ok": bool(tool_result.get("ok", False)),
+                            "readOnly": bool((tool_result.get("result") or {}).get("readOnly", True)),
                         }
                     )
 
@@ -367,7 +384,7 @@ class ChatOrchestrator:
                 else:
                     final_text = "I could not generate a response for this request."
 
-            used_tool_names = [str(entry.get("tool") or "").strip() for entry in tool_trace if str(entry.get("tool") or "").strip()]
+            used_tool_names = self._write_applied_tool_names(tool_trace)
             final_text = self._apply_read_only_guard(final_text, latest_user_text, used_tool_names=used_tool_names)
 
             return {
