@@ -6,6 +6,8 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { resolveFixtureAiConfigSource } from "./apiRegressionConfig.mjs";
+
 const repoRoot = process.cwd();
 const pythonBin = process.env.PARSE_PYTHON_BIN || "python";
 
@@ -103,10 +105,15 @@ async function createFixtureProject(projectRoot) {
   await mkdir(path.join(projectRoot, "config"), { recursive: true });
   await mkdir(path.join(projectRoot, "annotations"), { recursive: true });
 
-  await cp(
-    path.join(repoRoot, "config", "ai_config.json"),
-    path.join(projectRoot, "config", "ai_config.json")
-  );
+  const fixtureConfigSource = resolveFixtureAiConfigSource(repoRoot);
+  if (fixtureConfigSource) {
+    await cp(
+      fixtureConfigSource,
+      path.join(projectRoot, "config", "ai_config.json")
+    );
+  } else {
+    await writeFile(path.join(projectRoot, "config", "ai_config.json"), "{}\n", "utf-8");
+  }
 
   try {
     await cp(

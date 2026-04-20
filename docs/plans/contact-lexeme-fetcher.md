@@ -442,7 +442,7 @@ origin/main
   └── feat/contact-lexemes  (new additive branch from current trunk)
 ```
 
-Do **not** start this until C6 (Lucas's browser regression checklist) is green. This is additive work, not a blocker for thesis submission — but having real similarity scores would make the borrowing adjudication section of the thesis concrete.
+Keep this on the later-stage test/build list rather than using C6 as a hard blocker. It becomes worth doing once onboarding/import and broader end-to-end testing are working well enough that new similarity signals can actually be exercised in the real workflow. This is additive work, not a blocker for thesis submission — but having real similarity scores would make the borrowing adjudication section of the thesis concrete.
 
 ---
 

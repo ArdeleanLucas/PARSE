@@ -63,15 +63,14 @@ All `src/api/client.ts` helpers have matching routes in `python/server.py`:
 
 **Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 
-## Release Gates (hard)
+## Deferred Validation Backlog
 
-The following are **manual Lucas gates** and must be respected in order:
+The following validation items remain important, but they are **not hard blockers for current implementation work**:
 
 - **C5:** LingPy TSV export verification (columns + row counts in browser)
 - **C6:** Full browser regression checklist (Annotate waveform/regions/STT + Compare grid/tags/nav)
-- **C7:** Cleanup and legacy deletion **blocked until C5 + C6 are explicitly cleared**
-
-Do not start C7 early.
+- **Current policy:** if Lucas asks for work on other PR stages, do that work. Keep C5/C6 on a deferred to-test list and run them in the order of actual testing once onboarding/import and end-to-end flows are ready.
+- **C7 / legacy cleanup:** destructive cleanup is no longer mechanically blocked on C5/C6 signoff, but it still requires a scoped PR, rollback discipline, and Lucas review/merge.
 
 ## Branch + Worktree Policy
 
@@ -106,19 +105,19 @@ However, on current `main`, coordinate shared-surface edits carefully.
 - `src/api/types.ts`
 - `python/server.py`
 
-## Safe Work Now (pre-C6)
+## Safe Work Now (current priority)
 
 - Add provider test coverage under `python/compare/providers/test_*.py`
 - Improve Lexibank/WOLD setup docs and CKB coverage strategy
 - Expand provider metadata and scholarly-source coverage plans
 - Non-destructive documentation/policy clarification about React (`:5173`) vs legacy (`parse.html`/`compare.html`) entrypoints is allowed when needed to reduce operator confusion
+- Work other PR stages directly when Lucas asks; do not use C5/C6 as a reason to defer implementation work
 
 ## Do Not Touch
 
-- `src/components/compare/*` (ContactLexemePanel + compare components currently stable)
-- `python/server.py` destructive routing/cutover changes before C5+C6 signoff
+- Avoid broad incidental churn in `src/components/compare/*`; edit compare components when required by the active stage and keep changes scoped/test-backed
 - `config/sil_contact_languages.json` directly (runtime output file)
-- Any C7 cleanup/deletion before C5+C6 signoff
+- Broad destructive cleanup without a scoped PR, rollback plan, and Lucas review/merge
 
 ## Test Gates (pre-push)
 
