@@ -49,10 +49,10 @@
 | Path | Current reference | Why it matters | Planned action |
 |---|---|---|---|
 | `docs/bugs.md` | Repro uses `http://localhost:5173` | Confirms current active React dev path | Keep |
-| `docs/plans/oda/coordination.md` | Browser checklist uses `http://localhost:5173/compare` | Confirms React Compare validation path | Keep |
-| `docs/plans/oda/phase-0.md` | `curl http://localhost:5173/api/config` | Confirms Vite dev workflow | Keep |
-| `docs/plans/oda/oda-core.md` | Requires `curl localhost:5173/api/config` | Confirms Vite dev workflow | Keep |
-| `docs/plans/oda/b9-compare-mode.md` | Validate at `http://localhost:5173/compare` | Confirms React Compare workflow | Keep |
+| `docs/archive/plans/oda/coordination.md` | Browser checklist uses `http://localhost:5173/compare` | Archived 2026-04-20 — task complete | Archived |
+| `docs/archive/plans/oda/phase-0.md` | `curl http://localhost:5173/api/config` | Archived 2026-04-20 — task complete | Archived |
+| `docs/archive/plans/oda/oda-core.md` | Requires `curl localhost:5173/api/config` | Archived 2026-04-20 — task complete | Archived |
+| `docs/archive/plans/oda/b9-compare-mode.md` | Validate at `http://localhost:5173/compare` | Archived 2026-04-20 — task complete | Archived |
 
 ---
 
@@ -65,7 +65,7 @@ They often refer to the API backend, which remains valid.
 |---|---|---|
 | `src/api/client.ts` | Documents Vite proxy to backend `http://localhost:8766` | Keep |
 | `docs/plans/react-vite-pivot.md` | Describes Vite proxy and backend API on `:8766` | Keep |
-| `docs/plans/oda/b7-export.md` | Calls export API on `:8766/api/export/*` | Keep |
+| `docs/archive/plans/oda/b7-export.md` | Calls export API on `:8766/api/export/*` | Archived 2026-04-20 — task complete |
 
 ---
 
