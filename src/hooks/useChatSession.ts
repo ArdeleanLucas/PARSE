@@ -20,6 +20,21 @@ const SESSION_KEY = "parse-chat-session-id"
 const MAX_POLLS = 60
 const POLL_INTERVAL_MS = 2000
 
+export function extractAssistantContent(raw: unknown): string {
+  if (typeof raw === "string") return raw
+  if (raw && typeof raw === "object") {
+    const r = raw as Record<string, unknown>
+    const assistant = r.assistant
+    if (assistant && typeof assistant === "object") {
+      const content = (assistant as Record<string, unknown>).content
+      if (typeof content === "string") return content
+    }
+    if (typeof r.content === "string") return r.content
+    if (typeof r.message === "string") return r.message
+  }
+  return ""
+}
+
 export function useChatSession(): UseChatSessionResult {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessionId, setSessionId] = useState<string | null>(
@@ -95,7 +110,7 @@ export function useChatSession(): UseChatSessionResult {
                   || status.status === "completed"
                   || status.status === "complete"
                 ) {
-                  resolve(status.result ?? "")
+                  resolve(extractAssistantContent(status.result))
                 } else if (status.status === "error") {
                   reject(new Error(status.error ?? status.result ?? "Chat error"))
                 } else if (polls >= MAX_POLLS) {

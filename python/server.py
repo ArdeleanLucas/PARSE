@@ -1395,13 +1395,9 @@ def _run_chat_job(job_id: str, session_id: str) -> None:
             },
         )
 
-        fresh_session = _chat_get_session_snapshot(session_id) or {}
-        response_payload = copy.deepcopy(result) if isinstance(result, dict) else {}
-        response_payload["session"] = _chat_session_public_payload(fresh_session)
-
         _set_job_complete(
             job_id,
-            response_payload,
+            assistant_content,
             message="Chat run complete",
         )
     except ChatOrchestratorError as exc:
@@ -1492,7 +1488,7 @@ def _set_job_progress(
 
 def _set_job_complete(
     job_id: str,
-    result: Dict[str, Any],
+    result: Any,
     message: Optional[str] = None,
     segments_processed: Optional[int] = None,
     total_segments: Optional[int] = None,
