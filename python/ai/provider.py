@@ -382,7 +382,6 @@ class OpenAIChatRuntime:
         merged_config = _deep_merge_dicts(file_config, config or {})
 
         self.chat_config = _build_chat_config(merged_config)
-        self.provider = str(self.chat_config.get("provider") or "openai").strip().lower() or "openai"
         self.model = str(self.chat_config.get("model") or "gpt-5.4").strip() or "gpt-5.4"
         self.api_key_env = str(self.chat_config.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
         self.reasoning_effort = str(self.chat_config.get("reasoning_effort") or "").strip().lower()
