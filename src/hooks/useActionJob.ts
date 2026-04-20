@@ -12,6 +12,32 @@ export interface ActionJobState {
   progress: number;
   error: string | null;
   label: string | null;
+  /** ms remaining, projected from elapsed time and current progress. null until the projection is stable. */
+  etaMs: number | null;
+}
+
+const MIN_PROGRESS_FOR_ETA = 0.05
+const MIN_ELAPSED_MS_FOR_ETA = 1500
+
+export function projectEtaMs(progress: number, elapsedMs: number): number | null {
+  if (!Number.isFinite(progress) || !Number.isFinite(elapsedMs)) return null
+  if (progress < MIN_PROGRESS_FOR_ETA) return null
+  if (elapsedMs < MIN_ELAPSED_MS_FOR_ETA) return null
+  if (progress >= 1) return 0
+  const remaining = (elapsedMs / progress) * (1 - progress)
+  if (!Number.isFinite(remaining) || remaining < 0) return null
+  return Math.round(remaining)
+}
+
+export function formatEta(ms: number): string {
+  if (ms < 1000) return "<1s"
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
 }
 
 export interface ActionJobConfig {
@@ -34,6 +60,7 @@ const IDLE_STATE: ActionJobState = {
   progress: 0,
   error: null,
   label: null,
+  etaMs: null,
 };
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -74,6 +101,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
   const jobIdRef = useRef<string | null>(null);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRunIdRef = useRef(0);
+  const startedAtRef = useRef<number | null>(null);
 
   const setStateIfMounted = useCallback((nextState: SetStateAction<ActionJobState>) => {
     if (!mountedRef.current) {
@@ -138,6 +166,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
             progress,
             error: toErrorMessage(error, `${config.label} follow-up failed`),
             label: config.label,
+            etaMs: null,
           });
           return;
         }
@@ -151,6 +180,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
           progress: 1,
           error: null,
           label: config.label,
+          etaMs: 0,
         });
 
         if (config.autoDismissMs !== 0) {
@@ -170,14 +200,18 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
           progress,
           error: poll.message ?? poll.error ?? "Job failed",
           label: config.label,
+          etaMs: null,
         });
         return;
       }
 
+      const elapsed = startedAtRef.current === null ? 0 : Date.now() - startedAtRef.current;
+      const etaMs = projectEtaMs(progress, elapsed);
       setStateIfMounted((prev) => ({
         ...prev,
         status: "running",
         progress,
+        etaMs,
       }));
     } catch (error) {
       if (activeRunIdRef.current !== runId) {
@@ -189,6 +223,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         progress: 0,
         error: toErrorMessage(error, "Job polling failed"),
         label: config.label,
+        etaMs: null,
       });
     } finally {
       pollInFlightRef.current = false;
@@ -205,7 +240,8 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
 
     startInFlightRef.current = true;
     stopPolling();
-    setStateIfMounted({ status: "running", progress: 0, error: null, label: config.label });
+    startedAtRef.current = Date.now();
+    setStateIfMounted({ status: "running", progress: 0, error: null, label: config.label, etaMs: null });
 
     try {
       const job = await config.start();
@@ -232,6 +268,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         progress: 0,
         error: toErrorMessage(error, "Job start failed"),
         label: config.label,
+        etaMs: null,
       });
     } finally {
       if (activeRunIdRef.current === runId) {

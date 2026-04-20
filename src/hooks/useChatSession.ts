@@ -112,7 +112,7 @@ export function useChatSession(): UseChatSessionResult {
                 ) {
                   resolve(extractAssistantContent(status.result))
                 } else if (status.status === "error") {
-                  reject(new Error(status.error ?? status.result ?? "Chat error"))
+                  reject(new Error(status.error ?? extractAssistantContent(status.result) ?? "Chat error"))
                 } else if (polls >= MAX_POLLS) {
                   reject(new Error("Chat timed out"))
                 } else {

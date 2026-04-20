@@ -19,7 +19,7 @@ import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
-import { useActionJob } from './hooks/useActionJob';
+import { useActionJob, formatEta } from './hooks/useActionJob';
 import type { PollResult } from './hooks/useActionJob';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -1726,6 +1726,11 @@ export function ParseUI() {
                           />
                         </div>
                         <span className="tabular-nums text-slate-400">{Math.round(job.state.progress * 100)}%</span>
+                        {job.state.etaMs !== null && job.state.etaMs > 0 && (
+                          <span className="tabular-nums text-slate-400" title="Estimated time remaining">
+                            · ~{formatEta(job.state.etaMs)} left
+                          </span>
+                        )}
                       </>
                     )}
                     {job.state.status === 'complete' && (
@@ -2205,7 +2210,12 @@ export function ParseUI() {
                     </button>
                   </div>
                   {computeJobState.status === 'running' && (
-                    <div className="mt-1 text-[10px] text-indigo-600">Running… {Math.round(computeJobState.progress * 100)}%</div>
+                    <div className="mt-1 text-[10px] text-indigo-600">
+                      Running… {Math.round(computeJobState.progress * 100)}%
+                      {computeJobState.etaMs !== null && computeJobState.etaMs > 0 && (
+                        <span className="text-slate-400"> · ~{formatEta(computeJobState.etaMs)} left</span>
+                      )}
+                    </div>
                   )}
                   {computeJobState.status === 'error' && (
                     <div className="mt-1 text-[10px] text-rose-600">{computeJobState.error}</div>
