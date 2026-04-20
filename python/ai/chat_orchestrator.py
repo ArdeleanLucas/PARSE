@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from .chat_tools import ChatToolError, ParseChatTools
+from .chat_tools import ChatToolError, ParseChatTools, WRITE_ALLOWED_TOOL_NAMES
 from .provider import OpenAIChatRuntime
 
 
@@ -32,8 +32,8 @@ _WRITE_CLAIM_RE = re.compile(
     flags=re.IGNORECASE,
 )
 READ_ONLY_NOTICE = (
-    "This PARSE assistant build is read-only. I can inspect data and draft previews, "
-    "but I cannot apply project writes from chat."
+    "This PARSE assistant build is mostly read-only. I can inspect data and draft previews, "
+    "but only specific allowlisted tools may write dedicated support files; annotations and enrichments remain read-only from chat."
 )
 _ATTACHMENTS_NOTICE = "This build also does not support file/context attachments."
 
@@ -80,8 +80,8 @@ class ChatOrchestrator:
             "   Exception: contact_lexeme_lookup and tag tools are allowed to write their respective data files.\n"
             "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
             "3) No file/context attachments are supported in this MVP.\n"
-            "4) If asked to apply changes, explicitly state the environment is read-only and provide a preview plan instead.\n"
-            "5) Never imply a write happened unless a tool explicitly reports a persisted write (which is not available in this MVP).\n"
+            "4) If asked to apply changes, explicitly state the environment is mostly read-only and provide a preview plan unless an allowlisted write-capable tool is the correct path.\n"
+            "5) Never imply a write happened unless an allowlisted write-capable tool explicitly reports a persisted write.\n"
             "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
             "\n"
             "Available tools:\n"
@@ -161,17 +161,36 @@ class ChatOrchestrator:
         lowered = str(text or "").lower()
         return "attachment" in lowered or "upload" in lowered or "file/context" in lowered
 
-    def _apply_read_only_guard(self, assistant_text: str, latest_user_text: str) -> str:
+    def _apply_read_only_guard(
+        self,
+        assistant_text: str,
+        latest_user_text: str,
+        used_tool_names: Optional[Sequence[str]] = None,
+    ) -> str:
         text = str(assistant_text or "").strip()
         user_text = str(latest_user_text or "").strip()
+        used_tools = {
+            str(tool_name or "").strip()
+            for tool_name in (used_tool_names or [])
+            if str(tool_name or "").strip()
+        }
+        write_allowed_tool_used = bool(used_tools.intersection(WRITE_ALLOWED_TOOL_NAMES))
 
         if not text:
             text = READ_ONLY_NOTICE
 
-        if _WRITE_CLAIM_RE.search(text) and not self._contains_read_only_notice(text):
+        if (
+            _WRITE_CLAIM_RE.search(text)
+            and not write_allowed_tool_used
+            and not self._contains_read_only_notice(text)
+        ):
             text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
 
-        if user_text and _MUTATION_REQUEST_RE.search(user_text):
+        if (
+            user_text
+            and _MUTATION_REQUEST_RE.search(user_text)
+            and not write_allowed_tool_used
+        ):
             if not self._contains_read_only_notice(text):
                 text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
 
@@ -348,7 +367,8 @@ class ChatOrchestrator:
                 else:
                     final_text = "I could not generate a response for this request."
 
-            final_text = self._apply_read_only_guard(final_text, latest_user_text)
+            used_tool_names = [str(entry.get("tool") or "").strip() for entry in tool_trace if str(entry.get("tool") or "").strip()]
+            final_text = self._apply_read_only_guard(final_text, latest_user_text, used_tool_names=used_tool_names)
 
             return {
                 "sessionId": session_id,

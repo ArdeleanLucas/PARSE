@@ -1,10 +1,8 @@
 """Tests for the contact_lexeme_lookup chat tool."""
 
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -12,7 +10,8 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ai.chat_tools import ParseChatTools, ChatToolValidationError
+from ai.chat_orchestrator import ChatOrchestrator, READ_ONLY_NOTICE as ORCHESTRATOR_READ_ONLY_NOTICE
+from ai.chat_tools import ParseChatTools
 
 
 @pytest.fixture
@@ -109,6 +108,44 @@ def test_fetches_with_concept_filter(mock_fetch, tools, project_dir):
 
 
 @patch("compare.contact_lexeme_fetcher.fetch_and_merge")
+def test_concept_ids_resolve_project_ids_to_labels(mock_fetch, tools):
+    """Project concept IDs should resolve to concept_en labels before fetch."""
+    observed = {}
+
+    def fake_fetch_and_merge(**kwargs):
+        observed["csv"] = Path(kwargs["concepts_path"]).read_text(encoding="utf-8")
+        return {"ar": 1}
+
+    mock_fetch.side_effect = fake_fetch_and_merge
+
+    result = tools.execute("contact_lexeme_lookup", {
+        "languages": ["ar"],
+        "conceptIds": ["1"],
+    })
+    assert result["ok"] is True
+    inner = result["result"]
+    assert inner["ok"] is True
+    assert "1,water" in observed["csv"]
+
+
+@patch("compare.contact_lexeme_fetcher.fetch_and_merge")
+def test_contact_lexeme_lookup_write_result_is_not_forced_read_only(mock_fetch, tools):
+    """Successful contact lexeme writes must not be re-labeled as read-only."""
+    mock_fetch.return_value = {"ar": 2}
+
+    result = tools.execute("contact_lexeme_lookup", {
+        "languages": ["ar"],
+    })
+    assert result["ok"] is True
+    inner = result["result"]
+    assert inner["ok"] is True
+    assert inner["readOnly"] is False
+    assert inner["previewOnly"] is False
+    assert inner["mode"] == "write-allowed"
+    assert "readOnlyNotice" not in inner
+
+
+@patch("compare.contact_lexeme_fetcher.fetch_and_merge")
 def test_fetches_with_provider_override(mock_fetch, tools, project_dir):
     """Should pass provider list when specified."""
     mock_fetch.return_value = {"ar": 2}
@@ -189,3 +226,26 @@ def test_reads_languages_from_config(project_dir):
         inner = result["result"]
         assert inner["ok"] is True
         assert set(inner["languages"]) == {"ar", "fa"}
+
+
+def test_read_only_guard_allows_contact_lexeme_lookup_write_messages(project_dir):
+    """Allowed mutating tools should not trigger the read-only refusal after success."""
+    ai_config = project_dir / "config" / "ai_config.json"
+    ai_config.write_text(json.dumps({
+        "chat": {"provider": "openai", "model": "gpt-5.4", "read_only": True}
+    }), encoding="utf-8")
+
+    orchestrator = ChatOrchestrator(
+        project_root=project_dir,
+        tools=ParseChatTools(project_root=project_dir),
+        config_path=ai_config,
+    )
+
+    text = orchestrator._apply_read_only_guard(
+        "Fetched Arabic reference forms and wrote them to sil_contact_languages.json.",
+        "Import Arabic reference forms for comparison.",
+        used_tool_names={"contact_lexeme_lookup"},
+    )
+
+    assert not text.startswith(ORCHESTRATOR_READ_ONLY_NOTICE)
+    assert "wrote them to sil_contact_languages.json" in text

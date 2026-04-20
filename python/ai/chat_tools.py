@@ -35,9 +35,15 @@ MUTATING_TOOL_NAME_RE = re.compile(
     flags=re.IGNORECASE,
 )
 READ_ONLY_NOTICE = (
-    "PARSE chat MVP is read-only. Tools can inspect/analyze data and run background previews, "
-    "but they cannot persist annotation/config/enrichment writes."
+    "PARSE chat MVP is mostly read-only. Tools can inspect/analyze data and run background previews; "
+    "only specific allowlisted tools may write dedicated support files such as contact lexeme config or parse-tags, "
+    "not annotations or enrichments."
 )
+WRITE_ALLOWED_TOOL_NAMES = frozenset({
+    "contact_lexeme_lookup",
+    "import_tag_csv",
+    "prepare_tag_import",
+})
 
 
 class ChatToolError(Exception):
@@ -515,7 +521,7 @@ class ParseChatTools:
                             "type": "array",
                             "maxItems": 100,
                             "items": {"type": "string", "minLength": 1, "maxLength": 100},
-                            "description": "English concept labels to look up. Defaults to all project concepts.",
+                            "description": "Project concept IDs or English concept labels to look up. Defaults to all project concepts.",
                         },
                         "providers": {
                             "type": "array",
@@ -568,6 +574,32 @@ class ParseChatTools:
             result["readOnlyNotice"] = READ_ONLY_NOTICE
         return result
 
+    def _finalize_write_allowed_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = _deepcopy_jsonable(payload)
+
+        preview_only = bool(
+            result.get("previewOnly")
+            or result.get("preview")
+            or result.get("dryRun")
+            or result.get("needsTagName")
+        )
+        if "previewOnly" not in result:
+            result["previewOnly"] = preview_only
+
+        if "readOnly" not in result:
+            result["readOnly"] = preview_only
+
+        if "mode" not in result:
+            result["mode"] = "read-only" if bool(result.get("readOnly")) else "write-allowed"
+
+        if bool(result.get("readOnly")):
+            if "readOnlyNotice" not in result:
+                result["readOnlyNotice"] = READ_ONLY_NOTICE
+        else:
+            result.pop("readOnlyNotice", None)
+
+        return result
+
     def execute(self, tool_name: str, raw_args: Any) -> Dict[str, Any]:
         """Execute a validated allowlisted tool."""
         name = str(tool_name or "").strip()
@@ -579,9 +611,8 @@ class ParseChatTools:
             raise ChatToolValidationError("Tool is not allowlisted: {0}".format(name))
 
         # Defense-in-depth: mutating tool names remain blocked even if added by mistake,
-        # except for explicitly allowlisted tag-import tools which need write access.
-        _TAG_TOOL_ALLOWLIST = {"import_tag_csv", "prepare_tag_import"}
-        if MUTATING_TOOL_NAME_RE.search(name) and name not in _TAG_TOOL_ALLOWLIST:
+        # except for explicitly allowlisted tools that may write dedicated support files.
+        if MUTATING_TOOL_NAME_RE.search(name) and name not in WRITE_ALLOWED_TOOL_NAMES:
             raise ChatToolValidationError(
                 "Mutating tool calls are disabled in read-only mode: {0}.".format(name)
             )
@@ -619,7 +650,11 @@ class ParseChatTools:
         return {
             "tool": name,
             "ok": True,
-            "result": self._finalize_read_only_result(result),
+            "result": (
+                self._finalize_write_allowed_result(result)
+                if name in WRITE_ALLOWED_TOOL_NAMES
+                else self._finalize_read_only_result(result)
+            ),
         }
 
     def _normalize_speaker(self, raw_speaker: Any) -> str:
@@ -803,8 +838,9 @@ class ParseChatTools:
 
         if "constraints" in include:
             out["constraints"] = {
-                "mode": "read-only",
+                "mode": "mostly-read-only",
                 "writesAllowed": False,
+                "writeAllowedTools": sorted(WRITE_ALLOWED_TOOL_NAMES),
                 "attachmentsSupported": False,
                 "readOnlyNotice": READ_ONLY_NOTICE,
                 "toolAllowlist": self.tool_names(),
@@ -1396,7 +1432,25 @@ class ParseChatTools:
         concept_ids_raw = args.get("conceptIds")
         concept_filter = None
         if isinstance(concept_ids_raw, list) and concept_ids_raw:
-            concept_filter = [str(c).strip() for c in concept_ids_raw if str(c).strip()]
+            project_concepts = self._load_project_concepts()
+            label_by_id = {
+                str(concept.get("id") or "").strip(): str(concept.get("label") or "").strip()
+                for concept in project_concepts
+                if str(concept.get("id") or "").strip() and str(concept.get("label") or "").strip()
+            }
+            label_by_label = {
+                str(concept.get("label") or "").strip().lower(): str(concept.get("label") or "").strip()
+                for concept in project_concepts
+                if str(concept.get("label") or "").strip()
+            }
+            concept_filter = []
+            for raw_concept in concept_ids_raw:
+                token = str(raw_concept).strip()
+                if not token:
+                    continue
+                concept_label = label_by_id.get(token) or label_by_label.get(token.lower()) or token
+                if concept_label not in concept_filter:
+                    concept_filter.append(concept_label)
 
         # Load ai_config for provider credentials (grokipedia needs API keys)
         ai_config = _read_json_file(self.config_path, {})
