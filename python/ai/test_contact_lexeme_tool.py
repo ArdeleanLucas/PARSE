@@ -61,7 +61,7 @@ def test_tool_has_openai_schema(tools):
 
 def test_no_languages_and_no_config_returns_error(tools):
     """When no languages given and config is empty, should return helpful error."""
-    result = tools.execute("contact_lexeme_lookup", {})
+    result = tools.execute("contact_lexeme_lookup", {"dryRun": False})
     assert result["ok"] is True
     inner = result["result"]
     assert inner["ok"] is False
@@ -74,6 +74,7 @@ def test_fetches_with_explicit_languages(mock_fetch, tools, project_dir):
     mock_fetch.return_value = {"ar": 3, "fa": 2}
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar", "fa"],
     })
     assert result["ok"] is True
@@ -95,6 +96,7 @@ def test_fetches_with_concept_filter(mock_fetch, tools, project_dir):
     mock_fetch.return_value = {"ar": 1}
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
         "conceptIds": ["water"],
     })
@@ -119,6 +121,7 @@ def test_concept_ids_resolve_project_ids_to_labels(mock_fetch, tools):
     mock_fetch.side_effect = fake_fetch_and_merge
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
         "conceptIds": ["1"],
     })
@@ -134,6 +137,7 @@ def test_contact_lexeme_lookup_write_result_is_not_forced_read_only(mock_fetch, 
     mock_fetch.return_value = {"ar": 2}
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
     })
     assert result["ok"] is True
@@ -151,6 +155,7 @@ def test_fetches_with_provider_override(mock_fetch, tools, project_dir):
     mock_fetch.return_value = {"ar": 2}
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
         "providers": ["grokipedia"],
     })
@@ -168,6 +173,7 @@ def test_fetches_with_overwrite(mock_fetch, tools, project_dir):
     mock_fetch.return_value = {"ar": 5}
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
         "overwrite": True,
     })
@@ -185,6 +191,7 @@ def test_handles_fetch_exception(mock_fetch, tools, project_dir):
     mock_fetch.side_effect = RuntimeError("Network timeout")
 
     result = tools.execute("contact_lexeme_lookup", {
+        "dryRun": False,
         "languages": ["ar"],
     })
     assert result["ok"] is True
@@ -202,7 +209,7 @@ def test_no_concepts_csv_returns_error(tmp_path):
     (tmp_path / "audio").mkdir()
 
     tools = ParseChatTools(project_root=tmp_path)
-    result = tools.execute("contact_lexeme_lookup", {"languages": ["ar"]})
+    result = tools.execute("contact_lexeme_lookup", {"dryRun": False, "languages": ["ar"]})
     assert result["ok"] is True
     inner = result["result"]
     assert inner["ok"] is False
@@ -221,7 +228,7 @@ def test_reads_languages_from_config(project_dir):
 
     with patch("compare.contact_lexeme_fetcher.fetch_and_merge") as mock_fetch:
         mock_fetch.return_value = {"ar": 1, "fa": 1}
-        result = tools.execute("contact_lexeme_lookup", {})
+        result = tools.execute("contact_lexeme_lookup", {"dryRun": False})
         assert result["ok"] is True
         inner = result["result"]
         assert inner["ok"] is True

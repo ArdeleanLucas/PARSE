@@ -382,9 +382,9 @@ All tools from `ParseChatTools` are available over MCP with the same semantics a
 | `cognate_compute_preview` | Compute cognate/similarity preview from annotations (read-only) |
 | `cross_speaker_match_preview` | Cross-speaker match candidates from STT output |
 | `spectrogram_preview` | Spectrogram preview for a time-bounded segment |
-| `contact_lexeme_lookup` | Preview reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); read-only — does not write to sil_contact_languages.json |
-| `stt_start` | Start STT background job on an audio file |
-| `stt_status` | Poll status/progress of an STT job |
+| `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); **dryRun required** — pass dryRun=true to preview, dryRun=false to merge into sil_contact_languages.json |
+| `stt_start` | Start STT background job on an audio file (proxied to the running PARSE HTTP server on PARSE_API_PORT, default 8766, so job state is shared with the browser UI) |
+| `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
 | `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
 | `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
 

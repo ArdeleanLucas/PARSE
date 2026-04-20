@@ -79,11 +79,108 @@ def _resolve_project_root(cli_root: Optional[str] = None) -> Path:
     return Path.cwd()
 
 
+def _resolve_api_base() -> str:
+    """Resolve the HTTP base URL of the running PARSE API server.
+
+    The MCP adapter proxies STT calls through the HTTP server instead of
+    running a parallel job manager — this keeps job state consistent with
+    the browser UI and avoids forking the in-memory job store.
+    """
+    port = os.environ.get("PARSE_API_PORT") or os.environ.get("PARSE_PORT") or "8766"
+    return "http://127.0.0.1:{0}".format(str(port).strip() or "8766")
+
+
+def _build_stt_callbacks() -> tuple:
+    """Build ParseChatTools' start_stt_job / get_job_snapshot callbacks that
+    proxy to the running HTTP server. Returns (start_fn, snapshot_fn).
+
+    If the HTTP server is unreachable, the callbacks return clear errors that
+    surface through the chat tool's normal validation path rather than letting
+    urllib exceptions leak to the MCP client.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def _post_json(path: str, payload: Dict[str, Any], timeout: float = 20.0) -> Dict[str, Any]:
+        """POST JSON to the PARSE API and return the parsed body.
+
+        For HTTP errors (404, 500, etc.) the server still sends a JSON body
+        with an error message — read it and return that so the calling chat
+        tool can surface the real reason (e.g. "Unknown jobId") instead of a
+        generic "unreachable" message. Only network-level failures raise.
+        """
+        data = _json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url="{0}{1}".format(base_url, path),
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            body = ""
+            try:
+                body = http_err.read().decode("utf-8") or ""
+            except Exception:
+                pass
+            try:
+                parsed_err = _json.loads(body) if body else {}
+            except _json.JSONDecodeError:
+                parsed_err = {"error": body[:400] or http_err.reason}
+            if isinstance(parsed_err, dict):
+                parsed_err.setdefault("status", "error")
+                parsed_err.setdefault("httpStatus", http_err.code)
+                return parsed_err
+            return {"status": "error", "error": str(parsed_err), "httpStatus": http_err.code}
+        parsed = _json.loads(body)
+        return parsed if isinstance(parsed, dict) else {}
+
+    def start_stt_job(speaker: str, source_wav: str, language: Optional[str]) -> str:
+        try:
+            response = _post_json(
+                "/api/stt",
+                {"speaker": speaker, "source_wav": source_wav, "language": language},
+            )
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                "PARSE API unreachable at {0} — cannot start STT job. "
+                "Ensure the Python server is running (scripts/parse-run.sh). "
+                "Underlying error: {1}".format(base_url, exc)
+            )
+        job_id = str(
+            response.get("job_id") or response.get("jobId") or ""
+        ).strip()
+        if not job_id:
+            raise RuntimeError(
+                "PARSE API returned no job_id for STT start: {0}".format(response)
+            )
+        return job_id
+
+    def get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            response = _post_json("/api/stt/status", {"job_id": job_id})
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                "PARSE API unreachable at {0} — cannot poll STT job. "
+                "Underlying error: {1}".format(base_url, exc)
+            )
+        return response or None
+
+    return start_stt_job, get_job_snapshot
+
+
 def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     """Create and return the PARSE MCP server with all tools registered.
 
     Wraps ParseChatTools so every tool available to the built-in AI chat
-    is also available over MCP for third-party agents.
+    is also available over MCP for third-party agents. STT tools proxy
+    through the running HTTP server on PARSE_API_PORT (default 8766) so
+    job state is shared with the browser UI.
     """
     if not _MCP_AVAILABLE:
         raise ImportError(
@@ -96,7 +193,12 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     root = _resolve_project_root(project_root)
     logger.info("PARSE MCP server starting with project root: %s", root)
 
-    tools = ParseChatTools(project_root=root)
+    start_stt, get_snapshot = _build_stt_callbacks()
+    tools = ParseChatTools(
+        project_root=root,
+        start_stt_job=start_stt,
+        get_job_snapshot=get_snapshot,
+    )
 
     mcp = FastMCP(
         "parse",
@@ -275,26 +377,35 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
 
     @mcp.tool()
     def contact_lexeme_lookup(
+        dryRun: bool,
         languages: Optional[list] = None,
         conceptIds: Optional[list] = None,
         providers: Optional[list] = None,
         maxConcepts: Optional[int] = None,
+        overwrite: Optional[bool] = None,
     ) -> str:
-        """Preview reference forms (IPA) for contact/comparison languages. Read-only —
-        returns fetched forms without writing to sil_contact_languages.json. To
-        persist results, run the contact-lexemes compute job from the Compare UI.
+        """Fetch reference forms (IPA) for contact/comparison languages.
+
+        Gated by dryRun — ALWAYS pass dryRun=true first to preview, then
+        dryRun=false after the user confirms. Only the second call writes to
+        sil_contact_languages.json.
 
         Args:
-            languages: ISO 639 language codes registered in sil_contact_languages.json
-                (e.g. ["ar", "fa", "ckb"]). Defaults to all configured languages.
-            conceptIds: Concept labels matching the concept_en column in concepts.csv.
-                Defaults to all concepts.
-            providers: Provider priority order (csv_override, lingpy_wordlist, pycldf,
-                pylexibank, asjp, cldf, wikidata, wiktionary, grokipedia, literature).
-            maxConcepts: Cap on concepts processed this call (1–200). Prevents runaway
-                fetches for sessions that only want a small sample.
+            dryRun: Required. If true, preview only (no filesystem writes).
+                If false, fetch and merge into sil_contact_languages.json.
+            languages: ISO 639 language codes (e.g. ["ar", "fa", "ckb"]).
+                Defaults to all configured languages in sil_contact_languages.json.
+            conceptIds: Concept labels matching the concept_en column in
+                concepts.csv. Defaults to all concepts.
+            providers: Provider priority order (csv_override, lingpy_wordlist,
+                pycldf, pylexibank, asjp, cldf, wikidata, wiktionary, grokipedia,
+                literature).
+            maxConcepts: Cap on concepts processed this call (1–200). Useful for
+                bounded previews.
+            overwrite: When dryRun=false, re-fetch even if forms already exist.
+                Ignored when dryRun=true.
         """
-        args: Dict[str, Any] = {}
+        args: Dict[str, Any] = {"dryRun": dryRun}
         if languages is not None:
             args["languages"] = languages
         if conceptIds is not None:
@@ -303,6 +414,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             args["providers"] = providers
         if maxConcepts is not None:
             args["maxConcepts"] = maxConcepts
+        if overwrite is not None:
+            args["overwrite"] = overwrite
         result = tools.execute("contact_lexeme_lookup", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
