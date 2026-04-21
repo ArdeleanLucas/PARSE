@@ -160,7 +160,7 @@ The assistant operates with read and write access to the project. It can stage f
 
 ### One-command launch (recommended)
 
-The `scripts/parse-run.sh` launcher (tracked in this repo) starts both servers, pulls the latest code, cleans up stale processes on both WSL and Windows sides, and health-checks the API before printing URLs. A shell alias (`parse-run`) is typically wired to call this script.
+The `scripts/parse-run.sh` launcher (tracked in this repo) starts both servers, pulls the latest code, cleans up stale processes on both WSL and Windows sides, probes the API port before launch, and health-checks the API before printing URLs. A shell alias (`parse-run`) is typically wired to call this script.
 
 ```bash
 scripts/parse-run.sh    # same as `parse-run` alias; run directly from repo root
@@ -186,15 +186,40 @@ On success you will see:
 
 Open **http://localhost:5173/** in your browser for the React UI.
 
+### Workspace-first bootstrap (recommended on a fresh machine)
+
+For real fieldwork use, keep generated runtime state outside the git checkout. `scripts/parse-init-workspace.sh` scaffolds a standalone workspace for copied source audio, annotations, peaks, chat memory, and config-local runtime files.
+
+```bash
+# scaffold once
+scripts/parse-init-workspace.sh /path/to/parse-workspace
+
+# then launch PARSE against that workspace
+PARSE_WORKSPACE_ROOT="/path/to/parse-workspace" \
+  PARSE_CHAT_MEMORY_PATH="/path/to/parse-workspace/parse-memory.md" \
+  PARSE_EXTERNAL_READ_ROOTS="/mnt/c/Users/Lucas/Thesis" \
+  scripts/parse-run.sh
+```
+
+This keeps original WAV/CSV sources untouched. Chat-assisted onboarding copies selected source files into `audio/original/<speaker>/` inside the workspace rather than mutating the source tree.
+
 Environment overrides:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PARSE_PY` | `python3` | Python interpreter. Set to a Windows `python.exe` (e.g. `/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe`) when running from WSL against a Windows conda env. |
 | `PARSE_ROOT` | auto-detected | Repo root. |
+| `PARSE_WORKSPACE_ROOT` | `PARSE_ROOT` | Workspace/data root used by backend chat tools and runtime files. Point this outside the repo for fieldwork use. |
+| `PARSE_CHAT_DOCS_ROOT` | `PARSE_WORKSPACE_ROOT` | Optional docs/text root used by `read_text_preview`. |
+| `PARSE_CHAT_MEMORY_PATH` | `PARSE_WORKSPACE_ROOT/parse-memory.md` | Persistent markdown memory file used by the chat assistant. |
+| `PARSE_EXTERNAL_READ_ROOTS` | empty | Absolute roots the chat assistant may read outside the workspace for onboarding and file previews. Use OS path separators for multiple roots, or `*` to disable the sandbox entirely. |
+| `PARSE_CHAT_READ_ONLY` | empty | Override chat mutability: `1` forces read-only; `0` forces write-enabled. Otherwise PARSE defers to `config/ai_config.json`. |
 | `PARSE_API_PORT` | `8766` | API server port. |
 | `PARSE_VITE_PORT` | `5173` | Vite dev server port. |
 | `PARSE_SKIP_PULL` | `0` | Set to `1` to skip the `git pull` step. |
+| `PARSE_PULL_MODE` | `auto` | Git integration strategy: `auto`, `ff`, `rebase`, or `reset`. |
+
+For machine-local overrides without editing tracked files, create a gitignored `.parse-env` file in the repo root. `parse-run.sh` sources it before applying defaults, so settings like `PARSE_PY` or `PARSE_EXTERNAL_READ_ROOTS` can live there permanently.
 
 Two companion commands are also available:
 
@@ -208,14 +233,17 @@ parse-logs vite         # tail Vite dev server output
 
 When `PARSE_PY` points at a Windows `python.exe` (a conda env on `C:`), the actual server process runs on the Windows side. WSL's `pkill`/`fuser` cannot signal Windows processes, so `parse-run.sh` detects this case and additionally calls `taskkill.exe` via `/mnt/c/Windows/System32/` to clean up zombie `python.exe` instances holding port 8766. This prevents the "empty reply from server" failure mode where a broken prior process blocks the port.
 
+If `parse-run.sh` reports that it **cannot bind** `127.0.0.1:8766` with `WinError 10013` or `10048`, this is usually a Windows/WSL phantom port reservation. The launcher now detects that case before startup and prints the fix: run `wsl --shutdown` from Windows Command Prompt or PowerShell, then relaunch PARSE. You can also temporarily override the port with `PARSE_API_PORT=<other>`.
+
 #### What `scripts/parse-run.sh` does
 
-1. `git pull origin main --ff-only` — fast-forward to latest main (skipped if `PARSE_SKIP_PULL=1`)
+1. Integrates latest `origin/main` according to `PARSE_PULL_MODE` (skipped if `PARSE_SKIP_PULL=1`)
 2. Kills any stale Python or Vite processes on ports 8766 / 5173
-3. Starts the **Python API server** (`python/server.py`) on `:8766`
-4. Waits for `/api/config` to return 200 (up to 12 s)
-5. Starts the **Vite dev server** (`npx vite --host`) on `:5173`
-6. Waits for Vite to respond, then prints URLs
+3. Probes whether the API port is actually bindable before launch
+4. Starts the **Python API server** (`python/server.py`) on `:8766`
+5. Waits for `/api/config` to return 200 (up to 12 s)
+6. Starts the **Vite dev server** (`npx vite --host`) on `:5173`
+7. Waits for Vite to respond, then prints URLs
 
 Both servers must be running. The Python backend serves the API routes;
 the Vite dev server serves the React/TypeScript frontend with Tailwind CSS
@@ -289,13 +317,13 @@ python/
   adapters/
     mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (11 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (16 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
     word_finder.py      -- Segment location in full recordings
   compare/              -- Compare pipeline (cognates, offsets, matching)
-    providers/          -- CLEF provider registry (11 providers)
+    providers/          -- CLEF provider registry and provider adapters
   shared/               -- Shared Python utilities
 config/
   ai_config.example.json -- Template for AI provider configuration (tracked)
@@ -311,20 +339,23 @@ dist/                   -- Vite build output (generated, gitignored)
 
 ## AI Chat Tools
 
-The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. These tools are invoked by the LLM during chat sessions — they are not exposed as a standalone server.
+The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **16 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
 
-### Tools (10)
+### Tools (16)
 
-**Read-only**
+**Read-only / preview**
 
 | Tool | Description |
 |---|---|
 | `project_context_read` | Full project metadata and speaker status |
 | `annotation_read` | Read annotation data for a speaker (with optional tier/concept filtering) |
-| `read_csv_preview` | Preview a CSV file (e.g. `concepts.csv`) |
 | `cognate_compute_preview` | Preview cognate computation results |
 | `cross_speaker_match_preview` | Preview cross-speaker matching candidates |
 | `spectrogram_preview` | Generate spectrogram preview for a segment |
+| `read_audio_info` | Read WAV metadata (duration, sample rate, channels, sample width, file size) |
+| `read_csv_preview` | Preview a CSV file (e.g. `concepts.csv`) |
+| `read_text_preview` | Preview Markdown/text files from the workspace or docs root |
+| `parse_memory_read` | Read persistent chat memory from `parse-memory.md` |
 
 **Job-triggering**
 
@@ -340,11 +371,21 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 | `prepare_tag_import` | Validate and preview a tag CSV before import |
 | `import_tag_csv` | Import tags from a prepared CSV file |
 
+**Write / merge operations**
+
+| Tool | Description |
+|---|---|
+| `contact_lexeme_lookup` | Fetch and optionally merge contact-language reference forms via the CLEF provider chain (`dryRun=true` first) |
+| `onboard_speaker_import` | Copy external audio/CSV into the workspace, scaffold speaker state, and register it in `source_index.json` (`dryRun=true` first) |
+| `parse_memory_upsert_section` | Create or replace a `## Section` block in `parse-memory.md` (`dryRun=true` first) |
+
+The built-in assistant operates with both read and write access to the project, but the write-capable tools are intentionally gated. In particular, onboarding is **one speaker at a time**, and multi-source speakers are flagged as requiring manual / virtual-timeline coordination because PARSE does not yet auto-align multiple WAVs into a shared annotation timeline.
+
 ---
 
 ## MCP Server Mode
 
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing all of its AI chat tools over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing a **14-tool MCP-safe subset** of its AI chat/tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
 
 ```bash
 python python/adapters/mcp_adapter.py                          # auto-detect project root
@@ -363,7 +404,9 @@ Add PARSE as an MCP server in your client config. Example for Claude Desktop (`c
             "command": "python",
             "args": ["/path/to/parse/python/adapters/mcp_adapter.py"],
             "env": {
-                "PARSE_PROJECT_ROOT": "/path/to/your/parse/project"
+                "PARSE_PROJECT_ROOT": "/path/to/your/parse/project",
+                "PARSE_EXTERNAL_READ_ROOTS": "/mnt/c/Users/Lucas/Thesis",
+                "PARSE_CHAT_MEMORY_PATH": "/path/to/parse-memory.md"
             }
         }
     }
@@ -372,7 +415,7 @@ Add PARSE as an MCP server in your client config. Example for Claude Desktop (`c
 
 ### Exposed Tools
 
-All tools from `ParseChatTools` are available over MCP with the same semantics as the built-in AI chat dock:
+The MCP adapter exposes the subset of `ParseChatTools` that is currently registered in `python/adapters/mcp_adapter.py`:
 
 | Tool | Description |
 |---|---|
@@ -387,6 +430,9 @@ All tools from `ParseChatTools` are available over MCP with the same semantics a
 | `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
 | `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
 | `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
+| `onboard_speaker_import` | Import one speaker from on-disk audio (and optional CSV) into the workspace; dry-run first; multi-source speakers may require manual virtual-timeline coordination |
+| `parse_memory_read` | Read persistent PARSE chat memory from `parse-memory.md` |
+| `parse_memory_upsert_section` | Upsert a `## Section` block in `parse-memory.md`; dry-run first |
 
 > **Requires:** `pip install 'mcp[cli]'`
 
