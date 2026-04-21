@@ -321,6 +321,19 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
             <div className="mt-1 text-[10px] text-slate-400">{msg.timestamp}</div>
           </div>
         ))}
+        {sending && (messages.length === 0 || messages[messages.length - 1].role === "user") && (
+          <div
+            className="flex max-w-[80%] items-center gap-1.5 self-start rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
+            aria-live="polite"
+            aria-label="PARSE AI is thinking"
+            data-testid="thinking-indicator"
+          >
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
+            <span className="ml-1.5 text-[12px] font-medium text-slate-500">Thinking…</span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-slate-200 bg-white px-4 py-3">

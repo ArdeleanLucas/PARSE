@@ -432,18 +432,32 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
         >
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">PARSE AI</span>
           <div className="h-4 w-px bg-slate-200"/>
-          <input
-            value={collapsedInput}
-            onChange={e => setCollapsedInput(e.target.value)}
-            onClick={e => e.stopPropagation()}
-            onFocus={() => onMinimize()}
-            placeholder={`Ask PARSE AI about ${conceptName} (#${conceptId})…`}
-            className="flex-1 bg-transparent text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none"
-          />
+          {chatSession.sending ? (
+            <div
+              className="flex flex-1 items-center gap-1.5 text-[13px] text-slate-500"
+              aria-live="polite"
+              aria-label="PARSE AI is thinking"
+            >
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]"/>
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]"/>
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"/>
+              <span className="ml-1.5 font-medium">Thinking…</span>
+            </div>
+          ) : (
+            <input
+              value={collapsedInput}
+              onChange={e => setCollapsedInput(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              onFocus={() => onMinimize()}
+              placeholder={`Ask PARSE AI about ${conceptName} (#${conceptId})…`}
+              className="flex-1 bg-transparent text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none"
+            />
+          )}
           <button
             type="submit"
             onClick={e => e.stopPropagation()}
-            className="grid h-8 w-8 place-items-center rounded-md text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-700"
+            disabled={chatSession.sending}
+            className="grid h-8 w-8 place-items-center rounded-md text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-700 disabled:opacity-40"
             title="Send"
           >
             <Send className="h-3.5 w-3.5"/>
@@ -759,6 +773,18 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
                   </div>
                 </div>
               ))}
+              {chatSession.sending &&
+                (chatSession.messages.length === 0 ||
+                  chatSession.messages[chatSession.messages.length - 1].role === 'user') && (
+                  <div className="flex justify-start" aria-live="polite" aria-label="PARSE AI is thinking">
+                    <div className="flex max-w-[78%] items-center gap-1.5 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 shadow-sm">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]"/>
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]"/>
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"/>
+                      <span className="ml-1.5 text-[12px] font-medium text-slate-500">Thinking…</span>
+                    </div>
+                  </div>
+                )}
             </div>
           </div>
 
