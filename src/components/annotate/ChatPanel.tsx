@@ -35,11 +35,28 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    getAuthStatus()
-      .then((s: AuthStatus) => {
-        setAuthState(s.authenticated ? "authenticated" : "unauthenticated")
-      })
-      .catch(() => setAuthState("unauthenticated"))
+    // Retry up to ~10 s so a brief backend restart during a code update
+    // doesn't incorrectly drop a persisted API key.
+    let attempt = 0
+    const delays = [500, 1000, 2000, 3000, 4000]
+    let cancelled = false
+
+    const tryFetch = () => {
+      getAuthStatus()
+        .then((s: AuthStatus) => {
+          if (!cancelled) setAuthState(s.authenticated ? "authenticated" : "unauthenticated")
+        })
+        .catch(() => {
+          if (cancelled) return
+          if (attempt < delays.length) {
+            setTimeout(tryFetch, delays[attempt++])
+          } else {
+            setAuthState("unauthenticated")
+          }
+        })
+    }
+    tryFetch()
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {

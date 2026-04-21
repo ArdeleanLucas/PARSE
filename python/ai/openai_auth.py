@@ -44,7 +44,9 @@ _auth_lock = threading.Lock()
 
 def _config_dir() -> pathlib.Path:
     """Return the config directory, creating it if needed."""
-    d = pathlib.Path.cwd() / "config"
+    # Anchor to the repo root (python/ai/ -> python/ -> repo root) so the path
+    # is stable regardless of the working directory when the server is launched.
+    d = pathlib.Path(__file__).resolve().parents[2] / "config"
     d.mkdir(exist_ok=True)
     return d
 
