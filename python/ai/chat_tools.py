@@ -44,6 +44,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "import_tag_csv",
     "prepare_tag_import",
 })
+TEXT_PREVIEW_EXTENSIONS = frozenset({".md", ".markdown", ".txt", ".rst"})
 
 
 class ChatToolError(Exception):
@@ -239,11 +240,13 @@ class ParseChatTools:
         self,
         project_root: Path,
         config_path: Optional[Path] = None,
+        docs_root: Optional[Path] = None,
         start_stt_job: Optional[Callable[[str, str, Optional[str]], str]] = None,
         get_job_snapshot: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
+        self.docs_root = Path(docs_root).expanduser().resolve() if docs_root else None
 
         self.annotations_dir = self.project_root / "annotations"
         self.audio_dir = self.project_root / "audio"
@@ -448,6 +451,24 @@ class ParseChatTools:
                     "properties": {
                         "csvPath": {"type": "string", "maxLength": 512},
                         "maxRows": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
+                    },
+                },
+            ),
+            "read_text_preview": ChatToolSpec(
+                name="read_text_preview",
+                description=(
+                    "Read a Markdown/text file preview from workspace or docs root. "
+                    "Allowed extensions: .md, .markdown, .txt, .rst. Read-only."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path"],
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "startLine": {"type": "integer", "minimum": 1, "maximum": 200000, "default": 1},
+                        "maxLines": {"type": "integer", "minimum": 1, "maximum": 400, "default": 120},
+                        "maxChars": {"type": "integer", "minimum": 200, "maximum": 50000, "default": 12000},
                     },
                 },
             ),
@@ -1708,6 +1729,89 @@ class ParseChatTools:
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def _tool_read_text_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read a bounded Markdown/text preview from workspace/docs root."""
+        raw_path = str(args.get("path") or "").strip()
+        start_line = int(args.get("startLine") or 1)
+        max_lines = int(args.get("maxLines") or 120)
+        max_chars = int(args.get("maxChars") or 12000)
+
+        allowed_roots = [self.project_root]
+        if self.docs_root is not None:
+            allowed_roots.append(self.docs_root)
+
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.project_root / candidate
+        text_path = candidate.resolve()
+
+        root_allowed = False
+        for root in allowed_roots:
+            try:
+                text_path.relative_to(root.resolve())
+                root_allowed = True
+                break
+            except ValueError:
+                continue
+
+        if not root_allowed:
+            return {
+                "ok": False,
+                "error": "Path is outside allowed roots",
+            }
+
+        extension = text_path.suffix.lower()
+        if extension not in TEXT_PREVIEW_EXTENSIONS:
+            return {
+                "ok": False,
+                "error": "Unsupported file type: {0}. Allowed: {1}".format(
+                    extension or "(none)", ", ".join(sorted(TEXT_PREVIEW_EXTENSIONS))
+                ),
+            }
+
+        if not text_path.exists() or not text_path.is_file():
+            return {"ok": False, "error": "File not found: {0}".format(text_path)}
+
+        try:
+            lines = text_path.read_text(encoding="utf-8").splitlines()
+        except Exception as exc:
+            return {"ok": False, "error": "Failed to read text file: {0}".format(exc)}
+
+        if start_line < 1:
+            start_line = 1
+
+        start_idx = start_line - 1
+        if start_idx >= len(lines):
+            return {
+                "ok": True,
+                "path": str(text_path),
+                "lineStart": start_line,
+                "lineEnd": start_line,
+                "totalLines": len(lines),
+                "truncated": False,
+                "content": "",
+                "message": "startLine is beyond end-of-file",
+            }
+
+        selected = lines[start_idx:start_idx + max_lines]
+        content = "\n".join(selected)
+        truncated = False
+        if len(content) > max_chars:
+            content = content[:max_chars]
+            truncated = True
+        if (start_idx + max_lines) < len(lines):
+            truncated = True
+
+        return {
+            "ok": True,
+            "path": str(text_path),
+            "lineStart": start_line,
+            "lineEnd": start_line + max(0, len(selected) - 1),
+            "totalLines": len(lines),
+            "truncated": truncated,
+            "content": content,
+        }
 
     def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Match CSV rows to project concept IDs and optionally create a tag."""

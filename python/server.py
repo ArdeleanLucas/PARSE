@@ -1354,6 +1354,21 @@ def _chat_get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
     return _get_job_snapshot(job_id)
 
 
+def _chat_docs_root() -> Optional[pathlib.Path]:
+    raw = str(os.environ.get("PARSE_CHAT_DOCS_ROOT") or "").strip()
+    if not raw:
+        return None
+
+    root = pathlib.Path(raw).expanduser()
+    if not root.is_absolute():
+        root = _project_root() / root
+
+    try:
+        return root.resolve()
+    except Exception:
+        return root
+
+
 def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
     global _chat_tools_runtime
     global _chat_orchestrator_runtime
@@ -1363,6 +1378,7 @@ def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
             _chat_tools_runtime = ParseChatTools(
                 project_root=_project_root(),
                 config_path=_config_path(),
+                docs_root=_chat_docs_root(),
                 start_stt_job=_chat_start_stt_job,
                 get_job_snapshot=_chat_get_job_snapshot,
             )
