@@ -235,6 +235,18 @@ def test_reads_languages_from_config(project_dir):
         assert set(inner["languages"]) == {"ar", "fa"}
 
 
+def test_system_prompt_requires_readable_markdown_responses(project_dir, tools):
+    """Chat prompt should tell the model to emit readable markdown, not one-line punctuation soup."""
+    ai_config = project_dir / "config" / "ai_config.json"
+    ai_config.write_text(json.dumps({}), encoding="utf-8")
+
+    orchestrator = ChatOrchestrator(project_root=project_dir, tools=tools, config_path=ai_config)
+
+    assert "Use readable Markdown" in orchestrator._system_prompt
+    assert "blank lines between sections" in orchestrator._system_prompt
+    assert "Never wrap the entire reply in a code fence" in orchestrator._system_prompt
+
+
 def test_read_only_guard_allows_contact_lexeme_lookup_write_messages(project_dir):
     """Allowed mutating tools should not trigger the read-only refusal after success."""
     ai_config = project_dir / "config" / "ai_config.json"

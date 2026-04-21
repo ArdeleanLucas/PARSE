@@ -27,6 +27,7 @@ import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
+import { ChatMarkdown } from './components/shared/ChatMarkdown';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -755,7 +756,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
               {chatSession.messages.length === 0 && !chatSession.sending && messages.length > 0 && messages.map(m => (
                 <div key={m.id} className="flex justify-start">
                   <div className="max-w-[78%] rounded-2xl bg-white px-4 py-2.5 text-[13px] leading-relaxed text-slate-800 ring-1 ring-slate-200/70 shadow-sm">
-                    {m.content}
+                    <ChatMarkdown content={m.content} />
                   </div>
                 </div>
               ))}
@@ -766,7 +767,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
                       ? 'bg-slate-900 text-white'
                       : 'bg-white text-slate-800 ring-1 ring-slate-200/70 shadow-sm'
                   }`}>
-                    {m.content}
+                    {m.role === 'assistant' ? <ChatMarkdown content={m.content} /> : m.content}
                     {chatSession.sending && i === chatSession.messages.length - 1 && m.role === 'assistant' && (
                       <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-slate-500"/>
                     )}

@@ -3,6 +3,12 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-libra
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 
+const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
+  mockGetAuthStatus: vi.fn(),
+  mockPollAuth: vi.fn(),
+  mockStartAuthFlow: vi.fn(),
+}));
+
 let mockConfig: ProjectConfig | null = null;
 let mockTags: Tag[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
@@ -30,6 +36,9 @@ const mockTagSetState = vi.fn();
 const mockPlaybackSetState = vi.fn();
 const mockConfigSetState = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
+let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
+let mockChatSending = false;
+let mockChatError: string | null = null;
 
 vi.mock("./stores/configStore", () => {
   const useConfigStore = (selector: (s: unknown) => unknown) =>
@@ -83,10 +92,10 @@ vi.mock("./stores/playbackStore", () => {
 
 vi.mock("./hooks/useChatSession", () => ({
   useChatSession: () => ({
-    messages: [],
+    messages: mockChatMessages,
     sessionId: "test-session",
-    sending: false,
-    error: null,
+    sending: mockChatSending,
+    error: mockChatError,
     send: mockChatSend,
     clear: vi.fn(),
   }),
@@ -121,6 +130,9 @@ vi.mock("./stores/uiStore", () => ({
 vi.mock("./api/client", () => ({
   getLingPyExport: vi.fn().mockResolvedValue(''),
   saveApiKey: vi.fn().mockResolvedValue(undefined),
+  getAuthStatus: mockGetAuthStatus,
+  pollAuth: mockPollAuth,
+  startAuthFlow: mockStartAuthFlow,
   startSTT: vi.fn().mockResolvedValue({ job_id: 'stt-job-1' }),
   startCompute: vi.fn().mockResolvedValue({ job_id: 'compute-job-1' }),
   startNormalize: vi.fn().mockResolvedValue({ job_id: 'normalize-job-1' }),
@@ -186,6 +198,12 @@ beforeEach(() => {
   mockRecords = {};
   mockEnrichmentData = {};
   mockSelectedRegion = { start: 1.25, end: 2.5 };
+  mockChatMessages = [];
+  mockChatSending = false;
+  mockChatError = null;
+  mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
+  mockPollAuth.mockResolvedValue({ status: "pending" });
+  mockStartAuthFlow.mockResolvedValue(undefined);
 
   mockLoadConfig.mockClear();
   mockHydrateTags.mockClear();
@@ -203,6 +221,9 @@ beforeEach(() => {
   mockSkip.mockClear();
   mockSetWaveZoom.mockClear();
   mockSetRate.mockClear();
+  mockGetAuthStatus.mockClear();
+  mockPollAuth.mockClear();
+  mockStartAuthFlow.mockClear();
   vi.mocked(apiClient.startNormalize).mockClear();
   vi.mocked(apiClient.pollNormalize).mockClear();
   vi.mocked(apiClient.startSTT).mockClear();
@@ -382,6 +403,28 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
     expect(screen.getByDisplayValue("Loanword candidate from Arabic.")).toBeTruthy();
+  });
+
+  it("renders assistant markdown with readable headings, lists, and inline code in the AI chat panel", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: true, provider: "openai", method: "api_key", flow_active: false });
+    mockChatMessages = [
+      {
+        role: "assistant",
+        timestamp: "2026-04-21T12:00:00.000Z",
+        content:
+          "**Cannot import speakers — read-only MVP constraints.** ### What I checked - `project_context_read`: Current project has 0 speakers. - `read_text_preview`: File not found. ### Recommended next steps 1. Add speaker audio files. 2. Create initial annotation files.",
+      },
+    ];
+
+    render(<ParseUI />);
+
+    fireEvent.focus(screen.getByPlaceholderText(/Ask PARSE AI about water/i));
+
+    expect(await screen.findByRole("heading", { name: "What I checked" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Recommended next steps" })).toBeTruthy();
+    expect(screen.getByText("project_context_read").tagName).toBe("CODE");
+    expect(screen.getByText(/read-only MVP constraints\./i).closest("strong")).not.toBeNull();
+    expect(screen.queryByText(/\*\*Cannot import speakers/i)).toBeNull();
   });
 
   it("shows a reference placeholder when enrichmentStore has no reference forms", () => {

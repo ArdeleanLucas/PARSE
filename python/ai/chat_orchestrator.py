@@ -97,6 +97,8 @@ class ChatOrchestrator:
             "- concise, technical, and accurate\n"
             "- when using tools, summarize what was checked\n"
             "- keep read-only limitations explicit when relevant\n"
+            "- Use readable Markdown with short headings, bullets, and blank lines between sections\n"
+            "- Never wrap the entire reply in a code fence unless the user explicitly asked for raw copy-paste output\n"
         ).format(tool_lines)
 
     def _history_messages(self, session_messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
