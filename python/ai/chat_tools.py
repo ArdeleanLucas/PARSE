@@ -43,8 +43,13 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "contact_lexeme_lookup",
     "import_tag_csv",
     "prepare_tag_import",
+    "onboard_speaker_import",
+    "parse_memory_upsert_section",
 })
 TEXT_PREVIEW_EXTENSIONS = frozenset({".md", ".markdown", ".txt", ".rst"})
+ONBOARD_AUDIO_EXTENSIONS = frozenset({".wav", ".flac", ".mp3", ".ogg", ".m4a"})
+MEMORY_MAX_BYTES = 256 * 1024  # 256 KB cap on parse-memory.md
+MEMORY_SECTION_SLUG_RE = re.compile(r"[^A-Za-z0-9 _./-]+")
 
 
 class ChatToolError(Exception):
@@ -243,10 +248,30 @@ class ParseChatTools:
         docs_root: Optional[Path] = None,
         start_stt_job: Optional[Callable[[str, str, Optional[str]], str]] = None,
         get_job_snapshot: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
+        external_read_roots: Optional[Sequence[Path]] = None,
+        memory_path: Optional[Path] = None,
+        onboard_speaker: Optional[
+            Callable[[str, Path, Optional[Path], bool], Dict[str, Any]]
+        ] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
         self.docs_root = Path(docs_root).expanduser().resolve() if docs_root else None
+
+        self.external_read_roots: List[Path] = []
+        for raw_root in external_read_roots or []:
+            try:
+                resolved_root = Path(raw_root).expanduser().resolve()
+            except Exception:
+                continue
+            if resolved_root not in self.external_read_roots:
+                self.external_read_roots.append(resolved_root)
+
+        self.memory_path = (
+            Path(memory_path).expanduser().resolve()
+            if memory_path
+            else (self.project_root / "parse-memory.md").resolve()
+        )
 
         self.annotations_dir = self.project_root / "annotations"
         self.audio_dir = self.project_root / "audio"
@@ -260,6 +285,7 @@ class ParseChatTools:
 
         self._start_stt_job = start_stt_job
         self._get_job_snapshot = get_job_snapshot
+        self._onboard_speaker = onboard_speaker
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
             "project_context_read": ChatToolSpec(
@@ -590,6 +616,85 @@ class ParseChatTools:
                     },
                 },
             ),
+            "onboard_speaker_import": ChatToolSpec(
+                name="onboard_speaker_import",
+                description=(
+                    "Import a new speaker from on-disk audio (and optional transcription CSV). "
+                    "Copies files into audio/original/<speaker>/, scaffolds an annotation record, "
+                    "and registers the speaker in source_index.json. sourceWav/sourceCsv may be "
+                    "absolute paths under PARSE_EXTERNAL_READ_ROOTS or paths under the project "
+                    "audio/ directory. Gated by dryRun: call dryRun=true first to preview planned "
+                    "copies/registrations, then dryRun=false after the user confirms."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "sourceWav", "dryRun"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "sourceCsv": {"type": "string", "maxLength": 1024},
+                        "isPrimary": {
+                            "type": "boolean",
+                            "description": "Flag this WAV as the speaker's primary source. Defaults to true when the speaker has no existing sources.",
+                        },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview only — no file copies or source_index.json writes.",
+                        },
+                    },
+                },
+            ),
+            "parse_memory_read": ChatToolSpec(
+                name="parse_memory_read",
+                description=(
+                    "Read PARSE's persistent chat memory markdown (parse-memory.md). This is "
+                    "where speaker provenance, file origins, user preferences, and session "
+                    "context are recorded. Read-only. Returns the full document bounded by "
+                    "maxBytes, or a specific `## Section` when section is provided."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": "Heading text (without leading `##`). If given, only that section is returned.",
+                        },
+                        "maxBytes": {
+                            "type": "integer",
+                            "minimum": 512,
+                            "maximum": MEMORY_MAX_BYTES,
+                            "description": "Cap on bytes returned. Defaults to full file (up to {0} bytes).".format(MEMORY_MAX_BYTES),
+                        },
+                    },
+                },
+            ),
+            "parse_memory_upsert_section": ChatToolSpec(
+                name="parse_memory_upsert_section",
+                description=(
+                    "Create or replace a `## Section` block in parse-memory.md. Use for "
+                    "persisting user preferences, speaker notes, onboarding decisions, and "
+                    "file provenance that should survive across chat turns. Gated by dryRun — "
+                    "call dryRun=true first to preview the resulting block, then dryRun=false "
+                    "after the user confirms. The existing block under the same heading is "
+                    "overwritten; other sections are left untouched."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["section", "body", "dryRun"],
+                    "properties": {
+                        "section": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "body": {"type": "string", "minLength": 1, "maxLength": 16000},
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, return the rewritten file preview without writing.",
+                        },
+                    },
+                },
+            ),
         }
 
     def openai_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -749,6 +854,45 @@ class ParseChatTools:
                 )
 
         return resolved
+
+    def _resolve_readable_path(self, raw_path: str, *, extra_roots: Sequence[Path] = ()) -> Path:
+        """Resolve an arbitrary read path against the project root or a configured external root.
+
+        Expanded allowed roots = [project_root, *external_read_roots, *extra_roots]. Paths may
+        be absolute (then must fall under one of the roots) or relative (resolved against
+        project_root). Raises ChatToolValidationError on escape.
+        """
+        value = str(raw_path or "").strip()
+        if not value:
+            raise ChatToolValidationError("Path is required")
+
+        allowed_roots: List[Path] = [self.project_root]
+        for root in self.external_read_roots:
+            if root not in allowed_roots:
+                allowed_roots.append(root)
+        for root in extra_roots:
+            resolved_extra = Path(root).expanduser().resolve()
+            if resolved_extra not in allowed_roots:
+                allowed_roots.append(resolved_extra)
+
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.project_root / candidate
+
+        resolved = candidate.resolve()
+
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return resolved
+            except ValueError:
+                continue
+
+        raise ChatToolValidationError(
+            "Path is outside allowed read roots: {0}".format(
+                ", ".join([str(root) for root in allowed_roots])
+            )
+        )
 
     def _annotation_path_for_speaker(self, speaker: str) -> Optional[Path]:
         primary = (self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)).resolve()
@@ -1695,6 +1839,13 @@ class ParseChatTools:
             pass
         return concepts
 
+    def _display_readable_path(self, path: Path) -> str:
+        """Return a project-relative path if possible, else the absolute path."""
+        try:
+            return str(path.relative_to(self.project_root))
+        except ValueError:
+            return str(path)
+
     def _tool_read_audio_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Return WAV metadata (duration, sample rate, channels) via stdlib wave."""
         import wave as _wave
@@ -1703,7 +1854,13 @@ class ParseChatTools:
         if not source_wav:
             raise ChatToolValidationError("sourceWav is required")
 
-        safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
+        # Paths under audio/ may be relative; absolute paths must fall under
+        # the project root or a configured PARSE_EXTERNAL_READ_ROOTS entry.
+        candidate = Path(source_wav).expanduser()
+        if candidate.is_absolute() and self.external_read_roots:
+            safe_audio = self._resolve_readable_path(source_wav)
+        else:
+            safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
 
         if not safe_audio.exists() or not safe_audio.is_file():
             return {"ok": False, "error": "File not found: {0}".format(safe_audio)}
@@ -1726,7 +1883,7 @@ class ParseChatTools:
 
         return {
             "ok": True,
-            "path": str(safe_audio.relative_to(self.project_root)),
+            "path": self._display_readable_path(safe_audio),
             "channels": channels,
             "sampleWidthBytes": sample_width,
             "sampleRateHz": frame_rate,
@@ -1736,13 +1893,13 @@ class ParseChatTools:
         }
 
     def _tool_read_csv_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read first N rows of a CSV file, sandboxed to the project root."""
+        """Read first N rows of a CSV file, sandboxed to project + external read roots."""
         import csv as _csv
         raw_path = str(args.get("csvPath") or "").strip()
         max_rows = int(args.get("maxRows") or 20)
 
         if raw_path:
-            csv_path = self._resolve_project_path(raw_path, allowed_roots=[self.project_root])
+            csv_path = self._resolve_readable_path(raw_path)
         else:
             csv_path = self.project_root / "concepts.csv"
 
@@ -1790,29 +1947,14 @@ class ParseChatTools:
         max_lines = int(args.get("maxLines") or 120)
         max_chars = int(args.get("maxChars") or 12000)
 
-        allowed_roots = [self.project_root]
+        extra_roots: List[Path] = []
         if self.docs_root is not None:
-            allowed_roots.append(self.docs_root)
+            extra_roots.append(self.docs_root)
 
-        candidate = Path(raw_path).expanduser()
-        if not candidate.is_absolute():
-            candidate = self.project_root / candidate
-        text_path = candidate.resolve()
-
-        root_allowed = False
-        for root in allowed_roots:
-            try:
-                text_path.relative_to(root.resolve())
-                root_allowed = True
-                break
-            except ValueError:
-                continue
-
-        if not root_allowed:
-            return {
-                "ok": False,
-                "error": "Path is outside allowed roots",
-            }
+        try:
+            text_path = self._resolve_readable_path(raw_path, extra_roots=extra_roots)
+        except ChatToolValidationError as exc:
+            return {"ok": False, "error": str(exc)}
 
         extension = text_path.suffix.lower()
         if extension not in TEXT_PREVIEW_EXTENSIONS:
@@ -2072,6 +2214,338 @@ class ParseChatTools:
             "assignedCount": len(concept_ids),
             "totalTagsInFile": len(tags),
             "message": "Tag {0!r} created with {1} concepts. Refresh Compare to see it.".format(tag_name, len(concept_ids)),
+        }
+
+    # ------------------------------------------------------------------
+    # Speaker onboarding via chat
+    # ------------------------------------------------------------------
+
+    def _resolve_onboard_source(self, raw_path: str, *, must_be_audio: bool) -> Path:
+        """Resolve a sourceWav/sourceCsv argument.
+
+        Accepts absolute paths under PARSE_EXTERNAL_READ_ROOTS, or absolute/relative
+        paths that land under the project root (typically under audio/). Ensures the
+        file exists and, for audio, has a supported extension.
+        """
+        resolved = self._resolve_readable_path(raw_path)
+
+        if not resolved.exists() or not resolved.is_file():
+            raise ChatToolValidationError("Source file not found: {0}".format(resolved))
+
+        if must_be_audio:
+            suffix = resolved.suffix.lower()
+            if suffix not in ONBOARD_AUDIO_EXTENSIONS:
+                raise ChatToolValidationError(
+                    "Unsupported audio format: {0} (allowed: {1})".format(
+                        suffix or "(none)", ", ".join(sorted(ONBOARD_AUDIO_EXTENSIONS))
+                    )
+                )
+        else:
+            if resolved.suffix.lower() != ".csv":
+                raise ChatToolValidationError("sourceCsv must have a .csv extension")
+
+        return resolved
+
+    def _tool_onboard_speaker_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        speaker = self._normalize_speaker(args.get("speaker"))
+
+        source_wav_raw = str(args.get("sourceWav") or "").strip()
+        if not source_wav_raw:
+            raise ChatToolValidationError("sourceWav is required")
+
+        wav_path = self._resolve_onboard_source(source_wav_raw, must_be_audio=True)
+
+        csv_path: Optional[Path] = None
+        source_csv_raw = str(args.get("sourceCsv") or "").strip()
+        if source_csv_raw:
+            csv_path = self._resolve_onboard_source(source_csv_raw, must_be_audio=False)
+
+        dry_run = bool(args.get("dryRun"))
+        is_primary_arg = args.get("isPrimary")
+
+        # Existing source index state — used for preview and to decide the default is_primary.
+        source_index = _read_json_file(self.source_index_path, {})
+        speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
+        existing_entry = speakers_block.get(speaker) if isinstance(speakers_block, dict) else None
+        existing_sources = (
+            existing_entry.get("source_wavs", [])
+            if isinstance(existing_entry, dict)
+            else []
+        )
+        existing_filenames = [
+            str(entry.get("filename", ""))
+            for entry in existing_sources
+            if isinstance(entry, dict)
+        ]
+        already_registered = wav_path.name in existing_filenames
+
+        if is_primary_arg is None:
+            is_primary = not existing_sources and not already_registered
+        else:
+            is_primary = bool(is_primary_arg)
+
+        target_dir = self.audio_dir / "original" / speaker
+        wav_dest = target_dir / wav_path.name
+        csv_dest = (target_dir / csv_path.name) if csv_path else None
+
+        plan: Dict[str, Any] = {
+            "speaker": speaker,
+            "sourceWav": str(wav_path),
+            "sourceCsv": str(csv_path) if csv_path else None,
+            "wavDest": self._display_readable_path(wav_dest),
+            "csvDest": self._display_readable_path(csv_dest) if csv_dest else None,
+            "isPrimary": is_primary,
+            "newSpeaker": not isinstance(existing_entry, dict),
+            "alreadyRegistered": already_registered,
+            "wavSizeBytes": wav_path.stat().st_size,
+            "csvSizeBytes": csv_path.stat().st_size if csv_path else None,
+        }
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dryRun": True,
+                "plan": plan,
+                "message": (
+                    "Preview only. Run again with dryRun=false to copy the audio into "
+                    "audio/original/{speaker}/ and register it in source_index.json."
+                ).format(speaker=speaker),
+            }
+
+        if self._onboard_speaker is None:
+            return {
+                "ok": False,
+                "dryRun": False,
+                "error": (
+                    "Onboarding callback is not wired in this chat runtime — cannot "
+                    "write to the project. Run the PARSE server (scripts/parse-run.sh) "
+                    "and retry."
+                ),
+                "plan": plan,
+            }
+
+        try:
+            callback_result = self._onboard_speaker(speaker, wav_path, csv_path, is_primary)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "dryRun": False,
+                "error": "Onboarding failed: {0}".format(exc),
+                "plan": plan,
+            }
+
+        out: Dict[str, Any] = {
+            "ok": True,
+            "dryRun": False,
+            "plan": plan,
+            "message": "Speaker {0!r} imported.".format(speaker),
+        }
+        if isinstance(callback_result, dict):
+            out.update(callback_result)
+        return out
+
+    # ------------------------------------------------------------------
+    # Persistent chat memory (parse-memory.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _memory_normalize_heading(raw: str) -> str:
+        return " ".join(str(raw or "").strip().split())
+
+    @classmethod
+    def _memory_match_section(cls, section: str, heading_line: str) -> bool:
+        stripped = heading_line.strip()
+        if not stripped.startswith("##"):
+            return False
+        heading_text = stripped.lstrip("#").strip()
+        return heading_text.lower() == section.lower()
+
+    @classmethod
+    def _memory_split_sections(cls, content: str) -> List[Tuple[str, str]]:
+        """Return [(heading_line_or_empty, body_text), ...] preserving order.
+
+        The first entry has heading_line="" and contains any prelude before the
+        first `##` heading. Subsequent entries start with their heading line.
+        """
+        lines = content.splitlines(keepends=True)
+        sections: List[Tuple[str, List[str]]] = [("", [])]
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("## ") or stripped == "##":
+                sections.append((line.rstrip("\n"), []))
+            else:
+                sections[-1][1].append(line)
+        return [(heading, "".join(body)) for heading, body in sections]
+
+    def _memory_read_raw(self) -> str:
+        if not self.memory_path.exists():
+            return ""
+        try:
+            return self.memory_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise ChatToolExecutionError("Failed to read parse-memory.md: {0}".format(exc))
+
+    def _tool_parse_memory_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        section_arg = self._memory_normalize_heading(args.get("section"))
+        max_bytes_raw = args.get("maxBytes")
+        try:
+            max_bytes = int(max_bytes_raw) if max_bytes_raw is not None else MEMORY_MAX_BYTES
+        except (TypeError, ValueError):
+            max_bytes = MEMORY_MAX_BYTES
+        max_bytes = max(512, min(MEMORY_MAX_BYTES, max_bytes))
+
+        path_display = self._display_readable_path(self.memory_path)
+
+        if not self.memory_path.exists():
+            return {
+                "ok": True,
+                "path": path_display,
+                "exists": False,
+                "content": "",
+                "sections": [],
+                "message": "parse-memory.md does not exist yet. Use parse_memory_upsert_section to create it.",
+            }
+
+        raw = self._memory_read_raw()
+        parsed = self._memory_split_sections(raw)
+        section_headings = [
+            heading_line.lstrip("#").strip()
+            for heading_line, _body in parsed
+            if heading_line
+        ]
+
+        if section_arg:
+            for heading_line, body in parsed:
+                if heading_line and self._memory_match_section(section_arg, heading_line):
+                    content = "{0}\n{1}".format(heading_line, body).strip("\n")
+                    truncated = False
+                    encoded = content.encode("utf-8")
+                    if len(encoded) > max_bytes:
+                        content = encoded[:max_bytes].decode("utf-8", errors="ignore")
+                        truncated = True
+                    return {
+                        "ok": True,
+                        "path": path_display,
+                        "exists": True,
+                        "section": section_arg,
+                        "content": content,
+                        "truncated": truncated,
+                        "sections": section_headings,
+                    }
+            return {
+                "ok": True,
+                "path": path_display,
+                "exists": True,
+                "section": section_arg,
+                "found": False,
+                "content": "",
+                "sections": section_headings,
+                "message": "Section not found. Existing sections: {0}".format(
+                    ", ".join(section_headings) or "(none)"
+                ),
+            }
+
+        encoded = raw.encode("utf-8")
+        truncated = len(encoded) > max_bytes
+        content = encoded[:max_bytes].decode("utf-8", errors="ignore") if truncated else raw
+
+        return {
+            "ok": True,
+            "path": path_display,
+            "exists": True,
+            "content": content,
+            "truncated": truncated,
+            "totalBytes": len(encoded),
+            "sections": section_headings,
+        }
+
+    def _tool_parse_memory_upsert_section(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        section = self._memory_normalize_heading(args.get("section"))
+        if not section:
+            raise ChatToolValidationError("section is required")
+
+        body = str(args.get("body") or "").rstrip()
+        if not body:
+            raise ChatToolValidationError("body is required")
+
+        dry_run = bool(args.get("dryRun"))
+
+        # Ensure parse-memory.md lives somewhere writable (project root or under it).
+        try:
+            self.memory_path.relative_to(self.project_root)
+        except ValueError:
+            # Absolute custom location is allowed; just make sure the parent exists.
+            pass
+
+        existing = self._memory_read_raw()
+        sections = self._memory_split_sections(existing) if existing else [("", "")]
+
+        rendered_heading = "## {0}".format(section)
+        rendered_section = "{0}\n{1}\n".format(rendered_heading, body)
+
+        updated_parts: List[str] = []
+        replaced = False
+        for heading_line, section_body in sections:
+            if heading_line and self._memory_match_section(section, heading_line):
+                updated_parts.append(rendered_section)
+                replaced = True
+            elif not heading_line:
+                # Prelude (before first ## heading)
+                updated_parts.append(section_body)
+            else:
+                updated_parts.append("{0}\n{1}".format(heading_line, section_body))
+
+        if not replaced:
+            # Append a new section at end, ensuring a blank line separator.
+            preface = "".join(updated_parts)
+            if preface and not preface.endswith("\n"):
+                preface = preface + "\n"
+            if preface and not preface.endswith("\n\n"):
+                preface = preface + "\n"
+            if not preface:
+                preface = "# PARSE chat memory\n\n"
+            updated_content = preface + rendered_section
+        else:
+            updated_content = "".join(updated_parts)
+            if not updated_content.endswith("\n"):
+                updated_content = updated_content + "\n"
+
+        if len(updated_content.encode("utf-8")) > MEMORY_MAX_BYTES:
+            return {
+                "ok": False,
+                "error": "parse-memory.md would exceed {0} bytes. Trim an old section first.".format(MEMORY_MAX_BYTES),
+            }
+
+        path_display = self._display_readable_path(self.memory_path)
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dryRun": True,
+                "path": path_display,
+                "section": section,
+                "action": "replace" if replaced else "create",
+                "previewSection": rendered_section,
+                "totalBytesAfter": len(updated_content.encode("utf-8")),
+            }
+
+        try:
+            self.memory_path.parent.mkdir(parents=True, exist_ok=True)
+            self.memory_path.write_text(updated_content, encoding="utf-8")
+        except Exception as exc:
+            return {"ok": False, "error": "Failed to write parse-memory.md: {0}".format(exc)}
+
+        return {
+            "ok": True,
+            "dryRun": False,
+            "path": path_display,
+            "section": section,
+            "action": "replace" if replaced else "create",
+            "totalBytesAfter": len(updated_content.encode("utf-8")),
+            "message": "parse-memory.md {0}d section {1!r}.".format(
+                "update" if replaced else "create",
+                section,
+            ),
         }
 
 

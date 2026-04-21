@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """PARSE chat orchestration (OpenAI + strict PARSE-native tools).
 
-This orchestrator is intentionally read-only in MVP:
-- no annotation/config/enrichment writes
-- no arbitrary shell/file tools
-- no file attachments
+Read-only vs. write-enabled mode is driven by ``chat.read_only`` in
+``config/ai_config.json`` (override via ``PARSE_CHAT_READ_ONLY`` env). When
+read-only the orchestrator only permits allowlisted write-capable tools
+(``WRITE_ALLOWED_TOOL_NAMES`` in ``chat_tools``) and injects guard notices
+on mutation-intent requests. When write-enabled those guards are dropped
+and any allowlisted chat tool may mutate project state.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -17,6 +20,18 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .chat_tools import ChatToolError, ParseChatTools, WRITE_ALLOWED_TOOL_NAMES
 from .provider import OpenAIChatRuntime
+
+
+def _resolve_read_only(config_value: Any) -> bool:
+    """Read-only resolution: env PARSE_CHAT_READ_ONLY wins over config.
+
+    Values like "0", "false", "no", "off" disable read-only mode.
+    Any other non-empty value enables it. Empty env falls back to config.
+    """
+    env_value = str(os.environ.get("PARSE_CHAT_READ_ONLY") or "").strip().lower()
+    if env_value:
+        return env_value not in {"0", "false", "no", "off"}
+    return bool(config_value)
 
 
 _MUTATION_REQUEST_RE = re.compile(
@@ -59,33 +74,44 @@ class ChatOrchestrator:
         self.max_tool_rounds = max(1, int(chat_config.get("max_tool_rounds", 4) or 4))
         self.max_history_messages = max(1, int(chat_config.get("max_history_messages", 24) or 24))
         self.max_tool_result_chars = max(1000, int(chat_config.get("max_tool_result_chars", 24000) or 24000))
-        self.read_only = bool(chat_config.get("read_only", True))
+        self.read_only = _resolve_read_only(chat_config.get("read_only", False))
         self.attachments_supported = bool(chat_config.get("attachments_supported", False))
-
-        # Chat MVP is intentionally locked to read-only + no attachments.
-        if not self.read_only:
-            self.read_only = True
-        if self.attachments_supported:
-            self.attachments_supported = False
 
         self._system_prompt = self._build_system_prompt()
 
     def _build_system_prompt(self) -> str:
         tool_lines = "\n".join(["- {0}".format(name) for name in self.tools.tool_names()])
+
+        if self.read_only:
+            constraints = (
+                "Hard constraints (must follow):\n"
+                "1) READ-ONLY MODE: do not mutate project state. No annotation writes, no config writes, no enrichments writes, no file overwrites.\n"
+                "   Exception: allowlisted write-capable tools (e.g. contact_lexeme_lookup, tag tools, onboard_speaker_import, parse_memory_upsert_section) may write their dedicated files.\n"
+                "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
+                "3) No file/context attachments are supported.\n"
+                "4) If asked to apply changes, state the environment is mostly read-only and provide a preview plan unless an allowlisted write-capable tool is the correct path.\n"
+                "5) Never imply a write happened unless an allowlisted write-capable tool explicitly reports a persisted write.\n"
+                "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+            )
+        else:
+            constraints = (
+                "Operating rules (must follow):\n"
+                "1) WRITE-ENABLED MODE: you may invoke any allowlisted tool, including ones that write project state (annotations, tags, contact-language config, source index, parse-memory.md).\n"
+                "2) Destructive or broad writes require a dry-run preview first. For any tool exposing a dryRun flag, call it with dryRun=true before dryRun=false.\n"
+                "3) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
+                "4) No file/context attachments are supported — pass external file paths via tool arguments (e.g. onboard_speaker_import sourceWav) and rely on PARSE_EXTERNAL_READ_ROOTS for bounded reads.\n"
+                "5) Never imply a write happened unless a tool explicitly reports a persisted write. When reporting writes, cite the tool name and the file(s) updated.\n"
+                "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+                "7) Keep parse-memory.md current: when the user shares file provenance, speaker context, preferences, or onboarding decisions, record it via parse_memory_upsert_section so future turns can recall it with parse_memory_read.\n"
+            )
+
         return (
             "You are the built-in PARSE AI toolbox assistant.\n"
             "\n"
-            "Hard constraints (must follow):\n"
-            "1) READ-ONLY MVP: do not mutate project state. No annotation writes, no config writes, no enrichments writes, no file overwrites.\n"
-            "   Exception: contact_lexeme_lookup and tag tools are allowed to write their respective data files.\n"
-            "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
-            "3) No file/context attachments are supported in this MVP.\n"
-            "4) If asked to apply changes, explicitly state the environment is mostly read-only and provide a preview plan unless an allowlisted write-capable tool is the correct path.\n"
-            "5) Never imply a write happened unless an allowlisted write-capable tool explicitly reports a persisted write.\n"
-            "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+            "{constraints}"
             "\n"
             "Available tools:\n"
-            "{0}\n"
+            "{tools}\n"
             "\n"
             "External data fetching:\n"
             "- contact_lexeme_lookup can fetch reference forms (IPA) for ANY language from third-party sources\n"
@@ -93,11 +119,23 @@ class ChatOrchestrator:
             "- Use it when the user needs Arabic, Persian, Sorani, or other reference language data\n"
             "- After fetching, use cognate_compute_preview with contactLanguages to compare\n"
             "\n"
+            "Persistent memory:\n"
+            "- parse_memory_read returns the project's parse-memory.md (user preferences, speaker provenance, onboarding notes).\n"
+            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Prefer small, well-named sections over one sprawling blob.\n"
+            "\n"
             "Response style:\n"
             "- concise, technical, and accurate\n"
             "- when using tools, summarize what was checked\n"
-            "- keep read-only limitations explicit when relevant\n"
-        ).format(tool_lines)
+            "- {mode_note}\n"
+        ).format(
+            constraints=constraints,
+            tools=tool_lines,
+            mode_note=(
+                "keep read-only limitations explicit when relevant"
+                if self.read_only
+                else "note any writes performed and reference the files updated"
+            ),
+        )
 
     def _history_messages(self, session_messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         filtered: List[Dict[str, Any]] = []
@@ -193,22 +231,23 @@ class ChatOrchestrator:
         write_allowed_tool_used = bool(used_tools.intersection(WRITE_ALLOWED_TOOL_NAMES))
 
         if not text:
-            text = READ_ONLY_NOTICE
+            text = READ_ONLY_NOTICE if self.read_only else "I did not produce a response for this request."
 
-        if (
-            _WRITE_CLAIM_RE.search(text)
-            and not write_allowed_tool_used
-            and not self._contains_read_only_notice(text)
-        ):
-            text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
+        if self.read_only:
+            if (
+                _WRITE_CLAIM_RE.search(text)
+                and not write_allowed_tool_used
+                and not self._contains_read_only_notice(text)
+            ):
+                text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
 
-        if (
-            user_text
-            and _MUTATION_REQUEST_RE.search(user_text)
-            and not write_allowed_tool_used
-        ):
-            if not self._contains_read_only_notice(text):
-                text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
+            if (
+                user_text
+                and _MUTATION_REQUEST_RE.search(user_text)
+                and not write_allowed_tool_used
+            ):
+                if not self._contains_read_only_notice(text):
+                    text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
 
         if user_text and _ATTACHMENT_REQUEST_RE.search(user_text):
             if not self._contains_attachments_notice(text):
@@ -396,29 +435,32 @@ class ChatOrchestrator:
                 "toolTrace": tool_trace,
                 "model": runtime_meta.get("model", self.runtime.model),
                 "reasoning": runtime_meta,
-                "mode": "read-only",
+                "mode": "read-only" if self.read_only else "write-enabled",
                 "readOnly": self.read_only,
                 "attachmentsSupported": self.attachments_supported,
-                "readOnlyNotice": READ_ONLY_NOTICE,
+                "readOnlyNotice": READ_ONLY_NOTICE if self.read_only else "",
             }
+
+        fallback_text = (
+            "I hit the maximum tool-call rounds for this turn. "
+            "Please narrow the request and try again."
+        )
+        if self.read_only:
+            fallback_text = "{0}\n\n{1}".format(fallback_text, READ_ONLY_NOTICE)
 
         return {
             "sessionId": session_id,
             "assistant": {
                 "role": "assistant",
-                "content": (
-                    "I hit the maximum tool-call rounds for this turn. "
-                    "Please narrow the request and try again.\n\n"
-                    "{0}".format(READ_ONLY_NOTICE)
-                ),
+                "content": fallback_text,
             },
             "toolTrace": tool_trace,
             "model": runtime_meta.get("model", self.runtime.model),
             "reasoning": runtime_meta,
-            "mode": "read-only",
+            "mode": "read-only" if self.read_only else "write-enabled",
             "readOnly": self.read_only,
             "attachmentsSupported": self.attachments_supported,
-            "readOnlyNotice": READ_ONLY_NOTICE,
+            "readOnlyNotice": READ_ONLY_NOTICE if self.read_only else "",
         }
 
 
