@@ -54,6 +54,25 @@
 
 set -u
 
+# ---------- Local env override --------------------------------------------
+#
+# Create <repo-root>/.parse-env to set machine-specific overrides without
+# touching tracked files. This file is gitignored. Example contents:
+#
+#   PARSE_EXTERNAL_READ_ROOTS=/mnt/c/Users/Lucas/Thesis
+#   PARSE_PY=/mnt/c/Users/Lucas/miniconda3/python.exe
+#
+# The file is sourced before the defaults block so any variable it exports
+# takes precedence over the :=  defaults below.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PARSE_ENV_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.parse-env"
+if [ -f "${PARSE_ENV_FILE}" ]; then
+  # shellcheck source=/dev/null
+  . "${PARSE_ENV_FILE}"
+  printf '[parse-run] Loaded local overrides from .parse-env\n'
+fi
+
 # ---------- Defaults ------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
