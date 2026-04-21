@@ -1,3 +1,6 @@
+# Machine-specific local overrides (not committed)
+.parse-env
+
 # Python
 python/__pycache__/
 *.pyc
