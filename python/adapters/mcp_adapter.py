@@ -4,11 +4,12 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (11):
+Tools exposed (14):
   project_context_read, annotation_read, read_csv_preview,
   cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
   contact_lexeme_lookup, stt_start, stt_status,
-  import_tag_csv, prepare_tag_import
+  import_tag_csv, prepare_tag_import,
+  onboard_speaker_import, parse_memory_read, parse_memory_upsert_section
 
 Usage:
     python python/adapters/mcp_adapter.py
@@ -22,7 +23,9 @@ MCP client config (e.g. claude_desktop_config.json):
                 "command": "python",
                 "args": ["python/adapters/mcp_adapter.py"],
                 "env": {
-                    "PARSE_PROJECT_ROOT": "/path/to/your/parse/project"
+                    "PARSE_PROJECT_ROOT": "/path/to/your/parse/project",
+                    "PARSE_EXTERNAL_READ_ROOTS": "/mnt/c/Users/Lucas/Thesis",
+                    "PARSE_CHAT_MEMORY_PATH": "/path/to/parse-memory.md"
                 }
             }
         }
@@ -174,13 +177,158 @@ def _build_stt_callbacks() -> tuple:
     return start_stt_job, get_job_snapshot
 
 
+def _resolve_external_read_roots() -> list:
+    """Parse PARSE_EXTERNAL_READ_ROOTS from env into a list of Paths.
+
+    Mirrors server._chat_external_read_roots so MCP clients and the in-process
+    chat runtime share the same sandbox roots.
+    """
+    raw = str(os.environ.get("PARSE_EXTERNAL_READ_ROOTS") or "").strip()
+    if not raw:
+        return []
+    sep = ";" if os.name == "nt" or ";" in raw else os.pathsep
+    roots: list = []
+    for piece in raw.split(sep):
+        piece = piece.strip()
+        if not piece:
+            continue
+        candidate = Path(piece).expanduser()
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _resolve_memory_path(project_root_path: Path) -> Path:
+    raw = str(os.environ.get("PARSE_CHAT_MEMORY_PATH") or "").strip()
+    if raw:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = project_root_path / candidate
+        try:
+            return candidate.resolve()
+        except Exception:
+            return candidate
+    return (project_root_path / "parse-memory.md").resolve()
+
+
+def _build_onboard_callback() -> Optional[object]:
+    """Return a callback that proxies onboard_speaker_import through the HTTP API.
+
+    The MCP adapter runs out-of-process from the PARSE server, so we can't call
+    the in-process job worker directly. Instead, POST the source files as
+    multipart/form-data to /api/onboard/speaker and block on the resulting job
+    until it completes. Returns None if the API is unreachable when invoked.
+    """
+    import email.generator
+    import mimetypes
+    import time
+    import urllib.error
+    import urllib.request
+    import uuid
+
+    base_url = _resolve_api_base()
+
+    def onboard(speaker: str, source_wav: Path, source_csv: Optional[Path], is_primary: bool) -> Dict[str, Any]:
+        boundary = "----parse-mcp-{0}".format(uuid.uuid4().hex)
+        crlf = b"\r\n"
+        parts: list = []
+
+        def add_field(name: str, value: str) -> None:
+            parts.append(
+                (
+                    "--{0}\r\nContent-Disposition: form-data; name=\"{1}\"\r\n\r\n{2}\r\n"
+                    .format(boundary, name, value)
+                ).encode("utf-8")
+            )
+
+        def add_file(name: str, path: Path) -> None:
+            mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            header = (
+                "--{0}\r\nContent-Disposition: form-data; name=\"{1}\"; filename=\"{2}\"\r\n"
+                "Content-Type: {3}\r\n\r\n".format(boundary, name, path.name, mime)
+            ).encode("utf-8")
+            parts.append(header)
+            parts.append(path.read_bytes())
+            parts.append(crlf)
+
+        add_field("speaker_id", speaker)
+        add_file("audio", source_wav)
+        if source_csv is not None:
+            add_file("csv", source_csv)
+        parts.append("--{0}--\r\n".format(boundary).encode("utf-8"))
+
+        body = b"".join(parts)
+        req = urllib.request.Request(
+            url="{0}/api/onboard/speaker".format(base_url),
+            data=body,
+            headers={"Content-Type": "multipart/form-data; boundary={0}".format(boundary)},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120.0) as resp:
+                response = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                "PARSE API unreachable at {0} — cannot onboard speaker. Underlying: {1}".format(
+                    base_url, exc
+                )
+            )
+
+        job_id = str(response.get("job_id") or response.get("jobId") or "").strip()
+        if not job_id:
+            raise RuntimeError("Onboard API did not return a job_id: {0}".format(response))
+
+        # Poll for completion (bounded).
+        status_req_body = json.dumps({"job_id": job_id}).encode("utf-8")
+        deadline = time.time() + 120.0
+        final: Dict[str, Any] = {}
+        while time.time() < deadline:
+            status_req = urllib.request.Request(
+                url="{0}/api/onboard/speaker/status".format(base_url),
+                data=status_req_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(status_req, timeout=10.0) as sresp:
+                    final = json.loads(sresp.read().decode("utf-8") or "{}")
+            except urllib.error.URLError:
+                time.sleep(1.0)
+                continue
+            status = str(final.get("status") or "").lower()
+            if status in {"complete", "error"}:
+                break
+            time.sleep(1.0)
+
+        if str(final.get("status") or "").lower() != "complete":
+            raise RuntimeError(
+                "Onboarding failed for speaker {0!r}: {1}".format(speaker, final.get("error") or final)
+            )
+
+        result = final.get("result") if isinstance(final.get("result"), dict) else {}
+        return {
+            "jobId": job_id,
+            "annotationPath": result.get("annotationPath"),
+            "wavPath": result.get("wavPath"),
+            "csvPath": result.get("csvPath"),
+            "isPrimary": is_primary,
+        }
+
+    return onboard
+
+
 def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     """Create and return the PARSE MCP server with all tools registered.
 
     Wraps ParseChatTools so every tool available to the built-in AI chat
-    is also available over MCP for third-party agents. STT tools proxy
-    through the running HTTP server on PARSE_API_PORT (default 8766) so
-    job state is shared with the browser UI.
+    is also available over MCP for third-party agents. STT and onboarding
+    tools proxy through the running HTTP server on PARSE_API_PORT
+    (default 8766) so job state is shared with the browser UI.
     """
     if not _MCP_AVAILABLE:
         raise ImportError(
@@ -191,13 +339,22 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     from ai.chat_tools import ParseChatTools
 
     root = _resolve_project_root(project_root)
+    external_roots = _resolve_external_read_roots()
+    memory_path = _resolve_memory_path(root)
     logger.info("PARSE MCP server starting with project root: %s", root)
+    if external_roots:
+        logger.info("External read roots: %s", ", ".join(str(r) for r in external_roots))
+    logger.info("Chat memory path: %s", memory_path)
 
     start_stt, get_snapshot = _build_stt_callbacks()
+    onboard_callback = _build_onboard_callback()
     tools = ParseChatTools(
         project_root=root,
         start_stt_job=start_stt,
         get_job_snapshot=get_snapshot,
+        external_read_roots=external_roots,
+        memory_path=memory_path,
+        onboard_speaker=onboard_callback,
     )
 
     mcp = FastMCP(
@@ -514,6 +671,90 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         if color is not None:
             args["color"] = color
         result = tools.execute("prepare_tag_import", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def onboard_speaker_import(
+        speaker: str,
+        sourceWav: str,
+        dryRun: bool,
+        sourceCsv: Optional[str] = None,
+        isPrimary: Optional[bool] = None,
+    ) -> str:
+        """Import a new speaker from on-disk audio (and optional transcription CSV).
+
+        Copies the audio into audio/original/<speaker>/, scaffolds an annotation
+        record, and registers the speaker in source_index.json. sourceWav/sourceCsv
+        may be absolute paths under PARSE_EXTERNAL_READ_ROOTS or project-relative.
+        Use dryRun=true first to preview, then dryRun=false to execute.
+
+        Args:
+            speaker: Speaker ID (filename-safe, no path separators)
+            sourceWav: Path to the source audio file
+            dryRun: If true, preview only. Run false to perform the import.
+            sourceCsv: Optional path to a transcription CSV to store alongside
+            isPrimary: Flag this WAV as the speaker's primary source
+        """
+        args: Dict[str, Any] = {
+            "speaker": speaker,
+            "sourceWav": sourceWav,
+            "dryRun": dryRun,
+        }
+        if sourceCsv is not None:
+            args["sourceCsv"] = sourceCsv
+        if isPrimary is not None:
+            args["isPrimary"] = isPrimary
+        result = tools.execute("onboard_speaker_import", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def parse_memory_read(
+        section: Optional[str] = None,
+        maxBytes: Optional[int] = None,
+    ) -> str:
+        """Read the persistent chat memory markdown (parse-memory.md).
+
+        Records speaker provenance, file origins, user preferences, and session
+        context. Read-only. Returns the full document bounded by maxBytes, or a
+        specific `## Section` when section is provided.
+
+        Args:
+            section: Heading text (without leading `##`). If given, only that
+                section is returned.
+            maxBytes: Cap on bytes returned (min 512).
+        """
+        args: Dict[str, Any] = {}
+        if section is not None:
+            args["section"] = section
+        if maxBytes is not None:
+            args["maxBytes"] = maxBytes
+        result = tools.execute("parse_memory_read", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def parse_memory_upsert_section(
+        section: str,
+        body: str,
+        dryRun: bool,
+    ) -> str:
+        """Create or replace a `## Section` block in parse-memory.md.
+
+        Use for persisting user preferences, speaker notes, onboarding decisions,
+        and file provenance that should survive across chat turns. The existing
+        block under the same heading is overwritten; other sections are untouched.
+        Use dryRun=true first to preview, then dryRun=false to write.
+
+        Args:
+            section: Section heading (without leading `##`)
+            body: Markdown body for the section
+            dryRun: If true, returns preview without writing
+        """
+        args: Dict[str, Any] = {
+            "section": section,
+            "body": body,
+            "dryRun": dryRun,
+        }
+        result = tools.execute("parse_memory_upsert_section", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     return mcp
