@@ -238,6 +238,26 @@ def _deepcopy_jsonable(payload: Any) -> Any:
     return copy.deepcopy(payload)
 
 
+_WSL_MOUNT_RE = re.compile(r'^[/\\]mnt[/\\]([a-zA-Z])[/\\]?(.*)', re.DOTALL)
+
+
+def _wsl_to_windows_path(raw: str) -> Optional[str]:
+    """Convert a WSL /mnt/X/... path to a Windows drive-letter path.
+
+    On Windows Python, /mnt/c/Users/... is not absolute (no drive letter),
+    so pathlib anchors it under cwd and produces a broken UNC path.
+    Returns the translated string, or None if the input isn't a WSL mount path.
+    """
+    if os.name != 'nt':
+        return None
+    m = _WSL_MOUNT_RE.match(raw)
+    if not m:
+        return None
+    drive = m.group(1).upper()
+    rest = m.group(2).replace('\\', '/')
+    return f"{drive}:/{rest}" if rest else f"{drive}:/"
+
+
 class ParseChatTools:
     """Strict read-only tool allowlist for PARSE chat."""
 
@@ -898,7 +918,15 @@ class ParseChatTools:
 
         candidate = Path(value).expanduser()
         if not candidate.is_absolute():
-            candidate = self.project_root / candidate
+            # On Windows Python, /mnt/X/... paths are WSL drive-letter mounts and
+            # are not recognised as absolute.  Translate before anchoring so we
+            # resolve to the real Windows path (C:\...) rather than appending the
+            # raw string under project_root and ending up with a broken UNC path.
+            translated = _wsl_to_windows_path(value)
+            if translated is not None:
+                candidate = Path(translated)
+            else:
+                candidate = self.project_root / candidate
 
         resolved = candidate.resolve()
 
