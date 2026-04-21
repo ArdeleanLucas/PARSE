@@ -1,5 +1,7 @@
 # B5 — EnrichmentsPanel
 
+> **Archived Oda Track B task brief (2026-04-21):** this file is historical implementation scaffolding from the Compare-track React pivot. Do **not** execute it as a live task. Current PARSE work branches from `origin/main`, and the landed Compare code lives in `src/components/compare/`, `src/hooks/`, and `AGENTS.md`.
+
 **Model:** gemini-2.5-flash
 **Read first:** `js/compare/enrichments.js` (1,557 lines)
 **Output:** `src/components/compare/EnrichmentsPanel.tsx` + `EnrichmentsPanel.test.tsx`

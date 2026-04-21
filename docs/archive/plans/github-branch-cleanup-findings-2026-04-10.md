@@ -1,6 +1,6 @@
 # PARSE GitHub branch cleanup findings — 2026-04-10
 
-> **Historical note (post-cleanup):** the GitHub cleanup described here has since landed. `origin` now exposes only 4 remote branches (`main`, `docs/phase4-c5-c6-signoff`, `feat/annotate-react`, `feat/compare-react`), and the rolling branches named below (`feat/parseui-unified-shell`, `docs/parseui-planning`) were later merged/deleted. Keep this memo as historical evidence only; branch from `origin/main` for new work.
+> **Historical note (capture-time only):** this memo records the branch-cleanup recommendation state from 2026-04-10. Later cleanups landed, and the branch inventory continued to change after that pass. Treat all keep/delete guidance and branch counts below as historical evidence only; branch from `origin/main` for new work.
 
 **Captured from:** `/home/lucas/gh/ardeleanlucas/parse`
 **Docs branch for this memo:** `docs/parseui-planning` (historical; since deleted)

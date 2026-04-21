@@ -1,5 +1,7 @@
 # PARSE Phase 2 — `feat/compare-react` Branch Audit
 
+> **Archived audit snapshot (2026-04-21):** this file records a one-time branch disposition analysis from 2026-04-09. Keep it as historical evidence only. Do **not** treat the delete/preserve recommendations below as current without re-auditing the live refs.
+
 **Purpose:** Decide whether `feat/compare-react` should be deleted, preserved, or intentionally revived.
 
 **Captured on:** 2026-04-09  

@@ -1,5 +1,7 @@
 # Phase 0 — Scaffold Gate, Store Shapes, API Contract
 
+> **Archived Oda Track B phase note (2026-04-21):** this file records the original scaffold gate for the Compare-track pivot. Do **not** execute it as a live prerequisite checklist. Current PARSE work starts from `origin/main` and uses the landed React runtime.
+>
 > Load this file at the start of Track B. Block until the gate passes.
 > After Phase 0 is confirmed, you only need the specific Bx file for each task.
 

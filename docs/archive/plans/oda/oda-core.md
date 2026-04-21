@@ -1,6 +1,6 @@
 # Oda — Core Identity, Ownership, and Summary Rules
 
-> Load this file in every session. It is always required.
+> **Archived identity file (2026-04-21):** this document belongs to the retired Oda Compare-track lane. Do **not** load it as a default current-session requirement. Use it only as historical context. Current branch policy, contract guidance, and frontend rules live in `AGENTS.md`.
 >
 > **Historical note (post-pivot merge):** this document captures the original Oda Compare-track lane. References to `feat/compare-react` and `feat/parse-react-vite` are historical branch notes; current PARSE work branches from `origin/main` unless Lucas explicitly asks otherwise.
 

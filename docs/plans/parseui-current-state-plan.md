@@ -11,7 +11,7 @@ The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archiv
 
 ## Live sources of truth
 
-1. `AGENTS.md` — branch policy, deferred-validation policy, and known contract gaps
+1. `AGENTS.md` — branch policy, deferred-validation policy, and the live client/server contract table
 2. `docs/plans/parsebuilder-todo.md` — high-level current status / deferred validation backlog
 3. `src/ParseUI.tsx` — implemented UI state and current affordances
 4. `src/ParseUI.test.tsx` — regression coverage for landed ParseUI slices
@@ -73,7 +73,7 @@ The next implementation work is not "add raw fetch calls from the old TODO." It 
 
 ### 3. ~~Finish Actions menu job behavior, not just button clicks~~ ✅ DONE (PR #38)
 
-All 5 processing actions (normalize, STT, IPA, full pipeline, cross-speaker match) now use `useActionJob` with proper start → poll → progress → complete/error lifecycle. Topbar status indicator shows progress bars, completion flashes, and error messages with dismiss. Buttons disabled while running. Reset Project clears all in-flight jobs. No `console.error`-only failure paths remain. Tests: 132 passing.
+All 5 processing actions (normalize, STT, IPA, full pipeline, cross-speaker match) now use `useActionJob` with proper start → poll → progress → complete/error lifecycle. Topbar status indicator shows progress bars, completion flashes, and error messages with dismiss. Buttons disabled while running. Reset Project clears all in-flight jobs. No `console.error`-only failure paths remain. Tests at landing time: 132 passing. For the current enforced suite floor, see `AGENTS.md`.
 
 ### 4. Unify the decisions story
 

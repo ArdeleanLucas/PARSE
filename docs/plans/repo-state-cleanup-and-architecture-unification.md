@@ -1,8 +1,8 @@
 # PARSE Repository State Cleanup and Architecture Unification Plan
 
-> **For Hermes:** Execute from the lowercase clone `/home/lucas/gh/ardeleanlucas/parse`. Do **not** merge to `main` directly. Open PRs; **Lucas must merge them**.
+> **Historical completion record (2026-04-21):** the legacy-removal slice described here is closed — Stage 3 landed in PR #58. Keep this file as the execution record for that cutover, not as an open runbook. For current PARSE repo policy, branch rules, and validation gates, use `AGENTS.md`.
 
-**Goal:** Finish the React cutover by deleting the vanilla-JS legacy surface and making the Python server serve the React build — in a scoped, reversible PR that can only run once Lucas authorizes destructive cleanup.
+**Historical goal at capture time:** Finish the React cutover by deleting the vanilla-JS legacy surface and making the Python server serve the React build — in a scoped, reversible PR that could only run once Lucas authorized destructive cleanup.
 
 Earlier prep steps (preflight, canonicalization, non-destructive messaging, deferred-validation maintenance) and later post-merge branch pruning are no longer active execution work; see the Stage 1 archive under `docs/archive/` for their history. This doc is now the legacy-removal slice only.
 

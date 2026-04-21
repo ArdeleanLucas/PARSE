@@ -1,5 +1,7 @@
 # MC-306 — Replace stale ParseUI wiring plan with a current-state execution plan
 
+> **Archived historical planning note (2026-04-21):** this file records the one-time docs transition that produced `docs/plans/parseui-current-state-plan.md`. Keep it as project history only. For current PARSE policy and live contract guidance, use `AGENTS.md` and the active plan docs under `docs/plans/`.
+
 ## Objective
 Retire `docs/plans/parseui-wiring-todo.md` as a live execution guide and replace it with one current-state ParseUI plan grounded in `origin/main`, the implemented UI, and the live client/server contract.
 

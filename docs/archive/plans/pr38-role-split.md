@@ -1,5 +1,7 @@
 # PR #38 Role Split — Opus (planner) vs parse-gpt (coder)
 
+> **Archived historical coordination note (2026-04-21):** this file describes the agent split for one completed PR-era slice. Do not reuse it as a live operating procedure. Current PARSE workflow, branch policy, and validation gates live in `AGENTS.md`.
+
 **PR:** #38 `feat/actions-job-lifecycle`
 **Branch:** `feat/actions-job-lifecycle` from `origin/main`
 

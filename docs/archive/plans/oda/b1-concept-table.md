@@ -1,5 +1,7 @@
 # B1 — ConceptTable
 
+> **Archived Oda Track B task brief (2026-04-21):** this file is historical implementation scaffolding from the Compare-track React pivot. Do **not** execute it as a live task. Current PARSE work branches from `origin/main`, and the landed Compare code lives in `src/components/compare/`, `src/hooks/`, and `AGENTS.md`.
+
 **Model:** gemini-2.5-pro (complex grid render + state logic)
 **Read first:** `js/compare/concept-table.js` (873 lines), `js/compare/compare.js` lines 1–500
 **Output:** `src/components/compare/ConceptTable.tsx` + `ConceptTable.test.tsx`

@@ -1,5 +1,7 @@
 # BUILD SESSION — PARSE v4.0
 
+> **Archived historical runbook (2026-04-21):** this pre-React build-session plan targets the old vanilla-JS runtime and an older `AGENTS.md` contract. Do **not** execute it literally for current PARSE work. Use the live `AGENTS.md`, branch from `origin/main`, and prefer active docs under `docs/plans/`.
+
 **Created:** 2026-03-23 22:23 CET
 **Purpose:** Execution plan for the next session. Read this, then build.
 
