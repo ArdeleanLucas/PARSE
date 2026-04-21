@@ -438,12 +438,28 @@ class ParseChatTools:
                     },
                 },
             ),
+            "read_audio_info": ChatToolSpec(
+                name="read_audio_info",
+                description=(
+                    "Read metadata for a WAV file in the project audio directory: duration, "
+                    "sample rate, channels, sample width, frame count, and file size. "
+                    "Read-only; does not return audio samples."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["sourceWav"],
+                    "properties": {
+                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
+                    },
+                },
+            ),
             "read_csv_preview": ChatToolSpec(
                 name="read_csv_preview",
                 description=(
                     "Read first N rows of any CSV file and return column names, delimiter, "
                     "total row count, and a sample. Defaults to concepts.csv in project root "
-                    "if no path given. Read-only."
+                    "if no path given. Path must stay within the project root. Read-only."
                 ),
                 parameters={
                     "type": "object",
@@ -1679,17 +1695,54 @@ class ParseChatTools:
             pass
         return concepts
 
+    def _tool_read_audio_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return WAV metadata (duration, sample rate, channels) via stdlib wave."""
+        import wave as _wave
+
+        source_wav = str(args.get("sourceWav") or "").strip()
+        if not source_wav:
+            raise ChatToolValidationError("sourceWav is required")
+
+        safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
+
+        if not safe_audio.exists() or not safe_audio.is_file():
+            return {"ok": False, "error": "File not found: {0}".format(safe_audio)}
+
+        if safe_audio.suffix.lower() != ".wav":
+            return {"ok": False, "error": "Not a .wav file: {0}".format(safe_audio.name)}
+
+        try:
+            with _wave.open(str(safe_audio), "rb") as wav:
+                channels = wav.getnchannels()
+                sample_width = wav.getsampwidth()
+                frame_rate = wav.getframerate()
+                n_frames = wav.getnframes()
+        except _wave.Error as exc:
+            return {"ok": False, "error": "Invalid WAV file: {0}".format(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": "Failed to read audio file: {0}".format(exc)}
+
+        duration_sec = (n_frames / frame_rate) if frame_rate > 0 else 0.0
+
+        return {
+            "ok": True,
+            "path": str(safe_audio.relative_to(self.project_root)),
+            "channels": channels,
+            "sampleWidthBytes": sample_width,
+            "sampleRateHz": frame_rate,
+            "numFrames": n_frames,
+            "durationSec": round(duration_sec, 3),
+            "fileSizeBytes": safe_audio.stat().st_size,
+        }
+
     def _tool_read_csv_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read first N rows of a CSV file."""
+        """Read first N rows of a CSV file, sandboxed to the project root."""
         import csv as _csv
         raw_path = str(args.get("csvPath") or "").strip()
         max_rows = int(args.get("maxRows") or 20)
 
         if raw_path:
-            csv_path = Path(raw_path).expanduser()
-            if not csv_path.is_absolute():
-                csv_path = self.project_root / csv_path
-            csv_path = csv_path.resolve()
+            csv_path = self._resolve_project_path(raw_path, allowed_roots=[self.project_root])
         else:
             csv_path = self.project_root / "concepts.csv"
 
