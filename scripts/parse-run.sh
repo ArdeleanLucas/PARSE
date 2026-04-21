@@ -14,13 +14,6 @@
 #   PARSE_ROOT       Repo root (default: auto-detected from script location)
 #   PARSE_WORKSPACE_ROOT  Data workspace root for backend chat/tools (default: PARSE_ROOT)
 #   PARSE_CHAT_DOCS_ROOT  Optional docs root for chat markdown/text preview (default: PARSE_WORKSPACE_ROOT)
-#   PARSE_EXTERNAL_READ_ROOTS  OS-path-separated list of absolute roots chat may read
-#                               outside the workspace (e.g. "/mnt/c/Users/Lucas/Thesis").
-#                               Used by read_audio_info / read_csv_preview / read_text_preview
-#                               and by onboard_speaker_import source paths.
-#   PARSE_CHAT_MEMORY_PATH  Path to parse-memory.md (default: PARSE_WORKSPACE_ROOT/parse-memory.md)
-#   PARSE_CHAT_READ_ONLY    Set to "1" to force chat read-only; "0" to force write-enabled.
-#                           Empty (default) defers to config/ai_config.json.
 #   PARSE_API_PORT   API server port (default: 8766)
 #   PARSE_VITE_PORT  Vite dev server port (default: 5173)
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
@@ -50,9 +43,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_ROOT:=$(cd "${SCRIPT_DIR}/.." && pwd)}"
 : "${PARSE_WORKSPACE_ROOT:=${PARSE_ROOT}}"
 : "${PARSE_CHAT_DOCS_ROOT:=${PARSE_WORKSPACE_ROOT}}"
-: "${PARSE_CHAT_MEMORY_PATH:=${PARSE_WORKSPACE_ROOT}/parse-memory.md}"
-: "${PARSE_EXTERNAL_READ_ROOTS:=}"
-: "${PARSE_CHAT_READ_ONLY:=}"
 : "${PARSE_PY:=python3}"
 : "${PARSE_API_PORT:=8766}"
 : "${PARSE_VITE_PORT:=5173}"
@@ -203,20 +193,10 @@ start_api() {
   log "Starting Python API server on :${PARSE_API_PORT}..."
   log "Backend workspace root: ${PARSE_WORKSPACE_ROOT}"
   log "Chat docs root: ${PARSE_CHAT_DOCS_ROOT}"
-  log "Chat memory path: ${PARSE_CHAT_MEMORY_PATH}"
-  if [ -n "${PARSE_EXTERNAL_READ_ROOTS}" ]; then
-    log "External read roots: ${PARSE_EXTERNAL_READ_ROOTS}"
-  fi
-  if [ -n "${PARSE_CHAT_READ_ONLY}" ]; then
-    log "Chat read-only override: ${PARSE_CHAT_READ_ONLY}"
-  fi
   # -u = unbuffered stdout (so logs appear immediately; critical for remote debugging).
   (
     cd "${PARSE_WORKSPACE_ROOT}" || exit 1
     PARSE_CHAT_DOCS_ROOT="${PARSE_CHAT_DOCS_ROOT}" \
-      PARSE_CHAT_MEMORY_PATH="${PARSE_CHAT_MEMORY_PATH}" \
-      PARSE_EXTERNAL_READ_ROOTS="${PARSE_EXTERNAL_READ_ROOTS}" \
-      PARSE_CHAT_READ_ONLY="${PARSE_CHAT_READ_ONLY}" \
       "${PARSE_PY}" -u "${PARSE_ROOT}/python/server.py" \
       >"${API_STDOUT_LOG}" 2>"${API_STDERR_LOG}"
   ) &
@@ -272,10 +252,6 @@ print_banner() {
   log "  API:       http://localhost:${PARSE_API_PORT}/api/config"
   log "  Workspace: ${PARSE_WORKSPACE_ROOT}"
   log "  Chat docs: ${PARSE_CHAT_DOCS_ROOT}"
-  log "  Chat memory: ${PARSE_CHAT_MEMORY_PATH}"
-  if [ -n "${PARSE_EXTERNAL_READ_ROOTS}" ]; then
-    log "  External reads: ${PARSE_EXTERNAL_READ_ROOTS}"
-  fi
   log "════════════════════════════════════════"
 }
 

@@ -48,7 +48,7 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     },
     "chat": {
         "enabled": True,
-        "read_only": False,
+        "read_only": True,
         "attachments_supported": False,
         "provider": "openai",
         "model": "gpt-5.4",
@@ -283,9 +283,7 @@ def load_ai_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve chat config from merged defaults/user config.
 
-    Chat is OpenAI-compatible (OpenAI or xAI). ``read_only`` is honored from
-    config (env ``PARSE_CHAT_READ_ONLY`` also overrides it at orchestrator
-    construction). Attachments remain unsupported.
+    Chat is OpenAI-only and read-only in the current PARSE MVP backend.
     """
     llm_config = merged_config.get("llm", {})
     if not isinstance(llm_config, dict):
@@ -297,7 +295,7 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
 
     defaults = {
         "enabled": True,
-        "read_only": False,
+        "read_only": True,
         "attachments_supported": False,
         "provider": "openai",
         "model": str(chat_config.get("model") or llm_config.get("model") or "gpt-5.4").strip() or "gpt-5.4",
@@ -382,7 +380,13 @@ def _build_chat_config(merged_config: Dict[str, Any]) -> Dict[str, Any]:
         maximum=1000,
     )
 
-    resolved["read_only"] = _coerce_bool(resolved.get("read_only"), False)
+    read_only = _coerce_bool(resolved.get("read_only"), True)
+    if not read_only:
+        print(
+            "[WARN] chat.read_only=false is unsupported in MVP; forcing read-only",
+            file=sys.stderr,
+        )
+    resolved["read_only"] = True
 
     attachments_supported = _coerce_bool(resolved.get("attachments_supported"), False)
     if attachments_supported:

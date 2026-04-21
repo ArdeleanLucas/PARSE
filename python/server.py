@@ -1369,116 +1369,6 @@ def _chat_docs_root() -> Optional[pathlib.Path]:
         return root
 
 
-def _chat_external_read_roots() -> List[pathlib.Path]:
-    """Parse PARSE_EXTERNAL_READ_ROOTS as an OS-path-separated list.
-
-    Use ``:`` on POSIX and ``;`` on Windows. Non-existent or unreadable entries
-    are dropped silently so an over-eager config doesn't break chat startup.
-    """
-    raw = str(os.environ.get("PARSE_EXTERNAL_READ_ROOTS") or "").strip()
-    if not raw:
-        return []
-
-    sep = ";" if os.name == "nt" or ";" in raw else os.pathsep
-    roots: List[pathlib.Path] = []
-    for piece in raw.split(sep):
-        piece = piece.strip()
-        if not piece:
-            continue
-        candidate = pathlib.Path(piece).expanduser()
-        try:
-            resolved = candidate.resolve()
-        except Exception:
-            continue
-        if resolved not in roots:
-            roots.append(resolved)
-    return roots
-
-
-def _chat_memory_path() -> pathlib.Path:
-    raw = str(os.environ.get("PARSE_CHAT_MEMORY_PATH") or "").strip()
-    if raw:
-        candidate = pathlib.Path(raw).expanduser()
-        if not candidate.is_absolute():
-            candidate = _project_root() / candidate
-        try:
-            return candidate.resolve()
-        except Exception:
-            return candidate
-    return (_project_root() / "parse-memory.md").resolve()
-
-
-def _chat_onboard_speaker(
-    speaker: str,
-    source_wav_path: pathlib.Path,
-    source_csv_path: Optional[pathlib.Path],
-    is_primary: bool,
-) -> Dict[str, Any]:
-    """Synchronous onboarding callback used by the chat tool.
-
-    Copies the source WAV (and optional CSV) into the project's audio/original/
-    tree, then runs the existing onboard-speaker worker in-thread so the
-    annotation scaffold and source_index registration follow the same path the
-    HTTP /api/onboard/speaker endpoint uses.
-    """
-    project_root_path = _project_root()
-    target_dir = project_root_path / "audio" / "original" / speaker
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    wav_dest = target_dir / source_wav_path.name
-    wav_dest.write_bytes(source_wav_path.read_bytes())
-
-    csv_dest: Optional[pathlib.Path] = None
-    if source_csv_path is not None:
-        csv_dest = target_dir / source_csv_path.name
-        csv_dest.write_bytes(source_csv_path.read_bytes())
-
-    job_id = _create_job(
-        "onboard:speaker",
-        {
-            "speaker": speaker,
-            "wavPath": str(wav_dest.relative_to(project_root_path)),
-            "csvPath": str(csv_dest.relative_to(project_root_path)) if csv_dest else None,
-            "initiatedBy": "chat",
-        },
-    )
-
-    # Run synchronously — we're already inside the chat job's worker thread.
-    _run_onboard_speaker_job(job_id, speaker, wav_dest, csv_dest)
-
-    snapshot = _get_job_snapshot(job_id) or {}
-    result = snapshot.get("result") if isinstance(snapshot, dict) else None
-
-    if snapshot.get("status") != "complete":
-        raise RuntimeError(
-            "Onboarding job {0} failed: {1}".format(
-                job_id, snapshot.get("error") or "unknown error"
-            )
-        )
-
-    # If the caller marked this as non-primary, patch source_index.json accordingly.
-    # _run_onboard_speaker_job already sets is_primary based on list length; respect
-    # an explicit False override from the caller.
-    if is_primary is False and isinstance(result, dict):
-        source_index_path = _source_index_path()
-        source_index = _read_json_file(source_index_path, {})
-        speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else None
-        if isinstance(speakers_block, dict):
-            entry = speakers_block.get(speaker)
-            if isinstance(entry, dict):
-                for source_entry in entry.get("source_wavs", []) or []:
-                    if isinstance(source_entry, dict) and source_entry.get("filename") == wav_dest.name:
-                        source_entry["is_primary"] = False
-                _write_json_file(source_index_path, source_index)
-
-    return {
-        "jobId": job_id,
-        "annotationPath": (result or {}).get("annotationPath") if isinstance(result, dict) else None,
-        "wavPath": (result or {}).get("wavPath") if isinstance(result, dict) else None,
-        "csvPath": (result or {}).get("csvPath") if isinstance(result, dict) else None,
-    }
-
-
 def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
     global _chat_tools_runtime
     global _chat_orchestrator_runtime
@@ -1491,9 +1381,6 @@ def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
                 docs_root=_chat_docs_root(),
                 start_stt_job=_chat_start_stt_job,
                 get_job_snapshot=_chat_get_job_snapshot,
-                external_read_roots=_chat_external_read_roots(),
-                memory_path=_chat_memory_path(),
-                onboard_speaker=_chat_onboard_speaker,
             )
 
         if _chat_orchestrator_runtime is None:
