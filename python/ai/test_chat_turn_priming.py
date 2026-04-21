@@ -102,19 +102,7 @@ def test_priming_block_includes_source_index_summary(tmp_path, monkeypatch, stub
     assert "+1 more" in block  # secondary wav counted
 
 
-def test_run_injects_priming_block_as_second_system_message(tmp_path, monkeypatch, stub_runtime) -> None:
-    """The priming block must appear as its own system message so the model
-    sees it even when the static system prompt is cached upstream."""
-    stub_runtime({})
-    (tmp_path / "parse-memory.md").write_text(
-        "## User preferences\n- terse tone\n", encoding="utf-8"
-    )
-
-    tools = ParseChatTools(project_root=tmp_path)
-    orch = ChatOrchestrator(project_root=tmp_path, tools=tools)
-
-    captured: dict = {}
-
+def _install_fake_completion(orchestrator, captured):
     class _FakeChoice:
         def __init__(self, text):
             self.message = type("Msg", (), {"content": text, "tool_calls": None})()
@@ -127,7 +115,22 @@ def test_run_injects_priming_block_as_second_system_message(tmp_path, monkeypatc
         captured["messages"] = list(messages)
         return _FakeResponse("ok"), {"model": "stub-model"}
 
-    orch.runtime.complete = _fake_complete  # type: ignore[assignment]
+    orchestrator.runtime.complete = _fake_complete  # type: ignore[assignment]
+
+
+def test_run_injects_priming_block_on_first_turn_of_session(tmp_path, monkeypatch, stub_runtime) -> None:
+    """First turn of a fresh session (no prior assistant reply) gets the
+    auto-injected priming block as a second system message."""
+    stub_runtime({})
+    (tmp_path / "parse-memory.md").write_text(
+        "## User preferences\n- terse tone\n", encoding="utf-8"
+    )
+
+    tools = ParseChatTools(project_root=tmp_path)
+    orch = ChatOrchestrator(project_root=tmp_path, tools=tools)
+
+    captured: dict = {}
+    _install_fake_completion(orch, captured)
 
     orch.run(
         session_id="session-1",
@@ -135,20 +138,52 @@ def test_run_injects_priming_block_as_second_system_message(tmp_path, monkeypatc
     )
 
     msgs = captured["messages"]
-    # [0] is the static system prompt; [1] is the auto-priming block; [2] is the user turn.
+    # [0] static system prompt, [1] priming block, [2] user turn.
     assert msgs[0]["role"] == "system"
     assert msgs[1]["role"] == "system"
     assert "terse tone" in msgs[1]["content"]
     assert msgs[2]["role"] == "user"
 
 
-def test_priming_reflects_parse_memory_updates_between_turns(tmp_path, monkeypatch, stub_runtime) -> None:
-    """An update from turn N must be visible in turn N+1's priming block."""
+def test_run_skips_priming_on_subsequent_turns_of_session(tmp_path, monkeypatch, stub_runtime) -> None:
+    """If the session already has an assistant reply the priming block is
+    NOT re-injected — the model inherits context through conversation history
+    instead of reloading it each turn."""
+    stub_runtime({})
+    (tmp_path / "parse-memory.md").write_text(
+        "## User preferences\n- terse tone\n", encoding="utf-8"
+    )
+
+    tools = ParseChatTools(project_root=tmp_path)
+    orch = ChatOrchestrator(project_root=tmp_path, tools=tools)
+
+    captured: dict = {}
+    _install_fake_completion(orch, captured)
+
+    orch.run(
+        session_id="session-1",
+        session_messages=[
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "what did I say?"},
+        ],
+    )
+
+    msgs = captured["messages"]
+    # Exactly one system message — the static prompt. No priming block.
+    system_messages = [m for m in msgs if m.get("role") == "system"]
+    assert len(system_messages) == 1
+    assert "terse tone" not in system_messages[0]["content"]
+
+
+def test_priming_reflects_parse_memory_updates_between_sessions(tmp_path, monkeypatch, stub_runtime) -> None:
+    """An update from session N must be visible in session N+1's priming block.
+    The priming reads straight off disk so the new session sees the new file
+    whether or not the writing session is still alive."""
     stub_runtime({})
     tools = ParseChatTools(project_root=tmp_path)
     orch = ChatOrchestrator(project_root=tmp_path, tools=tools)
 
-    # Simulate a write that the agent made on turn N.
     tools.execute(
         "parse_memory_upsert_section",
         {"section": "Speakers", "body": "- Faili01 from Fail01", "dryRun": False},

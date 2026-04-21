@@ -124,9 +124,9 @@ class ChatOrchestrator:
             "- After fetching, use cognate_compute_preview with contactLanguages to compare\n"
             "\n"
             "Persistent memory:\n"
-            "- A second system message each turn auto-injects the current `parse-memory.md` and a summary of `source_index.json`. Treat it as authoritative on-disk state.\n"
-            "- parse_memory_read returns the full file on demand (useful when auto-injected content was truncated).\n"
-            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Updates are visible to the next turn and all future sessions. Prefer small, well-named sections over one sprawling blob.\n"
+            "- On the session's first assistant turn a second system message auto-injects the current `parse-memory.md` and a summary of `source_index.json`. Treat it as authoritative on-disk state at session start.\n"
+            "- Subsequent turns in the same session inherit that context via conversation history — not re-read on every turn. If you wrote to `parse-memory.md` mid-session and want to reference the new content by file rather than by memory, call `parse_memory_read`.\n"
+            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Updates persist across sessions; the next session you start will see them in its auto-injected context.\n"
             "\n"
             "Response style:\n"
             "- concise, technical, and accurate\n"
@@ -143,6 +143,20 @@ class ChatOrchestrator:
                 else "note any writes performed and reference the files updated"
             ),
         )
+
+    @staticmethod
+    def _session_has_assistant_turn(session_messages: Sequence[Mapping[str, Any]]) -> bool:
+        """True iff the session history already contains an assistant reply.
+
+        A fresh chat session arrives with only the user's opening message, so
+        this is False — the "session's first turn" signal used to decide
+        whether to auto-inject persistent-context priming.
+        """
+        for row in session_messages:
+            role = str(row.get("role") or "").strip().lower()
+            if role == "assistant":
+                return True
+        return False
 
     def _build_turn_priming_block(self) -> str:
         """Return a system message body auto-loaded at the start of every turn.
@@ -462,9 +476,15 @@ class ChatOrchestrator:
             }
         ]
 
-        priming_block = self._build_turn_priming_block()
-        if priming_block:
-            messages.append({"role": "system", "content": priming_block})
+        # Auto-prime persistent context (parse-memory.md + source_index.json)
+        # only on the session's first assistant turn. Subsequent turns inherit
+        # it through the conversation history, so we don't re-inject on every
+        # message — cheaper, and avoids "memory refresh" surprising the model
+        # mid-conversation if the user wrote to parse-memory.md out of band.
+        if not self._session_has_assistant_turn(session_messages):
+            priming_block = self._build_turn_priming_block()
+            if priming_block:
+                messages.append({"role": "system", "content": priming_block})
 
         messages.extend(self._history_messages(session_messages))
 
