@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import sys
 import time
@@ -87,6 +88,16 @@ def test_save_api_key_round_trips_openai_provider(tmp_path, monkeypatch) -> None
     assert status["provider"] == "openai"
     assert openai_auth.get_api_key() == "sk-openai-key-456"
     assert openai_auth.get_api_key_provider() == "openai"
+
+
+def test_save_api_key_updates_runtime_env_for_xai(tmp_path, monkeypatch) -> None:
+    token_path = tmp_path / "auth_tokens.json"
+    monkeypatch.setattr(openai_auth, "_token_path", lambda: token_path)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+
+    openai_auth.save_api_key("xai-key-123", "xai")
+
+    assert os.environ.get("XAI_API_KEY") == "xai-key-123"
 
 
 def test_save_tokens_preserves_existing_direct_api_key(tmp_path, monkeypatch) -> None:

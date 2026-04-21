@@ -77,6 +77,16 @@ _chat_tools_runtime: Optional[ParseChatTools] = None
 _chat_orchestrator_runtime: Optional[ChatOrchestrator] = None
 
 
+def _reset_chat_runtime_after_auth_key_save() -> None:
+    """Clear cached chat runtimes so a newly saved API key applies immediately."""
+    global _chat_tools_runtime
+    global _chat_orchestrator_runtime
+
+    with _chat_runtime_lock:
+        _chat_tools_runtime = None
+        _chat_orchestrator_runtime = None
+
+
 class ApiError(Exception):
     """API error with explicit HTTP status."""
 
@@ -2974,6 +2984,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
             from ai.openai_auth import save_api_key, get_auth_status
             save_api_key(key, provider)
+            _reset_chat_runtime_after_auth_key_save()
             status = get_auth_status()
             self._send_json(HTTPStatus.OK, status)
         except Exception as exc:

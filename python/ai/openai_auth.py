@@ -11,6 +11,7 @@ Tokens are stored in config/auth_tokens.json (gitignored).
 """
 
 import json
+import os
 import pathlib
 import threading
 import time
@@ -366,17 +367,23 @@ def get_auth_status() -> Dict[str, Any]:
 
 
 def save_api_key(key: str, provider: str = "xai") -> None:
-    """Save a direct API key to auth_tokens.json."""
+    """Save a direct API key to auth_tokens.json and mirror it into the live env."""
     path = _token_path()
     try:
         with open(path, "r", encoding="utf-8") as f:
             tokens = json.load(f)
     except (json.JSONDecodeError, OSError):
         tokens = {}
-    tokens["direct_api_key"] = key.strip()
-    tokens["direct_api_key_provider"] = provider.strip()
+
+    normalized_key = key.strip()
+    normalized_provider = provider.strip().lower() or "xai"
+    tokens["direct_api_key"] = normalized_key
+    tokens["direct_api_key_provider"] = normalized_provider
     with open(path, "w", encoding="utf-8") as f:
         json.dump(tokens, f, indent=2)
+
+    env_var = "XAI_API_KEY" if normalized_provider in {"xai", "grok", "x.ai"} else "OPENAI_API_KEY"
+    os.environ[env_var] = normalized_key
 
 
 def get_api_key() -> Optional[str]:
