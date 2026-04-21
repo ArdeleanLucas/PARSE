@@ -219,7 +219,7 @@ Environment overrides:
 | `PARSE_SKIP_PULL` | `0` | Set to `1` to skip the `git pull` step. |
 | `PARSE_PULL_MODE` | `auto` | Git integration strategy: `auto`, `ff`, `rebase`, or `reset`. |
 
-For machine-local overrides without editing tracked files, create a gitignored `.parse-env` file in the repo root. `parse-run.sh` sources it before applying defaults, so settings like `PARSE_PY` or `PARSE_EXTERNAL_READ_ROOTS` can live there permanently.
+For machine-local overrides without editing tracked files, create a gitignored `.parse-env` file in the repo root. `parse-run.sh` sources it before applying defaults, and the standalone MCP adapter now mirrors that convention when launched directly, so settings like `PARSE_PY`, `PARSE_EXTERNAL_READ_ROOTS`, or `PARSE_CHAT_MEMORY_PATH` can live there permanently. Explicit process environment variables still win over `.parse-env`.
 
 Two companion commands are also available:
 
@@ -412,6 +412,8 @@ Add PARSE as an MCP server in your client config. Example for Claude Desktop (`c
     }
 }
 ```
+
+If you launch the adapter without an explicit `env` block, it also reads repo-local overrides from `<project-root>/.parse-env` (same convention as `scripts/parse-run.sh`). Use that for machine-specific `PARSE_EXTERNAL_READ_ROOTS`, `PARSE_CHAT_MEMORY_PATH`, or `PARSE_PROJECT_ROOT`; explicit client-provided env vars still take precedence.
 
 ### Exposed Tools
 

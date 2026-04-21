@@ -5,6 +5,7 @@ through ParseChatTools.execute(), so registering an MCP tool that isn't
 in the allowlist produces a runtime ChatToolValidationError on the
 client side. A test at import time catches that before shipping.
 """
+import os
 import pathlib
 import sys
 
@@ -16,6 +17,57 @@ if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
 from ai.chat_tools import ParseChatTools
+
+
+def test_load_repo_parse_env_sets_missing_vars(tmp_path, monkeypatch) -> None:
+    from adapters import mcp_adapter
+
+    (tmp_path / ".parse-env").write_text(
+        "# local overrides\nPARSE_EXTERNAL_READ_ROOTS=*\nexport PARSE_CHAT_MEMORY_PATH=memory/custom.md\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("PARSE_EXTERNAL_READ_ROOTS", raising=False)
+    monkeypatch.delenv("PARSE_CHAT_MEMORY_PATH", raising=False)
+
+    applied = mcp_adapter._load_repo_parse_env(tmp_path)
+
+    assert applied == {
+        "PARSE_EXTERNAL_READ_ROOTS": "*",
+        "PARSE_CHAT_MEMORY_PATH": "memory/custom.md",
+    }
+    assert os.environ["PARSE_EXTERNAL_READ_ROOTS"] == "*"
+    assert os.environ["PARSE_CHAT_MEMORY_PATH"] == "memory/custom.md"
+
+
+def test_repo_parse_env_can_disable_mcp_path_sandbox(tmp_path, monkeypatch) -> None:
+    import wave
+
+    from adapters import mcp_adapter
+
+    (tmp_path / ".parse-env").write_text("PARSE_EXTERNAL_READ_ROOTS=*\n", encoding="utf-8")
+    monkeypatch.delenv("PARSE_EXTERNAL_READ_ROOTS", raising=False)
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    stray_root = tmp_path / "external"
+    stray_root.mkdir()
+    wav = stray_root / "speaker.wav"
+    with wave.open(str(wav), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 16000)
+
+    mcp_adapter._load_repo_parse_env(tmp_path)
+    tools = ParseChatTools(
+        project_root=project_root,
+        external_read_roots=mcp_adapter._resolve_external_read_roots(),
+    )
+
+    result = tools.execute("read_audio_info", {"sourceWav": str(wav)})["result"]
+    assert result["ok"] is True
+    assert result["sampleRateHz"] == 16000
 
 
 def _has_mcp() -> bool:
