@@ -238,11 +238,11 @@ cp config/ai_config.example.json config/ai_config.json
 # then edit config/ai_config.json — especially stt.model_path (local Razhan CT2 path)
 
 # Terminal 1 — Python API backend
-cd /path/to/parse_v2
+cd /path/to/parse
 /path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py
 
 # Terminal 2 — Vite frontend
-cd /path/to/parse_v2
+cd /path/to/parse
 npm install   # once per clone
 npm run dev
 ```
