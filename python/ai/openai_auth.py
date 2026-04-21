@@ -146,10 +146,30 @@ def load_tokens() -> Optional[Dict[str, Any]]:
 
 
 def save_tokens(tokens: Dict[str, Any]) -> None:
-    """Save tokens to disk."""
+    """Save OAuth tokens to disk, preserving any direct API key fields.
+
+    auth_tokens.json holds both OAuth tokens (access_token / refresh_token /
+    expires / token_type) and direct API key fields (direct_api_key /
+    direct_api_key_provider). Earlier this function wrote the OAuth tokens
+    with open(..., "w"), which truncated the whole file — so completing an
+    OAuth login after saving an xAI or OpenAI API key silently wiped that
+    key. Merge on top of whatever's already on disk so both auth methods
+    coexist.
+    """
     path = _token_path()
+    existing: Dict[str, Any] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+            if isinstance(loaded, dict):
+                existing = loaded
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+
+    merged = {**existing, **tokens}
+
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(tokens, f, indent=2)
+        json.dump(merged, f, indent=2)
 
 
 def clear_tokens() -> None:
