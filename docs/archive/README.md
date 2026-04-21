@@ -24,7 +24,7 @@ These documents describe **landed work, completed cleanups, or the pre-React van
 - `repo-cleanup-preflight.md` — 2026-04-09 branch snapshot; branches pruned.
 
 ### plans/oda/
-The Oda agent persona owned Track B (Compare Mode) of the dual-agent React+Vite pivot. Every component it scoped is now in `src/components/compare/` and `src/hooks/`. `b6-speaker-import.md` and `rules.md` remain in `docs/plans/oda/` as UPDATE items.
+The Oda agent persona owned Track B (Compare Mode) of the dual-agent React+Vite pivot. Every component it scoped is now in `src/components/compare/` and `src/hooks/`. `b6-speaker-import.md` remains in `docs/plans/oda/` only as a historical handoff note that now points readers to the landed React component; the rest of the Oda briefs live here as archive material.
 
 - `b1-concept-table.md` through `b5-enrichments-panel.md` — Component specs; all landed.
 - `b7-export.md` — `useExport` hook spec; landed.

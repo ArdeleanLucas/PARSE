@@ -1,5 +1,7 @@
 # Coordination Protocol and Completion Gate
 
+> **Archived Oda Track B coordination note (2026-04-21):** this file documents the original dual-agent Compare-track protocol from the React pivot. Do **not** use it as a live coordination contract. Current repo policy and shared-surface rules live in `AGENTS.md`.
+>
 > Reference this when you are blocked, need something from ParseBuilder,
 > or are ready to hand off.
 

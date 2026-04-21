@@ -1,5 +1,7 @@
 # PARSE branch cleanup delete commands — 2026-04-21
 
+> **Historical branch-state snapshot (2026-04-21):** this memo captures one validated deletion pass from the repo state at that time. The branch set has already drifted since capture. Use the commands below only after re-running the preflight and confirming the live refs still match.
+>
 > Snapshot memo generated from the canonical active repo. All commands below are parameterized on `$PARSE_REPO`, which defaults to `/home/lucas/gh/ardeleanlucas/parse` when unset. Run the following once per shell (or export it in `~/.bashrc`):
 >
 > ```bash

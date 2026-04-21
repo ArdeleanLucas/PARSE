@@ -1,8 +1,12 @@
 # B6 — SpeakerImport
 
-**Model:** gemini-2.5-flash
-**Read first:** `js/compare/speaker-import.js` (2,147 lines)
-**Output:** `src/components/compare/SpeakerImport.tsx` + `SpeakerImport.test.tsx`
+> **Historical React-pivot handoff note (2026-04-21):** this file was written as an implementation brief during the Compare-track migration. `src/components/compare/SpeakerImport.tsx` has already landed, and the legacy source file named below was removed in Stage 3 / PR #58. Do **not** treat this as a pending task checklist.
+>
+> **Read current code first:** `src/components/compare/SpeakerImport.tsx` and `src/components/compare/SpeakerImport.test.tsx`.
+
+**Original model:** gemini-2.5-flash
+**Historical source at capture time:** `js/compare/speaker-import.js` (removed in PR #58)
+**Original output target:** `src/components/compare/SpeakerImport.tsx` + `SpeakerImport.test.tsx`
 **Renders as:** `Modal` from `src/components/shared/` (ParseBuilder's)
 
 ---

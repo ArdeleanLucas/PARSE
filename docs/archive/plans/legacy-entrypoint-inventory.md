@@ -1,5 +1,7 @@
 # PARSE Legacy Entrypoint Inventory
 
+> **Archived cutover snapshot (2026-04-21):** this inventory predates the completed Stage 3 runtime removal. File-presence claims and phase labels below are historical; `parse.html`, `compare.html`, `review_tool_dev.html`, `js/`, and the legacy launchers are already gone from the live repo.
+
 **Purpose:** Enumerate current references to legacy entrypoints (`parse.html`, `compare.html`, `localhost:8766` legacy UI paths) and identify which phase should handle each reference.
 
 **Scope date:** 2026-04-09

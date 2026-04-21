@@ -1,5 +1,7 @@
 # B9 — CompareMode Root + Assembly
 
+> **Archived Oda Track B task brief (2026-04-21):** this file is historical implementation scaffolding from the Compare-track React pivot. Do **not** execute it as a live task. Current PARSE work branches from `origin/main`, and the landed Compare code lives in `src/components/compare/`, `src/hooks/`, and `AGENTS.md`.
+
 **Model:** gemini-2.5-flash
 **Output:** `src/components/compare/CompareMode.tsx` + `CompareMode.test.tsx`
 **Requires:** All of B1–B8 complete and tested.
