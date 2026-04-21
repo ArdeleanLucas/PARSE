@@ -192,6 +192,9 @@ def _resolve_external_read_roots() -> list:
         piece = piece.strip()
         if not piece:
             continue
+        if piece in {"*", "**", "/"}:
+            roots.append(Path(piece))
+            continue
         candidate = Path(piece).expanduser()
         try:
             resolved = candidate.resolve()

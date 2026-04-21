@@ -1395,6 +1395,10 @@ def _chat_external_read_roots() -> List[pathlib.Path]:
         piece = piece.strip()
         if not piece:
             continue
+        # Preserve wildcard tokens as-is so ParseChatTools.__init__ can detect them.
+        if piece in {"*", "**", "/"}:
+            roots.append(pathlib.Path(piece))
+            continue
         candidate = pathlib.Path(piece).expanduser()
         try:
             resolved = candidate.resolve()
