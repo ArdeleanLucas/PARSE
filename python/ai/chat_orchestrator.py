@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """PARSE chat orchestration (OpenAI + strict PARSE-native tools).
 
-This orchestrator is intentionally read-only in MVP:
-- no annotation/config/enrichment writes
-- no arbitrary shell/file tools
-- no file attachments
+Read-only vs. write-enabled mode is driven by ``chat.read_only`` in
+``config/ai_config.json`` (override via ``PARSE_CHAT_READ_ONLY`` env). When
+read-only the orchestrator only permits allowlisted write-capable tools
+(``WRITE_ALLOWED_TOOL_NAMES`` in ``chat_tools``) and injects guard notices
+on mutation-intent requests. When write-enabled those guards are dropped
+and any allowlisted chat tool may mutate project state.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -17,6 +20,22 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .chat_tools import ChatToolError, ParseChatTools, WRITE_ALLOWED_TOOL_NAMES
 from .provider import OpenAIChatRuntime
+
+
+_TURN_PRIMING_MEMORY_MAX_BYTES = 16 * 1024
+_TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS = 40
+
+
+def _resolve_read_only(config_value: Any) -> bool:
+    """Read-only resolution: env PARSE_CHAT_READ_ONLY wins over config.
+
+    Values like "0", "false", "no", "off" disable read-only mode.
+    Any other non-empty value enables it. Empty env falls back to config.
+    """
+    env_value = str(os.environ.get("PARSE_CHAT_READ_ONLY") or "").strip().lower()
+    if env_value:
+        return env_value not in {"0", "false", "no", "off"}
+    return bool(config_value)
 
 
 _MUTATION_REQUEST_RE = re.compile(
@@ -59,33 +78,44 @@ class ChatOrchestrator:
         self.max_tool_rounds = max(1, int(chat_config.get("max_tool_rounds", 4) or 4))
         self.max_history_messages = max(1, int(chat_config.get("max_history_messages", 24) or 24))
         self.max_tool_result_chars = max(1000, int(chat_config.get("max_tool_result_chars", 24000) or 24000))
-        self.read_only = bool(chat_config.get("read_only", True))
+        self.read_only = _resolve_read_only(chat_config.get("read_only", False))
         self.attachments_supported = bool(chat_config.get("attachments_supported", False))
-
-        # Chat MVP is intentionally locked to read-only + no attachments.
-        if not self.read_only:
-            self.read_only = True
-        if self.attachments_supported:
-            self.attachments_supported = False
 
         self._system_prompt = self._build_system_prompt()
 
     def _build_system_prompt(self) -> str:
         tool_lines = "\n".join(["- {0}".format(name) for name in self.tools.tool_names()])
+
+        if self.read_only:
+            constraints = (
+                "Hard constraints (must follow):\n"
+                "1) READ-ONLY MODE: do not mutate project state. No annotation writes, no config writes, no enrichments writes, no file overwrites.\n"
+                "   Exception: allowlisted write-capable tools (e.g. contact_lexeme_lookup, tag tools, onboard_speaker_import, parse_memory_upsert_section) may write their dedicated files.\n"
+                "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
+                "3) No file/context attachments are supported.\n"
+                "4) If asked to apply changes, state the environment is mostly read-only and provide a preview plan unless an allowlisted write-capable tool is the correct path.\n"
+                "5) Never imply a write happened unless an allowlisted write-capable tool explicitly reports a persisted write.\n"
+                "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+            )
+        else:
+            constraints = (
+                "Operating rules (must follow):\n"
+                "1) WRITE-ENABLED MODE: you may invoke any allowlisted tool, including ones that write project state (annotations, tags, contact-language config, source index, parse-memory.md).\n"
+                "2) Destructive or broad writes require a dry-run preview first. For any tool exposing a dryRun flag, call it with dryRun=true before dryRun=false.\n"
+                "3) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
+                "4) No file/context attachments are supported — pass external file paths via tool arguments (e.g. onboard_speaker_import sourceWav) and rely on PARSE_EXTERNAL_READ_ROOTS for bounded reads.\n"
+                "5) Never imply a write happened unless a tool explicitly reports a persisted write. When reporting writes, cite the tool name and the file(s) updated.\n"
+                "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+                "7) Keep parse-memory.md current: when the user shares file provenance, speaker context, preferences, or onboarding decisions, record it via parse_memory_upsert_section so future turns can recall it with parse_memory_read.\n"
+            )
+
         return (
             "You are the built-in PARSE AI toolbox assistant.\n"
             "\n"
-            "Hard constraints (must follow):\n"
-            "1) READ-ONLY MVP: do not mutate project state. No annotation writes, no config writes, no enrichments writes, no file overwrites.\n"
-            "   Exception: contact_lexeme_lookup and tag tools are allowed to write their respective data files.\n"
-            "2) Only use allowlisted PARSE-native tools. Never invent tools and never request shell access.\n"
-            "3) No file/context attachments are supported in this MVP.\n"
-            "4) If asked to apply changes, explicitly state the environment is mostly read-only and provide a preview plan unless an allowlisted write-capable tool is the correct path.\n"
-            "5) Never imply a write happened unless an allowlisted write-capable tool explicitly reports a persisted write.\n"
-            "6) Be transparent: if a tool is placeholder/unavailable, say so clearly.\n"
+            "{constraints}"
             "\n"
             "Available tools:\n"
-            "{0}\n"
+            "{tools}\n"
             "\n"
             "External data fetching:\n"
             "- contact_lexeme_lookup can fetch reference forms (IPA) for ANY language from third-party sources\n"
@@ -93,13 +123,143 @@ class ChatOrchestrator:
             "- Use it when the user needs Arabic, Persian, Sorani, or other reference language data\n"
             "- After fetching, use cognate_compute_preview with contactLanguages to compare\n"
             "\n"
+            "Persistent memory:\n"
+            "- On the session's first assistant turn a second system message auto-injects the current `parse-memory.md` and a summary of `source_index.json`. Treat it as authoritative on-disk state at session start.\n"
+            "- Subsequent turns in the same session inherit that context via conversation history — not re-read on every turn. If you wrote to `parse-memory.md` mid-session and want to reference the new content by file rather than by memory, call `parse_memory_read`.\n"
+            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Updates persist across sessions; the next session you start will see them in its auto-injected context.\n"
+            "\n"
             "Response style:\n"
             "- concise, technical, and accurate\n"
             "- when using tools, summarize what was checked\n"
-            "- keep read-only limitations explicit when relevant\n"
+            "- {mode_note}\n"
             "- Use readable Markdown with short headings, bullets, and blank lines between sections\n"
             "- Never wrap the entire reply in a code fence unless the user explicitly asked for raw copy-paste output\n"
-        ).format(tool_lines)
+        ).format(
+            constraints=constraints,
+            tools=tool_lines,
+            mode_note=(
+                "keep read-only limitations explicit when relevant"
+                if self.read_only
+                else "note any writes performed and reference the files updated"
+            ),
+        )
+
+    @staticmethod
+    def _session_has_assistant_turn(session_messages: Sequence[Mapping[str, Any]]) -> bool:
+        """True iff the session history already contains an assistant reply.
+
+        A fresh chat session arrives with only the user's opening message, so
+        this is False — the "session's first turn" signal used to decide
+        whether to auto-inject persistent-context priming.
+        """
+        for row in session_messages:
+            role = str(row.get("role") or "").strip().lower()
+            if role == "assistant":
+                return True
+        return False
+
+    def _build_turn_priming_block(self) -> str:
+        """Return a system message body auto-loaded at the start of every turn.
+
+        Pulls the current ``parse-memory.md`` and a compact ``source_index.json``
+        summary so the model sees persistent context without having to call
+        ``parse_memory_read`` / ``project_context_read`` itself. Empty string
+        when neither file has anything worth showing.
+        """
+        sections: List[str] = []
+
+        memory_path = getattr(self.tools, "memory_path", None)
+        if isinstance(memory_path, Path) and memory_path.exists():
+            try:
+                raw = memory_path.read_text(encoding="utf-8")
+            except Exception:
+                raw = ""
+
+            text = (raw or "").strip()
+            if text:
+                encoded = text.encode("utf-8")
+                truncated = len(encoded) > _TURN_PRIMING_MEMORY_MAX_BYTES
+                if truncated:
+                    text = encoded[:_TURN_PRIMING_MEMORY_MAX_BYTES].decode("utf-8", errors="ignore")
+                    text = text + "\n\n(truncated — call parse_memory_read for full content)"
+                sections.append(
+                    "## Persistent memory (parse-memory.md)\n"
+                    "This is the live on-disk content. Use parse_memory_upsert_section to update it.\n"
+                    "---\n"
+                    "{0}".format(text)
+                )
+
+        source_index_summary = self._source_index_summary()
+        if source_index_summary:
+            sections.append(
+                "## Source index summary\n"
+                "Speakers currently registered and their primary audio path. For full details "
+                "call project_context_read.\n"
+                "---\n"
+                "{0}".format(source_index_summary)
+            )
+
+        if not sections:
+            return ""
+
+        return (
+            "Auto-loaded PARSE context for this turn. Treat these as authoritative "
+            "snapshots of on-disk state — they reflect any writes from prior turns.\n"
+            "\n"
+            + "\n\n".join(sections)
+        )
+
+    def _source_index_summary(self) -> str:
+        """Compact `speaker: path (primary/secondary)` listing of source_index.json."""
+        path = getattr(self.tools, "source_index_path", None)
+        if not isinstance(path, Path) or not path.exists():
+            return ""
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+
+        if not isinstance(payload, dict):
+            return ""
+
+        speakers = payload.get("speakers") if isinstance(payload.get("speakers"), dict) else {}
+        if not speakers:
+            return ""
+
+        lines: List[str] = []
+        for speaker_name in sorted(speakers.keys())[:_TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS]:
+            entry = speakers.get(speaker_name)
+            if not isinstance(entry, dict):
+                continue
+
+            source_wavs = entry.get("source_wavs") if isinstance(entry.get("source_wavs"), list) else []
+            primary = ""
+            extras = 0
+            for wav in source_wavs:
+                if not isinstance(wav, dict):
+                    continue
+                filename = str(wav.get("path") or wav.get("filename") or "").strip()
+                if wav.get("is_primary") and not primary:
+                    primary = filename
+                elif filename:
+                    extras += 1
+            if not primary and source_wavs:
+                first = source_wavs[0]
+                if isinstance(first, dict):
+                    primary = str(first.get("path") or first.get("filename") or "").strip()
+
+            suffix = " (+{0} more)".format(extras) if extras else ""
+            lines.append("- {0}: {1}{2}".format(speaker_name, primary or "(no primary wav)", suffix))
+
+        if len(speakers) > _TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS:
+            lines.append(
+                "- …{0} more speakers truncated; call project_context_read for the full list.".format(
+                    len(speakers) - _TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS
+                )
+            )
+
+        return "\n".join(lines)
 
     def _history_messages(self, session_messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         filtered: List[Dict[str, Any]] = []
@@ -195,22 +355,23 @@ class ChatOrchestrator:
         write_allowed_tool_used = bool(used_tools.intersection(WRITE_ALLOWED_TOOL_NAMES))
 
         if not text:
-            text = READ_ONLY_NOTICE
+            text = READ_ONLY_NOTICE if self.read_only else "I did not produce a response for this request."
 
-        if (
-            _WRITE_CLAIM_RE.search(text)
-            and not write_allowed_tool_used
-            and not self._contains_read_only_notice(text)
-        ):
-            text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
+        if self.read_only:
+            if (
+                _WRITE_CLAIM_RE.search(text)
+                and not write_allowed_tool_used
+                and not self._contains_read_only_notice(text)
+            ):
+                text = "{0}\n\n{1}".format(text, READ_ONLY_NOTICE)
 
-        if (
-            user_text
-            and _MUTATION_REQUEST_RE.search(user_text)
-            and not write_allowed_tool_used
-        ):
-            if not self._contains_read_only_notice(text):
-                text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
+            if (
+                user_text
+                and _MUTATION_REQUEST_RE.search(user_text)
+                and not write_allowed_tool_used
+            ):
+                if not self._contains_read_only_notice(text):
+                    text = "{0}\n\n{1}".format(READ_ONLY_NOTICE, text)
 
         if user_text and _ATTACHMENT_REQUEST_RE.search(user_text):
             if not self._contains_attachments_notice(text):
@@ -314,6 +475,17 @@ class ChatOrchestrator:
                 "content": self._system_prompt,
             }
         ]
+
+        # Auto-prime persistent context (parse-memory.md + source_index.json)
+        # only on the session's first assistant turn. Subsequent turns inherit
+        # it through the conversation history, so we don't re-inject on every
+        # message — cheaper, and avoids "memory refresh" surprising the model
+        # mid-conversation if the user wrote to parse-memory.md out of band.
+        if not self._session_has_assistant_turn(session_messages):
+            priming_block = self._build_turn_priming_block()
+            if priming_block:
+                messages.append({"role": "system", "content": priming_block})
+
         messages.extend(self._history_messages(session_messages))
 
         tool_trace: List[Dict[str, Any]] = []
@@ -398,29 +570,32 @@ class ChatOrchestrator:
                 "toolTrace": tool_trace,
                 "model": runtime_meta.get("model", self.runtime.model),
                 "reasoning": runtime_meta,
-                "mode": "read-only",
+                "mode": "read-only" if self.read_only else "write-enabled",
                 "readOnly": self.read_only,
                 "attachmentsSupported": self.attachments_supported,
-                "readOnlyNotice": READ_ONLY_NOTICE,
+                "readOnlyNotice": READ_ONLY_NOTICE if self.read_only else "",
             }
+
+        fallback_text = (
+            "I hit the maximum tool-call rounds for this turn. "
+            "Please narrow the request and try again."
+        )
+        if self.read_only:
+            fallback_text = "{0}\n\n{1}".format(fallback_text, READ_ONLY_NOTICE)
 
         return {
             "sessionId": session_id,
             "assistant": {
                 "role": "assistant",
-                "content": (
-                    "I hit the maximum tool-call rounds for this turn. "
-                    "Please narrow the request and try again.\n\n"
-                    "{0}".format(READ_ONLY_NOTICE)
-                ),
+                "content": fallback_text,
             },
             "toolTrace": tool_trace,
             "model": runtime_meta.get("model", self.runtime.model),
             "reasoning": runtime_meta,
-            "mode": "read-only",
+            "mode": "read-only" if self.read_only else "write-enabled",
             "readOnly": self.read_only,
             "attachmentsSupported": self.attachments_supported,
-            "readOnlyNotice": READ_ONLY_NOTICE,
+            "readOnlyNotice": READ_ONLY_NOTICE if self.read_only else "",
         }
 
 
