@@ -22,6 +22,10 @@ from .chat_tools import ChatToolError, ParseChatTools, WRITE_ALLOWED_TOOL_NAMES
 from .provider import OpenAIChatRuntime
 
 
+_TURN_PRIMING_MEMORY_MAX_BYTES = 16 * 1024
+_TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS = 40
+
+
 def _resolve_read_only(config_value: Any) -> bool:
     """Read-only resolution: env PARSE_CHAT_READ_ONLY wins over config.
 
@@ -120,8 +124,9 @@ class ChatOrchestrator:
             "- After fetching, use cognate_compute_preview with contactLanguages to compare\n"
             "\n"
             "Persistent memory:\n"
-            "- parse_memory_read returns the project's parse-memory.md (user preferences, speaker provenance, onboarding notes).\n"
-            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Prefer small, well-named sections over one sprawling blob.\n"
+            "- A second system message each turn auto-injects the current `parse-memory.md` and a summary of `source_index.json`. Treat it as authoritative on-disk state.\n"
+            "- parse_memory_read returns the full file on demand (useful when auto-injected content was truncated).\n"
+            "- parse_memory_upsert_section creates or replaces a `## Section` block there. Updates are visible to the next turn and all future sessions. Prefer small, well-named sections over one sprawling blob.\n"
             "\n"
             "Response style:\n"
             "- concise, technical, and accurate\n"
@@ -138,6 +143,109 @@ class ChatOrchestrator:
                 else "note any writes performed and reference the files updated"
             ),
         )
+
+    def _build_turn_priming_block(self) -> str:
+        """Return a system message body auto-loaded at the start of every turn.
+
+        Pulls the current ``parse-memory.md`` and a compact ``source_index.json``
+        summary so the model sees persistent context without having to call
+        ``parse_memory_read`` / ``project_context_read`` itself. Empty string
+        when neither file has anything worth showing.
+        """
+        sections: List[str] = []
+
+        memory_path = getattr(self.tools, "memory_path", None)
+        if isinstance(memory_path, Path) and memory_path.exists():
+            try:
+                raw = memory_path.read_text(encoding="utf-8")
+            except Exception:
+                raw = ""
+
+            text = (raw or "").strip()
+            if text:
+                encoded = text.encode("utf-8")
+                truncated = len(encoded) > _TURN_PRIMING_MEMORY_MAX_BYTES
+                if truncated:
+                    text = encoded[:_TURN_PRIMING_MEMORY_MAX_BYTES].decode("utf-8", errors="ignore")
+                    text = text + "\n\n(truncated — call parse_memory_read for full content)"
+                sections.append(
+                    "## Persistent memory (parse-memory.md)\n"
+                    "This is the live on-disk content. Use parse_memory_upsert_section to update it.\n"
+                    "---\n"
+                    "{0}".format(text)
+                )
+
+        source_index_summary = self._source_index_summary()
+        if source_index_summary:
+            sections.append(
+                "## Source index summary\n"
+                "Speakers currently registered and their primary audio path. For full details "
+                "call project_context_read.\n"
+                "---\n"
+                "{0}".format(source_index_summary)
+            )
+
+        if not sections:
+            return ""
+
+        return (
+            "Auto-loaded PARSE context for this turn. Treat these as authoritative "
+            "snapshots of on-disk state — they reflect any writes from prior turns.\n"
+            "\n"
+            + "\n\n".join(sections)
+        )
+
+    def _source_index_summary(self) -> str:
+        """Compact `speaker: path (primary/secondary)` listing of source_index.json."""
+        path = getattr(self.tools, "source_index_path", None)
+        if not isinstance(path, Path) or not path.exists():
+            return ""
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+
+        if not isinstance(payload, dict):
+            return ""
+
+        speakers = payload.get("speakers") if isinstance(payload.get("speakers"), dict) else {}
+        if not speakers:
+            return ""
+
+        lines: List[str] = []
+        for speaker_name in sorted(speakers.keys())[:_TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS]:
+            entry = speakers.get(speaker_name)
+            if not isinstance(entry, dict):
+                continue
+
+            source_wavs = entry.get("source_wavs") if isinstance(entry.get("source_wavs"), list) else []
+            primary = ""
+            extras = 0
+            for wav in source_wavs:
+                if not isinstance(wav, dict):
+                    continue
+                filename = str(wav.get("path") or wav.get("filename") or "").strip()
+                if wav.get("is_primary") and not primary:
+                    primary = filename
+                elif filename:
+                    extras += 1
+            if not primary and source_wavs:
+                first = source_wavs[0]
+                if isinstance(first, dict):
+                    primary = str(first.get("path") or first.get("filename") or "").strip()
+
+            suffix = " (+{0} more)".format(extras) if extras else ""
+            lines.append("- {0}: {1}{2}".format(speaker_name, primary or "(no primary wav)", suffix))
+
+        if len(speakers) > _TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS:
+            lines.append(
+                "- …{0} more speakers truncated; call project_context_read for the full list.".format(
+                    len(speakers) - _TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS
+                )
+            )
+
+        return "\n".join(lines)
 
     def _history_messages(self, session_messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         filtered: List[Dict[str, Any]] = []
@@ -353,6 +461,11 @@ class ChatOrchestrator:
                 "content": self._system_prompt,
             }
         ]
+
+        priming_block = self._build_turn_priming_block()
+        if priming_block:
+            messages.append({"role": "system", "content": priming_block})
+
         messages.extend(self._history_messages(session_messages))
 
         tool_trace: List[Dict[str, Any]] = []
