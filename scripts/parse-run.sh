@@ -251,7 +251,13 @@ pull_main() {
       reset)
         if git reset --hard origin/main; then
           log "Local main reset to origin/main (destructive)"
-          [ "${pop}" = "1" ] && git stash pop -q 2>/dev/null || true
+          # Do NOT pop: reset mode intentionally discards local state.
+          # Popping after a hard reset causes conflicts between the rescued
+          # changes and the new origin/main tree.  The stash entry remains
+          # as a safety net; recover manually with: git stash pop
+          if [ "${stashed}" = "1" ]; then
+            log "  Local changes were stashed (not restored). Recover with: git stash pop"
+          fi
           return 0
         fi
         ;;
