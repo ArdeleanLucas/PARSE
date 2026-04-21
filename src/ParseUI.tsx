@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
@@ -336,8 +336,36 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
     setTestMessage('');
   };
 
-  // Cleanup OAuth poll on unmount
+  // Restore auth state on mount and cleanup poll on unmount.
   useEffect(() => {
+    getAuthStatus().then(s => {
+      if (s.authenticated) {
+        setProvider('openai');
+        setView('connected');
+      } else if (s.flow_active) {
+        // OAuth was started before this mount (page reload mid-flow) — resume.
+        setOauthCode(s.user_code ?? '');
+        setOauthUri(s.verification_uri ?? '');
+        setOauthPending(true);
+        oauthPollRef.current = setInterval(async () => {
+          try {
+            const result = await pollAuth();
+            if (result.status === 'complete') {
+              if (oauthPollRef.current) clearInterval(oauthPollRef.current);
+              oauthPollRef.current = null;
+              setOauthPending(false);
+              setProvider('openai');
+              setView('connected');
+            } else if (result.status === 'expired' || result.status === 'error') {
+              if (oauthPollRef.current) clearInterval(oauthPollRef.current);
+              oauthPollRef.current = null;
+              setOauthPending(false);
+              setTestMessage(result.error ?? (result.status === 'expired' ? 'Login code expired — try again' : 'OAuth failed'));
+            }
+          } catch { /* keep polling */ }
+        }, 5000);
+      }
+    }).catch(() => { /* leave view at welcome */ });
     return () => { if (oauthPollRef.current) clearInterval(oauthPollRef.current); };
   }, []);
 
@@ -355,13 +383,18 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
       }
       oauthPollRef.current = setInterval(async () => {
         try {
-          const s = await getAuthStatus();
-          if (s.authenticated) {
+          const result = await pollAuth();
+          if (result.status === 'complete') {
             if (oauthPollRef.current) clearInterval(oauthPollRef.current);
             oauthPollRef.current = null;
             setOauthPending(false);
             setProvider('openai');
             setView('connected');
+          } else if (result.status === 'expired' || result.status === 'error') {
+            if (oauthPollRef.current) clearInterval(oauthPollRef.current);
+            oauthPollRef.current = null;
+            setOauthPending(false);
+            setTestMessage(result.error ?? (result.status === 'expired' ? 'Login code expired — try again' : 'OAuth failed'));
           }
         } catch { /* keep polling */ }
       }, 5000);
