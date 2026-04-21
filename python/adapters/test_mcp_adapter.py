@@ -99,6 +99,22 @@ def test_every_mcp_tool_is_allowlisted_in_parse_chat_tools(tmp_path) -> None:
     )
 
 
+def test_resolve_onboard_http_timeout_scales_for_large_files(monkeypatch) -> None:
+    from adapters import mcp_adapter
+
+    monkeypatch.delenv("PARSE_MCP_ONBOARD_TIMEOUT_SEC", raising=False)
+
+    small = mcp_adapter._resolve_onboard_http_timeout(10 * 1024 * 1024)
+    fail02_like = mcp_adapter._resolve_onboard_http_timeout(1519246722)
+
+    assert small == 120.0
+    assert fail02_like > 120.0
+    assert fail02_like < 1800.0
+
+    monkeypatch.setenv("PARSE_MCP_ONBOARD_TIMEOUT_SEC", "300")
+    assert mcp_adapter._resolve_onboard_http_timeout(1519246722) == 300.0
+
+
 def test_contact_lexeme_lookup_is_allowlisted(tmp_path) -> None:
     """contact_lexeme_lookup specifically — the bug that motivated this test."""
     tools = ParseChatTools(project_root=tmp_path)
@@ -128,7 +144,7 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
     text = source.read_text(encoding="utf-8")
     for tool in [
         "annotation_read", "cognate_compute_preview", "contact_lexeme_lookup",
-        "cross_speaker_match_preview", "import_tag_csv", "prepare_tag_import",
+        "cross_speaker_match_preview", "import_processed_speaker", "import_tag_csv", "prepare_tag_import",
         "project_context_read", "read_csv_preview", "spectrogram_preview",
         "stt_start", "stt_status",
     ]:
