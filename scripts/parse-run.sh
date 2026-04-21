@@ -17,7 +17,8 @@
 #   PARSE_EXTERNAL_READ_ROOTS  OS-path-separated list of absolute roots chat may read
 #                               outside the workspace (e.g. "/mnt/c/Users/Lucas/Thesis").
 #                               Used by read_audio_info / read_csv_preview / read_text_preview
-#                               and by onboard_speaker_import source paths.
+#                               and by onboard_speaker_import source paths. Set to "*" to
+#                               disable the sandbox entirely (any absolute path readable).
 #   PARSE_CHAT_MEMORY_PATH  Path to parse-memory.md (default: PARSE_WORKSPACE_ROOT/parse-memory.md)
 #   PARSE_CHAT_READ_ONLY    Set to "1" to force chat read-only; "0" to force write-enabled.
 #                           Empty (default) defers to config/ai_config.json.

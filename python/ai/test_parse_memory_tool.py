@@ -153,8 +153,101 @@ def test_onboard_speaker_rejects_source_outside_allowed_roots(tmp_path) -> None:
 
     tools = ParseChatTools(project_root=project_root)  # no external_read_roots
 
-    with pytest.raises(ChatToolValidationError, match="outside allowed read roots"):
+    with pytest.raises(
+        ChatToolValidationError,
+        match=r"outside allowed read roots.*PARSE_EXTERNAL_READ_ROOTS",
+    ):
         tools.execute(
             "onboard_speaker_import",
             {"speaker": "Speaker01", "sourceWav": str(wav), "dryRun": True},
         )
+
+
+def test_external_read_wildcard_allows_any_absolute_path(tmp_path) -> None:
+    import wave
+
+    stray_root = tmp_path / "stray"
+    stray_root.mkdir()
+    wav = stray_root / "Faili_M_1984.wav"
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 8000)
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    # PARSE_EXTERNAL_READ_ROOTS="*" → wildcard mode
+    tools = ParseChatTools(project_root=project_root, external_read_roots=["*"])
+
+    result = tools.execute(
+        "read_audio_info", {"sourceWav": str(wav)}
+    )["result"]
+    assert result["ok"] is True
+    assert result["sampleRateHz"] == 16000
+
+
+def test_onboard_speaker_flags_virtual_timeline_on_second_source(tmp_path) -> None:
+    """When a speaker already has a registered WAV, a second onboarding call
+    must surface virtualTimelineRequired=true + an explanatory note so the
+    agent raises the gap rather than silently writing two disjoint sources."""
+    import json
+    import wave
+
+    external_root = tmp_path / "Thesis"
+    external_root.mkdir()
+
+    def make_wav(name: str) -> pathlib.Path:
+        wav = external_root / name
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(b"\x00\x00" * 8000)
+        return wav
+
+    wav_a = make_wav("Mand_M_1962_01.wav")
+    wav_b = make_wav("Mand_M_1962_02.wav")
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    # Seed source_index.json as if Mand_M_1962_01.wav was already onboarded.
+    (project_root / "source_index.json").write_text(
+        json.dumps(
+            {
+                "speakers": {
+                    "Mand01": {
+                        "source_wavs": [
+                            {
+                                "filename": "Mand_M_1962_01.wav",
+                                "path": "audio/original/Mand01/Mand_M_1962_01.wav",
+                                "is_primary": True,
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    first_result = tools.execute(
+        "onboard_speaker_import",
+        {"speaker": "Mand01", "sourceWav": str(wav_a), "dryRun": True},
+    )["result"]
+    # wav_a is already registered → no count increase, no virtual-timeline flag.
+    assert first_result["plan"]["alreadyRegistered"] is True
+    assert first_result["plan"]["projectedSourceCount"] == 1
+    assert first_result["plan"]["virtualTimelineRequired"] is False
+
+    second_result = tools.execute(
+        "onboard_speaker_import",
+        {"speaker": "Mand01", "sourceWav": str(wav_b), "dryRun": True},
+    )["result"]
+    assert second_result["plan"]["projectedSourceCount"] == 2
+    assert second_result["plan"]["virtualTimelineRequired"] is True
+    assert "virtual timeline" in second_result["plan"]["virtualTimelineNote"].lower()
