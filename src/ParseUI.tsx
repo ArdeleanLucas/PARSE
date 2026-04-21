@@ -251,6 +251,14 @@ const PROVIDER_META: Record<AIProvider, { label: string; model: string; badgeCla
   openai: { label: 'OpenAI', model: 'gpt-5.4',            badgeClass: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
 };
 
+// Narrow the backend's free-form `provider` string (from /api/auth/status) to
+// the UI's AIProvider union. Defaults to 'openai' when unset or unrecognized
+// — OAuth-only flows don't populate it and historical tokens predate the
+// provider field.
+function resolveAuthProvider(raw: string | undefined | null): AIProvider {
+  return raw === 'xai' ? 'xai' : 'openai';
+}
+
 const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMinimize, conceptName, conceptId, speakerCount, chatSession }) => {
   // Connection state machine
   const [view, setView] = useState<AIConnectionView>('welcome');
@@ -341,7 +349,7 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
   useEffect(() => {
     getAuthStatus().then(s => {
       if (s.authenticated) {
-        setProvider('openai');
+        setProvider(resolveAuthProvider(s.provider));
         setView('connected');
       } else if (s.flow_active) {
         // OAuth was started before this mount (page reload mid-flow) — resume.
@@ -355,7 +363,11 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
               if (oauthPollRef.current) clearInterval(oauthPollRef.current);
               oauthPollRef.current = null;
               setOauthPending(false);
-              setProvider('openai');
+              // OAuth device flow is OpenAI-specific today; re-check status so
+              // we never hard-code a provider that doesn't match what the
+              // backend actually persisted.
+              const after = await getAuthStatus().catch(() => null);
+              setProvider(resolveAuthProvider(after?.provider));
               setView('connected');
             } else if (result.status === 'expired' || result.status === 'error') {
               if (oauthPollRef.current) clearInterval(oauthPollRef.current);
@@ -389,7 +401,8 @@ const AIChat: React.FC<AIChatProps> = ({ height, minimized, onResizeStart, onMin
             if (oauthPollRef.current) clearInterval(oauthPollRef.current);
             oauthPollRef.current = null;
             setOauthPending(false);
-            setProvider('openai');
+            const after = await getAuthStatus().catch(() => null);
+            setProvider(resolveAuthProvider(after?.provider));
             setView('connected');
           } else if (result.status === 'expired' || result.status === 'error') {
             if (oauthPollRef.current) clearInterval(oauthPollRef.current);

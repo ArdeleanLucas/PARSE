@@ -431,6 +431,44 @@ describe("ParseUI", () => {
     render(<ParseUI />);
     expect(screen.getAllByText("No reference data").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
+    // Regression: the mount effect used to call setProvider('openai')
+    // unconditionally whenever the backend said authenticated=true, so users
+    // who saved an xAI key would see the OpenAI badge on reload.
+    mockGetAuthStatus.mockResolvedValue({
+      authenticated: true,
+      provider: "xai",
+      method: "api_key",
+      flow_active: false,
+    });
+
+    render(<ParseUI />);
+
+    // Expand the minimized AI chat so the provider badge renders.
+    fireEvent.focus(screen.getByPlaceholderText(/Ask PARSE AI about water/i));
+
+    expect(await screen.findByText("Connected to xAI")).toBeTruthy();
+    expect(screen.getByText(/grok-4\.2 reasoning/i)).toBeTruthy();
+    expect(screen.queryByText("Connected to OpenAI")).toBeNull();
+  });
+
+  it("restores the OpenAI provider badge after reload when backend reports provider=openai", async () => {
+    mockGetAuthStatus.mockResolvedValue({
+      authenticated: true,
+      provider: "openai",
+      method: "api_key",
+      flow_active: false,
+    });
+
+    render(<ParseUI />);
+
+    fireEvent.focus(screen.getByPlaceholderText(/Ask PARSE AI about water/i));
+
+    expect(await screen.findByText("Connected to OpenAI")).toBeTruthy();
+    expect(screen.getByText("gpt-5.4")).toBeTruthy();
+    expect(screen.queryByText("Connected to xAI")).toBeNull();
+  });
 });
 
 
