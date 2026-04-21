@@ -1530,9 +1530,14 @@ def _run_chat_job(job_id: str, session_id: str) -> None:
 
         _set_job_progress(job_id, 20.0, message="Running chat orchestration")
         _, orchestrator = _get_chat_runtime()
+
+        def _tool_progress(tool_name: str) -> None:
+            _set_job_progress(job_id, 20.0, message="Running: {0}".format(tool_name))
+
         result = orchestrator.run(
             session_id=session_id,
             session_messages=session_snapshot.get("messages", []),
+            on_tool_call=_tool_progress,
         )
 
         assistant_payload = result.get("assistant") if isinstance(result, dict) else {}

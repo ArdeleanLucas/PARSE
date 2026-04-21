@@ -24,7 +24,7 @@ const authSecondaryBtnClass =
   "w-full rounded-md border border-indigo-600 bg-white px-5 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-slate-50"
 
 export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
-  const { messages, sending, tokensUsed, tokensLimit, send, clear } = useChatSession()
+  const { messages, sending, statusMessage, tokensUsed, tokensLimit, send, clear } = useChatSession()
   const [inputText, setInputText] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -331,7 +331,9 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
-            <span className="ml-1.5 text-[12px] font-medium text-slate-500">Thinking…</span>
+            <span className="ml-1.5 text-[12px] font-medium text-slate-500">
+              {statusMessage ?? "Thinking…"}
+            </span>
           </div>
         )}
         <div ref={messagesEndRef} />
