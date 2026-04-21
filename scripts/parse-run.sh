@@ -12,6 +12,8 @@
 # ---------------------
 #   PARSE_PY         Python interpreter (default: python3, or $PARSE_PY if set)
 #   PARSE_ROOT       Repo root (default: auto-detected from script location)
+#   PARSE_WORKSPACE_ROOT  Data workspace root for backend chat/tools (default: PARSE_ROOT)
+#   PARSE_CHAT_DOCS_ROOT  Optional docs root for chat markdown/text preview (default: PARSE_WORKSPACE_ROOT)
 #   PARSE_API_PORT   API server port (default: 8766)
 #   PARSE_VITE_PORT  Vite dev server port (default: 5173)
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
@@ -39,6 +41,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_ROOT:=$(cd "${SCRIPT_DIR}/.." && pwd)}"
+: "${PARSE_WORKSPACE_ROOT:=${PARSE_ROOT}}"
+: "${PARSE_CHAT_DOCS_ROOT:=${PARSE_WORKSPACE_ROOT}}"
 : "${PARSE_PY:=python3}"
 : "${PARSE_API_PORT:=8766}"
 : "${PARSE_VITE_PORT:=5173}"
@@ -187,10 +191,13 @@ pull_main() {
 
 start_api() {
   log "Starting Python API server on :${PARSE_API_PORT}..."
+  log "Backend workspace root: ${PARSE_WORKSPACE_ROOT}"
+  log "Chat docs root: ${PARSE_CHAT_DOCS_ROOT}"
   # -u = unbuffered stdout (so logs appear immediately; critical for remote debugging).
   (
-    cd "${PARSE_ROOT}" || exit 1
-    "${PARSE_PY}" -u python/server.py \
+    cd "${PARSE_WORKSPACE_ROOT}" || exit 1
+    PARSE_CHAT_DOCS_ROOT="${PARSE_CHAT_DOCS_ROOT}" \
+      "${PARSE_PY}" -u "${PARSE_ROOT}/python/server.py" \
       >"${API_STDOUT_LOG}" 2>"${API_STDERR_LOG}"
   ) &
   API_PID=$!
@@ -243,12 +250,19 @@ print_banner() {
   log "  React UI:  http://localhost:${PARSE_VITE_PORT}/"
   log "  Compare:   http://localhost:${PARSE_VITE_PORT}/compare"
   log "  API:       http://localhost:${PARSE_API_PORT}/api/config"
+  log "  Workspace: ${PARSE_WORKSPACE_ROOT}"
+  log "  Chat docs: ${PARSE_CHAT_DOCS_ROOT}"
   log "════════════════════════════════════════"
 }
 
 # ---------- Main ---------------------------------------------------------
 
 main() {
+  if [ ! -d "${PARSE_WORKSPACE_ROOT}" ]; then
+    log "ERROR: PARSE_WORKSPACE_ROOT does not exist: ${PARSE_WORKSPACE_ROOT}"
+    return 1
+  fi
+
   pull_main
   stop_servers
   start_api || return 1
