@@ -633,6 +633,63 @@ def _annotation_source_duration(speaker: str, source_wav: str) -> Optional[float
     return duration
 
 
+def _workspace_frontend_config(base_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
+
+    project_payload = _read_json_file(_project_json_path(), {})
+    if not isinstance(project_payload, dict):
+        project_payload = {}
+    source_index_payload = _read_json_file(_source_index_path(), {})
+    if not isinstance(source_index_payload, dict):
+        source_index_payload = {}
+
+    speakers: List[str] = []
+    speakers_value = project_payload.get("speakers")
+    if isinstance(speakers_value, dict):
+        speakers.extend(str(key).strip() for key in speakers_value.keys() if str(key).strip())
+    elif isinstance(speakers_value, list):
+        speakers.extend(str(item).strip() for item in speakers_value if str(item).strip())
+
+    source_speakers = source_index_payload.get("speakers")
+    if isinstance(source_speakers, dict):
+        speakers.extend(str(key).strip() for key in source_speakers.keys() if str(key).strip())
+    speakers = sorted(dict.fromkeys(speakers))
+
+    concepts_path = _project_root() / "concepts.csv"
+    concepts: list = []
+    if concepts_path.exists():
+        import csv as _csv
+        with open(concepts_path, newline="", encoding="utf-8") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                cid = str(row.get("id") or "").strip()
+                label = str(row.get("concept_en") or "").strip()
+                if cid and label:
+                    concepts.append({"id": cid, "label": label})
+
+    language_block = project_payload.get("language") if isinstance(project_payload.get("language"), dict) else {}
+    language_code = str(
+        project_payload.get("language_code")
+        or language_block.get("code")
+        or config.get("language_code")
+        or "und"
+    ).strip() or "und"
+    project_name = str(
+        project_payload.get("project_name")
+        or project_payload.get("name")
+        or config.get("project_name")
+        or "PARSE"
+    ).strip() or "PARSE"
+
+    config["project_name"] = project_name
+    config["language_code"] = language_code
+    config["speakers"] = speakers
+    config["concepts"] = concepts
+    config["audio_dir"] = str(project_payload.get("audio_dir") or config.get("audio_dir") or "audio")
+    config["annotations_dir"] = str(project_payload.get("annotations_dir") or config.get("annotations_dir") or "annotations")
+    return config
+
+
 def _annotation_empty_tier(display_order: int) -> Dict[str, Any]:
     return {
         "type": "interval",
@@ -3092,22 +3149,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     # ── Config endpoints ─────────────────────────────────────────
 
     def _api_get_config(self) -> None:
-        config = load_ai_config(_config_path())
-
-        # Inject concepts from concepts.csv
-        concepts_path = _project_root() / "concepts.csv"
-        concepts: list = []
-        if concepts_path.exists():
-            import csv as _csv
-            with open(concepts_path, newline="", encoding="utf-8") as f:
-                reader = _csv.DictReader(f)
-                for row in reader:
-                    cid = str(row.get("id") or "").strip()
-                    label = str(row.get("concept_en") or "").strip()
-                    if cid and label:
-                        concepts.append({"id": cid, "label": label})
-        config["concepts"] = concepts
-
+        config = _workspace_frontend_config(load_ai_config(_config_path()))
         self._send_json(HTTPStatus.OK, {"config": config})
 
     def _api_get_export_lingpy(self) -> None:

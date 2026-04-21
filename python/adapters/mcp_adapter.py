@@ -4,12 +4,13 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (14):
+Tools exposed (15):
   project_context_read, annotation_read, read_csv_preview,
   cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
   contact_lexeme_lookup, stt_start, stt_status,
   import_tag_csv, prepare_tag_import,
-  onboard_speaker_import, parse_memory_read, parse_memory_upsert_section
+  onboard_speaker_import, import_processed_speaker,
+  parse_memory_read, parse_memory_upsert_section
 
 Usage:
     python python/adapters/mcp_adapter.py
@@ -132,6 +133,36 @@ def _resolve_api_base() -> str:
     """
     port = os.environ.get("PARSE_API_PORT") or os.environ.get("PARSE_PORT") or "8766"
     return "http://127.0.0.1:{0}".format(str(port).strip() or "8766")
+
+
+def _resolve_onboard_http_timeout(total_bytes: int) -> float:
+    """Return a socket timeout for MCP onboarding HTTP calls.
+
+    Thesis WAV uploads are often multi-gigabyte files. The original fixed
+    120-second timeout is too short even on localhost once the adapter spends
+    time reading the file, constructing multipart payloads, and waiting for the
+    server to persist the upload. Scale the timeout with payload size while
+    keeping a sane floor/cap, and allow an explicit environment override for
+    machine-specific tuning.
+    """
+    override_raw = str(os.environ.get("PARSE_MCP_ONBOARD_TIMEOUT_SEC") or "").strip()
+    if override_raw:
+        try:
+            override = float(override_raw)
+        except ValueError:
+            override = 0.0
+        if override > 0:
+            return override
+
+    base_timeout = 120.0
+    max_timeout = 1800.0
+    payload_bytes = max(0, int(total_bytes))
+    if payload_bytes <= 128 * 1024 * 1024:
+        return base_timeout
+
+    processing_buffer = 180.0
+    transfer_budget = payload_bytes / float(8 * 1024 * 1024)
+    return min(max_timeout, max(base_timeout, processing_buffer + transfer_budget))
 
 
 def _build_stt_callbacks() -> tuple:
@@ -280,6 +311,8 @@ def _build_onboard_callback() -> Optional[object]:
         boundary = "----parse-mcp-{0}".format(uuid.uuid4().hex)
         crlf = b"\r\n"
         parts: list = []
+        total_bytes = source_wav.stat().st_size + (source_csv.stat().st_size if source_csv is not None else 0)
+        http_timeout = _resolve_onboard_http_timeout(total_bytes)
 
         def add_field(name: str, value: str) -> None:
             parts.append(
@@ -314,7 +347,7 @@ def _build_onboard_callback() -> Optional[object]:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=120.0) as resp:
+            with urllib.request.urlopen(req, timeout=http_timeout) as resp:
                 response = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.URLError as exc:
             raise RuntimeError(
@@ -329,7 +362,7 @@ def _build_onboard_callback() -> Optional[object]:
 
         # Poll for completion (bounded).
         status_req_body = json.dumps({"job_id": job_id}).encode("utf-8")
-        deadline = time.time() + 120.0
+        deadline = time.time() + http_timeout
         final: Dict[str, Any] = {}
         while time.time() < deadline:
             status_req = urllib.request.Request(
@@ -755,6 +788,42 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         if isPrimary is not None:
             args["isPrimary"] = isPrimary
         result = tools.execute("onboard_speaker_import", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def import_processed_speaker(
+        speaker: str,
+        workingWav: str,
+        annotationJson: str,
+        dryRun: bool,
+        peaksJson: Optional[str] = None,
+        transcriptCsv: Optional[str] = None,
+    ) -> str:
+        """Import a speaker from existing processed artifacts.
+
+        Use when lexemes are already timestamped to a working WAV and the goal is
+        to bootstrap the PARSE workspace from those processed files rather than
+        re-running raw-audio onboarding or STT.
+
+        Args:
+            speaker: Speaker ID
+            workingWav: Path to the processed/working WAV
+            annotationJson: Path to the timestamp-bearing annotation JSON
+            dryRun: If true, preview only
+            peaksJson: Optional peaks JSON for the same working WAV
+            transcriptCsv: Optional legacy transcript CSV to preserve in workspace
+        """
+        args: Dict[str, Any] = {
+            "speaker": speaker,
+            "workingWav": workingWav,
+            "annotationJson": annotationJson,
+            "dryRun": dryRun,
+        }
+        if peaksJson is not None:
+            args["peaksJson"] = peaksJson
+        if transcriptCsv is not None:
+            args["transcriptCsv"] = transcriptCsv
+        result = tools.execute("import_processed_speaker", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     @mcp.tool()

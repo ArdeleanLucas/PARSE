@@ -251,3 +251,259 @@ def test_onboard_speaker_flags_virtual_timeline_on_second_source(tmp_path) -> No
     assert second_result["plan"]["projectedSourceCount"] == 2
     assert second_result["plan"]["virtualTimelineRequired"] is True
     assert "virtual timeline" in second_result["plan"]["virtualTimelineNote"].lower()
+
+
+def test_import_processed_speaker_is_write_allowlisted() -> None:
+    assert "import_processed_speaker" in WRITE_ALLOWED_TOOL_NAMES
+
+
+def _write_test_wav(path: pathlib.Path) -> None:
+    import wave
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 8000)
+
+
+def _write_processed_fixture(root: pathlib.Path, speaker: str = "Fail02") -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+    import json
+
+    wav = root / "Audio_Working" / speaker / "speaker.wav"
+    _write_test_wav(wav)
+
+    annotation = root / "annotations" / f"{speaker}.json"
+    annotation.parent.mkdir(parents=True, exist_ok=True)
+    annotation.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_id": "southern-kurdish-dialect-comparison",
+                "speaker": speaker,
+                "source_audio": f"audio/working/{speaker}/speaker.wav",
+                "source_audio_duration_sec": 2.0,
+                "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
+                "tiers": {
+                    "ipa": {"display_order": 1, "intervals": [{"start": 0.0, "end": 1.0, "text": "a"}, {"start": 1.0, "end": 2.0, "text": "b"}]},
+                    "ortho": {"display_order": 2, "intervals": [{"start": 0.0, "end": 1.0, "text": "ash"}, {"start": 1.0, "end": 2.0, "text": "bark"}]},
+                    "concept": {"display_order": 3, "intervals": [{"start": 0.0, "end": 1.0, "text": "1: ash"}, {"start": 1.0, "end": 2.0, "text": "2: bark"}]},
+                    "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 1.0, "text": speaker}, {"start": 1.0, "end": 2.0, "text": speaker}]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    peaks = root / "peaks" / f"{speaker}.json"
+    peaks.parent.mkdir(parents=True, exist_ok=True)
+    peaks.write_text(json.dumps({"duration": 2.0, "peaks": [0, 1, 0, -1]}), encoding="utf-8")
+    return wav, annotation, peaks
+
+
+def test_import_processed_speaker_dry_run_reports_plan(tmp_path) -> None:
+    external_root = tmp_path / "Thesis"
+    wav, annotation, peaks = _write_processed_fixture(external_root)
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+    result = tools.execute(
+        "import_processed_speaker",
+        {
+            "speaker": "Fail02",
+            "workingWav": str(wav),
+            "annotationJson": str(annotation),
+            "peaksJson": str(peaks),
+            "dryRun": True,
+        },
+    )["result"]
+
+    assert result["ok"] is True
+    assert result["plan"]["speaker"] == "Fail02"
+    assert result["plan"]["conceptCount"] == 2
+    assert result["plan"]["audioDest"].endswith("audio/working/Fail02/speaker.wav")
+    assert result["plan"]["annotationDest"].endswith("annotations/Fail02.json")
+    assert result["plan"]["peaksDest"].endswith("peaks/Fail02.json")
+    assert result["plan"]["languageCode"] == "sdh"
+
+
+def test_import_processed_speaker_write_copies_assets_and_builds_workspace_files(tmp_path) -> None:
+    import csv
+    import json
+
+    external_root = tmp_path / "Thesis"
+    wav, annotation, peaks = _write_processed_fixture(external_root)
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+    result = tools.execute(
+        "import_processed_speaker",
+        {
+            "speaker": "Fail02",
+            "workingWav": str(wav),
+            "annotationJson": str(annotation),
+            "peaksJson": str(peaks),
+            "dryRun": False,
+        },
+    )["result"]
+
+    assert result["ok"] is True
+    assert (project_root / "audio" / "working" / "Fail02" / "speaker.wav").is_file()
+    assert (project_root / "annotations" / "Fail02.json").is_file()
+    assert (project_root / "peaks" / "Fail02.json").is_file()
+
+    source_index = json.loads((project_root / "source_index.json").read_text(encoding="utf-8"))
+    assert source_index["speakers"]["Fail02"]["source_wavs"][0]["path"] == "audio/working/Fail02/speaker.wav"
+    assert source_index["speakers"]["Fail02"]["peaks_file"] == "peaks/Fail02.json"
+
+    project_json = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
+    assert "Fail02" in project_json["speakers"]
+    assert project_json["language"]["code"] == "sdh"
+
+    with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows == [
+        {"id": "1", "concept_en": "ash"},
+        {"id": "2", "concept_en": "bark"},
+    ]
+
+    imported_annotation = json.loads((project_root / "annotations" / "Fail02.json").read_text(encoding="utf-8"))
+    assert imported_annotation["source_audio"] == "audio/working/Fail02/speaker.wav"
+
+
+def test_import_processed_speaker_assigns_fallback_ids_without_collisions(tmp_path) -> None:
+    import csv
+    import json
+
+    external_root = tmp_path / "Thesis"
+    wav, annotation, peaks = _write_processed_fixture(external_root)
+    payload = json.loads(annotation.read_text(encoding="utf-8"))
+    payload["tiers"]["concept"]["intervals"] = [
+        {"start": 0.0, "end": 1.0, "text": "free concept"},
+        {"start": 1.0, "end": 2.0, "text": "1: ash"},
+        {"start": 2.0, "end": 3.0, "text": "another free concept"},
+    ]
+    annotation.write_text(json.dumps(payload), encoding="utf-8")
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    result = tools.execute(
+        "import_processed_speaker",
+        {
+            "speaker": "Fail02",
+            "workingWav": str(wav),
+            "annotationJson": str(annotation),
+            "peaksJson": str(peaks),
+            "dryRun": False,
+        },
+    )["result"]
+
+    assert result["ok"] is True
+    with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows == [
+        {"id": "1", "concept_en": "ash"},
+        {"id": "2", "concept_en": "free concept"},
+        {"id": "3", "concept_en": "another free concept"},
+    ]
+
+
+def test_import_processed_speaker_preserves_existing_concepts_when_free_text_lacks_ids(tmp_path) -> None:
+    import csv
+    import json
+
+    external_root = tmp_path / "Thesis"
+    wav, annotation, peaks = _write_processed_fixture(external_root)
+    payload = json.loads(annotation.read_text(encoding="utf-8"))
+    payload["tiers"]["concept"]["intervals"] = [
+        {"start": 0.0, "end": 1.0, "text": "ash"},
+        {"start": 1.0, "end": 2.0, "text": "bark"},
+    ]
+    annotation.write_text(json.dumps(payload), encoding="utf-8")
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    with open(project_root / "concepts.csv", "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en"])
+        writer.writeheader()
+        writer.writerow({"id": "1", "concept_en": "water"})
+
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+    result = tools.execute(
+        "import_processed_speaker",
+        {
+            "speaker": "Fail02",
+            "workingWav": str(wav),
+            "annotationJson": str(annotation),
+            "peaksJson": str(peaks),
+            "dryRun": False,
+        },
+    )["result"]
+
+    assert result["ok"] is True
+    with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows == [
+        {"id": "1", "concept_en": "water"},
+        {"id": "2", "concept_en": "ash"},
+        {"id": "3", "concept_en": "bark"},
+    ]
+
+
+def test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata(tmp_path) -> None:
+    import json
+
+    external_root = tmp_path / "Thesis"
+    wav, annotation, _ = _write_processed_fixture(external_root)
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "source_index.json").write_text(
+        json.dumps(
+            {
+                "speakers": {
+                    "Fail02": {
+                        "source_wavs": [
+                            {
+                                "filename": "speaker.wav",
+                                "path": "audio/original/Fail02/speaker.wav",
+                                "is_primary": True,
+                            }
+                        ],
+                        "peaks_file": "peaks/stale.json",
+                        "legacy_transcript_csv": "imports/legacy/Fail02/stale.csv",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+    result = tools.execute(
+        "import_processed_speaker",
+        {
+            "speaker": "Fail02",
+            "workingWav": str(wav),
+            "annotationJson": str(annotation),
+            "dryRun": False,
+        },
+    )["result"]
+
+    assert result["ok"] is True
+    source_index = json.loads((project_root / "source_index.json").read_text(encoding="utf-8"))
+    source_paths = [entry["path"] for entry in source_index["speakers"]["Fail02"]["source_wavs"]]
+    primary_paths = [
+        entry["path"]
+        for entry in source_index["speakers"]["Fail02"]["source_wavs"]
+        if entry.get("is_primary") is True
+    ]
+    assert "audio/original/Fail02/speaker.wav" in source_paths
+    assert "audio/working/Fail02/speaker.wav" in source_paths
+    assert primary_paths == ["audio/working/Fail02/speaker.wav"]
+    assert "peaks_file" not in source_index["speakers"]["Fail02"]
+    assert "legacy_transcript_csv" not in source_index["speakers"]["Fail02"]
