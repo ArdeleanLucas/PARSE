@@ -1,6 +1,10 @@
 # PARSE branch cleanup delete commands — 2026-04-21
 
-> Snapshot memo generated from the canonical active repo: `/home/lucas/gh/ardeleanlucas/parse`
+> Snapshot memo generated from the canonical active repo. All commands below are parameterized on `$PARSE_REPO`, which defaults to `/home/lucas/gh/ardeleanlucas/parse` when unset. Run the following once per shell (or export it in `~/.bashrc`):
+>
+> ```bash
+> export PARSE_REPO="${PARSE_REPO:-/home/lucas/gh/ardeleanlucas/parse}"
+> ```
 >
 > Reference trunk at capture time: `origin/main` = `13d16b2cba8daf747cf8e9ca8701f9dd169b16c9`
 >
@@ -15,12 +19,12 @@ Provide the exact validated commands for pruning the currently stale PARSE branc
 Run this first. If the branch list no longer matches this memo, stop and re-audit instead of executing stale commands.
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse fetch origin --prune
+git -C "$PARSE_REPO" fetch origin --prune
 
 gh api repos/ArdeleanLucas/PARSE/branches --paginate --jq '.[].name' | sort
 
-git -C /home/lucas/gh/ardeleanlucas/parse branch -vv
-git -C /home/lucas/gh/ardeleanlucas/parse worktree list
+git -C "$PARSE_REPO" branch -vv
+git -C "$PARSE_REPO" worktree list
 ```
 
 Expected remote branch list at capture time:
@@ -51,7 +55,7 @@ All 12 non-`main` remote branches below were re-verified as merged leftovers:
 Exact command:
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse push origin --delete \
+git -C "$PARSE_REPO" push origin --delete \
   docs/generalize-beyond-sk \
   feat/chat-context-ring \
   feat/chat-tool-reference-forms \
@@ -68,18 +72,18 @@ git -C /home/lucas/gh/ardeleanlucas/parse push origin --delete \
 
 ## 2) Safe local merged-branch deletion in the canonical repo
 
-First move the canonical checkout off `feat/mcp-server` and fast-forward local `main`.
+`git branch -d` refuses to delete the currently checked-out branch, so first make sure `HEAD` is on `main` and `main` is fast-forwarded to `origin/main`. If the checkout is currently on a branch this memo lists for deletion, switch it off before continuing.
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse fetch origin --prune
-git -C /home/lucas/gh/ardeleanlucas/parse switch main
-git -C /home/lucas/gh/ardeleanlucas/parse pull --ff-only origin main
+git -C "$PARSE_REPO" fetch origin --prune
+git -C "$PARSE_REPO" switch main
+git -C "$PARSE_REPO" pull --ff-only origin main
 ```
 
 Then delete the merged local branches that are already fully subsumed by `origin/main`.
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse branch -d \
+git -C "$PARSE_REPO" branch -d \
   feat/chat-tool-reference-forms \
   feat/mcp-server \
   fix/auth-key-read-body \
@@ -98,19 +102,19 @@ These branches can be removed locally only after their attached worktrees are re
 Remove the worktrees:
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse worktree remove /tmp/parse-stage3-impl
-git -C /home/lucas/gh/ardeleanlucas/parse worktree remove /tmp/parse-stage3-preflight
-git -C /home/lucas/gh/ardeleanlucas/parse worktree remove /tmp/parse-pr53-review
+git -C "$PARSE_REPO" worktree remove /tmp/parse-stage3-impl
+git -C "$PARSE_REPO" worktree remove /tmp/parse-stage3-preflight
+git -C "$PARSE_REPO" worktree remove /tmp/parse-pr53-review
 ```
 
 Then delete the corresponding local branches:
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse branch -d \
+git -C "$PARSE_REPO" branch -d \
   chore/remove-vanilla-js-stage3 \
   docs/stage3-preflight-c5-c6
 
-git -C /home/lucas/gh/ardeleanlucas/parse branch -D docs/audit-2026-04-20
+git -C "$PARSE_REPO" branch -D docs/audit-2026-04-20
 ```
 
 Why `-D` for `docs/audit-2026-04-20`:
@@ -126,7 +130,7 @@ These are not part of the default merged-branch cleanup, but they are typical st
 ### 4a) Optional force-delete closed review snapshots
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse branch -D \
+git -C "$PARSE_REPO" branch -D \
   pr-52-review \
   pr-53-review \
   pr-7-review \
@@ -136,7 +140,7 @@ git -C /home/lucas/gh/ardeleanlucas/parse branch -D \
 ### 4b) Optional force-delete doc/snapshot leftovers if no archival value remains
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse branch -D \
+git -C "$PARSE_REPO" branch -D \
   docs/fix-openai-codex-auth-plan \
   docs/update-task-list \
   backup/chore-remove-vanilla-js-stage3-pre-rebase-20260420 \
@@ -156,19 +160,19 @@ Reason: the uppercase clone is not current branch truth and should be handled in
 After any cleanup run, re-check refs and then run the standard PARSE validation gate on trunk.
 
 ```bash
-git -C /home/lucas/gh/ardeleanlucas/parse fetch origin --prune
-git -C /home/lucas/gh/ardeleanlucas/parse branch -vv
-git -C /home/lucas/gh/ardeleanlucas/parse worktree list
+git -C "$PARSE_REPO" fetch origin --prune
+git -C "$PARSE_REPO" branch -vv
+git -C "$PARSE_REPO" worktree list
 gh api repos/ArdeleanLucas/PARSE/branches --paginate --jq '.[].name' | sort
 
-cd /home/lucas/gh/ardeleanlucas/parse
+cd "$PARSE_REPO"
 npm run test -- --run
 ./node_modules/.bin/tsc --noEmit
 ```
 
 ## Evidence summary behind this memo
 
-Validated again at capture time from `/home/lucas/gh/ardeleanlucas/parse`:
+Validated again at capture time from `$PARSE_REPO` (canonical lowercase repo):
 - current `origin/main`: `13d16b2cba8daf747cf8e9ca8701f9dd169b16c9`
 - current live GitHub non-`main` remote branches: 12
 - all 12 remote branches above had `branch-only commits = 0` vs `origin/main`
