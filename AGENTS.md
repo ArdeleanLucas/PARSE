@@ -1,6 +1,6 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
-## Current State (updated 2026-06-14)
+## Current State (updated 2026-04-21)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -11,8 +11,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - Wired: `useWaveSurfer`, `useChatSession`, `useConfigStore`, `useTagStore`, `usePlaybackStore`, `useUIStore`, `useAnnotationSync`
   - Spectrogram Worker TS port + `useSpectrogram` hook (MC-297, PR #31)
   - Annotate prefill/save/mark/badge, compare real data, import modal, notes, compute basics, decisions basics, tags bulk-selection — all landed
-- **Cross-mode integration complete** on integration branch:
-  - Track merge (`feat/annotate-react` + `feat/compare-react`)
+- **Cross-mode integration landed on current `main`**:
+  - Track merge (`feat/annotate-react` + `feat/compare-react`) completed
   - Cross-mode navigation (Annotate ↔ Compare)
   - Store persistence regression coverage
   - API regression suite + CLEF integration coverage
@@ -139,18 +139,18 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 10. **No `any` types** unless unavoidable. If you use `any`, add an inline comment explaining exactly why.
 11. **Prefer classes / Tailwind / CSS modules over inline styles.** Inline `style={{…}}` is allowed for values that are genuinely dynamic (computed widths, progress bars) — don't use it as a shortcut for static layout. Existing files with heavy inline styles (e.g. `ParseUI.tsx`, shared primitives) should migrate as they're touched, not via broad churn.
 12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
-13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The floor in Test Gates below (≥132 passing) is the enforced check; this rule is the target for new features.
+13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The floor in Test Gates below (≥157 passing) is the enforced check; this rule is the target for new features.
 
 ## Test Gates (pre-push)
 
-Run both before pushing integration changes:
+Run both before pushing PARSE changes:
 
 ```bash
 npm run test -- --run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-Expected floor: **>=132 passing tests** and clean TypeScript compile.
+Expected floor: **>=157 passing tests** and clean TypeScript compile.
 
 ## Baseline Architecture
 
