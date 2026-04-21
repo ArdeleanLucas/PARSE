@@ -11,6 +11,7 @@ export interface UseChatSessionResult {
   messages: ChatMessage[]
   sessionId: string | null
   sending: boolean
+  statusMessage: string | null
   error: string | null
   tokensUsed: number | null
   tokensLimit: number | null
@@ -19,8 +20,10 @@ export interface UseChatSessionResult {
 }
 
 const SESSION_KEY = "parse-chat-session-id"
-const MAX_POLLS = 60
 const POLL_INTERVAL_MS = 2000
+// How many consecutive polls with no message change before giving up.
+// Each poll is POLL_INTERVAL_MS, so 30 idle polls = 60 s of silence.
+const MAX_IDLE_POLLS = 30
 
 export function extractAssistantContent(raw: unknown): string {
   if (typeof raw === "string") return raw
@@ -43,6 +46,7 @@ export function useChatSession(): UseChatSessionResult {
     () => sessionStorage.getItem(SESSION_KEY),
   )
   const [sending, setSending] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tokensUsed, setTokensUsed] = useState<number | null>(null)
   const [tokensLimit, setTokensLimit] = useState<number | null>(null)
@@ -107,8 +111,12 @@ export function useChatSession(): UseChatSessionResult {
 
       const job = await runChat(sid, text)
 
-      // Poll for completion
-      let polls = 0
+      // Poll for completion.  Timeout is activity-based: idlePolls resets
+      // to zero whenever the server's status message changes, so long-running
+      // tool calls (STT, imports) never time out as long as they keep
+      // reporting progress.
+      let idlePolls = 0
+      let lastMessage: string | undefined
       const pollOnce = (): Promise<string> =>
         new Promise((resolve, reject) => {
           const tick = () => {
@@ -116,9 +124,17 @@ export function useChatSession(): UseChatSessionResult {
               reject(new Error("Aborted"))
               return
             }
-            polls++
             pollChat(job.job_id)
               .then((status) => {
+                // Reset idle counter whenever the server reports new activity.
+                if (status.message !== lastMessage) {
+                  idlePolls = 0
+                  lastMessage = status.message
+                  setStatusMessage(status.message ?? null)
+                } else {
+                  idlePolls++
+                }
+
                 if (
                   status.status === "done"
                   || status.status === "completed"
@@ -127,8 +143,8 @@ export function useChatSession(): UseChatSessionResult {
                   resolve(extractAssistantContent(status.result))
                 } else if (status.status === "error") {
                   reject(new Error(status.error ?? extractAssistantContent(status.result) ?? "Chat error"))
-                } else if (polls >= MAX_POLLS) {
-                  reject(new Error("Chat timed out"))
+                } else if (idlePolls >= MAX_IDLE_POLLS) {
+                  reject(new Error("Chat timed out — no response after 60 s of inactivity"))
                 } else {
                   setTimeout(tick, POLL_INTERVAL_MS)
                 }
@@ -163,6 +179,7 @@ export function useChatSession(): UseChatSessionResult {
       }
     } finally {
       setSending(false)
+      setStatusMessage(null)
     }
   }, [sessionId])
 
@@ -175,5 +192,5 @@ export function useChatSession(): UseChatSessionResult {
     sessionStorage.removeItem(SESSION_KEY)
   }, [])
 
-  return { messages, sessionId, sending, error, tokensUsed, tokensLimit, send, clear }
+  return { messages, sessionId, sending, statusMessage, error, tokensUsed, tokensLimit, send, clear }
 }

@@ -16,7 +16,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .chat_tools import ChatToolError, ParseChatTools, WRITE_ALLOWED_TOOL_NAMES
 from .provider import OpenAIChatRuntime
@@ -468,6 +468,7 @@ class ChatOrchestrator:
         self,
         session_id: str,
         session_messages: Sequence[Mapping[str, Any]],
+        on_tool_call: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """Run one assistant turn for an existing session history."""
         if not session_messages:
@@ -519,6 +520,12 @@ class ChatOrchestrator:
                 for call in tool_calls:
                     tool_name = str(call.get("name") or "").strip()
                     raw_args = call.get("arguments") or "{}"
+
+                    if on_tool_call is not None:
+                        try:
+                            on_tool_call(tool_name)
+                        except Exception:
+                            pass
 
                     try:
                         tool_result = self.tools.execute(tool_name, raw_args)
