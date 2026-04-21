@@ -82,6 +82,47 @@ def _resolve_project_root(cli_root: Optional[str] = None) -> Path:
     return Path.cwd()
 
 
+def _load_repo_parse_env(project_root_path: Path) -> Dict[str, str]:
+    """Load machine-local overrides from <project>/.parse-env into os.environ.
+
+    The dev launcher (scripts/parse-run.sh) already sources this file before
+    booting the browser/server stack, but the standalone MCP adapter is often
+    launched directly by an editor or agent process. In that mode, the process
+    inherits no PARSE_* environment and silently falls back to the strict
+    project-root sandbox, which breaks legitimate thesis imports from /mnt/c.
+
+    This helper mirrors the launcher convention: read simple KEY=VALUE pairs
+    from .parse-env and populate only variables that are currently unset.
+    Existing environment variables always win.
+    """
+    parse_env_path = project_root_path / ".parse-env"
+    if not parse_env_path.exists() or not parse_env_path.is_file():
+        return {}
+
+    applied: Dict[str, str] = {}
+    for raw_line in parse_env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+
+        cleaned = value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+            cleaned = cleaned[1:-1]
+        os.environ[key] = cleaned
+        applied[key] = cleaned
+
+    return applied
+
+
 def _resolve_api_base() -> str:
     """Resolve the HTTP base URL of the running PARSE API server.
 
@@ -342,9 +383,15 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     from ai.chat_tools import ParseChatTools
 
     root = _resolve_project_root(project_root)
+    applied_env = _load_repo_parse_env(root)
     external_roots = _resolve_external_read_roots()
     memory_path = _resolve_memory_path(root)
     logger.info("PARSE MCP server starting with project root: %s", root)
+    if applied_env:
+        logger.info(
+            "Loaded .parse-env overrides: %s",
+            ", ".join("{0}={1}".format(k, v) for k, v in sorted(applied_env.items())),
+        )
     if external_roots:
         logger.info("External read roots: %s", ", ".join(str(r) for r in external_roots))
     logger.info("Chat memory path: %s", memory_path)
