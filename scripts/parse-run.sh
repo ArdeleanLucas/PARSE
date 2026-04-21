@@ -42,6 +42,15 @@
 # cannot signal it, which historically left zombie python.exe processes
 # holding port 8766 and breaking subsequent launches. This script detects
 # that case and uses taskkill.exe to clean both sides.
+#
+# Phantom port reservation
+# ------------------------
+# A crashed python.exe occasionally leaves a kernel-level reservation on
+# the API port that netstat cannot see but bind() still trips over
+# (WinError 10013 / 10048). preflight_api_port below probes the port with
+# PARSE_PY before start_api and, on failure, points at the fix:
+# `wsl --shutdown` from Windows cmd clears the reservation. Override
+# PARSE_API_PORT to skip the block entirely.
 
 set -u
 
@@ -135,6 +144,67 @@ stop_servers() {
   fuser -k "${PARSE_VITE_PORT}/tcp" 2>/dev/null || true
 
   sleep 1
+}
+
+# ---------- API port pre-flight ------------------------------------------
+#
+# On Windows + WSL a crashed python.exe can leave a kernel-level reservation
+# on the server port that never appears in netstat or `netsh int ipv4 show
+# excludedportrange`. The subsequent server.py start crashes inside
+# socketserver.bind with WinError 10013 (ACCESS) or 10048 (ADDRINUSE), and
+# parse-run then wastes the full 12-second curl healthcheck window before
+# giving up with a vague "API did not respond" message.
+#
+# Do a tiny bind probe using PARSE_PY (so the same interpreter/network stack
+# as the real server) and, when it fails, print the underlying OS error plus
+# the actionable fix (wsl --shutdown) before start_api wastes time.
+
+preflight_api_port() {
+  local probe_out
+  probe_out=$(
+    "${PARSE_PY}" - <<PY 2>&1
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", ${PARSE_API_PORT}))
+except OSError as exc:
+    print("BIND_FAIL: {0}".format(exc))
+    sys.exit(1)
+finally:
+    try:
+        s.close()
+    except Exception:
+        pass
+print("BIND_OK")
+PY
+  ) || true
+
+  case "${probe_out}" in
+    BIND_OK*)
+      return 0
+      ;;
+    *WinError\ 10013*|*WinError\ 10048*)
+      log "ERROR: cannot bind 127.0.0.1:${PARSE_API_PORT} — ${probe_out#BIND_FAIL: }"
+      log "  → Likely Windows/WSL phantom port reservation (visible to bind, invisible to netstat)."
+      log "  → Fix: run 'wsl --shutdown' from Windows cmd/PowerShell, then retry parse-run."
+      log "  → Alternative: set PARSE_API_PORT=<other> in your environment before relaunching."
+      return 1
+      ;;
+    *BIND_FAIL*)
+      log "ERROR: cannot bind 127.0.0.1:${PARSE_API_PORT} — ${probe_out#BIND_FAIL: }"
+      log "  → Check what's holding the port:"
+      log "      lsof -i :${PARSE_API_PORT}   (WSL/Linux)"
+      log "      netstat.exe -ano | grep ${PARSE_API_PORT}   (from WSL, hits Windows side)"
+      log "  → Or override the port with PARSE_API_PORT=<other> and restart."
+      return 1
+      ;;
+    *)
+      # Non-bind failure (Python invocation error, etc.) — surface it but don't block.
+      log "WARNING: API port pre-flight probe did not produce BIND_OK/BIND_FAIL; continuing anyway."
+      log "  probe output: ${probe_out}"
+      return 0
+      ;;
+  esac
 }
 
 # ---------- Git pull (defensive) -----------------------------------------
@@ -290,6 +360,7 @@ main() {
 
   pull_main
   stop_servers
+  preflight_api_port || return 1
   start_api || return 1
   start_vite || return 1
   print_banner
