@@ -128,6 +128,10 @@ class ChatOrchestrator:
             "- Subsequent turns in the same session inherit that context via conversation history — not re-read on every turn. If you wrote to `parse-memory.md` mid-session and want to reference the new content by file rather than by memory, call `parse_memory_read`.\n"
             "- parse_memory_upsert_section creates or replaces a `## Section` block there. Updates persist across sessions; the next session you start will see them in its auto-injected context.\n"
             "\n"
+            "Multi-source speakers and virtual timelines:\n"
+            "- A speaker may have multiple source WAVs. Call onboard_speaker_import once per WAV — the first is primary, subsequent imports default to non-primary.\n"
+            "- When onboard_speaker_import returns `virtualTimelineRequired=true` (or the source index already shows >1 WAV for a speaker), PARSE has no automatic cross-WAV alignment. Do not assert that annotations on one WAV transfer to the other. Record the gap in `parse-memory.md` (e.g. under a `## Alignment status` section) and surface it to the user so manual reconciliation can be scheduled.\n"
+            "\n"
             "Response style:\n"
             "- concise, technical, and accurate\n"
             "- when using tools, summarize what was checked\n"
@@ -249,7 +253,7 @@ class ChatOrchestrator:
                 if isinstance(first, dict):
                     primary = str(first.get("path") or first.get("filename") or "").strip()
 
-            suffix = " (+{0} more)".format(extras) if extras else ""
+            suffix = " (+{0} more, virtual-timeline required)".format(extras) if extras else ""
             lines.append("- {0}: {1}{2}".format(speaker_name, primary or "(no primary wav)", suffix))
 
         if len(speakers) > _TURN_PRIMING_SOURCE_INDEX_MAX_SPEAKERS:

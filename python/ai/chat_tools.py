@@ -258,8 +258,20 @@ class ParseChatTools:
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
         self.docs_root = Path(docs_root).expanduser().resolve() if docs_root else None
 
+        # ``external_read_roots`` supports two modes:
+        #   - a list of concrete absolute roots → paths must fall under one
+        #   - a single-element list containing "*" or "/" (or a Path("*")) →
+        #     wildcard mode, any absolute path that exists is readable
+        # Wildcard is the "broad access" knob for local single-user setups
+        # where enumerating every source tree is tedious; default stays
+        # conservative so unintended deployments don't leak the filesystem.
         self.external_read_roots: List[Path] = []
+        self.external_read_wildcard: bool = False
         for raw_root in external_read_roots or []:
+            raw_str = str(raw_root).strip()
+            if raw_str in {"*", "/", "**"}:
+                self.external_read_wildcard = True
+                continue
             try:
                 resolved_root = Path(raw_root).expanduser().resolve()
             except Exception:
@@ -619,12 +631,19 @@ class ParseChatTools:
             "onboard_speaker_import": ChatToolSpec(
                 name="onboard_speaker_import",
                 description=(
-                    "Import a new speaker from on-disk audio (and optional transcription CSV). "
-                    "Copies files into audio/original/<speaker>/, scaffolds an annotation record, "
-                    "and registers the speaker in source_index.json. sourceWav/sourceCsv may be "
-                    "absolute paths under PARSE_EXTERNAL_READ_ROOTS or paths under the project "
-                    "audio/ directory. Gated by dryRun: call dryRun=true first to preview planned "
-                    "copies/registrations, then dryRun=false after the user confirms."
+                    "Import a speaker's audio source from on-disk paths (and optional transcription CSV). "
+                    "Copies files into audio/original/<speaker>/, scaffolds an annotation record on the "
+                    "first import, and appends the source to source_index.json. sourceWav/sourceCsv may "
+                    "be absolute paths under PARSE_EXTERNAL_READ_ROOTS (set to '*' for no sandbox) or "
+                    "paths under the project audio/ directory. "
+                    "Multi-source speakers: call this tool once per audio source. The first import "
+                    "defaults to is_primary=true; subsequent imports default to is_primary=false. "
+                    "When a speaker already has registered sources, the response flags "
+                    "`virtualTimelineRequired=true` — PARSE does not yet auto-align multiple WAVs "
+                    "across a shared virtual timeline, so annotation spanning them must be coordinated "
+                    "manually or deferred. "
+                    "Gated by dryRun: call dryRun=true first to preview planned copies/registrations, "
+                    "then dryRun=false after the user confirms."
                 ),
                 parameters={
                     "type": "object",
@@ -860,7 +879,9 @@ class ParseChatTools:
 
         Expanded allowed roots = [project_root, *external_read_roots, *extra_roots]. Paths may
         be absolute (then must fall under one of the roots) or relative (resolved against
-        project_root). Raises ChatToolValidationError on escape.
+        project_root). When ``external_read_wildcard`` is set (PARSE_EXTERNAL_READ_ROOTS=*)
+        any absolute path is accepted. Raises ChatToolValidationError on escape with a
+        message listing the actual allowed roots so the caller knows what to fix.
         """
         value = str(raw_path or "").strip()
         if not value:
@@ -881,6 +902,9 @@ class ParseChatTools:
 
         resolved = candidate.resolve()
 
+        if self.external_read_wildcard:
+            return resolved
+
         for root in allowed_roots:
             try:
                 resolved.relative_to(root)
@@ -889,8 +913,10 @@ class ParseChatTools:
                 continue
 
         raise ChatToolValidationError(
-            "Path is outside allowed read roots: {0}".format(
-                ", ".join([str(root) for root in allowed_roots])
+            "Path {0!r} is outside allowed read roots. Allowed: {1}. "
+            "Extend access by setting PARSE_EXTERNAL_READ_ROOTS "
+            "(e.g. '/mnt/c/Users/Lucas/Thesis') or use '*' for no sandbox.".format(
+                str(resolved), ", ".join([str(root) for root in allowed_roots])
             )
         )
 
@@ -1854,10 +1880,11 @@ class ParseChatTools:
         if not source_wav:
             raise ChatToolValidationError("sourceWav is required")
 
-        # Paths under audio/ may be relative; absolute paths must fall under
-        # the project root or a configured PARSE_EXTERNAL_READ_ROOTS entry.
+        # Relative paths are anchored at audio/ for continuity with earlier
+        # behavior. Absolute paths go through the broader readable-path
+        # resolver so PARSE_EXTERNAL_READ_ROOTS (including "*") applies.
         candidate = Path(source_wav).expanduser()
-        if candidate.is_absolute() and self.external_read_roots:
+        if candidate.is_absolute():
             safe_audio = self._resolve_readable_path(source_wav)
         else:
             safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
@@ -2288,6 +2315,22 @@ class ParseChatTools:
         wav_dest = target_dir / wav_path.name
         csv_dest = (target_dir / csv_path.name) if csv_path else None
 
+        # Multi-source speakers require a virtual-timeline to align
+        # annotations across WAVs. PARSE doesn't auto-build one yet, so flag
+        # it explicitly so the agent raises the gap with the user instead of
+        # silently writing two disjoint source entries.
+        projected_source_count = len(existing_sources) + (0 if already_registered else 1)
+        virtual_timeline_required = projected_source_count > 1
+        virtual_timeline_note = ""
+        if virtual_timeline_required:
+            virtual_timeline_note = (
+                "Speaker {0!r} will have {1} source WAVs after this import. PARSE does not "
+                "yet auto-align multiple WAVs on a shared virtual timeline. Flag downstream "
+                "annotation/alignment as pending until a virtual-timeline workflow is in "
+                "place; annotations authored against one WAV will not transfer to the other "
+                "without manual reconciliation."
+            ).format(speaker, projected_source_count)
+
         plan: Dict[str, Any] = {
             "speaker": speaker,
             "sourceWav": str(wav_path),
@@ -2299,7 +2342,11 @@ class ParseChatTools:
             "alreadyRegistered": already_registered,
             "wavSizeBytes": wav_path.stat().st_size,
             "csvSizeBytes": csv_path.stat().st_size if csv_path else None,
+            "projectedSourceCount": projected_source_count,
+            "virtualTimelineRequired": virtual_timeline_required,
         }
+        if virtual_timeline_note:
+            plan["virtualTimelineNote"] = virtual_timeline_note
 
         if dry_run:
             return {
@@ -2338,7 +2385,11 @@ class ParseChatTools:
             "ok": True,
             "dryRun": False,
             "plan": plan,
-            "message": "Speaker {0!r} imported.".format(speaker),
+            "message": (
+                "Speaker {0!r} imported. {1}".format(speaker, virtual_timeline_note).strip()
+                if virtual_timeline_note
+                else "Speaker {0!r} imported.".format(speaker)
+            ),
         }
         if isinstance(callback_result, dict):
             out.update(callback_result)

@@ -170,11 +170,17 @@ Workspace ready. To start PARSE against this workspace:
 
   PARSE_WORKSPACE_ROOT="${WORKSPACE}" \\
     PARSE_CHAT_MEMORY_PATH="${WORKSPACE}/parse-memory.md" \\
-    PARSE_EXTERNAL_READ_ROOTS="/path/to/your/source/tree" \\
+    PARSE_EXTERNAL_READ_ROOTS="/mnt/c/Users/Lucas/Thesis" \\
     bash "\$(dirname "\$0")/parse-run.sh"
 
 Set PARSE_EXTERNAL_READ_ROOTS to the directory your original WAV/CSV files
-live under (e.g. /mnt/c/Users/Lucas/Thesis on WSL). PARSE AI will copy files
-from there into ${WORKSPACE}/audio/original/<speaker>/ via onboard_speaker_import.
-Originals are never mutated.
+live under (e.g. /mnt/c/Users/Lucas/Thesis on WSL). Use multiple entries
+separated by ':' (':' on POSIX, ';' on Windows), or pass '*' to disable the
+sandbox entirely:
+
+  PARSE_EXTERNAL_READ_ROOTS="*"   # any absolute path is readable
+
+PARSE AI copies the sources you point at into
+${WORKSPACE}/audio/original/<speaker>/ via onboard_speaker_import — originals
+are never mutated.
 EOF
