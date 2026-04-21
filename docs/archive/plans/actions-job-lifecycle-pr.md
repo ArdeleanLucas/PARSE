@@ -1,5 +1,7 @@
 # PR: Wire Actions menu job lifecycle — progress, polling, error UI
 
+> **Archived historical plan (2026-04-21):** this PR brief documents a completed slice from the ParseUI integration era. Keep it as implementation history only. For current branch policy, validation policy, and the live contract table, use `AGENTS.md`; for live ParseUI execution priorities, use `docs/plans/parseui-current-state-plan.md`.
+
 **Branch:** `feat/actions-job-lifecycle` → `main`
 **Reviewer:** TrueNorth49
 **Gate:** Pre-C5/C6 — no destructive changes, no legacy removal
