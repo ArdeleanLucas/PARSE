@@ -44,7 +44,35 @@ export function ChatPanel({ speaker, conceptId }: ChatPanelProps) {
     const tryFetch = () => {
       getAuthStatus()
         .then((s: AuthStatus) => {
-          if (!cancelled) setAuthState(s.authenticated ? "authenticated" : "unauthenticated")
+          if (cancelled) return
+          if (s.authenticated) {
+            setAuthState("authenticated")
+          } else if (s.flow_active) {
+            // OAuth device flow was started before this mount (e.g. HMR reload).
+            // Resume polling so the token is picked up without re-entering the code.
+            setOauthInfo({ user_code: s.user_code, verification_uri: s.verification_uri })
+            setAuthState("oauth")
+            if (!pollRef.current) {
+              pollRef.current = setInterval(async () => {
+                try {
+                  const result = await pollAuth()
+                  if (result.status === "complete") {
+                    if (pollRef.current) clearInterval(pollRef.current)
+                    pollRef.current = null
+                    setAuthState("authenticated")
+                  } else if (result.status === "expired" || result.status === "error") {
+                    if (pollRef.current) clearInterval(pollRef.current)
+                    pollRef.current = null
+                    setAuthState("unauthenticated")
+                    setAuthError(result.error ?? (result.status === "expired" ? "Login code expired — try again" : "OAuth failed"))
+                    setOauthInfo({})
+                  }
+                } catch { /* transient — keep polling */ }
+              }, 5000)
+            }
+          } else {
+            setAuthState("unauthenticated")
+          }
         })
         .catch(() => {
           if (cancelled) return
