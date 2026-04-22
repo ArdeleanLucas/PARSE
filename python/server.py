@@ -2609,6 +2609,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_concepts_import()
             return
 
+        if request_path == "/api/tags/import":
+            self._api_post_tags_import()
+            return
+
         parts = self._path_parts(request_path)
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
@@ -3469,6 +3473,161 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "added": added,
                 "total": len(existing),
                 "mode": "replace" if replace_mode else "merge",
+            },
+        )
+
+    def _api_post_tags_import(self) -> None:
+        """Import a custom concept list as a TAG with auto-assigned concepts.
+
+        Multipart form fields:
+            - `csv` (file, required): columns `id` and/or `concept_en`.
+            - `tagName` (text, optional): defaults to the CSV filename stem.
+            - `color` (text, optional): hex or named, default "#4461d4".
+
+        Each CSV row is matched to an existing project concept by `id` first,
+        else case-insensitive `concept_en`. Matched concept ids are added to
+        the tag (merged — never removes existing assignments). Unmatched rows
+        are reported as `missedLabels` so the caller can review.
+        """
+        import csv as _csv
+        import re as _re
+
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
+
+        raw_length = self.headers.get("Content-Length", "")
+        try:
+            content_length = int(raw_length)
+        except (ValueError, TypeError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
+        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
+            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
+
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": str(content_length),
+        }
+        form = cgi.FieldStorage(
+            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
+        )
+
+        csv_item = form["csv"] if "csv" in form else None
+        if csv_item is None or not getattr(csv_item, "filename", None):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
+
+        try:
+            csv_text = csv_item.file.read().decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
+
+        csv_filename = os.path.basename(csv_item.filename or "tag.csv")
+        tag_name_field = form.getfirst("tagName", "") if "tagName" in form else ""
+        color_field = form.getfirst("color", "") if "color" in form else ""
+        tag_name = str(tag_name_field or "").strip()
+        if not tag_name:
+            tag_name = pathlib.Path(csv_filename).stem or "Custom list"
+        color = str(color_field or "").strip() or "#4461d4"
+
+        try:
+            reader = _csv.DictReader(io.StringIO(csv_text))
+            rows = list(reader)
+        except _csv.Error as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv parse error: {0}".format(exc))
+        if not rows:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv is empty")
+
+        fieldnames = [str(n or "").strip().lower() for n in (reader.fieldnames or [])]
+        if "id" not in fieldnames and "concept_en" not in fieldnames:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must have an id or concept_en column")
+
+        # Load project concepts for matching
+        concepts_path = _project_root() / "concepts.csv"
+        project_concepts: List[Dict[str, str]] = []
+        if concepts_path.exists():
+            with open(concepts_path, newline="", encoding="utf-8") as f:
+                project_concepts = list(_csv.DictReader(f))
+
+        by_id: Dict[str, str] = {}
+        by_label: Dict[str, str] = {}
+        for c in project_concepts:
+            cid = _normalize_concept_id(c.get("id"))
+            lbl = str(c.get("concept_en") or "").strip()
+            if cid:
+                by_id[cid] = lbl
+            if lbl:
+                by_label[lbl.casefold()] = cid
+
+        matched_ids: List[str] = []
+        missed_labels: List[str] = []
+        seen_ids: set = set()
+        for row in rows:
+            row_id = _normalize_concept_id(row.get("id"))
+            row_label = str(row.get("concept_en") or "").strip()
+            cid = ""
+            if row_id and row_id in by_id:
+                cid = row_id
+            elif row_label and row_label.casefold() in by_label:
+                cid = by_label[row_label.casefold()]
+            if cid:
+                if cid not in seen_ids:
+                    matched_ids.append(cid)
+                    seen_ids.add(cid)
+            else:
+                missed_labels.append(row_label or row_id or "")
+
+        if not matched_ids:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "No rows matched any existing concept by id or concept_en. Import concepts first.",
+            )
+
+        # Upsert into parse-tags.json (additive merge)
+        tag_id = _re.sub(r"[^a-z0-9]+", "-", tag_name.lower()).strip("-") or "tag"
+        tags_path = _project_root() / "parse-tags.json"
+        existing_tags: List[Dict[str, Any]] = []
+        if tags_path.exists():
+            try:
+                with open(tags_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, list):
+                    existing_tags = raw
+            except (OSError, ValueError):
+                existing_tags = []
+
+        found = False
+        for tag in existing_tags:
+            if isinstance(tag, dict) and str(tag.get("id")) == tag_id:
+                prev = set(tag.get("concepts") or [])
+                prev.update(matched_ids)
+                tag["concepts"] = sorted(prev, key=_concept_sort_key)
+                tag["label"] = tag_name
+                tag["color"] = color
+                found = True
+                break
+        if not found:
+            existing_tags.append({
+                "id": tag_id,
+                "label": tag_name,
+                "color": color,
+                "concepts": sorted(set(matched_ids), key=_concept_sort_key),
+            })
+
+        with open(tags_path, "w", encoding="utf-8") as f:
+            json.dump(existing_tags, f, indent=2, ensure_ascii=False)
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "tagId": tag_id,
+                "tagName": tag_name,
+                "color": color,
+                "matchedCount": len(matched_ids),
+                "missedCount": len(missed_labels),
+                "missedLabels": missed_labels[:50],
+                "totalTagsInFile": len(existing_tags),
             },
         )
 
