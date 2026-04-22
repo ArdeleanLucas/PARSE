@@ -2361,6 +2361,11 @@ class ParseChatTools:
             for item in existing_concepts
             if _normalize_space(item.get("id")) and _normalize_space(item.get("label"))
         }
+        existing_label_by_id = {
+            _normalize_space(item.get("id")): _normalize_space(item.get("label"))
+            for item in existing_concepts
+            if _normalize_space(item.get("id")) and _normalize_space(item.get("label"))
+        }
         reserved_numeric_ids = {
             _normalize_space(item.get("id"))
             for item in existing_concepts
@@ -2379,6 +2384,18 @@ class ParseChatTools:
         concepts: List[Dict[str, str]] = []
         seen_ids = set()
         fallback_index = 1
+
+        def _resolve_by_label(label_text: str) -> str:
+            nonlocal fallback_index
+            existing_concept_id = existing_id_by_label.get(label_text.casefold())
+            if existing_concept_id and existing_concept_id not in seen_ids:
+                return existing_concept_id
+            while str(fallback_index) in reserved_numeric_ids or str(fallback_index) in seen_ids:
+                fallback_index += 1
+            assigned = str(fallback_index)
+            fallback_index += 1
+            return assigned
+
         for raw_interval in intervals:
             if not isinstance(raw_interval, dict):
                 continue
@@ -2387,19 +2404,20 @@ class ParseChatTools:
                 continue
             match = concept_re.match(text)
             if match:
-                concept_id = _normalize_space(match.group(1))
+                claimed_id = _normalize_space(match.group(1))
                 label = _normalize_space(match.group(2))
-            else:
-                existing_concept_id = existing_id_by_label.get(text.casefold())
-                if existing_concept_id and existing_concept_id not in seen_ids:
-                    concept_id = existing_concept_id
-                    label = text
+                # Guard against ID collisions with a different existing label:
+                # when another speaker has already registered `claimed_id` with
+                # a different label, prefer matching by label (or assigning a
+                # fresh id) so we don't clobber the existing concept.
+                existing_label_for_id = existing_label_by_id.get(claimed_id)
+                if existing_label_for_id and existing_label_for_id.casefold() != label.casefold():
+                    concept_id = _resolve_by_label(label)
                 else:
-                    while str(fallback_index) in reserved_numeric_ids or str(fallback_index) in seen_ids:
-                        fallback_index += 1
-                    concept_id = str(fallback_index)
-                    label = text
-                    fallback_index += 1
+                    concept_id = claimed_id
+            else:
+                label = text
+                concept_id = _resolve_by_label(label)
             if not concept_id or not label or concept_id in seen_ids:
                 continue
             seen_ids.add(concept_id)

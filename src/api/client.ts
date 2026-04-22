@@ -168,6 +168,38 @@ export async function importConceptsCsv(
   return response.json() as Promise<ImportConceptsResult>;
 }
 
+export interface ImportTagCsvResult {
+  ok: boolean;
+  tagId: string;
+  tagName: string;
+  color: string;
+  matchedCount: number;
+  missedCount: number;
+  missedLabels: string[];
+  totalTagsInFile: number;
+}
+
+export async function importTagCsv(
+  file: File,
+  options: { tagName?: string; color?: string } = {},
+): Promise<ImportTagCsvResult> {
+  const form = new FormData();
+  form.append("csv", file);
+  if (options.tagName) form.append("tagName", options.tagName);
+  if (options.color) form.append("color", options.color);
+  let response: Response;
+  try {
+    response = await fetch("/api/tags/import", { method: "POST", body: form });
+  } catch (error) {
+    throw networkError("/api/tags/import", { method: "POST" }, error);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`API POST /api/tags/import failed ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ImportTagCsvResult>;
+}
+
 // Auth
 export async function getAuthStatus(): Promise<AuthStatus> {
   return apiFetch<AuthStatus>("/api/auth/status");

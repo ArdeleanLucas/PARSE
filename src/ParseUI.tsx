@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importConceptsCsv } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
@@ -48,7 +48,7 @@ interface Concept {
   customOrder?: number;
 }
 
-type ConceptSortMode = 'az' | '1n' | 'survey' | 'custom';
+type ConceptSortMode = 'az' | '1n' | 'survey';
 
 interface SpeakerForm {
   speaker: string; ipa: string; utterances: number;
@@ -1594,9 +1594,6 @@ export function ParseUI() {
         }
         return av.localeCompare(bv);
       });
-    } else if (sortMode === 'custom') {
-      list = list.filter(c => typeof c.customOrder === 'number');
-      list = [...list].sort((a, b) => (a.customOrder ?? 0) - (b.customOrder ?? 0));
     } else {
       list = [...list].sort((a, b) => a.id - b.id);
     }
@@ -1604,15 +1601,19 @@ export function ParseUI() {
   }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
-  const hasCustomOrders = useMemo(() => concepts.some(c => typeof c.customOrder === 'number'), [concepts]);
 
-  const handleConceptImport = async (file: File) => {
+  const handleCustomListImport = async (file: File) => {
     setConceptImportError(null);
     setConceptImportSummary(null);
+    const defaultName = file.name.replace(/\.csv$/i, '');
+    const tagName = window.prompt('Tag name for this concept list:', defaultName);
+    if (tagName === null) return; // user cancelled
     try {
-      const result = await importConceptsCsv(file, 'merge');
-      setConceptImportSummary(`Imported: matched ${result.matched}, added ${result.added}, total ${result.total}`);
-      await loadConfig();
+      const result = await importTagCsv(file, { tagName: tagName.trim() || defaultName });
+      const missedNote = result.missedCount > 0 ? `, ${result.missedCount} unmatched` : '';
+      setConceptImportSummary(`Tag "${result.tagName}": ${result.matchedCount} concepts assigned${missedNote}`);
+      // Refresh server-backed tags so the new tag appears in the Manage Tags view
+      await useTagStore.getState().syncFromServer();
     } catch (err) {
       setConceptImportError(err instanceof Error ? err.message : String(err));
     }
@@ -1814,7 +1815,7 @@ export function ParseUI() {
                       onClick={() => { setActionsMenuOpen(false); conceptImportInputRef.current?.click(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
                     >
-                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Concepts CSV…
+                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Custom Concept List
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); loadDecisionsMenuRef.current?.click(); }}
@@ -1851,7 +1852,7 @@ export function ParseUI() {
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) void handleConceptImport(file);
+                  if (file) void handleCustomListImport(file);
                   if (conceptImportInputRef.current) conceptImportInputRef.current.value = '';
                 }}
               />
@@ -1946,13 +1947,6 @@ export function ParseUI() {
                   title={hasSurveyItems ? 'Sort by original survey item (section.item)' : 'No survey_item values present in concepts.csv'}
                   className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='survey'?'bg-white text-slate-800 shadow-sm':'text-slate-500'} ${!hasSurveyItems ? 'cursor-not-allowed opacity-40' : ''}`}
                 >Survey</button>
-                <button
-                  data-testid="concept-sort-custom"
-                  onClick={() => setSortMode('custom')}
-                  disabled={!hasCustomOrders}
-                  title={hasCustomOrders ? 'Sort and filter by custom_order (imported list)' : 'Import a custom list to enable this view'}
-                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='custom'?'bg-white text-slate-800 shadow-sm':'text-slate-500'} ${!hasCustomOrders ? 'cursor-not-allowed opacity-40' : ''}`}
-                >Custom</button>
               </div>
               <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
             </div>
@@ -1960,10 +1954,7 @@ export function ParseUI() {
           <nav className="flex-1 overflow-y-auto px-2 pb-6">
             {filtered.map(c => {
               const active = c.id === conceptId;
-              const badge =
-                sortMode === 'survey' && c.surveyItem ? c.surveyItem :
-                sortMode === 'custom' && typeof c.customOrder === 'number' ? String(c.customOrder) :
-                String(c.id);
+              const badge = sortMode === 'survey' && c.surveyItem ? c.surveyItem : String(c.id);
               const badgePrefix = sortMode === 'survey' ? 'Q' : '#';
               return (
                 <button key={c.id} onClick={() => setConceptId(c.id)}
