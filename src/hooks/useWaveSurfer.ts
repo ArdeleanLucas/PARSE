@@ -157,6 +157,11 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     const container = options.containerRef.current;
     if (!container) return;
 
+    // Skip initialization when the audio URL isn't ready yet. Otherwise
+    // WaveSurfer.load("") throws and leaves the component in a broken state.
+    // Re-runs when audioUrl changes.
+    if (!options.audioUrl) return;
+
     // Abort any previous peaks fetch
     abortControllerRef.current?.abort();
     const abortCtrl = new AbortController();

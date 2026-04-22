@@ -74,6 +74,15 @@ function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
+// Build a workspace-relative audio URL from an annotation record. Server serves
+// static files from the project root, so "audio/working/X/foo.wav" → "/audio/working/X/foo.wav".
+function deriveAudioUrl(record: AnnotationRecord | null | undefined): string {
+  const raw = (record?.source_audio ?? record?.source_wav ?? '').trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/\\/g, '/').replace(/^\/+/, '');
+  return '/' + cleaned;
+}
+
 
 function conceptMatchesIntervalText(concept: Concept, text: string): boolean {
   const normalizedText = text.trim().toLowerCase();
@@ -2010,7 +2019,7 @@ export function ParseUI() {
               totalConcepts={total}
               onPrev={goPrev}
               onNext={goNext}
-              audioUrl={selectedSpeakers[0] ? `/audio/${selectedSpeakers[0]}.wav` : ''}
+              audioUrl={deriveAudioUrl(annotationRecords[selectedSpeakers[0] ?? ''])}
               peaksUrl={selectedSpeakers[0] ? `/peaks/${selectedSpeakers[0]}.json` : undefined}
             />
             <AIChat

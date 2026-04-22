@@ -45,12 +45,17 @@ export function AnnotateMode() {
   const playbackRate = usePlaybackStore((s) => s.playbackRate);
   const setPlaybackRate = usePlaybackStore((s) => s.setPlaybackRate);
   const dirty = useAnnotationStore((s) => s.dirty);
+  const record = useAnnotationStore((s) =>
+    activeSpeaker ? s.records[activeSpeaker] ?? null : null,
+  );
 
   // Annotation sync
   useAnnotationSync();
 
-  // Waveform
-  const audioUrl = activeSpeaker ? `/audio/${activeSpeaker}.wav` : "";
+  // Waveform URL comes from the loaded annotation's source_audio
+  // (e.g. "audio/working/Fail02/foo.wav"), not a speaker-name stub.
+  const sourceAudio = (record?.source_audio ?? record?.source_wav ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const audioUrl = activeSpeaker && sourceAudio ? "/" + sourceAudio : "";
   const {
     playPause,
     seek,
