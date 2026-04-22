@@ -15,6 +15,7 @@ import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './ap
 import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, applyTimestampOffset } from './api/client';
 import type { OffsetDetectResult } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
+import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -1784,7 +1785,9 @@ export function ParseUI() {
   }, [selectedSpeakers, loadSpeaker]);
 
   useEffect(() => {
-    loadEnrichments().catch((err) => {
+    // Wrap in Promise.resolve because tests mock the store's `load` as a
+    // no-op that returns undefined; `.catch` on undefined would throw.
+    Promise.resolve(loadEnrichments?.()).catch((err) => {
       console.error('[ParseUI] loadEnrichments failed:', err);
     });
   }, [loadEnrichments]);
@@ -2052,41 +2055,15 @@ export function ParseUI() {
     if (sortMode === 'az') {
       list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortMode === 'survey') {
-      // Natural sort: group first by source (KLQ / JBIL / …), then by every
-      // embedded number in order (section, item, variant). Without this
-      // "JBIL_10" lands before "JBIL_2" because the default string compare
-      // treats each segment as a whole literal, and "KLQ_1.10.A" lands
-      // before "KLQ_1.2.A" when each dotted segment is parseFloat'd as a
-      // decimal.
-      const surveyKey = (raw: string): (string | number)[] => {
-        const tokens: (string | number)[] = [];
-        for (const match of raw.matchAll(/([A-Za-z]+)|(\d+)/g)) {
-          if (match[1]) tokens.push(match[1].toLowerCase());
-          else if (match[2]) tokens.push(parseInt(match[2], 10));
-        }
-        return tokens;
-      };
+      // Natural sort lives in src/lib/surveySort.ts — the same module the
+      // regression tests import, so any future branch that reverts the
+      // sidebar sort will fail CI instead of landing silently.
       list = [...list].sort((a, b) => {
         const av = a.surveyItem ?? '';
         const bv = b.surveyItem ?? '';
         if (av && !bv) return -1;
         if (!av && bv) return 1;
-        const ka = surveyKey(av);
-        const kb = surveyKey(bv);
-        for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-          const xa = ka[i];
-          const xb = kb[i];
-          if (xa === undefined) return -1;
-          if (xb === undefined) return 1;
-          if (typeof xa === 'number' && typeof xb === 'number') {
-            if (xa !== xb) return xa - xb;
-          } else {
-            const sa = String(xa);
-            const sb = String(xb);
-            if (sa !== sb) return sa < sb ? -1 : 1;
-          }
-        }
-        return 0;
+        return compareSurveyKeys(av, bv);
       });
     } else {
       list = [...list].sort((a, b) => a.id - b.id);
@@ -2527,9 +2504,10 @@ export function ParseUI() {
             {filtered.map(c => {
               const active = c.id === conceptId;
               const badge = sortMode === 'survey' && c.surveyItem ? c.surveyItem : String(c.id);
-              // Survey items already carry their source prefix (JBIL / KLQ / …)
-              // — no extra "Q" needed. Numeric-id mode prefixes with "#".
-              const badgePrefix = sortMode === 'survey' ? '' : '#';
+              // Badge prefix lives in src/lib/surveySort.ts (empty in Survey
+              // mode — the survey_item already carries its source; "#" in
+              // numeric-id mode). Shared with the regression test.
+              const badgePrefix = surveyBadgePrefix(sortMode);
               return (
                 <button key={c.id} onClick={() => setConceptId(c.id)}
                   className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>

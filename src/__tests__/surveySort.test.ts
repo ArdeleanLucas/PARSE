@@ -1,39 +1,21 @@
 import { describe, it, expect } from "vitest";
+import { compareSurveyKeys, surveyBadgePrefix, surveyKey } from "../lib/surveySort";
 
-// Mirror of the surveyKey helper in ParseUI.tsx. Kept here so the ordering
-// contract is testable without mounting the whole component tree.
-function surveyKey(raw: string): (string | number)[] {
-  const tokens: (string | number)[] = [];
-  for (const match of raw.matchAll(/([A-Za-z]+)|(\d+)/g)) {
-    if (match[1]) tokens.push(match[1].toLowerCase());
-    else if (match[2]) tokens.push(parseInt(match[2], 10));
-  }
-  return tokens;
-}
-
-function compare(a: string, b: string): number {
-  const ka = surveyKey(a);
-  const kb = surveyKey(b);
-  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-    const xa = ka[i];
-    const xb = kb[i];
-    if (xa === undefined) return -1;
-    if (xb === undefined) return 1;
-    if (typeof xa === "number" && typeof xb === "number") {
-      if (xa !== xb) return xa - xb;
-    } else {
-      const sa = String(xa);
-      const sb = String(xb);
-      if (sa !== sb) return sa < sb ? -1 : 1;
-    }
-  }
-  return 0;
-}
+// Regression guard for the concept sidebar's Survey sort. PR #113 introduced
+// the natural-sort behavior; PR #114 accidentally reverted it because the
+// previous test suite had its own copy of `surveyKey`. Both the production
+// sort and the badge prefix now import from `src/lib/surveySort.ts`, so any
+// future branch that reverts those helpers will fail these cases.
 
 describe("survey-item natural sort", () => {
+  it("tokenises survey_item into letter-runs and integer-runs", () => {
+    expect(surveyKey("KLQ_1.10.A")).toEqual(["klq", 1, 10, "a"]);
+    expect(surveyKey("JBIL_100.A")).toEqual(["jbil", 100, "a"]);
+  });
+
   it("orders JBIL numerically: 1, 2, 10, 11, 100 (not 1, 10, 100, 11, 2)", () => {
     const items = ["JBIL_10.A", "JBIL_100.A", "JBIL_11.A", "JBIL_1.A", "JBIL_2.A"];
-    const sorted = [...items].sort(compare);
+    const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual([
       "JBIL_1.A", "JBIL_2.A", "JBIL_10.A", "JBIL_11.A", "JBIL_100.A",
     ]);
@@ -45,7 +27,7 @@ describe("survey-item natural sort", () => {
     const items = [
       "KLQ_1.10.A", "KLQ_1.2.A", "KLQ_1.2.B", "KLQ_2.1.A", "KLQ_1.1.A",
     ];
-    const sorted = [...items].sort(compare);
+    const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual([
       "KLQ_1.1.A", "KLQ_1.2.A", "KLQ_1.2.B", "KLQ_1.10.A", "KLQ_2.1.A",
     ]);
@@ -53,7 +35,7 @@ describe("survey-item natural sort", () => {
 
   it("groups by source prefix before number (JBIL before KLQ alphabetically)", () => {
     const items = ["KLQ_1.1.A", "JBIL_1.A", "KLQ_2.1.A", "JBIL_10.A"];
-    const sorted = [...items].sort(compare);
+    const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual([
       "JBIL_1.A", "JBIL_10.A", "KLQ_1.1.A", "KLQ_2.1.A",
     ]);
@@ -61,14 +43,31 @@ describe("survey-item natural sort", () => {
 
   it("A/B variants on the same (section,item) stay adjacent in variant order", () => {
     const items = ["KLQ_1.2.B", "KLQ_1.1.A", "KLQ_1.2.A"];
-    const sorted = [...items].sort(compare);
+    const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual(["KLQ_1.1.A", "KLQ_1.2.A", "KLQ_1.2.B"]);
   });
 
   it("unprefixed numeric survey ids sort numerically too", () => {
     // Fallback for workspaces that store bare numeric ids.
     const items = ["10", "100", "11", "1", "2"];
-    const sorted = [...items].sort(compare);
+    const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual(["1", "2", "10", "11", "100"]);
+  });
+});
+
+describe("survey-mode badge prefix", () => {
+  it("emits no extra letter in Survey mode — survey_item carries its own source tag", () => {
+    // This is the half of the regression that slipped past the old tests.
+    // Specifically blocks re-introducing the "Q" prefix seen in the
+    // user-reported regression where the sidebar read "QJBIL_1.A" instead
+    // of "JBIL_1.A".
+    expect(surveyBadgePrefix("survey")).toBe("");
+    expect(surveyBadgePrefix("survey")).not.toBe("Q");
+  });
+
+  it("uses # for numeric-id sort modes", () => {
+    expect(surveyBadgePrefix("1n")).toBe("#");
+    expect(surveyBadgePrefix("az")).toBe("#");
+    expect(surveyBadgePrefix("")).toBe("#");
   });
 });
