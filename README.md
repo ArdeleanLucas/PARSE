@@ -6,9 +6,9 @@ Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
 
 ## What is PARSE
 
-PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, and comparative analysis in one workspace, so researchers can move from raw recordings to analysis-ready linguistic data without switching between disconnected tools.
+PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, onboarding/import, and comparative analysis in one workspace, so researchers can move from raw recordings or processed thesis artifacts to analysis-ready linguistic data without switching between disconnected tools.
 
-PARSE has a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
+PARSE has a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system, action menu, and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
 
 The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). The legacy HTML entrypoints, old review page, and root vanilla-JS tree have been removed. For non-dev/local-server usage, run `npm run build` and the Python backend will serve the built frontend from `http://localhost:8766/` and `http://localhost:8766/compare`. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
 
@@ -24,9 +24,14 @@ Per-speaker segmentation and transcription workstation.
 
 - Waveform review with WaveSurfer 7 for long recordings
 - Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
-- AI-assisted STT for locating candidate segments in full recordings
-- Draggable timestamp regions for boundary correction
-- Fast segment playback and iterative refinement
+- Audio normalization job (`/api/normalize`) with in-place working-audio support
+- Speaker-level orthographic STT job (`/api/stt`) with progress/error reporting
+- Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
+- Draggable lexeme timestamp editing and manual boundary correction
+- Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment
+- Fast segment playback, rate control, and bounded lexeme-region playback
+- Concept display modes and sorting controls (ID order, A–Z, survey-order when present)
+- Keyboard shortcuts for mode switching and concept navigation
 - AI chat dock for in-session analysis assistance
 - Tag and filter concepts for selective annotation
 
@@ -36,6 +41,7 @@ Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
 
 - Concept × speaker matrix for side-by-side lexical review
 - Cognate controls: **accept**, **split**, **merge**, and **cycle**
+- Per-row cognate-group editing, speaker flags, and long-press / secondary-action controls
 - Borrowing adjudication aided by contact-language similarity signals
 - Enrichments overlay for computed analysis metadata
 - **CLEF** (Contact Lexeme Explorer Feature) — multi-source contact-language similarity panel powered by a provider registry (see below)
@@ -79,13 +85,13 @@ PARSE supports multiple AI backends, routed per task type:
 
 | Task | Supported providers |
 |---|---|
-| STT (speech-to-text) | faster-whisper (local, GPU), OpenAI Whisper API |
-| IPA transcription | wav2vec2 (local), epitran (fallback) |
+| STT (speech-to-text) | faster-whisper (local, GPU-first with CPU/int8 fallback), OpenAI Whisper API |
+| IPA transcription | local IPA provider via `ipa_only` compute (wav2vec2 / transliteration-backed provider path, depending on config) |
 | LLM / chat | xAI (Grok), OpenAI |
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
-**GPU requirement:** PARSE is designed for CUDA inference. The recommended local STT setup is faster-whisper with `device=cuda, compute_type=float16`. CPU inference is not supported for production use.
+**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable.
 
 ### Models
 
@@ -153,6 +159,22 @@ The assistant has full access to project state via the `ParseChatTools` interfac
 - Explain error messages from the server log
 
 The assistant operates with read and write access to the project. It can stage files, update metadata, trigger jobs, and report back — without requiring the user to leave the interface.
+
+---
+
+## Speaker import and workspace hydration
+
+Recent PRs expanded PARSE beyond raw upload-only onboarding. In addition to `POST /api/onboard/speaker`, the current workstation and MCP adapter support **processed-speaker imports**: copying a timestamp-aligned working WAV plus annotation/peaks/transcript artifacts into the active workspace and registering the speaker in `project.json` and `source_index.json`.
+
+This matters for thesis workflows where the richest aligned source is not a fresh raw WAV pipeline run but an existing processed artifact set. In practice, PARSE can now be hydrated from:
+
+- a working WAV under `audio/working/<Speaker>/`
+- `annotations/<Speaker>.json` / `annotations/<Speaker>.parse.json`
+- `peaks/<Speaker>.json`
+- optional `coarse_transcripts/<Speaker>.json`
+- optional legacy transcript CSV under `imports/legacy/<Speaker>/`
+
+The active frontend speaker list comes from the live workspace behind `/api/config`, not necessarily from the bare repo checkout. When running PARSE with `PARSE_WORKSPACE_ROOT` set, imports and runtime writes must land in that workspace for the UI to see them.
 
 ---
 
