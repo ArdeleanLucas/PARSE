@@ -24,11 +24,12 @@ Per-speaker segmentation and transcription workstation.
 
 - Waveform review with WaveSurfer 7 for long recordings
 - Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
+- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTHO**, with lane visibility/color controls and waveform-synced horizontal scrolling
 - Audio normalization job (`/api/normalize`) with in-place working-audio support
 - Speaker-level orthographic STT job (`/api/stt`) with progress/error reporting
 - Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
 - Draggable lexeme timestamp editing and manual boundary correction
-- Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment
+- Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment, now with monotonic alignment, quantile anchor sampling, and manual single-pair fallback
 - Fast segment playback, rate control, and bounded lexeme-region playback
 - Concept display modes and sorting controls (ID order, A–Z, survey-order when present)
 - Keyboard shortcuts for mode switching and concept navigation
@@ -157,6 +158,8 @@ The assistant has full access to project state via the `ParseChatTools` interfac
 - Diagnose pipeline failures (STT, IPA, normalization)
 - Identify missing files, mismatched metadata, or annotation gaps
 - Explain error messages from the server log
+
+Recent post-README improvements also expanded the assistant's operational surface in two practical areas: server-backed tags now sync on UI bootstrap (so imported tags appear after reload), and existing tags can be renamed directly inside PARSE's Tags mode instead of being recreate-only.
 
 The assistant operates with read and write access to the project. It can stage files, update metadata, trigger jobs, and report back — without requiring the user to leave the interface.
 
@@ -339,7 +342,7 @@ python/
   adapters/
     mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (19 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (20 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
@@ -361,9 +364,9 @@ dist/                   -- Vite build output (generated, gitignored)
 
 ## AI Chat Tools
 
-The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **19 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
+The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **20 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
 
-### Tools (19)
+### Tools (20)
 
 **Read-only / preview**
 
@@ -386,6 +389,7 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 | `stt_start` | Start STT pipeline on a recording. Returns job ID |
 | `stt_status` | Poll status of a running STT job |
 | `detect_timestamp_offset` | Detect a constant timestamp offset between annotation data and audio/STT evidence |
+| `detect_timestamp_offset_from_pair` | Compute an offset from one or more manually known CSV↔audio anchor pairs when automated STT-based matching is weak or unavailable |
 | `apply_timestamp_offset` | Apply a constant offset to lexeme timestamps for one speaker (`dryRun=true` first) |
 
 **Tag operations**
@@ -410,7 +414,7 @@ The built-in assistant operates with both read and write access to the project, 
 
 ## MCP Server Mode
 
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing **17 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing **18 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
 
 ```bash
 python python/adapters/mcp_adapter.py                          # auto-detect project root
@@ -442,7 +446,7 @@ If you launch the adapter without an explicit `env` block, it also reads repo-lo
 
 ### Exposed Tools
 
-The MCP adapter currently registers **17 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
+The MCP adapter currently registers **18 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
 
 | Tool | Description |
 |---|---|
@@ -455,7 +459,8 @@ The MCP adapter currently registers **17 tools** from `ParseChatTools` in `pytho
 | `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); **dryRun required** — pass dryRun=true to preview, dryRun=false to merge into sil_contact_languages.json |
 | `stt_start` | Start STT background job on an audio file (proxied to the running PARSE HTTP server on PARSE_API_PORT, default 8766, so job state is shared with the browser UI) |
 | `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
-| `detect_timestamp_offset` | Detect a constant timestamp offset between transcript/annotation timestamps and audio evidence |
+| `detect_timestamp_offset` | Detect a constant timestamp offset between transcript/annotation timestamps and audio evidence, with monotonic alignment and quantile anchor selection |
+| `detect_timestamp_offset_from_pair` | Detect an offset from manually supplied audio↔CSV anchor pair(s) when automated alignment is unreliable |
 | `apply_timestamp_offset` | Apply a constant offset to speaker lexeme timestamps; dry-run first |
 | `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
 | `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
