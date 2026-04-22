@@ -1119,7 +1119,17 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   const selectedRegion = usePlaybackStore(s => s.selectedRegion);
   const annotated = Boolean(conceptInterval && ipaInterval);
 
-  const { playPause, seek, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
+  // Ref mirror of the currently stored concept interval. Used from the
+  // onRegionCommit closure (which is captured on WaveSurfer init) so it
+  // always sees the latest stored start/end when the user releases a drag.
+  const storedIntervalRef = useRef<{ start: number; end: number } | null>(null);
+  useEffect(() => {
+    storedIntervalRef.current = conceptInterval
+      ? { start: conceptInterval.start, end: conceptInterval.end }
+      : null;
+  }, [conceptInterval]);
+
+  const { playPause, seek, scrollToTimeAtFraction, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
     containerRef,
     audioUrl,
     peaksUrl,
@@ -1132,15 +1142,37 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       setEditStart(start.toFixed(3));
       setEditEnd(end.toFixed(3));
     },
+    onRegionCommit: (start, end) => {
+      // Auto-save: when the user finishes dragging/resizing the region,
+      // retime the current lexeme across all tiers and persist to the
+      // annotation JSON. No Save button needed for region edits.
+      const prev = storedIntervalRef.current;
+      if (!prev) return;
+      if (Math.abs(prev.start - start) < 0.001 && Math.abs(prev.end - end) < 0.001) return;
+      if (end <= start) return;
+      const moved = moveIntervalAcrossTiers(speaker, prev.start, prev.end, start, end);
+      if (moved > 0) {
+        storedIntervalRef.current = { start, end };
+        setEditStart(start.toFixed(3));
+        setEditEnd(end.toFixed(3));
+        void saveSpeaker(speaker);
+        setTimestampMessage({ kind: 'ok', text: `Saved · ${moved} tier${moved === 1 ? '' : 's'}` });
+      }
+    },
   });
 
-  // When the user picks a concept (and once the waveform is ready), seek to its
-  // start and show the lexeme's range as a draggable region on the waveform.
+  // When the user picks a concept (and once the waveform is ready): zoom
+  // in to 400 px/s, seek to its start, draw the lexeme range as a draggable
+  // region, and scroll so the start sits at ~33% from the left of the
+  // viewport (leaves more of the trailing audio visible than centering).
   useEffect(() => {
     if (!audioReady || !conceptInterval) return;
+    wsSetZoom(400);
+    setZoom(400);
     seek(conceptInterval.start);
     addRegion(conceptInterval.start, conceptInterval.end);
-  }, [audioReady, conceptInterval?.start, conceptInterval?.end, seek, addRegion]);
+    scrollToTimeAtFraction(conceptInterval.start, 0.33);
+  }, [audioReady, conceptInterval?.start, conceptInterval?.end, seek, addRegion, wsSetZoom, scrollToTimeAtFraction]);
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 

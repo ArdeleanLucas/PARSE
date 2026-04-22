@@ -18,6 +18,13 @@ interface UseWaveSurferOptions {
   initialSeekSec?: number;
   durationSec?: number;
   onRegionUpdate?: (start: number, end: number) => void;
+  /**
+   * Fires once when the user releases the mouse after a region drag or
+   * resize — i.e. the final committed range. Callers that want to persist
+   * region edits should hook this instead of `onRegionUpdate`, which
+   * streams throughout the interaction.
+   */
+  onRegionCommit?: (start: number, end: number) => void;
   onTimeUpdate?: (time: number) => void;
   onReady?: (duration: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
@@ -112,6 +119,30 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     },
     [seekToSec],
   );
+
+  /**
+   * Scroll the waveform so that `timeSec` is positioned at `fraction` of the
+   * visible viewport width (e.g. 0.33 = one-third from the left). Useful when
+   * seeking to a lexeme start — centering hides the trailing audio, whereas
+   * 33% offset keeps more of the following waveform visible for region edits.
+   */
+  const scrollToTimeAtFraction = useCallback((timeSec: number, fraction: number) => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    const duration = ws.getDuration();
+    if (!duration || duration <= 0) return;
+    const options = (ws as unknown as { options: { minPxPerSec?: number } }).options;
+    const pxPerSec = options?.minPxPerSec ?? 0;
+    if (!pxPerSec) return;
+    const wrapper = ws.getWrapper();
+    const viewport = wrapper?.parentElement;
+    const viewportWidth = viewport?.clientWidth ?? 0;
+    if (!viewportWidth) return;
+    const totalPx = duration * pxPerSec;
+    const maxScroll = Math.max(0, totalPx - viewportWidth);
+    const target = clamp(timeSec * pxPerSec - viewportWidth * fraction, 0, maxScroll);
+    ws.setScroll(target);
+  }, []);
 
   const setZoom = useCallback((minPxPerSec: number) => {
     wsRef.current?.zoom(minPxPerSec);
@@ -237,6 +268,17 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
       options.onRegionUpdate?.(region.start, region.end);
     });
 
+    // `region-updated` in the wavesurfer regions plugin fires continuously
+    // while the user drags or resizes. The public type map doesn't include a
+    // "drag end" event, so we attach a pointerup listener to the container
+    // and treat the region's current bounds as the committed value.
+    function onCommit() {
+      const active = activeRegionRef.current;
+      if (!active) return;
+      options.onRegionCommit?.(active.start, active.end);
+    }
+    container.addEventListener("pointerup", onCommit);
+
     // -- Keyboard shortcuts (scoped to container) --
 
     function onKeyDown(e: KeyboardEvent) {
@@ -303,6 +345,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     return () => {
       abortControllerRef.current?.abort();
       container.removeEventListener("keydown", onKeyDown);
+      container.removeEventListener("pointerup", onCommit);
       ws.destroy();
       wsRef.current = null;
       regionsRef.current = null;
@@ -316,6 +359,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     pause,
     playPause,
     seek,
+    scrollToTimeAtFraction,
     skip,
     jump,
     setZoom,
