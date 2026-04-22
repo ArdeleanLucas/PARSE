@@ -1877,22 +1877,49 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[
         if not audio_path.exists():
             raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
 
-        _set_job_progress(job_id, 1.0, message="Initializing STT provider")
-        provider = get_stt_provider()
+        # NB: the frontend normalizes backend progress values >1 as "percent"
+        # and values in [0,1] as "fraction". Sending exactly 1.0 was
+        # interpreted as 100%, so the bar flashed full before decoding even
+        # started. Use 0.5 (half a percent) for the initial splash.
+        _set_job_progress(job_id, 0.5, message="Initializing STT provider ({0})".format(language or "auto"))
+        try:
+            provider = get_stt_provider()
+        except Exception as exc:
+            # Capture the full traceback so downstream users see *why* the
+            # provider failed to initialize (missing model, CUDA not available,
+            # bad config), not just the generic last-message banner.
+            import traceback
+            tb = traceback.format_exc()
+            print("[stt] get_stt_provider failed for speaker={0!r}: {1}".format(speaker, tb), file=sys.stderr, flush=True)
+            raise RuntimeError("STT provider init failed: {0}".format(exc)) from exc
 
+        _set_job_progress(job_id, 2.0, message="Loading model")
+
+        # faster-whisper emits segments whose `end` can equal `total_duration`
+        # on the very first yield (VAD fuses everything into one chunk for
+        # short clips). That makes the raw per-segment progress jump to 100%
+        # while decoding is still underway. Cap mid-job progress at 98% so
+        # only `_set_job_complete` actually fills the bar.
         def _progress_callback(progress: float, segments_processed: int) -> None:
+            clamped = min(float(progress) if progress is not None else 0.0, 98.0)
             _set_job_progress(
                 job_id,
-                progress,
-                message="Transcribing",
+                max(2.0, clamped),
+                message="Transcribing ({0} segments)".format(segments_processed),
                 segments_processed=segments_processed,
             )
 
-        segments = provider.transcribe(
-            audio_path=audio_path,
-            language=language,
-            progress_callback=_progress_callback,
-        )
+        try:
+            segments = provider.transcribe(
+                audio_path=audio_path,
+                language=language,
+                progress_callback=_progress_callback,
+            )
+        except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            print("[stt] transcribe failed for speaker={0!r} path={1!r}: {2}".format(speaker, str(audio_path), tb), file=sys.stderr, flush=True)
+            raise RuntimeError("STT transcription failed: {0}".format(exc)) from exc
 
         result = {
             "speaker": speaker,
@@ -1903,7 +1930,7 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[
         _set_job_complete(
             job_id,
             result,
-            message="STT complete",
+            message="STT complete — {0} segments".format(len(segments)),
             segments_processed=len(segments),
             total_segments=len(segments),
         )
@@ -2042,12 +2069,44 @@ def _run_onboard_speaker_job(
 
         concept_total: Optional[int] = None
         concepts_added = 0
+        comments_imported = 0
         if csv_dest is not None and csv_dest.exists():
             _set_job_progress(job_id, 80.0, message="Merging concepts from CSV")
             parsed = _parse_concepts_csv(csv_dest)
             if parsed:
                 concepts_added = len(parsed)
                 concept_total = _merge_concepts_into_root_csv(parsed)
+            else:
+                # Not a concepts CSV — try as an Audition comments export so that
+                # onboarding can also seed lexeme-level import notes in one step.
+                try:
+                    from lexeme_notes import parse_audition_csv as _parse_comments
+                    csv_text = csv_dest.read_text(encoding="utf-8-sig")
+                    comment_rows = _parse_comments(csv_text)
+                    if comment_rows:
+                        payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
+                        notes_block = payload.get("lexeme_notes")
+                        if not isinstance(notes_block, dict):
+                            notes_block = {}
+                            payload["lexeme_notes"] = notes_block
+                        speaker_block = notes_block.get(speaker)
+                        if not isinstance(speaker_block, dict):
+                            speaker_block = {}
+                            notes_block[speaker] = speaker_block
+                        for row in comment_rows:
+                            cid = _normalize_concept_id(row.concept_id)
+                            note = (row.remainder or "").strip()
+                            if not cid or not note:
+                                continue
+                            entry = speaker_block.get(cid) or {}
+                            entry["import_note"] = note
+                            entry["import_raw"] = row.raw_name
+                            entry["updated_at"] = _utc_now_iso()
+                            speaker_block[cid] = entry
+                            comments_imported += 1
+                        _write_json_file(_enrichments_path(), payload)
+                except Exception:
+                    comments_imported = 0
 
         _set_job_progress(job_id, 90.0, message="Finalizing")
 
@@ -2058,6 +2117,7 @@ def _run_onboard_speaker_job(
             "annotationPath": str(annotation_path.relative_to(_project_root())),
             "conceptsAdded": concepts_added,
             "conceptTotal": concept_total,
+            "commentsImported": comments_imported,
         }
         _set_job_complete(job_id, result, message="Speaker onboarded")
     except Exception as exc:
@@ -2634,6 +2694,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_tags()
             return
 
+        if request_path == "/api/spectrogram":
+            self._api_get_spectrogram()
+            return
+
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
@@ -2715,6 +2779,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/tags/import":
             self._api_post_tags_import()
+            return
+
+        if request_path == "/api/lexeme-notes":
+            self._api_post_lexeme_note()
+            return
+
+        if request_path == "/api/lexeme-notes/import":
+            self._api_post_lexeme_notes_import()
             return
 
         parts = self._path_parts(request_path)
