@@ -870,6 +870,109 @@ def _annotation_collect_speaker_intervals(record: Dict[str, Any]) -> List[Dict[s
     return fallback
 
 
+def _offset_detect_payload(
+    *,
+    speaker: str,
+    offset_sec: float,
+    confidence: float,
+    n_matched: int,
+    total_anchors: int,
+    total_segments: int,
+    method: str,
+    spread_sec: float,
+    matches: List[Dict[str, Any]],
+    anchor_distribution: str,
+) -> Dict[str, Any]:
+    """Shape the response body for /api/offset/detect{,-from-pair}.
+
+    Direction is reported in plain language so MCP / chat clients can read
+    it back to the user without sign confusion. The numeric ``offsetSec``
+    is the value to pass to /api/offset/apply unchanged.
+    """
+    if abs(offset_sec) < 1e-3:
+        direction = "none"
+        direction_label = "no shift needed"
+    elif offset_sec > 0:
+        direction = "later"
+        direction_label = "{0:.3f} s later (toward the end)".format(offset_sec)
+    else:
+        direction = "earlier"
+        direction_label = "{0:.3f} s earlier (toward the start)".format(abs(offset_sec))
+
+    reliable = bool(
+        n_matched >= 3 and confidence >= 0.5 and (spread_sec <= 2.0 or n_matched == 1)
+    )
+    warnings: List[str] = []
+    if n_matched < 3 and method != "manual_pair":
+        warnings.append(
+            "Only {0} anchor match{1} were found — apply with caution.".format(
+                n_matched, "" if n_matched == 1 else "es"
+            )
+        )
+    if spread_sec > 2.0:
+        warnings.append(
+            "Match offsets disagree by ±{0:.2f}s — the detected value may be noisy.".format(spread_sec)
+        )
+    if confidence < 0.5 and method != "manual_pair":
+        warnings.append("Low confidence; consider re-running STT or using a manual single-anchor pair.")
+    if method == "bucket_vote":
+        warnings.append(
+            "Monotonic alignment failed; fell back to bucket vote which is more vulnerable to false matches."
+        )
+
+    return {
+        "speaker": speaker,
+        "offsetSec": float(offset_sec),
+        "confidence": float(confidence),
+        "nAnchors": int(n_matched),
+        "totalAnchors": int(total_anchors),
+        "totalSegments": int(total_segments),
+        "method": method,
+        "spreadSec": float(spread_sec),
+        "direction": direction,
+        "directionLabel": direction_label,
+        "anchorDistribution": anchor_distribution,
+        "reliable": reliable,
+        "warnings": warnings,
+        "matches": matches,
+    }
+
+
+def _annotation_find_concept_interval(
+    record: Dict[str, Any], concept_id: str
+) -> Optional[Dict[str, Any]]:
+    """Return the first interval whose ``concept_id`` (or text) matches.
+
+    Searches concept tier first (where the id naturally lives), then ortho
+    and ipa tiers as fallback for legacy records that stored the concept id
+    in the text field.
+    """
+    if not isinstance(record, dict) or not concept_id:
+        return None
+    needle = str(concept_id).strip()
+    if not needle:
+        return None
+    tiers = record.get("tiers")
+    if not isinstance(tiers, dict):
+        return None
+    for tier_key in ("concept", "ortho", "ipa"):
+        tier = tiers.get(tier_key)
+        if not isinstance(tier, dict):
+            continue
+        intervals = tier.get("intervals")
+        if not isinstance(intervals, list):
+            continue
+        for raw in intervals:
+            normalized = _annotation_normalize_interval(raw)
+            if normalized is None:
+                continue
+            cid = str(raw.get("concept_id") or raw.get("conceptId") or "").strip()
+            text = str(normalized.get("text") or "").strip()
+            if cid == needle or text == needle:
+                return normalized
+    return None
+
+
 def _annotation_offset_anchor_intervals(record: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return interval dicts (start/end/text) suitable as offset-detection anchors.
 
@@ -2967,6 +3070,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_offset_detect()
             return
 
+        if request_path == "/api/offset/detect-from-pair":
+            self._api_post_offset_detect_from_pair()
+            return
+
         if request_path == "/api/offset/apply":
             self._api_post_offset_apply()
             return
@@ -3296,7 +3403,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         from compare import (
             anchors_from_intervals as _anchors_from_intervals,
-            detect_offset as _detect_offset,
+            detect_offset_detailed as _detect_offset_detailed,
             load_rules_from_file as _load_rules,
             segments_from_raw as _segments_from_raw,
         )
@@ -3307,7 +3414,11 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             rules = []
 
-        anchors = _anchors_from_intervals(intervals, n_anchors)
+        distribution_raw = str(body.get("distribution") or body.get("anchorDistribution") or "quantile").strip().lower()
+        if distribution_raw not in {"quantile", "earliest"}:
+            distribution_raw = "quantile"
+
+        anchors = _anchors_from_intervals(intervals, n_anchors, distribution=distribution_raw)
         if not anchors:
             raise ApiError(
                 HTTPStatus.BAD_REQUEST,
@@ -3318,7 +3429,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ApiError(HTTPStatus.BAD_REQUEST, "STT input contained no usable segments")
 
         try:
-            offset_sec, confidence, n_matched = _detect_offset(
+            detailed = _detect_offset_detailed(
                 anchors=anchors,
                 segments=segments,
                 rules=rules,
@@ -3330,15 +3441,163 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         self._send_json(
             HTTPStatus.OK,
-            {
-                "speaker": speaker,
-                "offsetSec": float(offset_sec),
-                "confidence": float(confidence),
-                "nAnchors": int(n_matched),
-                "totalAnchors": len(anchors),
-                "totalSegments": len(segments),
-                "method": "keyword_alignment",
-            },
+            _offset_detect_payload(
+                speaker=speaker,
+                offset_sec=float(detailed.offset_sec),
+                confidence=float(detailed.confidence),
+                n_matched=int(detailed.n_matched),
+                total_anchors=len(anchors),
+                total_segments=len(segments),
+                method=detailed.method,
+                spread_sec=float(detailed.spread_sec),
+                matches=detailed.matches,
+                anchor_distribution=distribution_raw,
+            ),
+        )
+
+    def _api_post_offset_detect_from_pair(self) -> None:
+        """Compute the offset from one or more trusted (csv_time, audio_time) pairs.
+
+        Two body shapes are accepted:
+
+        * **Single pair (legacy)**:
+            ``{speaker, audioTimeSec, csvTimeSec? | conceptId?}``
+        * **Multiple pairs (preferred)**:
+            ``{speaker, pairs: [{audioTimeSec, csvTimeSec? | conceptId?}, ...]}``
+
+        With multiple pairs the offset is the median of per-pair offsets and
+        the response carries the MAD spread plus a warning if any single
+        pair disagrees with the consensus by more than ``2 s``. No STT, no
+        statistics-on-text — every input is a user-supplied ground truth.
+        """
+        body = self._expect_object(self._read_json_body(), "Request body")
+
+        try:
+            speaker = _normalize_speaker_id(body.get("speaker"))
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        raw_pairs = body.get("pairs")
+        if raw_pairs is None:
+            raw_pairs = [
+                {
+                    "audioTimeSec": body.get("audioTimeSec") or body.get("audio_time_sec"),
+                    "csvTimeSec": body.get("csvTimeSec") or body.get("csv_time_sec"),
+                    "conceptId": body.get("conceptId") or body.get("concept_id"),
+                }
+            ]
+        if not isinstance(raw_pairs, list) or not raw_pairs:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "pairs must be a non-empty array")
+
+        # Lazy-load the annotation only if at least one pair needs concept lookup.
+        annotation_cache: Optional[Dict[str, Any]] = None
+
+        def _annotation() -> Dict[str, Any]:
+            nonlocal annotation_cache
+            if annotation_cache is None:
+                annotation_cache = _normalize_annotation_record(
+                    _read_json_any_file(_annotation_read_path_for_speaker(speaker)), speaker
+                )
+            return annotation_cache
+
+        matches: List[Dict[str, Any]] = []
+        offsets: List[float] = []
+
+        for raw in raw_pairs:
+            if not isinstance(raw, dict):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair must be a JSON object")
+
+            audio_raw = raw.get("audioTimeSec")
+            if audio_raw is None:
+                audio_raw = raw.get("audio_time_sec")
+            try:
+                audio_time = float(audio_raw)
+            except (TypeError, ValueError):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair needs a numeric audioTimeSec")
+            if not math.isfinite(audio_time) or audio_time < 0:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "audioTimeSec must be finite and non-negative")
+
+            csv_raw = raw.get("csvTimeSec")
+            if csv_raw is None:
+                csv_raw = raw.get("csv_time_sec")
+            concept_raw = raw.get("conceptId") or raw.get("concept_id")
+
+            anchor_csv_time: Optional[float] = None
+            anchor_label: Optional[str] = None
+
+            if csv_raw is not None and (not isinstance(csv_raw, str) or csv_raw.strip() != ""):
+                try:
+                    anchor_csv_time = float(csv_raw)
+                except (TypeError, ValueError):
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be a number when provided")
+                if not math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be finite and non-negative")
+                anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
+            elif concept_raw is not None and str(concept_raw).strip():
+                concept_id = str(concept_raw).strip()
+                interval = _annotation_find_concept_interval(_annotation(), concept_id)
+                if interval is None:
+                    raise ApiError(
+                        HTTPStatus.BAD_REQUEST,
+                        "No annotation interval found for concept '{0}'".format(concept_id),
+                    )
+                anchor_csv_time = float(interval["start"])
+                anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
+            else:
+                raise ApiError(
+                    HTTPStatus.BAD_REQUEST,
+                    "Each pair needs either csvTimeSec or conceptId",
+                )
+
+            pair_offset = round(audio_time - float(anchor_csv_time), 3)
+            offsets.append(pair_offset)
+            matches.append(
+                {
+                    "anchor_index": -1,
+                    "anchor_text": anchor_label or "",
+                    "anchor_start": float(anchor_csv_time),
+                    "segment_index": -1,
+                    "segment_text": "(user-supplied audio time)",
+                    "segment_start": float(audio_time),
+                    "score": 1.0,
+                    "offset_sec": pair_offset,
+                }
+            )
+
+        # Median offset across pairs; MAD for the headline spread number;
+        # max-deviation drives confidence so a single outlier among many
+        # consistent pairs is visible (MAD alone hides it). Both numbers
+        # show up in the response — UI flags any pair whose offset
+        # diverges from the consensus by more than `spread_warn_sec`.
+        import statistics as _statistics
+
+        median_offset = round(_statistics.median(offsets), 3)
+        if len(offsets) >= 2:
+            deviations = [abs(o - median_offset) for o in offsets]
+            spread = round(_statistics.median(deviations), 3)
+            max_deviation = max(deviations)
+            # Linear drop: identical pairs → 0.99; one pair off by 30 s
+            # → 0.49 (clamped to 0.5). Big enough penalty to amber the
+            # Apply button via the existing _offset_detect_payload logic.
+            confidence = max(0.5, min(0.99, 0.99 - (max_deviation / 60.0)))
+        else:
+            spread = 0.0
+            confidence = 0.99
+
+        self._send_json(
+            HTTPStatus.OK,
+            _offset_detect_payload(
+                speaker=speaker,
+                offset_sec=median_offset,
+                confidence=float(confidence),
+                n_matched=len(matches),
+                total_anchors=len(matches),
+                total_segments=0,
+                method="manual_pair",
+                spread_sec=float(spread),
+                matches=matches,
+                anchor_distribution="manual",
+            ),
         )
 
     def _api_post_offset_apply(self) -> None:

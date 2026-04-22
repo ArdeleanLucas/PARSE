@@ -4,11 +4,12 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (17):
+Tools exposed (18):
   project_context_read, annotation_read, read_csv_preview,
   cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
   contact_lexeme_lookup, stt_start, stt_status,
-  detect_timestamp_offset, apply_timestamp_offset,
+  detect_timestamp_offset, detect_timestamp_offset_from_pair,
+  apply_timestamp_offset,
   import_tag_csv, prepare_tag_import,
   onboard_speaker_import, import_processed_speaker,
   parse_memory_read, parse_memory_upsert_section
@@ -708,23 +709,38 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         nAnchors: Optional[int] = None,
         bucketSec: Optional[float] = None,
         minMatchScore: Optional[float] = None,
+        anchorDistribution: Optional[str] = None,
     ) -> str:
         """Detect a constant timestamp offset between a speaker's annotation
         intervals and STT segments for the same audio. Read-only.
 
-        Use case: a working WAV is missing leading audio (e.g. an intro was
-        trimmed) so every CSV-derived lexeme timestamp is uniformly later than
-        the true position in the truncated WAV. detect_timestamp_offset reports
-        the constant shift that brings them back into alignment.
+        Uses monotonic anchor↔segment alignment (chosen matches must visit
+        anchors and segments in increasing time order) so false matches to
+        similar-sounding words elsewhere in the recording can't elect the
+        wrong direction. Anchors are sampled across the timeline by quantile
+        by default — pass ``anchorDistribution="earliest"`` for the legacy
+        first-N selection.
+
+        The return payload includes ``direction`` ("earlier" / "later"),
+        ``directionLabel`` (plain-language sentence), ``spreadSec`` (median
+        absolute deviation of the matched offsets), ``warnings`` (e.g. "low
+        confidence"), and ``matches`` (the actual anchor↔segment pairs the
+        algorithm chose). Sanity-check those before calling
+        apply_timestamp_offset; if anything looks off, fall back to
+        detect_timestamp_offset_from_pair with a manually known anchor.
 
         Args:
             speaker: Speaker ID whose annotation tiers provide the anchors
             sttJobId: Required. The jobId of a completed stt_start run for the
                 same speaker — its segments are matched against annotation
-                anchors to compute the offset.
-            nAnchors: Number of earliest annotation intervals to use (2–50, default 12)
-            bucketSec: Offset clustering bucket size in seconds (default 1.0)
+                anchors to compute the offset. (For an STT-free path, use
+                detect_timestamp_offset_from_pair instead.)
+            nAnchors: Number of annotation intervals to sample (2–50, default 12)
+            bucketSec: Bucket-vote granularity, used only as a fallback when
+                monotonic alignment can't form a chain (default 1.0)
             minMatchScore: Minimum token similarity to accept a match (0.0–1.0, default 0.56)
+            anchorDistribution: ``"quantile"`` (default — even sampling across
+                the timeline) or ``"earliest"`` (first N intervals).
         """
         args: Dict[str, Any] = {"speaker": speaker}
         if sttJobId is not None:
@@ -735,7 +751,58 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             args["bucketSec"] = bucketSec
         if minMatchScore is not None:
             args["minMatchScore"] = minMatchScore
+        if anchorDistribution is not None:
+            args["anchorDistribution"] = anchorDistribution
         result = tools.execute("detect_timestamp_offset", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def detect_timestamp_offset_from_pair(
+        speaker: str,
+        audioTimeSec: Optional[float] = None,
+        csvTimeSec: Optional[float] = None,
+        conceptId: Optional[str] = None,
+        pairs: Optional[list] = None,
+    ) -> str:
+        """Compute a timestamp offset from one or more trusted
+        (csvTime, audioTime) pairs. No STT, no statistics-on-text, no
+        false matches. Read-only.
+
+        Use this when you (or the user) already know where one or more
+        lexemes actually are in the audio — e.g. "STONE is at 02:34, WATER
+        is at 04:12". With two or more pairs the response carries the MAD
+        spread plus a warning if any pair disagrees with the consensus.
+
+        Two argument shapes are accepted:
+
+        * **Single pair** — pass ``audioTimeSec`` plus exactly one of
+          ``csvTimeSec`` or ``conceptId``. Returns a single-pair offset.
+        * **Multiple pairs** — pass ``pairs=[{...}, {...}]`` where each
+          element is a pair object. The reported offsetSec is the median
+          of per-pair offsets; spread is the median absolute deviation.
+
+        Args:
+            speaker: Speaker ID whose annotation will be shifted
+            audioTimeSec: Single-pair convenience — the true audio time
+                of the anchor lexeme. Mutually exclusive with ``pairs``.
+            csvTimeSec: Single-pair convenience — the lexeme's current
+                annotation time. Use either this or ``conceptId``.
+            conceptId: Single-pair convenience — concept id to look up in
+                the annotation; the matching interval's start becomes the
+                csv time. Use either this or ``csvTimeSec``.
+            pairs: Multi-pair list. Each item is
+                ``{audioTimeSec, csvTimeSec? | conceptId?}``.
+        """
+        args: Dict[str, Any] = {"speaker": speaker}
+        if audioTimeSec is not None:
+            args["audioTimeSec"] = audioTimeSec
+        if csvTimeSec is not None:
+            args["csvTimeSec"] = csvTimeSec
+        if conceptId is not None:
+            args["conceptId"] = conceptId
+        if pairs is not None:
+            args["pairs"] = pairs
+        result = tools.execute("detect_timestamp_offset_from_pair", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     @mcp.tool()

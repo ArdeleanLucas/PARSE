@@ -12,8 +12,8 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, applyTimestampOffset } from './api/client';
-import type { OffsetDetectResult } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset } from './api/client';
+import type { OffsetDetectResult, OffsetPair } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
@@ -76,6 +76,19 @@ const simBar = (v: number) =>
 
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
+
+/** Render a number of seconds as ``MM:SS.cs`` — the same format the
+ *  Annotate playback bar shows under the waveform. Lifted to module
+ *  scope so the offset-capture toast + manual-anchor chips can mirror
+ *  it exactly (so users can verify what was captured against the
+ *  readout they were just looking at). */
+function formatPlaybackTime(t: number): string {
+  if (!Number.isFinite(t) || t < 0) return '00:00.00';
+  const m = Math.floor(t / 60).toString().padStart(2, '0');
+  const s = Math.floor(t % 60).toString().padStart(2, '0');
+  const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
+  return `${m}:${s}.${ms}`;
+}
 
 function isInteractiveHotkeyTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
@@ -1233,9 +1246,11 @@ interface AnnotateViewProps {
   onNext: () => void;
   audioUrl: string;
   peaksUrl?: string;
+  onCaptureOffsetAnchor?: () => void;
+  captureToast?: string | null;
 }
 
-const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext, audioUrl, peaksUrl }) => {
+const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext, audioUrl, peaksUrl, onCaptureOffsetAnchor, captureToast }) => {
   const record = useAnnotationStore(s => s.records[speaker] ?? null);
   const setInterval = useAnnotationStore(s => s.setInterval);
   const moveIntervalAcrossTiers = useAnnotationStore(s => s.moveIntervalAcrossTiers);
@@ -1353,12 +1368,9 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
-  const fmt = (t: number) => {
-    const m = Math.floor(t / 60).toString().padStart(2, '0');
-    const s = Math.floor(t % 60).toString().padStart(2, '0');
-    const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
-    return `${m}:${s}.${ms}`;
-  };
+  // fmt now lives at module scope (formatPlaybackTime) — kept as a local
+  // alias so the inline JSX below stays diff-friendly with prior versions.
+  const fmt = formatPlaybackTime;
 
   return (
     <main className="flex-1 overflow-y-auto bg-slate-50">
@@ -1675,6 +1687,27 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {onCaptureOffsetAnchor && (
+              <div className="relative">
+                <button
+                  onClick={onCaptureOffsetAnchor}
+                  data-testid="annotate-capture-anchor"
+                  title="Anchor offset detection to the current lexeme + playback time"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                >
+                  <Anchor className="h-3 w-3"/> Anchor offset here
+                </button>
+                {captureToast && (
+                  <div
+                    role="status"
+                    data-testid="annotate-capture-toast"
+                    className="absolute bottom-full right-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                  >
+                    {captureToast}
+                  </div>
+                )}
+              </div>
+            )}
             <select defaultValue="1" onChange={e => setRate(Number(e.target.value))} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
               <option value="0.5">0.5x</option>
               <option value="0.75">0.75x</option>
@@ -1915,10 +1948,135 @@ export function ParseUI() {
     | { phase: 'idle' }
     | { phase: 'detecting' }
     | { phase: 'detected'; result: OffsetDetectResult }
+    | { phase: 'manual' }
     | { phase: 'applying'; result: OffsetDetectResult }
     | { phase: 'applied'; result: OffsetDetectResult; shifted: number }
     | { phase: 'error'; message: string }
   >({ phase: 'idle' });
+
+  // Manual-pair anchors live at parent scope so the playback-bar capture
+  // button (Annotate mode) and the modal share the same list. Each anchor
+  // captures the lexeme's current annotation time *at the moment of
+  // capture* — that's the "csv time" — plus the audio cursor position
+  // (the "audio time"). Per-pair offset = audioTimeSec − csvTimeSec.
+  type ManualAnchor = {
+    conceptKey: string;
+    conceptName: string;
+    csvTimeSec: number;
+    audioTimeSec: number;
+    capturedAt: number;
+  };
+  const [manualAnchors, setManualAnchors] = useState<ManualAnchor[]>([]);
+  const [manualBusy, setManualBusy] = useState(false);
+
+  // Briefly-flashed inline confirmation when the user captures an anchor
+  // straight from the playback bar. Vanishes after a couple of seconds so
+  // the chrome stays calm.
+  const [captureToast, setCaptureToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!captureToast) return;
+    const handle = window.setTimeout(() => setCaptureToast(null), 2200);
+    return () => window.clearTimeout(handle);
+  }, [captureToast]);
+
+  // Look up the current annotation start time for a concept on the
+  // active speaker (read directly from the store so we don't hold a
+  // hook subscription at parent scope).
+  const lookupCsvTimeForConcept = (speaker: string, concept: Concept): number | null => {
+    const records = useAnnotationStore.getState().records;
+    const record = records[speaker];
+    if (!record) return null;
+    const intervals = record.tiers?.concept?.intervals ?? [];
+    const interval = intervals.find((iv) => conceptMatchesIntervalText(concept, iv.text));
+    return interval ? interval.start : null;
+  };
+
+  // Capture an anchor from the currently-selected concept + the current
+  // playback time. Wired to BOTH the in-Annotate "Anchor offset here"
+  // button and the modal's "Capture from current selection" button.
+  const captureCurrentAnchor = (): { ok: boolean; message: string } => {
+    if (!activeActionSpeaker) {
+      return { ok: false, message: 'Select a speaker first.' };
+    }
+    const conc = concepts.find((c) => c.id === conceptId) ?? null;
+    if (!conc) {
+      return { ok: false, message: 'Select a lexeme in the sidebar first.' };
+    }
+    const csv = lookupCsvTimeForConcept(activeActionSpeaker, conc);
+    if (csv === null) {
+      return {
+        ok: false,
+        message: `No annotation interval for "${conc.name}" — open the lexeme in Annotate first.`,
+      };
+    }
+    const audio = usePlaybackStore.getState().currentTime;
+    if (audio <= 0) {
+      return {
+        ok: false,
+        message: 'Scrub the waveform to where the lexeme actually is, then capture again.',
+      };
+    }
+    setManualAnchors((prev) => {
+      // Replace any existing anchor for the same concept — capturing
+      // again on the same lexeme is a "I changed my mind, this is the
+      // right audio position" gesture, not a duplicate.
+      const filtered = prev.filter((a) => a.conceptKey !== conc.key);
+      return [
+        ...filtered,
+        {
+          conceptKey: conc.key,
+          conceptName: conc.name,
+          csvTimeSec: csv,
+          audioTimeSec: audio,
+          capturedAt: Date.now(),
+        },
+      ];
+    });
+    const offset = audio - csv;
+    const sign = offset >= 0 ? '+' : '';
+    return {
+      ok: true,
+      message: `Anchored ${conc.name} @ ${formatPlaybackTime(audio)} → ${sign}${offset.toFixed(2)}s offset.`,
+    };
+  };
+
+  const captureAnchorFromBar = () => {
+    const result = captureCurrentAnchor();
+    setCaptureToast(result.message);
+  };
+
+  const removeManualAnchor = (conceptKey: string) => {
+    setManualAnchors((prev) => prev.filter((a) => a.conceptKey !== conceptKey));
+  };
+
+  // Live consensus offset across captured anchors — median of per-pair
+  // offsets, plus median absolute deviation as a disagreement metric.
+  // Computed client-side so the user gets zero-latency feedback as they
+  // add or remove anchors. The backend re-derives the same number when
+  // the user clicks Apply, so this is purely UI.
+  const manualConsensus = useMemo(() => {
+    if (!manualAnchors.length) {
+      return null;
+    }
+    const offsets = manualAnchors.map((a) => a.audioTimeSec - a.csvTimeSec);
+    const sorted = [...offsets].sort((a, b) => a - b);
+    const median =
+      sorted.length % 2
+        ? sorted[(sorted.length - 1) / 2]
+        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+    const deviations = offsets.map((o) => Math.abs(o - median)).sort((a, b) => a - b);
+    const mad =
+      deviations.length === 1
+        ? 0
+        : deviations.length % 2
+        ? deviations[(deviations.length - 1) / 2]
+        : (deviations[deviations.length / 2 - 1] + deviations[deviations.length / 2]) / 2;
+    return {
+      median,
+      mad,
+      offsets,
+    };
+  }, [manualAnchors]);
 
   const detectOffsetForSpeaker = async () => {
     setActionsMenuOpen(false);
@@ -1951,6 +2109,36 @@ export function ParseUI() {
         phase: 'error',
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  };
+
+  const submitManualOffset = async () => {
+    if (!activeActionSpeaker) {
+      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
+      return;
+    }
+    if (!manualAnchors.length) {
+      setOffsetState({
+        phase: 'error',
+        message: 'Capture at least one anchor before computing the offset.',
+      });
+      return;
+    }
+    setManualBusy(true);
+    try {
+      const pairs: OffsetPair[] = manualAnchors.map((a) => ({
+        audioTimeSec: a.audioTimeSec,
+        csvTimeSec: a.csvTimeSec,
+      }));
+      const result = await detectTimestampOffsetFromPairs(activeActionSpeaker, pairs);
+      setOffsetState({ phase: 'detected', result });
+    } catch (err) {
+      setOffsetState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setManualBusy(false);
     }
   };
   const [exporting, setExporting] = useState(false);
@@ -2660,6 +2848,8 @@ export function ParseUI() {
               onNext={goNext}
               audioUrl={deriveAudioUrl(annotationRecords[selectedSpeakers[0] ?? ''])}
               peaksUrl={selectedSpeakers[0] ? `/peaks/${selectedSpeakers[0]}.json` : undefined}
+              onCaptureOffsetAnchor={captureAnchorFromBar}
+              captureToast={captureToast}
             />
             <AIChat
               height={aiHeight}
@@ -3281,36 +3471,241 @@ export function ParseUI() {
               <Loader2 className="h-4 w-4 animate-spin"/> Detecting offset…
             </div>
           )}
+          {offsetState.phase === 'manual' && (() => {
+            const consensus = manualConsensus;
+            const directionWord =
+              !consensus
+                ? null
+                : consensus.median > 0.001
+                ? 'later (toward the end)'
+                : consensus.median < -0.001
+                ? 'earlier (toward the start)'
+                : 'no shift';
+            const arrow =
+              !consensus
+                ? null
+                : consensus.median > 0.001
+                ? '→'
+                : consensus.median < -0.001
+                ? '←'
+                : '·';
+            const noisy = consensus !== null && consensus.mad > 2.0;
+            return (
+              <div className="space-y-3" data-testid="offset-manual">
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  <p className="leading-snug">
+                    Capture one trusted lexeme at a time. In Annotate, click a lexeme,
+                    scrub to where you actually hear it, then press
+                    <span className="mx-1 inline-flex items-center gap-1 rounded bg-indigo-100 px-1.5 py-0.5 font-semibold text-indigo-700">
+                      <Anchor className="h-3 w-3"/>Anchor offset here
+                    </span>
+                    on the playback bar. Captured pairs accumulate below — adding
+                    more refines the offset.
+                  </p>
+                </div>
+
+                {manualAnchors.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 p-4 text-xs text-slate-500">
+                    <Anchor className="h-5 w-5 text-slate-300"/>
+                    No anchors captured yet.
+                    <span className="text-[11px] text-slate-400">
+                      Switch to Annotate, select a lexeme, scrub the waveform, then click
+                      <em> Anchor offset here</em>.
+                    </span>
+                  </div>
+                ) : (
+                  <ul className="space-y-1.5" data-testid="offset-manual-anchor-list">
+                    {manualAnchors.map((a) => {
+                      const pairOffset = a.audioTimeSec - a.csvTimeSec;
+                      const disagrees =
+                        consensus !== null && Math.abs(pairOffset - consensus.median) > 1.5;
+                      const sign = pairOffset >= 0 ? '+' : '';
+                      return (
+                        <li
+                          key={a.conceptKey}
+                          className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${disagrees ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}
+                          data-testid="offset-manual-anchor"
+                        >
+                          <div className="flex-1 truncate">
+                            <span className="font-semibold text-slate-800">{a.conceptName}</span>
+                            <span className="ml-1 font-mono text-slate-400">{a.conceptKey}</span>
+                          </div>
+                          <div className="font-mono text-[11px] text-slate-500 tabular-nums" title={`csv ${a.csvTimeSec.toFixed(3)}s → audio ${a.audioTimeSec.toFixed(3)}s`}>
+                            {formatPlaybackTime(a.csvTimeSec)} <span className="text-slate-300">→</span> {formatPlaybackTime(a.audioTimeSec)}
+                          </div>
+                          <div className={`w-16 text-right font-mono text-[11px] tabular-nums ${disagrees ? 'text-rose-600' : 'text-slate-700'}`}>
+                            {sign}{pairOffset.toFixed(2)}s
+                          </div>
+                          <button
+                            onClick={() => removeManualAnchor(a.conceptKey)}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                            title="Remove this anchor"
+                            data-testid={`offset-manual-anchor-remove-${a.conceptKey}`}
+                          >
+                            <X className="h-3 w-3"/>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {consensus !== null && (
+                  <div className={`rounded-md border p-3 text-xs ${noisy ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                    <div className="font-mono text-base text-slate-900" data-testid="offset-manual-consensus">
+                      {consensus.median >= 0 ? '+' : ''}{consensus.median.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
+                    </div>
+                    <div className="mt-1 text-slate-700">
+                      Apply will move every interval <strong>{Math.abs(consensus.median).toFixed(3)} s {directionWord}</strong>.
+                    </div>
+                    <div className="mt-1 text-slate-500">
+                      {manualAnchors.length} anchor{manualAnchors.length === 1 ? '' : 's'}
+                      {consensus.mad > 0 && (
+                        <> · spread ±{consensus.mad.toFixed(2)}s</>
+                      )}
+                      {noisy && (
+                        <> — anchors disagree, review the rose-highlighted ones above</>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      const r = captureCurrentAnchor();
+                      if (!r.ok) {
+                        setOffsetState({ phase: 'error', message: r.message });
+                      }
+                    }}
+                    title="Use the lexeme currently selected in the sidebar plus the current playback time"
+                    data-testid="offset-manual-capture"
+                  >
+                    <Plus className="h-3 w-3"/> Capture from current selection
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => setOffsetState({ phase: 'idle' })}
+                    >
+                      Close
+                    </button>
+                    <button
+                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                      onClick={() => { void submitManualOffset(); }}
+                      disabled={!manualAnchors.length || manualBusy}
+                      data-testid="offset-manual-submit"
+                    >
+                      {manualBusy ? 'Computing…' : 'Review & apply →'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {offsetState.phase === 'detected' && (
             <>
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
-                <div className="font-mono text-base text-slate-900" data-testid="offset-value">
-                  {offsetState.result.offsetSec >= 0 ? '+' : ''}{offsetState.result.offsetSec.toFixed(3)} s
-                </div>
-                <div className="mt-1 text-slate-600">
-                  Confidence {(offsetState.result.confidence * 100).toFixed(0)}% from {offsetState.result.nAnchors}/{offsetState.result.totalAnchors} anchors
-                  {' · '}{offsetState.result.totalSegments} STT segments
-                </div>
-              </div>
-              <p className="text-xs text-slate-600">
-                Apply will add this offset to every annotation interval (start &amp; end). Negative values pull
-                timestamps earlier — use this when the WAV is missing leading audio.
-              </p>
-              <div className="flex justify-end gap-2">
-                <button
-                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={() => setOffsetState({ phase: 'idle' })}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                  onClick={() => { void applyDetectedOffset(); }}
-                  data-testid="offset-apply"
-                >
-                  Apply offset
-                </button>
-              </div>
+              {(() => {
+                const r = offsetState.result;
+                const direction = r.direction ?? (r.offsetSec >= 0 ? 'later' : 'earlier');
+                const sign = r.offsetSec >= 0 ? '+' : '';
+                const lowConf = (r.confidence ?? 0) < 0.5;
+                const directionWord =
+                  direction === 'later' ? 'later (toward the end)' :
+                  direction === 'earlier' ? 'earlier (toward the start)' :
+                  'no-op (no shift)';
+                const arrow = direction === 'later' ? '→' : direction === 'earlier' ? '←' : '·';
+                const isManual = r.method === 'manual_pair';
+                return (
+                  <>
+                    <div className={`rounded-md border p-3 text-xs ${lowConf ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="font-mono text-base text-slate-900" data-testid="offset-value">
+                        {sign}{r.offsetSec.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
+                      </div>
+                      <div className="mt-1 text-slate-700" data-testid="offset-direction-label">
+                        Apply will move every interval <strong>{Math.abs(r.offsetSec).toFixed(3)} s {directionWord}</strong>.
+                      </div>
+                      <div className="mt-2 text-slate-500">
+                        {isManual ? (
+                          <>From single trusted pair · confidence {Math.round((r.confidence ?? 0) * 100)}%</>
+                        ) : (
+                          <>
+                            Confidence {Math.round((r.confidence ?? 0) * 100)}% · {r.nAnchors}/{r.totalAnchors} anchors matched · {r.totalSegments} STT segments
+                            {typeof r.spreadSec === 'number' && r.spreadSec > 0 && (
+                              <> · spread ±{r.spreadSec.toFixed(2)}s</>
+                            )}
+                            {r.method && <> · {r.method.replace('_', ' ')}</>}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {(r.warnings?.length ?? 0) > 0 && (
+                      <ul className="space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                        {r.warnings!.map((w, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0"/>{w}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {(r.matches?.length ?? 0) > 0 && (
+                      <details className="text-[11px] text-slate-600">
+                        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
+                          Show matched anchor pairs ({r.matches!.length})
+                        </summary>
+                        <table className="mt-1 w-full table-fixed border-separate border-spacing-y-0.5 font-mono">
+                          <thead className="text-[10px] text-slate-400">
+                            <tr>
+                              <th className="text-left">Anchor text</th>
+                              <th className="text-right">CSV t</th>
+                              <th className="text-right">Audio t</th>
+                              <th className="text-right">Δ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.matches!.slice(0, 8).map((m, i) => (
+                              <tr key={i} className="text-slate-700">
+                                <td className="truncate">{m.anchor_text}</td>
+                                <td className="text-right">{m.anchor_start?.toFixed(2) ?? '—'}</td>
+                                <td className="text-right">{m.segment_start?.toFixed(2) ?? '—'}</td>
+                                <td className={`text-right ${Math.abs(m.offset_sec - r.offsetSec) > 1.5 ? 'text-rose-600' : ''}`}>
+                                  {m.offset_sec >= 0 ? '+' : ''}{m.offset_sec.toFixed(2)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </details>
+                    )}
+                    <div className="flex justify-between gap-2">
+                      <button
+                        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                        onClick={() => setOffsetState({ phase: 'manual' })}
+                        data-testid="offset-use-known-anchor"
+                      >
+                        Use a known anchor instead
+                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                          onClick={() => setOffsetState({ phase: 'idle' })}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 ${lowConf ? 'bg-amber-600' : 'bg-indigo-600'}`}
+                          onClick={() => { void applyDetectedOffset(); }}
+                          data-testid="offset-apply"
+                          title={lowConf ? 'Low confidence — review the matches before applying' : undefined}
+                        >
+                          {lowConf ? 'Apply anyway' : 'Apply offset'}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </>
           )}
           {offsetState.phase === 'applying' && (
@@ -3339,7 +3734,13 @@ export function ParseUI() {
                 <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0"/>
                 <span data-testid="offset-error">{offsetState.message}</span>
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOffsetState({ phase: 'manual' })}
+                >
+                  Try a known anchor
+                </button>
                 <button
                   className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                   onClick={() => setOffsetState({ phase: 'idle' })}
