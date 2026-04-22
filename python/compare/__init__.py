@@ -2,7 +2,11 @@
 
 from .cognate_compute import compute_similarity_scores
 from .cross_speaker_match import compute_matches
-from .offset_detect import detect_offset
+from .offset_detect import (
+    anchors_from_intervals,
+    detect_offset,
+    segments_from_raw,
+)
 from .phonetic_rules import (
     PhoneticRule,
     apply_rules,
@@ -14,7 +18,9 @@ from .phonetic_rules import (
 __all__ = [
     "compute_similarity_scores",
     "compute_matches",
+    "anchors_from_intervals",
     "detect_offset",
+    "segments_from_raw",
     "PhoneticRule",
     "apply_rules",
     "are_phonetically_equivalent",

@@ -4,10 +4,11 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (15):
+Tools exposed (17):
   project_context_read, annotation_read, read_csv_preview,
   cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
   contact_lexeme_lookup, stt_start, stt_status,
+  detect_timestamp_offset, apply_timestamp_offset,
   import_tag_csv, prepare_tag_import,
   onboard_speaker_import, import_processed_speaker,
   parse_memory_read, parse_memory_upsert_section
@@ -698,6 +699,69 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         if maxSegments is not None:
             args["maxSegments"] = maxSegments
         result = tools.execute("stt_status", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def detect_timestamp_offset(
+        speaker: str,
+        sttJobId: Optional[str] = None,
+        nAnchors: Optional[int] = None,
+        bucketSec: Optional[float] = None,
+        minMatchScore: Optional[float] = None,
+    ) -> str:
+        """Detect a constant timestamp offset between a speaker's annotation
+        intervals and STT segments for the same audio. Read-only.
+
+        Use case: a working WAV is missing leading audio (e.g. an intro was
+        trimmed) so every CSV-derived lexeme timestamp is uniformly later than
+        the true position in the truncated WAV. detect_timestamp_offset reports
+        the constant shift that brings them back into alignment.
+
+        Args:
+            speaker: Speaker ID whose annotation tiers provide the anchors
+            sttJobId: Required. The jobId of a completed stt_start run for the
+                same speaker — its segments are matched against annotation
+                anchors to compute the offset.
+            nAnchors: Number of earliest annotation intervals to use (2–50, default 12)
+            bucketSec: Offset clustering bucket size in seconds (default 1.0)
+            minMatchScore: Minimum token similarity to accept a match (0.0–1.0, default 0.56)
+        """
+        args: Dict[str, Any] = {"speaker": speaker}
+        if sttJobId is not None:
+            args["sttJobId"] = sttJobId
+        if nAnchors is not None:
+            args["nAnchors"] = nAnchors
+        if bucketSec is not None:
+            args["bucketSec"] = bucketSec
+        if minMatchScore is not None:
+            args["minMatchScore"] = minMatchScore
+        result = tools.execute("detect_timestamp_offset", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def apply_timestamp_offset(
+        speaker: str,
+        offsetSec: float,
+        dryRun: bool,
+    ) -> str:
+        """Shift every annotation interval (start and end) by ``offsetSec`` for
+        the given speaker. Mutates annotations/<speaker>.parse.json.
+
+        Use dryRun=true first to preview the shift (returns a sample of
+        before/after intervals), then dryRun=false to write the change.
+
+        Args:
+            speaker: Speaker ID whose annotation will be shifted
+            offsetSec: Seconds to add to every interval start and end (negative
+                values pull timestamps earlier; clamped at 0).
+            dryRun: Required. If true, return preview only. If false, write.
+        """
+        args: Dict[str, Any] = {
+            "speaker": speaker,
+            "offsetSec": offsetSec,
+            "dryRun": dryRun,
+        }
+        result = tools.execute("apply_timestamp_offset", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     @mcp.tool()
