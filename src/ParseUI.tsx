@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, applyTimestampOffset } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPair, applyTimestampOffset } from './api/client';
 import type { OffsetDetectResult } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
@@ -1863,10 +1863,17 @@ export function ParseUI() {
     | { phase: 'idle' }
     | { phase: 'detecting' }
     | { phase: 'detected'; result: OffsetDetectResult }
+    | { phase: 'manual' }
     | { phase: 'applying'; result: OffsetDetectResult }
     | { phase: 'applied'; result: OffsetDetectResult; shifted: number }
     | { phase: 'error'; message: string }
   >({ phase: 'idle' });
+
+  // Manual-pair form state. Lives at the parent level so the user can flip
+  // between automatic detect and manual-pair without losing what they typed.
+  const [manualConceptId, setManualConceptId] = useState('');
+  const [manualCsvTime, setManualCsvTime] = useState('');
+  const [manualAudioTime, setManualAudioTime] = useState('');
 
   const detectOffsetForSpeaker = async () => {
     setActionsMenuOpen(false);
@@ -1894,6 +1901,41 @@ export function ParseUI() {
       const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
       await reloadSpeakerAnnotation(result.speaker);
       setOffsetState({ phase: 'applied', result, shifted: apply.shiftedIntervals });
+    } catch (err) {
+      setOffsetState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const submitManualOffset = async () => {
+    if (!activeActionSpeaker) {
+      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
+      return;
+    }
+    const audioTime = Number(manualAudioTime);
+    if (!Number.isFinite(audioTime) || audioTime < 0) {
+      setOffsetState({ phase: 'error', message: 'Enter a valid audio time in seconds.' });
+      return;
+    }
+    const csvTime = manualCsvTime.trim() === '' ? undefined : Number(manualCsvTime);
+    if (csvTime !== undefined && (!Number.isFinite(csvTime) || csvTime < 0)) {
+      setOffsetState({ phase: 'error', message: 'CSV time must be a non-negative number when provided.' });
+      return;
+    }
+    const conceptId = manualConceptId.trim() || undefined;
+    if (csvTime === undefined && !conceptId) {
+      setOffsetState({ phase: 'error', message: 'Provide either the CSV time OR a concept id.' });
+      return;
+    }
+    setOffsetState({ phase: 'detecting' });
+    try {
+      const result = await detectTimestampOffsetFromPair(activeActionSpeaker, audioTime, {
+        csvTimeSec: csvTime,
+        conceptId,
+      });
+      setOffsetState({ phase: 'detected', result });
     } catch (err) {
       setOffsetState({
         phase: 'error',
@@ -3183,21 +3225,47 @@ export function ParseUI() {
               <Loader2 className="h-4 w-4 animate-spin"/> Detecting offset…
             </div>
           )}
-          {offsetState.phase === 'detected' && (
-            <>
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
-                <div className="font-mono text-base text-slate-900" data-testid="offset-value">
-                  {offsetState.result.offsetSec >= 0 ? '+' : ''}{offsetState.result.offsetSec.toFixed(3)} s
-                </div>
-                <div className="mt-1 text-slate-600">
-                  Confidence {(offsetState.result.confidence * 100).toFixed(0)}% from {offsetState.result.nAnchors}/{offsetState.result.totalAnchors} anchors
-                  {' · '}{offsetState.result.totalSegments} STT segments
-                </div>
-              </div>
+          {offsetState.phase === 'manual' && (
+            <div className="space-y-3">
               <p className="text-xs text-slate-600">
-                Apply will add this offset to every annotation interval (start &amp; end). Negative values pull
-                timestamps earlier — use this when the WAV is missing leading audio.
+                Enter one trusted (current annotation time → real audio time) pair.
+                The offset is computed exactly — no STT, no statistics. Provide the
+                concept id <em>or</em> the CSV time, plus the audio time.
               </p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <label className="flex flex-col gap-1">
+                  <span className="text-slate-500">Concept id (optional)</span>
+                  <input
+                    value={manualConceptId}
+                    onChange={(e) => setManualConceptId(e.target.value)}
+                    placeholder="e.g. STONE"
+                    className="rounded-md border border-slate-200 px-2 py-1 font-mono"
+                    data-testid="offset-manual-concept"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-slate-500">CSV time (s, optional)</span>
+                  <input
+                    value={manualCsvTime}
+                    onChange={(e) => setManualCsvTime(e.target.value)}
+                    placeholder="e.g. 154.0"
+                    inputMode="decimal"
+                    className="rounded-md border border-slate-200 px-2 py-1 font-mono"
+                    data-testid="offset-manual-csvtime"
+                  />
+                </label>
+                <label className="col-span-2 flex flex-col gap-1">
+                  <span className="text-slate-500">Real audio time (s) — required</span>
+                  <input
+                    value={manualAudioTime}
+                    onChange={(e) => setManualAudioTime(e.target.value)}
+                    placeholder="e.g. 220.5"
+                    inputMode="decimal"
+                    className="rounded-md border border-slate-200 px-2 py-1 font-mono"
+                    data-testid="offset-manual-audiotime"
+                  />
+                </label>
+              </div>
               <div className="flex justify-end gap-2">
                 <button
                   className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
@@ -3207,12 +3275,116 @@ export function ParseUI() {
                 </button>
                 <button
                   className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                  onClick={() => { void applyDetectedOffset(); }}
-                  data-testid="offset-apply"
+                  onClick={() => { void submitManualOffset(); }}
+                  data-testid="offset-manual-submit"
                 >
-                  Apply offset
+                  Compute offset
                 </button>
               </div>
+            </div>
+          )}
+          {offsetState.phase === 'detected' && (
+            <>
+              {(() => {
+                const r = offsetState.result;
+                const direction = r.direction ?? (r.offsetSec >= 0 ? 'later' : 'earlier');
+                const sign = r.offsetSec >= 0 ? '+' : '';
+                const lowConf = (r.confidence ?? 0) < 0.5;
+                const directionWord =
+                  direction === 'later' ? 'later (toward the end)' :
+                  direction === 'earlier' ? 'earlier (toward the start)' :
+                  'no-op (no shift)';
+                const arrow = direction === 'later' ? '→' : direction === 'earlier' ? '←' : '·';
+                const isManual = r.method === 'manual_pair';
+                return (
+                  <>
+                    <div className={`rounded-md border p-3 text-xs ${lowConf ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="font-mono text-base text-slate-900" data-testid="offset-value">
+                        {sign}{r.offsetSec.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
+                      </div>
+                      <div className="mt-1 text-slate-700" data-testid="offset-direction-label">
+                        Apply will move every interval <strong>{Math.abs(r.offsetSec).toFixed(3)} s {directionWord}</strong>.
+                      </div>
+                      <div className="mt-2 text-slate-500">
+                        {isManual ? (
+                          <>From single trusted pair · confidence {Math.round((r.confidence ?? 0) * 100)}%</>
+                        ) : (
+                          <>
+                            Confidence {Math.round((r.confidence ?? 0) * 100)}% · {r.nAnchors}/{r.totalAnchors} anchors matched · {r.totalSegments} STT segments
+                            {typeof r.spreadSec === 'number' && r.spreadSec > 0 && (
+                              <> · spread ±{r.spreadSec.toFixed(2)}s</>
+                            )}
+                            {r.method && <> · {r.method.replace('_', ' ')}</>}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {(r.warnings?.length ?? 0) > 0 && (
+                      <ul className="space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                        {r.warnings!.map((w, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0"/>{w}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {(r.matches?.length ?? 0) > 0 && (
+                      <details className="text-[11px] text-slate-600">
+                        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
+                          Show matched anchor pairs ({r.matches!.length})
+                        </summary>
+                        <table className="mt-1 w-full table-fixed border-separate border-spacing-y-0.5 font-mono">
+                          <thead className="text-[10px] text-slate-400">
+                            <tr>
+                              <th className="text-left">Anchor text</th>
+                              <th className="text-right">CSV t</th>
+                              <th className="text-right">Audio t</th>
+                              <th className="text-right">Δ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.matches!.slice(0, 8).map((m, i) => (
+                              <tr key={i} className="text-slate-700">
+                                <td className="truncate">{m.anchor_text}</td>
+                                <td className="text-right">{m.anchor_start?.toFixed(2) ?? '—'}</td>
+                                <td className="text-right">{m.segment_start?.toFixed(2) ?? '—'}</td>
+                                <td className={`text-right ${Math.abs(m.offset_sec - r.offsetSec) > 1.5 ? 'text-rose-600' : ''}`}>
+                                  {m.offset_sec >= 0 ? '+' : ''}{m.offset_sec.toFixed(2)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </details>
+                    )}
+                    <div className="flex justify-between gap-2">
+                      <button
+                        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                        onClick={() => setOffsetState({ phase: 'manual' })}
+                        data-testid="offset-use-known-anchor"
+                      >
+                        Use a known anchor instead
+                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                          onClick={() => setOffsetState({ phase: 'idle' })}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 ${lowConf ? 'bg-amber-600' : 'bg-indigo-600'}`}
+                          onClick={() => { void applyDetectedOffset(); }}
+                          data-testid="offset-apply"
+                          title={lowConf ? 'Low confidence — review the matches before applying' : undefined}
+                        >
+                          {lowConf ? 'Apply anyway' : 'Apply offset'}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </>
           )}
           {offsetState.phase === 'applying' && (
@@ -3241,7 +3413,13 @@ export function ParseUI() {
                 <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0"/>
                 <span data-testid="offset-error">{offsetState.message}</span>
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOffsetState({ phase: 'manual' })}
+                >
+                  Try a known anchor
+                </button>
                 <button
                   className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                   onClick={() => setOffsetState({ phase: 'idle' })}

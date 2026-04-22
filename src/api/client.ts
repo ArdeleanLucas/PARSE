@@ -261,6 +261,19 @@ export async function pollSTT(jobId: string): Promise<STTStatus> {
 }
 
 // Timestamp offset — detect a constant CSV/STT misalignment and (optionally) apply it.
+export interface OffsetMatch {
+  anchor_index: number;
+  anchor_text: string;
+  anchor_start: number | null;
+  segment_index: number;
+  segment_text: string;
+  segment_start: number | null;
+  score: number;
+  offset_sec: number;
+}
+
+export type OffsetDirection = "earlier" | "later" | "none";
+
 export interface OffsetDetectResult {
   speaker: string;
   offsetSec: number;
@@ -269,6 +282,16 @@ export interface OffsetDetectResult {
   totalAnchors: number;
   totalSegments: number;
   method: string;
+  // Fields below were added when the detector switched to monotonic
+  // alignment + manual-pair detection. Optional for back-compat with
+  // any cached payloads from earlier server builds.
+  spreadSec?: number;
+  direction?: OffsetDirection;
+  directionLabel?: string;
+  anchorDistribution?: string;
+  reliable?: boolean;
+  warnings?: string[];
+  matches?: OffsetMatch[];
 }
 
 export interface OffsetApplyResult {
@@ -279,7 +302,12 @@ export interface OffsetApplyResult {
 
 export async function detectTimestampOffset(
   speaker: string,
-  options?: { sttJobId?: string; sttSegments?: unknown[] }
+  options?: {
+    sttJobId?: string;
+    sttSegments?: unknown[];
+    anchorDistribution?: "quantile" | "earliest";
+    nAnchors?: number;
+  }
 ): Promise<OffsetDetectResult> {
   return apiFetch<OffsetDetectResult>("/api/offset/detect", {
     method: "POST",
@@ -287,6 +315,24 @@ export async function detectTimestampOffset(
       speaker,
       sttJobId: options?.sttJobId,
       sttSegments: options?.sttSegments,
+      anchorDistribution: options?.anchorDistribution,
+      nAnchors: options?.nAnchors,
+    }),
+  });
+}
+
+export async function detectTimestampOffsetFromPair(
+  speaker: string,
+  audioTimeSec: number,
+  options: { csvTimeSec?: number; conceptId?: string }
+): Promise<OffsetDetectResult> {
+  return apiFetch<OffsetDetectResult>("/api/offset/detect-from-pair", {
+    method: "POST",
+    body: JSON.stringify({
+      speaker,
+      audioTimeSec,
+      csvTimeSec: options.csvTimeSec,
+      conceptId: options.conceptId,
     }),
   });
 }

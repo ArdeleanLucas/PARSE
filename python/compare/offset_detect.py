@@ -388,12 +388,23 @@ def segments_from_raw(raw: Any) -> List[Segment]:
 def anchors_from_intervals(
     intervals: Iterable[Mapping[str, Any]],
     n_anchors: int,
+    *,
+    distribution: str = "quantile",
 ) -> List[Anchor]:
     """Build Anchor list from annotation tier intervals (start/end/text dicts).
 
     Used when timestamp anchors live in an annotation record rather than a
     standalone CSV — same role as ``load_anchors_from_csv`` but for in-memory
     annotation tiers.
+
+    Args:
+        intervals: source records with start/text fields
+        n_anchors: maximum anchors to return (≥ 2 recommended)
+        distribution: how to pick the subset when more intervals than n_anchors
+            are available. ``"quantile"`` (default) samples evenly across the
+            timeline so the detector isn't biased toward whichever stretch was
+            most-mis-aligned (commonly the truncated head). ``"earliest"``
+            preserves the legacy "first N" behaviour.
     """
     anchors: List[Anchor] = []
     for index, raw in enumerate(intervals or []):
@@ -428,7 +439,37 @@ def anchors_from_intervals(
         return []
 
     anchors.sort(key=lambda item: item.start_sec)
-    return anchors[: max(1, int(n_anchors))]
+    cap = max(1, int(n_anchors))
+    if len(anchors) <= cap:
+        return anchors
+
+    mode = (distribution or "quantile").strip().lower()
+    if mode == "earliest":
+        return anchors[:cap]
+
+    # Quantile distribution — keep the first and last (boundary anchors are the
+    # ones humans care about for "did the offset land?") and pull the rest from
+    # evenly-spaced positions across the middle. Picking by quantile rather than
+    # taking the first N stops the detector from over-weighting the truncated /
+    # noisy intro region that triggered the offset problem in the first place.
+    indices: List[int] = [0, len(anchors) - 1]
+    if cap > 2:
+        step = (len(anchors) - 1) / float(cap - 1)
+        indices = [int(round(step * i)) for i in range(cap)]
+    # Deduplicate while preserving order; clamp to valid range.
+    seen: Dict[int, bool] = {}
+    ordered_unique: List[int] = []
+    for idx in indices:
+        if idx < 0:
+            idx = 0
+        if idx >= len(anchors):
+            idx = len(anchors) - 1
+        if idx not in seen:
+            seen[idx] = True
+            ordered_unique.append(idx)
+
+    sampled = [anchors[i] for i in sorted(ordered_unique)]
+    return sampled
 
 
 def load_stt_segments(stt_path: Path) -> List[Segment]:
@@ -537,6 +578,110 @@ def select_consistent_matches(
     return [fallback_per_anchor[key] for key in sorted(fallback_per_anchor.keys())]
 
 
+def select_monotonic_matches(
+    anchors: Sequence[Anchor],
+    hypotheses: Sequence[MatchHypothesis],
+) -> List[MatchHypothesis]:
+    """Pick at most one match per anchor such that segment indices stay
+    increasing as anchor order increases — i.e. respects the natural
+    monotonicity of an elicitation session in time.
+
+    Solved as a weighted longest-increasing-subsequence: dp[i][j] = best
+    cumulative score using anchors 0..i ending with the match at (i, j),
+    where j indexes the candidate matches for anchor i. We keep the
+    chain with the highest total score; ties broken by chain length so a
+    longer chain of slightly weaker matches outranks a single
+    high-confidence match.
+
+    Returns an empty list if no monotonic chain of length ≥ 2 exists —
+    callers fall back to ``select_consistent_matches`` in that case.
+    """
+    if not hypotheses or not anchors:
+        return []
+
+    # Group hypotheses by anchor; anchors are visited in their stored
+    # ``index`` order (which is the time-sorted order produced by
+    # ``anchors_from_intervals``).
+    grouped: Dict[int, List[MatchHypothesis]] = {}
+    for h in hypotheses:
+        grouped.setdefault(h.anchor_index, []).append(h)
+
+    anchor_order = [a.index for a in anchors if a.index in grouped]
+    if len(anchor_order) < 2:
+        # Not enough anchored matches to form a chain — let the caller
+        # fall back to a non-monotonic strategy.
+        return []
+
+    # Flatten into a list of candidates while remembering each
+    # candidate's anchor position. Sort by (anchor_position, segment_index)
+    # so an LIS over segment_index respects anchor ordering automatically.
+    flat: List[Tuple[int, MatchHypothesis]] = []
+    anchor_position: Dict[int, int] = {ai: pos for pos, ai in enumerate(anchor_order)}
+    for ai in anchor_order:
+        for h in grouped[ai]:
+            flat.append((anchor_position[ai], h))
+
+    flat.sort(key=lambda item: (item[0], item[1].segment_index, -item[1].score))
+
+    # Weighted LIS on segment_index. dp[k] = (best_score, length, prev_index).
+    # Each transition adds the new match's similarity score plus a
+    # consistency bonus (∈ [0, 1]) that rewards adjacent matches whose
+    # implied offsets agree. Without this bonus, two chains of equal
+    # length and equal raw score (e.g. one 'clean' chain at the true
+    # offset and one 'noisy' chain with a single false-match early
+    # segment) tie-break arbitrarily — which was exactly the failure
+    # mode that elected the wrong sign on Fail01.
+    n = len(flat)
+    dp_score: List[float] = [0.0] * n
+    dp_length: List[int] = [1] * n
+    dp_prev: List[int] = [-1] * n
+    consistency_window_sec = 5.0
+
+    for k in range(n):
+        anchor_pos_k, hyp_k = flat[k]
+        dp_score[k] = float(hyp_k.score)
+        for prev in range(k):
+            anchor_pos_prev, hyp_prev = flat[prev]
+            # Strictly increasing in BOTH anchor position and segment
+            # index (monotonic), and at most one match per anchor.
+            if anchor_pos_prev >= anchor_pos_k:
+                continue
+            if hyp_prev.segment_index >= hyp_k.segment_index:
+                continue
+            offset_diff = abs(hyp_k.offset_sec - hyp_prev.offset_sec)
+            consistency_bonus = max(0.0, 1.0 - offset_diff / consistency_window_sec)
+            cand_score = dp_score[prev] + float(hyp_k.score) + consistency_bonus
+            cand_length = dp_length[prev] + 1
+            # Prefer longer chain; tie-break on accumulated score
+            # (which now includes the consistency bonus).
+            if cand_length > dp_length[k] or (
+                cand_length == dp_length[k] and cand_score > dp_score[k]
+            ):
+                dp_score[k] = cand_score
+                dp_length[k] = cand_length
+                dp_prev[k] = prev
+
+    # Pick the chain end that wins on (length, score, lower offset spread).
+    best_end = -1
+    best_key: Tuple[int, float] = (0, -1.0)
+    for k in range(n):
+        key = (dp_length[k], dp_score[k])
+        if key > best_key:
+            best_key = key
+            best_end = k
+
+    if best_end == -1 or dp_length[best_end] < 2:
+        return []
+
+    chain: List[MatchHypothesis] = []
+    cursor = best_end
+    while cursor != -1:
+        chain.append(flat[cursor][1])
+        cursor = dp_prev[cursor]
+    chain.reverse()
+    return chain
+
+
 def _robust_spread(values: Sequence[float]) -> float:
     if not values:
         return 0.0
@@ -562,6 +707,24 @@ def compute_confidence(selected: Sequence[MatchHypothesis], total_anchors: int) 
     return max(0.0, min(0.99, round(confidence, 3)))
 
 
+@dataclass
+class OffsetResult:
+    """Detailed detection result.
+
+    The plain-tuple return of :func:`detect_offset` is preserved for
+    backwards-compat; ``detect_offset_detailed`` returns this richer record
+    so callers can surface direction, MAD spread, and the actual matched
+    anchor→segment pairs to the user.
+    """
+
+    offset_sec: float
+    confidence: float
+    n_matched: int
+    spread_sec: float
+    method: str
+    matches: List[Dict[str, Any]]
+
+
 def detect_offset(
     anchors: Sequence[Anchor],
     segments: Sequence[Segment],
@@ -570,6 +733,33 @@ def detect_offset(
     bucket_sec: float,
     min_match_score: float,
 ) -> Tuple[float, float, int]:
+    result = detect_offset_detailed(
+        anchors=anchors,
+        segments=segments,
+        rules=rules,
+        bucket_sec=bucket_sec,
+        min_match_score=min_match_score,
+    )
+    return (result.offset_sec, result.confidence, result.n_matched)
+
+
+def detect_offset_detailed(
+    anchors: Sequence[Anchor],
+    segments: Sequence[Segment],
+    rules: Sequence[Any],
+    *,
+    bucket_sec: float,
+    min_match_score: float,
+) -> OffsetResult:
+    """Detect a constant timestamp offset and return rich diagnostics.
+
+    The selector tries the monotonicity-constrained alignment first
+    (matches must visit anchors and segments in increasing order, which
+    matches how an elicitation actually unfolds in time) and falls back
+    to the legacy bucket-vote only when monotonic alignment can't form
+    a chain of ≥ 2 matches. The bucket fallback is recorded in the
+    ``method`` field so the UI can warn the user when it kicked in.
+    """
     hypotheses = build_offset_hypotheses(
         anchors=anchors,
         segments=segments,
@@ -579,14 +769,46 @@ def detect_offset(
     if not hypotheses:
         raise ValueError("Unable to find keyword matches between CSV anchors and STT segments")
 
-    selected = select_consistent_matches(anchors, hypotheses, bucket_sec=bucket_sec)
+    method = "monotonic_alignment"
+    selected = select_monotonic_matches(anchors, hypotheses)
+    if not selected:
+        method = "bucket_vote"
+        selected = select_consistent_matches(anchors, hypotheses, bucket_sec=bucket_sec)
     if not selected:
         raise ValueError("Unable to select a consistent offset cluster")
 
     offsets = [item.offset_sec for item in selected]
     offset_sec = round(statistics.median(offsets), 3)
     confidence = compute_confidence(selected, len(anchors))
-    return (offset_sec, confidence, len(selected))
+    spread = round(_robust_spread(offsets), 3)
+
+    anchor_by_index = {a.index: a for a in anchors}
+    segment_by_index = {s.index: s for s in segments}
+    matches: List[Dict[str, Any]] = []
+    for h in selected:
+        anc = anchor_by_index.get(h.anchor_index)
+        seg = segment_by_index.get(h.segment_index)
+        matches.append(
+            {
+                "anchor_index": h.anchor_index,
+                "anchor_text": anc.text if anc else "",
+                "anchor_start": float(anc.start_sec) if anc else None,
+                "segment_index": h.segment_index,
+                "segment_text": seg.text if seg else "",
+                "segment_start": float(seg.start_sec) if seg else None,
+                "score": round(float(h.score), 3),
+                "offset_sec": round(float(h.offset_sec), 3),
+            }
+        )
+
+    return OffsetResult(
+        offset_sec=offset_sec,
+        confidence=confidence,
+        n_matched=len(selected),
+        spread_sec=spread,
+        method=method,
+        matches=matches,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

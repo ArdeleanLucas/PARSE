@@ -384,8 +384,15 @@ class ParseChatTools:
                 name="detect_timestamp_offset",
                 description=(
                     "Detect a constant timestamp offset between a speaker's annotation "
-                    "intervals and STT segments for the same audio. Read-only — returns "
-                    "offsetSec and confidence so the caller can decide whether to apply."
+                    "intervals and STT segments for the same audio. Uses monotonic "
+                    "anchor-segment alignment (chosen matches must visit anchors and "
+                    "segments in increasing time order) so false matches to similar-"
+                    "sounding words elsewhere in the recording can't elect the wrong "
+                    "direction. Anchors are sampled across the timeline by quantile "
+                    "by default — pass anchorDistribution='earliest' to use the legacy "
+                    "first-N selection. Read-only; returns offsetSec, confidence, "
+                    "spreadSec, direction, warnings, and the matched anchor↔segment "
+                    "pairs so callers can sanity-check before applying."
                 ),
                 parameters={
                     "type": "object",
@@ -397,6 +404,30 @@ class ParseChatTools:
                         "nAnchors": {"type": "integer", "minimum": 2, "maximum": 50},
                         "bucketSec": {"type": "number", "minimum": 0.1, "maximum": 30.0},
                         "minMatchScore": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "anchorDistribution": {"type": "string", "enum": ["quantile", "earliest"]},
+                    },
+                },
+            ),
+            "detect_timestamp_offset_from_pair": ChatToolSpec(
+                name="detect_timestamp_offset_from_pair",
+                description=(
+                    "Compute a timestamp offset from one trusted (csvTime, audioTime) "
+                    "pair — no STT, no statistics, no false matches. Use this when "
+                    "the user already knows where one lexeme actually is in the audio. "
+                    "Anchor either by csvTimeSec (the time the annotation currently "
+                    "claims) or by conceptId (look up the start time of that concept's "
+                    "interval). Returns the same shape as detect_timestamp_offset so "
+                    "the result can be passed straight into apply_timestamp_offset."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "audioTimeSec"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "audioTimeSec": {"type": "number", "minimum": 0.0},
+                        "csvTimeSec": {"type": "number", "minimum": 0.0},
+                        "conceptId": {"type": "string", "minLength": 1, "maxLength": 128},
                     },
                 },
             ),
@@ -1354,17 +1385,19 @@ class ParseChatTools:
         return payload
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Proxy detect_offset against the speaker's annotation + STT job.
+        """Proxy detect_offset_detailed against the speaker's annotation + STT job.
 
-        Pulls anchors from the on-disk annotation tiers (preferring ortho/ipa);
-        STT segments come from an explicit ``sttJobId`` if given, otherwise from
-        the most recent complete STT job for the same speaker that this process
-        can see via ``get_job_snapshot``.
+        Returns the rich payload (direction, spread, warnings, matched
+        anchor↔segment pairs) so MCP / chat clients can sanity-check before
+        calling apply_timestamp_offset. Anchor selection defaults to
+        quantile sampling across the timeline (less biased toward the
+        truncated head) and the selector now requires monotonic
+        alignment unless no chain of length ≥ 2 is possible.
         """
         try:
             from compare import (
                 anchors_from_intervals,
-                detect_offset,
+                detect_offset_detailed,
                 load_rules_from_file,
                 segments_from_raw,
             )
@@ -1398,6 +1431,9 @@ class ParseChatTools:
         n_anchors = max(2, min(50, int(args.get("nAnchors") or 12)))
         bucket_sec = max(0.1, float(args.get("bucketSec") or 1.0))
         min_match_score = max(0.0, min(1.0, float(args.get("minMatchScore") or 0.56)))
+        distribution = str(args.get("anchorDistribution") or "quantile").strip().lower()
+        if distribution not in {"quantile", "earliest"}:
+            distribution = "quantile"
 
         stt_segments: Optional[List[Any]] = None
         stt_job_id = str(args.get("sttJobId") or "").strip()
@@ -1419,7 +1455,9 @@ class ParseChatTools:
         if stt_segments is None:
             raise ChatToolValidationError(
                 "sttJobId is required for detect_timestamp_offset; pass the jobId of a "
-                "completed stt_start run for this speaker"
+                "completed stt_start run for this speaker, or call "
+                "detect_timestamp_offset_from_pair if you already know one true "
+                "(csvTime, audioTime) pair."
             )
 
         rules_path = self.phonetic_rules_path
@@ -1428,7 +1466,7 @@ class ParseChatTools:
         except Exception:
             rules = []
 
-        anchors = anchors_from_intervals(intervals, n_anchors)
+        anchors = anchors_from_intervals(intervals, n_anchors, distribution=distribution)
         if not anchors:
             raise ChatToolValidationError(
                 "No usable anchors with both timestamp and text in annotation"
@@ -1438,7 +1476,7 @@ class ParseChatTools:
             raise ChatToolValidationError("STT input contained no usable segments")
 
         try:
-            offset_sec, confidence, n_matched = detect_offset(
+            detailed = detect_offset_detailed(
                 anchors=anchors,
                 segments=segments,
                 rules=rules,
@@ -1448,17 +1486,211 @@ class ParseChatTools:
         except ValueError as exc:
             raise ChatToolExecutionError(str(exc))
 
-        return {
+        return self._format_offset_detect_payload(
+            speaker=speaker,
+            offset_sec=float(detailed.offset_sec),
+            confidence=float(detailed.confidence),
+            n_matched=int(detailed.n_matched),
+            total_anchors=len(anchors),
+            total_segments=len(segments),
+            method=detailed.method,
+            spread_sec=float(detailed.spread_sec),
+            matches=list(detailed.matches),
+            anchor_distribution=distribution,
+            annotation_path=annotation_path,
+        )
+
+    def _tool_detect_timestamp_offset_from_pair(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute the offset from a single trusted (csv_time, audio_time) pair.
+
+        No STT, no statistics — the user already knows the true position
+        of one lexeme. Anchor by ``csvTimeSec`` (preferred) or by
+        ``conceptId`` (looked up in the annotation).
+        """
+        speaker_raw = str(args.get("speaker") or "").strip()
+        if not speaker_raw or not SPEAKER_PATTERN.match(speaker_raw):
+            raise ChatToolValidationError("speaker is required and must match {0}".format(SPEAKER_PATTERN.pattern))
+        speaker = speaker_raw
+
+        try:
+            audio_time = float(args.get("audioTimeSec"))
+        except (TypeError, ValueError):
+            raise ChatToolValidationError("audioTimeSec is required and must be a number")
+        import math as _math
+        if not _math.isfinite(audio_time) or audio_time < 0:
+            raise ChatToolValidationError("audioTimeSec must be a finite, non-negative number")
+
+        anchor_label: Optional[str] = None
+        anchor_csv_time: Optional[float] = None
+
+        if "csvTimeSec" in args and args["csvTimeSec"] is not None:
+            try:
+                anchor_csv_time = float(args["csvTimeSec"])
+            except (TypeError, ValueError):
+                raise ChatToolValidationError("csvTimeSec must be a number when provided")
+            if not _math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
+                raise ChatToolValidationError("csvTimeSec must be a finite, non-negative number")
+            anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
+        elif "conceptId" in args and args["conceptId"] is not None:
+            concept_id = str(args["conceptId"]).strip()
+            if not concept_id:
+                raise ChatToolValidationError("conceptId must be non-empty")
+            annotation_path = self._annotation_path_for_speaker(speaker)
+            if annotation_path is None or not annotation_path.is_file():
+                raise ChatToolValidationError(
+                    "No annotation file found for speaker '{0}'".format(speaker)
+                )
+            try:
+                record = json.loads(annotation_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc))
+            interval = self._find_concept_interval(record, concept_id)
+            if interval is None:
+                raise ChatToolValidationError(
+                    "No annotation interval found for concept '{0}'".format(concept_id)
+                )
+            anchor_csv_time = float(interval["start"])
+            anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
+        else:
+            raise ChatToolValidationError(
+                "Provide either csvTimeSec or conceptId so the offset can be anchored"
+            )
+
+        annotation_path = self._annotation_path_for_speaker(speaker)
+        offset_sec = round(audio_time - float(anchor_csv_time), 3)
+        return self._format_offset_detect_payload(
+            speaker=speaker,
+            offset_sec=offset_sec,
+            confidence=0.99,
+            n_matched=1,
+            total_anchors=1,
+            total_segments=0,
+            method="manual_pair",
+            spread_sec=0.0,
+            matches=[
+                {
+                    "anchor_index": -1,
+                    "anchor_text": anchor_label or "",
+                    "anchor_start": float(anchor_csv_time),
+                    "segment_index": -1,
+                    "segment_text": "(user-supplied audio time)",
+                    "segment_start": float(audio_time),
+                    "score": 1.0,
+                    "offset_sec": offset_sec,
+                }
+            ],
+            anchor_distribution="manual",
+            annotation_path=annotation_path,
+        )
+
+    def _format_offset_detect_payload(
+        self,
+        *,
+        speaker: str,
+        offset_sec: float,
+        confidence: float,
+        n_matched: int,
+        total_anchors: int,
+        total_segments: int,
+        method: str,
+        spread_sec: float,
+        matches: List[Dict[str, Any]],
+        anchor_distribution: str,
+        annotation_path: Optional[Path],
+    ) -> Dict[str, Any]:
+        """Mirror of server._offset_detect_payload kept here so MCP / chat
+        clients see the same shape regardless of whether the request came
+        in via HTTP or via in-process tool execution."""
+        if abs(offset_sec) < 1e-3:
+            direction = "none"
+            direction_label = "no shift needed"
+        elif offset_sec > 0:
+            direction = "later"
+            direction_label = "{0:.3f} s later (toward the end)".format(offset_sec)
+        else:
+            direction = "earlier"
+            direction_label = "{0:.3f} s earlier (toward the start)".format(abs(offset_sec))
+
+        reliable = bool(
+            n_matched >= 3 and confidence >= 0.5 and (spread_sec <= 2.0 or n_matched == 1)
+        )
+        warnings: List[str] = []
+        if n_matched < 3 and method != "manual_pair":
+            warnings.append(
+                "Only {0} anchor match{1} were found — apply with caution.".format(
+                    n_matched, "" if n_matched == 1 else "es"
+                )
+            )
+        if spread_sec > 2.0:
+            warnings.append(
+                "Match offsets disagree by ±{0:.2f}s — the detected value may be noisy.".format(spread_sec)
+            )
+        if confidence < 0.5 and method != "manual_pair":
+            warnings.append(
+                "Low confidence; consider re-running STT or using "
+                "detect_timestamp_offset_from_pair with a manual single-anchor pair."
+            )
+        if method == "bucket_vote":
+            warnings.append(
+                "Monotonic alignment failed; fell back to bucket vote which is more vulnerable to false matches."
+            )
+
+        payload: Dict[str, Any] = {
             "readOnly": True,
             "speaker": speaker,
             "offsetSec": float(offset_sec),
             "confidence": float(confidence),
             "nAnchors": int(n_matched),
-            "totalAnchors": len(anchors),
-            "totalSegments": len(segments),
-            "method": "keyword_alignment",
-            "annotationPath": str(annotation_path.relative_to(self.project_root)),
+            "totalAnchors": int(total_anchors),
+            "totalSegments": int(total_segments),
+            "method": method,
+            "spreadSec": float(spread_sec),
+            "direction": direction,
+            "directionLabel": direction_label,
+            "anchorDistribution": anchor_distribution,
+            "reliable": reliable,
+            "warnings": warnings,
+            "matches": matches,
         }
+        if annotation_path is not None:
+            try:
+                payload["annotationPath"] = str(annotation_path.relative_to(self.project_root))
+            except ValueError:
+                payload["annotationPath"] = str(annotation_path)
+        return payload
+
+    def _find_concept_interval(self, record: Any, concept_id: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(record, dict) or not concept_id:
+            return None
+        needle = str(concept_id).strip()
+        if not needle:
+            return None
+        tiers = record.get("tiers")
+        if not isinstance(tiers, dict):
+            return None
+        for tier_key in ("concept", "ortho", "ipa"):
+            tier = tiers.get(tier_key)
+            if not isinstance(tier, dict):
+                continue
+            intervals = tier.get("intervals")
+            if not isinstance(intervals, list):
+                continue
+            for raw in intervals:
+                if not isinstance(raw, dict):
+                    continue
+                start = raw.get("start", raw.get("xmin"))
+                text = str(raw.get("text") or "").strip()
+                cid = str(raw.get("concept_id") or raw.get("conceptId") or "").strip()
+                if cid != needle and text != needle:
+                    continue
+                try:
+                    start_f = float(start) if start is not None else None
+                except (TypeError, ValueError):
+                    continue
+                if start_f is None or start_f < 0:
+                    continue
+                return {"start": start_f, "text": text}
+        return None
 
     def _tool_apply_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Add ``offsetSec`` to every interval start/end in the speaker's annotation.
