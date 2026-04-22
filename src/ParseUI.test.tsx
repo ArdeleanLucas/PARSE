@@ -402,6 +402,12 @@ describe("ParseUI", () => {
     expect(screen.queryByRole("button", { name: "Manage Tags" })).toBeNull();
   });
 
+  it("renders a visible hotkey hint in the top bar", () => {
+    render(<ParseUI />);
+
+    expect(screen.getByText(/A Annotate · C Compare · T Tags · ←\/↑ Prev · →\/↓ Next/i)).toBeTruthy();
+  });
+
   it("supports app-mode hotkeys a/c/t", async () => {
     render(<ParseUI />);
 

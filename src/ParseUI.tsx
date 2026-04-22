@@ -1936,6 +1936,9 @@ export function ParseUI() {
               <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
                 <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${(reviewed/total)*100}%` }}/>
               </div>
+              <div className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-500 lg:block">
+                A Annotate · C Compare · T Tags · ←/↑ Prev · →/↓ Next
+              </div>
             </div>
           </div>
 
