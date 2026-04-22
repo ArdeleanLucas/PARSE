@@ -46,6 +46,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "onboard_speaker_import",
     "import_processed_speaker",
     "parse_memory_upsert_section",
+    "apply_timestamp_offset",
 })
 TEXT_PREVIEW_EXTENSIONS = frozenset({".md", ".markdown", ".txt", ".rst"})
 ONBOARD_AUDIO_EXTENSIONS = frozenset({".wav", ".flac", ".mp3", ".ogg", ".m4a"})
@@ -376,6 +377,44 @@ class ParseChatTools:
                             },
                         },
                         "maxIntervals": {"type": "integer", "minimum": 1, "maximum": 5000},
+                    },
+                },
+            ),
+            "detect_timestamp_offset": ChatToolSpec(
+                name="detect_timestamp_offset",
+                description=(
+                    "Detect a constant timestamp offset between a speaker's annotation "
+                    "intervals and STT segments for the same audio. Read-only — returns "
+                    "offsetSec and confidence so the caller can decide whether to apply."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "sttJobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "nAnchors": {"type": "integer", "minimum": 2, "maximum": 50},
+                        "bucketSec": {"type": "number", "minimum": 0.1, "maximum": 30.0},
+                        "minMatchScore": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                },
+            ),
+            "apply_timestamp_offset": ChatToolSpec(
+                name="apply_timestamp_offset",
+                description=(
+                    "Shift every annotation interval (start and end) by offsetSec for the "
+                    "given speaker. Mutates annotations/<speaker>.parse.json. Use dryRun=true "
+                    "first to preview the shift, then dryRun=false to write."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "offsetSec", "dryRun"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "offsetSec": {"type": "number"},
+                        "dryRun": {"type": "boolean"},
                     },
                 },
             ),
@@ -1313,6 +1352,271 @@ class ParseChatTools:
             payload["segmentCount"] = len(segments)
 
         return payload
+
+    def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Proxy detect_offset against the speaker's annotation + STT job.
+
+        Pulls anchors from the on-disk annotation tiers (preferring ortho/ipa);
+        STT segments come from an explicit ``sttJobId`` if given, otherwise from
+        the most recent complete STT job for the same speaker that this process
+        can see via ``get_job_snapshot``.
+        """
+        try:
+            from compare import (
+                anchors_from_intervals,
+                detect_offset,
+                load_rules_from_file,
+                segments_from_raw,
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError(
+                "compare/offset_detect.py is not importable: {0}".format(exc)
+            )
+
+        speaker_raw = str(args.get("speaker") or "").strip()
+        if not speaker_raw or not SPEAKER_PATTERN.match(speaker_raw):
+            raise ChatToolValidationError("speaker is required and must match {0}".format(SPEAKER_PATTERN.pattern))
+        speaker = speaker_raw
+
+        annotation_path = self._annotation_path_for_speaker(speaker)
+        if annotation_path is None or not annotation_path.is_file():
+            raise ChatToolValidationError(
+                "No annotation file found for speaker '{0}'".format(speaker)
+            )
+
+        try:
+            record = json.loads(annotation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc))
+
+        intervals = self._collect_offset_anchor_intervals(record)
+        if not intervals:
+            raise ChatToolValidationError(
+                "Speaker '{0}' has no annotated intervals to use as offset anchors".format(speaker)
+            )
+
+        n_anchors = max(2, min(50, int(args.get("nAnchors") or 12)))
+        bucket_sec = max(0.1, float(args.get("bucketSec") or 1.0))
+        min_match_score = max(0.0, min(1.0, float(args.get("minMatchScore") or 0.56)))
+
+        stt_segments: Optional[List[Any]] = None
+        stt_job_id = str(args.get("sttJobId") or "").strip()
+        if stt_job_id:
+            if self._get_job_snapshot is None:
+                raise ChatToolExecutionError("Job snapshot callback is unavailable")
+            snapshot = self._get_job_snapshot(stt_job_id)
+            if snapshot is None:
+                raise ChatToolValidationError("Unknown sttJobId")
+            if snapshot.get("type") != "stt":
+                raise ChatToolValidationError("sttJobId is not an STT job")
+            if snapshot.get("status") != "complete":
+                raise ChatToolValidationError("STT job has not completed")
+            result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+            seg_payload = result.get("segments")
+            if isinstance(seg_payload, list):
+                stt_segments = seg_payload
+
+        if stt_segments is None:
+            raise ChatToolValidationError(
+                "sttJobId is required for detect_timestamp_offset; pass the jobId of a "
+                "completed stt_start run for this speaker"
+            )
+
+        rules_path = self.phonetic_rules_path
+        try:
+            rules = load_rules_from_file(rules_path) if rules_path.exists() else []
+        except Exception:
+            rules = []
+
+        anchors = anchors_from_intervals(intervals, n_anchors)
+        if not anchors:
+            raise ChatToolValidationError(
+                "No usable anchors with both timestamp and text in annotation"
+            )
+        segments = segments_from_raw(stt_segments)
+        if not segments:
+            raise ChatToolValidationError("STT input contained no usable segments")
+
+        try:
+            offset_sec, confidence, n_matched = detect_offset(
+                anchors=anchors,
+                segments=segments,
+                rules=rules,
+                bucket_sec=bucket_sec,
+                min_match_score=min_match_score,
+            )
+        except ValueError as exc:
+            raise ChatToolExecutionError(str(exc))
+
+        return {
+            "readOnly": True,
+            "speaker": speaker,
+            "offsetSec": float(offset_sec),
+            "confidence": float(confidence),
+            "nAnchors": int(n_matched),
+            "totalAnchors": len(anchors),
+            "totalSegments": len(segments),
+            "method": "keyword_alignment",
+            "annotationPath": str(annotation_path.relative_to(self.project_root)),
+        }
+
+    def _tool_apply_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Add ``offsetSec`` to every interval start/end in the speaker's annotation.
+
+        Negative offsets clamp to 0. ``dryRun=true`` returns a preview of the
+        first few shifted intervals without writing.
+        """
+        speaker_raw = str(args.get("speaker") or "").strip()
+        if not speaker_raw or not SPEAKER_PATTERN.match(speaker_raw):
+            raise ChatToolValidationError("speaker is required and must match {0}".format(SPEAKER_PATTERN.pattern))
+        speaker = speaker_raw
+
+        if "offsetSec" not in args:
+            raise ChatToolValidationError("offsetSec is required")
+        try:
+            offset_sec = float(args.get("offsetSec"))
+        except (TypeError, ValueError):
+            raise ChatToolValidationError("offsetSec must be a number")
+        import math as _math
+        if not _math.isfinite(offset_sec):
+            raise ChatToolValidationError("offsetSec must be a finite number")
+        if abs(offset_sec) < 1e-6:
+            raise ChatToolValidationError("offsetSec is effectively zero — nothing to apply")
+
+        if "dryRun" not in args:
+            raise ChatToolValidationError("dryRun is required (use true to preview)")
+        dry_run = bool(args.get("dryRun"))
+
+        annotation_path = self._annotation_path_for_speaker(speaker)
+        if annotation_path is None or not annotation_path.is_file():
+            raise ChatToolValidationError(
+                "No annotation file found for speaker '{0}'".format(speaker)
+            )
+
+        try:
+            record = json.loads(annotation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc))
+
+        shifted_count, preview = self._shift_annotation_intervals(record, offset_sec)
+        if shifted_count == 0:
+            raise ChatToolValidationError("No intervals were shifted")
+
+        if dry_run:
+            return {
+                "readOnly": True,
+                "dryRun": True,
+                "speaker": speaker,
+                "offsetSec": offset_sec,
+                "wouldShiftIntervals": shifted_count,
+                "preview": preview,
+            }
+
+        if isinstance(record, dict):
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            metadata["modified"] = _utc_now_iso()
+            record["metadata"] = metadata
+
+        try:
+            annotation_path.write_text(
+                json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            raise ChatToolExecutionError("Failed to write annotation: {0}".format(exc))
+
+        return {
+            "readOnly": False,
+            "dryRun": False,
+            "speaker": speaker,
+            "appliedOffsetSec": offset_sec,
+            "shiftedIntervals": shifted_count,
+            "annotationPath": str(annotation_path.relative_to(self.project_root)),
+        }
+
+    def _annotation_path_for_speaker(self, speaker: str) -> Optional[Path]:
+        canonical = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
+        if canonical.is_file():
+            return canonical
+        legacy = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_LEGACY_FILENAME_SUFFIX)
+        if legacy.is_file():
+            return legacy
+        return canonical
+
+    def _collect_offset_anchor_intervals(self, record: Any) -> List[Dict[str, Any]]:
+        if not isinstance(record, dict):
+            return []
+        tiers = record.get("tiers")
+        if not isinstance(tiers, dict):
+            return []
+        for tier_key in ("ortho", "ipa", "concept"):
+            tier = tiers.get(tier_key)
+            if not isinstance(tier, dict):
+                continue
+            intervals = tier.get("intervals")
+            if not isinstance(intervals, list):
+                continue
+            collected: List[Dict[str, Any]] = []
+            for raw in intervals:
+                if not isinstance(raw, dict):
+                    continue
+                start = raw.get("start", raw.get("xmin"))
+                end = raw.get("end", raw.get("xmax"))
+                text = raw.get("text")
+                try:
+                    start_f = float(start) if start is not None else None
+                    end_f = float(end) if end is not None else None
+                except (TypeError, ValueError):
+                    continue
+                if start_f is None or end_f is None or end_f < start_f:
+                    continue
+                if not str(text or "").strip():
+                    continue
+                collected.append({"start": start_f, "end": end_f, "text": str(text).strip()})
+            if collected:
+                return collected
+        return []
+
+    def _shift_annotation_intervals(
+        self, record: Any, offset_sec: float
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        if not isinstance(record, dict):
+            return 0, []
+        tiers = record.get("tiers")
+        if not isinstance(tiers, dict):
+            return 0, []
+
+        shifted = 0
+        preview: List[Dict[str, Any]] = []
+        for tier_key, tier in tiers.items():
+            if not isinstance(tier, dict):
+                continue
+            intervals = tier.get("intervals")
+            if not isinstance(intervals, list):
+                continue
+            for raw in intervals:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    start_f = float(raw.get("start", raw.get("xmin")))
+                    end_f = float(raw.get("end", raw.get("xmax")))
+                except (TypeError, ValueError):
+                    continue
+                new_start = max(0.0, start_f + offset_sec)
+                new_end = max(new_start, end_f + offset_sec)
+                raw["start"] = new_start
+                raw["end"] = new_end
+                if "xmin" in raw:
+                    raw["xmin"] = new_start
+                if "xmax" in raw:
+                    raw["xmax"] = new_end
+                shifted += 1
+                if len(preview) < 5:
+                    preview.append({
+                        "tier": tier_key,
+                        "from": [start_f, end_f],
+                        "to": [new_start, new_end],
+                    })
+        return shifted, preview
 
     def _tool_cognate_compute_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if cognate_compute_module is None:
