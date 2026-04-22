@@ -19,6 +19,9 @@ import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
+import { useTranscriptionLanesStore, type LaneKind } from './stores/transcriptionLanesStore';
+import { TranscriptionLanes } from './components/annotate/TranscriptionLanes';
+import { LaneColorPicker } from './components/annotate/LaneColorPicker';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
@@ -34,7 +37,6 @@ import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
-type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ModeTab = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 type AppMode = 'annotate' | 'compare' | 'tags';
@@ -1014,12 +1016,17 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
   selectedTagId, setSelectedTagId, conceptSearch, setConceptSearch,
   tagConcept, untagConcept,
 }) => {
-  const [checkedConceptIds, setCheckedConceptIds] = useState<Set<string>>(new Set());
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [editingTagName, setEditingTagName] = useState('');
+  const storeTags = useTagStore(s => s.tags);
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
   const selectedTag = tags.find(t => t.id === selectedTagId);
   const filteredConcepts = concepts.filter(c => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
+  const taggedKeys = useMemo<Set<string>>(() => {
+    if (!selectedTagId) return new Set();
+    const t = storeTags.find(s => s.id === selectedTagId);
+    return new Set(t?.concepts ?? []);
+  }, [storeTags, selectedTagId]);
 
   return (
     <div className="flex flex-1 min-h-0 bg-slate-50">
@@ -1160,8 +1167,8 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
         </div>
       </div>
 
-      {/* RIGHT: main content */}
-      <div className="flex-1 overflow-y-auto">
+      {/* RIGHT: concept list panel */}
+      <div className="flex flex-1 min-h-0 flex-col">
         {!selectedTag ? (
           <div className="grid h-full place-items-center px-10 py-20">
             <div className="text-center">
@@ -1176,70 +1183,41 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
             </div>
           </div>
         ) : (
-          <div className="px-10 py-8">
-            <div className="flex items-center justify-between">
+          <>
+            <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
               <div className="flex items-center gap-3">
                 <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: selectedTag.color, boxShadow: '0 0 0 1px rgb(226 232 240)' }}/>
-                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{selectedTag.name}</h1>
+                <h1 className="text-lg font-semibold tracking-tight text-slate-900">{selectedTag.name}</h1>
                 <Pill tone="indigo">{selectedTag.count} concepts</Pill>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setCheckedConceptIds(new Set())}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                  <X className="h-3.5 w-3.5"/> Clear selection
-                </button>
-                <button
-                  onClick={() => {
-                    if (!selectedTagId) return;
-                    checkedConceptIds.forEach(id => tagConcept(selectedTagId, id));
-                    setCheckedConceptIds(new Set());
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
-                  <Check className="h-3.5 w-3.5"/> Apply to selected
-                </button>
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"/>
+                <input
+                  value={conceptSearch}
+                  onChange={e => setConceptSearch(e.target.value)}
+                  placeholder="Search concepts…"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                />
               </div>
             </div>
-
-            <div className="relative mt-6">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"/>
-              <input
-                value={conceptSearch}
-                onChange={e => setConceptSearch(e.target.value)}
-                placeholder="Search concepts to assign…"
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
-              />
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredConcepts.map(c => (
-                <label
-                  key={c.id}
-                  className="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-indigo-300 hover:shadow-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checkedConceptIds.has(c.key)}
-                    onChange={e => {
-                      const next = new Set(checkedConceptIds);
-                      if (e.target.checked) {
-                        next.add(c.key);
-                        if (selectedTagId) tagConcept(selectedTagId, c.key);
-                      } else {
-                        next.delete(c.key);
-                        if (selectedTagId) untagConcept(selectedTagId, c.key);
-                      }
-                      setCheckedConceptIds(next);
-                    }}
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`}/>
-                  <span className="flex-1 text-sm font-medium text-slate-800">{c.name}</span>
-                  <span className="font-mono text-[10px] text-slate-300">#{c.id}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+            <nav className="flex-1 overflow-y-auto px-2 py-2">
+              {filteredConcepts.map(c => {
+                const tagged = taggedKeys.has(c.key);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => selectedTagId && (tagged ? untagConcept(selectedTagId, c.key) : tagConcept(selectedTagId, c.key))}
+                    className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${tagged ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagDot[c.tag]}`}/>
+                    <span className={`flex-1 text-[13px] ${tagged ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
+                    <span className={`font-mono text-[10px] ${tagged ? 'text-indigo-400' : 'text-slate-300'}`}>#{c.id}</span>
+                    {tagged && <Check className="h-3.5 w-3.5 shrink-0 text-indigo-500"/>}
+                  </button>
+                );
+              })}
+            </nav>
+          </>
         )}
       </div>
     </div>
@@ -1466,6 +1444,9 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
             )}
           </div>
         </div>
+
+        {/* Transcription lanes — STT / IPA / ORTHO, toggled from the right drawer */}
+        <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady} onSeek={seek}/>
       </section>
 
       {/* ======= CONCEPT HEADER ======= */}
@@ -1746,7 +1727,7 @@ export function ParseUI() {
   const [conceptImportError, setConceptImportError] = useState<string | null>(null);
   const [conceptImportSummary, setConceptImportSummary] = useState<string | null>(null);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
-  const [tagFilter, setTagFilter] = useState<TagState>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
   const [conceptId, setConceptId] = useState(1);
   const [modeTab, setModeTab] = useState<ModeTab>('all');
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
@@ -1829,6 +1810,16 @@ export function ParseUI() {
   const [currentMode, setCurrentMode] = useState<AppMode>('compare');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [sttLanguage, setSttLanguage] = useState<string>(() => {
+    try { return (localStorage.getItem('parse.stt.language') ?? '').trim(); }
+    catch { return ''; }
+  });
+  const sttLanguageRef = useRef(sttLanguage);
+  useEffect(() => {
+    sttLanguageRef.current = sttLanguage;
+    try { localStorage.setItem('parse.stt.language', sttLanguage); }
+    catch { /* storage unavailable */ }
+  }, [sttLanguage]);
   const activeActionSpeaker = selectedSpeakers[0] ?? null;
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
@@ -1880,11 +1871,15 @@ export function ParseUI() {
           `No source_audio on annotation for ${activeActionSpeaker}. Import or onboard the speaker first.`,
         ));
       }
-      return startSTT(activeActionSpeaker, sourceWav, 'ckb');
+      return startSTT(activeActionSpeaker, sourceWav, sttLanguageRef.current || undefined);
     },
     poll: (id) => pollSTT(id) as Promise<PollResult>,
     label: 'Running STT…',
-    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
+    onComplete: () => {
+      const speaker = activeActionSpeaker;
+      if (speaker) void useTranscriptionLanesStore.getState().reloadStt(speaker);
+      return reloadSpeakerAnnotation(speaker);
+    },
   });
 
   const ipaJob = useActionJob({
@@ -2095,7 +2090,14 @@ export function ParseUI() {
     };
 
     let list = concepts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
-    if (tagFilter !== 'all') list = list.filter(c => c.tag === tagFilter);
+    if (tagFilter === 'untagged') {
+      list = list.filter(c => c.tag === 'untagged');
+    } else if (tagFilter === 'review') {
+      list = list.filter(c => c.tag === 'review');
+    } else if (tagFilter !== 'all') {
+      const storeTag = storeTags.find(t => t.id === tagFilter);
+      if (storeTag) list = list.filter(c => storeTag.concepts.includes(c.key));
+    }
     if (modeTab === 'unreviewed') {
       list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
     }
@@ -2126,7 +2128,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts]);
+  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
 
@@ -2355,14 +2357,27 @@ export function ParseUI() {
                       <AudioLines className="h-3.5 w-3.5 text-slate-400"/>
                       {normalizeJob.state.status === 'running' ? 'Normalizing…' : 'Run Audio Normalization'}
                     </button>
-                    <button
-                      onClick={() => { setActionsMenuOpen(false); void sttJob.run(); }}
-                      disabled={!activeActionSpeaker || sttJob.state.status === 'running'}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Mic className="h-3.5 w-3.5 text-slate-400"/>
-                      {sttJob.state.status === 'running' ? 'Running STT…' : 'Run Orthographic STT'}
-                    </button>
+                    <div className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-slate-700">
+                      <Mic className="h-3.5 w-3.5 shrink-0 text-slate-400"/>
+                      <label htmlFor="stt-language" className="shrink-0 text-[11px] text-slate-500">Language</label>
+                      <input
+                        id="stt-language"
+                        value={sttLanguage}
+                        onChange={e => setSttLanguage(e.target.value.trim().toLowerCase())}
+                        placeholder="auto"
+                        maxLength={8}
+                        spellCheck={false}
+                        className="w-16 rounded border border-slate-200 px-1.5 py-0.5 font-mono text-[11px] text-slate-700 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none"
+                        title="ISO 639-1 code (e.g. en, de, ar). Whisper does not accept ISO 639-3 codes like ckb. Leave blank to auto-detect."
+                      />
+                      <button
+                        onClick={() => { setActionsMenuOpen(false); void sttJob.run(); }}
+                        disabled={!activeActionSpeaker || sttJob.state.status === 'running'}
+                        className="ml-auto inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {sttJob.state.status === 'running' ? 'Running…' : 'Run STT'}
+                      </button>
+                    </div>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void ipaJob.run(); }}
                       disabled={!activeActionSpeaker || ipaJob.state.status === 'running'}
@@ -2556,6 +2571,25 @@ export function ParseUI() {
               </div>
               <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
             </div>
+            {tagsList.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                <button
+                  onClick={() => setTagFilter('all')}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                >All</button>
+                {tagsList.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    style={tagFilter === t.id ? { background: t.color } : {}}
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <nav className="flex-1 overflow-y-auto px-2 pb-6">
             {filtered.map(c => {
@@ -3150,6 +3184,8 @@ export function ParseUI() {
                     Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
                   </p>
 
+                  <TranscriptionLanesControls/>
+
                   <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
                     <Layers className="h-3.5 w-3.5"/>
                     <span className="flex-1 text-left">Spectrogram workspace</span>
@@ -3336,6 +3372,56 @@ export function ParseUI() {
           e.target.value = '';
         }}
       />
+    </div>
+  );
+}
+
+const LANE_ORDER: LaneKind[] = ['stt', 'ipa', 'ortho'];
+const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
+  stt: { label: 'STT segments', hint: 'Coarse transcript' },
+  ipa: { label: 'IPA tier', hint: 'Phonemic/phonetic' },
+  ortho: { label: 'Ortho tier', hint: 'Orthographic' },
+};
+
+function TranscriptionLanesControls() {
+  const lanes = useTranscriptionLanesStore(s => s.lanes);
+  const toggleLane = useTranscriptionLanesStore(s => s.toggleLane);
+  const setLaneColor = useTranscriptionLanesStore(s => s.setLaneColor);
+
+  return (
+    <div className="mb-3 rounded-md bg-slate-50 p-2">
+      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Transcription lanes
+      </div>
+      <div className="space-y-1">
+        {LANE_ORDER.map(kind => {
+          const cfg = lanes[kind];
+          const { label, hint } = LANE_DISPLAY[kind];
+          return (
+            <div
+              key={kind}
+              className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-white"
+            >
+              <input
+                id={`lane-toggle-${kind}`}
+                type="checkbox"
+                checked={cfg.visible}
+                onChange={() => toggleLane(kind)}
+                className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+              />
+              <LaneColorPicker
+                value={cfg.color}
+                onChange={c => setLaneColor(kind, c)}
+                ariaLabel={`Color for ${label}`}
+              />
+              <label htmlFor={`lane-toggle-${kind}`} className="flex-1 min-w-0 cursor-pointer">
+                <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
+                <div className="text-[9px] text-slate-400 truncate">{hint}</div>
+              </label>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
