@@ -2187,6 +2187,21 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         working_dir.mkdir(parents=True, exist_ok=True)
         output_path = build_normalized_output_path(audio_path, working_dir)
 
+        # If the source WAV is already living at the destination (e.g. a
+        # processed-speaker import landed the file directly under
+        # audio/working/<speaker>/), we can't ask ffmpeg to read-and-write the
+        # same file — it will truncate the input mid-read. Route the output
+        # through a sibling temp path and atomically replace after ffmpeg
+        # reports success.
+        try:
+            inplace = output_path.resolve() == audio_path.resolve()
+        except OSError:
+            inplace = str(output_path) == str(audio_path)
+        if inplace:
+            write_path = output_path.with_name(output_path.stem + ".normalized.tmp.wav")
+        else:
+            write_path = output_path
+
         # Pass 2: apply loudnorm with measured stats for precise normalization
         normalize_filter = "loudnorm=I={target}".format(target=NORMALIZE_LUFS_TARGET)
         if measured_i and measured_tp and measured_lra and measured_thresh:
@@ -2213,7 +2228,7 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
             "-ac", NORMALIZE_CHANNELS,
             "-c:a", NORMALIZE_AUDIO_CODEC,
             "-sample_fmt", NORMALIZE_SAMPLE_FORMAT,
-            str(output_path),
+            str(write_path),
         ]
         proc = subprocess.run(
             normalize_cmd,
@@ -2223,11 +2238,21 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         )
 
         if proc.returncode != 0:
-            error_tail = (proc.stderr or "")[-500:]
-            raise RuntimeError("ffmpeg normalize failed: {0}".format(error_tail))
+            error_tail = (proc.stderr or "")[-800:]
+            if inplace and write_path.exists():
+                try:
+                    write_path.unlink()
+                except OSError:
+                    pass
+            raise RuntimeError("ffmpeg normalize failed (exit {0}): {1}".format(proc.returncode, error_tail))
 
-        if not output_path.exists():
+        if not write_path.exists():
             raise RuntimeError("ffmpeg produced no output file")
+
+        if inplace:
+            # Atomic same-filesystem swap keeps the workspace consistent —
+            # there's never a window where output_path is missing.
+            os.replace(str(write_path), str(output_path))
 
         _set_job_progress(job_id, 95.0, message="Finalizing")
 
