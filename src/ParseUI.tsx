@@ -1736,9 +1736,11 @@ export function ParseUI() {
     const store = useEnrichmentStore.getState();
     const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
     const prevFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, Record<string, boolean>> : {};
-    const conceptBlock = { ...(prevFlags[conceptKey] ?? {}) };
-    if (current) delete conceptBlock[speaker];
-    else conceptBlock[speaker] = true;
+    // The enrichment store's deep-merge only walks keys present in the patch,
+    // so `delete`-ing the key would leave the stored `true` intact. Explicitly
+    // write `false` to clear the flag instead.
+    const conceptBlock: Record<string, boolean> = { ...(prevFlags[conceptKey] ?? {}) };
+    conceptBlock[speaker] = !current;
     const patch = { manual_overrides: { speaker_flags: { [conceptKey]: conceptBlock } } };
     void store.save(patch);
   };
