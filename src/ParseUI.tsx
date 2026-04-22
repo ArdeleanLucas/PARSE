@@ -75,6 +75,19 @@ const simBar = (v: number) =>
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 
+/** Render a number of seconds as ``MM:SS.cs`` — the same format the
+ *  Annotate playback bar shows under the waveform. Lifted to module
+ *  scope so the offset-capture toast + manual-anchor chips can mirror
+ *  it exactly (so users can verify what was captured against the
+ *  readout they were just looking at). */
+function formatPlaybackTime(t: number): string {
+  if (!Number.isFinite(t) || t < 0) return '00:00.00';
+  const m = Math.floor(t / 60).toString().padStart(2, '0');
+  const s = Math.floor(t % 60).toString().padStart(2, '0');
+  const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
+  return `${m}:${s}.${ms}`;
+}
+
 function isInteractiveHotkeyTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   const tag = target.tagName.toLowerCase();
@@ -1323,12 +1336,9 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
-  const fmt = (t: number) => {
-    const m = Math.floor(t / 60).toString().padStart(2, '0');
-    const s = Math.floor(t % 60).toString().padStart(2, '0');
-    const ms = Math.floor((t * 100) % 100).toString().padStart(2, '0');
-    return `${m}:${s}.${ms}`;
-  };
+  // fmt now lives at module scope (formatPlaybackTime) — kept as a local
+  // alias so the inline JSX below stays diff-friendly with prior versions.
+  const fmt = formatPlaybackTime;
 
   return (
     <main className="flex-1 overflow-y-auto bg-slate-50">
@@ -1970,9 +1980,11 @@ export function ParseUI() {
         },
       ];
     });
+    const offset = audio - csv;
+    const sign = offset >= 0 ? '+' : '';
     return {
       ok: true,
-      message: `Anchored ${conc.name}: ${(audio - csv).toFixed(2)}s offset.`,
+      message: `Anchored ${conc.name} @ ${formatPlaybackTime(audio)} → ${sign}${offset.toFixed(2)}s offset.`,
     };
   };
 
@@ -3420,8 +3432,8 @@ export function ParseUI() {
                             <span className="font-semibold text-slate-800">{a.conceptName}</span>
                             <span className="ml-1 font-mono text-slate-400">{a.conceptKey}</span>
                           </div>
-                          <div className="font-mono text-[11px] text-slate-500 tabular-nums">
-                            {a.csvTimeSec.toFixed(2)} <span className="text-slate-300">→</span> {a.audioTimeSec.toFixed(2)}s
+                          <div className="font-mono text-[11px] text-slate-500 tabular-nums" title={`csv ${a.csvTimeSec.toFixed(3)}s → audio ${a.audioTimeSec.toFixed(3)}s`}>
+                            {formatPlaybackTime(a.csvTimeSec)} <span className="text-slate-300">→</span> {formatPlaybackTime(a.audioTimeSec)}
                           </div>
                           <div className={`w-16 text-right font-mono text-[11px] tabular-nums ${disagrees ? 'text-rose-600' : 'text-slate-700'}`}>
                             {sign}{pairOffset.toFixed(2)}s
