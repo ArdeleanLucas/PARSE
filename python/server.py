@@ -2338,6 +2338,108 @@ def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, 
     }
 
 
+def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill missing IPA cells on a speaker's annotation from the ortho tier.
+
+    For each ortho interval with text, generate IPA via the configured IPA
+    provider. If an ipa interval at the same (start, end) is empty or
+    absent, write the generated IPA. Intervals with existing non-empty IPA
+    are left alone unless `overwrite=True`, so this can be run repeatedly
+    without clobbering manual edits.
+
+    Payload: `{ "speaker": "Fail02", "overwrite": false }`.
+    """
+    speaker = _normalize_speaker_id(payload.get("speaker"))
+    overwrite = bool(payload.get("overwrite", False))
+
+    canonical_path = _project_root() / _annotation_record_relative_path(speaker)
+    legacy_path = _project_root() / _annotation_legacy_record_relative_path(speaker)
+
+    if canonical_path.is_file():
+        annotation_path = canonical_path
+    elif legacy_path.is_file():
+        annotation_path = legacy_path
+    else:
+        raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
+
+    annotation = _read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise RuntimeError("Annotation is not a JSON object")
+
+    tiers = annotation.get("tiers") or {}
+    ortho_tier = tiers.get("ortho") or {}
+    ortho_intervals = list(ortho_tier.get("intervals") or [])
+    if not ortho_intervals:
+        return {"speaker": speaker, "filled": 0, "skipped": 0, "total": 0, "message": "No ortho intervals."}
+
+    ipa_tier = tiers.setdefault("ipa", {"type": "interval", "display_order": 1, "intervals": []})
+    ipa_intervals: List[Dict[str, Any]] = list(ipa_tier.get("intervals") or [])
+
+    def _key(interval: Dict[str, Any]) -> Tuple[float, float]:
+        return (round(float(interval.get("start", 0.0)), 3), round(float(interval.get("end", 0.0)), 3))
+
+    ipa_by_key: Dict[Tuple[float, float], Dict[str, Any]] = {_key(i): i for i in ipa_intervals}
+
+    provider = get_ipa_provider()
+    metadata = annotation.get("metadata") if isinstance(annotation.get("metadata"), dict) else {}
+    language = str(metadata.get("language_code") or "und")
+
+    filled = 0
+    skipped = 0
+    total = len(ortho_intervals)
+
+    for idx, ortho in enumerate(ortho_intervals):
+        text = str(ortho.get("text") or "").strip()
+        key = _key(ortho)
+        existing = ipa_by_key.get(key)
+        existing_text = str((existing or {}).get("text") or "").strip()
+
+        if not text:
+            skipped += 1
+            continue
+        if existing_text and not overwrite:
+            skipped += 1
+            continue
+
+        try:
+            new_ipa = provider.to_ipa(text, language)
+        except Exception:
+            skipped += 1
+            continue
+
+        new_ipa = str(new_ipa or "").strip()
+        if not new_ipa:
+            skipped += 1
+            continue
+
+        if existing is not None:
+            existing["text"] = new_ipa
+        else:
+            new_interval = {"start": ortho["start"], "end": ortho["end"], "text": new_ipa}
+            ipa_intervals.append(new_interval)
+            ipa_by_key[key] = new_interval
+        filled += 1
+
+        progress = 5.0 + ((idx + 1) / total) * 90.0
+        _set_job_progress(job_id, progress, message="IPA {0}/{1}".format(idx + 1, total))
+
+    ipa_intervals.sort(key=lambda i: (float(i.get("start", 0.0)), float(i.get("end", 0.0))))
+    ipa_tier["intervals"] = ipa_intervals
+    tiers["ipa"] = ipa_tier
+    annotation["tiers"] = tiers
+    _annotation_touch_metadata(annotation, preserve_created=True)
+
+    _write_json_file(annotation_path, annotation)
+    # Keep both file shapes in sync (the server prefers .parse.json; external
+    # tooling sometimes writes the legacy .json).
+    if canonical_path != annotation_path:
+        _write_json_file(canonical_path, annotation)
+    if legacy_path != annotation_path:
+        _write_json_file(legacy_path, annotation)
+
+    return {"speaker": speaker, "filled": filled, "skipped": skipped, "total": total}
+
+
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
     try:
         normalized_type = str(compute_type or "").strip().lower()
@@ -2347,6 +2449,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_cognates(job_id, payload)
         elif normalized_type == "contact-lexemes":
             result = _compute_contact_lexemes(job_id, payload)
+        elif normalized_type in {"ipa_only", "ipa-only", "ipa"}:
+            result = _compute_speaker_ipa(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
