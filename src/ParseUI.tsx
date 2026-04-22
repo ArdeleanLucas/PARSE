@@ -995,6 +995,7 @@ interface ManageTagsProps {
   tags: LingTag[];
   concepts: Concept[];
   onCreateTag: (name: string, color: string) => void;
+  onUpdateTag: (id: string, name: string) => void;
   tagSearch: string; setTagSearch: (s: string) => void;
   newTagName: string; setNewTagName: (s: string) => void;
   newTagColor: string; setNewTagColor: (s: string) => void;
@@ -1008,12 +1009,14 @@ interface ManageTagsProps {
 const SWATCHES = ['#6366f1','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4','#ec4899','#64748b'];
 
 const ManageTagsView: React.FC<ManageTagsProps> = ({
-  tags, concepts, onCreateTag, tagSearch, setTagSearch, newTagName, setNewTagName,
+  tags, concepts, onCreateTag, onUpdateTag, tagSearch, setTagSearch, newTagName, setNewTagName,
   newTagColor, setNewTagColor, showUntagged, setShowUntagged,
   selectedTagId, setSelectedTagId, conceptSearch, setConceptSearch,
   tagConcept, untagConcept,
 }) => {
   const [checkedConceptIds, setCheckedConceptIds] = useState<Set<string>>(new Set());
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
   const selectedTag = tags.find(t => t.id === selectedTagId);
   const filteredConcepts = concepts.filter(c => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
@@ -1089,16 +1092,67 @@ const ManageTagsView: React.FC<ManageTagsProps> = ({
             <div className="mt-2 space-y-1">
               {filteredTags.map(t => {
                 const active = selectedTagId === t.id;
+                const editing = editingTagId === t.id;
                 return (
-                  <button
-                    key={t.id}
-                    onClick={() => setSelectedTagId(t.id)}
-                    className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition ${active ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'}`}
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: t.color, boxShadow: '0 0 0 1px rgb(226 232 240)' }}/>
-                    <span className={`flex-1 text-[13px] ${active ? 'font-semibold text-indigo-900' : 'font-medium text-slate-700'}`}>{t.name}</span>
-                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{t.count}</span>
-                  </button>
+                  <div key={t.id} className={`rounded-lg ${active ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'}`}>
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <button
+                        onClick={() => setSelectedTagId(t.id)}
+                        className="group flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: t.color, boxShadow: '0 0 0 1px rgb(226 232 240)' }}/>
+                        <span className={`flex-1 truncate text-[13px] ${active ? 'font-semibold text-indigo-900' : 'font-medium text-slate-700'}`}>{t.name}</span>
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{t.count}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Edit tag"
+                        onClick={() => {
+                          setEditingTagId(t.id);
+                          setEditingTagName(t.name);
+                        }}
+                        className="rounded-md px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-800"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    {editing && (
+                      <div className="border-t border-indigo-100 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            aria-label="Rename tag"
+                            value={editingTagName}
+                            onChange={e => setEditingTagName(e.target.value)}
+                            className="flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                          />
+                          <button
+                            type="button"
+                            aria-label="Save tag"
+                            onClick={() => {
+                              if (!editingTagName.trim()) return;
+                              onUpdateTag(t.id, editingTagName.trim());
+                              setEditingTagId(null);
+                              setEditingTagName('');
+                            }}
+                            className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Cancel rename"
+                            onClick={() => {
+                              setEditingTagId(null);
+                              setEditingTagName('');
+                            }}
+                            className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1668,6 +1722,7 @@ export function ParseUI() {
   const storeAddTag      = useTagStore(s => s.addTag);
   const hydrateTagStore  = useTagStore(s => s.hydrate);
   const syncTagStoreFromServer = useTagStore(s => s.syncFromServer);
+  const updateStoreTag   = useTagStore(s => s.updateTag);
   const tagConcept       = useTagStore(s => s.tagConcept);
   const untagConcept     = useTagStore(s => s.untagConcept);
   const getTagsForConcept = useTagStore(s => s.getTagsForConcept);
@@ -2530,6 +2585,11 @@ export function ParseUI() {
               tags={tagsList}
               concepts={concepts}
               onCreateTag={(name, color) => { if (!name.trim()) return; storeAddTag(name, color); setNewTagName(''); }}
+              onUpdateTag={(id, name) => {
+                const existing = storeTags.find(t => t.id === id);
+                if (!existing || !name.trim()) return;
+                updateStoreTag(id, { label: name.trim(), color: existing.color });
+              }}
               tagSearch={tagSearch}
               setTagSearch={setTagSearch}
               newTagName={newTagName}

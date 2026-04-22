@@ -22,6 +22,7 @@ const mockSetInterval = vi.fn();
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockTagConcept = vi.fn();
 const mockUntagConcept = vi.fn();
+const mockUpdateTag = vi.fn();
 const mockSetSelectedRegion = vi.fn();
 const mockSetActiveSpeaker = vi.fn();
 const mockSetActiveConcept = vi.fn();
@@ -40,6 +41,7 @@ const mockTagSetState = vi.fn();
 const mockPlaybackSetState = vi.fn();
 const mockConfigSetState = vi.fn();
 const mockLoadEnrichments = vi.fn().mockResolvedValue(undefined);
+const mockSaveEnrichments = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
@@ -60,6 +62,7 @@ vi.mock("./stores/tagStore", () => {
       tags: mockTags,
       hydrate: mockHydrateTags,
       syncFromServer: mockSyncTagsFromServer,
+      updateTag: mockUpdateTag,
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
       getTagsForConcept: (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId)),
@@ -126,17 +129,19 @@ vi.mock("./hooks/useWaveSurfer", () => ({
 
 vi.mock("./stores/enrichmentStore", () => {
   const useEnrichmentStore = (selector: (s: unknown) => unknown) =>
-    selector({ data: mockEnrichmentData, loading: false, load: mockLoadEnrichments, save: vi.fn() });
+    selector({ data: mockEnrichmentData, loading: false, load: mockLoadEnrichments, save: mockSaveEnrichments });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockEnrichmentSetState(...args);
   // cycleSpeakerCognate / toggleSpeakerFlag read manual_overrides via
   // .getState() — provide a zustand-shaped accessor that resolves lazily
   // (not at mock-hoist time) so `mockEnrichmentData` is initialised.
-  (useEnrichmentStore as unknown as { getState: () => unknown }).getState = () => ({
+  (useEnrichmentStore as unknown as {
+    getState: () => { data: Record<string, unknown>; loading: boolean; load: () => Promise<void>; save: typeof mockSaveEnrichments };
+  }).getState = () => ({
     data: mockEnrichmentData,
     loading: false,
-    load: vi.fn(),
-    save: vi.fn(),
+    load: mockLoadEnrichments,
+    save: mockSaveEnrichments,
   });
   return { useEnrichmentStore };
 });
@@ -234,6 +239,7 @@ beforeEach(() => {
   mockSetInterval.mockClear();
   mockSaveSpeaker.mockClear();
   mockTagConcept.mockClear();
+  mockUpdateTag.mockClear();
   mockUntagConcept.mockClear();
   mockSetSelectedRegion.mockClear();
   mockSetActiveSpeaker.mockClear();
@@ -260,6 +266,7 @@ beforeEach(() => {
   vi.mocked(apiClient.saveApiKey).mockClear();
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
+  mockSaveEnrichments.mockClear();
   mockTagSetState.mockClear();
   mockPlaybackSetState.mockClear();
   mockConfigSetState.mockClear();
@@ -456,17 +463,15 @@ describe("ParseUI", () => {
     expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
   });
 
-  it("compare table row flag button targets a single speaker (not the whole concept)", () => {
-    // The flag button now writes per-speaker state to
-    // `manual_overrides.speaker_flags[concept][speaker]` via the enrichment
-    // store, rather than toggling the concept-wide `problematic` tag. That
-    // change means flagging Fail01 must NOT pull the whole concept into the
-    // Flagged tab — only Fail01 shows as amber.
+  it("compare table row flag button targets a single speaker via enrichment overrides", () => {
     render(<ParseUI />);
 
-    fireEvent.click(screen.getByTitle("Toggle flag for Fail01"));
+    fireEvent.click(screen.getByTestId("speaker-flag-Fail01"));
     expect(mockUntagConcept).not.toHaveBeenCalled();
     expect(mockTagConcept).not.toHaveBeenCalledWith("problematic", "1");
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { speaker_flags: { "1": { Fail01: true } } },
+    });
   });
 
   it("opens the speaker import modal from the Actions menu", async () => {
@@ -476,6 +481,24 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import Speaker Data…" }));
 
     expect(await screen.findByTestId("speaker-import")).toBeTruthy();
+  });
+
+  it("supports renaming an existing tag in Tags mode", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Tags\s*T/i }));
+
+    const reviewButtons = await screen.findAllByRole("button", { name: /Review needed/i });
+    fireEvent.click(reviewButtons[0]);
+    const editButtons = screen.getAllByRole("button", { name: /Edit tag/i });
+    fireEvent.click(editButtons[0]);
+
+    const renameInput = screen.getByDisplayValue("Review needed");
+    fireEvent.change(renameInput, { target: { value: "Oxford core" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save tag/i }));
+
+    expect(mockUpdateTag).toHaveBeenCalledWith("review-needed", { label: "Oxford core", color: "#f59e0b" });
   });
 
   it("renames the mode menu label to Tags", async () => {
