@@ -140,6 +140,34 @@ export async function updateConfig(patch: Partial<ProjectConfig>): Promise<void>
   });
 }
 
+export interface ImportConceptsResult {
+  ok: boolean;
+  matched: number;
+  added: number;
+  total: number;
+  mode: "merge" | "replace";
+}
+
+export async function importConceptsCsv(
+  file: File,
+  mode: "merge" | "replace" = "merge",
+): Promise<ImportConceptsResult> {
+  const form = new FormData();
+  form.append("csv", file);
+  form.append("mode", mode);
+  let response: Response;
+  try {
+    response = await fetch("/api/concepts/import", { method: "POST", body: form });
+  } catch (error) {
+    throw networkError("/api/concepts/import", { method: "POST" }, error);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`API POST /api/concepts/import failed ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ImportConceptsResult>;
+}
+
 // Auth
 export async function getAuthStatus(): Promise<AuthStatus> {
   return apiFetch<AuthStatus>("/api/auth/status");

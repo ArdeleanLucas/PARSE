@@ -25,6 +25,8 @@ export interface AnnotationRecord {
 export interface ConceptEntry {
   id: string;
   label: string;
+  survey_item?: string;
+  custom_order?: number;
 }
 
 export interface ProjectConfig {

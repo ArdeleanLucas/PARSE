@@ -664,8 +664,22 @@ def _workspace_frontend_config(base_config: Optional[Dict[str, Any]] = None) -> 
             for row in reader:
                 cid = str(row.get("id") or "").strip()
                 label = str(row.get("concept_en") or "").strip()
-                if cid and label:
-                    concepts.append({"id": cid, "label": label})
+                if not (cid and label):
+                    continue
+                entry: Dict[str, Any] = {"id": cid, "label": label}
+                survey_item = str(row.get("survey_item") or "").strip()
+                if survey_item:
+                    entry["survey_item"] = survey_item
+                custom_order_raw = str(row.get("custom_order") or "").strip()
+                if custom_order_raw:
+                    try:
+                        entry["custom_order"] = int(custom_order_raw)
+                    except ValueError:
+                        try:
+                            entry["custom_order"] = float(custom_order_raw)
+                        except ValueError:
+                            pass
+                concepts.append(entry)
 
     language_block = project_payload.get("language") if isinstance(project_payload.get("language"), dict) else {}
     language_code = str(
@@ -2591,6 +2605,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_tags_merge()
             return
 
+        if request_path == "/api/concepts/import":
+            self._api_post_concepts_import()
+            return
+
         parts = self._path_parts(request_path)
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
@@ -3310,6 +3328,149 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         merged = _deep_merge_dicts(current, body)
         _write_json_file(_config_path(), merged)
         self._send_json(HTTPStatus.OK, {"success": True, "config": merged})
+
+    def _api_post_concepts_import(self) -> None:
+        """Merge survey_item / custom_order from an uploaded CSV into concepts.csv.
+
+        Upload format (CSV with header):
+            - `id` or `concept_en` (at least one for matching)
+            - `survey_item` (optional string)
+            - `custom_order` (optional integer; blank/non-numeric clears the field)
+
+        Matching: `id` first, then case-insensitive `concept_en`.
+        Rows in the existing concepts.csv that aren't in the upload keep their
+        existing `survey_item` / `custom_order`. Pass `?mode=replace` to clear
+        those fields on non-matching rows instead.
+        """
+        import csv as _csv
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
+
+        raw_length = self.headers.get("Content-Length", "")
+        try:
+            content_length = int(raw_length)
+        except (ValueError, TypeError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
+        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
+            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
+
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": str(content_length),
+        }
+        form = cgi.FieldStorage(
+            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
+        )
+
+        csv_item = form["csv"] if "csv" in form else None
+        if csv_item is None or not getattr(csv_item, "filename", None):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
+
+        try:
+            csv_text = csv_item.file.read().decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
+
+        mode_field = form.getfirst("mode", "") if "mode" in form else ""
+        replace_mode = str(mode_field or "").strip().lower() == "replace"
+
+        try:
+            reader = _csv.DictReader(io.StringIO(csv_text))
+            upload_rows = list(reader)
+        except _csv.Error as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv parse error: {0}".format(exc))
+
+        if not upload_rows:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv is empty")
+
+        fieldnames = [str(n or "").strip().lower() for n in (reader.fieldnames or [])]
+        if "id" not in fieldnames and "concept_en" not in fieldnames:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must have an id or concept_en column")
+
+        # Load existing
+        concepts_path = _project_root() / "concepts.csv"
+        existing: List[Dict[str, str]] = []
+        if concepts_path.exists():
+            with open(concepts_path, newline="", encoding="utf-8") as f:
+                existing = list(_csv.DictReader(f))
+
+        by_id: Dict[str, int] = {}
+        by_label: Dict[str, int] = {}
+        for idx, row in enumerate(existing):
+            rid = _normalize_concept_id(row.get("id"))
+            lbl = str(row.get("concept_en") or "").strip().lower()
+            if rid:
+                by_id[rid] = idx
+            if lbl:
+                by_label[lbl] = idx
+
+        if replace_mode:
+            for row in existing:
+                row["survey_item"] = ""
+                row["custom_order"] = ""
+
+        matched = 0
+        added = 0
+        for up in upload_rows:
+            up_id = _normalize_concept_id(up.get("id"))
+            up_label = str(up.get("concept_en") or "").strip()
+            target_idx: Optional[int] = None
+            if up_id and up_id in by_id:
+                target_idx = by_id[up_id]
+            elif up_label and up_label.lower() in by_label:
+                target_idx = by_label[up_label.lower()]
+
+            survey_raw = str(up.get("survey_item") or "").strip() if "survey_item" in up else ""
+            custom_raw = str(up.get("custom_order") or "").strip() if "custom_order" in up else ""
+
+            if target_idx is None:
+                if not up_label:
+                    continue
+                if not up_id:
+                    # Auto-assign next numeric id so imports that only specify labels work.
+                    existing_ids = {_normalize_concept_id(r.get("id")) for r in existing}
+                    next_id = 1
+                    while str(next_id) in existing_ids:
+                        next_id += 1
+                    up_id = str(next_id)
+                row = {
+                    "id": up_id,
+                    "concept_en": up_label,
+                    "survey_item": survey_raw,
+                    "custom_order": custom_raw,
+                }
+                existing.append(row)
+                by_id[up_id] = len(existing) - 1
+                by_label[up_label.lower()] = len(existing) - 1
+                added += 1
+            else:
+                row = existing[target_idx]
+                if survey_raw:
+                    row["survey_item"] = survey_raw
+                if custom_raw:
+                    row["custom_order"] = custom_raw
+                matched += 1
+
+        fieldnames_out = ["id", "concept_en", "survey_item", "custom_order"]
+        concepts_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(concepts_path, "w", newline="", encoding="utf-8") as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames_out)
+            writer.writeheader()
+            for row in existing:
+                writer.writerow({k: row.get(k, "") or "" for k in fieldnames_out})
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "matched": matched,
+                "added": added,
+                "total": len(existing),
+                "mode": "replace" if replace_mode else "merge",
+            },
+        )
 
     def _parse_single_range(self, range_header: str, file_size: int) -> Tuple[int, int]:
         unit, _, ranges_spec = range_header.partition("=")
