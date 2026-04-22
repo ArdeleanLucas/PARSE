@@ -56,7 +56,7 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 interface SpeakerForm {
   speaker: string; ipa: string; ortho: string; utterances: number;
   arabicSim: number; persianSim: number;
-  cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
+  cognate: string; flagged: boolean;
   startSec: number | null; endSec: number | null;
 }
 
@@ -159,8 +159,9 @@ function buildSpeakerForm(
     ?? (autoSets && isRecord(autoSets[concept.key]) ? autoSets[concept.key] : null);
   let cognate: SpeakerForm['cognate'] = '—';
   if (conceptCognates && isRecord(conceptCognates)) {
+    // Accept any single-letter group A–Z; first match wins.
     for (const [group, members] of Object.entries(conceptCognates)) {
-      if (Array.isArray(members) && members.includes(speaker) && (group === 'A' || group === 'B' || group === 'C')) {
+      if (Array.isArray(members) && members.includes(speaker) && /^[A-Z]$/.test(group)) {
         cognate = group;
         break;
       }
@@ -243,6 +244,100 @@ const SimBar: React.FC<{ value: number }> = ({ value }) => (
     <span className={`text-xs font-mono tabular-nums ${simColor(value)}`}>{value.toFixed(2)}</span>
   </div>
 );
+
+// Per-speaker cognate cell. Click cycles A → B → … → Z → — → A. A long press
+// (≥500 ms) resets to —. The button swallows the subsequent click after a
+// long-press fires so cycle doesn't also run.
+const COGNATE_COLORS: Record<string, string> = {
+  A: 'bg-indigo-100 text-indigo-700',
+  B: 'bg-violet-100 text-violet-700',
+  C: 'bg-fuchsia-100 text-fuchsia-700',
+  D: 'bg-rose-100 text-rose-700',
+  E: 'bg-orange-100 text-orange-700',
+  F: 'bg-amber-100 text-amber-700',
+  G: 'bg-lime-100 text-lime-700',
+  H: 'bg-emerald-100 text-emerald-700',
+  I: 'bg-teal-100 text-teal-700',
+  J: 'bg-cyan-100 text-cyan-700',
+  K: 'bg-sky-100 text-sky-700',
+  L: 'bg-blue-100 text-blue-700',
+  M: 'bg-indigo-200 text-indigo-800',
+  N: 'bg-violet-200 text-violet-800',
+  O: 'bg-fuchsia-200 text-fuchsia-800',
+  P: 'bg-rose-200 text-rose-800',
+  Q: 'bg-orange-200 text-orange-800',
+  R: 'bg-amber-200 text-amber-800',
+  S: 'bg-lime-200 text-lime-800',
+  T: 'bg-emerald-200 text-emerald-800',
+  U: 'bg-teal-200 text-teal-800',
+  V: 'bg-cyan-200 text-cyan-800',
+  W: 'bg-sky-200 text-sky-800',
+  X: 'bg-blue-200 text-blue-800',
+  Y: 'bg-slate-200 text-slate-800',
+  Z: 'bg-stone-200 text-stone-800',
+};
+
+const CognateCell: React.FC<{
+  speaker: string;
+  group: string;
+  onCycle: () => void;
+  onReset: () => void;
+}> = ({ speaker, group, onCycle, onReset }) => {
+  const timerRef = React.useRef<number | null>(null);
+  const longPressFiredRef = React.useRef(false);
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startPress = () => {
+    longPressFiredRef.current = false;
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      onReset();
+    }, 500);
+  };
+
+  const cancelPress = () => {
+    clearTimer();
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false; // suppress cycle after long-press reset
+      return;
+    }
+    onCycle();
+  };
+
+  const colorClass = /^[A-Z]$/.test(group)
+    ? COGNATE_COLORS[group] ?? 'bg-slate-200 text-slate-800'
+    : 'bg-slate-100 text-slate-400';
+
+  const next = group === '\u2014' || !/^[A-Z]$/.test(group) ? 'A'
+    : group === 'Z' ? '\u2014'
+    : String.fromCharCode(group.charCodeAt(0) + 1);
+
+  return (
+    <button
+      data-testid={`cognate-cycle-${speaker}`}
+      title={`Click cycles → ${next} · Long-press resets to —`}
+      onPointerDown={startPress}
+      onPointerUp={cancelPress}
+      onPointerLeave={cancelPress}
+      onPointerCancel={cancelPress}
+      onClick={handleClick}
+      className={`inline-flex h-5 min-w-[24px] items-center justify-center rounded px-1 font-mono text-[10px] font-bold hover:ring-2 hover:ring-slate-300 ${colorClass}`}
+    >
+      {group}
+    </button>
+  );
+};
 
 const Pill: React.FC<{ children: React.ReactNode; tone?: 'slate'|'emerald'|'indigo' }> = ({ children, tone='slate' }) => {
   const tones: Record<string,string> = {
@@ -1599,9 +1694,7 @@ export function ParseUI() {
     });
   };
 
-  const cycleSpeakerCognate = (conceptKey: string, speaker: string, current: 'A' | 'B' | 'C' | '\u2014') => {
-    const next: 'A' | 'B' | 'C' | null =
-      current === '\u2014' ? 'A' : current === 'A' ? 'B' : current === 'B' ? 'C' : null;
+  const writeSpeakerCognate = (conceptKey: string, speaker: string, nextGroup: string | null) => {
     const store = useEnrichmentStore.getState();
     const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
     const prevSets = isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, Record<string, string[]>> : {};
@@ -1614,21 +1707,40 @@ export function ParseUI() {
     for (const [group, members] of Object.entries(baseline)) {
       cleaned[group] = (Array.isArray(members) ? members : []).filter((m) => m !== speaker);
     }
-    if (next) {
-      const existing = cleaned[next] ?? [];
-      if (!existing.includes(speaker)) cleaned[next] = [...existing, speaker];
+    if (nextGroup) {
+      const existing = cleaned[nextGroup] ?? [];
+      if (!existing.includes(speaker)) cleaned[nextGroup] = [...existing, speaker];
     }
     const patch = { manual_overrides: { cognate_sets: { [conceptKey]: cleaned } } };
     void store.save(patch);
+  };
+
+  const cycleSpeakerCognate = (conceptKey: string, speaker: string, current: string) => {
+    // A → B → C → … → Z → — → A.
+    let next: string | null;
+    if (current === '\u2014' || !/^[A-Z]$/.test(current)) {
+      next = 'A';
+    } else if (current === 'Z') {
+      next = null;
+    } else {
+      next = String.fromCharCode(current.charCodeAt(0) + 1);
+    }
+    writeSpeakerCognate(conceptKey, speaker, next);
+  };
+
+  const resetSpeakerCognate = (conceptKey: string, speaker: string) => {
+    writeSpeakerCognate(conceptKey, speaker, null);
   };
 
   const toggleSpeakerFlag = (conceptKey: string, speaker: string, current: boolean) => {
     const store = useEnrichmentStore.getState();
     const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
     const prevFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, Record<string, boolean>> : {};
-    const conceptBlock = { ...(prevFlags[conceptKey] ?? {}) };
-    if (current) delete conceptBlock[speaker];
-    else conceptBlock[speaker] = true;
+    // The enrichment store's deep-merge only walks keys present in the patch,
+    // so `delete`-ing the key would leave the stored `true` intact. Explicitly
+    // write `false` to clear the flag instead.
+    const conceptBlock: Record<string, boolean> = { ...(prevFlags[conceptKey] ?? {}) };
+    conceptBlock[speaker] = !current;
     const patch = { manual_overrides: { speaker_flags: { [conceptKey]: conceptBlock } } };
     void store.save(patch);
   };
@@ -2568,19 +2680,12 @@ export function ParseUI() {
                           <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
                           <td className="px-3 py-2.5"><SimBar value={f.persianSim}/></td>
                           <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              data-testid={`cognate-cycle-${f.speaker}`}
-                              title={`Cycle cognate: ${f.cognate} → ${f.cognate === '—' ? 'A' : f.cognate === 'A' ? 'B' : f.cognate === 'B' ? 'C' : '—'}`}
-                              onClick={() => cycleSpeakerCognate(concept.key, f.speaker, f.cognate)}
-                              className={`inline-flex h-5 min-w-[24px] items-center justify-center rounded px-1 font-mono text-[10px] font-bold hover:ring-2 hover:ring-slate-300 ${
-                                f.cognate==='A'?'bg-indigo-100 text-indigo-700':
-                                f.cognate==='B'?'bg-violet-100 text-violet-700':
-                                f.cognate==='C'?'bg-fuchsia-100 text-fuchsia-700':
-                                'bg-slate-100 text-slate-400'
-                              }`}
-                            >
-                              {f.cognate}
-                            </button>
+                            <CognateCell
+                              speaker={f.speaker}
+                              group={f.cognate}
+                              onCycle={() => cycleSpeakerCognate(concept.key, f.speaker, f.cognate)}
+                              onReset={() => resetSpeakerCognate(concept.key, f.speaker)}
+                            />
                           </td>
                           <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                             <button
