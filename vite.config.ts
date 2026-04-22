@@ -43,6 +43,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: false,
       },
+      "/peaks": {
+        target: parseApiTarget,
+        changeOrigin: true,
+        ws: false,
+      },
     },
   },
   test: {

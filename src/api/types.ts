@@ -17,9 +17,16 @@ export interface AnnotationTier {
 export interface AnnotationRecord {
   speaker: string;
   tiers: Record<string, AnnotationTier>; // keys: ipa, ortho, concept, speaker
-  created_at: string;
-  modified_at: string;
-  source_wav: string;
+  created_at?: string;
+  modified_at?: string;
+  source_wav?: string;
+  /**
+   * Project-relative path to the source audio, e.g. "audio/working/Fail02/foo.wav".
+   * The Python server normalizer emits this key; `source_wav` is the historical
+   * blank-record shape. Prefer `source_audio` when both exist.
+   */
+  source_audio?: string;
+  source_audio_duration_sec?: number;
 }
 
 export interface ConceptEntry {
