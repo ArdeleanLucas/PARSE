@@ -683,6 +683,12 @@ def _looks_like_cuda_runtime_failure(message: str) -> bool:
     return any(marker in text for marker in _CUDA_RUNTIME_FAILURE_MARKERS)
 
 
+def _stt_force_cpu_env() -> bool:
+    """Respect PARSE_STT_FORCE_CPU as an emergency escape hatch."""
+    value = os.environ.get("PARSE_STT_FORCE_CPU", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _register_cuda_dll_directories() -> None:
     """Register cuBLAS / cuDNN DLL directories on Windows.
 
@@ -975,6 +981,15 @@ class LocalWhisperProvider(AIProvider):
             str(compute_type or stt_config.get("compute_type", "int8")).strip() or "int8"
         )
 
+        if _stt_force_cpu_env() and self.device.lower().startswith("cuda"):
+            print(
+                "[WARN] PARSE_STT_FORCE_CPU set; overriding stt.device "
+                "'{0}' → 'cpu' and compute_type → 'int8' before model load.".format(self.device),
+                file=sys.stderr,
+            )
+            self.device = "cpu"
+            self.compute_type = "int8"
+
         self._whisper_model: Optional[Any] = None
         self._model_source: Optional[str] = None
         self._effective_device: Optional[str] = None
@@ -1113,20 +1128,43 @@ class LocalWhisperProvider(AIProvider):
         try:
             segments_out = _run_transcription(model)
         except Exception as exc:
-            if self._effective_device == "cuda":
+            on_cuda = (
+                self._effective_device is not None
+                and self._effective_device.lower().startswith("cuda")
+            )
+            cuda_failure = on_cuda or _looks_like_cuda_runtime_failure(str(exc))
+            if not cuda_failure:
+                raise
+
+            print(
+                "[WARN] CUDA inference failed mid-transcription: {0}. "
+                "Rebuilding model on CPU/int8 and retrying. To use GPU, install "
+                "the matching cuDNN / cuBLAS runtime — typically "
+                "`pip install nvidia-cudnn-cu12 nvidia-cublas-cu12`.".format(exc),
+                file=sys.stderr,
+            )
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+            from faster_whisper import WhisperModel as _WM
+            cpu_source = self._model_source or self.model_path or "base"
+            try:
+                cpu_model = _WM(cpu_source, device="cpu", compute_type="int8")
+            except Exception as cpu_exc:
                 print(
-                    "[WARN] CUDA inference failed mid-transcription: {0}. "
-                    "Rebuilding model on CPU/int8 and retrying.".format(exc),
+                    "[ERROR] CPU fallback rebuild failed for model '{0}': {1}".format(
+                        cpu_source, cpu_exc
+                    ),
                     file=sys.stderr,
                 )
-                from faster_whisper import WhisperModel as _WM
-                cpu_model = _WM(self._model_source, device="cpu", compute_type="int8")
-                self._whisper_model = cpu_model
-                self._effective_device = "cpu"
-                self._effective_compute_type = "int8"
-                segments_out = _run_transcription(cpu_model)
-            else:
-                raise
+                raise RuntimeError(
+                    "STT mid-transcription CUDA failure and CPU fallback both failed. "
+                    "Original GPU error: {0}. CPU fallback error: {1}".format(exc, cpu_exc)
+                ) from cpu_exc
+
+            self._whisper_model = cpu_model
+            self._effective_device = "cpu"
+            self._effective_compute_type = "int8"
+            segments_out = _run_transcription(cpu_model)
 
         if progress_callback is not None:
             progress_callback(100.0, len(segments_out))
