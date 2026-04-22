@@ -7,6 +7,7 @@ import { BorrowingPanel } from "./BorrowingPanel";
 import { EnrichmentsPanel } from "./EnrichmentsPanel";
 import { TagManager } from "./TagManager";
 import { SpeakerImport } from "./SpeakerImport";
+import { CommentsImport } from "./CommentsImport";
 import { useUIStore } from "../../stores/uiStore";
 import { useEnrichmentStore } from "../../stores/enrichmentStore";
 import { useTagStore } from "../../stores/tagStore";
@@ -30,6 +31,7 @@ export function CompareMode() {
   const hydrateTags = useTagStore((store) => store.hydrate);
 
   const [importOpen, setImportOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [showLexemes, setShowLexemes] = useState(false);
 
   useEffect(() => {
@@ -52,6 +54,13 @@ export function CompareMode() {
           style={{ padding: "0.25rem 0.75rem", cursor: "pointer", fontFamily: "monospace" }}
         >
           Import Speaker
+        </button>
+        <button
+          data-testid="open-comments-import"
+          onClick={() => setCommentsOpen(true)}
+          style={{ padding: "0.25rem 0.75rem", cursor: "pointer", fontFamily: "monospace" }}
+        >
+          Import Comments CSV
         </button>
       </TopBar>
 
@@ -132,6 +141,10 @@ export function CompareMode() {
 
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={() => setImportOpen(false)} />
+      </Modal>
+
+      <Modal open={commentsOpen} onClose={() => setCommentsOpen(false)} title="Import Audition Comments">
+        <CommentsImport onImportComplete={() => setCommentsOpen(false)} />
       </Modal>
     </div>
   );

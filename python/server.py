@@ -3145,6 +3145,247 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         _write_json_file(_enrichments_path(), enrichments_payload)
         self._send_json(HTTPStatus.OK, {"success": True})
 
+    # ── Lexeme notes (per speaker + concept) ────────────────────────
+
+    def _api_post_lexeme_note(self) -> None:
+        """Write a single lexeme-level note into parse-enrichments.json."""
+        body = self._expect_object(self._read_json_body(required=True), "Request body")
+        speaker_raw = str(body.get("speaker") or "").strip()
+        concept_id = _normalize_concept_id(body.get("concept_id"))
+        if not speaker_raw or not concept_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker and concept_id are required")
+        try:
+            speaker = _normalize_speaker_id(speaker_raw)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
+        notes_block = payload.get("lexeme_notes")
+        if not isinstance(notes_block, dict):
+            notes_block = {}
+            payload["lexeme_notes"] = notes_block
+        speaker_block = notes_block.get(speaker)
+        if not isinstance(speaker_block, dict):
+            speaker_block = {}
+            notes_block[speaker] = speaker_block
+
+        if body.get("delete") is True:
+            speaker_block.pop(concept_id, None)
+            if not speaker_block:
+                notes_block.pop(speaker, None)
+        else:
+            entry = speaker_block.get(concept_id)
+            if not isinstance(entry, dict):
+                entry = {}
+            if "user_note" in body:
+                entry["user_note"] = str(body.get("user_note") or "")
+            if "import_note" in body:
+                entry["import_note"] = str(body.get("import_note") or "")
+            entry["updated_at"] = _utc_now_iso()
+            speaker_block[concept_id] = entry
+
+        _write_json_file(_enrichments_path(), payload)
+        self._send_json(HTTPStatus.OK, {
+            "success": True,
+            "lexeme_notes": payload.get("lexeme_notes") or {},
+        })
+
+    def _api_post_lexeme_notes_import(self) -> None:
+        """Multipart POST — parse Audition comments CSV into lexeme_notes."""
+        from lexeme_notes import parse_audition_csv, match_rows_to_lexemes
+
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
+
+        raw_length = self.headers.get("Content-Length", "")
+        try:
+            content_length = int(raw_length)
+        except (ValueError, TypeError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
+        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
+            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
+
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": str(content_length),
+        }
+        form = cgi.FieldStorage(
+            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
+        )
+
+        speaker_field = form.getfirst("speaker_id", "") if "speaker_id" in form else ""
+        if isinstance(speaker_field, bytes):
+            speaker_field = speaker_field.decode("utf-8", errors="replace")
+        try:
+            speaker = _normalize_speaker_id(str(speaker_field or "").strip())
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        csv_item = form["csv"] if "csv" in form else None
+        if csv_item is None or not getattr(csv_item, "filename", None):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
+        try:
+            csv_text = csv_item.file.read().decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
+
+        rows = parse_audition_csv(csv_text)
+        if not rows:
+            self._send_json(HTTPStatus.OK, {
+                "success": True, "imported": 0, "matched": 0, "total_rows": 0,
+            })
+            return
+
+        annotation_path = _annotation_read_path_for_speaker(speaker)
+        annotation_payload = _read_json_any_file(annotation_path)
+        normalized = _normalize_annotation_record(annotation_payload, speaker)
+        tiers = normalized.get("tiers") or {}
+        concept_tier = tiers.get("concept") if isinstance(tiers, dict) else None
+        intervals: List[Dict[str, Any]] = []
+        if isinstance(concept_tier, dict):
+            for iv in concept_tier.get("intervals") or []:
+                if not isinstance(iv, dict):
+                    continue
+                cid = _normalize_concept_id(iv.get("text"))
+                if not cid:
+                    continue
+                try:
+                    start = float(iv.get("start") or 0.0)
+                    end = float(iv.get("end") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                intervals.append({"concept_id": cid, "start": start, "end": end})
+
+        concept_labels: Dict[str, str] = {}
+        try:
+            import csv as _csv
+            concepts_path = _project_root() / "concepts.csv"
+            if concepts_path.exists():
+                with open(concepts_path, newline="", encoding="utf-8") as fh:
+                    for row in _csv.DictReader(fh):
+                        cid = _normalize_concept_id(row.get("id"))
+                        label = str(row.get("concept_en") or "").strip()
+                        if cid and label:
+                            concept_labels[cid] = label
+        except Exception:
+            concept_labels = {}
+
+        matches = match_rows_to_lexemes(rows, intervals, concept_labels=concept_labels)
+
+        payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
+        notes_block = payload.get("lexeme_notes")
+        if not isinstance(notes_block, dict):
+            notes_block = {}
+            payload["lexeme_notes"] = notes_block
+        speaker_block = notes_block.get(speaker)
+        if not isinstance(speaker_block, dict):
+            speaker_block = {}
+            notes_block[speaker] = speaker_block
+
+        imported = 0
+        for match in matches:
+            note_text = str(match.get("note") or "").strip()
+            if not note_text:
+                continue
+            cid = _normalize_concept_id(match.get("concept_id"))
+            if not cid:
+                continue
+            entry = speaker_block.get(cid)
+            if not isinstance(entry, dict):
+                entry = {}
+            entry["import_note"] = note_text
+            entry["import_raw"] = str(match.get("raw_name") or "")
+            entry["updated_at"] = _utc_now_iso()
+            speaker_block[cid] = entry
+            imported += 1
+
+        _write_json_file(_enrichments_path(), payload)
+
+        self._send_json(HTTPStatus.OK, {
+            "success": True,
+            "speaker": speaker,
+            "total_rows": len(rows),
+            "imported": imported,
+            "matched": sum(1 for m in matches if m.get("was_matched")),
+            "lexeme_notes": payload.get("lexeme_notes") or {},
+        })
+
+    # ── Spectrogram (shared cache) ───────────────────────────────────
+
+    def _api_get_spectrogram(self) -> None:
+        """Return (or generate) a PNG spectrogram for a clip; cached on disk."""
+        import spectrograms as spectro_module
+        from urllib.parse import parse_qs
+
+        query = urlparse(self.path).query
+        params = {k: v[0] for k, v in parse_qs(query).items() if v}
+
+        speaker_raw = str(params.get("speaker") or "").strip()
+        if not speaker_raw:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
+        try:
+            speaker = _normalize_speaker_id(speaker_raw)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        try:
+            start_sec = float(params.get("start") or 0.0)
+            end_sec = float(params.get("end") or 0.0)
+        except ValueError:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "start and end must be numbers")
+        if end_sec <= start_sec:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "end must be greater than start")
+
+        audio_hint = str(params.get("audio") or "").strip()
+        audio_path: Optional[pathlib.Path] = None
+        if audio_hint:
+            try:
+                audio_path = _resolve_project_path(audio_hint)
+            except ValueError as exc:
+                raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+        else:
+            working_candidate = _project_root() / "audio" / "working" / speaker
+            if working_candidate.is_dir():
+                for candidate in sorted(working_candidate.iterdir()):
+                    if candidate.is_file() and candidate.suffix.lower() in {".wav", ".flac"}:
+                        audio_path = candidate
+                        break
+            if audio_path is None:
+                primary = _annotation_primary_source_wav(speaker)
+                if primary:
+                    try:
+                        audio_path = _resolve_project_path(primary)
+                    except ValueError as exc:
+                        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        if audio_path is None or not pathlib.Path(audio_path).is_file():
+            raise ApiError(HTTPStatus.NOT_FOUND, "No audio file resolved for speaker {0}".format(speaker))
+
+        cache_file = spectro_module.cache_path(_project_root(), speaker, start_sec, end_sec)
+        force = str(params.get("force") or "").strip().lower() in {"1", "true", "yes"}
+
+        try:
+            spectro_module.generate_spectrogram_png(
+                pathlib.Path(audio_path), start_sec, end_sec, cache_file, force=force,
+            )
+        except Exception as exc:
+            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, "spectrogram render failed: {0}".format(exc))
+
+        png_bytes = cache_file.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(png_bytes)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        for key, value in CORS_HEADERS.items():
+            self.send_header(key, value)
+        self.end_headers()
+        try:
+            self.wfile.write(png_bytes)
+        except BrokenPipeError:
+            pass
+
     # ── Auth endpoints ──────────────────────────────────────────────
 
     def _api_auth_key(self) -> None:

@@ -45,6 +45,13 @@ vi.mock("../../stores/tagStore", () => ({
       tags: mockTags,
       getTagsForConcept: (conceptId: string) =>
         mockTags.filter((t) => t.concepts.includes(conceptId)),
+      getTagsForLexeme: (speaker: string, conceptId: string) => {
+        const key = `${speaker}::${conceptId}`;
+        return mockTags.filter((t) => (t.lexemeTargets ?? []).includes(key));
+      },
+      tagLexeme: vi.fn(),
+      untagLexeme: vi.fn(),
+      addTag: vi.fn(),
     }),
 }));
 

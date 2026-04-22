@@ -28,6 +28,8 @@ import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
 import { ChatMarkdown } from './components/shared/ChatMarkdown';
+import { LexemeDetail } from './components/compare/LexemeDetail';
+import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -51,9 +53,10 @@ interface Concept {
 type ConceptSortMode = 'az' | '1n' | 'survey';
 
 interface SpeakerForm {
-  speaker: string; ipa: string; utterances: number;
+  speaker: string; ipa: string; ortho: string; utterances: number;
   arabicSim: number; persianSim: number;
   cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
+  startSec: number | null; endSec: number | null;
 }
 
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
@@ -152,14 +155,23 @@ function buildSpeakerForm(
     }
   }
 
+  const primaryConceptInterval = conceptIntervals[0] ?? null;
+  const orthoIntervals = record?.tiers.ortho?.intervals ?? [];
+  const matchingOrthoIntervals = orthoIntervals.filter((orthoInterval) =>
+    conceptIntervals.some((conceptInterval) => overlaps(orthoInterval, conceptInterval)),
+  );
+
   return {
     speaker,
     ipa: matchingIpaIntervals[0]?.text ?? '',
+    ortho: matchingOrthoIntervals[0]?.text ?? '',
     utterances: matchingIpaIntervals.length,
     arabicSim,
     persianSim,
     cognate,
     flagged,
+    startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
+    endSec: primaryConceptInterval ? primaryConceptInterval.end : null,
   };
 }
 
@@ -1529,6 +1541,17 @@ export function ParseUI() {
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [expandedLexemes, setExpandedLexemes] = useState<Set<string>>(new Set());
+  const [commentsImportOpen, setCommentsImportOpen] = useState(false);
+
+  const toggleLexemeExpanded = (speaker: string) => {
+    setExpandedLexemes((prev) => {
+      const next = new Set(prev);
+      if (next.has(speaker)) next.delete(speaker);
+      else next.add(speaker);
+      return next;
+    });
+  };
 
   // Auto-select speakers when config loads and we have none selected
   useEffect(() => {
@@ -2267,11 +2290,34 @@ export function ParseUI() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {speakerForms.map(f => (
-                        <tr key={f.speaker} className="bg-white transition hover:bg-indigo-50/30">
+                      {speakerForms.map(f => {
+                        const isExpanded = expandedLexemes.has(f.speaker);
+                        const cognateColor =
+                          f.cognate === 'A' ? '#dcfce7' :
+                          f.cognate === 'B' ? '#dbeafe' :
+                          f.cognate === 'C' ? '#fef9c3' :
+                          null;
+                        return (
+                        <React.Fragment key={f.speaker}>
+                        <tr
+                          data-testid={`speaker-row-${f.speaker}`}
+                          className={`bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
+                        >
                           <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
                           <td className="px-3 py-2.5">
-                            <div className="font-mono text-[13px] text-slate-800">/{f.ipa}/</div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                data-testid={`lexeme-toggle-${f.speaker}`}
+                                onClick={() => toggleLexemeExpanded(f.speaker)}
+                                className="font-mono text-[13px] text-indigo-700 underline-offset-2 hover:underline"
+                                title="Click to expand lexeme details"
+                              >
+                                /{f.ipa || '—'}/
+                              </button>
+                              <ChevronDown
+                                className={`h-3 w-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                              />
+                            </div>
                             <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
                           </td>
                           <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
@@ -2294,7 +2340,28 @@ export function ParseUI() {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        {isExpanded && (
+                          <tr data-testid={`lexeme-detail-row-${f.speaker}`}>
+                            <td colSpan={6} className="bg-slate-50 p-2">
+                              <LexemeDetail
+                                speaker={f.speaker}
+                                conceptId={concept.key}
+                                conceptLabel={concept.name}
+                                ipa={f.ipa}
+                                ortho={f.ortho}
+                                startSec={f.startSec}
+                                endSec={f.endSec}
+                                arabicSim={f.arabicSim}
+                                persianSim={f.persianSim}
+                                cognateGroup={f.cognate !== '—' ? f.cognate : null}
+                                cognateColor={cognateColor}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2626,6 +2693,13 @@ export function ParseUI() {
                       <Download className="h-3 w-3"/>
                       {exporting ? 'Exporting…' : 'Export LingPy TSV'}
                     </button>
+                    <button
+                      data-testid="open-comments-import"
+                      onClick={() => setCommentsImportOpen(true)}
+                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Upload className="h-3 w-3"/> Import Audition comments
+                    </button>
                   </div>
                 </div>
               </>
@@ -2723,6 +2797,9 @@ export function ParseUI() {
       />
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
+      </Modal>
+      <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
+        <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
       </Modal>
       <input
         type="file"
