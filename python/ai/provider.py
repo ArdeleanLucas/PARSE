@@ -882,6 +882,9 @@ class LocalWhisperProvider(AIProvider):
         )
 
         self._whisper_model: Optional[Any] = None
+        self._model_source: Optional[str] = None
+        self._effective_device: Optional[str] = None
+        self._effective_compute_type: Optional[str] = None
         self._epitran_instances: Dict[str, Any] = {}
 
     def _load_whisper_model(self) -> Any:
@@ -906,20 +909,46 @@ class LocalWhisperProvider(AIProvider):
                 file=sys.stderr,
             )
 
+        self._model_source = model_source
+
         try:
             self._whisper_model = WhisperModel(
                 model_source,
                 device=self.device,
                 compute_type=self.compute_type,
             )
+            self._effective_device = self.device
+            self._effective_compute_type = self.compute_type
         except Exception as exc:
-            print(
-                "[ERROR] Failed to load faster-whisper model '{0}': {1}".format(
-                    model_source, exc
-                ),
-                file=sys.stderr,
-            )
-            raise
+            if self.device.lower().startswith("cuda"):
+                print(
+                    "[WARN] Failed to load faster-whisper on CUDA ('{0}'): {1}. "
+                    "This commonly means cuBLAS/cuDNN DLLs are missing. "
+                    "Retrying on CPU/int8.".format(model_source, exc),
+                    file=sys.stderr,
+                )
+                try:
+                    self._whisper_model = WhisperModel(
+                        model_source, device="cpu", compute_type="int8"
+                    )
+                    self._effective_device = "cpu"
+                    self._effective_compute_type = "int8"
+                except Exception as cpu_exc:
+                    print(
+                        "[ERROR] CPU fallback also failed for model '{0}': {1}".format(
+                            model_source, cpu_exc
+                        ),
+                        file=sys.stderr,
+                    )
+                    raise cpu_exc from exc
+            else:
+                print(
+                    "[ERROR] Failed to load faster-whisper model '{0}': {1}".format(
+                        model_source, exc
+                    ),
+                    file=sys.stderr,
+                )
+                raise
 
         return self._whisper_model
 
@@ -937,33 +966,50 @@ class LocalWhisperProvider(AIProvider):
         model = self._load_whisper_model()
         selected_language = language or self.language
 
-        segments_out: List[Segment] = []
-        segments_iter, info = model.transcribe(
-            str(path),
-            language=selected_language,
-            beam_size=5,
-            vad_filter=True,
-        )
+        def _run_transcription(m: Any) -> List[Segment]:
+            segs_out: List[Segment] = []
+            segs_iter, info = m.transcribe(
+                str(path),
+                language=selected_language,
+                beam_size=5,
+                vad_filter=True,
+            )
+            total_duration = float(getattr(info, "duration", 0.0) or 0.0)
+            for segment in segs_iter:
+                start = float(_dict_or_attr(segment, "start", 0.0) or 0.0)
+                end = float(_dict_or_attr(segment, "end", start) or start)
+                text = str(_dict_or_attr(segment, "text", "") or "").strip()
+                avg_logprob = _dict_or_attr(segment, "avg_logprob", None)
+                segs_out.append(
+                    {
+                        "start": start,
+                        "end": end,
+                        "text": text,
+                        "confidence": _confidence_from_logprob(avg_logprob),
+                    }
+                )
+                if progress_callback is not None and total_duration > 0.0:
+                    progress = _coerce_confidence(end / total_duration) * 100.0
+                    progress_callback(progress, len(segs_out))
+            return segs_out
 
-        total_duration = float(getattr(info, "duration", 0.0) or 0.0)
-
-        for segment in segments_iter:
-            start = float(_dict_or_attr(segment, "start", 0.0) or 0.0)
-            end = float(_dict_or_attr(segment, "end", start) or start)
-            text = str(_dict_or_attr(segment, "text", "") or "").strip()
-            avg_logprob = _dict_or_attr(segment, "avg_logprob", None)
-
-            segment_out: Segment = {
-                "start": start,
-                "end": end,
-                "text": text,
-                "confidence": _confidence_from_logprob(avg_logprob),
-            }
-            segments_out.append(segment_out)
-
-            if progress_callback is not None and total_duration > 0.0:
-                progress = _coerce_confidence(end / total_duration) * 100.0
-                progress_callback(progress, len(segments_out))
+        try:
+            segments_out = _run_transcription(model)
+        except Exception as exc:
+            if self._effective_device == "cuda":
+                print(
+                    "[WARN] CUDA inference failed mid-transcription: {0}. "
+                    "Rebuilding model on CPU/int8 and retrying.".format(exc),
+                    file=sys.stderr,
+                )
+                from faster_whisper import WhisperModel as _WM
+                cpu_model = _WM(self._model_source, device="cpu", compute_type="int8")
+                self._whisper_model = cpu_model
+                self._effective_device = "cpu"
+                self._effective_compute_type = "int8"
+                segments_out = _run_transcription(cpu_model)
+            else:
+                raise
 
         if progress_callback is not None:
             progress_callback(100.0, len(segments_out))
