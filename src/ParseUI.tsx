@@ -1126,6 +1126,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
+  const [readyAudioUrl, setReadyAudioUrl] = useState('');
   const [activeRegion] = useState<string | null>(null);
   const [lexAnchor, setLexAnchor] = useState<'word' | 'concept'>('concept');
   const [zoom, setZoom] = useState(10); // minPxPerSec
@@ -1154,7 +1155,11 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
     audioUrl,
     peaksUrl,
     onTimeUpdate: t => usePlaybackStore.setState({ currentTime: t }),
-    onReady: d => { usePlaybackStore.setState({ duration: d }); setAudioReady(true); },
+    onReady: d => {
+      usePlaybackStore.setState({ duration: d });
+      setAudioReady(true);
+      setReadyAudioUrl(audioUrl);
+    },
     onPlayStateChange: p => usePlaybackStore.setState({ isPlaying: p }),
     onRegionUpdate: (start, end) => {
       usePlaybackStore.setState({ selectedRegion: { start, end } });
@@ -1181,18 +1186,33 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
     },
   });
 
+  // Speaker switches replace the underlying WaveSurfer instance. Reset the
+  // ready gate and playback clock first so annotate-side seek/region effects
+  // wait for the new audio file instead of operating on a half-torn-down
+  // instance from the previous speaker.
+  useEffect(() => {
+    setAudioReady(false);
+    setReadyAudioUrl('');
+    usePlaybackStore.setState({
+      currentTime: 0,
+      duration: 0,
+      isPlaying: false,
+      selectedRegion: null,
+    });
+  }, [audioUrl]);
+
   // When the user picks a concept (and once the waveform is ready): zoom
   // in to 400 px/s, seek to its start, draw the lexeme range as a draggable
   // region, and scroll so the start sits at ~33% from the left of the
   // viewport (leaves more of the trailing audio visible than centering).
   useEffect(() => {
-    if (!audioReady || !conceptInterval) return;
+    if (!audioReady || readyAudioUrl !== audioUrl || !conceptInterval) return;
     wsSetZoom(400);
     setZoom(400);
     seek(conceptInterval.start);
     addRegion(conceptInterval.start, conceptInterval.end);
     scrollToTimeAtFraction(conceptInterval.start, 0.33);
-  }, [audioReady, conceptInterval?.start, conceptInterval?.end, seek, addRegion, wsSetZoom, scrollToTimeAtFraction]);
+  }, [audioReady, readyAudioUrl, audioUrl, conceptInterval?.start, conceptInterval?.end, seek, addRegion, wsSetZoom, scrollToTimeAtFraction]);
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
@@ -1827,43 +1847,20 @@ export function ParseUI() {
     if (sortMode === 'az') {
       list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortMode === 'survey') {
-      // Natural sort: group first by source (KLQ / JBIL / …), then by every
-      // embedded number in order (section, item, variant). Without this
-      // "JBIL_10" lands before "JBIL_2" because the default string compare
-      // treats each segment as a whole literal.
-      const surveyKey = (raw: string): (string | number)[] => {
-        const tokens: (string | number)[] = [];
-        // Pull out runs of letters and runs of digits separately. Dots and
-        // underscores act as delimiters only — "KLQ_1.10.A" yields
-        // ["klq", 1, 10, "a"] so item 10 sorts after item 2 (not before,
-        // which would happen if "1.10" were parsed as a decimal 1.1).
-        for (const match of raw.matchAll(/([A-Za-z]+)|(\d+)/g)) {
-          if (match[1]) tokens.push(match[1].toLowerCase());
-          else if (match[2]) tokens.push(parseInt(match[2], 10));
-        }
-        return tokens;
-      };
       list = [...list].sort((a, b) => {
         const av = a.surveyItem ?? '';
         const bv = b.surveyItem ?? '';
         if (av && !bv) return -1;
         if (!av && bv) return 1;
-        const ka = surveyKey(av);
-        const kb = surveyKey(bv);
-        for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-          const xa = ka[i];
-          const xb = kb[i];
-          if (xa === undefined) return -1;
-          if (xb === undefined) return 1;
-          if (typeof xa === 'number' && typeof xb === 'number') {
-            if (xa !== xb) return xa - xb;
-          } else {
-            const sa = String(xa);
-            const sb = String(xb);
-            if (sa !== sb) return sa < sb ? -1 : 1;
-          }
+        // Try numeric (section.item) comparison, fall back to lex
+        const na = av.split('.').map(n => parseFloat(n));
+        const nb = bv.split('.').map(n => parseFloat(n));
+        for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+          const xa = na[i] ?? 0;
+          const xb = nb[i] ?? 0;
+          if (Number.isFinite(xa) && Number.isFinite(xb) && xa !== xb) return xa - xb;
         }
-        return 0;
+        return av.localeCompare(bv);
       });
     } else {
       list = [...list].sort((a, b) => a.id - b.id);
@@ -2304,9 +2301,7 @@ export function ParseUI() {
             {filtered.map(c => {
               const active = c.id === conceptId;
               const badge = sortMode === 'survey' && c.surveyItem ? c.surveyItem : String(c.id);
-              // Survey items already carry their own source prefix
-              // (KLQ_1.1.A / JBIL_32.A); adding a second "Q" read noisy.
-              const badgePrefix = sortMode === 'survey' ? '' : '#';
+              const badgePrefix = sortMode === 'survey' ? 'Q' : '#';
               return (
                 <button key={c.id} onClick={() => setConceptId(c.id)}
                   className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>

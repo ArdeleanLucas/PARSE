@@ -28,6 +28,9 @@ const mockSetSelectedSpeakers = vi.fn();
 const mockChatSend = vi.fn();
 const mockPlayPause = vi.fn();
 const mockSkip = vi.fn();
+const mockSeek = vi.fn();
+const mockAddRegion = vi.fn();
+const mockScrollToTimeAtFraction = vi.fn();
 const mockSetWaveZoom = vi.fn();
 const mockSetRate = vi.fn();
 const mockAnnotationSetState = vi.fn();
@@ -39,6 +42,7 @@ let mockEnrichmentData: Record<string, unknown> = {};
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
 let mockChatError: string | null = null;
+let mockWaveOptions: Array<{ audioUrl?: string; onReady?: (duration: number) => void }> = [];
 
 vi.mock("./stores/configStore", () => {
   const useConfigStore = (selector: (s: unknown) => unknown) =>
@@ -102,12 +106,19 @@ vi.mock("./hooks/useChatSession", () => ({
 }));
 
 vi.mock("./hooks/useWaveSurfer", () => ({
-  useWaveSurfer: () => ({
-    playPause: mockPlayPause,
-    skip: mockSkip,
-    setZoom: mockSetWaveZoom,
-    setRate: mockSetRate,
-  }),
+  useWaveSurfer: (options: { audioUrl?: string; onReady?: (duration: number) => void }) => {
+    mockWaveOptions.push(options);
+    return {
+      playPause: mockPlayPause,
+      seek: mockSeek,
+      scrollToTimeAtFraction: mockScrollToTimeAtFraction,
+      skip: mockSkip,
+      addRegion: mockAddRegion,
+      setZoom: mockSetWaveZoom,
+      setRate: mockSetRate,
+      wsRef: { current: null },
+    };
+  },
 }));
 
 vi.mock("./stores/enrichmentStore", () => {
@@ -219,6 +230,9 @@ beforeEach(() => {
   mockChatSend.mockClear();
   mockPlayPause.mockClear();
   mockSkip.mockClear();
+  mockSeek.mockClear();
+  mockAddRegion.mockClear();
+  mockScrollToTimeAtFraction.mockClear();
   mockSetWaveZoom.mockClear();
   mockSetRate.mockClear();
   mockGetAuthStatus.mockClear();
@@ -237,6 +251,7 @@ beforeEach(() => {
   mockTagSetState.mockClear();
   mockPlaybackSetState.mockClear();
   mockConfigSetState.mockClear();
+  mockWaveOptions = [];
 });
 
 afterEach(() => {
@@ -312,6 +327,61 @@ describe("ParseUI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
     expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+  });
+
+  it("waits for the newly selected speaker audio to become ready before seeking and drawing a region", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Fail02"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+      Fail02: makeRecord("Fail02", [
+        { conceptText: "water", ipa: "aβ", ortho: "ئاڤ", start: 5, end: 6 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const latestWaveOptions = () => mockWaveOptions[mockWaveOptions.length - 1];
+
+    expect(latestWaveOptions()?.audioUrl).toBe("/Fail01.wav");
+
+    await act(async () => {
+      latestWaveOptions()?.onReady?.(10);
+    });
+
+    expect(mockSeek).toHaveBeenCalledWith(1);
+    expect(mockAddRegion).toHaveBeenCalledWith(1, 2);
+
+    mockSeek.mockClear();
+    mockAddRegion.mockClear();
+    mockScrollToTimeAtFraction.mockClear();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Fail02" })[0]);
+
+    await waitFor(() => expect(latestWaveOptions()?.audioUrl).toBe("/Fail02.wav"));
+    expect(mockSeek).not.toHaveBeenCalled();
+    expect(mockAddRegion).not.toHaveBeenCalled();
+    expect(mockScrollToTimeAtFraction).not.toHaveBeenCalled();
+
+    await act(async () => {
+      latestWaveOptions()?.onReady?.(12);
+    });
+
+    expect(mockSeek).toHaveBeenCalledWith(5);
+    expect(mockAddRegion).toHaveBeenCalledWith(5, 6);
+    expect(mockScrollToTimeAtFraction).toHaveBeenCalledWith(5, 0.33);
   });
 
   it("renders compare reference forms from enrichment data", () => {
