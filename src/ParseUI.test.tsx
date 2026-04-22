@@ -126,6 +126,15 @@ vi.mock("./stores/enrichmentStore", () => {
     selector({ data: mockEnrichmentData, loading: false, load: vi.fn(), save: vi.fn() });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockEnrichmentSetState(...args);
+  // cycleSpeakerCognate / toggleSpeakerFlag read manual_overrides via
+  // .getState() — provide a zustand-shaped accessor that resolves lazily
+  // (not at mock-hoist time) so `mockEnrichmentData` is initialised.
+  (useEnrichmentStore as unknown as { getState: () => unknown }).getState = () => ({
+    data: mockEnrichmentData,
+    loading: false,
+    load: vi.fn(),
+    save: vi.fn(),
+  });
   return { useEnrichmentStore };
 });
 
@@ -443,15 +452,17 @@ describe("ParseUI", () => {
     expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
   });
 
-  it("toggles the compare table row flag button from tagStore state", () => {
-    mockTags = mockTags.map((tag) =>
-      tag.id === "problematic" ? { ...tag, concepts: ["1"] } : tag,
-    );
-
+  it("compare table row flag button targets a single speaker (not the whole concept)", () => {
+    // The flag button now writes per-speaker state to
+    // `manual_overrides.speaker_flags[concept][speaker]` via the enrichment
+    // store, rather than toggling the concept-wide `problematic` tag. That
+    // change means flagging Fail01 must NOT pull the whole concept into the
+    // Flagged tab — only Fail01 shows as amber.
     render(<ParseUI />);
 
-    fireEvent.click(screen.getByTitle("Toggle speaker flag for Fail01"));
-    expect(mockUntagConcept).toHaveBeenCalledWith("problematic", "1");
+    fireEvent.click(screen.getByTitle("Toggle flag for Fail01"));
+    expect(mockUntagConcept).not.toHaveBeenCalled();
+    expect(mockTagConcept).not.toHaveBeenCalledWith("problematic", "1");
   });
 
   it("opens the speaker import modal from the Actions menu", async () => {
