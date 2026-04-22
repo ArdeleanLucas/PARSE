@@ -174,7 +174,7 @@ function makeRecord(
 
 async function switchToAnnotateMode() {
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Annotate" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
 }
 
 beforeEach(() => {
@@ -398,14 +398,33 @@ describe("ParseUI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));
 
-    expect(await screen.findByRole("button", { name: "Tags" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Tags\s*T/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Manage Tags" })).toBeNull();
   });
 
-  it("renders a visible hotkey hint in the top bar", () => {
+  it("shows PARSE as the top-left title", () => {
     render(<ParseUI />);
 
-    expect(screen.getByText(/A Annotate · C Compare · T Tags · ←\/↑ Prev · →\/↓ Next/i)).toBeTruthy();
+    expect(screen.getByText("PARSE")).toBeTruthy();
+    expect(screen.queryByText("PARSE Compare")).toBeNull();
+  });
+
+  it("shows inline arrow hotkeys on annotate prev/next buttons", async () => {
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    expect(screen.getByRole("button", { name: /←\s*Prev/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Next\s*→/i })).toBeTruthy();
+  });
+
+  it("shows mode hotkeys inside the mode dropdown", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(await screen.findByRole("button", { name: /Annotate\s*A/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Compare\s*C/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tags\s*T/i })).toBeTruthy();
   });
 
   it("supports app-mode hotkeys a/c/t", async () => {

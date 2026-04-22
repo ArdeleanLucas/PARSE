@@ -1292,8 +1292,12 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       <section className="px-8 pt-6">
         <div className="mx-auto max-w-4xl">
           <div className="flex items-center gap-3">
-            <button onClick={onPrev} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
-              <ChevronLeft className="h-4 w-4"/>
+            <button
+              onClick={onPrev}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-500 hover:text-slate-800"
+            >
+              <span>←</span>
+              <span>Prev</span>
             </button>
             <div className="flex-1">
               <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
@@ -1319,8 +1323,12 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
                 <span className="text-slate-500">{speaker}.wav</span>
               </div>
             </div>
-            <button onClick={onNext} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
-              <ChevronRight className="h-4 w-4"/>
+            <button
+              onClick={onNext}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-500 hover:text-slate-800"
+            >
+              <span>Next</span>
+              <span>→</span>
             </button>
           </div>
         </div>
@@ -1929,15 +1937,12 @@ export function ParseUI() {
               <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm">
                 <Layers className="h-4 w-4" />
               </div>
-              <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE Compare</span>
+              <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE</span>
             </div>
             <div className="hidden items-center gap-3 md:flex">
               <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewed} / {total} reviewed</div>
               <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
                 <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${(reviewed/total)*100}%` }}/>
-              </div>
-              <div className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-500 lg:block">
-                A Annotate · C Compare · T Tags · ←/↑ Prev · →/↓ Next
               </div>
             </div>
           </div>
@@ -1969,10 +1974,10 @@ export function ParseUI() {
                   <div className="fixed inset-0 z-30" onClick={() => setModeMenuOpen(false)}/>
                   <div className="absolute right-0 z-[60] mt-1.5 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
                     {([
-                      ['annotate','Annotate', Type],
-                      ['compare','Compare', Layers],
-                      ['tags','Tags', Tags],
-                    ] as const).map(([key,label,Icon]) => (
+                      ['annotate','Annotate', 'A', Type],
+                      ['compare','Compare', 'C', Layers],
+                      ['tags','Tags', 'T', Tags],
+                    ] as const).map(([key,label,hotkey,Icon]) => (
                       <button
                         key={key}
                         onClick={() => { setCurrentMode(key); setModeMenuOpen(false); }}
@@ -1980,6 +1985,7 @@ export function ParseUI() {
                       >
                         <Icon className="h-3.5 w-3.5 text-slate-400"/>
                         <span className="flex-1">{label}</span>
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{hotkey}</span>
                         {currentMode===key && <Check className="h-3.5 w-3.5 text-indigo-600"/>}
                       </button>
                     ))}
