@@ -1897,6 +1897,78 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[
         _set_job_error(job_id, str(exc))
 
 
+def _parse_concepts_csv(csv_path: pathlib.Path) -> List[Dict[str, str]]:
+    """Parse a concepts-style CSV (id, concept_en). Returns [] if columns don't match."""
+    import csv as _csv
+
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as handle:
+            reader = _csv.DictReader(handle)
+            fieldnames = [str(name or "").strip().lower() for name in (reader.fieldnames or [])]
+            if "id" not in fieldnames or "concept_en" not in fieldnames:
+                return []
+            concepts: List[Dict[str, str]] = []
+            for row in reader:
+                cid = _normalize_concept_id(row.get("id"))
+                label = str(row.get("concept_en") or "").strip()
+                if cid and label:
+                    concepts.append({"id": cid, "label": label})
+            return concepts
+    except (OSError, UnicodeDecodeError, _csv.Error):
+        return []
+
+
+def _merge_concepts_into_root_csv(new_concepts: List[Dict[str, str]]) -> int:
+    """Merge new concepts into root concepts.csv. Existing rows win on id collision. Returns total."""
+    import csv as _csv
+
+    concepts_path = _project_root() / "concepts.csv"
+    merged: Dict[str, str] = {}
+    if concepts_path.exists():
+        try:
+            with open(concepts_path, newline="", encoding="utf-8") as handle:
+                reader = _csv.DictReader(handle)
+                for row in reader:
+                    cid = _normalize_concept_id(row.get("id"))
+                    label = str(row.get("concept_en") or "").strip()
+                    if cid and label:
+                        merged[cid] = label
+        except (OSError, _csv.Error):
+            pass
+
+    for item in new_concepts:
+        cid = _normalize_concept_id(item.get("id"))
+        label = str(item.get("label") or "").strip()
+        if cid and label and cid not in merged:
+            merged[cid] = label
+
+    ordered = sorted(merged.items(), key=lambda kv: _concept_sort_key(kv[0]))
+    concepts_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(concepts_path, "w", newline="", encoding="utf-8") as handle:
+        writer = _csv.DictWriter(handle, fieldnames=["id", "concept_en"])
+        writer.writeheader()
+        for cid, label in ordered:
+            writer.writerow({"id": cid, "concept_en": label})
+    return len(ordered)
+
+
+def _register_speaker_in_project_json(speaker: str) -> None:
+    """Add speaker to project.json speakers block. Preserves existing keys."""
+    project = _read_json_file(_project_json_path(), {})
+    if not isinstance(project, dict):
+        project = {}
+
+    speakers_block = project.get("speakers")
+    if isinstance(speakers_block, list):
+        speakers_block = {str(item).strip(): {} for item in speakers_block if str(item).strip()}
+    elif not isinstance(speakers_block, dict):
+        speakers_block = {}
+    speakers_block.setdefault(speaker, {})
+    project["speakers"] = speakers_block
+
+    _write_json_file(_project_json_path(), project)
+
+
 def _run_onboard_speaker_job(
     job_id: str,
     speaker: str,
@@ -1916,7 +1988,7 @@ def _run_onboard_speaker_job(
         annotation_path = _annotation_record_path_for_speaker(speaker)
         _write_json_file(annotation_path, annotation)
 
-        _set_job_progress(job_id, 60.0, message="Updating source index")
+        _set_job_progress(job_id, 55.0, message="Updating source index")
 
         # Register in source_index.json
         source_index_path = _source_index_path()
@@ -1951,6 +2023,18 @@ def _run_onboard_speaker_job(
 
         _write_json_file(source_index_path, source_index)
 
+        _set_job_progress(job_id, 70.0, message="Registering speaker in project.json")
+        _register_speaker_in_project_json(speaker)
+
+        concept_total: Optional[int] = None
+        concepts_added = 0
+        if csv_dest is not None and csv_dest.exists():
+            _set_job_progress(job_id, 80.0, message="Merging concepts from CSV")
+            parsed = _parse_concepts_csv(csv_dest)
+            if parsed:
+                concepts_added = len(parsed)
+                concept_total = _merge_concepts_into_root_csv(parsed)
+
         _set_job_progress(job_id, 90.0, message="Finalizing")
 
         result: Dict[str, Any] = {
@@ -1958,6 +2042,8 @@ def _run_onboard_speaker_job(
             "wavPath": wav_relative,
             "csvPath": str(csv_dest.relative_to(_project_root())) if csv_dest else None,
             "annotationPath": str(annotation_path.relative_to(_project_root())),
+            "conceptsAdded": concepts_added,
+            "conceptTotal": concept_total,
         }
         _set_job_complete(job_id, result, message="Speaker onboarded")
     except Exception as exc:
