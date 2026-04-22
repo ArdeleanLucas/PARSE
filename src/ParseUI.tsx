@@ -28,6 +28,8 @@ import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
 import { ChatMarkdown } from './components/shared/ChatMarkdown';
+import { LexemeDetail } from './components/compare/LexemeDetail';
+import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type TagState = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -51,9 +53,10 @@ interface Concept {
 type ConceptSortMode = 'az' | '1n' | 'survey';
 
 interface SpeakerForm {
-  speaker: string; ipa: string; utterances: number;
+  speaker: string; ipa: string; ortho: string; utterances: number;
   arabicSim: number; persianSim: number;
   cognate: 'A' | 'B' | 'C' | '—'; flagged: boolean;
+  startSec: number | null; endSec: number | null;
 }
 
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
@@ -69,6 +72,13 @@ const simBar = (v: number) =>
 
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
+
+function isInteractiveHotkeyTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const tag = target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
+  return (target as HTMLElement).isContentEditable;
+}
 
 function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
   return a.start <= b.end && b.start <= a.end;
@@ -152,14 +162,23 @@ function buildSpeakerForm(
     }
   }
 
+  const primaryConceptInterval = conceptIntervals[0] ?? null;
+  const orthoIntervals = record?.tiers.ortho?.intervals ?? [];
+  const matchingOrthoIntervals = orthoIntervals.filter((orthoInterval) =>
+    conceptIntervals.some((conceptInterval) => overlaps(orthoInterval, conceptInterval)),
+  );
+
   return {
     speaker,
     ipa: matchingIpaIntervals[0]?.text ?? '',
+    ortho: matchingOrthoIntervals[0]?.text ?? '',
     utterances: matchingIpaIntervals.length,
     arabicSim,
     persianSim,
     cognate,
     flagged,
+    startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
+    endSec: primaryConceptInterval ? primaryConceptInterval.end : null,
   };
 }
 
@@ -1273,8 +1292,12 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       <section className="px-8 pt-6">
         <div className="mx-auto max-w-4xl">
           <div className="flex items-center gap-3">
-            <button onClick={onPrev} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
-              <ChevronLeft className="h-4 w-4"/>
+            <button
+              onClick={onPrev}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-500 hover:text-slate-800"
+            >
+              <span>←</span>
+              <span>Prev</span>
             </button>
             <div className="flex-1">
               <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
@@ -1300,8 +1323,12 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
                 <span className="text-slate-500">{speaker}.wav</span>
               </div>
             </div>
-            <button onClick={onNext} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
-              <ChevronRight className="h-4 w-4"/>
+            <button
+              onClick={onNext}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-500 hover:text-slate-800"
+            >
+              <span>Next</span>
+              <span>→</span>
             </button>
           </div>
         </div>
@@ -1504,6 +1531,7 @@ export function ParseUI() {
   const annotationRecords = useAnnotationStore(s => s.records);
   const enrichmentData = useEnrichmentStore(s => s.data);
   const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
+  const setActiveConceptUI = useUIStore(s => s.setActiveConcept);
   // — Chat session (one instance for the whole UI) —
   const chatSession = useChatSession();
   // — Annotation sync (auto-loads record when activeSpeaker changes) —
@@ -1529,6 +1557,17 @@ export function ParseUI() {
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [expandedLexemes, setExpandedLexemes] = useState<Set<string>>(new Set());
+  const [commentsImportOpen, setCommentsImportOpen] = useState(false);
+
+  const toggleLexemeExpanded = (speaker: string) => {
+    setExpandedLexemes((prev) => {
+      const next = new Set(prev);
+      if (next.has(speaker)) next.delete(speaker);
+      else next.add(speaker);
+      return next;
+    });
+  };
 
   // Auto-select speakers when config loads and we have none selected
   useEffect(() => {
@@ -1813,6 +1852,55 @@ export function ParseUI() {
 
   const goPrev = () => setConceptId(id => Math.max(1, id - 1));
   const goNext = () => setConceptId(id => Math.min(total, id + 1));
+
+  useEffect(() => {
+    setActiveConceptUI(concept.key);
+  }, [concept.key, setActiveConceptUI]);
+
+  useEffect(() => {
+    function onGlobalKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isInteractiveHotkeyTarget(e.target)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'a') {
+        e.preventDefault();
+        setCurrentMode('annotate');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+      if (key === 'c') {
+        e.preventDefault();
+        setCurrentMode('compare');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+      if (key === 't') {
+        e.preventDefault();
+        setCurrentMode('tags');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+
+      if (currentMode === 'tags' || total <= 1) return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        goPrev();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        goNext();
+      }
+    }
+
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, [currentMode, total, setActiveConceptUI]);
+
   const toggleSpeaker = (s: string) => {
     if (currentMode === 'annotate') {
       setSelectedSpeakers([s]);
@@ -1859,7 +1947,7 @@ export function ParseUI() {
               <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm">
                 <Layers className="h-4 w-4" />
               </div>
-              <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE Compare</span>
+              <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE</span>
             </div>
             <div className="hidden items-center gap-3 md:flex">
               <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewed} / {total} reviewed</div>
@@ -1888,7 +1976,7 @@ export function ParseUI() {
                 onClick={() => { setModeMenuOpen(v => !v); setActionsMenuOpen(false); }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
-                {currentMode === 'annotate' ? 'Annotate' : currentMode === 'compare' ? 'Compare' : 'Manage Tags'}
+                {currentMode === 'annotate' ? 'Annotate' : currentMode === 'compare' ? 'Compare' : 'Tags'}
                 <CDown className="h-3 w-3 text-slate-400"/>
               </button>
               {modeMenuOpen && (
@@ -1896,10 +1984,10 @@ export function ParseUI() {
                   <div className="fixed inset-0 z-30" onClick={() => setModeMenuOpen(false)}/>
                   <div className="absolute right-0 z-[60] mt-1.5 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
                     {([
-                      ['annotate','Annotate', Type],
-                      ['compare','Compare', Layers],
-                      ['tags','Manage Tags', Tags],
-                    ] as const).map(([key,label,Icon]) => (
+                      ['annotate','Annotate', 'A', Type],
+                      ['compare','Compare', 'C', Layers],
+                      ['tags','Tags', 'T', Tags],
+                    ] as const).map(([key,label,hotkey,Icon]) => (
                       <button
                         key={key}
                         onClick={() => { setCurrentMode(key); setModeMenuOpen(false); }}
@@ -1907,6 +1995,7 @@ export function ParseUI() {
                       >
                         <Icon className="h-3.5 w-3.5 text-slate-400"/>
                         <span className="flex-1">{label}</span>
+                        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{hotkey}</span>
                         {currentMode===key && <Check className="h-3.5 w-3.5 text-indigo-600"/>}
                       </button>
                     ))}
@@ -2296,11 +2385,34 @@ export function ParseUI() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {speakerForms.map(f => (
-                        <tr key={f.speaker} className="bg-white transition hover:bg-indigo-50/30">
+                      {speakerForms.map(f => {
+                        const isExpanded = expandedLexemes.has(f.speaker);
+                        const cognateColor =
+                          f.cognate === 'A' ? '#dcfce7' :
+                          f.cognate === 'B' ? '#dbeafe' :
+                          f.cognate === 'C' ? '#fef9c3' :
+                          null;
+                        return (
+                        <React.Fragment key={f.speaker}>
+                        <tr
+                          data-testid={`speaker-row-${f.speaker}`}
+                          className={`bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
+                        >
                           <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
                           <td className="px-3 py-2.5">
-                            <div className="font-mono text-[13px] text-slate-800">/{f.ipa}/</div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                data-testid={`lexeme-toggle-${f.speaker}`}
+                                onClick={() => toggleLexemeExpanded(f.speaker)}
+                                className="font-mono text-[13px] text-indigo-700 underline-offset-2 hover:underline"
+                                title="Click to expand lexeme details"
+                              >
+                                /{f.ipa || '—'}/
+                              </button>
+                              <ChevronDown
+                                className={`h-3 w-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                              />
+                            </div>
                             <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
                           </td>
                           <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
@@ -2323,7 +2435,28 @@ export function ParseUI() {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        {isExpanded && (
+                          <tr data-testid={`lexeme-detail-row-${f.speaker}`}>
+                            <td colSpan={6} className="bg-slate-50 p-2">
+                              <LexemeDetail
+                                speaker={f.speaker}
+                                conceptId={concept.key}
+                                conceptLabel={concept.name}
+                                ipa={f.ipa}
+                                ortho={f.ortho}
+                                startSec={f.startSec}
+                                endSec={f.endSec}
+                                arabicSim={f.arabicSim}
+                                persianSim={f.persianSim}
+                                cognateGroup={f.cognate !== '—' ? f.cognate : null}
+                                cognateColor={cognateColor}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2655,6 +2788,13 @@ export function ParseUI() {
                       <Download className="h-3 w-3"/>
                       {exporting ? 'Exporting…' : 'Export LingPy TSV'}
                     </button>
+                    <button
+                      data-testid="open-comments-import"
+                      onClick={() => setCommentsImportOpen(true)}
+                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Upload className="h-3 w-3"/> Import Audition comments
+                    </button>
                   </div>
                 </div>
               </>
@@ -2752,6 +2892,9 @@ export function ParseUI() {
       />
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
+      </Modal>
+      <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
+        <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
       </Modal>
       <input
         type="file"

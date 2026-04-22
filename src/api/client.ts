@@ -485,6 +485,73 @@ export async function mergeTags(tags: Tag[]): Promise<{ ok: boolean; tagCount: n
   });
 }
 
+// Lexeme notes
+export interface SaveLexemeNoteBody {
+  speaker: string;
+  concept_id: string;
+  user_note?: string;
+  import_note?: string;
+  delete?: boolean;
+}
+
+export async function saveLexemeNote(
+  body: SaveLexemeNoteBody,
+): Promise<{ success: boolean; lexeme_notes?: Record<string, Record<string, Record<string, unknown>>> }> {
+  return apiFetch<{
+    success: boolean;
+    lexeme_notes?: Record<string, Record<string, Record<string, unknown>>>;
+  }>("/api/lexeme-notes", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export interface ImportCommentsCsvResponse {
+  success: boolean;
+  speaker: string;
+  total_rows: number;
+  imported: number;
+  matched: number;
+  lexeme_notes?: Record<string, Record<string, Record<string, unknown>>>;
+}
+
+export async function importCommentsCsv(
+  speakerId: string,
+  csvFile: File,
+): Promise<ImportCommentsCsvResponse> {
+  const formData = new FormData();
+  formData.append("speaker_id", speakerId);
+  formData.append("csv", csvFile);
+  let response: Response;
+  try {
+    response = await fetch("/api/lexeme-notes/import", { method: "POST", body: formData });
+  } catch (error) {
+    throw networkError("/api/lexeme-notes/import", { method: "POST" }, error);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`API POST /api/lexeme-notes/import failed ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ImportCommentsCsvResponse>;
+}
+
+export function spectrogramUrl(params: {
+  speaker: string;
+  startSec: number;
+  endSec: number;
+  audio?: string;
+  force?: boolean;
+}): string {
+  const search = new URLSearchParams({
+    speaker: params.speaker,
+    start: params.startSec.toFixed(3),
+    end: params.endSec.toFixed(3),
+  });
+  if (params.audio) search.set("audio", params.audio);
+  if (params.force) search.set("force", "1");
+  return `/api/spectrogram?${search.toString()}`;
+}
+
 export async function getNEXUSExport(): Promise<Blob> {
   const response = await fetch("/api/export/nexus", {
     method: "GET",

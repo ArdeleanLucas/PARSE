@@ -289,30 +289,31 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
           e.preventDefault();
           ws.playPause();
           break;
-        case "ArrowLeft":
-          e.preventDefault();
-          {
-            const dur = ws.getDuration();
-            if (dur > 0) {
-              const delta = e.shiftKey ? -5 : -1;
-              ws.seekTo(clamp((ws.getCurrentTime() + delta) / dur, 0, 1));
-            }
-          }
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          {
-            const dur = ws.getDuration();
-            if (dur > 0) {
-              const delta = e.shiftKey ? 5 : 1;
-              ws.seekTo(clamp((ws.getCurrentTime() + delta) / dur, 0, 1));
-            }
-          }
-          break;
       }
     }
 
+    function onWheel(e: WheelEvent) {
+      if (isInteractiveTarget(e.target)) return;
+
+      const typedWs = ws as unknown as {
+        getWrapper?: () => HTMLElement;
+        setScroll?: (pixels: number) => void;
+      };
+      const wrapper = typedWs.getWrapper?.();
+      const viewport = wrapper?.parentElement;
+      if (!viewport) return;
+
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!delta) return;
+
+      e.preventDefault();
+      const nextScroll = Math.max(0, viewport.scrollLeft + delta);
+      viewport.scrollLeft = nextScroll;
+      typedWs.setScroll?.(nextScroll);
+    }
+
     container.addEventListener("keydown", onKeyDown);
+    container.addEventListener("wheel", onWheel, { passive: false });
 
     // -- Load audio (with optional peaks) --
 
@@ -345,6 +346,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     return () => {
       abortControllerRef.current?.abort();
       container.removeEventListener("keydown", onKeyDown);
+      container.removeEventListener("wheel", onWheel);
       container.removeEventListener("pointerup", onCommit);
       ws.destroy();
       wsRef.current = null;

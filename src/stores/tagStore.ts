@@ -4,11 +4,15 @@ import type { Tag } from "../api/types";
 const STORAGE_KEY_V2 = "parse-tags-v2";
 const STORAGE_KEY_V1 = "parse-tags-v1";
 
-const DEFAULT_TAGS: Omit<Tag, "concepts">[] = [
+const DEFAULT_TAGS: Omit<Tag, "concepts" | "lexemeTargets">[] = [
   { id: "review-needed", label: "Review needed", color: "#f59e0b" },
   { id: "confirmed", label: "Confirmed", color: "#10b981" },
   { id: "problematic", label: "Problematic", color: "#ef4444" },
 ];
+
+export function lexemeKey(speaker: string, conceptId: string): string {
+  return `${speaker}::${conceptId}`;
+}
 
 interface TagStore {
   tags: Tag[];
@@ -18,7 +22,10 @@ interface TagStore {
   updateTag: (id: string, patch: Partial<Tag>) => void;
   tagConcept: (tagId: string, conceptId: string) => void;
   untagConcept: (tagId: string, conceptId: string) => void;
+  tagLexeme: (tagId: string, speaker: string, conceptId: string) => void;
+  untagLexeme: (tagId: string, speaker: string, conceptId: string) => void;
   getTagsForConcept: (conceptId: string) => Tag[];
+  getTagsForLexeme: (speaker: string, conceptId: string) => Tag[];
 
   syncFromServer: () => Promise<void>;
   mergeFromServer: (tags: Tag[]) => void;
@@ -27,16 +34,27 @@ interface TagStore {
   hydrate: () => void;
 }
 
+function normalizeTag(raw: Partial<Tag>): Tag {
+  return {
+    id: raw.id || crypto.randomUUID(),
+    label: raw.label || "Untitled",
+    color: raw.color || "#6b7280",
+    concepts: Array.isArray(raw.concepts) ? raw.concepts : [],
+    lexemeTargets: Array.isArray(raw.lexemeTargets) ? raw.lexemeTargets : [],
+  };
+}
+
 export const useTagStore = create<TagStore>()((set, get) => ({
   tags: [],
 
   addTag: (label: string, color: string): Tag => {
-    const newTag: Tag = {
+    const newTag: Tag = normalizeTag({
       id: crypto.randomUUID(),
       label: label.trim(),
       color: color || "#6b7280",
       concepts: [],
-    };
+      lexemeTargets: [],
+    });
 
     set((state) => ({
       tags: [...state.tags, newTag],
@@ -56,7 +74,7 @@ export const useTagStore = create<TagStore>()((set, get) => ({
   updateTag: (id: string, patch: Partial<Tag>) => {
     set((state) => ({
       tags: state.tags.map((tag) =>
-        tag.id === id ? { ...tag, ...patch } : tag
+        tag.id === id ? normalizeTag({ ...tag, ...patch }) : tag
       ),
     }));
     get().persist();
@@ -92,29 +110,68 @@ export const useTagStore = create<TagStore>()((set, get) => ({
     get().persist();
   },
 
+  tagLexeme: (tagId: string, speaker: string, conceptId: string) => {
+    const key = lexemeKey(speaker, conceptId);
+    set((state) => ({
+      tags: state.tags.map((tag) => {
+        if (tag.id !== tagId) return tag;
+        const current = tag.lexemeTargets ?? [];
+        if (current.includes(key)) return tag;
+        return { ...tag, lexemeTargets: [...current, key] };
+      }),
+    }));
+    get().persist();
+  },
+
+  untagLexeme: (tagId: string, speaker: string, conceptId: string) => {
+    const key = lexemeKey(speaker, conceptId);
+    set((state) => ({
+      tags: state.tags.map((tag) => {
+        if (tag.id !== tagId) return tag;
+        const current = tag.lexemeTargets ?? [];
+        if (!current.includes(key)) return tag;
+        return { ...tag, lexemeTargets: current.filter((k) => k !== key) };
+      }),
+    }));
+    get().persist();
+  },
+
   getTagsForConcept: (conceptId: string): Tag[] => {
     const normalized = conceptId?.toString().trim() || "";
     if (!normalized) return [];
     return get().tags.filter((tag) => tag.concepts.includes(normalized));
   },
 
+  getTagsForLexeme: (speaker: string, conceptId: string): Tag[] => {
+    const key = lexemeKey(speaker, conceptId);
+    if (!speaker || !conceptId) return [];
+    return get().tags.filter((tag) => (tag.lexemeTargets ?? []).includes(key));
+  },
+
   mergeFromServer: (incomingTags: Tag[]) => {
     set((state) => {
       const existingById: Record<string, Tag> = {};
       for (const t of state.tags) {
-        existingById[t.id] = { ...t };
+        existingById[t.id] = normalizeTag(t);
       }
       for (const t of incomingTags) {
-        if (existingById[t.id]) {
-          const merged = new Set([...existingById[t.id].concepts, ...t.concepts]);
-          existingById[t.id] = {
-            ...existingById[t.id],
-            label: t.label,
-            color: t.color,
-            concepts: Array.from(merged),
+        const incoming = normalizeTag(t);
+        if (existingById[incoming.id]) {
+          const prev = existingById[incoming.id];
+          const concepts = new Set([...prev.concepts, ...incoming.concepts]);
+          const targets = new Set([
+            ...(prev.lexemeTargets ?? []),
+            ...(incoming.lexemeTargets ?? []),
+          ]);
+          existingById[incoming.id] = {
+            ...prev,
+            label: incoming.label,
+            color: incoming.color,
+            concepts: Array.from(concepts),
+            lexemeTargets: Array.from(targets),
           };
         } else {
-          existingById[t.id] = { ...t };
+          existingById[incoming.id] = incoming;
         }
       }
       return { tags: Object.values(existingById) };
@@ -158,15 +215,17 @@ export const useTagStore = create<TagStore>()((set, get) => ({
         let migratedTags: Tag[] = [];
 
         if (Array.isArray(parsed)) {
-          migratedTags = parsed;
+          migratedTags = parsed.map((t) => normalizeTag(t));
         } else if (parsed.tags && Array.isArray(parsed.tags)) {
-          // v1 style with wrapper
-          migratedTags = parsed.tags.map((t: any) => ({
-            id: t.id || crypto.randomUUID(),
-            label: t.name || t.label || "Untitled",
-            color: t.color || "#6b7280",
-            concepts: t.concepts || (parsed.assignments?.[t.id] || []),
-          }));
+          migratedTags = parsed.tags.map((t: any) =>
+            normalizeTag({
+              id: t.id || crypto.randomUUID(),
+              label: t.name || t.label || "Untitled",
+              color: t.color || "#6b7280",
+              concepts: t.concepts || (parsed.assignments?.[t.id] || []),
+              lexemeTargets: t.lexemeTargets || [],
+            })
+          );
         } else {
           migratedTags = [];
         }
@@ -182,14 +241,12 @@ export const useTagStore = create<TagStore>()((set, get) => ({
     }
 
     // defaults
-    const defaults: Tag[] = DEFAULT_TAGS.map((t) => ({
-      ...t,
-      concepts: [],
-    }));
+    const defaults: Tag[] = DEFAULT_TAGS.map((t) =>
+      normalizeTag({ ...t, concepts: [], lexemeTargets: [] })
+    );
     set({ tags: defaults });
     get().persist();
   },
 }));
 
-// Re-export for convenience
 export type { TagStore };

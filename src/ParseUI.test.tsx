@@ -174,7 +174,7 @@ function makeRecord(
 
 async function switchToAnnotateMode() {
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Annotate" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
 }
 
 beforeEach(() => {
@@ -391,6 +391,66 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import Speaker Data…" }));
 
     expect(await screen.findByTestId("speaker-import")).toBeTruthy();
+  });
+
+  it("renames the mode menu label to Tags", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(await screen.findByRole("button", { name: /Tags\s*T/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage Tags" })).toBeNull();
+  });
+
+  it("shows PARSE as the top-left title", () => {
+    render(<ParseUI />);
+
+    expect(screen.getByText("PARSE")).toBeTruthy();
+    expect(screen.queryByText("PARSE Compare")).toBeNull();
+  });
+
+  it("shows inline arrow hotkeys on annotate prev/next buttons", async () => {
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    expect(screen.getByRole("button", { name: /←\s*Prev/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Next\s*→/i })).toBeTruthy();
+  });
+
+  it("shows mode hotkeys inside the mode dropdown", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(await screen.findByRole("button", { name: /Annotate\s*A/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Compare\s*C/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tags\s*T/i })).toBeTruthy();
+  });
+
+  it("supports app-mode hotkeys a/c/t", async () => {
+    render(<ParseUI />);
+
+    fireEvent.keyDown(window, { key: "a" });
+    expect(await screen.findByRole("button", { name: /Mark Done/i })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "t" });
+    expect(await screen.findByText("Linguistic tags")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "c" });
+    expect(await screen.findByRole("button", { name: /Accept concept/i })).toBeTruthy();
+  });
+
+  it("uses arrow keys to change concepts in annotate mode", async () => {
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
   it("persists compare notes per concept via localStorage on blur", () => {

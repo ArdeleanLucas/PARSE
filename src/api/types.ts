@@ -52,12 +52,27 @@ export interface Tag {
   id: string; // uuid
   label: string;
   color: string; // hex
-  concepts: string[]; // concept ids that carry this tag
+  concepts: string[]; // concept ids that carry this tag (concept-level)
+  /**
+   * Per-lexeme tag targets, each encoded as `${speaker}::${conceptId}`.
+   * A lexeme is the intersection of a concept + speaker; tagging a lexeme
+   * only colours that speaker's form, not the whole concept row.
+   */
+  lexemeTargets?: string[];
 }
 
 export interface TagsResponse {
   tags: Tag[];
 }
+
+export interface LexemeNoteEntry {
+  user_note?: string;
+  import_note?: string;
+  import_raw?: string;
+  updated_at?: string;
+}
+
+export type LexemeNotesBySpeaker = Record<string, Record<string, LexemeNoteEntry>>;
 
 export interface AuthStatus {
   authenticated: boolean;

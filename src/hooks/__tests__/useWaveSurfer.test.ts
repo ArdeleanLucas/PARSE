@@ -5,6 +5,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // vi.hoisted ensures these are available inside vi.mock factories (which are hoisted)
 const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState } =
   vi.hoisted(() => {
+    const mockViewport = document.createElement("div");
+    Object.defineProperty(mockViewport, "clientWidth", { value: 200, configurable: true });
+    mockViewport.scrollLeft = 0;
+    const mockWrapper = document.createElement("div");
+    mockViewport.appendChild(mockWrapper);
+
     const mockWsInstance = {
       play: vi.fn(),
       pause: vi.fn(),
@@ -14,9 +20,12 @@ const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState } =
       seekTo: vi.fn(),
       zoom: vi.fn(),
       setPlaybackRate: vi.fn(),
+      setScroll: vi.fn(),
       getDuration: vi.fn(() => 10),
       getCurrentTime: vi.fn(() => 0),
+      getWrapper: vi.fn(() => mockWrapper),
       on: vi.fn(),
+      options: { minPxPerSec: 100 },
     };
 
     const mockRegionInstance = {
@@ -148,5 +157,24 @@ describe("useWaveSurfer", () => {
     });
 
     expect(mockRegionInstance.remove).toHaveBeenCalled();
+  });
+
+  it("mouse wheel scrolls the waveform horizontally", () => {
+    const containerRef = makeContainerRef();
+
+    renderHook(() =>
+      useWaveSurfer({
+        containerRef,
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    const event = new WheelEvent("wheel", { deltaY: 120, cancelable: true });
+    act(() => {
+      containerRef.current!.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockWsInstance.setScroll).toHaveBeenCalledWith(120);
   });
 });
