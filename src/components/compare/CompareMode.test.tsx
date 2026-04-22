@@ -30,6 +30,7 @@ vi.mock("../shared/Modal", () => ({
 
 const mockLoad = vi.fn().mockResolvedValue(undefined);
 const mockHydrate = vi.fn();
+const mockSyncFromServer = vi.fn().mockResolvedValue(undefined);
 const mockSetComparePanel = vi.fn();
 let mockComparePanel: "cognate" | "borrowing" | "enrichments" | "tags" = "cognate";
 let mockActiveConcept: string | null = null;
@@ -57,8 +58,8 @@ vi.mock("../../stores/enrichmentStore", () => ({
 }));
 
 vi.mock("../../stores/tagStore", () => ({
-  useTagStore: (selector: (state: { hydrate: () => void }) => unknown) =>
-    selector({ hydrate: mockHydrate }),
+  useTagStore: (selector: (state: { hydrate: () => void; syncFromServer: () => Promise<void> }) => unknown) =>
+    selector({ hydrate: mockHydrate, syncFromServer: mockSyncFromServer }),
 }));
 
 describe("CompareMode", () => {
@@ -85,6 +86,11 @@ describe("CompareMode", () => {
   it("calls tagStore.hydrate() on mount", () => {
     render(<CompareMode />);
     expect(mockHydrate).toHaveBeenCalledOnce();
+  });
+
+  it("calls tagStore.syncFromServer() on mount", () => {
+    render(<CompareMode />);
+    expect(mockSyncFromServer).toHaveBeenCalledOnce();
   });
 
   it("sidebar switches to BorrowingPanel when Borrowing tab clicked", () => {

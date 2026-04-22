@@ -29,6 +29,7 @@ export function CompareMode() {
   const loadEnrichments = useEnrichmentStore((store) => store.load);
 
   const hydrateTags = useTagStore((store) => store.hydrate);
+  const syncTagsFromServer = useTagStore((store) => store.syncFromServer);
 
   const [importOpen, setImportOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -39,6 +40,7 @@ export function CompareMode() {
       loadEnrichments().catch(() => {});
     }
     hydrateTags();
+    syncTagsFromServer().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
