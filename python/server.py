@@ -3421,14 +3421,19 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         )
 
     def _api_post_offset_detect_from_pair(self) -> None:
-        """Compute the offset from a single trusted (csv_time, audio_time) pair.
+        """Compute the offset from one or more trusted (csv_time, audio_time) pairs.
 
-        Useful when the user already knows where one lexeme actually is in the
-        recording and just needs the system to compute the constant shift —
-        no STT, no statistics, no false matches. Body:
-            {"speaker": str,
-             "csvTimeSec": float | "conceptId": str,
-             "audioTimeSec": float}
+        Two body shapes are accepted:
+
+        * **Single pair (legacy)**:
+            ``{speaker, audioTimeSec, csvTimeSec? | conceptId?}``
+        * **Multiple pairs (preferred)**:
+            ``{speaker, pairs: [{audioTimeSec, csvTimeSec? | conceptId?}, ...]}``
+
+        With multiple pairs the offset is the median of per-pair offsets and
+        the response carries the MAD spread plus a warning if any single
+        pair disagrees with the consensus by more than ``2 s``. No STT, no
+        statistics-on-text — every input is a user-supplied ground truth.
         """
         body = self._expect_object(self._read_json_body(), "Request body")
 
@@ -3437,79 +3442,125 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except ValueError as exc:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
 
-        audio_time_raw = body.get("audioTimeSec")
-        if audio_time_raw is None:
-            audio_time_raw = body.get("audio_time_sec")
-        try:
-            audio_time = float(audio_time_raw)
-        except (TypeError, ValueError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "audioTimeSec is required and must be a number")
-        if not math.isfinite(audio_time) or audio_time < 0:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "audioTimeSec must be a finite, non-negative number")
+        raw_pairs = body.get("pairs")
+        if raw_pairs is None:
+            raw_pairs = [
+                {
+                    "audioTimeSec": body.get("audioTimeSec") or body.get("audio_time_sec"),
+                    "csvTimeSec": body.get("csvTimeSec") or body.get("csv_time_sec"),
+                    "conceptId": body.get("conceptId") or body.get("concept_id"),
+                }
+            ]
+        if not isinstance(raw_pairs, list) or not raw_pairs:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "pairs must be a non-empty array")
 
-        csv_time_raw = body.get("csvTimeSec")
-        if csv_time_raw is None:
-            csv_time_raw = body.get("csv_time_sec")
+        # Lazy-load the annotation only if at least one pair needs concept lookup.
+        annotation_cache: Optional[Dict[str, Any]] = None
 
-        concept_id_raw = body.get("conceptId") or body.get("concept_id")
-        anchor_label: Optional[str] = None
-        anchor_csv_time: Optional[float] = None
+        def _annotation() -> Dict[str, Any]:
+            nonlocal annotation_cache
+            if annotation_cache is None:
+                annotation_cache = _normalize_annotation_record(
+                    _read_json_any_file(_annotation_read_path_for_speaker(speaker)), speaker
+                )
+            return annotation_cache
 
-        if csv_time_raw is not None:
+        matches: List[Dict[str, Any]] = []
+        offsets: List[float] = []
+
+        for raw in raw_pairs:
+            if not isinstance(raw, dict):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair must be a JSON object")
+
+            audio_raw = raw.get("audioTimeSec")
+            if audio_raw is None:
+                audio_raw = raw.get("audio_time_sec")
             try:
-                anchor_csv_time = float(csv_time_raw)
+                audio_time = float(audio_raw)
             except (TypeError, ValueError):
-                raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be a number when provided")
-            if not math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be a finite, non-negative number")
-            anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
-        elif concept_id_raw is not None:
-            concept_id = str(concept_id_raw).strip()
-            if not concept_id:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "conceptId must be non-empty")
-            annotation_path = _annotation_read_path_for_speaker(speaker)
-            annotation = _normalize_annotation_record(
-                _read_json_any_file(annotation_path), speaker
-            )
-            interval = _annotation_find_concept_interval(annotation, concept_id)
-            if interval is None:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair needs a numeric audioTimeSec")
+            if not math.isfinite(audio_time) or audio_time < 0:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "audioTimeSec must be finite and non-negative")
+
+            csv_raw = raw.get("csvTimeSec")
+            if csv_raw is None:
+                csv_raw = raw.get("csv_time_sec")
+            concept_raw = raw.get("conceptId") or raw.get("concept_id")
+
+            anchor_csv_time: Optional[float] = None
+            anchor_label: Optional[str] = None
+
+            if csv_raw is not None and (not isinstance(csv_raw, str) or csv_raw.strip() != ""):
+                try:
+                    anchor_csv_time = float(csv_raw)
+                except (TypeError, ValueError):
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be a number when provided")
+                if not math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be finite and non-negative")
+                anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
+            elif concept_raw is not None and str(concept_raw).strip():
+                concept_id = str(concept_raw).strip()
+                interval = _annotation_find_concept_interval(_annotation(), concept_id)
+                if interval is None:
+                    raise ApiError(
+                        HTTPStatus.BAD_REQUEST,
+                        "No annotation interval found for concept '{0}'".format(concept_id),
+                    )
+                anchor_csv_time = float(interval["start"])
+                anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
+            else:
                 raise ApiError(
                     HTTPStatus.BAD_REQUEST,
-                    "No annotation interval found for concept '{0}'".format(concept_id),
+                    "Each pair needs either csvTimeSec or conceptId",
                 )
-            anchor_csv_time = float(interval["start"])
-            anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
-        else:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "Provide either csvTimeSec or conceptId so the offset can be anchored",
+
+            pair_offset = round(audio_time - float(anchor_csv_time), 3)
+            offsets.append(pair_offset)
+            matches.append(
+                {
+                    "anchor_index": -1,
+                    "anchor_text": anchor_label or "",
+                    "anchor_start": float(anchor_csv_time),
+                    "segment_index": -1,
+                    "segment_text": "(user-supplied audio time)",
+                    "segment_start": float(audio_time),
+                    "score": 1.0,
+                    "offset_sec": pair_offset,
+                }
             )
 
-        offset_sec = round(audio_time - float(anchor_csv_time), 3)
+        # Median offset across pairs; MAD for the headline spread number;
+        # max-deviation drives confidence so a single outlier among many
+        # consistent pairs is visible (MAD alone hides it). Both numbers
+        # show up in the response — UI flags any pair whose offset
+        # diverges from the consensus by more than `spread_warn_sec`.
+        import statistics as _statistics
+
+        median_offset = round(_statistics.median(offsets), 3)
+        if len(offsets) >= 2:
+            deviations = [abs(o - median_offset) for o in offsets]
+            spread = round(_statistics.median(deviations), 3)
+            max_deviation = max(deviations)
+            # Linear drop: identical pairs → 0.99; one pair off by 30 s
+            # → 0.49 (clamped to 0.5). Big enough penalty to amber the
+            # Apply button via the existing _offset_detect_payload logic.
+            confidence = max(0.5, min(0.99, 0.99 - (max_deviation / 60.0)))
+        else:
+            spread = 0.0
+            confidence = 0.99
 
         self._send_json(
             HTTPStatus.OK,
             _offset_detect_payload(
                 speaker=speaker,
-                offset_sec=offset_sec,
-                confidence=0.99,  # one trusted pair is by construction reliable
-                n_matched=1,
-                total_anchors=1,
+                offset_sec=median_offset,
+                confidence=float(confidence),
+                n_matched=len(matches),
+                total_anchors=len(matches),
                 total_segments=0,
                 method="manual_pair",
-                spread_sec=0.0,
-                matches=[
-                    {
-                        "anchor_index": -1,
-                        "anchor_text": anchor_label or "",
-                        "anchor_start": float(anchor_csv_time),
-                        "segment_index": -1,
-                        "segment_text": "(user-supplied audio time)",
-                        "segment_start": float(audio_time),
-                        "score": 1.0,
-                        "offset_sec": offset_sec,
-                    }
-                ],
+                spread_sec=float(spread),
+                matches=matches,
                 anchor_distribution="manual",
             ),
         )

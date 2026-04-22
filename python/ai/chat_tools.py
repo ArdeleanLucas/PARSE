@@ -411,23 +411,43 @@ class ParseChatTools:
             "detect_timestamp_offset_from_pair": ChatToolSpec(
                 name="detect_timestamp_offset_from_pair",
                 description=(
-                    "Compute a timestamp offset from one trusted (csvTime, audioTime) "
-                    "pair — no STT, no statistics, no false matches. Use this when "
-                    "the user already knows where one lexeme actually is in the audio. "
-                    "Anchor either by csvTimeSec (the time the annotation currently "
-                    "claims) or by conceptId (look up the start time of that concept's "
-                    "interval). Returns the same shape as detect_timestamp_offset so "
-                    "the result can be passed straight into apply_timestamp_offset."
+                    "Compute a timestamp offset from one or more trusted "
+                    "(csvTime, audioTime) pairs — no STT, no statistics-on-text, "
+                    "no false matches. Use this when the user (or you) already "
+                    "knows where one or more lexemes actually are in the audio.\n\n"
+                    "Two argument shapes are accepted:\n"
+                    " - Single pair: pass speaker + audioTimeSec + (csvTimeSec OR conceptId)\n"
+                    " - Multiple pairs: pass speaker + pairs=[{...}, {...}]. With "
+                    "two or more pairs the offset is the median of per-pair offsets, "
+                    "and the response carries the MAD spread plus warnings if any "
+                    "pair disagrees with the consensus by more than ~2 s.\n\n"
+                    "The response shape is the same as detect_timestamp_offset, so "
+                    "the offsetSec can be passed straight into apply_timestamp_offset."
                 ),
                 parameters={
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["speaker", "audioTimeSec"],
+                    "required": ["speaker"],
                     "properties": {
                         "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
                         "audioTimeSec": {"type": "number", "minimum": 0.0},
                         "csvTimeSec": {"type": "number", "minimum": 0.0},
                         "conceptId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "pairs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["audioTimeSec"],
+                                "properties": {
+                                    "audioTimeSec": {"type": "number", "minimum": 0.0},
+                                    "csvTimeSec": {"type": "number", "minimum": 0.0},
+                                    "conceptId": {"type": "string", "minLength": 1, "maxLength": 128},
+                                },
+                            },
+                        },
                     },
                 },
             ),
@@ -1501,73 +1521,93 @@ class ParseChatTools:
         )
 
     def _tool_detect_timestamp_offset_from_pair(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute the offset from a single trusted (csv_time, audio_time) pair.
+        """Compute the offset from one or more trusted (csv_time, audio_time) pairs.
 
-        No STT, no statistics — the user already knows the true position
-        of one lexeme. Anchor by ``csvTimeSec`` (preferred) or by
-        ``conceptId`` (looked up in the annotation).
+        Single pair: pass ``audioTimeSec`` + (``csvTimeSec`` or ``conceptId``).
+        Multiple pairs: pass ``pairs=[{...}, {...}]``. The reported offset is
+        the median of per-pair offsets; spread is the median absolute
+        deviation, surfaced as a warning when pairs disagree by > 2 s.
         """
+        import math as _math
+        import statistics as _statistics
+
         speaker_raw = str(args.get("speaker") or "").strip()
         if not speaker_raw or not SPEAKER_PATTERN.match(speaker_raw):
             raise ChatToolValidationError("speaker is required and must match {0}".format(SPEAKER_PATTERN.pattern))
         speaker = speaker_raw
 
-        try:
-            audio_time = float(args.get("audioTimeSec"))
-        except (TypeError, ValueError):
-            raise ChatToolValidationError("audioTimeSec is required and must be a number")
-        import math as _math
-        if not _math.isfinite(audio_time) or audio_time < 0:
-            raise ChatToolValidationError("audioTimeSec must be a finite, non-negative number")
-
-        anchor_label: Optional[str] = None
-        anchor_csv_time: Optional[float] = None
-
-        if "csvTimeSec" in args and args["csvTimeSec"] is not None:
-            try:
-                anchor_csv_time = float(args["csvTimeSec"])
-            except (TypeError, ValueError):
-                raise ChatToolValidationError("csvTimeSec must be a number when provided")
-            if not _math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
-                raise ChatToolValidationError("csvTimeSec must be a finite, non-negative number")
-            anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
-        elif "conceptId" in args and args["conceptId"] is not None:
-            concept_id = str(args["conceptId"]).strip()
-            if not concept_id:
-                raise ChatToolValidationError("conceptId must be non-empty")
-            annotation_path = self._annotation_path_for_speaker(speaker)
-            if annotation_path is None or not annotation_path.is_file():
-                raise ChatToolValidationError(
-                    "No annotation file found for speaker '{0}'".format(speaker)
-                )
-            try:
-                record = json.loads(annotation_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc))
-            interval = self._find_concept_interval(record, concept_id)
-            if interval is None:
-                raise ChatToolValidationError(
-                    "No annotation interval found for concept '{0}'".format(concept_id)
-                )
-            anchor_csv_time = float(interval["start"])
-            anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
-        else:
-            raise ChatToolValidationError(
-                "Provide either csvTimeSec or conceptId so the offset can be anchored"
-            )
-
         annotation_path = self._annotation_path_for_speaker(speaker)
-        offset_sec = round(audio_time - float(anchor_csv_time), 3)
-        return self._format_offset_detect_payload(
-            speaker=speaker,
-            offset_sec=offset_sec,
-            confidence=0.99,
-            n_matched=1,
-            total_anchors=1,
-            total_segments=0,
-            method="manual_pair",
-            spread_sec=0.0,
-            matches=[
+        record_cache: Optional[Dict[str, Any]] = None
+
+        def _record() -> Dict[str, Any]:
+            nonlocal record_cache
+            if record_cache is None:
+                if annotation_path is None or not annotation_path.is_file():
+                    raise ChatToolValidationError(
+                        "No annotation file found for speaker '{0}'".format(speaker)
+                    )
+                try:
+                    record_cache = json.loads(annotation_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc))
+            return record_cache
+
+        # Normalise to a list of raw-pair dicts.
+        raw_pairs: List[Dict[str, Any]]
+        if "pairs" in args and args["pairs"] is not None:
+            raw_pairs = args["pairs"] if isinstance(args["pairs"], list) else []
+            if not raw_pairs:
+                raise ChatToolValidationError("pairs must be a non-empty array")
+        else:
+            raw_pairs = [
+                {
+                    "audioTimeSec": args.get("audioTimeSec"),
+                    "csvTimeSec": args.get("csvTimeSec"),
+                    "conceptId": args.get("conceptId"),
+                }
+            ]
+
+        matches: List[Dict[str, Any]] = []
+        offsets: List[float] = []
+
+        for raw in raw_pairs:
+            if not isinstance(raw, dict):
+                raise ChatToolValidationError("Each pair must be a JSON object")
+            try:
+                audio_time = float(raw.get("audioTimeSec"))
+            except (TypeError, ValueError):
+                raise ChatToolValidationError("audioTimeSec is required for every pair")
+            if not _math.isfinite(audio_time) or audio_time < 0:
+                raise ChatToolValidationError("audioTimeSec must be finite and non-negative")
+
+            anchor_csv_time: Optional[float] = None
+            anchor_label: Optional[str] = None
+
+            csv_raw = raw.get("csvTimeSec")
+            concept_raw = raw.get("conceptId")
+            if csv_raw is not None and (not isinstance(csv_raw, str) or csv_raw != ""):
+                try:
+                    anchor_csv_time = float(csv_raw)
+                except (TypeError, ValueError):
+                    raise ChatToolValidationError("csvTimeSec must be a number when provided")
+                if not _math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
+                    raise ChatToolValidationError("csvTimeSec must be finite and non-negative")
+                anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
+            elif concept_raw is not None and str(concept_raw).strip():
+                concept_id = str(concept_raw).strip()
+                interval = self._find_concept_interval(_record(), concept_id)
+                if interval is None:
+                    raise ChatToolValidationError(
+                        "No annotation interval found for concept '{0}'".format(concept_id)
+                    )
+                anchor_csv_time = float(interval["start"])
+                anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
+            else:
+                raise ChatToolValidationError("Each pair needs either csvTimeSec or conceptId")
+
+            offset_sec = round(audio_time - float(anchor_csv_time), 3)
+            offsets.append(offset_sec)
+            matches.append(
                 {
                     "anchor_index": -1,
                     "anchor_text": anchor_label or "",
@@ -1578,7 +1618,30 @@ class ParseChatTools:
                     "score": 1.0,
                     "offset_sec": offset_sec,
                 }
-            ],
+            )
+
+        median_offset = round(_statistics.median(offsets), 3)
+        if len(offsets) >= 2:
+            deviations = [abs(o - median_offset) for o in offsets]
+            spread = round(_statistics.median(deviations), 3)
+            max_deviation = max(deviations)
+            # Use the worst pair's deviation (not just MAD) so a single
+            # outlier in three consistent pairs still drops confidence.
+            confidence = max(0.5, min(0.99, 0.99 - (max_deviation / 60.0)))
+        else:
+            spread = 0.0
+            confidence = 0.99
+
+        return self._format_offset_detect_payload(
+            speaker=speaker,
+            offset_sec=median_offset,
+            confidence=float(confidence),
+            n_matched=len(matches),
+            total_anchors=len(matches),
+            total_segments=0,
+            method="manual_pair",
+            spread_sec=float(spread),
+            matches=matches,
             anchor_distribution="manual",
             annotation_path=annotation_path,
         )

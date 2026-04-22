@@ -321,6 +321,12 @@ export async function detectTimestampOffset(
   });
 }
 
+export interface OffsetPair {
+  audioTimeSec: number;
+  csvTimeSec?: number;
+  conceptId?: string;
+}
+
 export async function detectTimestampOffsetFromPair(
   speaker: string,
   audioTimeSec: number,
@@ -334,6 +340,16 @@ export async function detectTimestampOffsetFromPair(
       csvTimeSec: options.csvTimeSec,
       conceptId: options.conceptId,
     }),
+  });
+}
+
+export async function detectTimestampOffsetFromPairs(
+  speaker: string,
+  pairs: OffsetPair[]
+): Promise<OffsetDetectResult> {
+  return apiFetch<OffsetDetectResult>("/api/offset/detect-from-pair", {
+    method: "POST",
+    body: JSON.stringify({ speaker, pairs }),
   });
 }
 

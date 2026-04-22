@@ -759,39 +759,49 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     @mcp.tool()
     def detect_timestamp_offset_from_pair(
         speaker: str,
-        audioTimeSec: float,
+        audioTimeSec: Optional[float] = None,
         csvTimeSec: Optional[float] = None,
         conceptId: Optional[str] = None,
+        pairs: Optional[list] = None,
     ) -> str:
-        """Compute a timestamp offset from one trusted (csvTime, audioTime)
-        pair. No STT, no statistics, no false matches. Read-only.
+        """Compute a timestamp offset from one or more trusted
+        (csvTime, audioTime) pairs. No STT, no statistics-on-text, no
+        false matches. Read-only.
 
-        Use this when you (or the user) already know where one lexeme actually
-        is in the audio — e.g. the user says "lexeme X is at 02:34". The math
-        is just ``offset = audioTimeSec − csvTimeSec``; the result has the
-        same shape as detect_timestamp_offset so it can be passed straight
-        into apply_timestamp_offset.
+        Use this when you (or the user) already know where one or more
+        lexemes actually are in the audio — e.g. "STONE is at 02:34, WATER
+        is at 04:12". With two or more pairs the response carries the MAD
+        spread plus a warning if any pair disagrees with the consensus.
 
-        Anchor either by ``csvTimeSec`` (the time the annotation currently
-        claims) or by ``conceptId`` (look up that concept's interval in the
-        annotation and use its start time). Exactly one of the two must be
-        provided.
+        Two argument shapes are accepted:
+
+        * **Single pair** — pass ``audioTimeSec`` plus exactly one of
+          ``csvTimeSec`` or ``conceptId``. Returns a single-pair offset.
+        * **Multiple pairs** — pass ``pairs=[{...}, {...}]`` where each
+          element is a pair object. The reported offsetSec is the median
+          of per-pair offsets; spread is the median absolute deviation.
 
         Args:
             speaker: Speaker ID whose annotation will be shifted
-            audioTimeSec: The true time, in the recording, where the
-                anchor lexeme is heard.
-            csvTimeSec: Optional. The current annotation time of the same
-                lexeme.
-            conceptId: Optional. Concept id (e.g. "STONE") to look up in
-                the annotation; the matching interval's start_sec becomes
-                the csvTime.
+            audioTimeSec: Single-pair convenience — the true audio time
+                of the anchor lexeme. Mutually exclusive with ``pairs``.
+            csvTimeSec: Single-pair convenience — the lexeme's current
+                annotation time. Use either this or ``conceptId``.
+            conceptId: Single-pair convenience — concept id to look up in
+                the annotation; the matching interval's start becomes the
+                csv time. Use either this or ``csvTimeSec``.
+            pairs: Multi-pair list. Each item is
+                ``{audioTimeSec, csvTimeSec? | conceptId?}``.
         """
-        args: Dict[str, Any] = {"speaker": speaker, "audioTimeSec": audioTimeSec}
+        args: Dict[str, Any] = {"speaker": speaker}
+        if audioTimeSec is not None:
+            args["audioTimeSec"] = audioTimeSec
         if csvTimeSec is not None:
             args["csvTimeSec"] = csvTimeSec
         if conceptId is not None:
             args["conceptId"] = conceptId
+        if pairs is not None:
+            args["pairs"] = pairs
         result = tools.execute("detect_timestamp_offset_from_pair", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
