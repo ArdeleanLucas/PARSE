@@ -1081,6 +1081,7 @@ interface AnnotateViewProps {
 const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConcepts, onPrev, onNext, audioUrl, peaksUrl }) => {
   const record = useAnnotationStore(s => s.records[speaker] ?? null);
   const setInterval = useAnnotationStore(s => s.setInterval);
+  const moveIntervalAcrossTiers = useAnnotationStore(s => s.moveIntervalAcrossTiers);
   const saveSpeaker = useAnnotationStore(s => s.saveSpeaker);
   const tagConcept = useTagStore(s => s.tagConcept);
 
@@ -1090,10 +1091,18 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   );
   const [ipa, setIpa] = useState(ipaInterval?.text ?? '');
   const [ortho, setOrtho] = useState(orthoInterval?.text ?? '');
+  // Editable timestamp fields for the current lexeme (seeded from the concept tier interval).
+  const [editStart, setEditStart] = useState<string>(conceptInterval ? conceptInterval.start.toFixed(3) : '');
+  const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : '');
+  const [timestampSaving, setTimestampSaving] = useState(false);
+  const [timestampMessage, setTimestampMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   useEffect(() => {
     setIpa(ipaInterval?.text ?? '');
     setOrtho(orthoInterval?.text ?? '');
-  }, [speaker, concept.key, ipaInterval, orthoInterval]);
+    setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : '');
+    setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : '');
+    setTimestampMessage(null);
+  }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -1110,15 +1119,28 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   const selectedRegion = usePlaybackStore(s => s.selectedRegion);
   const annotated = Boolean(conceptInterval && ipaInterval);
 
-  const { playPause, skip, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
+  const { playPause, seek, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
     containerRef,
     audioUrl,
     peaksUrl,
     onTimeUpdate: t => usePlaybackStore.setState({ currentTime: t }),
     onReady: d => { usePlaybackStore.setState({ duration: d }); setAudioReady(true); },
     onPlayStateChange: p => usePlaybackStore.setState({ isPlaying: p }),
-    onRegionUpdate: (start, end) => usePlaybackStore.setState({ selectedRegion: { start, end } }),
+    onRegionUpdate: (start, end) => {
+      usePlaybackStore.setState({ selectedRegion: { start, end } });
+      // Dragging/resizing the waveform region mirrors into the editable fields.
+      setEditStart(start.toFixed(3));
+      setEditEnd(end.toFixed(3));
+    },
   });
+
+  // When the user picks a concept (and once the waveform is ready), seek to its
+  // start and show the lexeme's range as a draggable region on the waveform.
+  useEffect(() => {
+    if (!audioReady || !conceptInterval) return;
+    seek(conceptInterval.start);
+    addRegion(conceptInterval.start, conceptInterval.end);
+  }, [audioReady, conceptInterval?.start, conceptInterval?.end, seek, addRegion]);
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
@@ -1276,6 +1298,98 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
               dir="rtl"
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-serif text-xl text-slate-900 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
             />
+          </div>
+
+          {/* Timestamp editor for the current lexeme */}
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Lexeme timestamp (seconds)</label>
+              {conceptInterval ? (
+                <span className="font-mono text-[10px] text-slate-400">{fmt(conceptInterval.start)}–{fmt(conceptInterval.end)}</span>
+              ) : (
+                <span className="font-mono text-[10px] text-slate-400">no interval</span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-slate-500">Start</span>
+                <input
+                  data-testid="lexeme-start"
+                  type="number"
+                  step={0.001}
+                  min={0}
+                  value={editStart}
+                  onChange={e => setEditStart(e.target.value)}
+                  disabled={!conceptInterval}
+                  className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-slate-500">End</span>
+                <input
+                  data-testid="lexeme-end"
+                  type="number"
+                  step={0.001}
+                  min={0}
+                  value={editEnd}
+                  onChange={e => setEditEnd(e.target.value)}
+                  disabled={!conceptInterval}
+                  className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
+                />
+              </div>
+              <button
+                data-testid="lexeme-timestamp-save"
+                disabled={!conceptInterval || timestampSaving}
+                onClick={async () => {
+                  if (!conceptInterval) return;
+                  const ns = parseFloat(editStart);
+                  const ne = parseFloat(editEnd);
+                  if (!Number.isFinite(ns) || !Number.isFinite(ne) || ne <= ns) {
+                    setTimestampMessage({ kind: 'err', text: 'End must be greater than start.' });
+                    return;
+                  }
+                  setTimestampSaving(true);
+                  try {
+                    const moved = moveIntervalAcrossTiers(speaker, conceptInterval.start, conceptInterval.end, ns, ne);
+                    if (moved === 0) {
+                      setTimestampMessage({ kind: 'err', text: 'No matching intervals found to retime.' });
+                    } else {
+                      await saveSpeaker(speaker);
+                      setTimestampMessage({ kind: 'ok', text: `Retimed ${moved} tier${moved === 1 ? '' : 's'}.` });
+                      addRegion(ns, ne);
+                      seek(ns);
+                    }
+                  } catch (err) {
+                    setTimestampMessage({ kind: 'err', text: err instanceof Error ? err.message : String(err) });
+                  } finally {
+                    setTimestampSaving(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5"/> Save timestamp
+              </button>
+              <button
+                data-testid="lexeme-timestamp-reset"
+                disabled={!conceptInterval}
+                onClick={() => {
+                  if (!conceptInterval) return;
+                  setEditStart(conceptInterval.start.toFixed(3));
+                  setEditEnd(conceptInterval.end.toFixed(3));
+                  addRegion(conceptInterval.start, conceptInterval.end);
+                  seek(conceptInterval.start);
+                  setTimestampMessage(null);
+                }}
+                className="text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:opacity-50"
+              >
+                Reset
+              </button>
+              {timestampMessage && (
+                <span data-testid="lexeme-timestamp-msg" className={`ml-auto text-[11px] ${timestampMessage.kind === 'ok' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {timestampMessage.text}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Action buttons */}
