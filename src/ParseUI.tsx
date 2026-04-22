@@ -2747,8 +2747,7 @@ export function ParseUI() {
                     className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
                     <option value="cognates">Cognates</option>
                     <option value="similarity">Phonetic similarity</option>
-                    <option value="alignment">Alignment</option>
-                    <option value="borrowings">Borrowing detection</option>
+                    <option value="contact-lexemes">Borrowing detection (CLEF)</option>
                   </select>
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
                     <button
