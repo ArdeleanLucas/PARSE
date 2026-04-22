@@ -1615,12 +1615,13 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
                 pause();
                 return;
               }
-              // Default play: bound to the active lexeme region so the
-              // clip stops at end. Pressing play again (cursor now at
-              // region end) or after seeking elsewhere falls through to
-              // unbounded continuous playback inside playClip.
+              // Default play: jump to the lexeme start and stop at its
+              // end (clip-bounded). Pressing Play again after the clip
+              // auto-stops, or after the user seeks elsewhere on the
+              // waveform, falls through to continuous playback inside
+              // playClip — which checks the hook's "primed" flag.
               if (selectedRegion) {
-                playClip(selectedRegion.end);
+                playClip(selectedRegion.start, selectedRegion.end);
               } else {
                 playPause();
               }
