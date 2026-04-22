@@ -29,6 +29,19 @@ export interface AnnotationRecord {
   source_audio_duration_sec?: number;
 }
 
+export interface SttSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface SttSegmentsPayload {
+  speaker: string;
+  source_wav?: string;
+  language?: string | null;
+  segments: SttSegment[];
+}
+
 export interface ConceptEntry {
   id: string;
   label: string;

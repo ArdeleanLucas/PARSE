@@ -2832,6 +2832,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_annotation(parts[2])
             return
 
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "stt-segments":
+            self._api_get_stt_segments(parts[2])
+            return
+
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "chat" and parts[2] == "session":
             self._api_get_chat_session(parts[3])
             return
@@ -3014,6 +3018,37 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         _annotation_sync_speaker_tier(normalized)
 
         self._send_json(HTTPStatus.OK, normalized)
+
+    def _api_get_stt_segments(self, speaker_part: str) -> None:
+        """Return cached STT segments for a speaker, or an empty payload.
+
+        Reads ``coarse_transcripts/<speaker>.json`` — the cache seeded by
+        ``_run_stt_job`` and also used by ``/api/offset/detect``. Returns
+        ``{"speaker", "source_wav", "language", "segments"}``. When no cache
+        exists the response is the same shape with ``segments: []`` so the
+        frontend can distinguish "ran STT, no text" from "never ran STT" via
+        the 404 path.
+        """
+        try:
+            speaker = _normalize_speaker_id(speaker_part)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        cache_path = _stt_cache_path(speaker)
+        if not cache_path.exists():
+            self._send_json(HTTPStatus.OK, {"speaker": speaker, "segments": []})
+            return
+        try:
+            with open(cache_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, "Failed to read STT cache: {0}".format(exc))
+        if not isinstance(data, dict):
+            data = {"speaker": speaker, "segments": []}
+        data.setdefault("speaker", speaker)
+        segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+        data["segments"] = segments
+        self._send_json(HTTPStatus.OK, data)
 
     def _api_post_annotation(self, speaker_part: str) -> None:
         try:

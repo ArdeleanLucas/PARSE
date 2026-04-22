@@ -19,6 +19,8 @@ import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
+import { useTranscriptionLanesStore, type LaneKind } from './stores/transcriptionLanesStore';
+import { TranscriptionLanes } from './components/annotate/TranscriptionLanes';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
@@ -1466,6 +1468,9 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
             )}
           </div>
         </div>
+
+        {/* Transcription lanes — STT / IPA / ORTHO, toggled from the right drawer */}
+        <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady}/>
       </section>
 
       {/* ======= CONCEPT HEADER ======= */}
@@ -3150,6 +3155,8 @@ export function ParseUI() {
                     Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
                   </p>
 
+                  <TranscriptionLanesControls/>
+
                   <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
                     <Layers className="h-3.5 w-3.5"/>
                     <span className="flex-1 text-left">Spectrogram workspace</span>
@@ -3336,6 +3343,58 @@ export function ParseUI() {
           e.target.value = '';
         }}
       />
+    </div>
+  );
+}
+
+const LANE_ORDER: LaneKind[] = ['stt', 'ipa', 'ortho'];
+const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
+  stt: { label: 'STT segments', hint: 'Coarse transcript' },
+  ipa: { label: 'IPA tier', hint: 'Phonemic/phonetic' },
+  ortho: { label: 'Ortho tier', hint: 'Orthographic' },
+};
+
+function TranscriptionLanesControls() {
+  const lanes = useTranscriptionLanesStore(s => s.lanes);
+  const toggleLane = useTranscriptionLanesStore(s => s.toggleLane);
+  const setLaneColor = useTranscriptionLanesStore(s => s.setLaneColor);
+
+  return (
+    <div className="mb-3 rounded-md bg-slate-50 p-2">
+      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Transcription lanes
+      </div>
+      <div className="space-y-1">
+        {LANE_ORDER.map(kind => {
+          const cfg = lanes[kind];
+          const { label, hint } = LANE_DISPLAY[kind];
+          return (
+            <label
+              key={kind}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-white"
+            >
+              <input
+                type="checkbox"
+                checked={cfg.visible}
+                onChange={() => toggleLane(kind)}
+                className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
+              />
+              <input
+                type="color"
+                value={cfg.color}
+                onChange={e => setLaneColor(kind, e.target.value)}
+                className="h-4 w-5 cursor-pointer rounded border border-slate-200 bg-transparent p-0"
+                title={`Color for ${label}`}
+                aria-label={`Color for ${label}`}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
+                <div className="text-[9px] text-slate-400 truncate">{hint}</div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }

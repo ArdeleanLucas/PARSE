@@ -17,6 +17,7 @@ import type {
   ContactLexemeFetchOptions,
   Tag,
   TagsResponse,
+  SttSegmentsPayload,
 } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,6 +113,10 @@ export async function saveAnnotation(speaker: string, record: AnnotationRecord):
     method: "POST",
     body: JSON.stringify(record),
   });
+}
+
+export async function getSttSegments(speaker: string): Promise<SttSegmentsPayload> {
+  return apiFetch<SttSegmentsPayload>(`/api/stt-segments/${encodeURIComponent(speaker)}`);
 }
 
 // Enrichments
