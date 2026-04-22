@@ -151,10 +151,14 @@ function buildSpeakerForm(
   const arabicSim = typeof speakerSimilarity?.ar === 'number' ? speakerSimilarity.ar : 0;
   const persianSim = typeof speakerSimilarity?.tr === 'number' ? speakerSimilarity.tr : 0;
 
-  const cognateSets = isRecord(enrichments.cognate_sets) ? enrichments.cognate_sets : null;
-  const conceptCognates = cognateSets && isRecord(cognateSets[concept.key]) ? cognateSets[concept.key] as Record<string, unknown> : null;
+  const overrides = isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
+  const overrideSets = overrides && isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : null;
+  const autoSets = isRecord(enrichments.cognate_sets) ? enrichments.cognate_sets as Record<string, unknown> : null;
+  // Manual overrides win over auto-computed cognate sets.
+  const conceptCognates = (overrideSets && isRecord(overrideSets[concept.key]) ? overrideSets[concept.key] : null)
+    ?? (autoSets && isRecord(autoSets[concept.key]) ? autoSets[concept.key] : null);
   let cognate: SpeakerForm['cognate'] = '—';
-  if (conceptCognates) {
+  if (conceptCognates && isRecord(conceptCognates)) {
     for (const [group, members] of Object.entries(conceptCognates)) {
       if (Array.isArray(members) && members.includes(speaker) && (group === 'A' || group === 'B' || group === 'C')) {
         cognate = group;
@@ -162,6 +166,11 @@ function buildSpeakerForm(
       }
     }
   }
+
+  // Per-speaker flag: overrides.speaker_flags[conceptKey][speaker] = true.
+  const flagsBlock = overrides && isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : null;
+  const conceptFlags = flagsBlock && isRecord(flagsBlock[concept.key]) ? flagsBlock[concept.key] as Record<string, unknown> : null;
+  const speakerFlagged = !!(conceptFlags && conceptFlags[speaker]);
 
   const primaryConceptInterval = conceptIntervals[0] ?? null;
   const orthoIntervals = record?.tiers.ortho?.intervals ?? [];
@@ -177,7 +186,7 @@ function buildSpeakerForm(
     arabicSim,
     persianSim,
     cognate,
-    flagged,
+    flagged: speakerFlagged || flagged,
     startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
     endSec: primaryConceptInterval ? primaryConceptInterval.end : null,
   };
@@ -1570,6 +1579,40 @@ export function ParseUI() {
     });
   };
 
+  const cycleSpeakerCognate = (conceptKey: string, speaker: string, current: 'A' | 'B' | 'C' | '\u2014') => {
+    const next: 'A' | 'B' | 'C' | null =
+      current === '\u2014' ? 'A' : current === 'A' ? 'B' : current === 'B' ? 'C' : null;
+    const store = useEnrichmentStore.getState();
+    const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
+    const prevSets = isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, Record<string, string[]>> : {};
+    const autoSets = isRecord(store.data.cognate_sets) ? store.data.cognate_sets as Record<string, Record<string, string[]>> : {};
+    const baseline = (prevSets[conceptKey] ?? autoSets[conceptKey] ?? {}) as Record<string, string[]>;
+    // Include every existing group (even if now empty) so the enrichment
+    // store's deep-merge writes an actual empty array rather than preserving
+    // the prior membership.
+    const cleaned: Record<string, string[]> = {};
+    for (const [group, members] of Object.entries(baseline)) {
+      cleaned[group] = (Array.isArray(members) ? members : []).filter((m) => m !== speaker);
+    }
+    if (next) {
+      const existing = cleaned[next] ?? [];
+      if (!existing.includes(speaker)) cleaned[next] = [...existing, speaker];
+    }
+    const patch = { manual_overrides: { cognate_sets: { [conceptKey]: cleaned } } };
+    void store.save(patch);
+  };
+
+  const toggleSpeakerFlag = (conceptKey: string, speaker: string, current: boolean) => {
+    const store = useEnrichmentStore.getState();
+    const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
+    const prevFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, Record<string, boolean>> : {};
+    const conceptBlock = { ...(prevFlags[conceptKey] ?? {}) };
+    if (current) delete conceptBlock[speaker];
+    else conceptBlock[speaker] = true;
+    const patch = { manual_overrides: { speaker_flags: { [conceptKey]: conceptBlock } } };
+    void store.save(patch);
+  };
+
   // Auto-select speakers when config loads and we have none selected
   useEffect(() => {
     if (rawSpeakers.length > 0 && selectedSpeakers.length === 0) {
@@ -1591,6 +1634,12 @@ export function ParseUI() {
       });
     }
   }, [selectedSpeakers, loadSpeaker]);
+
+  useEffect(() => {
+    loadEnrichments().catch((err) => {
+      console.error('[ParseUI] loadEnrichments failed:', err);
+    });
+  }, [loadEnrichments]);
 
   const reloadSpeakerAnnotation = async (speakerId: string | null) => {
     if (!speakerId) {
@@ -1811,15 +1860,43 @@ export function ParseUI() {
   };
 
   const filtered = useMemo(() => {
+    const overrides = isRecord(enrichmentData?.manual_overrides) ? enrichmentData.manual_overrides as Record<string, unknown> : {};
+    const overrideSets = isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : {};
+    const autoSets = isRecord(enrichmentData?.cognate_sets) ? enrichmentData.cognate_sets as Record<string, unknown> : {};
+    const speakerFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : {};
+    const borrowingFlags = isRecord(enrichmentData?.borrowing_flags) ? enrichmentData.borrowing_flags as Record<string, unknown> : {};
+    const borrowingRoot = isRecord(enrichmentData?.borrowings) ? enrichmentData.borrowings as Record<string, unknown>
+      : isRecord(enrichmentData?.borrowing_candidates) ? enrichmentData.borrowing_candidates as Record<string, unknown>
+      : {};
+
+    const hasCognateAssignment = (key: string): boolean => {
+      const block = (isRecord(overrideSets[key]) ? overrideSets[key] : isRecord(autoSets[key]) ? autoSets[key] : null) as Record<string, unknown> | null;
+      if (!block) return false;
+      return Object.values(block).some((members) => Array.isArray(members) && members.length > 0);
+    };
+    const hasSpeakerFlag = (key: string): boolean => {
+      const block = speakerFlags[key];
+      if (!isRecord(block)) return false;
+      return Object.values(block).some((v) => !!v);
+    };
+    const hasBorrowing = (key: string): boolean => {
+      if (key in borrowingRoot) return true;
+      const flags = borrowingFlags[key];
+      if (!isRecord(flags)) return false;
+      return Object.values(flags).some((v) => v === 'borrowed' || v === 'uncertain');
+    };
+
     let list = concepts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
     if (tagFilter !== 'all') list = list.filter(c => c.tag === tagFilter);
-    if (modeTab === 'unreviewed') list = list.filter(c => c.tag === 'untagged' || c.tag === 'review');
-    if (modeTab === 'flagged') list = list.filter(c => c.tag === 'problematic');
-    if (modeTab === 'borrowings') list = list.filter(c => {
-      // TODO: wire to real borrowing data from enrichments
-      const borrowingRoot = isRecord(enrichmentData?.borrowings) ? enrichmentData.borrowings : {};
-      return c.key in borrowingRoot;
-    });
+    if (modeTab === 'unreviewed') {
+      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
+    }
+    if (modeTab === 'flagged') {
+      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
+    }
+    if (modeTab === 'borrowings') {
+      list = list.filter(c => hasBorrowing(c.key));
+    }
     // In annotate mode, show all concepts for the selected speaker (filter by real data when available)
     if (currentMode === 'annotate') {
       // No synthetic filtering — show the full concept list
@@ -2474,19 +2551,19 @@ export function ParseUI() {
                         <React.Fragment key={f.speaker}>
                         <tr
                           data-testid={`speaker-row-${f.speaker}`}
-                          className={`bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
+                          role="button"
+                          onClick={() => toggleLexemeExpanded(f.speaker)}
+                          className={`cursor-pointer bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
                         >
                           <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-2">
-                              <button
+                              <span
                                 data-testid={`lexeme-toggle-${f.speaker}`}
-                                onClick={() => toggleLexemeExpanded(f.speaker)}
-                                className="font-mono text-[13px] text-indigo-700 underline-offset-2 hover:underline"
-                                title="Click to expand lexeme details"
+                                className="font-mono text-[13px] text-indigo-700"
                               >
                                 /{f.ipa || '—'}/
-                              </button>
+                              </span>
                               <ChevronDown
                                 className={`h-3 w-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                               />
@@ -2495,18 +2572,26 @@ export function ParseUI() {
                           </td>
                           <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
                           <td className="px-3 py-2.5"><SimBar value={f.persianSim}/></td>
-                          <td className="px-3 py-2.5">
-                            <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded px-1 font-mono text-[10px] font-bold ${
-                              f.cognate==='A'?'bg-indigo-100 text-indigo-700':
-                              f.cognate==='B'?'bg-violet-100 text-violet-700':
-                              f.cognate==='C'?'bg-fuchsia-100 text-fuchsia-700':
-                              'bg-slate-100 text-slate-400'
-                            }`}>{f.cognate}</span>
-                          </td>
-                          <td className="px-3 py-2.5 text-right">
+                          <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                             <button
-                              title={`Toggle speaker flag for ${f.speaker}`}
-                              onClick={() => f.flagged ? untagConcept('problematic', concept.key) : tagConcept('problematic', concept.key)}
+                              data-testid={`cognate-cycle-${f.speaker}`}
+                              title={`Cycle cognate: ${f.cognate} → ${f.cognate === '—' ? 'A' : f.cognate === 'A' ? 'B' : f.cognate === 'B' ? 'C' : '—'}`}
+                              onClick={() => cycleSpeakerCognate(concept.key, f.speaker, f.cognate)}
+                              className={`inline-flex h-5 min-w-[24px] items-center justify-center rounded px-1 font-mono text-[10px] font-bold hover:ring-2 hover:ring-slate-300 ${
+                                f.cognate==='A'?'bg-indigo-100 text-indigo-700':
+                                f.cognate==='B'?'bg-violet-100 text-violet-700':
+                                f.cognate==='C'?'bg-fuchsia-100 text-fuchsia-700':
+                                'bg-slate-100 text-slate-400'
+                              }`}
+                            >
+                              {f.cognate}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              data-testid={`speaker-flag-${f.speaker}`}
+                              title={`Toggle flag for ${f.speaker}`}
+                              onClick={() => toggleSpeakerFlag(concept.key, f.speaker, f.flagged)}
                               className={`inline-grid h-6 w-6 place-items-center rounded-md ${f.flagged?'bg-amber-100 text-amber-600':'text-slate-300 hover:bg-slate-100 hover:text-slate-500'}`}
                             >
                               <Flag className="h-3 w-3"/>

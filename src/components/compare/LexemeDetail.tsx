@@ -20,11 +20,6 @@ interface LexemeDetailProps {
   cognateColor?: string | null;
 }
 
-function formatPct(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "—";
-  return `${Math.round(value * 100)}%`;
-}
-
 function deriveAudioUrl(record: { source_audio?: string; source_wav?: string } | null | undefined): string {
   const raw = (record?.source_audio ?? record?.source_wav ?? "").trim();
   if (!raw) return "";
@@ -36,14 +31,8 @@ export function LexemeDetail({
   speaker,
   conceptId,
   conceptLabel,
-  ipa,
-  ortho,
   startSec,
   endSec,
-  arabicSim,
-  persianSim,
-  cognateGroup,
-  cognateColor,
 }: LexemeDetailProps) {
   const records = useAnnotationStore((s) => s.records);
   const enrichmentData = useEnrichmentStore((s) => s.data);
@@ -67,7 +56,6 @@ export function LexemeDetail({
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [showSpectrogram, setShowSpectrogram] = useState(false);
-  const [flagged, setFlagged] = useState(false);
   const [tagSearch, setTagSearch] = useState("");
 
   useEffect(() => {
@@ -185,91 +173,42 @@ export function LexemeDetail({
         margin: "0.5rem 0",
       }}
     >
-      {/* Header row: speaker, IPA, sim bars, cognate, flag */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(80px, 0.75fr) minmax(220px, 2fr) 1fr 1fr 80px 60px",
-          alignItems: "center",
-          gap: "0.75rem",
-          padding: "0.75rem",
-        }}
-      >
-        <div style={{ fontWeight: 700 }}>{speaker}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "1.125rem" }}>{ipa || <em style={{ color: "#9ca3af" }}>No IPA</em>}</span>
-            <button
-              aria-label={`Play ${speaker} ${conceptLabel}`}
-              onClick={handlePlay}
-              disabled={!canPlay}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                border: "none",
-                background: canPlay ? "#3b82f6" : "#d1d5db",
-                color: "white",
-                cursor: canPlay ? "pointer" : "not-allowed",
-                fontSize: "0.75rem",
-              }}
-            >
-              ▶
-            </button>
-            {canShowSpectrogram && (
-              <button
-                data-testid={`toggle-spectrogram-${speaker}-${conceptId}`}
-                onClick={() => setShowSpectrogram((v) => !v)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#3b82f6",
-                  textDecoration: "underline",
-                  cursor: "pointer",
-                  fontSize: "0.8125rem",
-                  padding: 0,
-                }}
-              >
-                Toggle Spectrogram
-              </button>
-            )}
-          </div>
-          {ortho && <div style={{ color: "#6b7280", fontSize: "0.8125rem" }}>{ortho}</div>}
+      {canShowSpectrogram && (
+        <div style={{ padding: "0.5rem 0.75rem 0", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button
+            aria-label={`Play ${speaker} ${conceptLabel}`}
+            onClick={handlePlay}
+            disabled={!canPlay}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              border: "none",
+              background: canPlay ? "#3b82f6" : "#d1d5db",
+              color: "white",
+              cursor: canPlay ? "pointer" : "not-allowed",
+              fontSize: "0.625rem",
+            }}
+          >
+            ▶
+          </button>
+          <button
+            data-testid={`toggle-spectrogram-${speaker}-${conceptId}`}
+            onClick={() => setShowSpectrogram((v) => !v)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#3b82f6",
+              textDecoration: "underline",
+              cursor: "pointer",
+              fontSize: "0.8125rem",
+              padding: 0,
+            }}
+          >
+            {showSpectrogram ? "Hide Spectrogram" : "Toggle Spectrogram"}
+          </button>
         </div>
-        <SimBar label="Ar" value={arabicSim} color="#dbeafe" />
-        <SimBar label="Pr" value={persianSim} color="#fef3c7" />
-        <div>
-          {cognateGroup ? (
-            <span
-              style={{
-                display: "inline-block",
-                padding: "0.125rem 0.5rem",
-                borderRadius: "0.25rem",
-                background: cognateColor ?? "#e5e7eb",
-                fontWeight: 600,
-              }}
-            >
-              {cognateGroup}
-            </span>
-          ) : (
-            <span style={{ color: "#9ca3af" }}>—</span>
-          )}
-        </div>
-        <button
-          aria-label="Flag lexeme"
-          onClick={() => setFlagged((v) => !v)}
-          style={{
-            background: flagged ? "#fee2e2" : "transparent",
-            border: "1px solid #d1d5db",
-            borderRadius: "0.25rem",
-            cursor: "pointer",
-            padding: "0.25rem 0.5rem",
-          }}
-          title="Flag (local)"
-        >
-          {flagged ? "🚩" : "⚐"}
-        </button>
-      </div>
+      )}
 
       {spectrogramSrc && (
         <div style={{ padding: "0 0.75rem 0.75rem" }}>
@@ -439,43 +378,6 @@ export function LexemeDetail({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-interface SimBarProps {
-  label: string;
-  value: number | null | undefined;
-  color: string;
-}
-
-function SimBar({ label, value, color }: SimBarProps) {
-  const pct = value != null && !Number.isNaN(value) ? Math.max(0, Math.min(1, value)) : 0;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "0.8125rem" }}>
-      <strong>{label}</strong>
-      <div
-        style={{
-          position: "relative",
-          flex: 1,
-          height: 6,
-          background: "#f3f4f6",
-          borderRadius: 3,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            bottom: 0,
-            width: `${pct * 100}%`,
-            background: color,
-          }}
-        />
-      </div>
-      <span style={{ color: "#6b7280", minWidth: 30, textAlign: "right" }}>{formatPct(value)}</span>
     </div>
   );
 }

@@ -3733,6 +3733,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 intervals.append({"concept_id": cid, "start": start, "end": end})
 
         concept_labels: Dict[str, str] = {}
+        survey_to_id: Dict[str, str] = {}
         try:
             import csv as _csv
             concepts_path = _project_root() / "concepts.csv"
@@ -3741,12 +3742,31 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                     for row in _csv.DictReader(fh):
                         cid = _normalize_concept_id(row.get("id"))
                         label = str(row.get("concept_en") or "").strip()
+                        survey = str(row.get("survey_item") or "").strip()
                         if cid and label:
                             concept_labels[cid] = label
+                        if cid and survey:
+                            m = re.match(r"^[A-Za-z]+_([0-9]+(?:\.[0-9]+)?)", survey)
+                            if m:
+                                key = m.group(1)
+                                survey_to_id.setdefault(key, cid)
+                                concept_labels.setdefault(key, label)
         except Exception:
             concept_labels = {}
+            survey_to_id = {}
 
         matches = match_rows_to_lexemes(rows, intervals, concept_labels=concept_labels)
+        label_to_id = {lbl.lower(): cid for cid, lbl in concept_labels.items() if cid.isdigit()}
+        for row, match in zip(rows, matches):
+            csv_id = _normalize_concept_id(row.concept_id)
+            if csv_id in survey_to_id:
+                match["concept_id"] = survey_to_id[csv_id]
+                continue
+            current = _normalize_concept_id(match.get("concept_id"))
+            if current.isdigit():
+                continue
+            if current.lower() in label_to_id:
+                match["concept_id"] = label_to_id[current.lower()]
 
         payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
         notes_block = payload.get("lexeme_notes")
@@ -4002,8 +4022,131 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(content)
 
     def _api_get_export_nexus(self) -> None:
-        """NEXUS export placeholder — not yet implemented."""
-        self._send_json_error(HTTPStatus.NOT_IMPLEMENTED, "NEXUS export not yet implemented")
+        """Emit a NEXUS character matrix compatible with BEAST2.
+
+        One character per (concept, cognate group). For each speaker:
+          1  — speaker is in this cognate group for the concept
+          0  — speaker has a form for the concept but sits in a different group
+          ?  — speaker has no form / unreviewed for the concept
+        Manual overrides in ``manual_overrides.cognate_sets`` take precedence
+        over the auto-computed ``cognate_sets`` block.
+        """
+        enrichments = _read_json_file(_enrichments_path(), _default_enrichments_payload())
+        overrides = enrichments.get("manual_overrides") or {}
+        override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
+        auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None
+        override_sets = override_sets if isinstance(override_sets, dict) else {}
+        auto_sets = auto_sets if isinstance(auto_sets, dict) else {}
+
+        # Speakers from project.json (falls back to any found in cognate sets).
+        speakers_set: set = set()
+        project_payload = _read_json_file(_project_json_path(), {})
+        speakers_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None
+        if isinstance(speakers_block, dict):
+            speakers_set.update(str(s) for s in speakers_block.keys() if str(s).strip())
+        elif isinstance(speakers_block, list):
+            speakers_set.update(str(s) for s in speakers_block if str(s).strip())
+
+        # Determine which concepts have any cognate membership anywhere.
+        concept_keys: List[str] = []
+        concept_group_members: Dict[str, Dict[str, List[str]]] = {}
+        union_keys: List[str] = []
+        seen_keys: set = set()
+        for key in list(override_sets.keys()) + list(auto_sets.keys()):
+            if key not in seen_keys:
+                seen_keys.add(key)
+                union_keys.append(key)
+
+        for key in union_keys:
+            override_block = override_sets.get(key)
+            auto_block = auto_sets.get(key)
+            block = override_block if isinstance(override_block, dict) else auto_block
+            if not isinstance(block, dict):
+                continue
+            groups: Dict[str, List[str]] = {}
+            for group, members in block.items():
+                if not isinstance(members, list):
+                    continue
+                cleaned = [str(m) for m in members if str(m).strip()]
+                if cleaned:
+                    groups[str(group)] = cleaned
+                    speakers_set.update(cleaned)
+            if groups:
+                concept_group_members[key] = groups
+                concept_keys.append(key)
+
+        speakers = sorted(speakers_set)
+
+        # Presence-of-form per (concept, speaker) — used to distinguish 0 from ?.
+        # A speaker is considered "has form" if they appear in any cognate group
+        # for the concept. (Future refinement: consult annotation tiers directly.)
+        has_form: Dict[str, set] = {}
+        for key in concept_keys:
+            present: set = set()
+            for members in concept_group_members[key].values():
+                present.update(members)
+            has_form[key] = present
+
+        # Build characters in deterministic order.
+        characters: List[Tuple[str, str, str]] = []  # (concept_key, group, label)
+        for key in sorted(concept_keys, key=_concept_sort_key):
+            for group in sorted(concept_group_members[key].keys()):
+                label = "{0}_{1}".format(str(key).replace(" ", "_"), group)
+                characters.append((key, group, label))
+
+        # Build the per-speaker binary string.
+        def row_for(speaker: str) -> str:
+            chars: List[str] = []
+            for key, group, _lbl in characters:
+                members = concept_group_members[key].get(group, [])
+                if speaker in members:
+                    chars.append("1")
+                elif speaker in has_form.get(key, set()):
+                    chars.append("0")
+                else:
+                    chars.append("?")
+            return "".join(chars)
+
+        lines: List[str] = []
+        lines.append("#NEXUS")
+        lines.append("")
+        lines.append("BEGIN TAXA;")
+        lines.append("    DIMENSIONS NTAX={0};".format(len(speakers)))
+        if speakers:
+            lines.append("    TAXLABELS")
+            for sp in speakers:
+                lines.append("        {0}".format(sp))
+            lines.append("    ;")
+        lines.append("END;")
+        lines.append("")
+        lines.append("BEGIN CHARACTERS;")
+        lines.append("    DIMENSIONS NCHAR={0};".format(len(characters)))
+        lines.append("    FORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"01\";")
+        if characters:
+            lines.append("    CHARSTATELABELS")
+            label_rows = []
+            for idx, (_key, _group, label) in enumerate(characters, start=1):
+                label_rows.append("        {0} {1}".format(idx, label))
+            lines.append(",\n".join(label_rows))
+            lines.append("    ;")
+        lines.append("    MATRIX")
+        for sp in speakers:
+            lines.append("        {0}    {1}".format(sp, row_for(sp)))
+        lines.append("    ;")
+        lines.append("END;")
+        lines.append("")
+
+        nexus_text = "\n".join(lines).encode("utf-8")
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Disposition", 'attachment; filename="parse-cognates.nex"')
+        self.send_header("Content-Length", str(len(nexus_text)))
+        self.end_headers()
+        try:
+            self.wfile.write(nexus_text)
+        except BrokenPipeError:
+            pass
 
     def _api_get_contact_lexeme_coverage(self) -> None:
         """Return coverage stats for contact language lexeme data."""
