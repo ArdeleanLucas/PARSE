@@ -2060,7 +2060,26 @@ export function ParseUI() {
                     {job.state.status === 'error' && (
                       <>
                         <XCircle className="h-3 w-3 text-rose-500" />
-                        <span className="max-w-[200px] truncate text-rose-600">{job.state.error}</span>
+                        <span
+                          className="max-w-[560px] truncate text-rose-600"
+                          title={job.state.error ?? ''}
+                          data-testid="job-error-text"
+                        >
+                          {job.state.error}
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (job.state.error) {
+                              console.error('[PARSE action job]', job.state.label, job.state.error);
+                              alert(`${job.state.label}\n\n${job.state.error}`);
+                            }
+                          }}
+                          className="text-[10px] text-rose-600 underline hover:text-rose-700"
+                          title="Show full error"
+                          data-testid="job-error-details"
+                        >
+                          Details
+                        </button>
                         <button
                           onClick={() => { void job.run(); }}
                           className="text-[10px] text-rose-600 underline hover:text-rose-700"

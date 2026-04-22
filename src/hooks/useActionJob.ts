@@ -198,7 +198,10 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         setStateIfMounted({
           status: "error",
           progress,
-          error: poll.message ?? poll.error ?? "Job failed",
+          // Surface the actual exception (`poll.error`) first — `poll.message`
+          // is the last in-progress status line ("Loading model", "Initializing
+          // STT provider") and was masking the real failures.
+          error: poll.error ?? poll.message ?? "Job failed",
           label: config.label,
           etaMs: null,
         });
