@@ -1382,6 +1382,14 @@ export function ParseUI() {
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
 
+  useEffect(() => {
+    for (const speaker of selectedSpeakers) {
+      loadSpeaker(speaker).catch((err) => {
+        console.error('[ParseUI] loadSpeaker failed:', speaker, err);
+      });
+    }
+  }, [selectedSpeakers, loadSpeaker]);
+
   const reloadSpeakerAnnotation = async (speakerId: string | null) => {
     if (!speakerId) {
       return;
