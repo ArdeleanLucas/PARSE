@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importConceptsCsv } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
@@ -44,7 +44,11 @@ interface Concept {
   key: string;
   name: string;
   tag: ConceptTag;
+  surveyItem?: string;
+  customOrder?: number;
 }
+
+type ConceptSortMode = 'az' | '1n' | 'survey' | 'custom';
 
 interface SpeakerForm {
   speaker: string; ipa: string; utterances: number;
@@ -1356,7 +1360,10 @@ export function ParseUI() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [query, setQuery] = useState('');
-  const [sortMode, setSortMode] = useState<'az'|'1n'>('1n');
+  const [sortMode, setSortMode] = useState<ConceptSortMode>('1n');
+  const [conceptImportError, setConceptImportError] = useState<string | null>(null);
+  const [conceptImportSummary, setConceptImportSummary] = useState<string | null>(null);
+  const conceptImportInputRef = useRef<HTMLInputElement>(null);
   const [tagFilter, setTagFilter] = useState<TagState>('all');
   const [conceptId, setConceptId] = useState(1);
   const [modeTab, setModeTab] = useState<ModeTab>('all');
@@ -1511,6 +1518,8 @@ export function ParseUI() {
       key: c.id,
       name: c.label,
       tag: getConceptStatus(getTagsForConcept(c.id)),
+      surveyItem: c.survey_item,
+      customOrder: c.custom_order,
     }));
   }, [rawConcepts, getTagsForConcept]);
 
@@ -1567,10 +1576,47 @@ export function ParseUI() {
     if (currentMode === 'annotate') {
       // No synthetic filtering — show the full concept list
     }
-    if (sortMode === 'az') list = [...list].sort((a,b) => a.name.localeCompare(b.name));
-    else list = [...list].sort((a,b) => a.id - b.id);
+    if (sortMode === 'az') {
+      list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortMode === 'survey') {
+      list = [...list].sort((a, b) => {
+        const av = a.surveyItem ?? '';
+        const bv = b.surveyItem ?? '';
+        if (av && !bv) return -1;
+        if (!av && bv) return 1;
+        // Try numeric (section.item) comparison, fall back to lex
+        const na = av.split('.').map(n => parseFloat(n));
+        const nb = bv.split('.').map(n => parseFloat(n));
+        for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+          const xa = na[i] ?? 0;
+          const xb = nb[i] ?? 0;
+          if (Number.isFinite(xa) && Number.isFinite(xb) && xa !== xb) return xa - xb;
+        }
+        return av.localeCompare(bv);
+      });
+    } else if (sortMode === 'custom') {
+      list = list.filter(c => typeof c.customOrder === 'number');
+      list = [...list].sort((a, b) => (a.customOrder ?? 0) - (b.customOrder ?? 0));
+    } else {
+      list = [...list].sort((a, b) => a.id - b.id);
+    }
     return list;
   }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts]);
+
+  const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
+  const hasCustomOrders = useMemo(() => concepts.some(c => typeof c.customOrder === 'number'), [concepts]);
+
+  const handleConceptImport = async (file: File) => {
+    setConceptImportError(null);
+    setConceptImportSummary(null);
+    try {
+      const result = await importConceptsCsv(file, 'merge');
+      setConceptImportSummary(`Imported: matched ${result.matched}, added ${result.added}, total ${result.total}`);
+      await loadConfig();
+    } catch (err) {
+      setConceptImportError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceForms = useMemo(
@@ -1764,6 +1810,13 @@ export function ParseUI() {
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
+                      data-testid="concept-import-menu"
+                      onClick={() => { setActionsMenuOpen(false); conceptImportInputRef.current?.click(); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Concepts CSV…
+                    </button>
+                    <button
                       onClick={() => { setActionsMenuOpen(false); loadDecisionsMenuRef.current?.click(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
                     >
@@ -1789,6 +1842,24 @@ export function ParseUI() {
                     </button>
                   </div>
                 </>
+              )}
+              <input
+                ref={conceptImportInputRef}
+                data-testid="concept-import-input"
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleConceptImport(file);
+                  if (conceptImportInputRef.current) conceptImportInputRef.current.value = '';
+                }}
+              />
+              {conceptImportSummary && (
+                <div data-testid="concept-import-summary" className="absolute right-0 top-full z-[70] mt-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] text-emerald-700 shadow-sm">{conceptImportSummary}</div>
+              )}
+              {conceptImportError && (
+                <div data-testid="concept-import-error" className="absolute right-0 top-full z-[70] mt-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] text-rose-700 shadow-sm">{conceptImportError}</div>
               )}
             </div>
 
@@ -1864,23 +1935,42 @@ export function ParseUI() {
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search concepts…"
                 className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
             </div>
-            <div className="mt-3 flex items-center justify-between">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
               <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-                <button onClick={() => setSortMode('az')} className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='az'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>A→Z</button>
-                <button onClick={() => setSortMode('1n')} className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='1n'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>1→N</button>
+                <button data-testid="concept-sort-az" onClick={() => setSortMode('az')} title="Sort alphabetically by label" className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='az'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>A→Z</button>
+                <button data-testid="concept-sort-1n" onClick={() => setSortMode('1n')} title="Sort by concept id" className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='1n'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>1→N</button>
+                <button
+                  data-testid="concept-sort-survey"
+                  onClick={() => setSortMode('survey')}
+                  disabled={!hasSurveyItems}
+                  title={hasSurveyItems ? 'Sort by original survey item (section.item)' : 'No survey_item values present in concepts.csv'}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='survey'?'bg-white text-slate-800 shadow-sm':'text-slate-500'} ${!hasSurveyItems ? 'cursor-not-allowed opacity-40' : ''}`}
+                >Survey</button>
+                <button
+                  data-testid="concept-sort-custom"
+                  onClick={() => setSortMode('custom')}
+                  disabled={!hasCustomOrders}
+                  title={hasCustomOrders ? 'Sort and filter by custom_order (imported list)' : 'Import a custom list to enable this view'}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='custom'?'bg-white text-slate-800 shadow-sm':'text-slate-500'} ${!hasCustomOrders ? 'cursor-not-allowed opacity-40' : ''}`}
+                >Custom</button>
               </div>
-              <span className="text-[10px] text-slate-400">{filtered.length} concepts</span>
+              <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
             </div>
           </div>
           <nav className="flex-1 overflow-y-auto px-2 pb-6">
             {filtered.map(c => {
               const active = c.id === conceptId;
+              const badge =
+                sortMode === 'survey' && c.surveyItem ? c.surveyItem :
+                sortMode === 'custom' && typeof c.customOrder === 'number' ? String(c.customOrder) :
+                String(c.id);
+              const badgePrefix = sortMode === 'survey' ? 'Q' : '#';
               return (
                 <button key={c.id} onClick={() => setConceptId(c.id)}
                   className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`} />
                   <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
-                  <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>#{c.id}</span>
+                  <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badgePrefix}{badge}</span>
                 </button>
               );
             })}
