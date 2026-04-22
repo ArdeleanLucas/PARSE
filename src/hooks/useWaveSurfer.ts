@@ -86,13 +86,21 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
   // When set, the next time `timeupdate` reports >= this time the wave is
   // paused and the ref is cleared. Used by `playClip` to make the default
   // play action stop at a lexeme boundary without bleeding into the next
-  // word. Cleared on every pause / seek so subsequent plays are unbounded.
+  // word. Cleared on every pause / interaction so subsequent plays are
+  // unbounded.
   const clipEndRef = useRef<number | null>(null);
+  // True after `addRegion` until either the clip has played once or the
+  // user has interacted with the waveform / pause control. Tells
+  // `playClip` whether the next play should seek to the lexeme start
+  // (first click after selecting a lexeme) or continue from the current
+  // cursor position (subsequent click after the clip auto-stopped).
+  const regionPrimedRef = useRef<boolean>(false);
 
   // -- Imperative controls (stable refs) --
 
   const play = useCallback(() => {
     clipEndRef.current = null;
+    regionPrimedRef.current = false;
     wsRef.current?.play();
   }, []);
   const pause = useCallback(() => wsRef.current?.pause(), []);
@@ -102,38 +110,44 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
       wsRef.current.pause();
     } else {
       clipEndRef.current = null;
+      regionPrimedRef.current = false;
       wsRef.current.play();
     }
   }, []);
 
   /**
-   * Play the wave starting from the current cursor position, but pause
-   * automatically at ``endSec``. Designed for the Annotate "Play" button:
-   * the first click on a freshly-loaded lexeme should play just that
-   * region, but if the cursor is already past the boundary (or the user
-   * has seeked elsewhere) we fall back to normal continuous playback.
+   * Play the active lexeme region. Behaviour depends on whether the
+   * region is "primed" — true after `addRegion` until the clip has
+   * played once or the user has touched the waveform:
    *
-   * Returns true if the clip-bounded play actually started, false if the
-   * call degraded to a regular play (so the UI can stay symmetric with
-   * `play()`).
+   * - **Primed** → seek to ``startSec`` and play, pausing automatically
+   *   at ``endSec``. This is the user-visible "play just this lexeme"
+   *   behaviour for the very first click after selecting a concept.
+   * - **Not primed** → resume normal continuous playback from the
+   *   current cursor position (which after the clip auto-stop is
+   *   already at ``endSec``, so the audio continues into whatever
+   *   follows).
+   *
+   * Returns true if the clip-bounded play actually started, false if
+   * the call degraded to a plain play.
    */
-  const playClip = useCallback((endSec: number) => {
+  const playClip = useCallback((startSec: number, endSec: number) => {
     const ws = wsRef.current;
     if (!ws) return false;
-    if (!Number.isFinite(endSec) || endSec <= 0) {
+    if (!regionPrimedRef.current || !Number.isFinite(endSec) || endSec <= 0) {
+      // No fresh region (or invalid bounds) — behave like normal play.
       clipEndRef.current = null;
       ws.play();
       return false;
     }
-    const current = ws.getCurrentTime();
-    // Tolerate a small fractional gap so clicking play immediately after
-    // it auto-stops doesn't re-clip onto a single sample.
-    if (current >= endSec - 0.01) {
-      clipEndRef.current = null;
-      ws.play();
-      return false;
+    if (Number.isFinite(startSec) && startSec >= 0) {
+      const dur = ws.getDuration();
+      if (dur > 0) {
+        ws.seekTo(clamp(startSec / dur, 0, 1));
+      }
     }
     clipEndRef.current = endSec;
+    regionPrimedRef.current = false; // consumed
     ws.play();
     return true;
   }, []);
@@ -143,8 +157,12 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     if (!ws) return;
     const duration = ws.getDuration();
     if (!duration || duration <= 0) return;
-    // A user-initiated seek invalidates any pending clip-bound: pressing
-    // play after seeking elsewhere should resume normal playback.
+    // Programmatic seeks (e.g. ParseUI auto-positions to lexeme start when
+    // a concept is selected) do NOT consume the primed state — that's
+    // what makes the next Play press jump to the lexeme start. The clip
+    // end target IS cleared, since the new cursor position invalidates
+    // any in-flight bounded play. User-initiated waveform clicks come
+    // through the wavesurfer "interaction" event below and clear both.
     clipEndRef.current = null;
     ws.seekTo(clamp(timeSec / duration, 0, 1));
   }, []);
@@ -222,6 +240,11 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
         resize: true,
       }) as unknown as WsRegion;
       activeRegionRef.current = region;
+      // Adding a region (i.e. selecting a lexeme) primes the next Play
+      // press to seek-to-start + clip-bound. Cleared by playClip itself,
+      // any waveform interaction, or pause/finish.
+      regionPrimedRef.current = true;
+      clipEndRef.current = null;
     },
     [clearRegions],
   );
@@ -303,23 +326,28 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
 
     ws.on("pause", () => {
       // Manual pause (or our own clip-bounded pause) discards any pending
-      // clip-end so the next play starts unbounded.
+      // clip-end and primed state so the next play resumes normal
+      // continuous playback from wherever the cursor landed.
       clipEndRef.current = null;
+      regionPrimedRef.current = false;
       options.onPlayStateChange?.(false);
       usePlaybackStore.setState({ isPlaying: false });
     });
 
     ws.on("finish", () => {
       clipEndRef.current = null;
+      regionPrimedRef.current = false;
       options.onPlayStateChange?.(false);
       usePlaybackStore.setState({ isPlaying: false });
     });
 
     ws.on("interaction", () => {
       // Clicking on the waveform itself triggers wavesurfer's built-in
-      // seek; that's a "user moved elsewhere" signal — clear any pending
-      // clip-bound so the next play resumes normal playback.
+      // seek; that's a "user moved elsewhere" signal — clear the primed
+      // state and any pending clip-bound so the next Play resumes normal
+      // continuous playback instead of jumping back to the lexeme start.
       clipEndRef.current = null;
+      regionPrimedRef.current = false;
     });
 
     // -- Region events --
@@ -421,6 +449,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
       regionsRef.current = null;
       activeRegionRef.current = null;
       clipEndRef.current = null;
+      regionPrimedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options.audioUrl, options.peaksUrl, options.initialSeekSec]);

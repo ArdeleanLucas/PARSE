@@ -943,8 +943,51 @@ def _annotation_shift_intervals(record: Dict[str, Any], offset_sec: float) -> in
     return shifted
 
 
+def _stt_cache_path(speaker: str) -> pathlib.Path:
+    return _project_root() / "coarse_transcripts" / "{0}.json".format(speaker)
+
+
+def _write_stt_cache(speaker: str, source_wav: str, language: Optional[str], segments: List[Dict[str, Any]]) -> None:
+    speaker_norm = str(speaker or "").strip()
+    if not speaker_norm or not isinstance(segments, list) or not segments:
+        return
+    cache_path = _stt_cache_path(speaker_norm)
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "speaker": speaker_norm,
+            "source_wav": source_wav,
+            "language": language,
+            "segments": segments,
+        }
+        with open(cache_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+    except OSError as exc:
+        print("[stt] failed to cache segments for {0!r}: {1}".format(speaker_norm, exc), file=sys.stderr, flush=True)
+
+
+def _read_stt_cache(speaker: str) -> Optional[List[Dict[str, Any]]]:
+    cache_path = _stt_cache_path(speaker)
+    if not cache_path.exists():
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    segments = data.get("segments") if isinstance(data, dict) else None
+    if not isinstance(segments, list) or not segments:
+        return None
+    return segments
+
+
 def _latest_stt_segments_for_speaker(speaker: str) -> Optional[List[Dict[str, Any]]]:
-    """Find the most recent completed STT job for ``speaker`` and return its segments."""
+    """Find the most recent completed STT job for ``speaker`` and return its segments.
+
+    Prefers the current session's in-memory job. Falls back to the on-disk
+    ``coarse_transcripts/<speaker>.json`` cache so actions like offset-detect
+    still work after a server restart.
+    """
     speaker_norm = str(speaker or "").strip()
     if not speaker_norm:
         return None
@@ -964,10 +1007,10 @@ def _latest_stt_segments_for_speaker(speaker: str) -> Optional[List[Dict[str, An
                 continue
             ts = float(job.get("completed_ts") or job.get("updated_ts") or 0.0)
             candidates.append((ts, copy.deepcopy(segments)))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
+    if candidates:
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+    return _read_stt_cache(speaker_norm)
 
 
 def _annotation_sync_speaker_tier(record: Dict[str, Any]) -> None:
@@ -2028,6 +2071,7 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[
             "language": language,
             "segments": segments,
         }
+        _write_stt_cache(speaker, str(audio_path), language, segments)
         _set_job_complete(
             job_id,
             result,
