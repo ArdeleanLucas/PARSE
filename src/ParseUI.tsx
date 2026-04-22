@@ -2051,20 +2051,41 @@ export function ParseUI() {
     if (sortMode === 'az') {
       list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortMode === 'survey') {
+      // Natural sort: group first by source (KLQ / JBIL / …), then by every
+      // embedded number in order (section, item, variant). Without this
+      // "JBIL_10" lands before "JBIL_2" because the default string compare
+      // treats each segment as a whole literal, and "KLQ_1.10.A" lands
+      // before "KLQ_1.2.A" when each dotted segment is parseFloat'd as a
+      // decimal.
+      const surveyKey = (raw: string): (string | number)[] => {
+        const tokens: (string | number)[] = [];
+        for (const match of raw.matchAll(/([A-Za-z]+)|(\d+)/g)) {
+          if (match[1]) tokens.push(match[1].toLowerCase());
+          else if (match[2]) tokens.push(parseInt(match[2], 10));
+        }
+        return tokens;
+      };
       list = [...list].sort((a, b) => {
         const av = a.surveyItem ?? '';
         const bv = b.surveyItem ?? '';
         if (av && !bv) return -1;
         if (!av && bv) return 1;
-        // Try numeric (section.item) comparison, fall back to lex
-        const na = av.split('.').map(n => parseFloat(n));
-        const nb = bv.split('.').map(n => parseFloat(n));
-        for (let i = 0; i < Math.max(na.length, nb.length); i++) {
-          const xa = na[i] ?? 0;
-          const xb = nb[i] ?? 0;
-          if (Number.isFinite(xa) && Number.isFinite(xb) && xa !== xb) return xa - xb;
+        const ka = surveyKey(av);
+        const kb = surveyKey(bv);
+        for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+          const xa = ka[i];
+          const xb = kb[i];
+          if (xa === undefined) return -1;
+          if (xb === undefined) return 1;
+          if (typeof xa === 'number' && typeof xb === 'number') {
+            if (xa !== xb) return xa - xb;
+          } else {
+            const sa = String(xa);
+            const sb = String(xb);
+            if (sa !== sb) return sa < sb ? -1 : 1;
+          }
         }
-        return av.localeCompare(bv);
+        return 0;
       });
     } else {
       list = [...list].sort((a, b) => a.id - b.id);
@@ -2505,7 +2526,9 @@ export function ParseUI() {
             {filtered.map(c => {
               const active = c.id === conceptId;
               const badge = sortMode === 'survey' && c.surveyItem ? c.surveyItem : String(c.id);
-              const badgePrefix = sortMode === 'survey' ? 'Q' : '#';
+              // Survey items already carry their source prefix (JBIL / KLQ / …)
+              // — no extra "Q" needed. Numeric-id mode prefixes with "#".
+              const badgePrefix = sortMode === 'survey' ? '' : '#';
               return (
                 <button key={c.id} onClick={() => setConceptId(c.id)}
                   className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>
