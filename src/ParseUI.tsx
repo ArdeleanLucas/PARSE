@@ -1254,7 +1254,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       : null;
   }, [conceptInterval]);
 
-  const { playPause, seek, scrollToTimeAtFraction, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
+  const { playPause, playClip, pause, seek, scrollToTimeAtFraction, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
     containerRef,
     audioUrl,
     peaksUrl,
@@ -1610,7 +1610,22 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           <button onClick={() => skip(-5)} title="-5s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4"/></button>
           <button onClick={() => skip(-1)} title="-1s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4"/></button>
           <button
-            onClick={() => playPause()}
+            onClick={() => {
+              if (isPlaying) {
+                pause();
+                return;
+              }
+              // Default play: bound to the active lexeme region so the
+              // clip stops at end. Pressing play again (cursor now at
+              // region end) or after seeking elsewhere falls through to
+              // unbounded continuous playback inside playClip.
+              if (selectedRegion) {
+                playClip(selectedRegion.end);
+              } else {
+                playPause();
+              }
+            }}
+            data-testid="annotate-play"
             className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
           >
             {isPlaying ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 translate-x-[1px]"/>}
