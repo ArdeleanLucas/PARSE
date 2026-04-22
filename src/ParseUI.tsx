@@ -1576,7 +1576,14 @@ export function ParseUI() {
   const sttJob = useActionJob({
     start: () => {
       if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      return startSTT(activeActionSpeaker, `${activeActionSpeaker}.wav`, 'ckb');
+      const record = annotationRecords[activeActionSpeaker];
+      const sourceWav = (record?.source_audio ?? record?.source_wav ?? '').trim();
+      if (!sourceWav) {
+        return Promise.reject(new Error(
+          `No source_audio on annotation for ${activeActionSpeaker}. Import or onboard the speaker first.`,
+        ));
+      }
+      return startSTT(activeActionSpeaker, sourceWav, 'ckb');
     },
     poll: (id) => pollSTT(id) as Promise<PollResult>,
     label: 'Running STT…',
@@ -1584,10 +1591,13 @@ export function ParseUI() {
   });
 
   const ipaJob = useActionJob({
-    start: () => startCompute('ipa_only'),
+    start: () => {
+      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
+      return startCompute('ipa_only', { speaker: activeActionSpeaker });
+    },
     poll: (id) => pollCompute('ipa_only', id),
     label: 'Transcribing IPA…',
-    onComplete: loadEnrichments,
+    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
   });
 
   const pipelineJob = useActionJob({
@@ -1942,7 +1952,7 @@ export function ParseUI() {
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void ipaJob.run(); }}
-                      disabled={ipaJob.state.status === 'running'}
+                      disabled={!activeActionSpeaker || ipaJob.state.status === 'running'}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Type className="h-3.5 w-3.5 text-slate-400"/>
