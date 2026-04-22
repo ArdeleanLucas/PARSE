@@ -3020,14 +3020,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.OK, normalized)
 
     def _api_get_stt_segments(self, speaker_part: str) -> None:
-        """Return cached STT segments for a speaker, or an empty payload.
+        """Return cached STT segments for a speaker.
 
         Reads ``coarse_transcripts/<speaker>.json`` — the cache seeded by
-        ``_run_stt_job`` and also used by ``/api/offset/detect``. Returns
-        ``{"speaker", "source_wav", "language", "segments"}``. When no cache
-        exists the response is the same shape with ``segments: []`` so the
-        frontend can distinguish "ran STT, no text" from "never ran STT" via
-        the 404 path.
+        ``_run_stt_job`` and also used by ``/api/offset/detect``. Always
+        returns HTTP 200 with ``{"speaker", "source_wav", "language",
+        "segments"}``; missing cache yields ``segments: []``. The frontend
+        treats an empty array as "run STT first" — keeping the response
+        uniform avoids noisy 404s in the console on every speaker switch.
         """
         try:
             speaker = _normalize_speaker_id(speaker_part)

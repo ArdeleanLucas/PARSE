@@ -21,6 +21,7 @@ import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useTranscriptionLanesStore, type LaneKind } from './stores/transcriptionLanesStore';
 import { TranscriptionLanes } from './components/annotate/TranscriptionLanes';
+import { LaneColorPicker } from './components/annotate/LaneColorPicker';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
@@ -1470,7 +1471,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
         </div>
 
         {/* Transcription lanes — STT / IPA / ORTHO, toggled from the right drawer */}
-        <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady}/>
+        <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady} onSeek={seek}/>
       </section>
 
       {/* ======= CONCEPT HEADER ======= */}
@@ -1889,7 +1890,11 @@ export function ParseUI() {
     },
     poll: (id) => pollSTT(id) as Promise<PollResult>,
     label: 'Running STT…',
-    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
+    onComplete: () => {
+      const speaker = activeActionSpeaker;
+      if (speaker) void useTranscriptionLanesStore.getState().reloadStt(speaker);
+      return reloadSpeakerAnnotation(speaker);
+    },
   });
 
   const ipaJob = useActionJob({
@@ -3369,29 +3374,27 @@ function TranscriptionLanesControls() {
           const cfg = lanes[kind];
           const { label, hint } = LANE_DISPLAY[kind];
           return (
-            <label
+            <div
               key={kind}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-white"
+              className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-white"
             >
               <input
+                id={`lane-toggle-${kind}`}
                 type="checkbox"
                 checked={cfg.visible}
                 onChange={() => toggleLane(kind)}
                 className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
               />
-              <input
-                type="color"
+              <LaneColorPicker
                 value={cfg.color}
-                onChange={e => setLaneColor(kind, e.target.value)}
-                className="h-4 w-5 cursor-pointer rounded border border-slate-200 bg-transparent p-0"
-                title={`Color for ${label}`}
-                aria-label={`Color for ${label}`}
+                onChange={c => setLaneColor(kind, c)}
+                ariaLabel={`Color for ${label}`}
               />
-              <div className="flex-1 min-w-0">
+              <label htmlFor={`lane-toggle-${kind}`} className="flex-1 min-w-0 cursor-pointer">
                 <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
                 <div className="text-[9px] text-slate-400 truncate">{hint}</div>
-              </div>
-            </label>
+              </label>
+            </div>
           );
         })}
       </div>
