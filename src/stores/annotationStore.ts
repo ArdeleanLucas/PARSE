@@ -68,6 +68,20 @@ interface AnnotationStore {
   updateInterval: (speaker: string, tier: string, index: number, text: string) => void;
   addInterval: (speaker: string, tier: string, interval: AnnotationInterval) => void;
   removeInterval: (speaker: string, tier: string, index: number) => void;
+  /**
+   * Retime a lexeme across every tier. Finds the interval that matches
+   * (oldStart, oldEnd) within a 1ms tolerance on each tier and rewrites its
+   * start/end to (newStart, newEnd), keeping the text. Intended for the
+   * concept-timestamp editor in Annotate mode, where the concept interval
+   * and its co-timed ipa/ortho/speaker intervals move together.
+   */
+  moveIntervalAcrossTiers: (
+    speaker: string,
+    oldStart: number,
+    oldEnd: number,
+    newStart: number,
+    newEnd: number,
+  ) => number;
 }
 
 export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
@@ -224,5 +238,36 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
+  },
+
+  moveIntervalAcrossTiers: (speaker, oldStart, oldEnd, newStart, newEnd) => {
+    if (!Number.isFinite(newStart) || !Number.isFinite(newEnd)) return 0;
+    if (newEnd < newStart) return 0;
+
+    const state = get();
+    const record = state.records[speaker];
+    if (!record) return 0;
+
+    const clone = deepClone(record);
+    const tol = 0.001;
+    let moved = 0;
+    for (const tier of Object.values(clone.tiers)) {
+      const idx = tier.intervals.findIndex(
+        (it) => Math.abs(it.start - oldStart) < tol && Math.abs(it.end - oldEnd) < tol,
+      );
+      if (idx < 0) continue;
+      tier.intervals[idx] = { ...tier.intervals[idx], start: newStart, end: newEnd };
+      tier.intervals.sort((a, b) => a.start - b.start);
+      moved += 1;
+    }
+    if (moved === 0) return 0;
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+    return moved;
   },
 }));
