@@ -5,6 +5,7 @@ import copy
 import http.server
 import io
 import json
+import math
 import os
 import pathlib
 import re
@@ -867,6 +868,106 @@ def _annotation_collect_speaker_intervals(record: Dict[str, Any]) -> List[Dict[s
         fallback.append({"start": interval["start"], "end": interval["end"]})
 
     return fallback
+
+
+def _annotation_offset_anchor_intervals(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return interval dicts (start/end/text) suitable as offset-detection anchors.
+
+    Prefers ``ortho`` and ``ipa`` tiers (transcribed forms that should match
+    STT output); falls back to ``concept`` only if neither is populated.
+    """
+    if not isinstance(record, dict):
+        return []
+    tiers = record.get("tiers")
+    if not isinstance(tiers, dict):
+        return []
+
+    for tier_key in ("ortho", "ipa", "concept"):
+        tier = tiers.get(tier_key)
+        if not isinstance(tier, dict):
+            continue
+        intervals_raw = tier.get("intervals")
+        if not isinstance(intervals_raw, list):
+            continue
+
+        collected: List[Dict[str, Any]] = []
+        for raw in intervals_raw:
+            normalized = _annotation_normalize_interval(raw)
+            if normalized is None:
+                continue
+            text = str(normalized.get("text") or "").strip()
+            if not text:
+                continue
+            collected.append({"start": normalized["start"], "end": normalized["end"], "text": text})
+        if collected:
+            return collected
+
+    return []
+
+
+def _annotation_shift_intervals(record: Dict[str, Any], offset_sec: float) -> int:
+    """Add ``offset_sec`` to every interval's start/end. Negative values clamp to 0.
+
+    Mutates the record in place. Returns the count of intervals shifted.
+    """
+    if not isinstance(record, dict):
+        return 0
+    tiers = record.get("tiers")
+    if not isinstance(tiers, dict):
+        return 0
+
+    shifted = 0
+    for tier in tiers.values():
+        if not isinstance(tier, dict):
+            continue
+        intervals = tier.get("intervals")
+        if not isinstance(intervals, list):
+            continue
+        for raw in intervals:
+            if not isinstance(raw, dict):
+                continue
+            start = _coerce_finite_float(raw.get("start", raw.get("xmin")))
+            end = _coerce_finite_float(raw.get("end", raw.get("xmax")))
+            if start is None or end is None:
+                continue
+            new_start = max(0.0, float(start) + float(offset_sec))
+            new_end = max(new_start, float(end) + float(offset_sec))
+            raw["start"] = new_start
+            raw["end"] = new_end
+            if "xmin" in raw:
+                raw["xmin"] = new_start
+            if "xmax" in raw:
+                raw["xmax"] = new_end
+            shifted += 1
+    _annotation_sort_all_intervals(record)
+    return shifted
+
+
+def _latest_stt_segments_for_speaker(speaker: str) -> Optional[List[Dict[str, Any]]]:
+    """Find the most recent completed STT job for ``speaker`` and return its segments."""
+    speaker_norm = str(speaker or "").strip()
+    if not speaker_norm:
+        return None
+    candidates: List[Tuple[float, List[Dict[str, Any]]]] = []
+    with _jobs_lock:
+        for job in _jobs.values():
+            if str(job.get("type") or "") != "stt":
+                continue
+            if str(job.get("status") or "") != "complete":
+                continue
+            meta = job.get("meta") if isinstance(job.get("meta"), dict) else {}
+            if str(meta.get("speaker") or "") != speaker_norm:
+                continue
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            segments = result.get("segments")
+            if not isinstance(segments, list) or not segments:
+                continue
+            ts = float(job.get("completed_ts") or job.get("updated_ts") or 0.0)
+            candidates.append((ts, copy.deepcopy(segments)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 def _annotation_sync_speaker_tier(record: Dict[str, Any]) -> None:
@@ -2814,6 +2915,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_lexeme_notes_import()
             return
 
+        if request_path == "/api/offset/detect":
+            self._api_post_offset_detect()
+            return
+
+        if request_path == "/api/offset/apply":
+            self._api_post_offset_apply()
+            return
+
         parts = self._path_parts(request_path)
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
@@ -3037,6 +3146,170 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "job_id": job_id,
                 "jobId": job_id,
                 "status": "running",
+            },
+        )
+
+    def _api_post_offset_detect(self) -> None:
+        """Synchronously detect a constant timestamp offset for a speaker.
+
+        Compares anchors taken from the speaker's annotation tiers against STT
+        segments (passed inline via ``sttSegments``, pulled from a completed
+        STT job by ``sttJobId``, or auto-discovered as the speaker's most
+        recent complete STT job). Returns the median offset and a confidence —
+        does not mutate any files.
+        """
+        body = self._expect_object(self._read_json_body(), "Request body")
+
+        try:
+            speaker = _normalize_speaker_id(body.get("speaker"))
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        try:
+            n_anchors = max(2, min(50, int(body.get("nAnchors") or body.get("n_anchors") or 12)))
+        except (TypeError, ValueError):
+            n_anchors = 12
+
+        try:
+            bucket_sec = max(0.1, float(body.get("bucketSec") or body.get("bucket_sec") or 1.0))
+        except (TypeError, ValueError):
+            bucket_sec = 1.0
+
+        try:
+            min_match_score = max(
+                0.0,
+                min(1.0, float(body.get("minMatchScore") or body.get("min_match_score") or 0.56)),
+            )
+        except (TypeError, ValueError):
+            min_match_score = 0.56
+
+        annotation_path = _annotation_read_path_for_speaker(speaker)
+        annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
+        intervals = _annotation_offset_anchor_intervals(annotation)
+        if not intervals:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "Speaker '{0}' has no annotated intervals to use as offset anchors".format(speaker),
+            )
+
+        stt_segments_payload = body.get("sttSegments") or body.get("stt_segments")
+        stt_job_id = str(body.get("sttJobId") or body.get("stt_job_id") or "").strip()
+
+        if stt_segments_payload is None and stt_job_id:
+            job = _get_job_snapshot(stt_job_id)
+            if job is None:
+                raise ApiError(HTTPStatus.NOT_FOUND, "Unknown sttJobId")
+            if str(job.get("type") or "") != "stt":
+                raise ApiError(HTTPStatus.BAD_REQUEST, "sttJobId is not an STT job")
+            if str(job.get("status") or "") != "complete":
+                raise ApiError(HTTPStatus.BAD_REQUEST, "STT job has not completed")
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            stt_segments_payload = result.get("segments")
+
+        if stt_segments_payload is None:
+            stt_segments_payload = _latest_stt_segments_for_speaker(speaker)
+
+        if not stt_segments_payload:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "No STT segments available. Run STT first or pass sttJobId / sttSegments.",
+            )
+
+        from compare import (
+            anchors_from_intervals as _anchors_from_intervals,
+            detect_offset as _detect_offset,
+            load_rules_from_file as _load_rules,
+            segments_from_raw as _segments_from_raw,
+        )
+
+        rules_path = _project_root() / "config" / "phonetic_rules.json"
+        try:
+            rules = _load_rules(rules_path) if rules_path.exists() else []
+        except Exception:
+            rules = []
+
+        anchors = _anchors_from_intervals(intervals, n_anchors)
+        if not anchors:
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "No usable anchors with both timestamp and text in annotation",
+            )
+        segments = _segments_from_raw(stt_segments_payload)
+        if not segments:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "STT input contained no usable segments")
+
+        try:
+            offset_sec, confidence, n_matched = _detect_offset(
+                anchors=anchors,
+                segments=segments,
+                rules=rules,
+                bucket_sec=bucket_sec,
+                min_match_score=min_match_score,
+            )
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "speaker": speaker,
+                "offsetSec": float(offset_sec),
+                "confidence": float(confidence),
+                "nAnchors": int(n_matched),
+                "totalAnchors": len(anchors),
+                "totalSegments": len(segments),
+                "method": "keyword_alignment",
+            },
+        )
+
+    def _api_post_offset_apply(self) -> None:
+        """Shift every annotation interval by ``offsetSec`` (start/end += offset).
+
+        For the typical "WAV missing leading audio" case the detected offset is
+        negative, so applying it pulls every CSV-sourced timestamp earlier so
+        the lexemes line up with the truncated recording.
+        """
+        body = self._expect_object(self._read_json_body(), "Request body")
+
+        try:
+            speaker = _normalize_speaker_id(body.get("speaker"))
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        offset_raw = body.get("offsetSec")
+        if offset_raw is None:
+            offset_raw = body.get("offset_sec")
+        if offset_raw is None:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec is required")
+
+        try:
+            offset_sec = float(offset_raw)
+        except (TypeError, ValueError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec must be a number")
+
+        if not math.isfinite(offset_sec):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec must be a finite number")
+
+        if abs(offset_sec) < 1e-6:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec is effectively zero — nothing to apply")
+
+        annotation_path = _annotation_read_path_for_speaker(speaker)
+        annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
+
+        shifted_count = _annotation_shift_intervals(annotation, offset_sec)
+        if shifted_count == 0:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "No intervals were shifted")
+
+        _annotation_touch_metadata(annotation, preserve_created=True)
+        write_path = _annotation_record_path_for_speaker(speaker)
+        _write_json_file(write_path, annotation)
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "speaker": speaker,
+                "appliedOffsetSec": offset_sec,
+                "shiftedIntervals": shifted_count,
             },
         )
 
