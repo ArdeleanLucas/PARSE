@@ -16,6 +16,7 @@ let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, e
 
 const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
 const mockHydrateTags = vi.fn();
+const mockSyncTagsFromServer = vi.fn().mockResolvedValue(undefined);
 const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockSetInterval = vi.fn();
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
@@ -38,6 +39,7 @@ const mockEnrichmentSetState = vi.fn();
 const mockTagSetState = vi.fn();
 const mockPlaybackSetState = vi.fn();
 const mockConfigSetState = vi.fn();
+const mockLoadEnrichments = vi.fn().mockResolvedValue(undefined);
 let mockEnrichmentData: Record<string, unknown> = {};
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
@@ -57,6 +59,7 @@ vi.mock("./stores/tagStore", () => {
     selector({
       tags: mockTags,
       hydrate: mockHydrateTags,
+      syncFromServer: mockSyncTagsFromServer,
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
       getTagsForConcept: (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId)),
@@ -123,7 +126,7 @@ vi.mock("./hooks/useWaveSurfer", () => ({
 
 vi.mock("./stores/enrichmentStore", () => {
   const useEnrichmentStore = (selector: (s: unknown) => unknown) =>
-    selector({ data: mockEnrichmentData, loading: false, load: vi.fn(), save: vi.fn() });
+    selector({ data: mockEnrichmentData, loading: false, load: mockLoadEnrichments, save: vi.fn() });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockEnrichmentSetState(...args);
   // cycleSpeakerCognate / toggleSpeakerFlag read manual_overrides via
@@ -278,6 +281,7 @@ describe("ParseUI", () => {
 
     expect(mockLoadConfig).toHaveBeenCalledOnce();
     expect(mockHydrateTags).toHaveBeenCalledOnce();
+    expect(mockSyncTagsFromServer).toHaveBeenCalledOnce();
     expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
   });
 

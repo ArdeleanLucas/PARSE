@@ -1667,6 +1667,7 @@ export function ParseUI() {
   const storeTags        = useTagStore(s => s.tags);
   const storeAddTag      = useTagStore(s => s.addTag);
   const hydrateTagStore  = useTagStore(s => s.hydrate);
+  const syncTagStoreFromServer = useTagStore(s => s.syncFromServer);
   const tagConcept       = useTagStore(s => s.tagConcept);
   const untagConcept     = useTagStore(s => s.untagConcept);
   const getTagsForConcept = useTagStore(s => s.getTagsForConcept);
@@ -1682,6 +1683,7 @@ export function ParseUI() {
   useEffect(() => {
     loadConfig().catch(console.error);
     hydrateTagStore();
+    syncTagStoreFromServer().catch(console.error);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [query, setQuery] = useState('');
