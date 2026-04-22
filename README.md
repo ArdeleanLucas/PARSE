@@ -339,7 +339,7 @@ python/
   adapters/
     mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (16 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (19 tools)
     chat_orchestrator.py-- Chat session management
     stt_pipeline.py     -- Whisper STT pipeline
     ipa_transcribe.py   -- IPA via wav2vec2 + epitran
@@ -361,9 +361,9 @@ dist/                   -- Vite build output (generated, gitignored)
 
 ## AI Chat Tools
 
-The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **16 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
+The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **19 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
 
-### Tools (16)
+### Tools (19)
 
 **Read-only / preview**
 
@@ -385,6 +385,8 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 |---|---|
 | `stt_start` | Start STT pipeline on a recording. Returns job ID |
 | `stt_status` | Poll status of a running STT job |
+| `detect_timestamp_offset` | Detect a constant timestamp offset between annotation data and audio/STT evidence |
+| `apply_timestamp_offset` | Apply a constant offset to lexeme timestamps for one speaker (`dryRun=true` first) |
 
 **Tag operations**
 
@@ -399,6 +401,7 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 |---|---|
 | `contact_lexeme_lookup` | Fetch and optionally merge contact-language reference forms via the CLEF provider chain (`dryRun=true` first) |
 | `onboard_speaker_import` | Copy external audio/CSV into the workspace, scaffold speaker state, and register it in `source_index.json` (`dryRun=true` first) |
+| `import_processed_speaker` | Hydrate one speaker from existing processed artifacts (working WAV, annotations, peaks, optional transcript files) into the active workspace (`dryRun=true` first) |
 | `parse_memory_upsert_section` | Create or replace a `## Section` block in `parse-memory.md` (`dryRun=true` first) |
 
 The built-in assistant operates with both read and write access to the project, but the write-capable tools are intentionally gated. In particular, onboarding is **one speaker at a time**, and multi-source speakers are flagged as requiring manual / virtual-timeline coordination because PARSE does not yet auto-align multiple WAVs into a shared annotation timeline.
@@ -407,7 +410,7 @@ The built-in assistant operates with both read and write access to the project, 
 
 ## MCP Server Mode
 
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing a **14-tool MCP-safe subset** of its AI chat/tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing **17 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
 
 ```bash
 python python/adapters/mcp_adapter.py                          # auto-detect project root
@@ -439,7 +442,7 @@ If you launch the adapter without an explicit `env` block, it also reads repo-lo
 
 ### Exposed Tools
 
-The MCP adapter exposes the subset of `ParseChatTools` that is currently registered in `python/adapters/mcp_adapter.py`:
+The MCP adapter currently registers **17 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
 
 | Tool | Description |
 |---|---|
@@ -452,9 +455,12 @@ The MCP adapter exposes the subset of `ParseChatTools` that is currently registe
 | `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); **dryRun required** — pass dryRun=true to preview, dryRun=false to merge into sil_contact_languages.json |
 | `stt_start` | Start STT background job on an audio file (proxied to the running PARSE HTTP server on PARSE_API_PORT, default 8766, so job state is shared with the browser UI) |
 | `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
+| `detect_timestamp_offset` | Detect a constant timestamp offset between transcript/annotation timestamps and audio evidence |
+| `apply_timestamp_offset` | Apply a constant offset to speaker lexeme timestamps; dry-run first |
 | `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
 | `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
 | `onboard_speaker_import` | Import one speaker from on-disk audio (and optional CSV) into the workspace; dry-run first; multi-source speakers may require manual virtual-timeline coordination |
+| `import_processed_speaker` | Import one speaker from existing processed artifacts (working WAV, annotations, peaks, optional transcript JSON/CSV) into the active workspace; dry-run first |
 | `parse_memory_read` | Read persistent PARSE chat memory from `parse-memory.md` |
 | `parse_memory_upsert_section` | Upsert a `## Section` block in `parse-memory.md`; dry-run first |
 
