@@ -15,6 +15,7 @@ const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState } =
       play: vi.fn(),
       pause: vi.fn(),
       playPause: vi.fn(),
+      isPlaying: vi.fn(() => false),
       destroy: vi.fn(),
       load: vi.fn(),
       seekTo: vi.fn(),
@@ -176,5 +177,120 @@ describe("useWaveSurfer", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(mockWsInstance.setScroll).toHaveBeenCalledWith(120);
+  });
+
+  // -- Clip-bounded play --
+  //
+  // The Annotate "Play" button passes the active region's end into
+  // playClip() so the first press plays just that lexeme. Subsequent
+  // presses (cursor at end), or seeks to a different position, must fall
+  // through to normal continuous playback.
+
+  function findHandler(eventName: string): ((arg: unknown) => void) | undefined {
+    const call = mockWsInstance.on.mock.calls.find(([name]) => name === eventName);
+    return call?.[1] as ((arg: unknown) => void) | undefined;
+  }
+
+  it("playClip(end) starts playback and pauses at end via timeupdate", () => {
+    mockWsInstance.getCurrentTime.mockReturnValue(1);
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    let started = false;
+    act(() => {
+      started = result.current.playClip(3) as boolean;
+    });
+    expect(started).toBe(true);
+    expect(mockWsInstance.play).toHaveBeenCalledTimes(1);
+
+    const onTime = findHandler("timeupdate");
+    expect(onTime).toBeDefined();
+
+    // First tick well before end — no pause yet.
+    act(() => {
+      onTime!(2.5);
+    });
+    expect(mockWsInstance.pause).not.toHaveBeenCalled();
+
+    // Crossing end — pause exactly once.
+    act(() => {
+      onTime!(3.0);
+    });
+    expect(mockWsInstance.pause).toHaveBeenCalledTimes(1);
+
+    // Subsequent ticks should NOT pause again (clipEnd was cleared).
+    act(() => {
+      onTime!(3.2);
+    });
+    expect(mockWsInstance.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it("playClip(end) degrades to plain play when cursor is already past end", () => {
+    mockWsInstance.getCurrentTime.mockReturnValue(3.5);
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    let started = false;
+    act(() => {
+      started = result.current.playClip(3) as boolean;
+    });
+
+    expect(started).toBe(false);
+    expect(mockWsInstance.play).toHaveBeenCalledTimes(1);
+
+    // Even at later timeupdates, no clip-bound pause should fire.
+    const onTime = findHandler("timeupdate");
+    act(() => onTime!(99));
+    expect(mockWsInstance.pause).not.toHaveBeenCalled();
+  });
+
+  it("seek() clears any pending clip-bound so the next play is unbounded", () => {
+    mockWsInstance.getCurrentTime.mockReturnValue(1);
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    act(() => {
+      result.current.playClip(3);
+    });
+    act(() => {
+      result.current.seek(7);
+    });
+
+    const onTime = findHandler("timeupdate");
+    act(() => onTime!(3));
+    expect(mockWsInstance.pause).not.toHaveBeenCalled();
+  });
+
+  it("waveform 'interaction' event clears the pending clip-bound", () => {
+    mockWsInstance.getCurrentTime.mockReturnValue(1);
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    act(() => {
+      result.current.playClip(3);
+    });
+    const onInteraction = findHandler("interaction");
+    expect(onInteraction).toBeDefined();
+    act(() => onInteraction!(null));
+
+    const onTime = findHandler("timeupdate");
+    act(() => onTime!(3));
+    expect(mockWsInstance.pause).not.toHaveBeenCalled();
   });
 });

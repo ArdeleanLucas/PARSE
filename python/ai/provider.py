@@ -662,6 +662,100 @@ def _dict_or_attr(item: Any, key: str, default: Any = None) -> Any:
     return getattr(item, key, default)
 
 
+# Cache so repeated _load_whisper_model calls don't re-walk the filesystem.
+_CUDA_DLL_DIRS_REGISTERED: Optional[bool] = None
+_CUDA_RUNTIME_FAILURE_MARKERS = (
+    "cublas",
+    "cudnn",
+    "cuda",
+    "is not found or cannot be loaded",
+    "could not load library",
+    "no cuda-capable device",
+    "no cuda gpus are available",
+    "cuda driver version is insufficient",
+    "cublasstatus",
+)
+
+
+def _looks_like_cuda_runtime_failure(message: str) -> bool:
+    """Heuristic — the GPU init failed because of a missing/broken CUDA runtime."""
+    text = (message or "").lower()
+    return any(marker in text for marker in _CUDA_RUNTIME_FAILURE_MARKERS)
+
+
+def _register_cuda_dll_directories() -> None:
+    """Register cuBLAS / cuDNN DLL directories on Windows.
+
+    Since Python 3.8 the loader no longer searches ``PATH`` for dependent
+    DLLs, so a Windows install with cuBLAS reachable via PATH still produces
+    ``Library cublas64_12.dll is not found or cannot be loaded`` when
+    CTranslate2 tries to ``LoadLibraryEx``. We add every plausible directory
+    via ``os.add_dll_directory`` so the import succeeds.
+
+    Safe no-op on non-Windows platforms.
+    """
+    global _CUDA_DLL_DIRS_REGISTERED
+    if _CUDA_DLL_DIRS_REGISTERED is not None:
+        return
+    _CUDA_DLL_DIRS_REGISTERED = False
+
+    if os.name != "nt":
+        return
+
+    add_dll_directory = getattr(os, "add_dll_directory", None)
+    if add_dll_directory is None:
+        return
+
+    candidates: List[Path] = []
+
+    # 1. NVIDIA pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12) install
+    #    DLLs under <site-packages>/nvidia/<lib>/bin. Walk every nvidia
+    #    subpackage that has a `bin` dir.
+    try:
+        import nvidia  # type: ignore[import-not-found]
+
+        nvidia_root = Path(nvidia.__file__).resolve().parent
+        for entry in nvidia_root.iterdir():
+            bin_dir = entry / "bin"
+            if bin_dir.is_dir():
+                candidates.append(bin_dir)
+    except Exception:
+        pass
+
+    # 2. Explicit env vars that ship with CUDA Toolkit installs.
+    for env_key in ("CUDA_PATH", "CUDA_HOME", "CUDNN_PATH"):
+        value = os.environ.get(env_key)
+        if not value:
+            continue
+        candidates.append(Path(value) / "bin")
+        candidates.append(Path(value))
+
+    # 3. Anything the user explicitly added.
+    extra = os.environ.get("PARSE_CUDA_DLL_DIRS", "")
+    for chunk in extra.split(os.pathsep):
+        chunk = chunk.strip()
+        if chunk:
+            candidates.append(Path(chunk))
+
+    seen: set = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except Exception:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        try:
+            add_dll_directory(str(resolved))
+            _CUDA_DLL_DIRS_REGISTERED = True
+        except (OSError, FileNotFoundError):
+            # Directory exists but cannot be registered (e.g. permissions).
+            # Skip silently — the WhisperModel try/except below will surface
+            # any remaining DLL load failures with full context.
+            pass
+
+
 _ARABIC_DIACRITICS = {
     "\u064b",  # tanwin fatha
     "\u064c",  # tanwin damma
@@ -888,9 +982,20 @@ class LocalWhisperProvider(AIProvider):
         self._epitran_instances: Dict[str, Any] = {}
 
     def _load_whisper_model(self) -> Any:
-        """Lazy-load faster-whisper model."""
+        """Lazy-load faster-whisper model.
+
+        On Windows the CUDA backend needs cuBLAS / cuDNN DLLs visible to the
+        process. Since Python 3.8, ``PATH`` is no longer searched for DLLs, so
+        even a correct CUDA install can fail with
+        ``Library cublas64_12.dll is not found or cannot be loaded``. We
+        proactively register every plausible DLL directory before importing
+        ``faster_whisper`` (it's the import that triggers the CTranslate2
+        load), then fall back to CPU if the GPU model still won't initialize.
+        """
         if self._whisper_model is not None:
             return self._whisper_model
+
+        _register_cuda_dll_directories()
 
         try:
             from faster_whisper import WhisperModel
@@ -910,6 +1015,8 @@ class LocalWhisperProvider(AIProvider):
             )
 
         self._model_source = model_source
+        wants_gpu = str(self.device or "").strip().lower() in {"cuda", "auto"} or \
+            self.device.lower().startswith("cuda")
 
         try:
             self._whisper_model = WhisperModel(
@@ -919,29 +1026,11 @@ class LocalWhisperProvider(AIProvider):
             )
             self._effective_device = self.device
             self._effective_compute_type = self.compute_type
+            return self._whisper_model
         except Exception as exc:
-            if self.device.lower().startswith("cuda"):
-                print(
-                    "[WARN] Failed to load faster-whisper on CUDA ('{0}'): {1}. "
-                    "This commonly means cuBLAS/cuDNN DLLs are missing. "
-                    "Retrying on CPU/int8.".format(model_source, exc),
-                    file=sys.stderr,
-                )
-                try:
-                    self._whisper_model = WhisperModel(
-                        model_source, device="cpu", compute_type="int8"
-                    )
-                    self._effective_device = "cpu"
-                    self._effective_compute_type = "int8"
-                except Exception as cpu_exc:
-                    print(
-                        "[ERROR] CPU fallback also failed for model '{0}': {1}".format(
-                            model_source, cpu_exc
-                        ),
-                        file=sys.stderr,
-                    )
-                    raise cpu_exc from exc
-            else:
+            message = str(exc)
+            cuda_failure = wants_gpu and _looks_like_cuda_runtime_failure(message)
+            if not cuda_failure:
                 print(
                     "[ERROR] Failed to load faster-whisper model '{0}': {1}".format(
                         model_source, exc
@@ -950,7 +1039,35 @@ class LocalWhisperProvider(AIProvider):
                 )
                 raise
 
-        return self._whisper_model
+            print(
+                "[WARN] CUDA backend unavailable for faster-whisper "
+                "(device='{0}', compute_type='{1}'): {2}. "
+                "Falling back to CPU (compute_type='int8'). To use GPU, install "
+                "the matching cuDNN / cuBLAS runtime — typically "
+                "`pip install nvidia-cudnn-cu12 nvidia-cublas-cu12` — and ensure "
+                "their `bin` directories are reachable.".format(
+                    self.device, self.compute_type, message
+                ),
+                file=sys.stderr,
+            )
+
+            try:
+                self._whisper_model = WhisperModel(
+                    model_source, device="cpu", compute_type="int8"
+                )
+                self._effective_device = "cpu"
+                self._effective_compute_type = "int8"
+            except Exception as cpu_exc:
+                print(
+                    "[ERROR] CPU fallback for faster-whisper also failed: {0}".format(cpu_exc),
+                    file=sys.stderr,
+                )
+                raise RuntimeError(
+                    "STT initialization failed on both GPU and CPU. "
+                    "Original GPU error: {0}. CPU fallback error: {1}".format(message, cpu_exc)
+                ) from cpu_exc
+
+            return self._whisper_model
 
     def transcribe(
         self,

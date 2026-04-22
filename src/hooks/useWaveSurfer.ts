@@ -83,17 +83,69 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
   const activeRegionRef = useRef<WsRegion | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // When set, the next time `timeupdate` reports >= this time the wave is
+  // paused and the ref is cleared. Used by `playClip` to make the default
+  // play action stop at a lexeme boundary without bleeding into the next
+  // word. Cleared on every pause / seek so subsequent plays are unbounded.
+  const clipEndRef = useRef<number | null>(null);
+
   // -- Imperative controls (stable refs) --
 
-  const play = useCallback(() => wsRef.current?.play(), []);
+  const play = useCallback(() => {
+    clipEndRef.current = null;
+    wsRef.current?.play();
+  }, []);
   const pause = useCallback(() => wsRef.current?.pause(), []);
-  const playPause = useCallback(() => wsRef.current?.playPause(), []);
+  const playPause = useCallback(() => {
+    if (!wsRef.current) return;
+    if (wsRef.current.isPlaying()) {
+      wsRef.current.pause();
+    } else {
+      clipEndRef.current = null;
+      wsRef.current.play();
+    }
+  }, []);
+
+  /**
+   * Play the wave starting from the current cursor position, but pause
+   * automatically at ``endSec``. Designed for the Annotate "Play" button:
+   * the first click on a freshly-loaded lexeme should play just that
+   * region, but if the cursor is already past the boundary (or the user
+   * has seeked elsewhere) we fall back to normal continuous playback.
+   *
+   * Returns true if the clip-bounded play actually started, false if the
+   * call degraded to a regular play (so the UI can stay symmetric with
+   * `play()`).
+   */
+  const playClip = useCallback((endSec: number) => {
+    const ws = wsRef.current;
+    if (!ws) return false;
+    if (!Number.isFinite(endSec) || endSec <= 0) {
+      clipEndRef.current = null;
+      ws.play();
+      return false;
+    }
+    const current = ws.getCurrentTime();
+    // Tolerate a small fractional gap so clicking play immediately after
+    // it auto-stops doesn't re-clip onto a single sample.
+    if (current >= endSec - 0.01) {
+      clipEndRef.current = null;
+      ws.play();
+      return false;
+    }
+    clipEndRef.current = endSec;
+    ws.play();
+    return true;
+  }, []);
 
   const seekToSec = useCallback((timeSec: number) => {
     const ws = wsRef.current;
     if (!ws) return;
     const duration = ws.getDuration();
     if (!duration || duration <= 0) return;
+    // A user-initiated seek invalidates any pending clip-bound: pressing
+    // play after seeking elsewhere should resume normal playback.
+    clipEndRef.current = null;
     ws.seekTo(clamp(timeSec / duration, 0, 1));
   }, []);
 
@@ -221,6 +273,11 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     // -- Store sync & callbacks --
 
     ws.on("timeupdate", (t: number) => {
+      const stopAt = clipEndRef.current;
+      if (stopAt !== null && t >= stopAt) {
+        clipEndRef.current = null;
+        ws.pause();
+      }
       options.onTimeUpdate?.(t);
       usePlaybackStore.setState({ currentTime: t });
     });
@@ -245,13 +302,24 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     });
 
     ws.on("pause", () => {
+      // Manual pause (or our own clip-bounded pause) discards any pending
+      // clip-end so the next play starts unbounded.
+      clipEndRef.current = null;
       options.onPlayStateChange?.(false);
       usePlaybackStore.setState({ isPlaying: false });
     });
 
     ws.on("finish", () => {
+      clipEndRef.current = null;
       options.onPlayStateChange?.(false);
       usePlaybackStore.setState({ isPlaying: false });
+    });
+
+    ws.on("interaction", () => {
+      // Clicking on the waveform itself triggers wavesurfer's built-in
+      // seek; that's a "user moved elsewhere" signal — clear any pending
+      // clip-bound so the next play resumes normal playback.
+      clipEndRef.current = null;
     });
 
     // -- Region events --
@@ -352,6 +420,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
       wsRef.current = null;
       regionsRef.current = null;
       activeRegionRef.current = null;
+      clipEndRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options.audioUrl, options.peaksUrl, options.initialSeekSec]);
@@ -360,6 +429,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     play,
     pause,
     playPause,
+    playClip,
     seek,
     scrollToTimeAtFraction,
     skip,
