@@ -1814,7 +1814,7 @@ export function ParseUI() {
                       onClick={() => { setActionsMenuOpen(false); conceptImportInputRef.current?.click(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
                     >
-                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Concepts CSV…
+                      <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Custom Concept List
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); loadDecisionsMenuRef.current?.click(); }}
