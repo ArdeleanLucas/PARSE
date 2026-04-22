@@ -335,10 +335,13 @@ def load_anchors_from_csv(csv_path: Path, n_anchors: int) -> Tuple[str, List[Anc
     return (speaker, anchors)
 
 
-def load_stt_segments(stt_path: Path) -> List[Segment]:
-    raw = _load_json(stt_path)
-    raw_segments: List[Any]
+def segments_from_raw(raw: Any) -> List[Segment]:
+    """Build Segment list from already-loaded STT data (dict, list, or job result).
 
+    Same shape acceptance as ``load_stt_segments`` but skips disk I/O so callers
+    (HTTP server, MCP adapter) can pass an in-memory job result directly.
+    """
+    raw_segments: List[Any]
     if isinstance(raw, list):
         raw_segments = raw
     elif isinstance(raw, dict):
@@ -346,6 +349,8 @@ def load_stt_segments(stt_path: Path) -> List[Segment]:
             raw_segments = raw["segments"]
         elif isinstance(raw.get("items"), list):
             raw_segments = raw["items"]
+        elif isinstance(raw.get("result"), dict) and isinstance(raw["result"].get("segments"), list):
+            raw_segments = raw["result"]["segments"]
         else:
             raw_segments = []
     else:
@@ -378,6 +383,56 @@ def load_stt_segments(stt_path: Path) -> List[Segment]:
     for new_index, segment in enumerate(segments):
         segment.index = new_index
     return segments
+
+
+def anchors_from_intervals(
+    intervals: Iterable[Mapping[str, Any]],
+    n_anchors: int,
+) -> List[Anchor]:
+    """Build Anchor list from annotation tier intervals (start/end/text dicts).
+
+    Used when timestamp anchors live in an annotation record rather than a
+    standalone CSV — same role as ``load_anchors_from_csv`` but for in-memory
+    annotation tiers.
+    """
+    anchors: List[Anchor] = []
+    for index, raw in enumerate(intervals or []):
+        if not isinstance(raw, Mapping):
+            continue
+
+        start_value = _pick_value(
+            raw,
+            ["start", "start_sec", "startSec", "xmin", "t0"],
+            None,
+        )
+        if start_value is None:
+            continue
+
+        start_sec = _parse_float(start_value)
+        if start_sec < 0:
+            continue
+
+        text = _normalize_space(
+            _pick_value(raw, ["text", "ortho", "orth", "ipa", "concept", "label"], "")
+        )
+        if not text:
+            continue
+
+        tokens = _dedupe_tokens(_tokenize(text))
+        if not tokens:
+            continue
+
+        anchors.append(Anchor(index=index, start_sec=start_sec, text=text, tokens=tokens))
+
+    if not anchors:
+        return []
+
+    anchors.sort(key=lambda item: item.start_sec)
+    return anchors[: max(1, int(n_anchors))]
+
+
+def load_stt_segments(stt_path: Path) -> List[Segment]:
+    return segments_from_raw(_load_json(stt_path))
 
 
 def _anchor_to_segment_similarity(anchor_token: str, segment_token: str, rules: Sequence[Any]) -> float:
