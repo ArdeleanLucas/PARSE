@@ -393,6 +393,41 @@ describe("ParseUI", () => {
     expect(await screen.findByTestId("speaker-import")).toBeTruthy();
   });
 
+  it("renames the mode menu label to Tags", async () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(await screen.findByRole("button", { name: "Tags" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage Tags" })).toBeNull();
+  });
+
+  it("supports app-mode hotkeys a/c/t", async () => {
+    render(<ParseUI />);
+
+    fireEvent.keyDown(window, { key: "a" });
+    expect(await screen.findByRole("button", { name: /Mark Done/i })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "t" });
+    expect(await screen.findByText("Linguistic tags")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "c" });
+    expect(await screen.findByRole("button", { name: /Accept concept/i })).toBeTruthy();
+  });
+
+  it("uses arrow keys to change concepts in annotate mode", async () => {
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+  });
+
   it("persists compare notes per concept via localStorage on blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);

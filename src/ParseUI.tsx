@@ -73,6 +73,13 @@ const simBar = (v: number) =>
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 
+function isInteractiveHotkeyTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const tag = target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
+  return (target as HTMLElement).isContentEditable;
+}
+
 function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
@@ -1516,6 +1523,7 @@ export function ParseUI() {
   const annotationRecords = useAnnotationStore(s => s.records);
   const enrichmentData = useEnrichmentStore(s => s.data);
   const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
+  const setActiveConceptUI = useUIStore(s => s.setActiveConcept);
   // — Chat session (one instance for the whole UI) —
   const chatSession = useChatSession();
   // — Annotation sync (auto-loads record when activeSpeaker changes) —
@@ -1826,6 +1834,55 @@ export function ParseUI() {
 
   const goPrev = () => setConceptId(id => Math.max(1, id - 1));
   const goNext = () => setConceptId(id => Math.min(total, id + 1));
+
+  useEffect(() => {
+    setActiveConceptUI(concept.key);
+  }, [concept.key, setActiveConceptUI]);
+
+  useEffect(() => {
+    function onGlobalKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isInteractiveHotkeyTarget(e.target)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'a') {
+        e.preventDefault();
+        setCurrentMode('annotate');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+      if (key === 'c') {
+        e.preventDefault();
+        setCurrentMode('compare');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+      if (key === 't') {
+        e.preventDefault();
+        setCurrentMode('tags');
+        setModeMenuOpen(false);
+        setActionsMenuOpen(false);
+        return;
+      }
+
+      if (currentMode === 'tags' || total <= 1) return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        goPrev();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        goNext();
+      }
+    }
+
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, [currentMode, total, setActiveConceptUI]);
+
   const toggleSpeaker = (s: string) => {
     if (currentMode === 'annotate') {
       setSelectedSpeakers([s]);
@@ -1901,7 +1958,7 @@ export function ParseUI() {
                 onClick={() => { setModeMenuOpen(v => !v); setActionsMenuOpen(false); }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
-                {currentMode === 'annotate' ? 'Annotate' : currentMode === 'compare' ? 'Compare' : 'Manage Tags'}
+                {currentMode === 'annotate' ? 'Annotate' : currentMode === 'compare' ? 'Compare' : 'Tags'}
                 <CDown className="h-3 w-3 text-slate-400"/>
               </button>
               {modeMenuOpen && (
@@ -1911,7 +1968,7 @@ export function ParseUI() {
                     {([
                       ['annotate','Annotate', Type],
                       ['compare','Compare', Layers],
-                      ['tags','Manage Tags', Tags],
+                      ['tags','Tags', Tags],
                     ] as const).map(([key,label,Icon]) => (
                       <button
                         key={key}
