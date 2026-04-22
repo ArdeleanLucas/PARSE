@@ -12,7 +12,8 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, applyTimestampOffset } from './api/client';
+import type { OffsetDetectResult } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
@@ -1657,6 +1658,49 @@ export function ParseUI() {
   const activeJobs = allJobs.filter(j => j.state.status !== 'idle');
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+
+  const [offsetState, setOffsetState] = useState<
+    | { phase: 'idle' }
+    | { phase: 'detecting' }
+    | { phase: 'detected'; result: OffsetDetectResult }
+    | { phase: 'applying'; result: OffsetDetectResult }
+    | { phase: 'applied'; result: OffsetDetectResult; shifted: number }
+    | { phase: 'error'; message: string }
+  >({ phase: 'idle' });
+
+  const detectOffsetForSpeaker = async () => {
+    setActionsMenuOpen(false);
+    if (!activeActionSpeaker) {
+      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
+      return;
+    }
+    setOffsetState({ phase: 'detecting' });
+    try {
+      const result = await detectTimestampOffset(activeActionSpeaker);
+      setOffsetState({ phase: 'detected', result });
+    } catch (err) {
+      setOffsetState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const applyDetectedOffset = async () => {
+    if (offsetState.phase !== 'detected') return;
+    const { result } = offsetState;
+    setOffsetState({ phase: 'applying', result });
+    try {
+      const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
+      await reloadSpeakerAnnotation(result.speaker);
+      setOffsetState({ phase: 'applied', result, shifted: apply.shiftedIntervals });
+    } catch (err) {
+      setOffsetState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
   const [exporting, setExporting] = useState(false);
 
   const resetProject = () => {
@@ -2062,6 +2106,15 @@ export function ParseUI() {
                     >
                       <Network className="h-3.5 w-3.5 text-slate-400"/>
                       {crossSpeakerJob.state.status === 'running' ? 'Matching…' : 'Run Cross-Speaker Match'}
+                    </button>
+                    <button
+                      onClick={() => { void detectOffsetForSpeaker(); }}
+                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
+                      data-testid="actions-detect-offset"
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Anchor className="h-3.5 w-3.5 text-slate-400"/>
+                      {offsetState.phase === 'detecting' ? 'Detecting offset…' : 'Detect Timestamp Offset'}
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
@@ -2892,6 +2945,87 @@ export function ParseUI() {
       />
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
+      </Modal>
+      <Modal
+        open={offsetState.phase !== 'idle'}
+        onClose={() => setOffsetState({ phase: 'idle' })}
+        title="Timestamp Offset"
+      >
+        <div className="space-y-3 text-sm" data-testid="offset-modal">
+          {offsetState.phase === 'detecting' && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin"/> Detecting offset…
+            </div>
+          )}
+          {offsetState.phase === 'detected' && (
+            <>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+                <div className="font-mono text-base text-slate-900" data-testid="offset-value">
+                  {offsetState.result.offsetSec >= 0 ? '+' : ''}{offsetState.result.offsetSec.toFixed(3)} s
+                </div>
+                <div className="mt-1 text-slate-600">
+                  Confidence {(offsetState.result.confidence * 100).toFixed(0)}% from {offsetState.result.nAnchors}/{offsetState.result.totalAnchors} anchors
+                  {' · '}{offsetState.result.totalSegments} STT segments
+                </div>
+              </div>
+              <p className="text-xs text-slate-600">
+                Apply will add this offset to every annotation interval (start &amp; end). Negative values pull
+                timestamps earlier — use this when the WAV is missing leading audio.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOffsetState({ phase: 'idle' })}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                  onClick={() => { void applyDetectedOffset(); }}
+                  data-testid="offset-apply"
+                >
+                  Apply offset
+                </button>
+              </div>
+            </>
+          )}
+          {offsetState.phase === 'applying' && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin"/> Applying offset…
+            </div>
+          )}
+          {offsetState.phase === 'applied' && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-emerald-700">
+                <CheckCircle2 className="h-4 w-4"/> Shifted {offsetState.shifted} intervals by {offsetState.result.offsetSec.toFixed(3)}s
+              </div>
+              <div className="flex justify-end">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOffsetState({ phase: 'idle' })}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+          {offsetState.phase === 'error' && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 text-rose-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0"/>
+                <span data-testid="offset-error">{offsetState.message}</span>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOffsetState({ phase: 'idle' })}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
       <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
         <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />

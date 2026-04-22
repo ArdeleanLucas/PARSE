@@ -260,6 +260,47 @@ export async function pollSTT(jobId: string): Promise<STTStatus> {
   });
 }
 
+// Timestamp offset — detect a constant CSV/STT misalignment and (optionally) apply it.
+export interface OffsetDetectResult {
+  speaker: string;
+  offsetSec: number;
+  confidence: number;
+  nAnchors: number;
+  totalAnchors: number;
+  totalSegments: number;
+  method: string;
+}
+
+export interface OffsetApplyResult {
+  speaker: string;
+  appliedOffsetSec: number;
+  shiftedIntervals: number;
+}
+
+export async function detectTimestampOffset(
+  speaker: string,
+  options?: { sttJobId?: string; sttSegments?: unknown[] }
+): Promise<OffsetDetectResult> {
+  return apiFetch<OffsetDetectResult>("/api/offset/detect", {
+    method: "POST",
+    body: JSON.stringify({
+      speaker,
+      sttJobId: options?.sttJobId,
+      sttSegments: options?.sttSegments,
+    }),
+  });
+}
+
+export async function applyTimestampOffset(
+  speaker: string,
+  offsetSec: number
+): Promise<OffsetApplyResult> {
+  return apiFetch<OffsetApplyResult>("/api/offset/apply", {
+    method: "POST",
+    body: JSON.stringify({ speaker, offsetSec }),
+  });
+}
+
 // IPA
 export async function requestIPA(text: string, language?: string): Promise<{ ipa: string }> {
   return apiFetch<{ ipa: string }>("/api/ipa", {
