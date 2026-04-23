@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlparse
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
-from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_stt_provider, load_ai_config, resolve_context_window
+from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from audio_pipeline_paths import build_normalized_output_path
 
 try:
@@ -2801,6 +2801,403 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     return {"speaker": speaker, "filled": filled, "skipped": skipped, "total": total}
 
 
+def _pipeline_audio_path_for_speaker(speaker: str) -> pathlib.Path:
+    """Resolve the best audio file to feed a Whisper-family model for a speaker.
+
+    Prefers the normalized working copy under ``audio/working/<speaker>/`` if it
+    exists; otherwise falls back to the raw source recording recorded in the
+    annotation's ``source_audio`` field. Raises ``FileNotFoundError`` if neither
+    is reachable.
+    """
+    annotation_path = _annotation_read_path_for_speaker(speaker)
+    if not annotation_path.is_file():
+        raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
+
+    record = _read_json_file(annotation_path, {})
+    source_rel = ""
+    if isinstance(record, dict):
+        source_rel = str(
+            record.get("source_audio") or record.get("source_wav") or ""
+        ).strip()
+    if not source_rel:
+        source_rel = _annotation_primary_source_wav(speaker)
+    if not source_rel:
+        raise RuntimeError(
+            "No source_audio on annotation for {0!r}; import or onboard the speaker first".format(
+                speaker
+            )
+        )
+
+    source_path = _resolve_project_path(source_rel)
+    working_dir = _project_root() / "audio" / "working" / speaker
+    normalized_path = build_normalized_output_path(source_path, working_dir)
+    if normalized_path.exists():
+        return normalized_path
+    if source_path.exists():
+        return source_path
+    raise FileNotFoundError(
+        "Neither normalized ({0}) nor source audio ({1}) exists for {2!r}".format(
+            normalized_path, source_path, speaker
+        )
+    )
+
+
+def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
+    """Return what's already been done for a speaker, per pipeline step.
+
+    Shape::
+
+        {
+          "speaker": "Fail02",
+          "normalize": {"done": true, "path": "audio/working/Fail02/Fail02.wav"},
+          "stt":       {"done": true, "segments": 142, "source_wav": "..."},
+          "ortho":     {"done": true, "intervals": 84},
+          "ipa":       {"done": false, "intervals": 0}
+        }
+
+    "done" means a tier has at least one non-empty text interval. The UI uses
+    this to drive the pre-flight checklist: unchecked steps are skipped;
+    steps with ``done=True`` surface an overwrite confirmation.
+    """
+    speaker_norm = _normalize_speaker_id(speaker)
+    result: Dict[str, Any] = {"speaker": speaker_norm}
+
+    # Normalize: working WAV exists?
+    try:
+        annotation_path = _annotation_read_path_for_speaker(speaker_norm)
+        record = _read_json_file(annotation_path, {}) if annotation_path.is_file() else {}
+    except Exception:
+        record = {}
+
+    source_rel = ""
+    if isinstance(record, dict):
+        source_rel = str(
+            record.get("source_audio") or record.get("source_wav") or ""
+        ).strip()
+    normalized_info: Dict[str, Any] = {"done": False, "path": None}
+    if source_rel:
+        try:
+            source_path = _resolve_project_path(source_rel)
+            working_dir = _project_root() / "audio" / "working" / speaker_norm
+            normalized_path = build_normalized_output_path(source_path, working_dir)
+            if normalized_path.exists():
+                normalized_info = {
+                    "done": True,
+                    "path": str(normalized_path.relative_to(_project_root())),
+                }
+        except Exception:
+            pass
+    result["normalize"] = normalized_info
+
+    # STT: cache populated?
+    cached_stt = _latest_stt_segments_for_speaker(speaker_norm)
+    stt_info: Dict[str, Any] = {"done": False, "segments": 0}
+    if cached_stt:
+        stt_info = {"done": True, "segments": len(cached_stt)}
+    result["stt"] = stt_info
+
+    # ORTHO + IPA: count non-empty intervals on the annotation tiers.
+    tiers = {}
+    if isinstance(record, dict):
+        tiers = record.get("tiers") if isinstance(record.get("tiers"), dict) else {}
+
+    def _non_empty_count(tier_name: str) -> int:
+        tier = tiers.get(tier_name) if isinstance(tiers, dict) else None
+        if not isinstance(tier, dict):
+            return 0
+        intervals = tier.get("intervals") or []
+        if not isinstance(intervals, list):
+            return 0
+        return sum(
+            1 for iv in intervals
+            if isinstance(iv, dict) and str(iv.get("text") or "").strip()
+        )
+
+    ortho_count = _non_empty_count("ortho")
+    ipa_count = _non_empty_count("ipa")
+    result["ortho"] = {"done": ortho_count > 0, "intervals": ortho_count}
+    result["ipa"] = {"done": ipa_count > 0, "intervals": ipa_count}
+
+    return result
+
+
+def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate an orthographic transcript for a speaker using the razhan model.
+
+    Runs the ORTHO provider (faster-whisper with razhan/whisper-base-sdh)
+    full-file against the speaker's working WAV (normalized copy preferred,
+    raw source as fallback) and writes razhan's own segments to the
+    ``ortho`` tier of the annotation.
+
+    Payload: ``{"speaker": "Fail02", "overwrite": false}``.
+
+    Overwrite semantics differ from IPA: razhan's segmentation isn't stable
+    across runs, so we can't pair segments by ``(start, end)`` the way IPA
+    does. Rule: if the ortho tier already has any non-empty text intervals,
+    the caller must set ``overwrite=True`` to replace the whole tier;
+    otherwise the run is a no-op and returns ``skipped=True``. Empty tiers
+    are always populated.
+    """
+    speaker = _normalize_speaker_id(payload.get("speaker"))
+    overwrite = bool(payload.get("overwrite", False))
+    language = payload.get("language")
+    language_str = str(language).strip() if isinstance(language, str) and language.strip() else None
+
+    canonical_path = _project_root() / _annotation_record_relative_path(speaker)
+    legacy_path = _project_root() / _annotation_legacy_record_relative_path(speaker)
+
+    if canonical_path.is_file():
+        annotation_path = canonical_path
+    elif legacy_path.is_file():
+        annotation_path = legacy_path
+    else:
+        raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
+
+    annotation = _read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise RuntimeError("Annotation is not a JSON object")
+
+    tiers = annotation.get("tiers") or {}
+    ortho_tier = tiers.get("ortho") if isinstance(tiers.get("ortho"), dict) else None
+    existing_intervals: List[Dict[str, Any]] = []
+    if isinstance(ortho_tier, dict):
+        existing_intervals = [iv for iv in (ortho_tier.get("intervals") or []) if isinstance(iv, dict)]
+    has_existing_text = any(str(iv.get("text") or "").strip() for iv in existing_intervals)
+
+    if has_existing_text and not overwrite:
+        return {
+            "speaker": speaker,
+            "filled": 0,
+            "skipped": True,
+            "reason": "ortho tier already populated; pass overwrite=True to replace",
+            "existing_intervals": len(existing_intervals),
+        }
+
+    audio_path = _pipeline_audio_path_for_speaker(speaker)
+    _set_job_progress(job_id, 2.0, message="Loading ortho model (razhan)")
+
+    provider = get_ortho_provider()
+
+    def _progress_callback(progress: float, segments_processed: int) -> None:
+        clamped = min(float(progress) if progress is not None else 0.0, 98.0)
+        _set_job_progress(
+            job_id,
+            max(2.0, clamped),
+            message="ORTHO transcribing ({0} segments)".format(segments_processed),
+            segments_processed=segments_processed,
+        )
+
+    segments = provider.transcribe(
+        audio_path=audio_path,
+        language=language_str,
+        progress_callback=_progress_callback,
+    )
+
+    new_intervals: List[Dict[str, Any]] = []
+    for seg in segments:
+        start = float(seg.get("start", 0.0) or 0.0)
+        end = float(seg.get("end", start) or start)
+        text = str(seg.get("text", "") or "").strip()
+        if not text:
+            continue
+        new_intervals.append({"start": start, "end": end, "text": text})
+
+    new_intervals.sort(key=lambda iv: (float(iv["start"]), float(iv["end"])))
+
+    if ortho_tier is None:
+        ortho_tier = {"type": "interval", "display_order": 2, "intervals": []}
+    ortho_tier["intervals"] = new_intervals
+    tiers["ortho"] = ortho_tier
+    annotation["tiers"] = tiers
+    _annotation_touch_metadata(annotation, preserve_created=True)
+
+    _write_json_file(annotation_path, annotation)
+    if canonical_path != annotation_path:
+        _write_json_file(canonical_path, annotation)
+    if legacy_path != annotation_path:
+        _write_json_file(legacy_path, annotation)
+
+    _set_job_progress(job_id, 99.0, message="ORTHO written ({0} intervals)".format(len(new_intervals)))
+
+    return {
+        "speaker": speaker,
+        "filled": len(new_intervals),
+        "skipped": False,
+        "replaced_existing": has_existing_text,
+        "audio_path": str(audio_path),
+        "total": len(new_intervals),
+    }
+
+
+# Canonical step identifiers recognised by the full-pipeline sequencer.
+PIPELINE_STEPS: Tuple[str, ...] = ("normalize", "stt", "ortho", "ipa")
+
+
+def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a user-selected subset of the speaker pipeline sequentially.
+
+    Payload::
+
+        {
+          "speaker": "Fail02",
+          "steps": ["normalize", "stt", "ortho", "ipa"],
+          "overwrites": {"normalize": false, "stt": false, "ortho": true, "ipa": false},
+          "language": "sd"       // optional, forwarded to STT + ORTHO
+        }
+
+    Steps run in canonical order (normalize → stt → ortho → ipa). Unselected
+    steps are skipped silently. Overwrite flags only matter for steps whose
+    prior state already has data — an unchecked "overwrite" on a populated
+    tier causes that step to skip with ``skipped=True`` in its sub-result.
+    Failure of any step aborts the pipeline and propagates the error.
+    """
+    speaker = _normalize_speaker_id(payload.get("speaker"))
+
+    raw_steps = payload.get("steps")
+    if raw_steps is None:
+        selected = list(PIPELINE_STEPS)
+    elif isinstance(raw_steps, (list, tuple)):
+        selected_set = {str(s).strip().lower() for s in raw_steps if str(s).strip()}
+        selected = [s for s in PIPELINE_STEPS if s in selected_set]
+    else:
+        raise RuntimeError("steps must be a list, got {0}".format(type(raw_steps).__name__))
+
+    if not selected:
+        return {"speaker": speaker, "steps_run": [], "results": {}, "message": "No steps selected"}
+
+    overwrites_raw = payload.get("overwrites") or {}
+    if not isinstance(overwrites_raw, dict):
+        overwrites_raw = {}
+    overwrites = {str(k).strip().lower(): bool(v) for k, v in overwrites_raw.items()}
+
+    language = payload.get("language")
+    language_str = (
+        str(language).strip() if isinstance(language, str) and language.strip() else None
+    )
+
+    results: Dict[str, Any] = {}
+    steps_run: List[str] = []
+    total = len(selected)
+
+    for idx, step in enumerate(selected):
+        step_base_pct = 5.0 + (idx / total) * 90.0
+        _set_job_progress(
+            job_id,
+            step_base_pct,
+            message="Pipeline step {0}/{1}: {2}".format(idx + 1, total, step),
+        )
+
+        if step == "normalize":
+            source_rel = _annotation_primary_source_wav(speaker)
+            if not source_rel:
+                raise RuntimeError(
+                    "Cannot normalize {0!r}: no source_audio on annotation".format(speaker)
+                )
+            audio_path = _resolve_project_path(source_rel)
+            working_dir = _project_root() / "audio" / "working" / speaker
+            normalized_path = build_normalized_output_path(audio_path, working_dir)
+            if normalized_path.exists() and not overwrites.get("normalize", False):
+                results["normalize"] = {
+                    "skipped": True,
+                    "reason": "normalized output already exists; overwrite=False",
+                    "path": str(normalized_path.relative_to(_project_root())),
+                }
+                steps_run.append(step)
+                continue
+            # Delegate to the background normalize runner, but execute inline
+            # (no new thread) so the pipeline job owns the job_id.
+            _run_normalize_job(job_id, speaker, source_rel)
+            # The runner swallows its own exceptions into _set_job_error —
+            # re-raise here so the pipeline aborts visibly.
+            snapshot = _get_job_snapshot(job_id) or {}
+            if str(snapshot.get("status") or "") == "error":
+                raise RuntimeError(
+                    "normalize step failed: {0}".format(snapshot.get("error") or "unknown error")
+                )
+            sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+            results["normalize"] = dict(sub_result) if sub_result else {"done": True}
+            _reset_job_to_running(job_id)
+            steps_run.append(step)
+
+        elif step == "stt":
+            source_rel = _annotation_primary_source_wav(speaker)
+            if not source_rel:
+                raise RuntimeError(
+                    "Cannot run STT for {0!r}: no source_audio on annotation".format(speaker)
+                )
+            cached = _latest_stt_segments_for_speaker(speaker)
+            if cached and not overwrites.get("stt", False):
+                results["stt"] = {
+                    "skipped": True,
+                    "reason": "STT cache already exists; overwrite=False",
+                    "segments": len(cached),
+                }
+                steps_run.append(step)
+                continue
+            _run_stt_job(job_id, speaker, source_rel, language_str)
+            snapshot = _get_job_snapshot(job_id) or {}
+            if str(snapshot.get("status") or "") == "error":
+                raise RuntimeError(
+                    "stt step failed: {0}".format(snapshot.get("error") or "unknown error")
+                )
+            sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+            results["stt"] = {
+                "segments": len(sub_result.get("segments") or []) if isinstance(sub_result, dict) else 0,
+                "done": True,
+            }
+            _reset_job_to_running(job_id)
+            steps_run.append(step)
+
+        elif step == "ortho":
+            sub_result = _compute_speaker_ortho(
+                job_id,
+                {
+                    "speaker": speaker,
+                    "overwrite": overwrites.get("ortho", False),
+                    "language": language_str,
+                },
+            )
+            results["ortho"] = sub_result
+            steps_run.append(step)
+
+        elif step == "ipa":
+            sub_result = _compute_speaker_ipa(
+                job_id,
+                {"speaker": speaker, "overwrite": overwrites.get("ipa", False)},
+            )
+            results["ipa"] = sub_result
+            steps_run.append(step)
+
+        else:
+            raise RuntimeError("Unknown pipeline step: {0}".format(step))
+
+    _set_job_progress(job_id, 99.0, message="Pipeline complete")
+    return {
+        "speaker": speaker,
+        "steps_run": steps_run,
+        "results": results,
+    }
+
+
+def _reset_job_to_running(job_id: str) -> None:
+    """Clear terminal-state flags on a job so later pipeline steps can report progress.
+
+    ``_run_normalize_job`` and ``_run_stt_job`` are designed as one-shot background
+    workers that call ``_set_job_complete`` on success. When we call them inline
+    from the full-pipeline sequencer we need to undo that so the outer job stays
+    in a ``running`` state for the next step.
+    """
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not isinstance(job, dict):
+            return
+        job["status"] = "running"
+        job["result"] = None
+        job["error"] = None
+        job["completed_at"] = None
+        job["completed_ts"] = None
+
+
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
     try:
         normalized_type = str(compute_type or "").strip().lower()
@@ -2812,6 +3209,10 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_contact_lexemes(job_id, payload)
         elif normalized_type in {"ipa_only", "ipa-only", "ipa"}:
             result = _compute_speaker_ipa(job_id, payload)
+        elif normalized_type in {"ortho", "ortho_only", "ortho-only"}:
+            result = _compute_speaker_ortho(job_id, payload)
+        elif normalized_type in {"full_pipeline", "full-pipeline", "pipeline"}:
+            result = _compute_full_pipeline(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -2965,6 +3366,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "stt-segments":
             self._api_get_stt_segments(parts[2])
+            return
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "pipeline" and parts[2] == "state":
+            self._api_get_pipeline_state(parts[3])
             return
 
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "chat" and parts[2] == "session":
@@ -3188,6 +3593,22 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         segments = data.get("segments") if isinstance(data.get("segments"), list) else []
         data["segments"] = segments
         self._send_json(HTTPStatus.OK, data)
+
+    def _api_get_pipeline_state(self, speaker_part: str) -> None:
+        """Return per-step pipeline state for a speaker.
+
+        Drives the pre-flight checklist modal shown before ``Run Full Pipeline``.
+        Shape is documented on ``_pipeline_state_for_speaker``.
+        """
+        try:
+            speaker = _normalize_speaker_id(speaker_part)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+        try:
+            payload = _pipeline_state_for_speaker(speaker)
+        except Exception as exc:
+            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        self._send_json(HTTPStatus.OK, payload)
 
     def _api_post_annotation(self, speaker_part: str) -> None:
         try:

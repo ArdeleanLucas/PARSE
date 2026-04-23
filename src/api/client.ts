@@ -593,6 +593,40 @@ export async function pollNormalize(jobId: string): Promise<STTStatus> {
   });
 }
 
+// Pipeline state — powers the pre-flight checklist shown before Run Full
+// Pipeline. Each entry's `done` flag means that tier has at least one
+// non-empty text interval (or, for normalize, the working WAV exists). The
+// modal uses `done` to surface overwrite warnings per step.
+export interface PipelineStepState {
+  done: boolean;
+}
+
+export interface PipelineNormalizeState extends PipelineStepState {
+  path: string | null;
+}
+
+export interface PipelineSttState extends PipelineStepState {
+  segments: number;
+}
+
+export interface PipelineTierState extends PipelineStepState {
+  intervals: number;
+}
+
+export interface PipelineState {
+  speaker: string;
+  normalize: PipelineNormalizeState;
+  stt: PipelineSttState;
+  ortho: PipelineTierState;
+  ipa: PipelineTierState;
+}
+
+export async function getPipelineState(speaker: string): Promise<PipelineState> {
+  return apiFetch<PipelineState>(
+    `/api/pipeline/state/${encodeURIComponent(speaker)}`,
+  );
+}
+
 // Onboard Speaker
 export async function onboardSpeaker(
   speakerId: string,

@@ -641,15 +641,16 @@ describe("ParseUI", () => {
 
 
 describe("Actions menu job lifecycle", () => {
-  it("Actions menu renders all 5 processing action buttons", () => {
+  it("Actions menu renders all processing action buttons (incl. Generate ORTHO + Run Full Pipeline…)", () => {
     render(<ParseUI />);
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
 
     expect(screen.getByText("Run Audio Normalization")).toBeTruthy();
-    expect(screen.getByText("Run Orthographic STT")).toBeTruthy();
+    expect(screen.getByText("Run STT")).toBeTruthy();
+    expect(screen.getByText("Generate ORTHO (razhan)")).toBeTruthy();
     expect(screen.getByText("Run IPA Transcription")).toBeTruthy();
-    expect(screen.getByText("Run Full Pipeline")).toBeTruthy();
+    expect(screen.getByText("Run Full Pipeline…")).toBeTruthy();
     expect(screen.getByText("Run Cross-Speaker Match")).toBeTruthy();
   });
 

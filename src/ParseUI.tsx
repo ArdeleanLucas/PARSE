@@ -33,6 +33,7 @@ import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
+import { PipelineChecklistModal, type PipelineChecklistResult } from './components/shared/PipelineChecklistModal';
 import { ChatMarkdown } from './components/shared/ChatMarkdown';
 import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
@@ -1954,12 +1955,54 @@ export function ParseUI() {
     onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
   });
 
+  const orthoJob = useActionJob({
+    start: () => {
+      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
+      // Default user-initiated run is "replace" — the Actions menu click
+      // means the user explicitly asked to regenerate ORTHO.
+      return startCompute('ortho', { speaker: activeActionSpeaker, overwrite: true });
+    },
+    poll: (id) => pollCompute('ortho', id),
+    label: 'Generating orthographic transcript…',
+    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
+  });
+
+  // Launched by the pre-flight checklist modal. The actual start payload is
+  // supplied when the user confirms the checklist, so we stash it in a ref.
+  const pipelinePayloadRef = useRef<Record<string, unknown> | null>(null);
   const pipelineJob = useActionJob({
-    start: () => startCompute('full_pipeline'),
+    start: () => {
+      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
+      const payload = pipelinePayloadRef.current ?? { speaker: activeActionSpeaker };
+      return startCompute('full_pipeline', payload);
+    },
     poll: (id) => pollCompute('full_pipeline', id),
     label: 'Running full pipeline…',
-    onComplete: loadEnrichments,
+    onComplete: async () => {
+      if (activeActionSpeaker) {
+        void useTranscriptionLanesStore.getState().reloadStt(activeActionSpeaker);
+        await reloadSpeakerAnnotation(activeActionSpeaker);
+      }
+      await loadEnrichments();
+    },
   });
+
+  const [pipelineChecklistOpen, setPipelineChecklistOpen] = useState(false);
+  const openPipelineChecklist = () => {
+    if (!activeActionSpeaker) return;
+    setPipelineChecklistOpen(true);
+  };
+  const handlePipelineConfirm = (result: PipelineChecklistResult) => {
+    setPipelineChecklistOpen(false);
+    if (!activeActionSpeaker || result.steps.length === 0) return;
+    pipelinePayloadRef.current = {
+      speaker: activeActionSpeaker,
+      steps: result.steps,
+      overwrites: result.overwrites,
+      language: sttLanguageRef.current || undefined,
+    };
+    void pipelineJob.run();
+  };
 
   const crossSpeakerJob = useActionJob({
     start: () => startCompute('contact-lexemes'),
@@ -1968,7 +2011,7 @@ export function ParseUI() {
     onComplete: loadEnrichments,
   });
 
-  const allJobs = [normalizeJob, sttJob, ipaJob, pipelineJob, crossSpeakerJob];
+  const allJobs = [normalizeJob, sttJob, ipaJob, orthoJob, pipelineJob, crossSpeakerJob];
   const activeJobs = allJobs.filter(j => j.state.status !== 'idle');
 
   // On mount, adopt any in-flight backend jobs so progress bars survive
@@ -2632,6 +2675,15 @@ export function ParseUI() {
                       </button>
                     </div>
                     <button
+                      onClick={() => { setActionsMenuOpen(false); void orthoJob.run(); }}
+                      disabled={!activeActionSpeaker || orthoJob.state.status === 'running'}
+                      data-testid="actions-generate-ortho"
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Type className="h-3.5 w-3.5 text-slate-400"/>
+                      {orthoJob.state.status === 'running' ? 'Generating ORTHO…' : 'Generate ORTHO (razhan)'}
+                    </button>
+                    <button
                       onClick={() => { setActionsMenuOpen(false); void ipaJob.run(); }}
                       disabled={!activeActionSpeaker || ipaJob.state.status === 'running'}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2640,12 +2692,13 @@ export function ParseUI() {
                       {ipaJob.state.status === 'running' ? 'Transcribing…' : 'Run IPA Transcription'}
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); void pipelineJob.run(); }}
-                      disabled={pipelineJob.state.status === 'running'}
+                      onClick={() => { setActionsMenuOpen(false); openPipelineChecklist(); }}
+                      disabled={!activeActionSpeaker || pipelineJob.state.status === 'running'}
+                      data-testid="actions-run-full-pipeline"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Workflow className="h-3.5 w-3.5 text-slate-400"/>
-                      {pipelineJob.state.status === 'running' ? 'Running pipeline…' : 'Run Full Pipeline'}
+                      {pipelineJob.state.status === 'running' ? 'Running pipeline…' : 'Run Full Pipeline…'}
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void crossSpeakerJob.run(); }}
@@ -3533,6 +3586,12 @@ export function ParseUI() {
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
       </Modal>
+      <PipelineChecklistModal
+        open={pipelineChecklistOpen}
+        speaker={activeActionSpeaker || ''}
+        onClose={() => setPipelineChecklistOpen(false)}
+        onConfirm={handlePipelineConfirm}
+      />
       <Modal
         open={offsetState.phase !== 'idle'}
         onClose={() => setOffsetState({ phase: 'idle' })}
