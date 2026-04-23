@@ -101,10 +101,28 @@ class Aligner:
         device: Optional[str] = None,
     ) -> "Aligner":
         """Lazy import of torch/transformers so the module is importable
-        even in environments that lack them (tests stub ``Aligner.load``)."""
+        even in environments that lack them (tests stub ``Aligner.load``).
+
+        Processor construction goes through ``Wav2Vec2CTCTokenizer`` +
+        ``Wav2Vec2FeatureExtractor`` explicitly rather than
+        ``Wav2Vec2Processor.from_pretrained`` because the latter's
+        auto-dispatch breaks on recent transformers versions with:
+
+            TypeError: Received a bool for argument tokenizer, but a
+            PreTrainedTokenizerBase was expected.
+
+        (seen on transformers 4.40+ with the PC's kurdish_asr env on
+        2026-04-23). The explicit construction is also faster — no
+        extra auto-tokenizer discovery round-trip.
+        """
         try:
             import torch  # type: ignore
-            from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor  # type: ignore
+            from transformers import (  # type: ignore
+                Wav2Vec2CTCTokenizer,
+                Wav2Vec2FeatureExtractor,
+                Wav2Vec2ForCTC,
+                Wav2Vec2Processor,
+            )
         except ImportError as exc:
             raise RuntimeError(
                 "Tier 2 forced alignment requires torch + transformers. "
@@ -112,7 +130,21 @@ class Aligner:
             ) from exc
 
         resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        processor = Wav2Vec2Processor.from_pretrained(model_name)
+
+        # Explicit tokenizer + feature_extractor load. If this path
+        # raises, fall back to the legacy auto-dispatch as a last resort
+        # so older environments that DO work with from_pretrained still
+        # succeed.
+        try:
+            tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_name)
+            feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+            processor = Wav2Vec2Processor(
+                feature_extractor=feature_extractor,
+                tokenizer=tokenizer,
+            )
+        except Exception:
+            processor = Wav2Vec2Processor.from_pretrained(model_name)
+
         model = Wav2Vec2ForCTC.from_pretrained(model_name).to(resolved_device).eval()
 
         tokenizer = processor.tokenizer
@@ -319,15 +351,60 @@ def _g2p_word(word: str, language: str = DEFAULT_G2P_LANGUAGE) -> List[str]:
 
 
 def _load_audio_mono_16k(audio_path: Path) -> Any:
-    """Load an audio file as a mono 16 kHz torch.Tensor (float32)."""
-    import torch  # type: ignore
-    import torchaudio  # type: ignore
+    """Load an audio file as a mono 16 kHz torch.Tensor (float32).
 
-    waveform, sr = torchaudio.load(str(audio_path))
+    Uses ``soundfile`` as the primary decoder (already a PARSE dependency
+    via ``stt_pipeline``) rather than ``torchaudio.load``. torchaudio 2.5+
+    dispatches through ``load_with_torchcodec`` by default and raises
+    ``TorchCodec is required for load_with_torchcodec`` in environments
+    that haven't installed the separate ``torchcodec`` package — which
+    was exactly what silently killed the Tier 3 Fail02 run. soundfile
+    is libsndfile-backed, works on every platform PARSE supports, and
+    doesn't touch torch/CUDA.
+
+    Returned tensor shape is ``(num_samples,)``, dtype float32, at
+    exactly :data:`DEFAULT_SAMPLE_RATE`. Multichannel inputs are
+    downmixed to mono before resample. Resampling uses
+    ``torchaudio.functional.resample`` when available (polyphase,
+    reproduces the prior behaviour); if torchaudio is missing or
+    broken, falls back to a linear interpolation via ``torch.nn.functional.interpolate``.
+    """
+    import torch  # type: ignore
+
+    try:
+        import soundfile as sf  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "Tier 3 audio loading requires the 'soundfile' package. "
+            "Install with: pip install soundfile"
+        ) from exc
+
+    # Read as float32. ``always_2d=True`` gives a (num_samples, num_channels)
+    # ndarray regardless of source shape, which makes the mean-down-to-mono
+    # step uniform.
+    data, sr = sf.read(str(audio_path), dtype="float32", always_2d=True)
+    # numpy (num_samples, num_channels) → torch (num_channels, num_samples)
+    waveform = torch.from_numpy(data.T).contiguous()
+
     if waveform.ndim == 2 and waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
+
     if sr != DEFAULT_SAMPLE_RATE:
-        waveform = torchaudio.functional.resample(waveform, sr, DEFAULT_SAMPLE_RATE)
+        try:
+            import torchaudio.functional as _taf  # type: ignore
+            waveform = _taf.resample(waveform, sr, DEFAULT_SAMPLE_RATE)
+        except Exception:
+            # Last-resort resampler — torch-only, no torchaudio. Works for
+            # both up- and down-sampling by reshaping to (N, C, L) so we
+            # can use ``interpolate`` with mode="linear".
+            orig_len = int(waveform.shape[-1])
+            new_len = max(1, int(round(orig_len * DEFAULT_SAMPLE_RATE / float(sr))))
+            if waveform.ndim == 1:
+                waveform = waveform.unsqueeze(0)
+            waveform = torch.nn.functional.interpolate(
+                waveform.unsqueeze(0), size=new_len, mode="linear", align_corners=False,
+            ).squeeze(0)
+
     return waveform.squeeze(0).to(torch.float32)
 
 
