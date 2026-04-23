@@ -33,9 +33,25 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     "stt": {
         "provider": "faster-whisper",
         "model_path": "",
-        "language": "sd",
+        # Empty string = let Whisper auto-detect the language. We used to
+        # default to "sd" (Sindhi), but the project's Southern Kurdish audio
+        # isn't in Whisper's supported language list and forcing Sindhi made
+        # the decoder hallucinate (produced 'ايقIt is not legal'-style
+        # garbage). Auto-detect lands on Persian (fa) — a close relative —
+        # and produces coherent Kurdish-script output.
+        "language": "",
         "device": "cuda",
         "compute_type": "float16",
+        "beam_size": 5,
+        # "transcribe" preserves the detected language. Set to "translate"
+        # if you want an English gloss of the speech.
+        "task": "transcribe",
+        # VAD gates silence out of the audio before decoding. Keep it on —
+        # vad_filter=False produces hallucination loops in long silences
+        # (e.g. repeating 'شوال' 5x during a 10s pause). Parameters below
+        # are tunable; leave as {} to use faster-whisper's Silero defaults.
+        "vad_filter": True,
+        "vad_parameters": {},
     },
     "ipa": {
         "provider": "local",
@@ -995,6 +1011,20 @@ class LocalWhisperProvider(AIProvider):
             str(compute_type or section_config.get("compute_type", "int8")).strip() or "int8"
         )
 
+        try:
+            self.beam_size = max(1, int(stt_config.get("beam_size", 5) or 5))
+        except (TypeError, ValueError):
+            self.beam_size = 5
+        task_raw = str(stt_config.get("task", "transcribe") or "transcribe").strip().lower()
+        self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
+        self.vad_filter = bool(stt_config.get("vad_filter", True))
+        vad_params_raw = stt_config.get("vad_parameters")
+        # Only forward a dict when the user has set explicit parameters;
+        # an empty {} falls through to faster-whisper's Silero defaults.
+        self.vad_parameters: Optional[Dict[str, Any]] = (
+            dict(vad_params_raw) if isinstance(vad_params_raw, dict) and vad_params_raw else None
+        )
+
         if _stt_force_cpu_env() and self.device.lower().startswith("cuda"):
             print(
                 "[WARN] PARSE_STT_FORCE_CPU set; overriding stt.device "
@@ -1110,16 +1140,22 @@ class LocalWhisperProvider(AIProvider):
             raise FileNotFoundError("Audio file not found: {0}".format(path))
 
         model = self._load_whisper_model()
-        selected_language = language or self.language
+        # Auto-detect when the user hasn't forced a language (empty/None).
+        # faster-whisper treats language=None as auto-detect; language=""
+        # would error.
+        selected_language = (language or self.language) or None
 
         def _run_transcription(m: Any) -> List[Segment]:
             segs_out: List[Segment] = []
-            segs_iter, info = m.transcribe(
-                str(path),
-                language=selected_language,
-                beam_size=5,
-                vad_filter=True,
-            )
+            transcribe_kwargs: Dict[str, Any] = {
+                "language": selected_language,
+                "beam_size": self.beam_size,
+                "task": self.task,
+                "vad_filter": self.vad_filter,
+            }
+            if self.vad_filter and self.vad_parameters is not None:
+                transcribe_kwargs["vad_parameters"] = self.vad_parameters
+            segs_iter, info = m.transcribe(str(path), **transcribe_kwargs)
             total_duration = float(getattr(info, "duration", 0.0) or 0.0)
             for segment in segs_iter:
                 start = float(_dict_or_attr(segment, "start", 0.0) or 0.0)
