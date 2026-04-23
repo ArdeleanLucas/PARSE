@@ -20,13 +20,35 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 
+class WordSpan(TypedDict, total=False):
+    """Per-word timing from faster-whisper word_timestamps=True.
+
+    Optional enrichment attached to Segment.words in Tier 1 of the acoustic
+    alignment pipeline. Consumers that predate Tier 1 simply ignore it.
+    """
+
+    word: str
+    start: float
+    end: float
+    prob: float
+
+
 class Segment(TypedDict):
-    """Timestamped STT segment."""
+    """Timestamped STT segment. Always has start/end/text/confidence."""
 
     start: float
     end: float
     text: str
     confidence: float
+
+
+class SegmentWithWords(Segment, total=False):
+    """Segment enriched with per-word spans (Tier 1 acoustic alignment).
+
+    Structural subtype of Segment — legacy consumers ignore the extra key.
+    """
+
+    words: List[WordSpan]
 
 
 _DEFAULT_AI_CONFIG: Dict[str, Any] = {
@@ -722,6 +744,36 @@ def _dict_or_attr(item: Any, key: str, default: Any = None) -> Any:
     return getattr(item, key, default)
 
 
+def _extract_word_spans(segment: Any) -> List[WordSpan]:
+    """Pull per-word spans from a faster-whisper Segment when available.
+
+    Returns an empty list for providers/modes that don't produce word-level
+    timestamps so SegmentWithWords.words can be omitted cleanly.
+    """
+    raw_words = _dict_or_attr(segment, "words", None)
+    if not raw_words:
+        return []
+    out: List[WordSpan] = []
+    for w in raw_words:
+        text = str(_dict_or_attr(w, "word", "") or "").strip()
+        if not text:
+            continue
+        try:
+            start = float(_dict_or_attr(w, "start", 0.0) or 0.0)
+            end = float(_dict_or_attr(w, "end", start) or start)
+        except (TypeError, ValueError):
+            continue
+        prob_raw = _dict_or_attr(w, "probability", None)
+        entry: WordSpan = {"word": text, "start": start, "end": end}
+        if prob_raw is not None:
+            try:
+                entry["prob"] = _coerce_confidence(float(prob_raw))
+            except (TypeError, ValueError):
+                pass
+        out.append(entry)
+    return out
+
+
 # Cache so repeated _load_whisper_model calls don't re-walk the filesystem.
 _CUDA_DLL_DIRS_REGISTERED: Optional[bool] = None
 _CUDA_RUNTIME_FAILURE_MARKERS = (
@@ -1304,11 +1356,16 @@ class LocalWhisperProvider(AIProvider):
 
         def _run_transcription(m: Any) -> List[Segment]:
             segs_out: List[Segment] = []
+            # Tier 1 acoustic alignment: word_timestamps=True enriches each
+            # segment with per-word (start, end, probability) spans used by
+            # Tier 2 forced alignment. The extra cost is a DTW pass on
+            # cross-attention and is negligible relative to decoding.
             transcribe_kwargs: Dict[str, Any] = {
                 "language": selected_language,
                 "beam_size": self.beam_size,
                 "task": self.task,
                 "vad_filter": self.vad_filter,
+                "word_timestamps": True,
             }
             if self.vad_filter and self.vad_parameters is not None:
                 transcribe_kwargs["vad_parameters"] = self.vad_parameters
@@ -1319,14 +1376,16 @@ class LocalWhisperProvider(AIProvider):
                 end = float(_dict_or_attr(segment, "end", start) or start)
                 text = str(_dict_or_attr(segment, "text", "") or "").strip()
                 avg_logprob = _dict_or_attr(segment, "avg_logprob", None)
-                segs_out.append(
-                    {
-                        "start": start,
-                        "end": end,
-                        "text": text,
-                        "confidence": _confidence_from_logprob(avg_logprob),
-                    }
-                )
+                words_out = _extract_word_spans(segment)
+                seg_dict: SegmentWithWords = {
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                    "confidence": _confidence_from_logprob(avg_logprob),
+                }
+                if words_out:
+                    seg_dict["words"] = words_out
+                segs_out.append(seg_dict)
                 if progress_callback is not None and total_duration > 0.0:
                     progress = _coerce_confidence(end / total_duration) * 100.0
                     progress_callback(progress, len(segs_out))

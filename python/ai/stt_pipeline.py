@@ -14,19 +14,30 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 try:
-    from .provider import Segment, get_provider, load_ai_config
+    from .provider import Segment, WordSpan, get_provider, load_ai_config
 except ImportError:
-    from provider import Segment, get_provider, load_ai_config  # type: ignore
+    from provider import Segment, WordSpan, get_provider, load_ai_config  # type: ignore
 
 
 LONG_FILE_WARNING_SECONDS = 20.0 * 60.0
 
 
-class STTOutputSegment(Segment):
-    """Output STT segment used by speaker import flows."""
+class _STTOutputSegmentRequired(Segment):
+    """Required keys for speaker-import STT segments."""
 
     ortho: str
     ipa: str
+
+
+class STTOutputSegment(_STTOutputSegmentRequired, total=False):
+    """Output STT segment used by speaker import flows.
+
+    ``words`` is populated when Tier 1 word-level STT is active
+    (word_timestamps=True). Legacy consumers that only read start/end/text/
+    ortho/ipa keep working because ``words`` is structurally optional.
+    """
+
+    words: List[WordSpan]
 
 
 class STTArtifact(TypedDict):
@@ -200,16 +211,21 @@ def run_stt_pipeline(
         text = str(segment.get("text", "") or "").strip()
         confidence = clamp_confidence(float(segment.get("confidence", 0.0) or 0.0))
 
-        cleaned.append(
-            {
-                "start": start,
-                "end": end,
-                "text": text,
-                "ortho": text,
-                "ipa": "",
-                "confidence": confidence,
-            }
-        )
+        out_segment: STTOutputSegment = {
+            "start": start,
+            "end": end,
+            "text": text,
+            "ortho": text,
+            "ipa": "",
+            "confidence": confidence,
+        }
+        # Tier 1: propagate word-level spans when faster-whisper produced
+        # them (word_timestamps=True). Forced-alignment (Tier 2) consumes
+        # these; the frontend and legacy MCP tools ignore the extra key.
+        raw_words = segment.get("words")
+        if isinstance(raw_words, list) and raw_words:
+            out_segment["words"] = list(raw_words)
+        cleaned.append(out_segment)
 
     return {
         "speaker": speaker_id,
