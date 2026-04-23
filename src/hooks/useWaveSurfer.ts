@@ -152,6 +152,33 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     return true;
   }, []);
 
+  /**
+   * Play a fixed [startSec, endSec] window and always auto-pause at endSec.
+   * Unlike `playClip`, this ignores the region-primed flag and clip-bounds on
+   * every call — so the bottom Play button (and Space hotkey) on a selected
+   * region replays just that region even after waveform interaction cleared
+   * the primed state.
+   */
+  const playRange = useCallback((startSec: number, endSec: number) => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    if (!Number.isFinite(endSec) || endSec <= 0 || endSec <= startSec) {
+      clipEndRef.current = null;
+      ws.play();
+      return;
+    }
+    const dur = ws.getDuration();
+    if (dur > 0 && Number.isFinite(startSec) && startSec >= 0) {
+      const cur = ws.getCurrentTime();
+      if (cur < startSec - 0.01 || cur >= endSec - 0.01) {
+        ws.seekTo(clamp(startSec / dur, 0, 1));
+      }
+    }
+    clipEndRef.current = endSec;
+    regionPrimedRef.current = false;
+    ws.play();
+  }, []);
+
   const seekToSec = useCallback((timeSec: number) => {
     const ws = wsRef.current;
     if (!ws) return;
@@ -459,6 +486,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions) {
     pause,
     playPause,
     playClip,
+    playRange,
     seek,
     scrollToTimeAtFraction,
     skip,

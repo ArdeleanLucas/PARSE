@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
   RotateCw, Play, RefreshCw, Save, Upload,
@@ -1302,7 +1302,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       : null;
   }, [conceptInterval]);
 
-  const { playPause, playClip, pause, seek, scrollToTimeAtFraction, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
+  const { playPause, playRange, pause, seek, scrollToTimeAtFraction, skip, addRegion, setZoom: wsSetZoom, setRate, wsRef } = useWaveSurfer({
     containerRef,
     audioUrl,
     peaksUrl,
@@ -1337,6 +1337,37 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
       }
     },
   });
+
+  // Press Play (or Space) on a selected region → clip-bounded playback that
+  // stops at the region end. No region selected → plain play/pause toggle.
+  const handlePlayToggle = useCallback(() => {
+    if (isPlaying) {
+      pause();
+      return;
+    }
+    if (selectedRegion) {
+      playRange(selectedRegion.start, selectedRegion.end);
+    } else {
+      playPause();
+    }
+  }, [isPlaying, selectedRegion, pause, playRange, playPause]);
+
+  // Global Space hotkey for play/pause. Skips when the user is typing so the
+  // IPA and orthographic fields keep accepting spaces.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== " " && e.code !== "Space") return;
+      const t = e.target as HTMLElement | null;
+      if (t) {
+        const tag = t.tagName?.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable) return;
+      }
+      e.preventDefault();
+      handlePlayToggle();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handlePlayToggle]);
 
   // Speaker switches replace the underlying WaveSurfer instance. Reset the
   // ready gate and playback clock first so annotate-side seek/region effects
@@ -1658,22 +1689,8 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           <button onClick={() => skip(-5)} title="-5s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4"/></button>
           <button onClick={() => skip(-1)} title="-1s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4"/></button>
           <button
-            onClick={() => {
-              if (isPlaying) {
-                pause();
-                return;
-              }
-              // Default play: jump to the lexeme start and stop at its
-              // end (clip-bounded). Pressing Play again after the clip
-              // auto-stops, or after the user seeks elsewhere on the
-              // waveform, falls through to continuous playback inside
-              // playClip — which checks the hook's "primed" flag.
-              if (selectedRegion) {
-                playClip(selectedRegion.start, selectedRegion.end);
-              } else {
-                playPause();
-              }
-            }}
+            onClick={handlePlayToggle}
+            title={selectedRegion ? "Play selected region (Space)" : "Play (Space)"}
             data-testid="annotate-play"
             className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
           >
