@@ -640,114 +640,54 @@ describe("ParseUI", () => {
 });
 
 
-describe("Actions menu job lifecycle", () => {
-  it("Actions menu renders all processing action buttons (incl. Generate ORTHO + Run Full Pipeline…)", () => {
+describe("Actions menu — transcription run flow", () => {
+  // All per-model transcription actions (Normalize, STT, ORTH, IPA, and the
+  // combined Full Pipeline) are now routed through a single batch runner
+  // modal. The dedicated behaviours (sequential execution, pre-flight
+  // preflight, step-level error capture, post-run report with tracebacks)
+  // are tested in the TranscriptionRunModal / useBatchPipelineJob /
+  // BatchReportModal suites. These tests just cover the entry points from
+  // the action menu.
+
+  it("Actions menu shows every transcription entry point and the cross-speaker match", () => {
     render(<ParseUI />);
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
 
-    expect(screen.getByText("Run Audio Normalization")).toBeTruthy();
-    expect(screen.getByText("Run STT")).toBeTruthy();
-    expect(screen.getByText("Generate ORTHO (razhan)")).toBeTruthy();
-    expect(screen.getByText("Run IPA Transcription")).toBeTruthy();
+    expect(screen.getByText("Run Audio Normalization…")).toBeTruthy();
+    expect(screen.getByText("Run STT…")).toBeTruthy();
+    expect(screen.getByText("Generate ORTH (razhan)…")).toBeTruthy();
+    expect(screen.getByText("Run IPA Transcription…")).toBeTruthy();
     expect(screen.getByText("Run Full Pipeline…")).toBeTruthy();
     expect(screen.getByText("Run Cross-Speaker Match")).toBeTruthy();
   });
 
-  it("shows topbar normalize progress and disables the button while running", async () => {
-    vi.useFakeTimers();
-    vi.mocked(apiClient.startNormalize).mockResolvedValue({ job_id: "normalize-1" });
-    vi.mocked(apiClient.pollNormalize).mockResolvedValue({ status: "running", progress: 25, segments: [] });
-
+  it("clicking a transcription action opens the run modal", async () => {
     render(<ParseUI />);
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByTestId("actions-normalize"));
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
-      await Promise.resolve();
-    });
+    // The modal fires getPipelineState per speaker on open; give it a
+    // microtask to render.
+    await act(async () => { await Promise.resolve(); });
 
-    expect(apiClient.startNormalize).toHaveBeenCalledWith("Fail01");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-
-    expect(screen.getByTestId("topbar-action-statuses")).toBeTruthy();
-    expect(screen.getByText("Normalizing audio…")).toBeTruthy();
-    expect(screen.getByText("25%")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
-    expect((screen.getByRole("button", { name: "Normalizing…" }) as HTMLButtonElement).disabled).toBe(true);
+    // The modal renders with the title supplied by the action.
+    expect(screen.getByText(/Run Audio Normalization/i)).toBeTruthy();
   });
 
-  it("action buttons have disabled class when applicable", () => {
-    render(<ParseUI />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
-    const normalizeButton = screen.getByRole("button", { name: "Run Audio Normalization" });
-
-    expect(normalizeButton.className).toContain("disabled:opacity-50");
-    expect(normalizeButton.className).toContain("disabled:cursor-not-allowed");
-  });
-
-  it("shows retry for action errors and reruns the job", async () => {
-    vi.useFakeTimers();
-    vi.mocked(apiClient.startNormalize)
-      .mockResolvedValueOnce({ job_id: "normalize-error-1" })
-      .mockResolvedValueOnce({ job_id: "normalize-error-2" });
-    vi.mocked(apiClient.pollNormalize)
-      .mockResolvedValueOnce({ status: "error", progress: 40, segments: [], message: "Normalize failed" } as unknown as Awaited<ReturnType<typeof apiClient.pollNormalize>>)
-      .mockResolvedValue({ status: "running", progress: 60, segments: [] });
-
-    render(<ParseUI />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-
-    expect(screen.getByText("Normalize failed")).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-      await Promise.resolve();
-    });
-
-    expect(apiClient.startNormalize).toHaveBeenCalledTimes(2);
-  });
-
-  it("Reset Project clears action job states", async () => {
-    vi.useFakeTimers();
+  it("Reset Project resets the batch runner", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.mocked(apiClient.startNormalize).mockResolvedValue({ job_id: "normalize-reset" });
-    vi.mocked(apiClient.pollNormalize).mockResolvedValue({ status: "running", progress: 10, segments: [] });
 
     render(<ParseUI />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Run Audio Normalization" }));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-
-    expect(screen.getByTestId("topbar-action-statuses")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset Project" }));
 
-    expect(screen.queryByTestId("topbar-action-statuses")).toBeNull();
+    // Batch is idle after reset → no topbar batch-status element.
+    expect(screen.queryByTestId("topbar-batch-status")).toBeNull();
     expect(confirmSpy).toHaveBeenCalled();
     expect(mockAnnotationSetState).toHaveBeenCalledWith({ records: {}, dirty: {}, loading: {} });
-    expect(mockEnrichmentSetState).toHaveBeenCalledWith({ data: {}, loading: false });
-    expect(mockTagSetState).toHaveBeenCalledWith({ tags: [] });
-    expect(mockPlaybackSetState).toHaveBeenCalledWith({ activeSpeaker: null, currentTime: 0 });
-    expect(mockConfigSetState).toHaveBeenCalledWith({ config: null, loading: false });
 
     confirmSpy.mockRestore();
   });

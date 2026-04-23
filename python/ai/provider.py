@@ -712,6 +712,71 @@ def _stt_force_cpu_env() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+_HF_REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _looks_like_hf_repo_id(value: str) -> bool:
+    """Distinguish a HuggingFace repo id (``org/name``) from a filesystem path.
+
+    HF ids are two simple segments with a forward slash. Local paths can
+    contain forward slashes too (POSIX absolute paths, WSL paths with
+    forward slashes) so we check for disqualifying markers first:
+    drive letters, leading slashes, backslashes, or more than one slash.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if "\\" in text:
+        return False
+    if text.startswith(("/", ".")) or (len(text) >= 2 and text[1] == ":"):
+        return False
+    return bool(_HF_REPO_ID_RE.match(text))
+
+
+def _collect_nvidia_wheel_bin_dirs() -> List[Path]:
+    """Return ``<site-packages>/nvidia/<subpkg>/bin`` dirs for every
+    installed NVIDIA wheel (cublas, cudnn, cuda-runtime, …).
+
+    ``nvidia`` is a PEP-420 *namespace* package — there is no
+    ``nvidia/__init__.py``, so ``nvidia.__file__`` is ``None``. We
+    must iterate ``nvidia.__path__`` (a list of directories that
+    contribute to the namespace) to find the subpackage roots.
+
+    A prior revision used ``Path(nvidia.__file__).resolve().parent``
+    which raises ``TypeError`` when ``__file__`` is ``None``. The
+    enclosing ``except Exception: pass`` swallowed it, so no DLL
+    directories ever got registered — faster-whisper silently fell
+    back to CPU at the first cuBLAS call. This helper is the fix;
+    the bottom of ``test_ortho_provider_fallback.py`` locks the
+    behaviour in.
+    """
+    results: List[Path] = []
+    try:
+        import nvidia  # type: ignore[import-not-found]
+    except ImportError:
+        return results
+
+    # __path__ can be a list of str OR a _NamespacePath — iterate uniformly.
+    roots: List[str] = []
+    try:
+        roots = list(nvidia.__path__)  # type: ignore[attr-defined]
+    except TypeError:
+        return results
+
+    for root_str in roots:
+        try:
+            nvidia_root = Path(root_str)
+        except Exception:
+            continue
+        if not nvidia_root.is_dir():
+            continue
+        for entry in nvidia_root.iterdir():
+            bin_dir = entry / "bin"
+            if bin_dir.is_dir():
+                results.append(bin_dir)
+    return results
+
+
 def _register_cuda_dll_directories() -> None:
     """Register cuBLAS / cuDNN DLL directories on Windows.
 
@@ -737,19 +802,10 @@ def _register_cuda_dll_directories() -> None:
 
     candidates: List[Path] = []
 
-    # 1. NVIDIA pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12) install
-    #    DLLs under <site-packages>/nvidia/<lib>/bin. Walk every nvidia
-    #    subpackage that has a `bin` dir.
-    try:
-        import nvidia  # type: ignore[import-not-found]
-
-        nvidia_root = Path(nvidia.__file__).resolve().parent
-        for entry in nvidia_root.iterdir():
-            bin_dir = entry / "bin"
-            if bin_dir.is_dir():
-                candidates.append(bin_dir)
-    except Exception:
-        pass
+    # 1. NVIDIA pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12,
+    #    nvidia-cuda-runtime-cu12, …). Extracted into a helper so it
+    #    can be unit-tested without the surrounding Windows-only gate.
+    candidates.extend(_collect_nvidia_wheel_bin_dirs())
 
     # 2. Explicit env vars that ship with CUDA Toolkit installs.
     for env_key in ("CUDA_PATH", "CUDA_HOME", "CUDNN_PATH"):
@@ -767,6 +823,7 @@ def _register_cuda_dll_directories() -> None:
             candidates.append(Path(chunk))
 
     seen: set = set()
+    registered_dirs: List[Path] = []
     for candidate in candidates:
         try:
             resolved = candidate.expanduser().resolve()
@@ -778,11 +835,31 @@ def _register_cuda_dll_directories() -> None:
         try:
             add_dll_directory(str(resolved))
             _CUDA_DLL_DIRS_REGISTERED = True
+            registered_dirs.append(resolved)
         except (OSError, FileNotFoundError):
             # Directory exists but cannot be registered (e.g. permissions).
             # Skip silently — the WhisperModel try/except below will surface
             # any remaining DLL load failures with full context.
             pass
+
+    # One-shot diagnostic on stderr so silent registration failures
+    # (e.g. the nvidia.__file__=None namespace-package bug that caused
+    # production CPU fallbacks for months) are immediately visible.
+    if registered_dirs:
+        print(
+            "[INFO] CUDA DLL search registered {0} dir(s): {1}".format(
+                len(registered_dirs),
+                ", ".join(str(d) for d in registered_dirs),
+            ),
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[WARN] No CUDA DLL directories could be registered. If you expect "
+            "GPU inference, install the NVIDIA runtime wheels: "
+            "`pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12`.",
+            file=sys.stderr,
+        )
 
 
 _ARABIC_DIACRITICS = {
@@ -1005,6 +1082,27 @@ class LocalWhisperProvider(AIProvider):
         self.config_section = str(config_section or "stt").strip() or "stt"
         section_config = self.config.get(self.config_section, {})
         self.model_path = str(section_config.get("model_path", "")).strip()
+
+        # If an ORTHO provider has no explicit model_path, fall back to
+        # stt.model_path — users who configured razhan (or any local CT2)
+        # for STT almost always want the same model for ORTHO, and
+        # HuggingFace-repo-id defaults like "razhan/whisper-base-sdh" don't
+        # resolve to faster-whisper's CT2 format so they fail at load time.
+        # Explicit empty/HF-id → stt.model_path (when non-empty).
+        if self.config_section == "ortho":
+            if not self.model_path or _looks_like_hf_repo_id(self.model_path):
+                stt_fallback = str(
+                    self.config.get("stt", {}).get("model_path", "") or ""
+                ).strip()
+                if stt_fallback:
+                    if self.model_path:
+                        print(
+                            "[INFO] ortho.model_path '{0}' looks like a HuggingFace "
+                            "repo id; faster-whisper needs CT2. Falling back to "
+                            "stt.model_path '{1}'.".format(self.model_path, stt_fallback),
+                            file=sys.stderr,
+                        )
+                    self.model_path = stt_fallback
         self.language = str(language or section_config.get("language", "")).strip() or None
         self.device = str(device or section_config.get("device", "cpu")).strip() or "cpu"
         self.compute_type = (

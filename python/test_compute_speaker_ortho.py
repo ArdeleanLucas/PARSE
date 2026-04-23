@@ -326,8 +326,10 @@ def test_full_pipeline_stt_step_uses_normalized_working_wav(tmp_path, monkeypatc
     assert observed["source_wav"] == str(normalized)
 
 
-def test_full_pipeline_stt_raises_when_no_audio_reachable(tmp_path, monkeypatch):
-    """If neither normalized nor raw source exists, STT must abort cleanly."""
+def test_full_pipeline_stt_captures_missing_audio_error(tmp_path, monkeypatch):
+    """If neither normalized nor raw source exists, STT must record an
+    error in results['stt'] (not raise) so the rest of the pipeline can
+    still attempt to run for that speaker."""
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     _seed_annotation(tmp_path, "Fail02", source_audio="SK_Faili_F_1968.wav")
     # No audio file written anywhere — simulate the prod-error condition.
@@ -336,15 +338,21 @@ def test_full_pipeline_stt_raises_when_no_audio_reachable(tmp_path, monkeypatch)
     monkeypatch.setattr(server, "_latest_stt_segments_for_speaker", lambda s: None)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
 
-    with pytest.raises(RuntimeError, match="Cannot run STT"):
-        server._compute_full_pipeline(
-            "j1",
-            {"speaker": "Fail02", "steps": ["stt"], "overwrites": {"stt": True}},
-        )
+    result = server._compute_full_pipeline(
+        "j1",
+        {"speaker": "Fail02", "steps": ["stt"], "overwrites": {"stt": True}},
+    )
+    assert result["results"]["stt"]["status"] == "error"
+    assert "Cannot run STT" in result["results"]["stt"]["error"]
+    assert result["results"]["stt"]["traceback"]
 
 
-def test_full_pipeline_propagates_step_failure(tmp_path, monkeypatch):
-    """A step raising should abort the pipeline and propagate the error."""
+def test_full_pipeline_step_failure_is_captured_not_raised(tmp_path, monkeypatch):
+    """A step raising must be captured in results[step]['error']/['traceback'],
+    not propagated — and the next step must still run. This is the
+    walk-away-friendly contract: a batch of 10 speakers shouldn't be
+    aborted because one speaker's razhan load hit a stale cache.
+    """
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
@@ -356,16 +364,83 @@ def test_full_pipeline_propagates_step_failure(tmp_path, monkeypatch):
 
     def fake_ipa(*a, **kw):
         ipa_called["count"] += 1
-        return {"filled": 0}
+        return {"speaker": "Fail02", "filled": 0, "skipped": 0, "total": 0}
 
     monkeypatch.setattr(server, "_compute_speaker_ortho", broken_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", fake_ipa)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
 
-    with pytest.raises(RuntimeError, match="razhan exploded"):
-        server._compute_full_pipeline(
-            "j1",
-            {"speaker": "Fail02", "steps": ["ortho", "ipa"]},
-        )
-    # IPA must not run after ORTHO fails.
-    assert ipa_called["count"] == 0
+    result = server._compute_full_pipeline(
+        "j1",
+        {"speaker": "Fail02", "steps": ["ortho", "ipa"]},
+    )
+
+    # ORTHO captured the error — no raise.
+    assert result["results"]["ortho"]["status"] == "error"
+    assert "razhan exploded" in result["results"]["ortho"]["error"]
+    assert result["results"]["ortho"]["traceback"]  # non-empty
+    # IPA STILL ran after ORTHO failed — that's the whole point.
+    assert ipa_called["count"] == 1
+    assert result["results"]["ipa"]["status"] in {"ok", "skipped"}
+    # Summary roll-up reflects the outcome.
+    assert result["summary"]["error"] == 1
+    assert result["summary"]["ok"] + result["summary"]["skipped"] == 1
+
+
+# --------------------------------------------------------------------------
+# Preflight (can_run / reason) — drives the pre-run speaker grid in the UI
+# --------------------------------------------------------------------------
+
+
+def test_preflight_all_steps_can_run_when_audio_and_annotation_present(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(
+        tmp_path, "Fail02",
+        ortho=[{"start": 0.0, "end": 1.0, "text": "x"}],  # ortho present → IPA unlocked
+        source_audio="raw/Fail02.wav",
+    )
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "audio/working/Fail02/Fail02.wav")
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    for step in ("normalize", "stt", "ortho", "ipa"):
+        assert state[step]["can_run"] is True, f"{step} should be runnable: {state[step]}"
+        assert state[step]["reason"] is None
+
+
+def test_preflight_blocks_when_audio_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    # Deliberately write NO audio file anywhere.
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["normalize"]["can_run"] is False
+    assert "Source audio not found" in state["normalize"]["reason"]
+    assert state["stt"]["can_run"] is False
+    assert "No audio file" in state["stt"]["reason"]
+    assert state["ortho"]["can_run"] is False
+    assert "No audio file" in state["ortho"]["reason"]
+
+
+def test_preflight_ipa_blocked_when_no_ortho(tmp_path, monkeypatch):
+    """IPA cannot run if ortho tier is empty (nothing to phonemize from).
+    The reason text should hint that running ORTH first unblocks it."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["ipa"]["can_run"] is False
+    assert "ORTH" in state["ipa"]["reason"]
+    # ORTHO itself can still run (audio exists) — it's the unblocker.
+    assert state["ortho"]["can_run"] is True
+
+
+def test_preflight_handles_missing_annotation(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    # No _seed_annotation call — speaker has no annotation file.
+
+    state = server._pipeline_state_for_speaker("GhostSpeaker")
+    for step in ("normalize", "stt", "ortho", "ipa"):
+        assert state[step]["can_run"] is False
+        assert "No annotation" in state[step]["reason"]

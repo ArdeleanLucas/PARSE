@@ -24,7 +24,7 @@ interface LaneStrip {
 const LANE_LABELS: Record<LaneKind, string> = {
   stt: "STT",
   ipa: "IPA",
-  ortho: "ORTHO",
+  ortho: "ORTH",
 };
 
 const LANE_HEIGHT_PX = 28;
