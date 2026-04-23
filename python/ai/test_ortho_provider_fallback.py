@@ -94,3 +94,56 @@ def test_stt_section_is_never_touched_by_fallback(tmp_path):
         config_path=tmp_path / "ai_config.json",
     )
     assert provider.model_path == ""
+
+
+# --------------------------------------------------------------------------
+# _collect_nvidia_wheel_bin_dirs — regression guard for the PEP-420
+# namespace-package bug that silently disabled GPU inference in
+# production (no DLL dirs registered → cublas fails mid-transcription
+# → faster-whisper falls back to CPU). The helper is platform-agnostic
+# so we can test it on every CI runner, not only Windows.
+# --------------------------------------------------------------------------
+
+
+def test_collect_nvidia_wheel_bin_dirs_iterates_namespace_path(tmp_path, monkeypatch):
+    """The ``nvidia`` package installed by ``nvidia-cublas-cu12`` etc. is a
+    PEP-420 namespace package — ``nvidia.__file__`` is ``None`` but
+    ``nvidia.__path__`` enumerates its site-packages root(s). A previous
+    revision used ``Path(nvidia.__file__).resolve().parent`` and silently
+    failed (``TypeError``), meaning no DLL dirs got registered and
+    faster-whisper fell back to CPU at the first cuBLAS call.
+    """
+    import types
+    import sys as _sys
+    from ai import provider as provider_module
+
+    # Simulate how the nvidia-* wheels actually install: subpackage
+    # directories under <site-packages>/nvidia/ each with a bin/ dir.
+    fake_root = tmp_path / "site-packages" / "nvidia"
+    (fake_root / "cublas" / "bin").mkdir(parents=True)
+    (fake_root / "cudnn" / "bin").mkdir(parents=True)
+    (fake_root / "cuda_runtime" / "bin").mkdir(parents=True)
+    # Also drop a subpackage without a bin dir — must NOT be registered.
+    (fake_root / "cusparse").mkdir()
+
+    fake_nvidia = types.ModuleType("nvidia")
+    fake_nvidia.__file__ = None  # the exact shape that used to crash
+    fake_nvidia.__path__ = [str(fake_root)]
+    monkeypatch.setitem(_sys.modules, "nvidia", fake_nvidia)
+
+    dirs = provider_module._collect_nvidia_wheel_bin_dirs()
+
+    names = {d.parent.name for d in dirs}
+    assert names == {"cublas", "cudnn", "cuda_runtime"}, names
+
+
+def test_collect_nvidia_wheel_bin_dirs_returns_empty_when_nvidia_absent(monkeypatch):
+    """No nvidia wheels installed → empty list, no exception."""
+    import sys as _sys
+    from ai import provider as provider_module
+
+    # Ensure ``import nvidia`` fails cleanly.
+    monkeypatch.setitem(_sys.modules, "nvidia", None)
+
+    assert provider_module._collect_nvidia_wheel_bin_dirs() == []
+

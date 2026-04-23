@@ -733,6 +733,50 @@ def _looks_like_hf_repo_id(value: str) -> bool:
     return bool(_HF_REPO_ID_RE.match(text))
 
 
+def _collect_nvidia_wheel_bin_dirs() -> List[Path]:
+    """Return ``<site-packages>/nvidia/<subpkg>/bin`` dirs for every
+    installed NVIDIA wheel (cublas, cudnn, cuda-runtime, …).
+
+    ``nvidia`` is a PEP-420 *namespace* package — there is no
+    ``nvidia/__init__.py``, so ``nvidia.__file__`` is ``None``. We
+    must iterate ``nvidia.__path__`` (a list of directories that
+    contribute to the namespace) to find the subpackage roots.
+
+    A prior revision used ``Path(nvidia.__file__).resolve().parent``
+    which raises ``TypeError`` when ``__file__`` is ``None``. The
+    enclosing ``except Exception: pass`` swallowed it, so no DLL
+    directories ever got registered — faster-whisper silently fell
+    back to CPU at the first cuBLAS call. This helper is the fix;
+    the bottom of ``test_ortho_provider_fallback.py`` locks the
+    behaviour in.
+    """
+    results: List[Path] = []
+    try:
+        import nvidia  # type: ignore[import-not-found]
+    except ImportError:
+        return results
+
+    # __path__ can be a list of str OR a _NamespacePath — iterate uniformly.
+    roots: List[str] = []
+    try:
+        roots = list(nvidia.__path__)  # type: ignore[attr-defined]
+    except TypeError:
+        return results
+
+    for root_str in roots:
+        try:
+            nvidia_root = Path(root_str)
+        except Exception:
+            continue
+        if not nvidia_root.is_dir():
+            continue
+        for entry in nvidia_root.iterdir():
+            bin_dir = entry / "bin"
+            if bin_dir.is_dir():
+                results.append(bin_dir)
+    return results
+
+
 def _register_cuda_dll_directories() -> None:
     """Register cuBLAS / cuDNN DLL directories on Windows.
 
@@ -758,19 +802,10 @@ def _register_cuda_dll_directories() -> None:
 
     candidates: List[Path] = []
 
-    # 1. NVIDIA pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12) install
-    #    DLLs under <site-packages>/nvidia/<lib>/bin. Walk every nvidia
-    #    subpackage that has a `bin` dir.
-    try:
-        import nvidia  # type: ignore[import-not-found]
-
-        nvidia_root = Path(nvidia.__file__).resolve().parent
-        for entry in nvidia_root.iterdir():
-            bin_dir = entry / "bin"
-            if bin_dir.is_dir():
-                candidates.append(bin_dir)
-    except Exception:
-        pass
+    # 1. NVIDIA pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12,
+    #    nvidia-cuda-runtime-cu12, …). Extracted into a helper so it
+    #    can be unit-tested without the surrounding Windows-only gate.
+    candidates.extend(_collect_nvidia_wheel_bin_dirs())
 
     # 2. Explicit env vars that ship with CUDA Toolkit installs.
     for env_key in ("CUDA_PATH", "CUDA_HOME", "CUDNN_PATH"):
@@ -788,6 +823,7 @@ def _register_cuda_dll_directories() -> None:
             candidates.append(Path(chunk))
 
     seen: set = set()
+    registered_dirs: List[Path] = []
     for candidate in candidates:
         try:
             resolved = candidate.expanduser().resolve()
@@ -799,11 +835,31 @@ def _register_cuda_dll_directories() -> None:
         try:
             add_dll_directory(str(resolved))
             _CUDA_DLL_DIRS_REGISTERED = True
+            registered_dirs.append(resolved)
         except (OSError, FileNotFoundError):
             # Directory exists but cannot be registered (e.g. permissions).
             # Skip silently — the WhisperModel try/except below will surface
             # any remaining DLL load failures with full context.
             pass
+
+    # One-shot diagnostic on stderr so silent registration failures
+    # (e.g. the nvidia.__file__=None namespace-package bug that caused
+    # production CPU fallbacks for months) are immediately visible.
+    if registered_dirs:
+        print(
+            "[INFO] CUDA DLL search registered {0} dir(s): {1}".format(
+                len(registered_dirs),
+                ", ".join(str(d) for d in registered_dirs),
+            ),
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[WARN] No CUDA DLL directories could be registered. If you expect "
+            "GPU inference, install the NVIDIA runtime wheels: "
+            "`pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12`.",
+            file=sys.stderr,
+        )
 
 
 _ARABIC_DIACRITICS = {
