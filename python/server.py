@@ -3433,6 +3433,7 @@ def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[
     that Tier 3 (or a manual UI step) can then consume.
     """
     speaker = _normalize_speaker_id(payload.get("speaker"))
+    overwrite = bool(payload.get("overwrite", False))
     language = str(payload.get("language") or "ku").strip() or "ku"
     try:
         pad_ms = int(payload.get("padMs", 100) or 100)
@@ -3495,6 +3496,16 @@ def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[
     if output_path.suffix == ".stt":
         output_path = output_path.with_suffix("")
     output_path = output_path.parent / "{0}.aligned.json".format(output_path.name)
+
+    if output_path.is_file() and not overwrite:
+        existing = _read_json_file(output_path, {})
+        return {
+            "speaker": speaker,
+            "skipped": True,
+            "reason": "aligned artifact already exists; pass overwrite=true to replace",
+            "alignedArtifact": str(output_path),
+            "segmentCount": len(existing.get("segments") or []),
+        }
 
     out_payload = {
         **artifact,
