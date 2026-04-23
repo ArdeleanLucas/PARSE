@@ -322,17 +322,27 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
               currentMessage: message,
             }));
 
+            // Regardless of terminal status (complete OR error), the backend
+            // may have populated ``result`` with step-level details — e.g.
+            // a full_pipeline that completed STT then errored on IPA returns
+            // a ``results`` dict with per-step status/error/traceback even
+            // when the job-level status is "error". Previously we dropped
+            // that on the error branch, leaving the user with only the
+            // top-line "Pipeline failed" message and no way to see which
+            // step actually failed or why. Capture it on both paths.
+            const raw = poll as unknown as { result?: PipelineRunResult };
+
             if (isCompleteStatus(status)) {
-              // `pollCompute` returns ComputeStatus; the full PipelineRunResult
-              // lives under `result` on the same payload (shape documented in
-              // api/client.ts). Pull it off the raw response if present.
-              const raw = poll as unknown as { result?: PipelineRunResult };
               pollResult = raw.result ?? null;
               break;
             }
             if (isErrorStatus(status)) {
               pollErrored = true;
               pollErrorMessage = poll.error ?? poll.message ?? "Pipeline failed";
+              // Keep any partial per-step results so the modal can still
+              // render step-by-step status. A job-level error does NOT
+              // invalidate the steps that completed before it.
+              pollResult = raw.result ?? null;
               break;
             }
 
@@ -349,6 +359,9 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
                 ...nextOutcomes[i],
                 status: "error",
                 error: pollErrorMessage,
+                // Partial per-step data where present — see the comment in
+                // the poll loop for why we forward this on the error path.
+                result: pollResult,
               };
             } else {
               nextOutcomes[i] = {

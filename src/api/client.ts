@@ -666,6 +666,22 @@ export interface PipelineStepResultBase {
   reason?: string;
   error?: string;
   traceback?: string;
+  /** IPA-specific: categorised skip counters added in server.py on
+   *  2026-04-23 (see fix/ortho-regression-tier3-silent). When ``filled=0``
+   *  with ``total>0`` the cause is in this breakdown — usually
+   *  ``exception`` (torch/CUDA init) or ``empty_ipa_from_model``
+   *  (wav2vec2 decoded silence). The UI renders this as an expandable
+   *  reason block on the "Empty" step cell so the user sees why
+   *  nothing got written without opening the raw JSON. */
+  skip_breakdown?: {
+    empty_ortho?: number;
+    existing_ipa_no_overwrite?: number;
+    zero_range?: number;
+    exception?: number;
+    empty_ipa_from_model?: number;
+  };
+  /** First 1-3 caught exceptions from the per-interval decode loop. */
+  exception_samples?: string[];
   // Shape overlaps below are step-specific; carry them loosely — the
   // UI only pulls what it knows about.
   [key: string]: unknown;
