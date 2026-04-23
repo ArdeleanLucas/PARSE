@@ -96,7 +96,9 @@ export function TranscriptionLanes({
       setDuration(ws.getDuration() ?? 0);
       if (wrapper) {
         setScrollLeft(wrapper.scrollLeft ?? 0);
-        setViewportWidth(wrapper.clientWidth ?? 0);
+        // Use the wrapper's parent (the visible viewport) for the rendered width,
+        // not the wrapper itself which expands to the full timeline pixel width.
+        setViewportWidth(wrapper.parentElement?.clientWidth ?? wrapper.clientWidth ?? 0);
       }
     };
 
@@ -107,8 +109,10 @@ export function TranscriptionLanes({
     }
     readState();
 
-    const onScroll = (left: number) => {
-      setScrollLeft(left);
+    // WaveSurfer 7 emits scroll as (visibleStartSec, visibleEndSec, scrollLeftPx, scrollRightPx).
+    // Read argument index 2 (pixel offset) — not index 0 which is start time in seconds.
+    const onScroll = (_startSec: number, _endSec: number, leftPx: number) => {
+      setScrollLeft(leftPx);
     };
     const onZoom = () => readState();
     const onReady = () => readState();
