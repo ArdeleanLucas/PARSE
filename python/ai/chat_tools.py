@@ -45,9 +45,13 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "contact_lexeme_lookup",
     "enrichments_write",
     "export_annotations_csv",
+    "export_annotations_elan",
+    "export_annotations_textgrid",
     "export_lingpy_tsv",
     "export_nexus",
     "import_tag_csv",
+    "peaks_generate",
+    "transcript_reformat",
     "import_processed_speaker",
     "lexeme_notes_write",
     "onboard_speaker_import",
@@ -1351,6 +1355,179 @@ class ParseChatTools:
                             "description": "Project-relative or absolute path inside project root.",
                         },
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                    },
+                },
+            ),
+            "export_annotations_elan": ChatToolSpec(
+                name="export_annotations_elan",
+                description=(
+                    "Export speaker annotations to ELAN .eaf XML format for use in ELAN or other "
+                    "linguistic annotation tools. Without outputPath returns an XML preview "
+                    "(first 2000 chars); with outputPath writes inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root (e.g. exports/speaker.eaf).",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                    },
+                },
+            ),
+            "export_annotations_textgrid": ChatToolSpec(
+                name="export_annotations_textgrid",
+                description=(
+                    "Export speaker annotations to Praat TextGrid format (.TextGrid). "
+                    "Without outputPath returns a TextGrid string preview (first 2000 chars); "
+                    "with outputPath writes inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root (e.g. exports/speaker.TextGrid).",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                    },
+                },
+            ),
+            "phonetic_rules_apply": ChatToolSpec(
+                name="phonetic_rules_apply",
+                description=(
+                    "Apply the project phonetic rules to IPA forms. Three modes:\n"
+                    "  normalize — strip delimiters, lowercase, normalise whitespace\n"
+                    "  apply     — return all rule-generated variants of a form\n"
+                    "  equivalence — compare two forms; returns isEquivalent + similarity score\n"
+                    "Uses project phonetic_rules.json unless custom rules are supplied."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["form"],
+                    "properties": {
+                        "form": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "description": "Primary IPA form to operate on.",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["normalize", "apply", "equivalence"],
+                            "description": "Operation mode (default: normalize).",
+                        },
+                        "form2": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "description": "Second form for equivalence mode.",
+                        },
+                        "rules": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "items": {"type": "object"},
+                            "description": (
+                                "Optional inline rule list (same schema as phonetic_rules.json entries). "
+                                "Omit to use the project file."
+                            ),
+                        },
+                    },
+                },
+            ),
+            "transcript_reformat": ChatToolSpec(
+                name="transcript_reformat",
+                description=(
+                    "Reformat a *_coarse.json alignment file into PARSE CoarseTranscript schema "
+                    "(speaker, source_wav, duration_sec, segments[]). Without outputPath returns "
+                    "the reformatted JSON object; with outputPath writes inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["inputPath"],
+                    "properties": {
+                        "inputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Path to the *_coarse.json file to reformat (absolute or project-relative).",
+                        },
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root to write the result.",
+                        },
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Override speaker ID (inferred from filename if omitted).",
+                        },
+                        "sourceWav": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Override source WAV path written into the output metadata.",
+                        },
+                        "durationSec": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "description": "Override total duration in seconds (inferred from segments if omitted).",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Return parsed JSON without writing."},
+                    },
+                },
+            ),
+            "peaks_generate": ChatToolSpec(
+                name="peaks_generate",
+                description=(
+                    "Generate waveform peak data for a speaker's audio and write to "
+                    "peaks/<speaker>.json (or a custom outputPath). Required for the "
+                    "waveform visualiser after audio changes. Provide speaker or audioPath."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID — resolves audio from annotations.",
+                        },
+                        "audioPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Explicit audio file path (absolute or project-relative). Overrides speaker lookup.",
+                        },
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Where to write peaks JSON. Defaults to peaks/<speaker>.json.",
+                        },
+                        "samplesPerPixel": {
+                            "type": "integer",
+                            "minimum": 64,
+                            "maximum": 8192,
+                            "description": "Samples per waveform pixel (default 512).",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Compute peaks but do not write to disk."},
                     },
                 },
             ),
@@ -2703,6 +2880,274 @@ class ParseChatTools:
         lines.append("END;")
         lines.append("")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Tier 2 — ELAN / TextGrid export
+    # ------------------------------------------------------------------
+
+    def _tool_export_annotations_elan(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from elan_export import annotations_to_elan_str, export_elan  # type: ignore[import]
+        except Exception as exc:
+            raise ChatToolExecutionError("elan_export is not importable: {0}".format(exc))
+
+        speaker = self._normalize_speaker(args.get("speaker"))
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+
+        ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
+        if not ann_path.exists():
+            raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
+
+        try:
+            data = json.loads(ann_path.read_text(encoding="utf-8"))
+            if dry_run or not output_path_str:
+                elan_str = annotations_to_elan_str(data, speaker)
+                return {
+                    "readOnly": True,
+                    "previewOnly": True,
+                    "preview": elan_str[:2000],
+                    "truncated": len(elan_str) > 2000,
+                    "totalChars": len(elan_str),
+                }
+            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            export_elan(data, out_path, speaker)
+            return {"success": True, "outputPath": str(out_path)}
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("ELAN export failed: {0}".format(exc)) from exc
+
+    def _tool_export_annotations_textgrid(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from textgrid_io import annotations_to_textgrid_str, write_textgrid  # type: ignore[import]
+        except Exception as exc:
+            raise ChatToolExecutionError("textgrid_io is not importable: {0}".format(exc))
+
+        speaker = self._normalize_speaker(args.get("speaker"))
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+
+        ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
+        if not ann_path.exists():
+            raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
+
+        try:
+            data = json.loads(ann_path.read_text(encoding="utf-8"))
+            if dry_run or not output_path_str:
+                tg_str = annotations_to_textgrid_str(data, speaker)
+                return {
+                    "readOnly": True,
+                    "previewOnly": True,
+                    "preview": tg_str[:2000],
+                    "truncated": len(tg_str) > 2000,
+                    "totalChars": len(tg_str),
+                }
+            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            write_textgrid(data, out_path, speaker)
+            return {"success": True, "outputPath": str(out_path)}
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("TextGrid export failed: {0}".format(exc)) from exc
+
+    # ------------------------------------------------------------------
+    # Tier 2 — phonetic rules
+    # ------------------------------------------------------------------
+
+    def _tool_phonetic_rules_apply(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from compare.phonetic_rules import (  # type: ignore[import]
+                apply_rules,
+                are_phonetically_equivalent,
+                load_rules_from_file,
+                normalize_ipa_form,
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("phonetic_rules is not importable: {0}".format(exc))
+
+        form = str(args.get("form") or "").strip()
+        if not form:
+            raise ChatToolValidationError("form is required")
+
+        mode = str(args.get("mode") or "normalize").strip().lower()
+        inline_rules = args.get("rules")
+
+        if isinstance(inline_rules, list) and inline_rules:
+            rules = inline_rules
+        else:
+            rules = load_rules_from_file(self.phonetic_rules_path)
+
+        try:
+            if mode == "normalize":
+                result = normalize_ipa_form(form)
+                return {"readOnly": True, "mode": "normalize", "form": form, "normalized": result}
+
+            if mode == "apply":
+                normalized = normalize_ipa_form(form)
+                variants = apply_rules(normalized, rules)
+                return {
+                    "readOnly": True,
+                    "mode": "apply",
+                    "form": form,
+                    "normalized": normalized,
+                    "variants": variants,
+                }
+
+            if mode == "equivalence":
+                form2 = str(args.get("form2") or "").strip()
+                if not form2:
+                    raise ChatToolValidationError("form2 is required for equivalence mode")
+                is_equiv, score = are_phonetically_equivalent(form, form2, rules)
+                return {
+                    "readOnly": True,
+                    "mode": "equivalence",
+                    "form": form,
+                    "form2": form2,
+                    "isEquivalent": is_equiv,
+                    "similarityScore": round(score, 4),
+                }
+
+            raise ChatToolValidationError("Unknown mode: {0}".format(mode))
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("phonetic_rules_apply failed: {0}".format(exc)) from exc
+
+    # ------------------------------------------------------------------
+    # Tier 2 — transcript reformat
+    # ------------------------------------------------------------------
+
+    def _tool_transcript_reformat(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        import os as _os
+        import tempfile
+
+        input_path_str = str(args.get("inputPath") or "").strip()
+        if not input_path_str:
+            raise ChatToolValidationError("inputPath is required")
+
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+        speaker = str(args.get("speaker") or "").strip() or None
+        source_wav = str(args.get("sourceWav") or "").strip() or None
+        duration_sec_raw = args.get("durationSec")
+        duration_sec = float(duration_sec_raw) if duration_sec_raw is not None else None
+
+        input_path = self._resolve_readable_path(input_path_str)
+        if not input_path.exists():
+            raise ChatToolExecutionError("inputPath does not exist: {0}".format(input_path))
+
+        try:
+            from reformat_transcripts import reformat  # type: ignore[import]
+        except Exception as exc:
+            raise ChatToolExecutionError("reformat_transcripts is not importable: {0}".format(exc))
+
+        try:
+            if dry_run or not output_path_str:
+                tmp_fd, tmp_str = tempfile.mkstemp(suffix=".json")
+                _os.close(tmp_fd)
+                tmp_path = Path(tmp_str)
+                try:
+                    reformat(str(input_path), speaker, source_wav, duration_sec, str(tmp_path))
+                    result_data = json.loads(tmp_path.read_text(encoding="utf-8"))
+                finally:
+                    try:
+                        _os.unlink(tmp_str)
+                    except OSError:
+                        pass
+                return {"readOnly": True, "previewOnly": True, "result": result_data}
+
+            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            reformat(str(input_path), speaker, source_wav, duration_sec, str(out_path))
+            return {"success": True, "outputPath": str(out_path)}
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("transcript_reformat failed: {0}".format(exc)) from exc
+
+    # ------------------------------------------------------------------
+    # Tier 2 — peaks generate
+    # ------------------------------------------------------------------
+
+    def _tool_peaks_generate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from peaks import (  # type: ignore[import]
+                generate_peaks_for_audio,
+                build_peaks_payload,
+                write_peaks_json,
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("peaks is not importable: {0}".format(exc))
+
+        speaker_raw = str(args.get("speaker") or "").strip()
+        audio_path_str = str(args.get("audioPath") or "").strip()
+        output_path_str = str(args.get("outputPath") or "").strip()
+        samples_per_pixel = int(args.get("samplesPerPixel") or 512)
+        dry_run = bool(args.get("dryRun", False))
+
+        if not speaker_raw and not audio_path_str:
+            raise ChatToolValidationError("speaker or audioPath is required")
+
+        if audio_path_str:
+            audio_path = self._resolve_readable_path(audio_path_str)
+        else:
+            speaker = self._normalize_speaker(speaker_raw)
+            ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
+            if not ann_path.exists():
+                raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
+            ann_data = json.loads(ann_path.read_text(encoding="utf-8"))
+            source_audio = str(ann_data.get("source_audio") or "").strip()
+            if not source_audio:
+                raise ChatToolExecutionError(
+                    "Speaker {0} annotation has no source_audio field".format(speaker)
+                )
+            audio_path = self._resolve_readable_path(source_audio)
+
+        if not audio_path.exists():
+            raise ChatToolExecutionError("Audio file not found: {0}".format(audio_path))
+
+        try:
+            sample_rate, peak_data, total_samples = generate_peaks_for_audio(
+                audio_path, samples_per_pixel
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("peaks generation failed: {0}".format(exc)) from exc
+
+        payload = build_peaks_payload(sample_rate, samples_per_pixel, peak_data)
+
+        if dry_run:
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "sampleRate": sample_rate,
+                "samplesPerPixel": samples_per_pixel,
+                "totalSamples": total_samples,
+                "peakCount": len(peak_data) // 2,
+                "durationSec": round(total_samples / sample_rate, 3) if sample_rate else None,
+            }
+
+        if output_path_str:
+            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+        elif speaker_raw:
+            speaker = self._normalize_speaker(speaker_raw)
+            out_path = self.peaks_dir / "{0}.json".format(speaker)
+        else:
+            out_path = self.peaks_dir / "{0}.json".format(audio_path.stem)
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        write_peaks_json(out_path, payload)
+        return {
+            "success": True,
+            "outputPath": str(out_path),
+            "sampleRate": sample_rate,
+            "samplesPerPixel": samples_per_pixel,
+            "totalSamples": total_samples,
+            "peakCount": len(peak_data) // 2,
+            "durationSec": round(total_samples / sample_rate, 3) if sample_rate else None,
+        }
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.
