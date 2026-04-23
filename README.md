@@ -342,11 +342,11 @@ python/
   adapters/
     mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
   ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (20 tools)
+    chat_tools.py       -- ParseChatTools — AI assistant tool interface (26 tools)
     chat_orchestrator.py-- Chat session management
-    stt_pipeline.py     -- Whisper STT pipeline
-    ipa_transcribe.py   -- IPA via wav2vec2 + epitran
-    word_finder.py      -- Segment location in full recordings
+    stt_pipeline.py     -- Tier 1 word-level STT (faster-whisper + word_timestamps=True)
+    forced_align.py     -- Tier 2 acoustic forced alignment (torchaudio + wav2vec2-xlsr)
+    ipa_transcribe.py   -- Tier 3 acoustic IPA (wav2vec2 CTC on audio slices, wav2vec2-only)
   compare/              -- Compare pipeline (cognates, offsets, matching)
     providers/          -- CLEF provider registry and provider adapters
   shared/               -- Shared Python utilities
