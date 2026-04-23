@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlparse
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
-from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
+from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
 from audio_pipeline_paths import build_normalized_output_path
 
@@ -3589,10 +3589,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_stt_status()
             return
 
-        if request_path == "/api/ipa":
-            self._api_post_ipa()
-            return
-
         if request_path == "/api/suggest":
             self._api_post_suggest()
             return
@@ -4344,15 +4340,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is not an STT job")
 
         self._send_json(HTTPStatus.OK, _job_response_payload(job))
-
-    def _api_post_ipa(self) -> None:
-        body = self._expect_object(self._read_json_body(), "Request body")
-        text = str(body.get("text") or "")
-        language = str(body.get("language") or "").strip() or "sdh"
-
-        provider = get_ipa_provider()
-        ipa = provider.to_ipa(text=text, language=language)
-        self._send_json(HTTPStatus.OK, {"ipa": ipa})
 
     def _api_post_suggest(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

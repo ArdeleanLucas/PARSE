@@ -416,13 +416,10 @@ export async function applyTimestampOffset(
   });
 }
 
-// IPA
-export async function requestIPA(text: string, language?: string): Promise<{ ipa: string }> {
-  return apiFetch<{ ipa: string }>("/api/ipa", {
-    method: "POST",
-    body: JSON.stringify({ text, language }),
-  });
-}
+// IPA is now generated acoustically by the server (wav2vec2 on audio
+// slices). The former text → IPA endpoint POST /api/ipa has been removed
+// in the Tier 3 purge — regenerate the IPA tier via the ipa_only compute
+// job (Actions → Run IPA transcription).
 
 // Suggestions
 function unwrapSuggestions(payload: unknown): unknown[] {

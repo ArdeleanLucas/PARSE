@@ -75,9 +75,13 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "vad_filter": True,
         "vad_parameters": {},
     },
+    # Tier 3 acoustic alignment: wav2vec2 is the ONLY IPA engine. Text-based
+    # paths (Epitran, LLM prompts, Arabic-to-IPA rules) have been removed.
+    # The ``engine`` key is informational — the code path is hard-wired to
+    # facebook/wav2vec2-xlsr-53-espeak-cv-ft via ai.forced_align.Aligner.
     "ipa": {
-        "provider": "local",
-        "model": "epitran",
+        "engine": "wav2vec2",
+        "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
     },
     "ortho": {
         "provider": "faster-whisper",
@@ -724,19 +728,6 @@ def _confidence_from_logprob(avg_logprob: Any) -> float:
     return _coerce_confidence(numeric)
 
 
-def _strip_ipa_wrappers(text: str) -> str:
-    """Remove common IPA wrappers (/.../, [...], leading labels)."""
-    value = str(text).strip()
-    value = re.sub(r"^\s*ipa\s*:\s*", "", value, flags=re.IGNORECASE)
-
-    if value.startswith("/") and value.endswith("/") and len(value) > 1:
-        value = value[1:-1].strip()
-    if value.startswith("[") and value.endswith("]") and len(value) > 1:
-        value = value[1:-1].strip()
-
-    return value
-
-
 def _dict_or_attr(item: Any, key: str, default: Any = None) -> Any:
     """Read a field from dict-like or object-like values."""
     if isinstance(item, dict):
@@ -951,158 +942,6 @@ def _register_cuda_dll_directories() -> None:
         )
 
 
-_ARABIC_DIACRITICS = {
-    "\u064b",  # tanwin fatha
-    "\u064c",  # tanwin damma
-    "\u064d",  # tanwin kasra
-    "\u064e",  # fatha
-    "\u064f",  # damma
-    "\u0650",  # kasra
-    "\u0651",  # shadda
-    "\u0652",  # sukun
-    "\u0670",  # superscript alef
-    "\u0653",  # maddah
-    "\u0654",  # hamza above
-    "\u0655",  # hamza below
-}
-
-_SOUTHERN_KURDISH_CHAR_MAP: Dict[str, str] = {
-    "ا": "a",
-    "أ": "a",
-    "إ": "a",
-    "آ": "a",
-    "ب": "b",
-    "پ": "p",
-    "ت": "t",
-    "ث": "s",
-    "ج": "dʒ",
-    "چ": "tʃ",
-    "ح": "h",
-    "خ": "x",
-    "د": "d",
-    "ذ": "z",
-    "ر": "r",
-    "ڕ": "r",
-    "ز": "z",
-    "ژ": "ʒ",
-    "س": "s",
-    "ش": "ʃ",
-    "ع": "ʕ",
-    "غ": "ɣ",
-    "ف": "f",
-    "ڤ": "v",
-    "ق": "q",
-    "ک": "k",
-    "ك": "k",
-    "گ": "g",
-    "ل": "l",
-    "ڵ": "ɫ",
-    "م": "m",
-    "ن": "n",
-    "ه": "h",
-    "ھ": "h",
-    "ة": "e",
-    "ە": "e",
-    "ێ": "e",
-    "ۆ": "o",
-    "ئ": "ʔ",
-    "ء": "ʔ",
-}
-
-_SOUTHERN_KURDISH_DIGRAPHS = {
-    "وو": "u",
-}
-
-
-def _is_probably_arabic_script(text: str) -> bool:
-    """Return True if text appears to use Arabic-script code points."""
-    for char in text:
-        code = ord(char)
-        if 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:
-            return True
-    return False
-
-
-def southern_kurdish_arabic_to_ipa(text: str) -> str:
-    """Best-effort Arabic-script Southern Kurdish -> IPA fallback.
-
-    This is intentionally lightweight and dependency-free, used when local IPA
-    backends are unavailable. It is not a full phonological model.
-    """
-    normalized = str(text)
-    normalized = normalized.replace("\u200c", "")
-    normalized = normalized.replace("\u200d", "")
-
-    for source, target in _SOUTHERN_KURDISH_DIGRAPHS.items():
-        normalized = normalized.replace(source, target)
-
-    output: List[str] = []
-    for index, char in enumerate(normalized):
-        if char in _ARABIC_DIACRITICS:
-            continue
-
-        if char in {"\n", "\r", "\t"}:
-            output.append(" ")
-            continue
-
-        if char.isspace():
-            output.append(" ")
-            continue
-
-        if char in {"ی", "ي", "ى"}:
-            prev_is_space = index == 0 or normalized[index - 1].isspace()
-            output.append("j" if prev_is_space else "i")
-            continue
-
-        if char == "و":
-            prev_is_space = index == 0 or normalized[index - 1].isspace()
-            output.append("w" if prev_is_space else "u")
-            continue
-
-        mapped = _SOUTHERN_KURDISH_CHAR_MAP.get(char)
-        if mapped is not None:
-            output.append(mapped)
-            continue
-
-        if char.isascii() and (char.isalnum() or char in "-_'"):
-            output.append(char.lower())
-            continue
-
-    ipa = "".join(output)
-    ipa = re.sub(r"\s+", " ", ipa).strip()
-    return ipa
-
-
-def _epitran_code_for_language(language: Optional[str]) -> Optional[str]:
-    """Resolve best-effort Epitran code from a language code."""
-    if not language:
-        return "kur-Arab"
-
-    normalized = str(language).strip().lower()
-    if not normalized:
-        return "kur-Arab"
-
-    mapping = {
-        "sdh": "kur-Arab",
-        "ckb": "kur-Arab",
-        "ku": "kur-Arab",
-        "kur": "kur-Arab",
-        "sd": "snd-Arab",
-        "fa": "fas-Arab",
-        "fas": "fas-Arab",
-        "ar": "ara-Arab",
-        "ara": "ara-Arab",
-    }
-
-    if normalized in mapping:
-        return mapping[normalized]
-
-    if "-" in normalized:
-        return normalized
-
-    return None
-
-
 def _audio_duration_seconds(audio_path: Path) -> float:
     """Read audio duration using soundfile."""
     try:
@@ -1142,12 +981,6 @@ class AIProvider(abc.ABC):
     ) -> List[Segment]:
         """Transcribe an audio file into timestamped segments."""
         raise NotImplementedError
-
-    @abc.abstractmethod
-    def to_ipa(self, text: str, language: str) -> str:
-        """Convert orthographic text to IPA."""
-        raise NotImplementedError
-
 
 class LocalWhisperProvider(AIProvider):
     """Local provider backed by faster-whisper.
@@ -1247,7 +1080,6 @@ class LocalWhisperProvider(AIProvider):
         self._model_source: Optional[str] = None
         self._effective_device: Optional[str] = None
         self._effective_compute_type: Optional[str] = None
-        self._epitran_instances: Dict[str, Any] = {}
 
     def _load_whisper_model(self) -> Any:
         """Lazy-load faster-whisper model.
@@ -1437,61 +1269,6 @@ class LocalWhisperProvider(AIProvider):
 
         return segments_out
 
-    def _epitran_transliterate(self, text: str, language: Optional[str]) -> Optional[str]:
-        """Try transliteration with Epitran; return None when unavailable."""
-        code = _epitran_code_for_language(language)
-        if not code:
-            return None
-
-        try:
-            import epitran
-        except ImportError:
-            return None
-
-        instance = self._epitran_instances.get(code)
-        if instance is None:
-            try:
-                instance = epitran.Epitran(code)
-            except Exception as exc:
-                print(
-                    "[WARN] Could not initialize Epitran with code '{0}': {1}".format(
-                        code, exc
-                    ),
-                    file=sys.stderr,
-                )
-                return None
-            self._epitran_instances[code] = instance
-
-        try:
-            transliterated = str(instance.transliterate(text)).strip()
-        except Exception as exc:
-            print(
-                "[WARN] Epitran transliteration failed: {0}".format(exc),
-                file=sys.stderr,
-            )
-            return None
-
-        if not transliterated:
-            return None
-
-        return transliterated
-
-    def to_ipa(self, text: str, language: str) -> str:
-        """Convert orthography to IPA using local tooling with Kurdish fallback."""
-        value = str(text or "").strip()
-        if not value:
-            return ""
-
-        transliterated = self._epitran_transliterate(value, language)
-        if transliterated:
-            return _strip_ipa_wrappers(transliterated)
-
-        if _is_probably_arabic_script(value):
-            return southern_kurdish_arabic_to_ipa(value)
-
-        return value
-
-
 class OpenAIProvider(AIProvider):
     """OpenAI-backed provider for STT and IPA conversion."""
 
@@ -1613,46 +1390,6 @@ class OpenAIProvider(AIProvider):
                 progress_callback(100.0, 1)
 
         return segments_out
-
-    def to_ipa(self, text: str, language: str) -> str:
-        """Convert text to IPA using an OpenAI chat model."""
-        value = str(text or "").strip()
-        if not value:
-            return ""
-
-        client = self._load_client()
-        prompt = (
-            "Convert the following text to IPA. "
-            "Return only IPA characters with no explanation.\n"
-            "Language code: {0}\n"
-            "Text: {1}"
-        ).format(language, value)
-
-        response = client.chat.completions.create(
-            model=self.llm_model,
-            temperature=0.0,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a linguistics transcription assistant. "
-                        "Output IPA only."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-        )
-
-        if not response.choices:
-            raise RuntimeError("OpenAI returned no choices for IPA conversion")
-
-        message = response.choices[0].message
-        content = str(getattr(message, "content", "") or "").strip()
-        if not content:
-            return value
-
-        return _strip_ipa_wrappers(content)
-
 
 class XAIProvider(OpenAIProvider):
     """xAI (Grok) provider. Uses OpenAI-compatible API at api.x.ai."""
@@ -1791,24 +1528,6 @@ class OllamaProvider(AIProvider):
 
         return str(body.get("response", "") or "").strip()
 
-    def to_ipa(self, text: str, language: str) -> str:
-        """Convert text to IPA using an Ollama LLM prompt."""
-        value = str(text or "").strip()
-        if not value:
-            return ""
-
-        prompt = (
-            "Convert this text to IPA and output only IPA symbols. "
-            "Language code: {0}. Text: {1}"
-        ).format(language, value)
-        response = self._generate(prompt)
-
-        if not response:
-            return value
-
-        return _strip_ipa_wrappers(response)
-
-
 def _build_provider(provider_name: str, merged_config: Dict[str, Any]) -> AIProvider:
     """Instantiate a provider implementation from a provider name."""
     normalized = str(provider_name or "").strip().lower()
@@ -1887,18 +1606,6 @@ def get_ortho_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     return LocalWhisperProvider(config=merged, config_section="ortho")
 
 
-def get_ipa_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
-    """Factory for IPA providers resolved from `ipa.provider` fallback chain."""
-    override = config or {}
-    merged = _deep_merge_dicts(load_ai_config(), override)
-    provider_name = _resolve_provider_name(
-        merged,
-        ["ipa", "llm", "stt"],
-        override_config=override,
-    )
-    return _build_provider(provider_name, merged)
-
-
 def get_llm_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     """Factory for LLM providers resolved from `llm.provider` fallback chain."""
     override = config or {}
@@ -1914,8 +1621,9 @@ def get_llm_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
 def get_provider(config: Dict[str, Any]) -> AIProvider:
     """Factory for AI providers.
 
-    Deprecated: use `get_stt_provider`, `get_ipa_provider`, or
-    `get_llm_provider` for feature-specific provider resolution.
+    Deprecated: use `get_stt_provider` or `get_llm_provider` for
+    feature-specific provider resolution. IPA is generated acoustically
+    via ai.forced_align.Aligner and has no provider factory any more.
 
     By default this resolves against STT provider configuration.
     Pass an explicit top-level `provider` key in `config` to override.
@@ -1940,11 +1648,9 @@ __all__ = [
     "OpenAIChatRuntime",
     "get_stt_provider",
     "get_ortho_provider",
-    "get_ipa_provider",
     "get_llm_provider",
     "get_chat_config",
     "get_provider",
     "load_ai_config",
     "resolve_ai_config_path",
-    "southern_kurdish_arabic_to_ipa",
 ]

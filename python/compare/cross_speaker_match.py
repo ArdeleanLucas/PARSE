@@ -14,27 +14,20 @@ import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 try:
     from .phonetic_rules import apply_rules, are_phonetically_equivalent, load_rules_from_file
 except ImportError:
     from phonetic_rules import apply_rules, are_phonetically_equivalent, load_rules_from_file  # type: ignore
 
-_PROVIDER_ARABIC_TO_IPA: Optional[Callable[[str], str]]
-try:
-    from ..ai.provider import southern_kurdish_arabic_to_ipa as _PROVIDER_ARABIC_TO_IPA
-except Exception:
-    try:
-        from ai.provider import southern_kurdish_arabic_to_ipa as _PROVIDER_ARABIC_TO_IPA  # type: ignore
-    except Exception:
-        python_dir = Path(__file__).resolve().parents[1]
-        if str(python_dir) not in sys.path:
-            sys.path.append(str(python_dir))
-        try:
-            from ai.provider import southern_kurdish_arabic_to_ipa as _PROVIDER_ARABIC_TO_IPA  # type: ignore
-        except Exception:
-            _PROVIDER_ARABIC_TO_IPA = None
+# Tier 3 acoustic-IPA purge: the ai.provider text-to-IPA helper used to
+# live here as a transliteration fallback. All text-based IPA generation
+# is gone — cross-speaker matching now reads the stored acoustic IPA
+# (produced by facebook/wav2vec2-xlsr-53-espeak-cv-ft) from the
+# annotation JSON. The small local ``_simple_arabic_to_ipa`` helper is
+# kept purely to normalise legacy Arabic-script IPA values that may
+# remain in older annotations until a re-transcription pass is run.
 
 
 DEFAULT_TOP_K = 5
@@ -192,16 +185,12 @@ def _normalize_for_comparison(text: Any) -> str:
         return ""
 
     value = _strip_arabic_diacritics(value)
+    # Legacy pre-Tier-3 annotations may still hold Arabic-script strings in
+    # the IPA tier. Fresh acoustic output is always Latin-script IPA, so
+    # this branch is a compat layer until every speaker has been
+    # re-transcribed with the wav2vec2 pipeline.
     if _contains_arabic_script(value):
-        transliterated = ""
-        if _PROVIDER_ARABIC_TO_IPA is not None:
-            try:
-                transliterated = _normalize_space(_PROVIDER_ARABIC_TO_IPA(value))
-            except Exception:
-                transliterated = ""
-        if not transliterated:
-            transliterated = _simple_arabic_to_ipa(value)
-        value = transliterated
+        value = _simple_arabic_to_ipa(value)
 
     value = _strip_arabic_diacritics(value)
     return _normalize_ipa(value)
