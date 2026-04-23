@@ -72,11 +72,15 @@ def test_speakers_list_empty_when_no_annotations(tmp_path):
 def _fake_state(speaker: str) -> Dict[str, Any]:
     return {
         "speaker": speaker,
+        "duration_sec": 300.0,
         "normalize": {"done": True, "can_run": True, "reason": None, "path": "x.wav"},
-        "stt":       {"done": True, "can_run": True, "reason": None, "segments": 82},
-        "ortho":     {"done": False, "can_run": True, "reason": None, "intervals": 0},
+        "stt":       {"done": True, "can_run": True, "reason": None, "segments": 82,
+                      "full_coverage": True, "coverage_fraction": 0.99},
+        "ortho":     {"done": False, "can_run": True, "reason": None, "intervals": 0,
+                      "full_coverage": False, "coverage_fraction": 0.0},
         "ipa":       {"done": False, "can_run": False,
-                      "reason": "No ortho intervals yet — run ORTH first", "intervals": 0},
+                      "reason": "No ortho intervals yet — run ORTH first", "intervals": 0,
+                      "full_coverage": False, "coverage_fraction": 0.0},
     }
 
 
@@ -124,6 +128,60 @@ def test_pipeline_state_batch_honors_speaker_filter(tmp_path):
     result = tools.execute("pipeline_state_batch", {"speakers": ["Fail02"]})
     speakers = [r["speaker"] for r in result["result"]["rows"]]
     assert speakers == ["Fail02"]
+
+
+def test_pipeline_state_batch_counts_partial_coverage_speakers(tmp_path):
+    """partialCoverageSpeakers counts speakers where any STT/ORTH/IPA
+    step is ``done=true`` but ``full_coverage=false`` — i.e. work was
+    started but doesn't span the whole WAV."""
+    _seed_annotation(tmp_path, "Full01")    # everything full-coverage
+    _seed_annotation(tmp_path, "Partial02")  # ortho only covers a slice
+    _seed_annotation(tmp_path, "Clean03")    # nothing done yet — not partial
+
+    def per_speaker_state(speaker: str) -> Dict[str, Any]:
+        if speaker == "Full01":
+            return {
+                "speaker": speaker, "duration_sec": 300.0,
+                "normalize": {"done": True, "can_run": True, "reason": None, "path": "x"},
+                "stt":       {"done": True, "can_run": True, "reason": None, "segments": 82,
+                              "full_coverage": True, "coverage_fraction": 0.99},
+                "ortho":     {"done": True, "can_run": True, "reason": None, "intervals": 82,
+                              "full_coverage": True, "coverage_fraction": 0.99},
+                "ipa":       {"done": True, "can_run": True, "reason": None, "intervals": 82,
+                              "full_coverage": True, "coverage_fraction": 0.99},
+            }
+        if speaker == "Partial02":
+            return {
+                "speaker": speaker, "duration_sec": 300.0,
+                "normalize": {"done": True, "can_run": True, "reason": None, "path": "x"},
+                "stt":       {"done": True, "can_run": True, "reason": None, "segments": 82,
+                              "full_coverage": True, "coverage_fraction": 0.99},
+                "ortho":     {"done": True, "can_run": True, "reason": None, "intervals": 10,
+                              "full_coverage": False, "coverage_fraction": 0.1},
+                "ipa":       {"done": False, "can_run": True, "reason": None, "intervals": 0,
+                              "full_coverage": False, "coverage_fraction": 0.0},
+            }
+        # Clean03 — nothing done, nothing partial.
+        return {
+            "speaker": speaker, "duration_sec": 300.0,
+            "normalize": {"done": False, "can_run": True, "reason": None, "path": None},
+            "stt":       {"done": False, "can_run": True, "reason": None, "segments": 0,
+                          "full_coverage": False, "coverage_fraction": 0.0},
+            "ortho":     {"done": False, "can_run": True, "reason": None, "intervals": 0,
+                          "full_coverage": False, "coverage_fraction": 0.0},
+            "ipa":       {"done": False, "can_run": False,
+                          "reason": "No ortho intervals yet — run ORTH first", "intervals": 0,
+                          "full_coverage": False, "coverage_fraction": 0.0},
+        }
+
+    tools = ParseChatTools(project_root=tmp_path, pipeline_state=per_speaker_state)
+    result = tools.execute("pipeline_state_batch", {})
+    payload = result["result"]
+
+    assert payload["count"] == 3
+    assert payload["partialCoverageSpeakers"] == 1  # only Partial02
+    # Clean03's IPA can_run=false → counts as blocked.
+    assert payload["blockedSpeakers"] == 1
 
 
 # ---------------------------------------------------------------------------

@@ -1281,12 +1281,18 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
 
     @mcp.tool()
     def pipeline_state_read(speaker: str) -> str:
-        """Preflight one speaker: what's done + whether each step can run.
+        """Preflight one speaker: done + can_run + FULL-FILE COVERAGE per step.
 
-        Returns the same shape the UI's TranscriptionRunModal consumes —
-        per-step ``{done, can_run, reason, intervals|segments|path}``. Use
-        this to answer questions like "can I run ORTH on Fail02 right now?"
-        without touching disk state.
+        Per-step fields: ``done, intervals|segments, can_run, reason,
+        coverage_start_sec, coverage_end_sec, coverage_fraction,
+        full_coverage``. Top-level also returns ``duration_sec``.
+
+        CRITICAL: ``done`` is NOT the same as ``full_coverage``. A tier
+        can have 128 intervals that only cover the first 30 seconds of
+        a 6-minute WAV — ``done: true``, ``full_coverage: false``. If
+        you're deciding whether a step needs to re-run, check
+        ``full_coverage`` (bool). ``coverage_fraction`` (0.0–1.0) gives
+        the precise ratio of last-interval-end to audio duration.
 
         Args:
             speaker: Speaker id (filename stem in annotations/)
@@ -1298,10 +1304,14 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     def pipeline_state_batch(speakers: Optional[list] = None) -> str:
         """Preflight many speakers at once — the "can I walk away?" tool.
 
-        With no args, probes every annotated speaker. Supply ``speakers``
-        to restrict to a subset. Returns a grid row per speaker with
-        per-step ``can_run`` + ``reason`` so an agent can decide which
-        speakers to include in a batch before kicking off long GPU runs.
+        Returns ``{count, blockedSpeakers, partialCoverageSpeakers, rows}``
+        where each row carries the same per-step fields as
+        ``pipeline_state_read`` (including ``full_coverage``). A speaker
+        counts as ``blockedSpeakers`` if any step currently can_run=false;
+        as ``partialCoverageSpeakers`` if any STT/ORTH/IPA step is
+        ``done=true`` but ``full_coverage=false`` (work was started but
+        doesn't span the whole WAV — typically because older runs were
+        constrained to stale concept timestamps).
 
         Args:
             speakers: Optional subset. Omit to probe all speakers.
