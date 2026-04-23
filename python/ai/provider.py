@@ -63,6 +63,11 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "language": "sd",
         "device": "cuda",
         "compute_type": "float16",
+        # VAD off for ortho (see LocalWhisperProvider.__init__ for the
+        # reasoning). Razhan is expected to produce a full-waveform
+        # transcript; Silero's conservative stock threshold was
+        # dropping coverage to 2 intervals on real recordings.
+        "vad_filter": False,
     },
     "llm": {
         "provider": "openai",
@@ -1115,7 +1120,29 @@ class LocalWhisperProvider(AIProvider):
             self.beam_size = 5
         task_raw = str(section_config.get("task", "transcribe") or "transcribe").strip().lower()
         self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
-        self.vad_filter = bool(section_config.get("vad_filter", True))
+        # VAD default differs by section:
+        #
+        # * STT — default **True**. STT is meant to produce a coarse
+        #   transcript where silence-free segments are the useful unit;
+        #   VAD also avoids Whisper's "hallucinate in long silence"
+        #   failure mode (see PR #135 for empirical evidence).
+        #
+        # * ORTHO — default **False**. ORTHO's purpose is a
+        #   full-waveform orthographic transcript, and razhan's own
+        #   30-second-window attention handles silence well enough. With
+        #   VAD on + un-tuned ``vad_parameters``, Silero's stock
+        #   threshold is conservative and frequently collapses coverage
+        #   to only the loudest stretches — e.g. a 6-minute recording
+        #   returning just 2 ortho intervals while STT (with tuned VAD
+        #   params) produced 80+. VAD off gives razhan the full file and
+        #   full waveform coverage; spurious silence segments can be
+        #   deleted in the UI but MISSING segments can't be recovered
+        #   without re-running the whole model.
+        #
+        # Users can still override via an explicit ``vad_filter`` entry
+        # in their ai_config.json section.
+        vad_default = False if self.config_section == "ortho" else True
+        self.vad_filter = bool(section_config.get("vad_filter", vad_default))
         vad_params_raw = section_config.get("vad_parameters")
         # Only forward a dict when the user has set explicit parameters;
         # an empty {} falls through to faster-whisper's Silero defaults.

@@ -137,6 +137,42 @@ def test_collect_nvidia_wheel_bin_dirs_iterates_namespace_path(tmp_path, monkeyp
     assert names == {"cublas", "cudnn", "cuda_runtime"}, names
 
 
+def test_ortho_section_defaults_vad_filter_off(tmp_path):
+    """The ortho provider runs razhan full-file for full-waveform coverage.
+    Silero VAD with stock defaults was dropping coverage to ~2 intervals
+    on real recordings (vs 80+ from STT with tuned VAD params). Default
+    must be **off** for ortho so razhan sees the entire audio."""
+    provider = LocalWhisperProvider(
+        config={"ortho": {"model_path": "C:/local/razhan-ct2"}},
+        config_section="ortho",
+        config_path=tmp_path / "ai_config.json",
+    )
+    assert provider.vad_filter is False
+
+
+def test_stt_section_still_defaults_vad_filter_on(tmp_path):
+    """STT's default is still VAD on (PR #135 rationale: avoids Whisper
+    hallucinating through long silences). The ortho default change
+    doesn't leak to other sections."""
+    provider = LocalWhisperProvider(
+        config={"stt": {"model_path": "C:/local/whisper-base"}},
+        config_section="stt",
+        config_path=tmp_path / "ai_config.json",
+    )
+    assert provider.vad_filter is True
+
+
+def test_ortho_vad_filter_explicit_override_wins(tmp_path):
+    """Users can still force VAD on for ortho via an explicit
+    ``vad_filter: true`` in their config."""
+    provider = LocalWhisperProvider(
+        config={"ortho": {"model_path": "C:/local/razhan-ct2", "vad_filter": True}},
+        config_section="ortho",
+        config_path=tmp_path / "ai_config.json",
+    )
+    assert provider.vad_filter is True
+
+
 def test_collect_nvidia_wheel_bin_dirs_returns_empty_when_nvidia_absent(monkeypatch):
     """No nvidia wheels installed → empty list, no exception."""
     import sys as _sys
