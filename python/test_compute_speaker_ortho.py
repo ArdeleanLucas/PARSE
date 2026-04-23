@@ -444,3 +444,143 @@ def test_preflight_handles_missing_annotation(tmp_path, monkeypatch):
     for step in ("normalize", "stt", "ortho", "ipa"):
         assert state[step]["can_run"] is False
         assert "No annotation" in state[step]["reason"]
+
+
+# --------------------------------------------------------------------------
+# Full-file coverage — the signal that distinguishes "tier has intervals"
+# from "the entire WAV was actually processed". A tier can have 128
+# intervals that only cover the first 30 seconds of a 6-minute recording;
+# the user needs to know this so they can decide whether to re-run.
+# --------------------------------------------------------------------------
+
+
+def _write_fake_wav(tmp_path, rel_path, duration_sec):
+    """Create a tiny but valid PCM WAV with the given duration so the
+    ``wave.open`` path in _audio_duration_sec picks it up."""
+    import wave
+    path = tmp_path / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rate = 1000
+    frames = int(rate * duration_sec)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)  # 16-bit
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * frames)
+    return path
+
+
+def test_tier_coverage_full_file_when_intervals_span_duration(tmp_path, monkeypatch):
+    """ORTH ran full-file → last interval end is close to audio duration
+    → full_coverage is true and coverage_fraction is ~1.0."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    ortho = [
+        {"start": 0.2, "end": 2.5, "text": "a"},
+        {"start": 3.0, "end": 5.8, "text": "b"},
+        {"start": 6.0, "end": 9.9, "text": "c"},  # last end ~ duration
+    ]
+    _seed_annotation(tmp_path, "Fail02", ortho=ortho, source_audio="raw/Fail02.wav")
+    _write_fake_wav(tmp_path, "raw/Fail02.wav", duration_sec=10.0)
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["duration_sec"] == pytest.approx(10.0, abs=0.05)
+    assert state["ortho"]["full_coverage"] is True
+    assert state["ortho"]["coverage_end_sec"] == pytest.approx(9.9, abs=0.01)
+    assert state["ortho"]["coverage_fraction"] > 0.95
+
+
+def test_tier_coverage_partial_file_when_intervals_cluster_early(tmp_path, monkeypatch):
+    """ORTH was only run on the first slice (e.g. stale concept
+    timestamps) → last interval end is far short of audio duration →
+    full_coverage is false even though done is true."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    # 60-second file, but ortho only covers the first 10 seconds.
+    ortho = [
+        {"start": 1.0, "end": 3.0, "text": "a"},
+        {"start": 4.0, "end": 6.0, "text": "b"},
+        {"start": 7.0, "end": 10.0, "text": "c"},
+    ]
+    _seed_annotation(tmp_path, "Fail02", ortho=ortho, source_audio="raw/Fail02.wav")
+    _write_fake_wav(tmp_path, "raw/Fail02.wav", duration_sec=60.0)
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["ortho"]["done"] is True
+    assert state["ortho"]["full_coverage"] is False
+    assert state["ortho"]["coverage_fraction"] == pytest.approx(10.0 / 60.0, abs=0.01)
+    assert state["ortho"]["coverage_end_sec"] == pytest.approx(10.0, abs=0.01)
+
+
+def test_tier_coverage_empty_tier_is_not_full_coverage(tmp_path, monkeypatch):
+    """Empty tier with known duration → full_coverage explicitly false
+    (not null) so agents can distinguish from 'duration unknown'."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", ortho=[], source_audio="raw/Fail02.wav")
+    _write_fake_wav(tmp_path, "raw/Fail02.wav", duration_sec=60.0)
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["ortho"]["done"] is False
+    assert state["ortho"]["full_coverage"] is False
+    assert state["ortho"]["coverage_fraction"] == 0.0
+
+
+def test_tier_coverage_null_when_duration_unknown(tmp_path, monkeypatch):
+    """No audio file, no duration metadata → coverage_fraction and
+    full_coverage are null (not guessed)."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    # Seed with source that doesn't exist + no duration metadata.
+    ann_dir = tmp_path / "annotations"
+    ann_dir.mkdir(exist_ok=True)
+    (ann_dir / "Fail02.parse.json").write_text(json.dumps({
+        "version": 1,
+        "speaker": "Fail02",
+        "source_audio": "missing.wav",
+        # No source_audio_duration_sec key at all.
+        "tiers": {
+            "ortho": {"type": "interval", "display_order": 2,
+                      "intervals": [{"start": 1.0, "end": 5.0, "text": "x"}]},
+        },
+    }), encoding="utf-8")
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["duration_sec"] is None
+    assert state["ortho"]["full_coverage"] is None
+    assert state["ortho"]["coverage_fraction"] is None
+    assert state["ortho"]["coverage_end_sec"] == pytest.approx(5.0)
+
+
+def test_tier_coverage_absolute_tolerance_for_short_clips(tmp_path, monkeypatch):
+    """A 30-second clip with ortho ending at 28.5s is effectively full-
+    coverage (within 3-second absolute tolerance), even though the
+    fraction is only 0.95. Regression guard for the short-clip edge
+    of the threshold heuristic."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    ortho = [{"start": 0.5, "end": 28.5, "text": "x"}]
+    _seed_annotation(tmp_path, "Fail02", ortho=ortho, source_audio="raw/Fail02.wav")
+    _write_fake_wav(tmp_path, "raw/Fail02.wav", duration_sec=30.0)
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["ortho"]["full_coverage"] is True
+
+
+def test_tier_coverage_falls_back_to_annotation_duration_when_audio_missing(tmp_path, monkeypatch):
+    """If the WAV isn't on disk but the annotation records
+    ``source_audio_duration_sec``, the preflight still reports
+    coverage_fraction + full_coverage using the hint."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    ann_dir = tmp_path / "annotations"
+    ann_dir.mkdir(exist_ok=True)
+    (ann_dir / "Fail02.parse.json").write_text(json.dumps({
+        "version": 1,
+        "speaker": "Fail02",
+        "source_audio": "missing.wav",
+        "source_audio_duration_sec": 100.0,
+        "tiers": {
+            "ortho": {"type": "interval", "display_order": 2,
+                      "intervals": [{"start": 0.0, "end": 50.0, "text": "x"}]},
+        },
+    }), encoding="utf-8")
+
+    state = server._pipeline_state_for_speaker("Fail02")
+    assert state["duration_sec"] == pytest.approx(100.0)
+    assert state["ortho"]["coverage_fraction"] == pytest.approx(0.5, abs=0.01)
+    assert state["ortho"]["full_coverage"] is False

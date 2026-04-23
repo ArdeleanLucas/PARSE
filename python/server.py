@@ -3013,33 +3013,127 @@ def _pipeline_audio_path_for_speaker(speaker: str) -> pathlib.Path:
     )
 
 
+def _audio_duration_sec(path: pathlib.Path) -> Optional[float]:
+    """Best-effort audio duration in seconds.
+
+    Reads the WAV RIFF header via the stdlib ``wave`` module — no optional
+    deps, no decode overhead. Returns ``None`` when the file is missing,
+    unreadable, or not a standard PCM WAV (the caller falls back to the
+    annotation's ``source_audio_duration_sec`` hint).
+    """
+    try:
+        if not path.is_file():
+            return None
+        import wave
+        with wave.open(str(path), "rb") as handle:
+            frames = handle.getnframes()
+            rate = handle.getframerate()
+            if not rate:
+                return None
+            return float(frames) / float(rate)
+    except Exception:
+        return None
+
+
+# Tier coverage is considered "full-file" when either:
+#   - the tier's last interval ends within this fraction of the audio
+#     duration, OR
+#   - within ``_COVERAGE_ABSOLUTE_TOLERANCE_SEC`` of the audio end.
+#
+# Both checks matter: a 6-minute recording with coverage at 95% still has
+# 18 unprocessed seconds (not "full"), but a 30-second clip with coverage
+# ending 1 second short IS effectively full. The absolute tolerance
+# catches the short-clip case; the fractional tolerance catches long-clip
+# tail silence that razhan/Whisper legitimately skips.
+_COVERAGE_FRACTION_THRESHOLD = 0.95
+_COVERAGE_ABSOLUTE_TOLERANCE_SEC = 3.0
+
+
+def _tier_coverage(
+    intervals: Any,
+    duration_sec: Optional[float],
+) -> Dict[str, Any]:
+    """Summarise how much of a file a tier's intervals cover.
+
+    Returns a dict with ``coverage_start_sec``, ``coverage_end_sec``,
+    ``coverage_fraction`` (None when duration is unknown), and
+    ``full_coverage`` (None when duration is unknown, else bool).
+
+    This is the signal that answers "was the whole WAV processed, or just
+    the slice where pre-existing concept timestamps happened to live?"
+    Non-empty text is required — empty intervals don't count as coverage.
+    """
+    coverage_start: Optional[float] = None
+    coverage_end: Optional[float] = None
+    if isinstance(intervals, list):
+        for iv in intervals:
+            if not isinstance(iv, dict):
+                continue
+            if not str(iv.get("text") or "").strip():
+                continue
+            try:
+                start = float(iv.get("start") or 0.0)
+                end = float(iv.get("end") or start)
+            except (TypeError, ValueError):
+                continue
+            if coverage_start is None or start < coverage_start:
+                coverage_start = start
+            if coverage_end is None or end > coverage_end:
+                coverage_end = end
+
+    fraction: Optional[float] = None
+    full: Optional[bool] = None
+    if duration_sec is not None and duration_sec > 0 and coverage_end is not None:
+        fraction = max(0.0, min(1.0, coverage_end / duration_sec))
+        full = bool(
+            fraction >= _COVERAGE_FRACTION_THRESHOLD
+            or (duration_sec - coverage_end) < _COVERAGE_ABSOLUTE_TOLERANCE_SEC
+        )
+    elif duration_sec is not None and duration_sec > 0 and coverage_end is None:
+        # No intervals at all → explicitly not-full.
+        fraction = 0.0
+        full = False
+
+    return {
+        "coverage_start_sec": coverage_start,
+        "coverage_end_sec": coverage_end,
+        "coverage_fraction": fraction,
+        "full_coverage": full,
+    }
+
+
 def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
     """Return what's already been done for a speaker, per pipeline step.
 
-    Shape::
+    Shape (per step)::
 
         {
-          "speaker": "Fail02",
-          "normalize": {"done": true,  "path": "audio/working/Fail02/Fail02.wav",
-                        "can_run": true,  "reason": null},
-          "stt":       {"done": true,  "segments": 142,
-                        "can_run": true,  "reason": null},
-          "ortho":     {"done": true,  "intervals": 84,
-                        "can_run": true,  "reason": null},
-          "ipa":       {"done": false, "intervals": 0,
-                        "can_run": false, "reason": "No ortho intervals yet — run ORTH first"}
+          "done": true,            # tier has ≥1 non-empty interval (or normalize WAV exists)
+          "intervals": 84,         # or "segments" for stt, "path" for normalize
+          "can_run": true,         # step can be invoked right now
+          "reason": null,          # populated when can_run is false
+
+          # Full-file coverage (new — the "whole WAV processed?" signal):
+          "coverage_start_sec": 0.12,   # first non-empty interval start
+          "coverage_end_sec": 351.44,   # last non-empty interval end
+          "coverage_fraction": 0.98,    # coverage_end / duration
+          "full_coverage": true         # true when coverage spans ≥95% OR
+                                        # within 3s of the audio end
         }
 
-    ``done`` means the tier has at least one non-empty text interval (or
-    for normalize, the working WAV exists). ``can_run`` means invoking the
-    step right now would succeed — the audio file exists, prerequisites
-    are in place. When ``can_run`` is false, ``reason`` explains why so
-    the pre-flight UI can surface it.
+    Top-level adds ``duration_sec`` so callers can reason about absolute
+    coverage.
 
-    Note ``can_run`` is computed against the *current* state of the
-    filesystem; for a batch that runs multiple steps, ``ipa.can_run`` may
-    be false today but will succeed after the ORTH step in the same batch
-    runs. The batch orchestrator re-checks at execution time.
+    ``done`` is a cheap "has any data?" signal — useful for the UI's
+    "will overwrite" warning. ``full_coverage`` is the signal an agent
+    should check before declaring the step truly complete: a tier with
+    128 intervals that cover only the first 30 seconds of a 6-minute
+    recording reports ``done=True`` + ``full_coverage=False``, and the
+    tier should be re-run.
+
+    ``can_run`` is computed against the *current* filesystem; for a
+    batch that runs multiple steps, ``ipa.can_run`` may be false today
+    but will succeed after the ORTH step in the same batch runs.
     """
     speaker_norm = _normalize_speaker_id(speaker)
     result: Dict[str, Any] = {"speaker": speaker_norm}
@@ -3071,6 +3165,25 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Resolve duration: prefer the actual WAV header on disk (truth),
+    # fall back to ``source_audio_duration_sec`` from the annotation.
+    # Coverage ratios use the truthiest number we can find.
+    duration_sec: Optional[float] = None
+    for candidate in (normalized_path, source_path):
+        if candidate is not None and candidate.is_file():
+            duration_sec = _audio_duration_sec(candidate)
+            if duration_sec:
+                break
+    if duration_sec is None and isinstance(record, dict):
+        meta_dur = record.get("source_audio_duration_sec")
+        try:
+            meta_float = float(meta_dur) if meta_dur is not None else None
+        except (TypeError, ValueError):
+            meta_float = None
+        if meta_float and meta_float > 0:
+            duration_sec = meta_float
+    result["duration_sec"] = duration_sec
+
     # --- Normalize ---
     normalize_info: Dict[str, Any] = {
         "done": normalized_exists,
@@ -3100,6 +3213,7 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
         "can_run": False,
         "reason": None,
     }
+    stt_info.update(_tier_coverage(cached_stt, duration_sec))
     if not has_annotation:
         stt_info["reason"] = "No annotation for speaker"
     elif not (normalized_exists or source_exists):
@@ -3125,6 +3239,12 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
             if isinstance(iv, dict) and str(iv.get("text") or "").strip()
         )
 
+    def _tier_intervals(tier_name: str) -> Any:
+        tier = tiers.get(tier_name) if isinstance(tiers, dict) else None
+        return tier.get("intervals") if isinstance(tier, dict) else None
+
+    ortho_intervals = _tier_intervals("ortho")
+    ipa_intervals = _tier_intervals("ipa")
     ortho_count = _non_empty_count("ortho")
     ipa_count = _non_empty_count("ipa")
 
@@ -3134,6 +3254,7 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
         "can_run": False,
         "reason": None,
     }
+    ortho_info.update(_tier_coverage(ortho_intervals, duration_sec))
     if not has_annotation:
         ortho_info["reason"] = "No annotation for speaker"
     elif not (normalized_exists or source_exists):
@@ -3148,6 +3269,7 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
         "can_run": False,
         "reason": None,
     }
+    ipa_info.update(_tier_coverage(ipa_intervals, duration_sec))
     if not has_annotation:
         ipa_info["reason"] = "No annotation for speaker"
     elif ortho_count == 0:

@@ -599,15 +599,27 @@ export async function pollNormalize(jobId: string): Promise<STTStatus> {
 }
 
 // Pipeline state — powers the pre-flight speaker/step grid shown before
-// running a transcription batch. Each entry carries both "what's done"
-// (done + counts) and "can it run now" (can_run + reason). The UI paints
-// three badges per cell: ✅ ok / ⏭️ will-skip / ❌ blocked, plus a
-// tooltip with the reason when blocked. `done` remains useful for the
-// overwrite warning ("will overwrite 128 ortho intervals").
+// running a transcription batch. Each entry carries three orthogonal
+// dimensions:
+//   - `done`     : tier has ≥1 non-empty interval (legacy signal,
+//                  useful for the "will overwrite" warning)
+//   - `can_run`  : the step can be invoked right now (prerequisites met)
+//   - `full_coverage` : the intervals actually span the entire audio
+//                       (not merely the legacy timestamps). THIS is the
+//                       signal to gate "needs re-run" decisions on; a
+//                       tier can be `done: true, full_coverage: false`
+//                       when old runs only transcribed the slice where
+//                       stale concept timestamps lived.
 export interface PipelineStepState {
   done: boolean;
   can_run: boolean;
   reason: string | null;
+  // Coverage metadata — `null` when the step doesn't apply (normalize)
+  // or the audio duration couldn't be determined.
+  coverage_start_sec?: number | null;
+  coverage_end_sec?: number | null;
+  coverage_fraction?: number | null;
+  full_coverage?: boolean | null;
 }
 
 export interface PipelineNormalizeState extends PipelineStepState {
@@ -624,6 +636,10 @@ export interface PipelineTierState extends PipelineStepState {
 
 export interface PipelineState {
   speaker: string;
+  /** Audio duration in seconds, resolved from the WAV header (preferred)
+   *  or the annotation's ``source_audio_duration_sec`` hint. Null when
+   *  neither is available. */
+  duration_sec?: number | null;
   normalize: PipelineNormalizeState;
   stt: PipelineSttState;
   ortho: PipelineTierState;

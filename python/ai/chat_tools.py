@@ -1007,11 +1007,18 @@ class ParseChatTools:
             "pipeline_state_read": ChatToolSpec(
                 name="pipeline_state_read",
                 description=(
-                    "Preflight one speaker: what's already done (normalize/STT/ORTH/IPA "
-                    "counts) AND whether each step can_run right now (audio file "
-                    "reachable, prerequisites in place). Read-only. This is the same data "
-                    "the UI's TranscriptionRunModal shows, exposed for agents that want "
-                    "to decide whether to skip or include a speaker in a batch."
+                    "Preflight one speaker. Read-only. Returns per-step "
+                    "``{done, intervals|segments, can_run, reason, "
+                    "coverage_start_sec, coverage_end_sec, "
+                    "coverage_fraction, full_coverage}`` plus top-level "
+                    "``duration_sec``. "
+                    "IMPORTANT: ``done`` only means 'the tier has ≥1 "
+                    "non-empty interval'. That is NOT the same as 'the "
+                    "entire WAV was processed' — a tier whose 128 "
+                    "intervals only cover the first 30 seconds of a "
+                    "6-minute recording is still ``done: true`` but "
+                    "``full_coverage: false``. Gate re-run decisions on "
+                    "``full_coverage``, not ``done``."
                 ),
                 parameters={
                     "type": "object",
@@ -1025,11 +1032,20 @@ class ParseChatTools:
             "pipeline_state_batch": ChatToolSpec(
                 name="pipeline_state_batch",
                 description=(
-                    "Preflight multiple speakers at once. Read-only. With no arguments, "
-                    "probes every speaker from ``speakers_list``. Supply ``speakers`` to "
-                    "restrict. Returns a grid: per speaker × step, whether the step can "
-                    "run and (if blocked) why — matches the speaker-picker grid in the "
-                    "UI. Ideal for answering 'can I kick off a full batch and walk away?'"
+                    "Preflight multiple speakers at once. Read-only. "
+                    "With no arguments, probes every speaker from "
+                    "``speakers_list``. Supply ``speakers`` to "
+                    "restrict. Each row carries the same per-step "
+                    "fields as ``pipeline_state_read``, including "
+                    "``full_coverage`` — the actual 'was the entire "
+                    "WAV processed?' signal (as distinct from "
+                    "``done``, which only checks for ≥1 non-empty "
+                    "interval). Top-level summary counts "
+                    "``blockedSpeakers`` (any step can_run=false) and "
+                    "``partialCoverageSpeakers`` (any STT/ORTH/IPA "
+                    "step has full_coverage=false). Ideal for "
+                    "answering 'can I kick off a full batch and walk "
+                    "away?' without surprises."
                 ),
                 parameters={
                     "type": "object",
@@ -1964,6 +1980,7 @@ class ParseChatTools:
 
         results: List[Dict[str, Any]] = []
         blocked = 0
+        partial_coverage = 0
         for speaker in speakers:
             try:
                 state = self._pipeline_state(speaker)
@@ -1975,16 +1992,31 @@ class ParseChatTools:
             row: Dict[str, Any] = {"speaker": speaker}
             row.update(state)
             results.append(row)
+            # A speaker is "blocked" if ANY step currently can_run=False;
+            # "partial coverage" if ANY STT/ORTH/IPA step has done=true
+            # but full_coverage=false (work was started but doesn't span
+            # the whole WAV — likely constrained to stale timestamps).
+            step_any_blocked = False
+            step_any_partial = False
             for step_name in ("normalize", "stt", "ortho", "ipa"):
                 step = state.get(step_name) if isinstance(state, dict) else None
-                if isinstance(step, dict) and step.get("can_run") is False:
-                    blocked += 1
-                    break
+                if not isinstance(step, dict):
+                    continue
+                if step.get("can_run") is False:
+                    step_any_blocked = True
+                if step_name in ("stt", "ortho", "ipa"):
+                    if step.get("done") and step.get("full_coverage") is False:
+                        step_any_partial = True
+            if step_any_blocked:
+                blocked += 1
+            if step_any_partial:
+                partial_coverage += 1
 
         return {
             "readOnly": True,
             "count": len(results),
             "blockedSpeakers": blocked,
+            "partialCoverageSpeakers": partial_coverage,
             "rows": results,
         }
 
