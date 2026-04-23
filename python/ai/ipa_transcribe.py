@@ -149,7 +149,7 @@ def transcribe_words_with_forced_align(
     pad_ms: int = DEFAULT_PAD_MS,
     aligner: Optional[Aligner] = None,
     progress_callback: Optional[Any] = None,
-    segment_batch_size: int = 20,
+    segment_batch_size: int = 5,
 ) -> List[IpaResult]:
     """Full 3-tier IPA: G2P + torchaudio forced alignment → word windows → wav2vec2 CTC.
 
@@ -201,6 +201,12 @@ def transcribe_words_with_forced_align(
                 e = float(word.get("end", 0.0) or 0.0)
                 if e > s:
                     word_intervals.append(IntervalSpec(start=s, end=e))
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     if not word_intervals:
         # No words produced — fall back to segment-level coarse transcription
