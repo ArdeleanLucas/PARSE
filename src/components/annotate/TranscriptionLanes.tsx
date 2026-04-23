@@ -28,7 +28,7 @@ const LANE_LABELS: Record<LaneKind, string> = {
 };
 
 const LANE_HEIGHT_PX = 28;
-const LABEL_COL_PX = 48;
+export const LABEL_COL_PX = 48;
 const MIN_LABEL_WIDTH_PX = 18;
 const VIRTUAL_BUFFER_PX = 400;
 
