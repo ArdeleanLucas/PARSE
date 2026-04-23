@@ -41,11 +41,16 @@ READ_ONLY_NOTICE = (
     "not annotations or enrichments."
 )
 WRITE_ALLOWED_TOOL_NAMES = frozenset({
+    "audio_normalize_start",
     "contact_lexeme_lookup",
+    "enrichments_write",
+    "export_annotations_csv",
+    "export_lingpy_tsv",
+    "export_nexus",
     "import_tag_csv",
-    "prepare_tag_import",
-    "onboard_speaker_import",
     "import_processed_speaker",
+    "lexeme_notes_write",
+    "onboard_speaker_import",
     "parse_memory_upsert_section",
     "apply_timestamp_offset",
     # Pipeline run kicks off background transcription jobs — it's
@@ -53,6 +58,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     # job completes, but the tool itself just returns a jobId for the
     # caller to poll via compute_status.
     "pipeline_run",
+    "prepare_tag_import",
 })
 TEXT_PREVIEW_EXTENSIONS = frozenset({".md", ".markdown", ".txt", ".rst"})
 ONBOARD_AUDIO_EXTENSIONS = frozenset({".wav", ".flac", ".mp3", ".ogg", ".m4a"})
@@ -294,6 +300,9 @@ class ParseChatTools:
         # "stt": {...}, "ortho": {...}, "ipa": {...}}). Surfaces what's
         # already done and whether each step *can* run now.
         pipeline_state: Optional[Callable[[str], Dict[str, Any]]] = None,
+        # Start a normalize job for a speaker. Takes (speaker, source_wav_or_None),
+        # returns a jobId to poll via audio_normalize_status / compute_status.
+        start_normalize_job: Optional[Callable[[str, Optional[str]], str]] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
@@ -341,6 +350,7 @@ class ParseChatTools:
         self._onboard_speaker = onboard_speaker
         self._start_compute_job = start_compute_job
         self._pipeline_state = pipeline_state
+        self._start_normalize_job = start_normalize_job
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
             "project_context_read": ChatToolSpec(
@@ -1142,6 +1152,205 @@ class ParseChatTools:
                                 "the job's type matches before returning the snapshot."
                             ),
                         },
+                    },
+                },
+            ),
+            "audio_normalize_start": ChatToolSpec(
+                name="audio_normalize_start",
+                description=(
+                    "Start an audio normalization job for a speaker (two-pass ffmpeg loudnorm: "
+                    "mono, 44.1 kHz, -16 LUFS). Returns a jobId; poll with audio_normalize_status. "
+                    "sourceWav is optional — defaults to the speaker's primary source audio."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "sourceWav": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path to source WAV. Omit to use primary source.",
+                        },
+                    },
+                },
+            ),
+            "audio_normalize_status": ChatToolSpec(
+                name="audio_normalize_status",
+                description=(
+                    "Poll status of a normalize job started with audio_normalize_start. "
+                    "Returns status, progress, error, and result when complete."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                    },
+                },
+            ),
+            "enrichments_read": ChatToolSpec(
+                name="enrichments_read",
+                description=(
+                    "Read parse-enrichments.json (cognate sets, similarities, borrowing flags, "
+                    "lexeme notes). Optionally filter to specific top-level keys."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "keys": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                            "description": (
+                                "Optional list of top-level keys to return "
+                                "(e.g. [\"cognate_sets\", \"lexeme_notes\"]). "
+                                "Omit to return the full payload."
+                            ),
+                        },
+                    },
+                },
+            ),
+            "enrichments_write": ChatToolSpec(
+                name="enrichments_write",
+                description=(
+                    "Write keys into parse-enrichments.json. By default merges (shallow) into the "
+                    "existing file; pass merge=false for a full replacement. Use with care — this "
+                    "file contains cognate sets and borrowing flags."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["enrichments"],
+                    "properties": {
+                        "enrichments": {
+                            "type": "object",
+                            "description": "Object to merge into (or replace) parse-enrichments.json.",
+                        },
+                        "merge": {
+                            "type": "boolean",
+                            "description": "If true (default), shallow-merge into existing data. If false, replace entirely.",
+                        },
+                    },
+                },
+            ),
+            "lexeme_notes_read": ChatToolSpec(
+                name="lexeme_notes_read",
+                description=(
+                    "Read lexeme-level notes from parse-enrichments.json. "
+                    "Optionally filter by speaker and/or conceptId."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Filter to a single speaker.",
+                        },
+                        "conceptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "description": "Filter to a single concept ID.",
+                        },
+                    },
+                },
+            ),
+            "lexeme_notes_write": ChatToolSpec(
+                name="lexeme_notes_write",
+                description=(
+                    "Write or delete a single lexeme note in parse-enrichments.json "
+                    "(speaker + conceptId key). Supports userNote and importNote fields."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "conceptId"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "conceptId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "userNote": {"type": "string", "maxLength": 4096},
+                        "importNote": {"type": "string", "maxLength": 4096},
+                        "delete": {
+                            "type": "boolean",
+                            "description": "If true, removes the note entry for this speaker+concept.",
+                        },
+                    },
+                },
+            ),
+            "export_annotations_csv": ChatToolSpec(
+                name="export_annotations_csv",
+                description=(
+                    "Export speaker annotations to CSV (IPA, ortho, concept, timing). "
+                    "Pass speaker='all' to merge all speakers. Without outputPath returns a preview "
+                    "of the first 20 rows; with outputPath writes the full CSV inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID or 'all' for a merged multi-speaker export.",
+                        },
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root to write CSV.",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                    },
+                },
+            ),
+            "export_lingpy_tsv": ChatToolSpec(
+                name="export_lingpy_tsv",
+                description=(
+                    "Export a LingPy-compatible wordlist TSV from enrichments + annotations "
+                    "for cognate analysis. Without outputPath returns first 20 lines; "
+                    "with outputPath writes inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root.",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                    },
+                },
+            ),
+            "export_nexus": ChatToolSpec(
+                name="export_nexus",
+                description=(
+                    "Export a NEXUS cognate-character matrix for BEAST2 / phylogenetic tools. "
+                    "Characters are (concept, cognate group) pairs; values are 1/0/? per speaker. "
+                    "Without outputPath returns a preview; with outputPath writes inside the project."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative or absolute path inside project root.",
+                        },
+                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
             ),
@@ -2112,6 +2321,388 @@ class ParseChatTools:
             "result": snapshot.get("result"),
         }
         return payload
+
+    # ------------------------------------------------------------------
+    # Tier 1 — audio normalize
+    # ------------------------------------------------------------------
+
+    def _tool_audio_normalize_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._start_normalize_job is None:
+            raise ChatToolExecutionError("normalize callback is unavailable")
+
+        speaker = self._normalize_speaker(args.get("speaker"))
+        source_wav: Optional[str] = str(args.get("sourceWav") or "").strip() or None
+
+        try:
+            job_id = self._start_normalize_job(speaker, source_wav)
+        except Exception as exc:
+            raise ChatToolExecutionError("normalize start failed: {0}".format(exc)) from exc
+
+        return {
+            "jobId": str(job_id),
+            "status": "running",
+            "speaker": speaker,
+            "message": "Normalize job started. Poll with audio_normalize_status.",
+        }
+
+    def _tool_audio_normalize_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._get_job_snapshot is None:
+            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+
+        job_id = str(args.get("jobId") or "").strip()
+        if not job_id:
+            raise ChatToolValidationError("jobId is required")
+
+        snapshot = self._get_job_snapshot(job_id)
+        if snapshot is None:
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "not_found",
+                "message": "Unknown jobId",
+            }
+
+        if snapshot.get("type") != "normalize":
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "invalid_job_type",
+                "expected": "normalize",
+                "actual": snapshot.get("type"),
+            }
+
+        return {
+            "readOnly": True,
+            "jobId": job_id,
+            "type": "normalize",
+            "status": snapshot.get("status"),
+            "progress": snapshot.get("progress"),
+            "message": snapshot.get("message"),
+            "error": snapshot.get("error"),
+            "result": snapshot.get("result"),
+        }
+
+    # ------------------------------------------------------------------
+    # Tier 1 — enrichments read / write
+    # ------------------------------------------------------------------
+
+    def _tool_enrichments_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        payload = _read_json_file(self.enrichments_path, {})
+        if not isinstance(payload, dict):
+            payload = {}
+        keys = args.get("keys")
+        if isinstance(keys, list) and keys:
+            payload = {k: payload[k] for k in keys if k in payload}
+        return {"readOnly": True, "enrichments": payload}
+
+    def _tool_enrichments_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        incoming = args.get("enrichments")
+        if not isinstance(incoming, dict):
+            raise ChatToolValidationError("enrichments must be an object")
+
+        merge = bool(args.get("merge", True))
+        if merge:
+            existing = _read_json_file(self.enrichments_path, {})
+            if not isinstance(existing, dict):
+                existing = {}
+            existing.update(incoming)
+            payload = existing
+        else:
+            payload = incoming
+
+        self.enrichments_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return {"success": True, "keys": list(payload.keys())}
+
+    # ------------------------------------------------------------------
+    # Tier 1 — lexeme notes read / write
+    # ------------------------------------------------------------------
+
+    def _tool_lexeme_notes_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        enrichments = _read_json_file(self.enrichments_path, {})
+        notes: Any = enrichments.get("lexeme_notes") or {}
+        if not isinstance(notes, dict):
+            notes = {}
+
+        speaker_filter = str(args.get("speaker") or "").strip()
+        concept_filter = _normalize_concept_id(args.get("conceptId") or "")
+
+        if speaker_filter:
+            notes = {speaker_filter: notes.get(speaker_filter, {})}
+        if concept_filter:
+            filtered: Dict[str, Any] = {}
+            for sp, sp_notes in notes.items():
+                if isinstance(sp_notes, dict) and concept_filter in sp_notes:
+                    filtered[sp] = {concept_filter: sp_notes[concept_filter]}
+            notes = filtered
+
+        return {"readOnly": True, "lexeme_notes": notes}
+
+    def _tool_lexeme_notes_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        speaker = self._normalize_speaker(args.get("speaker"))
+        concept_id = _normalize_concept_id(args.get("conceptId") or "")
+        if not concept_id:
+            raise ChatToolValidationError("conceptId is required")
+
+        payload = _read_json_file(self.enrichments_path, {})
+        if not isinstance(payload, dict):
+            payload = {}
+
+        notes_block = payload.get("lexeme_notes")
+        if not isinstance(notes_block, dict):
+            notes_block = {}
+            payload["lexeme_notes"] = notes_block
+
+        speaker_block = notes_block.get(speaker)
+        if not isinstance(speaker_block, dict):
+            speaker_block = {}
+            notes_block[speaker] = speaker_block
+
+        if bool(args.get("delete", False)):
+            speaker_block.pop(concept_id, None)
+            if not speaker_block:
+                notes_block.pop(speaker, None)
+        else:
+            entry = speaker_block.get(concept_id)
+            if not isinstance(entry, dict):
+                entry = {}
+            if "userNote" in args:
+                entry["user_note"] = str(args.get("userNote") or "")
+            if "importNote" in args:
+                entry["import_note"] = str(args.get("importNote") or "")
+            entry["updated_at"] = _utc_now_iso()
+            speaker_block[concept_id] = entry
+
+        self.enrichments_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return {"success": True, "lexeme_notes": payload.get("lexeme_notes") or {}}
+
+    # ------------------------------------------------------------------
+    # Tier 1 — export tools
+    # ------------------------------------------------------------------
+
+    def _tool_export_annotations_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from csv_export import (  # type: ignore[import]
+                annotations_to_csv_str,
+                _collect_all_rows,
+                _sort_rows_all,
+                _rows_to_csv_string,
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("csv_export is not importable: {0}".format(exc))
+
+        speaker_raw = str(args.get("speaker") or "all").strip()
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+
+        try:
+            if speaker_raw == "all":
+                rows = _collect_all_rows(self.annotations_dir)
+                _sort_rows_all(rows)
+                csv_content = _rows_to_csv_string(rows)
+            else:
+                sp = self._normalize_speaker(speaker_raw)
+                ann_path = self.annotations_dir / "{0}{1}".format(sp, ANNOTATION_FILENAME_SUFFIX)
+                if not ann_path.exists():
+                    raise ChatToolExecutionError("No annotation found for speaker: {0}".format(sp))
+                data = json.loads(ann_path.read_text(encoding="utf-8"))
+                csv_content = annotations_to_csv_str(data, sp)
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("CSV export failed: {0}".format(exc)) from exc
+
+        if dry_run or not output_path_str:
+            lines = csv_content.splitlines()
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "previewLines": "\n".join(lines[:20]),
+                "totalLines": len(lines),
+                "truncated": len(lines) > 20,
+            }
+
+        out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(csv_content, encoding="utf-8-sig")
+        return {
+            "success": True,
+            "outputPath": str(out_path),
+            "lines": len(csv_content.splitlines()),
+        }
+
+    def _tool_export_lingpy_tsv(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if cognate_compute_module is None:
+            raise ChatToolExecutionError("cognate_compute is not importable")
+
+        import os as _os
+        import tempfile
+
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+
+        try:
+            if dry_run or not output_path_str:
+                tmp_fd, tmp_str = tempfile.mkstemp(suffix=".tsv")
+                _os.close(tmp_fd)
+                tmp_path = Path(tmp_str)
+                try:
+                    count = cognate_compute_module.export_wordlist_tsv(
+                        self.enrichments_path, self.annotations_dir, tmp_path
+                    )
+                    content = tmp_path.read_text(encoding="utf-8")
+                finally:
+                    try:
+                        _os.unlink(tmp_str)
+                    except OSError:
+                        pass
+                lines = content.splitlines()
+                return {
+                    "readOnly": True,
+                    "previewOnly": True,
+                    "previewLines": "\n".join(lines[:20]),
+                    "totalLines": len(lines),
+                    "truncated": len(lines) > 20,
+                    "rowCount": count,
+                }
+
+            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            count = cognate_compute_module.export_wordlist_tsv(
+                self.enrichments_path, self.annotations_dir, out_path
+            )
+            return {"success": True, "outputPath": str(out_path), "rowCount": count}
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("LingPy TSV export failed: {0}".format(exc)) from exc
+
+    def _tool_export_nexus(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+
+        try:
+            nexus_text = self._build_nexus_text()
+        except Exception as exc:
+            raise ChatToolExecutionError("NEXUS build failed: {0}".format(exc)) from exc
+
+        if dry_run or not output_path_str:
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "preview": nexus_text[:2000],
+                "truncated": len(nexus_text) > 2000,
+                "totalChars": len(nexus_text),
+            }
+
+        out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(nexus_text, encoding="utf-8")
+        return {"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)}
+
+    def _build_nexus_text(self) -> str:
+        """Build NEXUS cognate-character matrix (mirrors server._api_get_export_nexus)."""
+        enrichments = _read_json_file(self.enrichments_path, {})
+        overrides = enrichments.get("manual_overrides") or {}
+        override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
+        auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None
+        override_sets = override_sets if isinstance(override_sets, dict) else {}
+        auto_sets = auto_sets if isinstance(auto_sets, dict) else {}
+
+        speakers_set: set = set()
+        project_payload = _read_json_file(self.project_json_path, {})
+        speakers_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None
+        if isinstance(speakers_block, dict):
+            speakers_set.update(str(s) for s in speakers_block.keys() if str(s).strip())
+        elif isinstance(speakers_block, list):
+            speakers_set.update(str(s) for s in speakers_block if str(s).strip())
+
+        union_keys: List[str] = []
+        seen_keys: set = set()
+        for key in list(override_sets.keys()) + list(auto_sets.keys()):
+            if key not in seen_keys:
+                seen_keys.add(key)
+                union_keys.append(key)
+
+        concept_keys: List[str] = []
+        concept_group_members: Dict[str, Dict[str, List[str]]] = {}
+        for key in union_keys:
+            override_block = override_sets.get(key)
+            auto_block = auto_sets.get(key)
+            block = override_block if isinstance(override_block, dict) else auto_block
+            if not isinstance(block, dict):
+                continue
+            groups: Dict[str, List[str]] = {}
+            for group, members in block.items():
+                if not isinstance(members, list):
+                    continue
+                cleaned = [str(m) for m in members if str(m).strip()]
+                if cleaned:
+                    groups[str(group)] = cleaned
+                    speakers_set.update(cleaned)
+            if groups:
+                concept_group_members[key] = groups
+                concept_keys.append(key)
+
+        speakers = sorted(speakers_set)
+
+        has_form: Dict[str, set] = {}
+        for key in concept_keys:
+            present: set = set()
+            for members in concept_group_members[key].values():
+                present.update(members)
+            has_form[key] = present
+
+        characters: List[Tuple[str, str, str]] = []
+        for key in sorted(concept_keys, key=_concept_sort_key):
+            for group in sorted(concept_group_members[key].keys()):
+                label = "{0}_{1}".format(str(key).replace(" ", "_"), group)
+                characters.append((key, group, label))
+
+        def row_for(speaker: str) -> str:
+            chars: List[str] = []
+            for key, group, _lbl in characters:
+                members = concept_group_members[key].get(group, [])
+                if speaker in members:
+                    chars.append("1")
+                elif speaker in has_form.get(key, set()):
+                    chars.append("0")
+                else:
+                    chars.append("?")
+            return "".join(chars)
+
+        lines: List[str] = []
+        lines.append("#NEXUS")
+        lines.append("")
+        lines.append("BEGIN TAXA;")
+        lines.append("    DIMENSIONS NTAX={0};".format(len(speakers)))
+        if speakers:
+            lines.append("    TAXLABELS")
+            for sp in speakers:
+                lines.append("        {0}".format(sp))
+            lines.append("    ;")
+        lines.append("END;")
+        lines.append("")
+        lines.append("BEGIN CHARACTERS;")
+        lines.append("    DIMENSIONS NCHAR={0};".format(len(characters)))
+        lines.append("    FORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"01\";")
+        if characters:
+            lines.append("    CHARSTATELABELS")
+            label_rows_str = []
+            for idx, (_key, _group, label) in enumerate(characters, start=1):
+                label_rows_str.append("        {0} {1}".format(idx, label))
+            lines.append(",\n".join(label_rows_str))
+            lines.append("    ;")
+        lines.append("    MATRIX")
+        for sp in speakers:
+            lines.append("        {0}    {1}".format(sp, row_for(sp)))
+        lines.append("    ;")
+        lines.append("END;")
+        lines.append("")
+        return "\n".join(lines)
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.
