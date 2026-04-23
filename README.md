@@ -4,6 +4,8 @@
 Browser-based dual-mode workstation for linguistic fieldwork and cross-speaker comparison.  
 Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
 
+> **Project status:** PARSE is in active development and is **not yet in beta**. Interfaces, workflows, and file contracts are still moving quickly as thesis-critical fieldwork and comparison features land on `main`.
+
 ## What is PARSE
 
 PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, onboarding/import, and comparative analysis in one workspace, so researchers can move from raw recordings or processed thesis artifacts to analysis-ready linguistic data without switching between disconnected tools.
@@ -24,13 +26,15 @@ Per-speaker segmentation and transcription workstation.
 
 - Waveform review with WaveSurfer 7 for long recordings
 - Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
-- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTHO**, with lane visibility/color controls and waveform-synced horizontal scrolling
+- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTHO**, with waveform-aligned timestamps and synchronized horizontal scrolling
 - Audio normalization job (`/api/normalize`) with in-place working-audio support
-- Speaker-level orthographic STT job (`/api/stt`) with progress/error reporting
+- Speaker-level STT job (`/api/stt`) with progress/error reporting, automatic language detection from project metadata when available, and tunable VAD / task / beam-size settings
+- Speaker-level ORTHO job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
 - Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
+- Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks
 - Draggable lexeme timestamp editing and manual boundary correction
 - Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment, now with monotonic alignment, quantile anchor sampling, and manual single-pair fallback
-- Fast segment playback, rate control, and bounded lexeme-region playback
+- Clip-bounded playback for the selected region plus global **Space** play/pause hotkey
 - Concept display modes and sorting controls (ID order, A–Z, survey-order when present)
 - Keyboard shortcuts for mode switching and concept navigation
 - AI chat dock for in-session analysis assistance
@@ -92,7 +96,7 @@ PARSE supports multiple AI backends, routed per task type:
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
-**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable.
+**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), and both STT and ORTHO expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`.
 
 ### Models
 
