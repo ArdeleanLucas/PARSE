@@ -1,0 +1,174 @@
+"""Tests for LocalWhisperProvider's configurable transcribe() path.
+
+Ensures:
+  - empty ``stt.language`` maps to ``language=None`` (auto-detect), not "".
+  - ``stt.vad_filter`` / ``stt.vad_parameters`` / ``stt.task`` / ``stt.beam_size``
+    flow through to ``WhisperModel.transcribe()``.
+  - Omitting ``stt.vad_parameters`` (or passing {}) does NOT send
+    ``vad_parameters`` to faster-whisper (so its Silero defaults apply).
+
+Context: default was ``language="sd"`` (Sindhi) + hard-coded
+``vad_filter=True`` with no way to tune. Probing real Southern Kurdish
+audio showed "sd" forces whisper to hallucinate garbage; auto-detect
+lands on "fa" and produces coherent text. This test guards the new
+config surface so we don't regress back to the hard-coded behavior.
+"""
+from __future__ import annotations
+
+import pathlib
+import sys
+from typing import Any, Dict, List, Tuple
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from ai import provider as provider_module
+from ai.provider import LocalWhisperProvider
+
+
+class _StubSegment:
+    def __init__(self, start: float, end: float, text: str) -> None:
+        self.start = start
+        self.end = end
+        self.text = text
+        self.avg_logprob = -0.3
+
+
+class _StubInfo:
+    def __init__(self, duration: float = 10.0) -> None:
+        self.duration = duration
+
+
+class _StubWhisperModel:
+    """Records every transcribe() call so tests can assert on kwargs."""
+
+    last_call: Dict[str, Any] = {}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def transcribe(self, audio: str, **kwargs: Any) -> Tuple[List[_StubSegment], _StubInfo]:
+        type(self).last_call = {"audio": audio, **kwargs}
+        return iter([_StubSegment(0.0, 1.0, "ok")]), _StubInfo()
+
+
+def _make_provider(tmp_path: pathlib.Path, stt_config: Dict[str, Any],
+                   monkeypatch: Any) -> LocalWhisperProvider:
+    """Instantiate LocalWhisperProvider with the given stt config,
+    bypassing real WhisperModel loading."""
+    _StubWhisperModel.last_call = {}
+    # Stub the WhisperModel import inside _load_whisper_model.
+    monkeypatch.setattr(
+        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
+    )
+
+    # Skip the real CUDA DLL dance by monkeypatching the import path.
+    import faster_whisper  # type: ignore
+    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+
+    provider = LocalWhisperProvider(
+        config={"stt": stt_config},
+        config_path=tmp_path / "ai_config.json",
+    )
+    return provider
+
+
+def _make_audio(tmp_path: pathlib.Path) -> pathlib.Path:
+    p = tmp_path / "clip.wav"
+    p.write_bytes(b"RIFF    WAVEfmt ")  # faux header; provider only stats existence
+    return p
+
+
+def test_empty_language_becomes_none_for_auto_detect(tmp_path, monkeypatch):
+    """language="" in config must translate to language=None when calling
+    faster-whisper, otherwise the decoder would error. This is the
+    regression guard for the old default of "sd" (Sindhi) producing
+    garbage on Kurdish audio — auto-detect is now the default."""
+    provider = _make_provider(tmp_path, {"language": ""}, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["language"] is None
+
+
+def test_explicit_language_is_passed_through(tmp_path, monkeypatch):
+    """When the user explicitly sets a language code (in config or per-call),
+    we forward it to whisper unchanged."""
+    provider = _make_provider(tmp_path, {"language": "fa"}, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["language"] == "fa"
+
+    # Per-call override wins over config.
+    provider.transcribe(_make_audio(tmp_path), language="ar")
+    assert _StubWhisperModel.last_call["language"] == "ar"
+
+
+def test_vad_parameters_forwarded_when_populated(tmp_path, monkeypatch):
+    """Non-empty vad_parameters dict reaches faster-whisper verbatim."""
+    stt = {
+        "language": "fa",
+        "vad_filter": True,
+        "vad_parameters": {
+            "min_silence_duration_ms": 500,
+            "threshold": 0.35,
+        },
+    }
+    provider = _make_provider(tmp_path, stt, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["vad_filter"] is True
+    assert call["vad_parameters"] == {
+        "min_silence_duration_ms": 500,
+        "threshold": 0.35,
+    }
+
+
+def test_empty_vad_parameters_omitted_so_silero_defaults_apply(tmp_path, monkeypatch):
+    """The config's default is `vad_parameters: {}` meaning "use faster-
+    whisper's built-in Silero defaults". We verify that an empty dict is
+    NOT forwarded — otherwise it would override Silero with a broken
+    empty config."""
+    provider = _make_provider(tmp_path, {"vad_filter": True, "vad_parameters": {}}, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["vad_filter"] is True
+    assert "vad_parameters" not in call, call
+
+
+def test_vad_disabled_does_not_forward_parameters(tmp_path, monkeypatch):
+    """If vad_filter=False, vad_parameters is meaningless — we should not
+    pass it even when the user configured values."""
+    stt = {
+        "vad_filter": False,
+        "vad_parameters": {"threshold": 0.35},
+    }
+    provider = _make_provider(tmp_path, stt, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["vad_filter"] is False
+    assert "vad_parameters" not in call, call
+
+
+def test_task_and_beam_size_forwarded(tmp_path, monkeypatch):
+    provider = _make_provider(
+        tmp_path,
+        {"task": "translate", "beam_size": 3},
+        monkeypatch,
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["task"] == "translate"
+    assert call["beam_size"] == 3
+
+
+def test_invalid_task_falls_back_to_transcribe(tmp_path, monkeypatch):
+    provider = _make_provider(
+        tmp_path, {"task": "garbage-value"}, monkeypatch
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["task"] == "transcribe"
+
+
+def test_invalid_beam_size_falls_back_to_five(tmp_path, monkeypatch):
+    provider = _make_provider(
+        tmp_path, {"beam_size": "not-a-number"}, monkeypatch
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["beam_size"] == 5
