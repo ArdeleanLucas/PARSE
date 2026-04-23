@@ -30,10 +30,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
+
+
+def _is_wsl() -> bool:
+    """Return True when running inside WSL (Windows Subsystem for Linux)."""
+    release = platform.uname().release.lower()
+    return "microsoft" in release or "wsl" in release
+
+
+def resolve_device(requested: Optional[str] = None) -> str:
+    """Resolve compute device, forcing CPU on WSL to avoid GPU driver crashes.
+
+    WSL2 GPU passthrough is unstable for sustained CTC workloads on RTX 5090
+    (Blackwell/sm_120): repeated kernel errors from bad CTC inputs destabilise
+    the Hyper-V VM host and crash WSL with E_UNEXPECTED. CPU is slower but
+    completes reliably. Pass requested="cuda" to override when needed.
+    """
+    if requested == "cpu":
+        return "cpu"
+    if requested != "cuda" and _is_wsl():
+        return "cpu"
+    try:
+        import torch  # type: ignore
+        return requested or ("cuda" if torch.cuda.is_available() else "cpu")
+    except ImportError:
+        return "cpu"
 
 try:
     from .provider import SegmentWithWords, WordSpan
@@ -129,7 +155,7 @@ class Aligner:
                 "Install: pip install torch torchaudio transformers"
             ) from exc
 
-        resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        resolved_device = resolve_device(device)
 
         # Explicit tokenizer + feature_extractor load. If this path
         # raises, fall back to the legacy auto-dispatch as a last resort
