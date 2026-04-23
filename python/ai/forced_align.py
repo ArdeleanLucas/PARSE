@@ -160,6 +160,45 @@ class Aligner:
         return out
 
     # ------------------------------------------------------------------
+    # Acoustic IPA decoding (Tier 3)
+    # ------------------------------------------------------------------
+
+    def transcribe_window(self, audio_16k: Any) -> str:
+        """Greedy-decode a mono-16 kHz audio window into an IPA string.
+
+        Used by Tier 3 ``ipa_transcribe`` — runs the same wav2vec2 CTC head
+        and returns the collapsed phoneme sequence. Empty string when the
+        window is too short or decoding fails.
+        """
+        import torch  # type: ignore
+
+        if audio_16k is None or int(audio_16k.numel()) < DEFAULT_SAMPLE_RATE // 10:
+            return ""
+
+        try:
+            with torch.no_grad():
+                input_values = self.processor(
+                    audio_16k.cpu().numpy(),
+                    sampling_rate=DEFAULT_SAMPLE_RATE,
+                    return_tensors="pt",
+                ).input_values.to(self.device)
+                logits = self.model(input_values).logits  # (1, T, C)
+                pred_ids = logits.argmax(dim=-1)[0]
+            # Tokenizer.decode for CTC models collapses repeats and drops
+            # the blank/pad token, which is exactly the greedy-CTC IPA we
+            # want for the acoustic tier.
+            ipa = self.processor.tokenizer.decode(
+                pred_ids, skip_special_tokens=True
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            print(
+                "[WARN] wav2vec2 IPA decode failed: {0}".format(exc),
+                file=sys.stderr,
+            )
+            return ""
+        return str(ipa or "").strip()
+
+    # ------------------------------------------------------------------
     # Core alignment call
     # ------------------------------------------------------------------
 

@@ -24,6 +24,7 @@ from urllib.parse import unquote, urlparse
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
 from ai.provider import get_chat_config, get_ipa_provider, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
+from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
 from audio_pipeline_paths import build_normalized_output_path
 
 try:
@@ -2699,16 +2700,33 @@ def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, 
     }
 
 
+_IPA_ALIGNER: Any = None
+
+
+def _get_ipa_aligner() -> Any:
+    """Lazy-load the Tier 2/3 wav2vec2 Aligner. Cached for the server lifetime."""
+    global _IPA_ALIGNER
+    if _IPA_ALIGNER is None:
+        from ai.forced_align import Aligner
+        _IPA_ALIGNER = Aligner.load()
+    return _IPA_ALIGNER
+
+
 def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fill missing IPA cells on a speaker's annotation from the ortho tier.
+    """Fill missing IPA cells on a speaker's annotation via acoustic wav2vec2.
 
-    For each ortho interval with text, generate IPA via the configured IPA
-    provider. If an ipa interval at the same (start, end) is empty or
-    absent, write the generated IPA. Intervals with existing non-empty IPA
-    are left alone unless `overwrite=True`, so this can be run repeatedly
-    without clobbering manual edits.
+    Tier 3 of the acoustic alignment pipeline: for each ortho interval, run
+    ``facebook/wav2vec2-xlsr-53-espeak-cv-ft`` CTC directly on the audio
+    window ``[start, end]`` and write the greedy-decoded phoneme string
+    into the IPA tier. No text → IPA conversion happens anywhere — the
+    ortho text is used only to decide whether the interval is worth
+    transcribing (empty ortho → skip).
 
-    Payload: `{ "speaker": "Fail02", "overwrite": false }`.
+    Intervals with existing non-empty IPA are left alone unless
+    ``overwrite=True`` — so this can be re-run safely without clobbering
+    manual edits.
+
+    Payload: ``{ "speaker": "Fail02", "overwrite": false }``.
     """
     speaker = _normalize_speaker_id(payload.get("speaker"))
     overwrite = bool(payload.get("overwrite", False))
@@ -2741,9 +2759,12 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     ipa_by_key: Dict[Tuple[float, float], Dict[str, Any]] = {_key(i): i for i in ipa_intervals}
 
-    provider = get_ipa_provider()
-    metadata = annotation.get("metadata") if isinstance(annotation.get("metadata"), dict) else {}
-    language = str(metadata.get("language_code") or "und")
+    # Resolve the speaker's working audio once; a 5-hour recording loads
+    # into ~300 MB of float32 which is fine for a one-shot pass.
+    audio_path = _pipeline_audio_path_for_speaker(speaker)
+    from ai.forced_align import _load_audio_mono_16k
+    audio_tensor = _load_audio_mono_16k(audio_path)
+    aligner = _get_ipa_aligner()
 
     filled = 0
     skipped = 0
@@ -2751,19 +2772,27 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     for idx, ortho in enumerate(ortho_intervals):
         text = str(ortho.get("text") or "").strip()
+        start_sec = float(ortho.get("start", 0.0) or 0.0)
+        end_sec = float(ortho.get("end", start_sec) or start_sec)
         key = _key(ortho)
         existing = ipa_by_key.get(key)
         existing_text = str((existing or {}).get("text") or "").strip()
 
+        # Ortho text is still the gate: intervals with no ortho aren't
+        # worth transcribing (typically silence/noise segments that the
+        # user hasn't labelled).
         if not text:
             skipped += 1
             continue
         if existing_text and not overwrite:
             skipped += 1
             continue
+        if end_sec <= start_sec:
+            skipped += 1
+            continue
 
         try:
-            new_ipa = provider.to_ipa(text, language)
+            new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
         except Exception:
             skipped += 1
             continue

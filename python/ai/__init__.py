@@ -10,7 +10,7 @@ from .provider import (
     load_ai_config,
 )
 from .stt_pipeline import run_stt_pipeline
-from .ipa_transcribe import convert_single_text
+from .ipa_transcribe import transcribe_intervals, transcribe_slice
 
 __all__ = [
     "AIProvider",
@@ -21,5 +21,6 @@ __all__ = [
     "get_provider",
     "load_ai_config",
     "run_stt_pipeline",
-    "convert_single_text",
+    "transcribe_intervals",
+    "transcribe_slice",
 ]
