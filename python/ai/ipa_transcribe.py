@@ -219,6 +219,15 @@ def transcribe_words_with_forced_align(
     for idx, spec in enumerate(word_intervals):
         ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
         out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+        # Release cached GPU allocations every 50 words to prevent VRAM
+        # accumulation across thousands of short inference calls.
+        if idx % 50 == 49:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
         if progress_callback is not None:
             try:
                 progress_callback((idx + 1) / float(total) * 100.0, idx + 1)
