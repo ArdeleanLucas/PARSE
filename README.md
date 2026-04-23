@@ -114,6 +114,26 @@ Silero VAD segments each full-length recording before Razhan processes it. VAD p
 
 The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) handles IPA transcription of annotated segments via CTC phoneme-to-word alignment. Both models are stored locally — no internet connection is required at inference time.
 
+### Citation and external dependency links
+
+For academic integrity, the following table lists the **core external models and repositories directly referenced by the current PARSE code/config**. If PARSE results are reported in a thesis, paper, talk, or dataset release, these are the first external components that should be cited or acknowledged alongside PARSE itself.
+
+| Component | Type | Used in PARSE for | Link |
+|---|---|---|---|
+| `razhan/whisper-base-sdh` | Model | ORTH transcription of Southern Kurdish speech | https://huggingface.co/razhan/whisper-base-sdh |
+| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | Model | IPA transcription / phoneme recognition | https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft |
+| Silero VAD | Model / repo | Voice activity detection during Whisper-style decoding | https://github.com/snakers4/silero-vad |
+| faster-whisper | Repository / library | Local STT + ORTH inference backend | https://github.com/SYSTRAN/faster-whisper |
+| CTranslate2 | Repository / library | Optimized local inference runtime for Whisper-family models | https://github.com/OpenNMT/CTranslate2 |
+| Epitran | Repository / library | Orthography-to-IPA transliteration fallback | https://github.com/dmort27/epitran |
+| WaveSurfer.js | Repository / library | Long-recording waveform UI, regions, and timeline | https://github.com/katspaugh/wavesurfer.js |
+| React | Repository / library | Frontend application framework | https://github.com/facebook/react |
+| Vite | Repository / library | Frontend dev/build toolchain | https://github.com/vitejs/vite |
+| Tailwind CSS | Repository / library | Frontend styling system | https://github.com/tailwindlabs/tailwindcss |
+| Lucide | Repository / library | UI icon set (`lucide-react`) | https://github.com/lucide-icons/lucide |
+
+**Scope note:** this table intentionally covers the major external models and repositories that PARSE calls out in source/config and that materially shape runtime behaviour or outputs. Proprietary API providers used by configuration (for example OpenAI or xAI) are services rather than citeable source repositories, so they should be acknowledged separately in method sections when they are actually enabled in a given run.
+
 ### Lexical Anchor Alignment System
 
 The core unique feature of PARSE. Long elicitation recordings (2.5–5 hours each) contain target lexical items embedded in conversational frames, metalinguistic commentary, and ambient noise. Manually scanning recordings to locate each concept across eleven speakers is prohibitively slow and inconsistent. PARSE solves this through a two-signal candidate scoring pipeline (thesis §4.4).
