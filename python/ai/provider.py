@@ -41,6 +41,13 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "provider": "local",
         "model": "epitran",
     },
+    "ortho": {
+        "provider": "faster-whisper",
+        "model_path": "razhan/whisper-base-sdh",
+        "language": "sd",
+        "device": "cuda",
+        "compute_type": "float16",
+    },
     "llm": {
         "provider": "openai",
         "model": "gpt-5.4",
@@ -961,7 +968,12 @@ class AIProvider(abc.ABC):
 
 
 class LocalWhisperProvider(AIProvider):
-    """Local provider backed by faster-whisper for STT."""
+    """Local provider backed by faster-whisper.
+
+    Used by both STT (``config_section="stt"``) and ORTHO
+    (``config_section="ortho"``, razhan/whisper-base-sdh). The section
+    selects which ai_config block supplies model_path/device/compute_type.
+    """
 
     def __init__(
         self,
@@ -970,15 +982,17 @@ class LocalWhisperProvider(AIProvider):
         language: Optional[str] = None,
         device: Optional[str] = None,
         compute_type: Optional[str] = None,
+        config_section: str = "stt",
     ) -> None:
         super().__init__(config=config, config_path=config_path)
 
-        stt_config = self.config.get("stt", {})
-        self.model_path = str(stt_config.get("model_path", "")).strip()
-        self.language = str(language or stt_config.get("language", "")).strip() or None
-        self.device = str(device or stt_config.get("device", "cpu")).strip() or "cpu"
+        self.config_section = str(config_section or "stt").strip() or "stt"
+        section_config = self.config.get(self.config_section, {})
+        self.model_path = str(section_config.get("model_path", "")).strip()
+        self.language = str(language or section_config.get("language", "")).strip() or None
+        self.device = str(device or section_config.get("device", "cpu")).strip() or "cpu"
         self.compute_type = (
-            str(compute_type or stt_config.get("compute_type", "int8")).strip() or "int8"
+            str(compute_type or section_config.get("compute_type", "int8")).strip() or "int8"
         )
 
         if _stt_force_cpu_env() and self.device.lower().startswith("cuda"):
@@ -1608,6 +1622,19 @@ def get_stt_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     return _build_provider(provider_name, merged)
 
 
+def get_ortho_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
+    """Factory for the orthographic transcription provider (razhan/whisper-base-sdh).
+
+    ORTHO is always a faster-whisper model configured in the `ortho` block,
+    distinct from whatever general-purpose model STT uses. This goes straight
+    to ``LocalWhisperProvider`` with ``config_section="ortho"`` so
+    model_path / device / language come from the ortho block rather than stt.
+    """
+    override = config or {}
+    merged = _deep_merge_dicts(load_ai_config(), override)
+    return LocalWhisperProvider(config=merged, config_section="ortho")
+
+
 def get_ipa_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     """Factory for IPA providers resolved from `ipa.provider` fallback chain."""
     override = config or {}
@@ -1660,6 +1687,7 @@ __all__ = [
     "OllamaProvider",
     "OpenAIChatRuntime",
     "get_stt_provider",
+    "get_ortho_provider",
     "get_ipa_provider",
     "get_llm_provider",
     "get_chat_config",

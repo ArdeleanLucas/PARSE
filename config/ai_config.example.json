@@ -12,6 +12,15 @@
     "provider": "local",
     "model": "epitran"
   },
+  "ortho": {
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH model. model_path may be a HuggingFace repo id (razhan/whisper-base-sdh) or a local CTranslate2 path.",
+    "provider": "faster-whisper",
+    "model_path": "razhan/whisper-base-sdh",
+    "language": "sd",
+    "device": "cuda",
+    "compute_type": "float16",
+    "beam_size": 5
+  },
   "llm": {
     "provider": "openai",
     "model": "gpt-5.4",
