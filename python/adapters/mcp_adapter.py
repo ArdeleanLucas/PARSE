@@ -22,7 +22,12 @@ Tools exposed:
   Write-allowed:
     contact_lexeme_lookup, import_tag_csv, prepare_tag_import,
     onboard_speaker_import, import_processed_speaker,
-    parse_memory_upsert_section
+    parse_memory_upsert_section,
+    audio_normalize_start, enrichments_write, lexeme_notes_write,
+    export_annotations_csv, export_lingpy_tsv, export_nexus
+  New read tools:
+    audio_normalize_status, enrichments_read, lexeme_notes_read,
+    jobs_list_active, source_index_validate
 
 Usage:
     python python/adapters/mcp_adapter.py
@@ -377,6 +382,78 @@ def _build_pipeline_callbacks() -> tuple:
     return pipeline_state, start_compute
 
 
+def _build_normalize_callback():
+    """Build ParseChatTools' start_normalize_job callback that proxies to the HTTP server."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def start_normalize_job(speaker: str, source_wav: Optional[str]) -> str:
+        payload: Dict[str, Any] = {"speaker": speaker}
+        if source_wav:
+            payload["sourceWav"] = source_wav
+        data = _json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url="{0}/api/normalize".format(base_url),
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            try:
+                body = http_err.read().decode("utf-8") or ""
+            except Exception:
+                body = ""
+            raise RuntimeError(
+                "PARSE API normalize start failed ({0}): {1}".format(http_err.code, body[:300])
+            )
+        except urllib.error.URLError as exc:
+            raise RuntimeError("PARSE API unreachable at {0}: {1}".format(base_url, exc))
+        parsed = _json.loads(body) if body else {}
+        job_id = str(parsed.get("jobId") or parsed.get("job_id") or "").strip()
+        if not job_id:
+            raise RuntimeError(
+                "PARSE API returned no jobId for normalize start: {0}".format(parsed)
+            )
+        return job_id
+
+    return start_normalize_job
+
+
+def _build_jobs_callback():
+    """Build ParseChatTools' list_active_jobs callback that proxies to the HTTP server."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def list_active_jobs() -> List[Dict[str, Any]]:
+        req = urllib.request.Request(
+            url="{0}/api/jobs/active".format(base_url),
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10.0) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            raise RuntimeError(
+                "PARSE API jobs/active failed ({0})".format(http_err.code)
+            )
+        except urllib.error.URLError as exc:
+            raise RuntimeError("PARSE API unreachable at {0}: {1}".format(base_url, exc))
+        parsed = _json.loads(body) if body else {}
+        return list(parsed.get("jobs") or [])
+
+    return list_active_jobs
+
+
 def _resolve_external_read_roots() -> list:
     """Parse PARSE_EXTERNAL_READ_ROOTS from env into a list of Paths.
 
@@ -560,6 +637,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     start_stt, get_snapshot = _build_stt_callbacks()
     pipeline_state_cb, start_compute_cb = _build_pipeline_callbacks()
     onboard_callback = _build_onboard_callback()
+    normalize_cb = _build_normalize_callback()
+    jobs_cb = _build_jobs_callback()
     tools = ParseChatTools(
         project_root=root,
         start_stt_job=start_stt,
@@ -569,6 +648,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         onboard_speaker=onboard_callback,
         pipeline_state=pipeline_state_cb,
         start_compute_job=start_compute_cb,
+        start_normalize_job=normalize_cb,
+        list_active_jobs=jobs_cb,
     )
 
     mcp = FastMCP(
