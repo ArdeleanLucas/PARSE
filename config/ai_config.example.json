@@ -49,6 +49,7 @@
   "wav2vec2": {
     "provider": "wav2vec2-ipa",
     "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
-    "device": "cuda"
+    "device": "cuda",
+    "force_cpu": false
   }
 }

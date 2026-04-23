@@ -3137,9 +3137,22 @@ def _get_ipa_aligner() -> Any:
         file=sys.stderr,
         flush=True,
     )
+    # Honour wav2vec2.force_cpu from ai_config.json, or auto-detect via
+    # resolve_device() which forces CPU on WSL to avoid GPU driver crashes.
+    try:
+        import json as _json
+        _ai_cfg = _json.loads((_project_root() / "config" / "ai_config.json").read_text())
+        _w2v = _ai_cfg.get("wav2vec2", {})
+        if _w2v.get("force_cpu"):
+            _ipa_device: Optional[str] = "cpu"
+        else:
+            _ipa_device = _w2v.get("device") or None
+    except Exception:
+        _ipa_device = None
+
     try:
         _compute_checkpoint("ALIGNER.load_begin")
-        _IPA_ALIGNER = Aligner.load()
+        _IPA_ALIGNER = Aligner.load(device=_ipa_device)
         _compute_checkpoint("ALIGNER.load_done", elapsed=round(_time.time() - t0, 2))
     except Exception as exc:
         elapsed = _time.time() - t0
