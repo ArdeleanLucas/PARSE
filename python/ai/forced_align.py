@@ -557,18 +557,23 @@ def align_segments(
     device: Optional[str] = None,
     emit_phonemes: bool = True,
     aligner: Optional[Aligner] = None,
+    audio_tensor: Optional[Any] = None,
 ) -> List[List[AlignedWord]]:
     """Align every word in every segment.
 
     Returns a list indexed by segment, inner list indexed by word. Segments
     without a ``words`` key yield an empty inner list (proportional fallback
     is only sensible when Tier 1 produced at least one Whisper word).
+
+    ``audio_tensor`` may be passed by callers that already hold the
+    pre-loaded mono-16 kHz tensor (e.g. ``transcribe_words_with_forced_align``)
+    to avoid reloading a large file a second time.
     """
     path = Path(audio_path).expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError("Audio file not found: {0}".format(path))
 
-    audio_full = _load_audio_mono_16k(path)
+    audio_full = audio_tensor if audio_tensor is not None else _load_audio_mono_16k(path)
 
     # Lazy-load aligner only when there is work to do and caller didn't
     # supply one. A caller (e.g. the MCP job runner) can share a single

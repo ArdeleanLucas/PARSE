@@ -3276,96 +3276,110 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     _compute_checkpoint("IPA.get_aligner_begin")
     aligner = _get_ipa_aligner()
     _compute_checkpoint("IPA.get_aligner_done")
-    print("[IPA] aligner ready — entering per-interval loop (n={0})".format(len(ortho_intervals)), file=sys.stderr, flush=True)
-    _compute_checkpoint("IPA.loop_begin", n=len(ortho_intervals))
+    # Use the full Tier 2+3 path when the STT cache has word timestamps;
+    # fall back to coarse ORTH-interval CTC when it doesn't.
+    stt_segments = _read_stt_cache(speaker)
+    has_words = bool(stt_segments and any(seg.get("words") for seg in stt_segments))
 
-    filled = 0
-    skipped = 0
-    total = len(ortho_intervals)
-    # Categorised skip counters so the job result can show *why* nothing
-    # got filled. Aligned with the user-visible failure modes we traced
-    # on Fail02 where filled=0 skipped=38 with no surfaced reason.
+    exception_samples: List[str] = []
     skipped_empty_ortho = 0
     skipped_existing_ipa = 0
     skipped_zero_range = 0
     skipped_exception = 0
     skipped_empty_ipa = 0
-    exception_samples: List[str] = []  # first 3 exceptions, full message
 
-    for idx, ortho in enumerate(ortho_intervals):
-        text = str(ortho.get("text") or "").strip()
-        start_sec = float(ortho.get("start", 0.0) or 0.0)
-        end_sec = float(ortho.get("end", start_sec) or start_sec)
-        key = _key(ortho)
-        existing = ipa_by_key.get(key)
-        existing_text = str((existing or {}).get("text") or "").strip()
+    if has_words:
+        print("[IPA] STT cache has words — using full forced-align path (Tier 2+3)", file=sys.stderr, flush=True)
+        _compute_checkpoint("IPA.forced_align_begin")
+        from ai.ipa_transcribe import transcribe_words_with_forced_align
 
-        # Ortho text is still the gate: intervals with no ortho aren't
-        # worth transcribing (typically silence/noise segments that the
-        # user hasn't labelled).
-        if not text:
-            skipped += 1
-            skipped_empty_ortho += 1
-            continue
-        if existing_text and not overwrite:
-            skipped += 1
-            skipped_existing_ipa += 1
-            continue
-        if end_sec <= start_sec:
-            skipped += 1
-            skipped_zero_range += 1
-            continue
+        total_words = sum(len(seg.get("words") or []) for seg in stt_segments)
 
-        # Checkpoint the first 3 iterations at slice-grain so a per-call
-        # CUDA hang can be pinpointed. Later iterations only checkpoint
-        # every 10th to keep the log bounded.
-        _trace_iv = idx < 3 or idx % 10 == 0
-        if _trace_iv:
-            _compute_checkpoint(
-                "IPA.iv_begin", idx=idx, start=start_sec, end=end_sec
-            )
-        try:
-            new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
-        except Exception as exc:
-            skipped += 1
-            skipped_exception += 1
+        def _word_progress(pct: float, n: int) -> None:
+            _set_job_progress(job_id, 5.0 + pct * 0.9, message="IPA {0}/{1} words".format(n, total_words))
+
+        word_results = transcribe_words_with_forced_align(
+            audio_path,
+            stt_segments,
+            aligner=aligner,
+            progress_callback=_word_progress,
+        )
+        _compute_checkpoint("IPA.forced_align_done", word_count=len(word_results))
+        print("[IPA] forced-align IPA: {0} word intervals".format(len(word_results)), file=sys.stderr, flush=True)
+
+        ipa_intervals = [
+            {"start": r["start"], "end": r["end"], "text": r["ipa"]}
+            for r in word_results
+        ]
+        filled = sum(1 for r in word_results if r["ipa"])
+        skipped_empty_ipa = sum(1 for r in word_results if not r["ipa"])
+        skipped = skipped_empty_ipa
+        total = len(word_results)
+    else:
+        print("[IPA] no STT word cache — using coarse ORTH-interval fallback", file=sys.stderr, flush=True)
+        _compute_checkpoint("IPA.loop_begin", n=len(ortho_intervals))
+
+        filled = 0
+        skipped = 0
+        total = len(ortho_intervals)
+
+        for idx, ortho in enumerate(ortho_intervals):
+            text = str(ortho.get("text") or "").strip()
+            start_sec = float(ortho.get("start", 0.0) or 0.0)
+            end_sec = float(ortho.get("end", start_sec) or start_sec)
+            key = _key(ortho)
+            existing = ipa_by_key.get(key)
+            existing_text = str((existing or {}).get("text") or "").strip()
+
+            if not text:
+                skipped += 1
+                skipped_empty_ortho += 1
+                continue
+            if existing_text and not overwrite:
+                skipped += 1
+                skipped_existing_ipa += 1
+                continue
+            if end_sec <= start_sec:
+                skipped += 1
+                skipped_zero_range += 1
+                continue
+
+            _trace_iv = idx < 3 or idx % 10 == 0
             if _trace_iv:
-                _compute_checkpoint(
-                    "IPA.iv_exc",
-                    idx=idx,
-                    exc_type=type(exc).__name__,
-                    exc=str(exc)[:200],
-                )
-            if len(exception_samples) < 3:
-                exception_samples.append(
-                    "interval[{0}] {1:.2f}-{2:.2f}: {3}: {4}".format(
-                        idx, start_sec, end_sec, type(exc).__name__, exc
+                _compute_checkpoint("IPA.iv_begin", idx=idx, start=start_sec, end=end_sec)
+            try:
+                new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
+            except Exception as exc:
+                skipped += 1
+                skipped_exception += 1
+                if _trace_iv:
+                    _compute_checkpoint("IPA.iv_exc", idx=idx, exc_type=type(exc).__name__, exc=str(exc)[:200])
+                if len(exception_samples) < 3:
+                    exception_samples.append(
+                        "interval[{0}] {1:.2f}-{2:.2f}: {3}: {4}".format(
+                            idx, start_sec, end_sec, type(exc).__name__, exc
+                        )
                     )
-                )
-            continue
+                continue
 
-        if _trace_iv:
-            _compute_checkpoint(
-                "IPA.iv_done",
-                idx=idx,
-                out_len=len(str(new_ipa or "")),
-            )
-        new_ipa = str(new_ipa or "").strip()
-        if not new_ipa:
-            skipped += 1
-            skipped_empty_ipa += 1
-            continue
+            if _trace_iv:
+                _compute_checkpoint("IPA.iv_done", idx=idx, out_len=len(str(new_ipa or "")))
+            new_ipa = str(new_ipa or "").strip()
+            if not new_ipa:
+                skipped += 1
+                skipped_empty_ipa += 1
+                continue
 
-        if existing is not None:
-            existing["text"] = new_ipa
-        else:
-            new_interval = {"start": ortho["start"], "end": ortho["end"], "text": new_ipa}
-            ipa_intervals.append(new_interval)
-            ipa_by_key[key] = new_interval
-        filled += 1
+            if existing is not None:
+                existing["text"] = new_ipa
+            else:
+                new_interval = {"start": ortho["start"], "end": ortho["end"], "text": new_ipa}
+                ipa_intervals.append(new_interval)
+                ipa_by_key[key] = new_interval
+            filled += 1
 
-        progress = 5.0 + ((idx + 1) / total) * 90.0
-        _set_job_progress(job_id, progress, message="IPA {0}/{1}".format(idx + 1, total))
+            progress = 5.0 + ((idx + 1) / total) * 90.0
+            _set_job_progress(job_id, progress, message="IPA {0}/{1}".format(idx + 1, total))
 
     ipa_intervals.sort(key=lambda i: (float(i.get("start", 0.0)), float(i.get("end", 0.0))))
     ipa_tier["intervals"] = ipa_intervals
@@ -3421,6 +3435,7 @@ def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[
     that Tier 3 (or a manual UI step) can then consume.
     """
     speaker = _normalize_speaker_id(payload.get("speaker"))
+    overwrite = bool(payload.get("overwrite", False))
     language = str(payload.get("language") or "ku").strip() or "ku"
     try:
         pad_ms = int(payload.get("padMs", 100) or 100)
@@ -3483,6 +3498,16 @@ def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[
     if output_path.suffix == ".stt":
         output_path = output_path.with_suffix("")
     output_path = output_path.parent / "{0}.aligned.json".format(output_path.name)
+
+    if output_path.is_file() and not overwrite:
+        existing = _read_json_file(output_path, {})
+        return {
+            "speaker": speaker,
+            "skipped": True,
+            "reason": "aligned artifact already exists; pass overwrite=true to replace",
+            "alignedArtifact": str(output_path),
+            "segmentCount": len(existing.get("segments") or []),
+        }
 
     out_payload = {
         **artifact,

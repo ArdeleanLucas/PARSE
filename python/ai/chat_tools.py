@@ -602,6 +602,10 @@ class ParseChatTools:
                     "required": ["speaker"],
                     "properties": {
                         "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "When true, replaces an existing aligned artifact (default: false).",
+                        },
                         "language": {
                             "type": "string",
                             "minLength": 2,
@@ -2212,9 +2216,11 @@ class ParseChatTools:
         pad_ms = max(0, min(500, pad_ms))
 
         emit_phonemes = bool(args.get("emitPhonemes", True))
+        overwrite = bool(args.get("overwrite", False))
 
         payload_body: Dict[str, Any] = {
             "speaker": speaker,
+            "overwrite": overwrite,
             "language": language,
             "padMs": pad_ms,
             "emitPhonemes": emit_phonemes,

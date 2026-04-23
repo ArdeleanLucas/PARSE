@@ -31,6 +31,7 @@ from typing import Any, Iterable, List, Optional, Sequence, TypedDict
 try:
     from .forced_align import (
         DEFAULT_MODEL_NAME,
+        DEFAULT_PAD_MS,
         DEFAULT_SAMPLE_RATE,
         Aligner,
         _load_audio_mono_16k,
@@ -38,6 +39,7 @@ try:
 except ImportError:  # pragma: no cover - CLI invocation
     from forced_align import (  # type: ignore
         DEFAULT_MODEL_NAME,
+        DEFAULT_PAD_MS,
         DEFAULT_SAMPLE_RATE,
         Aligner,
         _load_audio_mono_16k,
@@ -122,6 +124,88 @@ def transcribe_intervals(
     total = len(parsed)
     out: List[IpaResult] = []
     for idx, spec in enumerate(parsed):
+        ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+        out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+        if progress_callback is not None:
+            try:
+                progress_callback((idx + 1) / float(total) * 100.0, idx + 1)
+            except Exception:
+                pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Full 3-tier path: forced alignment → word windows → wav2vec2 CTC
+# ---------------------------------------------------------------------------
+
+
+def transcribe_words_with_forced_align(
+    audio_path: Path,
+    segments: Sequence[Any],
+    *,
+    model_name: str = DEFAULT_MODEL_NAME,
+    device: Optional[str] = None,
+    language: str = "ku",
+    pad_ms: int = DEFAULT_PAD_MS,
+    aligner: Optional[Aligner] = None,
+    progress_callback: Optional[Any] = None,
+) -> List[IpaResult]:
+    """Full 3-tier IPA: G2P + torchaudio forced alignment → word windows → wav2vec2 CTC.
+
+    For each word in ``segments[].words[]``:
+      1. ``align_word()`` refines the Whisper boundary via G2P +
+         ``torchaudio.functional.forced_align`` against the xlsr-53 vocab.
+      2. ``transcribe_window()`` runs wav2vec2 CTC on the refined word window.
+
+    Returns one :class:`IpaResult` per word. Segments that carry no
+    ``words[]`` are skipped. Falls back to segment-level
+    :func:`transcribe_intervals` when no words are found at all.
+    """
+    try:
+        from .forced_align import align_segments as _align_segments
+    except ImportError:
+        from forced_align import align_segments as _align_segments  # type: ignore
+
+    path = Path(audio_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError("Audio file not found: {0}".format(path))
+
+    local_aligner = aligner or Aligner.load(model_name=model_name, device=device)
+    audio = _load_audio_mono_16k(path)
+
+    # Tier 2: forced alignment — pass pre-loaded tensor to avoid double-load
+    aligned = _align_segments(
+        audio_path=path,
+        segments=list(segments),
+        language=language,
+        pad_ms=pad_ms,
+        aligner=local_aligner,
+        audio_tensor=audio,
+    )
+
+    word_intervals: List[IntervalSpec] = []
+    for seg_words in aligned:
+        for word in seg_words:
+            s = float(word.get("start", 0.0) or 0.0)
+            e = float(word.get("end", 0.0) or 0.0)
+            if e > s:
+                word_intervals.append(IntervalSpec(start=s, end=e))
+
+    if not word_intervals:
+        # No words produced — fall back to segment-level coarse transcription
+        seg_intervals = [
+            {"start": s.get("start", 0.0), "end": s.get("end", 0.0)}
+            for s in segments
+        ]
+        return transcribe_intervals(
+            path, seg_intervals, aligner=local_aligner,
+            progress_callback=progress_callback,
+        )
+
+    # Tier 3: wav2vec2 CTC on each refined word window
+    total = len(word_intervals)
+    out: List[IpaResult] = []
+    for idx, spec in enumerate(word_intervals):
         ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
         out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
         if progress_callback is not None:

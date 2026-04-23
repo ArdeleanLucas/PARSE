@@ -964,6 +964,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     @mcp.tool()
     def forced_align_start(
         speaker: str,
+        overwrite: Optional[bool] = None,
         language: Optional[str] = None,
         padMs: Optional[int] = None,
         emitPhonemes: Optional[bool] = None,
@@ -978,12 +979,15 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
 
         Args:
             speaker: Speaker name
+            overwrite: When true, replaces an existing aligned artifact (default: false)
             language: espeak-ng language code for the internal G2P step (default: ku)
             padMs: Context pad around each word window in milliseconds (0-500, default 100)
             emitPhonemes: Include per-phoneme spans in the output (default true)
             dryRun: Validate and describe the plan without launching the job
         """
         args: Dict[str, Any] = {"speaker": speaker}
+        if overwrite is not None:
+            args["overwrite"] = overwrite
         if language is not None:
             args["language"] = language
         if padMs is not None:
