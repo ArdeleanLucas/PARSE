@@ -47,6 +47,11 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "import_processed_speaker",
     "parse_memory_upsert_section",
     "apply_timestamp_offset",
+    # Pipeline run kicks off background transcription jobs — it's
+    # "mutating" in the sense that annotations get rewritten once the
+    # job completes, but the tool itself just returns a jobId for the
+    # caller to poll via compute_status.
+    "pipeline_run",
 })
 TEXT_PREVIEW_EXTENSIONS = frozenset({".md", ".markdown", ".txt", ".rst"})
 ONBOARD_AUDIO_EXTENSIONS = frozenset({".wav", ".flac", ".mp3", ".ogg", ".m4a"})
@@ -275,10 +280,19 @@ class ParseChatTools:
         onboard_speaker: Optional[
             Callable[[str, Path, Optional[Path], bool], Dict[str, Any]]
         ] = None,
-        # Tier 2/3 acoustic alignment surface: launch compute jobs of
-        # type "forced_align" or "ipa_only" (wav2vec2 acoustic IPA).
-        # Signature: (compute_type, payload) -> job_id.
+        # Launch a compute job of any registered type: "full_pipeline",
+        # "ortho", "ipa_only", "contact-lexemes", "forced_align",
+        # "ipa" (acoustic wav2vec2). Takes (compute_type, payload),
+        # returns a jobId the caller polls via compute_status. Mirrors
+        # ``/api/compute/<type>`` POST. Used by both the Tier 2/3
+        # acoustic-alignment tools (PR #146) and the pipeline-run /
+        # compute-status MCP surface (PR #144).
         start_compute_job: Optional[Callable[[str, Dict[str, Any]], str]] = None,
+        # Preflight: returns ``_pipeline_state_for_speaker``'s shape for
+        # a given speaker ({"normalize": {done, can_run, reason, ...},
+        # "stt": {...}, "ortho": {...}, "ipa": {...}}). Surfaces what's
+        # already done and whether each step *can* run now.
+        pipeline_state: Optional[Callable[[str], Dict[str, Any]]] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
@@ -325,6 +339,7 @@ class ParseChatTools:
         self._get_job_snapshot = get_job_snapshot
         self._onboard_speaker = onboard_speaker
         self._start_compute_job = start_compute_job
+        self._pipeline_state = pipeline_state
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
             "project_context_read": ChatToolSpec(
@@ -978,6 +993,141 @@ class ParseChatTools:
                     },
                 },
             ),
+            "speakers_list": ChatToolSpec(
+                name="speakers_list",
+                description=(
+                    "List every speaker with an annotation file under ``annotations/``. "
+                    "Read-only. Use as the starting point for a batch pipeline run — pair "
+                    "with ``pipeline_state_batch`` to see which speakers are ready to "
+                    "process. Filters out non-annotation entries (e.g. a ``backups/`` "
+                    "directory) so the list is directly usable as input to ``pipeline_run``."
+                ),
+                parameters={"type": "object", "additionalProperties": False, "properties": {}},
+            ),
+            "pipeline_state_read": ChatToolSpec(
+                name="pipeline_state_read",
+                description=(
+                    "Preflight one speaker: what's already done (normalize/STT/ORTH/IPA "
+                    "counts) AND whether each step can_run right now (audio file "
+                    "reachable, prerequisites in place). Read-only. This is the same data "
+                    "the UI's TranscriptionRunModal shows, exposed for agents that want "
+                    "to decide whether to skip or include a speaker in a batch."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                    },
+                },
+            ),
+            "pipeline_state_batch": ChatToolSpec(
+                name="pipeline_state_batch",
+                description=(
+                    "Preflight multiple speakers at once. Read-only. With no arguments, "
+                    "probes every speaker from ``speakers_list``. Supply ``speakers`` to "
+                    "restrict. Returns a grid: per speaker × step, whether the step can "
+                    "run and (if blocked) why — matches the speaker-picker grid in the "
+                    "UI. Ideal for answering 'can I kick off a full batch and walk away?'"
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "speakers": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                            "maxItems": 200,
+                            "description": "Optional speaker-id subset. Omit for every annotated speaker.",
+                        },
+                    },
+                },
+            ),
+            "pipeline_run": ChatToolSpec(
+                name="pipeline_run",
+                description=(
+                    "Kick off a transcription pipeline for ONE speaker — the same "
+                    "``full_pipeline`` compute the UI uses. Supports any subset of "
+                    "``normalize / stt / ortho / ipa`` in canonical order. Setting "
+                    "``steps: ['ortho']`` with ``overwrites: {ortho: true}`` runs the "
+                    "razhan model full-file against this speaker's working WAV and "
+                    "overwrites the ortho tier. Returns a jobId; poll via "
+                    "``compute_status`` (compute_type=\"full_pipeline\") until "
+                    "``status=complete``. Steps run step-resilient: a failing STT will "
+                    "not abort ORTH/IPA for the same speaker."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "steps"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "steps": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["normalize", "stt", "ortho", "ipa"],
+                            },
+                            "minItems": 1,
+                            "maxItems": 4,
+                        },
+                        "overwrites": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "normalize": {"type": "boolean"},
+                                "stt": {"type": "boolean"},
+                                "ortho": {"type": "boolean"},
+                                "ipa": {"type": "boolean"},
+                            },
+                            "description": (
+                                "Per-step overwrite flags. Steps flagged false will "
+                                "skip when their tier / cache is already populated; "
+                                "flagged true will replace the existing data."
+                            ),
+                        },
+                        "language": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32,
+                            "description": (
+                                "Optional language override forwarded to STT + ORTH "
+                                "(razhan). Empty / omitted = auto-detect for STT, "
+                                "``sd`` for ORTH (razhan's fine-tuning target)."
+                            ),
+                        },
+                    },
+                },
+            ),
+            "compute_status": ChatToolSpec(
+                name="compute_status",
+                description=(
+                    "Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) "
+                    "by jobId. Read-only. Returns the job snapshot with status, progress, "
+                    "message, and — for completed jobs — the full ``result`` payload. "
+                    "For pipeline jobs the result includes per-step status and summary "
+                    "counts so the agent can reason about success/skip/error cells."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "computeType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "description": (
+                                "Optional expected compute type (e.g. "
+                                "\"full_pipeline\"). If provided, the tool validates "
+                                "the job's type matches before returning the snapshot."
+                            ),
+                        },
+                    },
+                },
+            ),
         }
 
     def openai_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -1535,7 +1685,7 @@ class ParseChatTools:
         return payload
 
     # ------------------------------------------------------------------
-    # Tier 1/2/3 acoustic alignment tools
+    # Tier 1/2/3 acoustic alignment tools (from feat/acoustic-alignment-ipa)
     # ------------------------------------------------------------------
 
     def _tool_stt_word_level_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1726,7 +1876,11 @@ class ParseChatTools:
             }
 
         actual_type = str(snapshot.get("type") or snapshot.get("computeType") or "").strip().lower()
-        if actual_type and actual_type not in {expected_type, expected_type.replace("_", "-")}:
+        if actual_type and actual_type not in {
+            expected_type,
+            expected_type.replace("_", "-"),
+            "compute:{0}".format(expected_type),
+        }:
             return {
                 "readOnly": True,
                 "jobId": job_id,
@@ -1746,6 +1900,185 @@ class ParseChatTools:
             "error": snapshot.get("error"),
             "result": snapshot.get("result"),
         }
+
+    # ------------------------------------------------------------------
+    # Pipeline preflight + run + status tools (from feat/mcp-pipeline-tools)
+    # ------------------------------------------------------------------
+
+    def _tool_speakers_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List all annotated speakers under ``annotations/``.
+
+        Filters to entries that look like real annotation records — either
+        ``<speaker>.parse.json`` or ``<speaker>.json`` — so accidental
+        sibling directories (e.g. ``backups/``) don't pollute the list.
+        """
+        speakers: set[str] = set()
+        if self.annotations_dir.is_dir():
+            for entry in self.annotations_dir.iterdir():
+                if not entry.is_file():
+                    continue
+                name = entry.name
+                if name.endswith(".parse.json"):
+                    speakers.add(name[: -len(".parse.json")])
+                elif name.endswith(".json") and not name.endswith(".parse.json"):
+                    speakers.add(name[: -len(".json")])
+
+        ordered = sorted(speakers)
+        return {
+            "readOnly": True,
+            "speakers": ordered,
+            "count": len(ordered),
+        }
+
+    def _tool_pipeline_state_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._pipeline_state is None:
+            raise ChatToolExecutionError("pipeline state callback is unavailable")
+        speaker = self._normalize_speaker(args.get("speaker"))
+        try:
+            state = self._pipeline_state(speaker)
+        except Exception as exc:
+            raise ChatToolExecutionError("pipeline state lookup failed: {0}".format(exc)) from exc
+        if not isinstance(state, dict):
+            raise ChatToolExecutionError("pipeline state callback returned non-object")
+        payload = {"readOnly": True, "speaker": speaker}
+        payload.update(state)
+        return payload
+
+    def _tool_pipeline_state_batch(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._pipeline_state is None:
+            raise ChatToolExecutionError("pipeline state callback is unavailable")
+
+        requested = args.get("speakers")
+        if requested is None:
+            # Default to every annotated speaker on disk.
+            inventory = self._tool_speakers_list({})
+            speakers = list(inventory.get("speakers") or [])
+        elif isinstance(requested, list):
+            speakers = []
+            for raw in requested:
+                normalized = self._normalize_speaker(raw)
+                if normalized and normalized not in speakers:
+                    speakers.append(normalized)
+        else:
+            raise ChatToolValidationError("speakers must be a list")
+
+        results: List[Dict[str, Any]] = []
+        blocked = 0
+        for speaker in speakers:
+            try:
+                state = self._pipeline_state(speaker)
+                if not isinstance(state, dict):
+                    state = {}
+            except Exception as exc:
+                state = {"error": str(exc)}
+            # Flatten one row per speaker for easy grid reading.
+            row: Dict[str, Any] = {"speaker": speaker}
+            row.update(state)
+            results.append(row)
+            for step_name in ("normalize", "stt", "ortho", "ipa"):
+                step = state.get(step_name) if isinstance(state, dict) else None
+                if isinstance(step, dict) and step.get("can_run") is False:
+                    blocked += 1
+                    break
+
+        return {
+            "readOnly": True,
+            "count": len(results),
+            "blockedSpeakers": blocked,
+            "rows": results,
+        }
+
+    def _tool_pipeline_run(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        # Reuses the same start_compute_job callback that powers the Tier
+        # 2/3 acoustic tools above; full_pipeline is one compute type
+        # among many dispatched from server._run_compute_job.
+        if self._start_compute_job is None:
+            raise ChatToolExecutionError("start_compute_job callback is unavailable")
+
+        speaker = self._normalize_speaker(args.get("speaker"))
+        raw_steps = args.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            raise ChatToolValidationError("steps must be a non-empty list")
+        valid = {"normalize", "stt", "ortho", "ipa"}
+        steps: List[str] = []
+        for raw in raw_steps:
+            s = str(raw or "").strip().lower()
+            if s not in valid:
+                raise ChatToolValidationError("invalid step: {0!r}".format(raw))
+            if s not in steps:
+                steps.append(s)
+
+        overwrites_raw = args.get("overwrites") or {}
+        if not isinstance(overwrites_raw, dict):
+            raise ChatToolValidationError("overwrites must be an object")
+        overwrites: Dict[str, bool] = {}
+        for k, v in overwrites_raw.items():
+            kk = str(k or "").strip().lower()
+            if kk not in valid:
+                raise ChatToolValidationError("invalid overwrite key: {0!r}".format(k))
+            overwrites[kk] = bool(v)
+
+        language_raw = args.get("language")
+        language = str(language_raw).strip() if isinstance(language_raw, str) else ""
+
+        payload: Dict[str, Any] = {"speaker": speaker, "steps": steps, "overwrites": overwrites}
+        if language:
+            payload["language"] = language
+
+        try:
+            job_id = self._start_compute_job("full_pipeline", payload)
+        except Exception as exc:
+            raise ChatToolExecutionError("pipeline start failed: {0}".format(exc)) from exc
+
+        return {
+            "jobId": str(job_id),
+            "status": "running",
+            "speaker": speaker,
+            "steps": steps,
+            "overwrites": overwrites,
+            "computeType": "full_pipeline",
+            "message": "Pipeline job started. Poll with compute_status.",
+        }
+
+    def _tool_compute_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._get_job_snapshot is None:
+            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+
+        job_id = str(args.get("jobId") or "").strip()
+        if not job_id:
+            raise ChatToolValidationError("jobId is required")
+        expected = str(args.get("computeType") or "").strip().lower()
+
+        snapshot = self._get_job_snapshot(job_id)
+        if snapshot is None:
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "not_found",
+                "message": "Unknown jobId",
+            }
+
+        job_type = str(snapshot.get("type") or "")
+        if expected and job_type != "compute:{0}".format(expected):
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "invalid_job_type",
+                "expected": "compute:{0}".format(expected),
+                "actual": job_type,
+            }
+
+        payload: Dict[str, Any] = {
+            "readOnly": True,
+            "jobId": job_id,
+            "type": job_type,
+            "status": snapshot.get("status"),
+            "progress": snapshot.get("progress"),
+            "message": snapshot.get("message"),
+            "error": snapshot.get("error"),
+            "result": snapshot.get("result"),
+        }
+        return payload
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.

@@ -4,18 +4,25 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (25):
-  project_context_read, annotation_read, read_csv_preview,
-  cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
-  contact_lexeme_lookup, stt_start, stt_status,
-  stt_word_level_start, stt_word_level_status,
-  forced_align_start, forced_align_status,
-  ipa_transcribe_acoustic_start, ipa_transcribe_acoustic_status,
-  detect_timestamp_offset, detect_timestamp_offset_from_pair,
-  apply_timestamp_offset,
-  import_tag_csv, prepare_tag_import,
-  onboard_speaker_import, import_processed_speaker,
-  parse_memory_read, parse_memory_upsert_section
+Tools exposed:
+  Read-only inspection:
+    project_context_read, annotation_read, speakers_list,
+    pipeline_state_read, pipeline_state_batch,
+    read_csv_preview, read_text_preview, read_audio_info,
+    cognate_compute_preview, cross_speaker_match_preview,
+    spectrogram_preview, parse_memory_read
+  Job control:
+    stt_start, stt_status, pipeline_run, compute_status,
+    stt_word_level_start, stt_word_level_status,
+    forced_align_start, forced_align_status,
+    ipa_transcribe_acoustic_start, ipa_transcribe_acoustic_status
+  Offset alignment:
+    detect_timestamp_offset, detect_timestamp_offset_from_pair,
+    apply_timestamp_offset
+  Write-allowed:
+    contact_lexeme_lookup, import_tag_csv, prepare_tag_import,
+    onboard_speaker_import, import_processed_speaker,
+    parse_memory_upsert_section
 
 Usage:
     python python/adapters/mcp_adapter.py
@@ -242,16 +249,132 @@ def _build_stt_callbacks() -> tuple:
         return job_id
 
     def get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
+        # First try STT-style status so existing stt_status paths work
+        # unchanged; if the server says "not an STT job", re-poll via the
+        # generic compute status so callers get the full job snapshot
+        # (result, progress, message) regardless of compute_type.
         try:
             response = _post_json("/api/stt/status", {"job_id": job_id})
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                "PARSE API unreachable at {0} — cannot poll STT job. "
+                "PARSE API unreachable at {0} — cannot poll job. "
                 "Underlying error: {1}".format(base_url, exc)
             )
+        status = str((response or {}).get("status") or "").lower()
+        is_type_mismatch = (
+            (response or {}).get("error") == "jobId is not an STT job"
+            or status == "error"
+            and "is not an stt job" in str((response or {}).get("error") or "").lower()
+        )
+        if is_type_mismatch:
+            try:
+                response = _post_json(
+                    "/api/compute/status", {"job_id": job_id}
+                )
+            except urllib.error.URLError:
+                # Swallow — return the original STT-typed error.
+                pass
         return response or None
 
     return start_stt_job, get_job_snapshot
+
+
+def _build_pipeline_callbacks() -> tuple:
+    """Build ParseChatTools' pipeline_state and start_compute callbacks.
+
+    Both proxy to the running PARSE HTTP server so chat/MCP callers see
+    the same job state as the browser UI — same in-memory job registry,
+    same pipeline sequencer, same annotations-on-disk.
+
+    Returns ``(pipeline_state, start_compute)``.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def _get_json(path: str, timeout: float = 20.0) -> Dict[str, Any]:
+        req = urllib.request.Request(
+            url="{0}{1}".format(base_url, path),
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            try:
+                body = http_err.read().decode("utf-8") or ""
+            except Exception:
+                body = ""
+            try:
+                parsed = _json.loads(body) if body else {}
+            except _json.JSONDecodeError:
+                parsed = {"error": body[:400] or http_err.reason}
+            if isinstance(parsed, dict):
+                parsed.setdefault("httpStatus", http_err.code)
+                return parsed
+            return {"error": str(parsed), "httpStatus": http_err.code}
+        parsed = _json.loads(body)
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _post_json(path: str, payload: Dict[str, Any], timeout: float = 20.0) -> Dict[str, Any]:
+        data = _json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url="{0}{1}".format(base_url, path),
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            try:
+                body = http_err.read().decode("utf-8") or ""
+            except Exception:
+                body = ""
+            try:
+                parsed = _json.loads(body) if body else {}
+            except _json.JSONDecodeError:
+                parsed = {"error": body[:400] or http_err.reason}
+            if isinstance(parsed, dict):
+                parsed.setdefault("httpStatus", http_err.code)
+                return parsed
+            return {"error": str(parsed), "httpStatus": http_err.code}
+        parsed = _json.loads(body)
+        return parsed if isinstance(parsed, dict) else {}
+
+    def pipeline_state(speaker: str) -> Dict[str, Any]:
+        import urllib.parse
+        safe = urllib.parse.quote(str(speaker or "").strip(), safe="")
+        try:
+            return _get_json("/api/pipeline/state/{0}".format(safe))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                "PARSE API unreachable at {0} — cannot probe pipeline state. "
+                "Underlying error: {1}".format(base_url, exc)
+            )
+
+    def start_compute(compute_type: str, payload: Dict[str, Any]) -> str:
+        import urllib.parse
+        safe = urllib.parse.quote(str(compute_type or "").strip(), safe="")
+        try:
+            response = _post_json("/api/compute/{0}".format(safe), payload or {})
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                "PARSE API unreachable at {0} — cannot start compute job. "
+                "Underlying error: {1}".format(base_url, exc)
+            )
+        job_id = str(response.get("job_id") or response.get("jobId") or "").strip()
+        if not job_id:
+            raise RuntimeError(
+                "PARSE API returned no jobId for compute start: {0}".format(response)
+            )
+        return job_id
+
+    return pipeline_state, start_compute
 
 
 def _resolve_external_read_roots() -> list:
@@ -435,6 +558,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     logger.info("Chat memory path: %s", memory_path)
 
     start_stt, get_snapshot = _build_stt_callbacks()
+    pipeline_state_cb, start_compute_cb = _build_pipeline_callbacks()
     onboard_callback = _build_onboard_callback()
     tools = ParseChatTools(
         project_root=root,
@@ -443,6 +567,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         external_read_roots=external_roots,
         memory_path=memory_path,
         onboard_speaker=onboard_callback,
+        pipeline_state=pipeline_state_cb,
+        start_compute_job=start_compute_cb,
     )
 
     mcp = FastMCP(
@@ -1136,6 +1262,110 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             "dryRun": dryRun,
         }
         result = tools.execute("parse_memory_upsert_section", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    # ---- Pipeline + preflight tools (added for batch-pipeline workflow) ----
+
+    @mcp.tool()
+    def speakers_list() -> str:
+        """List every annotated speaker in the project.
+
+        Returns a sorted array of speaker ids, filtered to real annotation
+        files (skips sibling dirs like ``backups/``). Starting point for
+        batch pipeline runs — feed into ``pipeline_state_batch`` to see
+        which speakers are ready to process, then into ``pipeline_run``
+        to kick jobs off.
+        """
+        result = tools.execute("speakers_list", {})
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def pipeline_state_read(speaker: str) -> str:
+        """Preflight one speaker: what's done + whether each step can run.
+
+        Returns the same shape the UI's TranscriptionRunModal consumes —
+        per-step ``{done, can_run, reason, intervals|segments|path}``. Use
+        this to answer questions like "can I run ORTH on Fail02 right now?"
+        without touching disk state.
+
+        Args:
+            speaker: Speaker id (filename stem in annotations/)
+        """
+        result = tools.execute("pipeline_state_read", {"speaker": speaker})
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def pipeline_state_batch(speakers: Optional[list] = None) -> str:
+        """Preflight many speakers at once — the "can I walk away?" tool.
+
+        With no args, probes every annotated speaker. Supply ``speakers``
+        to restrict to a subset. Returns a grid row per speaker with
+        per-step ``can_run`` + ``reason`` so an agent can decide which
+        speakers to include in a batch before kicking off long GPU runs.
+
+        Args:
+            speakers: Optional subset. Omit to probe all speakers.
+        """
+        args: Dict[str, Any] = {}
+        if speakers is not None:
+            args["speakers"] = speakers
+        result = tools.execute("pipeline_state_batch", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def pipeline_run(
+        speaker: str,
+        steps: list,
+        overwrites: Optional[dict] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        """Start a transcription pipeline for ONE speaker. Returns jobId.
+
+        Drives the same ``full_pipeline`` compute the UI uses. To run
+        razhan (ORTH) on a speaker with overwrite enabled:
+
+            steps=["ortho"], overwrites={"ortho": true}
+
+        For the full chain in order:
+
+            steps=["normalize", "stt", "ortho", "ipa"]
+
+        Steps are step-resilient: a failing STT will not abort ORTH/IPA
+        for the same speaker. Poll with ``compute_status`` until
+        ``status=complete`` — the returned result carries per-step
+        status (ok / skipped / error) + tracebacks for failures.
+
+        Args:
+            speaker: Speaker id to run against.
+            steps: Subset of ["normalize", "stt", "ortho", "ipa"].
+            overwrites: Per-step overwrite flags (default: all false).
+            language: Optional language override for STT + ORTH.
+        """
+        args: Dict[str, Any] = {"speaker": speaker, "steps": steps}
+        if overwrites is not None:
+            args["overwrites"] = overwrites
+        if language is not None:
+            args["language"] = language
+        result = tools.execute("pipeline_run", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def compute_status(jobId: str, computeType: Optional[str] = None) -> str:
+        """Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes).
+
+        Returns the full server-side job snapshot including the ``result``
+        payload for completed jobs. Pass ``computeType`` to assert the
+        job's expected type (e.g. ``"full_pipeline"``) — the tool returns
+        an ``invalid_job_type`` status if it doesn't match.
+
+        Args:
+            jobId: Job id returned by ``pipeline_run`` (or any compute start).
+            computeType: Optional expected type (e.g. "full_pipeline").
+        """
+        args: Dict[str, Any] = {"jobId": jobId}
+        if computeType is not None:
+            args["computeType"] = computeType
+        result = tools.execute("compute_status", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     return mcp
