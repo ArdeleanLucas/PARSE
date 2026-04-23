@@ -130,6 +130,12 @@ export interface ComputeStatus {
   progress: number;
   message?: string;
   error?: string;
+  /** Opaque result payload the backend attaches when a compute job
+   *  completes (e.g. full_pipeline returns its per-step results here).
+   *  Callers cast this to the specific type they expect for their
+   *  compute_type — ``PipelineRunResult`` for ``full_pipeline``,
+   *  raw objects for the legacy per-step computes. */
+  result?: unknown;
 }
 
 export interface ContactLexemeCoverage {
