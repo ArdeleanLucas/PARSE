@@ -150,6 +150,7 @@ def transcribe_words_with_forced_align(
     aligner: Optional[Aligner] = None,
     progress_callback: Optional[Any] = None,
     segment_batch_size: int = 5,
+    chunk_size: int = 150,
 ) -> List[IpaResult]:
     """Full 3-tier IPA: G2P + torchaudio forced alignment → word windows → wav2vec2 CTC.
 
@@ -219,26 +220,35 @@ def transcribe_words_with_forced_align(
             progress_callback=progress_callback,
         )
 
-    # Tier 3: wav2vec2 CTC on each refined word window
+    # Tier 3: wav2vec2 CTC on each refined word window, processed in chunks
+    # to bound peak memory and give the allocator a chance to reset between
+    # batches. chunk_size=150 is the empirically safe limit on WSL2/Blackwell.
     total = len(word_intervals)
     out: List[IpaResult] = []
-    for idx, spec in enumerate(word_intervals):
-        ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
-        out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
-        # Release cached GPU allocations every 50 words to prevent VRAM
-        # accumulation across thousands of short inference calls.
-        if idx % 50 == 49:
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
-        if progress_callback is not None:
-            try:
-                progress_callback((idx + 1) / float(total) * 100.0, idx + 1)
-            except Exception:
-                pass
+
+    def _gpu_cleanup() -> None:
+        try:
+            import torch  # type: ignore
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+        except Exception:
+            pass
+
+    for chunk_start in range(0, total, chunk_size):
+        chunk = word_intervals[chunk_start: chunk_start + chunk_size]
+        for idx_in_chunk, spec in enumerate(chunk):
+            global_idx = chunk_start + idx_in_chunk
+            ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+            out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+            if progress_callback is not None:
+                try:
+                    progress_callback((global_idx + 1) / float(total) * 100.0, global_idx + 1)
+                except Exception:
+                    pass
+        _gpu_cleanup()
+
     return out
 
 

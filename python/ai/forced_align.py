@@ -242,12 +242,12 @@ class Aligner:
                 ).input_values.to(self.device)
                 logits = self.model(input_values).logits  # (1, T, C)
                 pred_ids = logits.argmax(dim=-1)[0]
-            # Tokenizer.decode for CTC models collapses repeats and drops
-            # the blank/pad token, which is exactly the greedy-CTC IPA we
-            # want for the acoustic tier.
             ipa = self.processor.tokenizer.decode(
                 pred_ids, skip_special_tokens=True
             )
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
         except Exception as exc:  # pragma: no cover - defensive
             print(
                 "[WARN] wav2vec2 IPA decode failed: {0}".format(exc),
