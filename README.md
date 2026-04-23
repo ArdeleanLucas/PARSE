@@ -473,6 +473,10 @@ The built-in assistant operates with both read and write access to the project, 
 
 ## MCP Server Mode
 
+### Agent Tools (MCP)
+
+PARSE can run as an **MCP server**, exposing a curated subset of **29 tools** (out of **47** total `ParseChatTools`). This lets third-party agents — Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or any MCP-compatible client — call PARSE functions programmatically without ever touching the browser UI.
+
 PARSE can run as an **MCP (Model Context Protocol) server**, exposing **29 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This is a curated subset of the broader 47-tool in-app `ParseChatTools` surface — not every chat tool is exported over MCP. Third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — can call these PARSE tools programmatically without going through the browser UI.
 
 ```bash
