@@ -1012,13 +1012,13 @@ class LocalWhisperProvider(AIProvider):
         )
 
         try:
-            self.beam_size = max(1, int(stt_config.get("beam_size", 5) or 5))
+            self.beam_size = max(1, int(section_config.get("beam_size", 5) or 5))
         except (TypeError, ValueError):
             self.beam_size = 5
-        task_raw = str(stt_config.get("task", "transcribe") or "transcribe").strip().lower()
+        task_raw = str(section_config.get("task", "transcribe") or "transcribe").strip().lower()
         self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
-        self.vad_filter = bool(stt_config.get("vad_filter", True))
-        vad_params_raw = stt_config.get("vad_parameters")
+        self.vad_filter = bool(section_config.get("vad_filter", True))
+        vad_params_raw = section_config.get("vad_parameters")
         # Only forward a dict when the user has set explicit parameters;
         # an empty {} falls through to faster-whisper's Silero defaults.
         self.vad_parameters: Optional[Dict[str, Any]] = (
