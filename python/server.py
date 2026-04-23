@@ -2746,11 +2746,47 @@ _IPA_ALIGNER: Any = None
 
 
 def _get_ipa_aligner() -> Any:
-    """Lazy-load the Tier 2/3 wav2vec2 Aligner. Cached for the server lifetime."""
+    """Lazy-load the Tier 2/3 wav2vec2 Aligner. Cached for the server lifetime.
+
+    Prints one-shot load diagnostics so the very-slow first call ("Loading
+    wav2vec2 …" can take 30s+ on first download, minutes on CPU) is
+    observable in the API stderr log. Subsequent calls reuse the cached
+    model and are free.
+    """
     global _IPA_ALIGNER
-    if _IPA_ALIGNER is None:
-        from ai.forced_align import Aligner
+    if _IPA_ALIGNER is not None:
+        return _IPA_ALIGNER
+
+    import time as _time
+    from ai.forced_align import Aligner, DEFAULT_MODEL_NAME
+
+    t0 = _time.time()
+    print(
+        "[IPA] Loading wav2vec2 aligner model={0}…".format(DEFAULT_MODEL_NAME),
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
         _IPA_ALIGNER = Aligner.load()
+    except Exception as exc:
+        elapsed = _time.time() - t0
+        print(
+            "[IPA][ERROR] Aligner.load() failed after {0:.1f}s: {1}".format(elapsed, exc),
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
+
+    elapsed = _time.time() - t0
+    device = getattr(_IPA_ALIGNER, "device", "?")
+    vocab_size = len(getattr(_IPA_ALIGNER, "vocab", {}) or {})
+    print(
+        "[IPA] Aligner ready in {0:.1f}s device={1} vocab_size={2}".format(
+            elapsed, device, vocab_size
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     return _IPA_ALIGNER
 
 
@@ -2770,6 +2806,11 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     Payload: ``{ "speaker": "Fail02", "overwrite": false }``.
     """
+    # Diagnostics v2: trace every call-site that could silently crash
+    # the process (CUDA / torch init). Prints are unbuffered + flushed
+    # so we land in stderr even on native crashes.
+    print("[IPA] enter _compute_speaker_ipa payload={0}".format(payload), file=sys.stderr, flush=True)
+
     speaker = _normalize_speaker_id(payload.get("speaker"))
     overwrite = bool(payload.get("overwrite", False))
 
@@ -2783,6 +2824,7 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     else:
         raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
 
+    print("[IPA] loaded annotation_path={0}".format(annotation_path), file=sys.stderr, flush=True)
     annotation = _read_json_file(annotation_path, {})
     if not isinstance(annotation, dict):
         raise RuntimeError("Annotation is not a JSON object")
@@ -2791,6 +2833,7 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     ortho_tier = tiers.get("ortho") or {}
     ortho_intervals = list(ortho_tier.get("intervals") or [])
     if not ortho_intervals:
+        print("[IPA] no ortho intervals — early return", file=sys.stderr, flush=True)
         return {"speaker": speaker, "filled": 0, "skipped": 0, "total": 0, "message": "No ortho intervals."}
 
     ipa_tier = tiers.setdefault("ipa", {"type": "interval", "display_order": 1, "intervals": []})
@@ -2800,17 +2843,52 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         return (round(float(interval.get("start", 0.0)), 3), round(float(interval.get("end", 0.0)), 3))
 
     ipa_by_key: Dict[Tuple[float, float], Dict[str, Any]] = {_key(i): i for i in ipa_intervals}
+    print(
+        "[IPA] ortho_intervals={0} existing_ipa_intervals={1}".format(
+            len(ortho_intervals), len(ipa_intervals)
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
     # Resolve the speaker's working audio once; a 5-hour recording loads
     # into ~300 MB of float32 which is fine for a one-shot pass.
+    print("[IPA] resolving audio path for speaker={0}…".format(speaker), file=sys.stderr, flush=True)
     audio_path = _pipeline_audio_path_for_speaker(speaker)
+    print("[IPA] audio_path={0} — importing ai.forced_align".format(audio_path), file=sys.stderr, flush=True)
     from ai.forced_align import _load_audio_mono_16k
+    print("[IPA] import ok — calling _load_audio_mono_16k()", file=sys.stderr, flush=True)
+    import time as _t_load
+    _t0 = _t_load.time()
     audio_tensor = _load_audio_mono_16k(audio_path)
+    _load_elapsed = _t_load.time() - _t0
+    try:
+        _numel = int(audio_tensor.numel())
+    except Exception:
+        _numel = -1
+    print(
+        "[IPA] audio loaded in {0:.1f}s numel={1} (~{2:.1f}s of 16 kHz mono)".format(
+            _load_elapsed, _numel, _numel / 16000.0 if _numel > 0 else 0.0
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    print("[IPA] calling _get_ipa_aligner()…", file=sys.stderr, flush=True)
     aligner = _get_ipa_aligner()
+    print("[IPA] aligner ready — entering per-interval loop (n={0})".format(len(ortho_intervals)), file=sys.stderr, flush=True)
 
     filled = 0
     skipped = 0
     total = len(ortho_intervals)
+    # Categorised skip counters so the job result can show *why* nothing
+    # got filled. Aligned with the user-visible failure modes we traced
+    # on Fail02 where filled=0 skipped=38 with no surfaced reason.
+    skipped_empty_ortho = 0
+    skipped_existing_ipa = 0
+    skipped_zero_range = 0
+    skipped_exception = 0
+    skipped_empty_ipa = 0
+    exception_samples: List[str] = []  # first 3 exceptions, full message
 
     for idx, ortho in enumerate(ortho_intervals):
         text = str(ortho.get("text") or "").strip()
@@ -2825,23 +2903,34 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         # user hasn't labelled).
         if not text:
             skipped += 1
+            skipped_empty_ortho += 1
             continue
         if existing_text and not overwrite:
             skipped += 1
+            skipped_existing_ipa += 1
             continue
         if end_sec <= start_sec:
             skipped += 1
+            skipped_zero_range += 1
             continue
 
         try:
             new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
-        except Exception:
+        except Exception as exc:
             skipped += 1
+            skipped_exception += 1
+            if len(exception_samples) < 3:
+                exception_samples.append(
+                    "interval[{0}] {1:.2f}-{2:.2f}: {3}: {4}".format(
+                        idx, start_sec, end_sec, type(exc).__name__, exc
+                    )
+                )
             continue
 
         new_ipa = str(new_ipa or "").strip()
         if not new_ipa:
             skipped += 1
+            skipped_empty_ipa += 1
             continue
 
         if existing is not None:
@@ -2869,7 +2958,32 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     if legacy_path != annotation_path:
         _write_json_file(legacy_path, annotation)
 
-    return {"speaker": speaker, "filled": filled, "skipped": skipped, "total": total}
+    skip_breakdown = {
+        "empty_ortho": skipped_empty_ortho,
+        "existing_ipa_no_overwrite": skipped_existing_ipa,
+        "zero_range": skipped_zero_range,
+        "exception": skipped_exception,
+        "empty_ipa_from_model": skipped_empty_ipa,
+    }
+    print(
+        "[IPA] speaker={0} filled={1} skipped={2} total={3} breakdown={4}".format(
+            speaker, filled, skipped, total, skip_breakdown
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    if exception_samples:
+        for sample in exception_samples:
+            print("[IPA][EXC] {0}".format(sample), file=sys.stderr, flush=True)
+
+    return {
+        "speaker": speaker,
+        "filled": filled,
+        "skipped": skipped,
+        "total": total,
+        "skip_breakdown": skip_breakdown,
+        "exception_samples": exception_samples,
+    }
 
 
 def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -3585,6 +3699,43 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
         "error": sum(1 for r in results.values() if r.get("status") == "error"),
     }
 
+    # Diagnostic tail: always land the per-step outcome on stderr so the
+    # API log gives a clear post-mortem even when the frontend batch
+    # report drops ``result`` (as happened on the 2026-04-23 Fail02 run).
+    print(
+        "[PIPELINE] speaker={0} steps={1} summary={2}".format(
+            speaker, steps_run, summary
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    for step_name, step_result in results.items():
+        status = step_result.get("status")
+        if status == "ok":
+            concise = {k: v for k, v in step_result.items() if k not in ("status", "traceback")}
+            print(
+                "[PIPELINE][{0}] ok {1}".format(step_name, concise),
+                file=sys.stderr,
+                flush=True,
+            )
+        elif status == "skipped":
+            print(
+                "[PIPELINE][{0}] skipped reason={1}".format(
+                    step_name, step_result.get("reason")
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        elif status == "error":
+            print(
+                "[PIPELINE][{0}] ERROR {1}".format(step_name, step_result.get("error")),
+                file=sys.stderr,
+                flush=True,
+            )
+            tb = step_result.get("traceback")
+            if tb:
+                print(tb, file=sys.stderr, flush=True)
+
     return {
         "speaker": speaker,
         "steps_run": steps_run,
@@ -3613,9 +3764,24 @@ def _reset_job_to_running(job_id: str) -> None:
 
 
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
+    # Diagnostics v2: emit on every entry so we can tell if the compute
+    # thread is even starting — previous Fail02 runs died between the
+    # HTTP POST accepting and the first downstream log line.
+    print(
+        "[COMPUTE] _run_compute_job entry job_id={0} compute_type={1} payload={2}".format(
+            job_id, compute_type, payload
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         normalized_type = str(compute_type or "").strip().lower()
         _set_job_progress(job_id, 5.0, message="Starting compute job")
+        print(
+            "[COMPUTE] dispatching normalized_type={0}".format(normalized_type),
+            file=sys.stderr,
+            flush=True,
+        )
 
         if normalized_type in {"cognates", "similarity"}:
             result = _compute_cognates(job_id, payload)
