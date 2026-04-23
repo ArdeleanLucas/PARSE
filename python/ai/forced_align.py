@@ -263,10 +263,11 @@ class Aligner:
             log_probs = torch.log_softmax(logits, dim=-1)
 
         targets = torch.tensor([target_ids], dtype=torch.int32, device=self.device)
-        # CTC requires log_probs_len >= targets_len + blank_frames. Skip the
-        # GPU kernel entirely when this can't hold — it would throw a CUDA
-        # error that destabilises the driver even though Python catches it.
-        if log_probs.shape[1] < targets.shape[1]:
+        # CTC requires log_probs_len >= targets_len + repeat_blanks. Use a
+        # 4-frame buffer to cover near-miss cases where repeats in the phoneme
+        # sequence would still violate the constraint. Hitting the kernel with
+        # bad inputs causes CUDA errors that destabilise the WSL GPU driver.
+        if log_probs.shape[1] < targets.shape[1] + 4:
             return None
         try:
             alignments, scores = AF.forced_align(
