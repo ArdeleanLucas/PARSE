@@ -1683,6 +1683,29 @@ def _chat_get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
     return _get_job_snapshot(job_id)
 
 
+def _chat_start_compute_job(compute_type: str, payload: Dict[str, Any]) -> str:
+    """Launch a compute-type job (Tier 2 forced_align, Tier 3 ipa_only) from
+    a ParseChatTools MCP handler. Mirrors the existing _chat_start_stt_job
+    shape so both are trivially replaceable in tests.
+    """
+    normalized_type = str(compute_type or "").strip().lower()
+    job_payload: Dict[str, Any] = {
+        **(payload or {}),
+        "computeType": normalized_type,
+        "origin": "chat_tool",
+    }
+    job_id = _create_job("compute", job_payload)
+
+    thread = threading.Thread(
+        target=_run_compute_job,
+        args=(job_id, normalized_type, dict(payload or {})),
+        daemon=True,
+    )
+    thread.start()
+
+    return job_id
+
+
 def _chat_docs_root() -> Optional[pathlib.Path]:
     raw = str(os.environ.get("PARSE_CHAT_DOCS_ROOT") or "").strip()
     if not raw:
@@ -1827,6 +1850,7 @@ def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
                 external_read_roots=_chat_external_read_roots(),
                 memory_path=_chat_memory_path(),
                 onboard_speaker=_chat_onboard_speaker,
+                start_compute_job=_chat_start_compute_job,
             )
 
         if _chat_orchestrator_runtime is None:
@@ -2830,6 +2854,106 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     return {"speaker": speaker, "filled": filled, "skipped": skipped, "total": total}
 
 
+def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run Tier 2 forced alignment for a speaker.
+
+    Looks up the speaker's most recent STT artifact (which carries nested
+    segments[].words[] from Tier 1), refines each word window with
+    torchaudio.functional.forced_align + xlsr-53-espeak-cv-ft, and writes
+    the refined spans back next to the input artifact as
+    ``*.aligned.json``. Ortho / IPA tiers in the annotation are left
+    untouched — this job only produces the refined boundary artifact
+    that Tier 3 (or a manual UI step) can then consume.
+    """
+    speaker = _normalize_speaker_id(payload.get("speaker"))
+    language = str(payload.get("language") or "ku").strip() or "ku"
+    try:
+        pad_ms = int(payload.get("padMs", 100) or 100)
+    except (TypeError, ValueError):
+        pad_ms = 100
+    pad_ms = max(0, min(500, pad_ms))
+    emit_phonemes = bool(payload.get("emitPhonemes", True))
+
+    audio_path = _pipeline_audio_path_for_speaker(speaker)
+
+    # Discover a Tier 1 STT artifact for the speaker. Convention:
+    # stt_output/<speaker>.stt.json; fall back to any sibling stt.json.
+    stt_candidates = [
+        _project_root() / "stt_output" / "{0}.stt.json".format(speaker),
+        _project_root() / "stt_output" / speaker / "stt.json",
+    ]
+    stt_artifact_path: Optional[pathlib.Path] = next(
+        (p for p in stt_candidates if p.is_file()), None
+    )
+    if stt_artifact_path is None:
+        raise RuntimeError(
+            "No Tier 1 STT artifact found for {0!r}. Run stt_word_level_start "
+            "first so segments[].words[] are available as alignment seeds.".format(
+                speaker
+            )
+        )
+
+    artifact = _read_json_file(stt_artifact_path, {})
+    if not isinstance(artifact, dict):
+        raise RuntimeError("STT artifact is not a JSON object: {0}".format(stt_artifact_path))
+    segments = artifact.get("segments") or []
+    if not isinstance(segments, list):
+        raise RuntimeError("STT artifact segments[] is missing or malformed")
+
+    _set_job_progress(job_id, 10.0, message="Loading wav2vec2 aligner")
+
+    from ai.forced_align import align_segments
+
+    aligned = align_segments(
+        audio_path=pathlib.Path(audio_path),
+        segments=segments,
+        language=language,
+        pad_ms=pad_ms,
+        emit_phonemes=emit_phonemes,
+    )
+
+    aligned_segments: List[Dict[str, Any]] = []
+    method_counts: Dict[str, int] = {}
+    for seg_idx, seg in enumerate(segments):
+        refined_words = aligned[seg_idx] if seg_idx < len(aligned) else []
+        merged: Dict[str, Any] = dict(seg)
+        if refined_words:
+            merged["words"] = list(refined_words)
+            for w in refined_words:
+                m = str(w.get("method", "") or "unknown")
+                method_counts[m] = method_counts.get(m, 0) + 1
+        aligned_segments.append(merged)
+
+    output_path = stt_artifact_path.with_suffix("")
+    if output_path.suffix == ".stt":
+        output_path = output_path.with_suffix("")
+    output_path = output_path.parent / "{0}.aligned.json".format(output_path.name)
+
+    out_payload = {
+        **artifact,
+        "segments": aligned_segments,
+        "alignment": {
+            "tier": "tier2_forced_align",
+            "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
+            "language": language,
+            "padMs": pad_ms,
+            "emitPhonemes": emit_phonemes,
+            "methodCounts": method_counts,
+        },
+    }
+    _write_json_file(output_path, out_payload)
+
+    _set_job_progress(job_id, 95.0, message="Wrote aligned artifact")
+
+    return {
+        "speaker": speaker,
+        "sttArtifact": str(stt_artifact_path),
+        "alignedArtifact": str(output_path),
+        "segmentCount": len(aligned_segments),
+        "methodCounts": method_counts,
+    }
+
+
 def _pipeline_audio_path_for_speaker(speaker: str) -> pathlib.Path:
     """Resolve the best audio file to feed a Whisper-family model for a speaker.
 
@@ -3361,6 +3485,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_speaker_ipa(job_id, payload)
         elif normalized_type in {"ortho", "ortho_only", "ortho-only"}:
             result = _compute_speaker_ortho(job_id, payload)
+        elif normalized_type in {"forced_align", "forced-align", "align"}:
+            result = _compute_speaker_forced_align(job_id, payload)
         elif normalized_type in {"full_pipeline", "full-pipeline", "pipeline"}:
             result = _compute_full_pipeline(job_id, payload)
         else:

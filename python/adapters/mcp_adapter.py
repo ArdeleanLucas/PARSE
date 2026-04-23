@@ -4,10 +4,13 @@
 Starts a stdio MCP server that lets any MCP client (Claude Code, Cursor, Codex,
 Windsurf, etc.) call PARSE's linguistic analysis tools programmatically.
 
-Tools exposed (18):
+Tools exposed (25):
   project_context_read, annotation_read, read_csv_preview,
   cognate_compute_preview, cross_speaker_match_preview, spectrogram_preview,
   contact_lexeme_lookup, stt_start, stt_status,
+  stt_word_level_start, stt_word_level_status,
+  forced_align_start, forced_align_status,
+  ipa_transcribe_acoustic_start, ipa_transcribe_acoustic_status,
   detect_timestamp_offset, detect_timestamp_offset_from_pair,
   apply_timestamp_offset,
   import_tag_csv, prepare_tag_import,
@@ -700,6 +703,134 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         if maxSegments is not None:
             args["maxSegments"] = maxSegments
         result = tools.execute("stt_status", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    # ------------------------------------------------------------------
+    # Tier 1/2/3 acoustic alignment surface
+    # ------------------------------------------------------------------
+
+    @mcp.tool()
+    def stt_word_level_start(
+        speaker: str,
+        sourceWav: str,
+        language: Optional[str] = None,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Start a Tier 1 word-level STT job. Segments include nested
+        words[] spans (word, start, end, prob) from faster-whisper's
+        word_timestamps=True.
+
+        Args:
+            speaker: Speaker name
+            sourceWav: Path to source WAV file (relative to audio/)
+            language: Language code hint for the STT model
+            dryRun: Validate and describe the plan without launching the job
+        """
+        args: Dict[str, Any] = {"speaker": speaker, "sourceWav": sourceWav}
+        if language is not None:
+            args["language"] = language
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        result = tools.execute("stt_word_level_start", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def stt_word_level_status(
+        jobId: str,
+        includeSegments: Optional[bool] = None,
+        includeWords: Optional[bool] = None,
+        maxSegments: Optional[int] = None,
+    ) -> str:
+        """Read status of a Tier 1 word-level STT job. includeWords
+        defaults to true so the nested words[] payload is returned.
+        """
+        args: Dict[str, Any] = {"jobId": jobId}
+        if includeSegments is not None:
+            args["includeSegments"] = includeSegments
+        if includeWords is not None:
+            args["includeWords"] = includeWords
+        if maxSegments is not None:
+            args["maxSegments"] = maxSegments
+        result = tools.execute("stt_word_level_status", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def forced_align_start(
+        speaker: str,
+        language: Optional[str] = None,
+        padMs: Optional[int] = None,
+        emitPhonemes: Optional[bool] = None,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Start a Tier 2 forced-alignment job for a speaker. Runs
+        torchaudio.functional.forced_align against
+        facebook/wav2vec2-xlsr-53-espeak-cv-ft on each Tier 1 word
+        window, producing tight per-word (and optional per-phoneme)
+        boundaries. G2P (phonemizer + espeak-ng) is used only to build
+        CTC targets and is discarded — no G2P output is persisted.
+
+        Args:
+            speaker: Speaker name
+            language: espeak-ng language code for the internal G2P step (default: ku)
+            padMs: Context pad around each word window in milliseconds (0-500, default 100)
+            emitPhonemes: Include per-phoneme spans in the output (default true)
+            dryRun: Validate and describe the plan without launching the job
+        """
+        args: Dict[str, Any] = {"speaker": speaker}
+        if language is not None:
+            args["language"] = language
+        if padMs is not None:
+            args["padMs"] = padMs
+        if emitPhonemes is not None:
+            args["emitPhonemes"] = emitPhonemes
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        result = tools.execute("forced_align_start", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def forced_align_status(jobId: str) -> str:
+        """Read status of a Tier 2 forced-alignment compute job.
+
+        Args:
+            jobId: The job ID returned by forced_align_start
+        """
+        result = tools.execute("forced_align_status", {"jobId": jobId})
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def ipa_transcribe_acoustic_start(
+        speaker: str,
+        overwrite: Optional[bool] = None,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Start a Tier 3 acoustic IPA job. Runs
+        facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho
+        interval's audio window and writes the decoded phoneme string
+        into the speaker's IPA tier. wav2vec2 is the ONLY IPA engine —
+        there are no text-based fallbacks.
+
+        Args:
+            speaker: Speaker name
+            overwrite: Replace existing non-empty IPA cells (default false)
+            dryRun: Validate and describe the plan without launching the job
+        """
+        args: Dict[str, Any] = {"speaker": speaker}
+        if overwrite is not None:
+            args["overwrite"] = overwrite
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        result = tools.execute("ipa_transcribe_acoustic_start", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def ipa_transcribe_acoustic_status(jobId: str) -> str:
+        """Read status of a Tier 3 acoustic IPA compute job.
+
+        Args:
+            jobId: The job ID returned by ipa_transcribe_acoustic_start
+        """
+        result = tools.execute("ipa_transcribe_acoustic_status", {"jobId": jobId})
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     @mcp.tool()

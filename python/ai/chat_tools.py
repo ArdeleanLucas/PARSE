@@ -275,6 +275,10 @@ class ParseChatTools:
         onboard_speaker: Optional[
             Callable[[str, Path, Optional[Path], bool], Dict[str, Any]]
         ] = None,
+        # Tier 2/3 acoustic alignment surface: launch compute jobs of
+        # type "forced_align" or "ipa_only" (wav2vec2 acoustic IPA).
+        # Signature: (compute_type, payload) -> job_id.
+        start_compute_job: Optional[Callable[[str, Dict[str, Any]], str]] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
@@ -320,6 +324,7 @@ class ParseChatTools:
         self._start_stt_job = start_stt_job
         self._get_job_snapshot = get_job_snapshot
         self._onboard_speaker = onboard_speaker
+        self._start_compute_job = start_compute_job
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
             "project_context_read": ChatToolSpec(
@@ -497,6 +502,131 @@ class ParseChatTools:
                         "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                         "includeSegments": {"type": "boolean"},
                         "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
+                    },
+                },
+            ),
+            # ── Tier 1 acoustic alignment: word-level STT ──────────────
+            "stt_word_level_start": ChatToolSpec(
+                name="stt_word_level_start",
+                description=(
+                    "Start a word-level STT job (Tier 1 acoustic alignment). "
+                    "Segments are returned with a nested words[] array of "
+                    "(word, start, end, prob) spans from faster-whisper's "
+                    "word_timestamps=True output. Mirrors stt_start but the "
+                    "name is explicit about Tier 1 semantics so agents can "
+                    "distinguish word-level jobs from plain sentence-level "
+                    "STT. Returns a jobId for polling with stt_word_level_status."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker", "sourceWav"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
+                        "language": {"type": "string", "minLength": 1, "maxLength": 32},
+                        "dryRun": {"type": "boolean"},
+                    },
+                },
+            ),
+            "stt_word_level_status": ChatToolSpec(
+                name="stt_word_level_status",
+                description=(
+                    "Read status of a Tier 1 word-level STT job. When "
+                    "includeSegments=true the returned segments include the "
+                    "nested words[] payload produced by word_timestamps=True."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "includeSegments": {"type": "boolean"},
+                        "includeWords": {"type": "boolean"},
+                        "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
+                    },
+                },
+            ),
+            # ── Tier 2 acoustic alignment: wav2vec2 forced alignment ──
+            "forced_align_start": ChatToolSpec(
+                name="forced_align_start",
+                description=(
+                    "Start a Tier 2 forced-alignment job for a speaker. Runs "
+                    "torchaudio.functional.forced_align against "
+                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft on each word window "
+                    "from the speaker's Tier 1 STT output, producing tight per-"
+                    "word (and optional per-phoneme) boundaries. G2P is used "
+                    "only internally to build CTC targets and is discarded; no "
+                    "G2P output is persisted. Returns a jobId for polling with "
+                    "forced_align_status."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "language": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 8,
+                            "description": "espeak-ng language code for the internal G2P step (default: ku)",
+                        },
+                        "padMs": {"type": "integer", "minimum": 0, "maximum": 500},
+                        "emitPhonemes": {"type": "boolean"},
+                        "dryRun": {"type": "boolean"},
+                    },
+                },
+            ),
+            "forced_align_status": ChatToolSpec(
+                name="forced_align_status",
+                description="Read status/progress of an existing Tier 2 forced-alignment job.",
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                    },
+                },
+            ),
+            # ── Tier 3 acoustic alignment: wav2vec2-only IPA ──────────
+            "ipa_transcribe_acoustic_start": ChatToolSpec(
+                name="ipa_transcribe_acoustic_start",
+                description=(
+                    "Start a Tier 3 acoustic IPA job. Runs "
+                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho "
+                    "interval's audio window and writes the decoded phoneme "
+                    "string into the speaker's IPA tier. wav2vec2 is the ONLY "
+                    "IPA engine — there are no text-based fallbacks. Equivalent "
+                    "to the ipa_only compute job exposed in the UI under "
+                    "Actions → Run IPA transcription. Returns a jobId for "
+                    "polling with ipa_transcribe_acoustic_status."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["speaker"],
+                    "properties": {
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "When true, replaces existing non-empty IPA cells (default: false).",
+                        },
+                        "dryRun": {"type": "boolean"},
+                    },
+                },
+            ),
+            "ipa_transcribe_acoustic_status": ChatToolSpec(
+                name="ipa_transcribe_acoustic_status",
+                description="Read status/progress of an existing Tier 3 acoustic IPA job.",
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                     },
                 },
             ),
@@ -1403,6 +1533,219 @@ class ParseChatTools:
             payload["segmentCount"] = len(segments)
 
         return payload
+
+    # ------------------------------------------------------------------
+    # Tier 1/2/3 acoustic alignment tools
+    # ------------------------------------------------------------------
+
+    def _tool_stt_word_level_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start a Tier 1 word-level STT job.
+
+        STT now always runs with word_timestamps=True (Tier 1), so this
+        delegates to the same callback as stt_start but the tool name
+        documents the expectation that segments[].words[] is present in
+        the output.
+        """
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "stt_word_level_start",
+                "speaker": self._normalize_speaker(args.get("speaker")),
+                "note": (
+                    "Dry run. Tier 1 STT would run with word_timestamps=True; "
+                    "segments would include a nested words[] array."
+                ),
+            }
+
+        payload = self._tool_stt_start(args)
+        payload["tier"] = "tier1_word_level"
+        payload["message"] = (
+            "Word-level STT job started. Poll with stt_word_level_status."
+        )
+        return payload
+
+    def _tool_stt_word_level_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read status of a Tier 1 job. includeWords defaults to True."""
+        include_words = bool(args.get("includeWords", True))
+        # Reuse the base handler; it already returns segments whose items
+        # carry the nested words[] key when word_timestamps was enabled.
+        delegated = self._tool_stt_status(args)
+        delegated["tier"] = "tier1_word_level"
+        # Strip nested words[] only if the caller explicitly opted out.
+        if not include_words and isinstance(delegated.get("segments"), list):
+            for seg in delegated["segments"]:
+                if isinstance(seg, dict) and "words" in seg:
+                    seg.pop("words", None)
+            delegated["wordsOmitted"] = True
+        return delegated
+
+    def _tool_forced_align_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start a Tier 2 forced-alignment compute job."""
+        speaker = self._normalize_speaker(args.get("speaker"))
+
+        language_raw = args.get("language")
+        language = str(language_raw).strip() if language_raw is not None else "ku"
+        if not language:
+            language = "ku"
+
+        pad_ms_raw = args.get("padMs", 100)
+        try:
+            pad_ms = int(pad_ms_raw)
+        except (TypeError, ValueError):
+            pad_ms = 100
+        pad_ms = max(0, min(500, pad_ms))
+
+        emit_phonemes = bool(args.get("emitPhonemes", True))
+
+        payload_body: Dict[str, Any] = {
+            "speaker": speaker,
+            "language": language,
+            "padMs": pad_ms,
+            "emitPhonemes": emit_phonemes,
+        }
+
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "forced_align_start",
+                "plan": payload_body,
+                "note": (
+                    "Dry run. Would launch a forced_align compute job against "
+                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft. G2P output is "
+                    "used only to build CTC targets and is never persisted."
+                ),
+            }
+
+        if self._start_compute_job is None:
+            raise ChatToolExecutionError(
+                "Compute-job start callback is unavailable — wire ParseChatTools "
+                "with start_compute_job to enable Tier 2 forced alignment."
+            )
+
+        job_id = self._start_compute_job("forced_align", payload_body)
+
+        return {
+            "readOnly": True,
+            "previewOnly": True,
+            "jobId": job_id,
+            "status": "running",
+            "tier": "tier2_forced_align",
+            "speaker": speaker,
+            "message": "Forced-alignment job started. Poll with forced_align_status.",
+        }
+
+    def _tool_forced_align_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read status of a Tier 2 forced-alignment compute job."""
+        return self._generic_compute_status(
+            args,
+            expected_type="forced_align",
+            tier_label="tier2_forced_align",
+        )
+
+    def _tool_ipa_transcribe_acoustic_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start a Tier 3 acoustic IPA job (wav2vec2 on audio slices)."""
+        speaker = self._normalize_speaker(args.get("speaker"))
+        overwrite = bool(args.get("overwrite", False))
+
+        payload_body: Dict[str, Any] = {
+            "speaker": speaker,
+            "overwrite": overwrite,
+        }
+
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "ipa_transcribe_acoustic_start",
+                "plan": payload_body,
+                "note": (
+                    "Dry run. Would launch the ipa_only compute job, running "
+                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho "
+                    "interval's audio window. No text-based IPA paths exist."
+                ),
+            }
+
+        if self._start_compute_job is None:
+            raise ChatToolExecutionError(
+                "Compute-job start callback is unavailable — wire ParseChatTools "
+                "with start_compute_job to enable Tier 3 acoustic IPA."
+            )
+
+        job_id = self._start_compute_job("ipa_only", payload_body)
+
+        return {
+            "readOnly": True,
+            "previewOnly": True,
+            "jobId": job_id,
+            "status": "running",
+            "tier": "tier3_acoustic_ipa",
+            "speaker": speaker,
+            "overwrite": overwrite,
+            "message": (
+                "Acoustic IPA job started. Poll with "
+                "ipa_transcribe_acoustic_status."
+            ),
+        }
+
+    def _tool_ipa_transcribe_acoustic_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read status of a Tier 3 acoustic IPA compute job."""
+        return self._generic_compute_status(
+            args,
+            expected_type="ipa_only",
+            tier_label="tier3_acoustic_ipa",
+        )
+
+    def _generic_compute_status(
+        self,
+        args: Dict[str, Any],
+        *,
+        expected_type: str,
+        tier_label: str,
+    ) -> Dict[str, Any]:
+        """Shared status reader for Tier 2/3 compute jobs."""
+        if self._get_job_snapshot is None:
+            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+
+        job_id = str(args.get("jobId") or "").strip()
+        if not job_id:
+            raise ChatToolValidationError("jobId is required")
+
+        snapshot = self._get_job_snapshot(job_id)
+        if snapshot is None:
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "not_found",
+                "tier": tier_label,
+                "message": "Unknown jobId",
+            }
+
+        actual_type = str(snapshot.get("type") or snapshot.get("computeType") or "").strip().lower()
+        if actual_type and actual_type not in {expected_type, expected_type.replace("_", "-")}:
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "invalid_job_type",
+                "tier": tier_label,
+                "expected": expected_type,
+                "actual": actual_type,
+            }
+
+        return {
+            "readOnly": True,
+            "jobId": job_id,
+            "tier": tier_label,
+            "status": snapshot.get("status"),
+            "progress": snapshot.get("progress"),
+            "message": snapshot.get("message"),
+            "error": snapshot.get("error"),
+            "result": snapshot.get("result"),
+        }
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.
