@@ -1471,30 +1471,26 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
         </div>
 
-        {/* Waveform container — WaveSurfer owns this div */}
+        {/* Waveform container — WaveSurfer owns this div. The left padding on
+            the inner wrapper matches the lane label gutter so waveform t=0
+            lines up with segment t=0 in the STT/IPA/ORTHO strips, without
+            wrapping WaveSurfer's container in a flex row (which caused the
+            container width to be unstable on first render and made the
+            Timeline plugin flicker). */}
         <div className="relative px-5 pt-4 pb-2">
-          <div className="flex items-stretch">
-            {/* Left gutter matches the lane label column so waveform t=0
-                lines up with segment t=0 in the STT/IPA/ORTHO strips. */}
+          <div className="relative" style={{ paddingLeft: LABEL_COL_PX }}>
             <div
-              className="shrink-0"
-              style={{ width: LABEL_COL_PX }}
-              aria-hidden="true"
+              ref={containerRef}
+              className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
+              style={{ minHeight: 110 }}
             />
-            <div className="relative flex-1">
-              <div
-                ref={containerRef}
-                className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
-                style={{ minHeight: 110 }}
+            {spectroOn && (
+              <canvas
+                ref={spectroCanvasRef}
+                className="pointer-events-none absolute inset-y-0 right-0 rounded-lg"
+                style={{ left: LABEL_COL_PX, opacity: 0.6, mixBlendMode: 'multiply' }}
               />
-              {spectroOn && (
-                <canvas
-                  ref={spectroCanvasRef}
-                  className="pointer-events-none absolute inset-0 rounded-lg"
-                  style={{ width: '100%', height: '100%', opacity: 0.6, mixBlendMode: 'multiply' }}
-                />
-              )}
-            </div>
+            )}
           </div>
         </div>
 
