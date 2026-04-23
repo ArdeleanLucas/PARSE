@@ -374,4 +374,166 @@ describe("BatchReportModal", () => {
         originalRevoke;
     }
   });
+
+  // ------------------------------------------------------------------
+  // Cell classifier — forgives older/inconsistent response shapes
+  // (see classifyCell() in BatchReportModal.tsx). These tests lock in
+  // the heuristic recovery so a shape regression in the backend
+  // doesn't silently turn every cell into an em-dash.
+  // ------------------------------------------------------------------
+
+  it("classifies cells with explicit status field", () => {
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "A",
+        status: "complete",
+        error: null,
+        result: makeResult("A", {
+          normalize: { status: "ok", done: true },
+          stt: { status: "ok", segments: 142 },
+          ortho: { status: "skipped", reason: "already populated" },
+          ipa: { status: "error", error: "boom" },
+        }),
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open={true}
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["normalize", "stt", "ortho", "ipa"]}
+      />,
+    );
+
+    // Summary chips reflect the classification.
+    expect(screen.getByText(/2 ok/)).toBeTruthy();
+    expect(screen.getByText(/1 skipped/)).toBeTruthy();
+    expect(screen.getByText(/1 errored/)).toBeTruthy();
+    // STT cell shows the OK marker + its detail string.
+    expect(screen.getAllByText("OK").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/142 segs/)).toBeTruthy();
+  });
+
+  it("infers ok from positive counters when status field is absent", () => {
+    // Mirrors the old backend shape (pre-step-resilience) OR direct
+    // per-step endpoint calls that never tagged a status.
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "A",
+        status: "complete",
+        error: null,
+        result: {
+          speaker: "A",
+          steps_run: ["ortho"],
+          results: {
+            ortho: { filled: 20, total: 20 },
+          },
+          summary: { ok: 0, skipped: 0, error: 0 },
+        },
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open={true}
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["ortho"]}
+      />,
+    );
+
+    // Even though the server said summary: {ok:0}, the client classifier
+    // recognises the positive `filled` and renders OK.
+    expect(screen.getByText("OK")).toBeTruthy();
+    expect(screen.getByText(/20 ivs/)).toBeTruthy();
+  });
+
+  it("infers skipped from skipped=true without explicit status", () => {
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "A",
+        status: "complete",
+        error: null,
+        result: {
+          speaker: "A",
+          steps_run: ["ortho"],
+          results: {
+            ortho: { skipped: true, reason: "already populated" },
+          },
+          summary: { ok: 0, skipped: 0, error: 0 },
+        },
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open={true}
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["ortho"]}
+      />,
+    );
+
+    expect(screen.getByText("Skipped")).toBeTruthy();
+    expect(screen.getByText(/already populated/)).toBeTruthy();
+  });
+
+  it("shows 'Ran (unclassified)' when the cell shape is unfamiliar", () => {
+    // Guarantees users see *something* helpful instead of a bare em-dash
+    // when the backend returns a genuinely novel shape.
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "A",
+        status: "complete",
+        error: null,
+        result: {
+          speaker: "A",
+          steps_run: ["normalize"],
+          results: {
+            normalize: { some_unknown_field: "foo" },
+          },
+          summary: { ok: 0, skipped: 0, error: 0 },
+        },
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open={true}
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["normalize"]}
+      />,
+    );
+
+    expect(screen.getByText(/unclassified/i)).toBeTruthy();
+  });
+
+  it("shows 'No data' when the step is in the batch but missing from the result map", () => {
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "A",
+        status: "complete",
+        error: null,
+        result: {
+          speaker: "A",
+          steps_run: ["ortho"],
+          results: {},  // step was in the batch but backend returned no entry
+          summary: { ok: 0, skipped: 0, error: 0 },
+        },
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open={true}
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["ortho"]}
+      />,
+    );
+
+    expect(screen.getByText("No data")).toBeTruthy();
+  });
 });
