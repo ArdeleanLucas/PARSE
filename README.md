@@ -26,10 +26,10 @@ Per-speaker segmentation and transcription workstation.
 
 - Waveform review with WaveSurfer 7 for long recordings
 - Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
-- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTHO**, with waveform-aligned timestamps and synchronized horizontal scrolling
+- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTH**, with waveform-aligned timestamps and synchronized horizontal scrolling
 - Audio normalization job (`/api/normalize`) with in-place working-audio support
 - Speaker-level STT job (`/api/stt`) with progress/error reporting, automatic language detection from project metadata when available, and tunable VAD / task / beam-size settings
-- Speaker-level ORTHO job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
+- Speaker-level ORTH job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
 - Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
 - Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks
 - Draggable lexeme timestamp editing and manual boundary correction
@@ -96,7 +96,7 @@ PARSE supports multiple AI backends, routed per task type:
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
-**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), and both STT and ORTHO expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`.
+**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), and both STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`.
 
 ### Models
 
