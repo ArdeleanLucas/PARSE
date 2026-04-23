@@ -1760,6 +1760,7 @@ export function ParseUI() {
   const loadConfig       = useConfigStore(s => s.load);
   const rawSpeakers      = useConfigStore(s => s.config?.speakers ?? []);
   const rawConcepts      = useConfigStore(s => s.config?.concepts ?? []);
+  const configError      = useConfigStore(s => s.error);
   const storeTags        = useTagStore(s => s.tags);
   const storeAddTag      = useTagStore(s => s.addTag);
   const hydrateTagStore  = useTagStore(s => s.hydrate);
@@ -2266,7 +2267,7 @@ export function ParseUI() {
     useEnrichmentStore.setState({ data: {}, loading: false });
     useTagStore.setState({ tags: [] });
     usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
-    useConfigStore.setState({ config: null, loading: false });
+    useConfigStore.setState({ config: null, loading: false, error: null });
     crossSpeakerJob.reset();
     batch.reset();
     resetComputeJob();
@@ -2940,6 +2941,15 @@ export function ParseUI() {
           </div>
         </div>
       </header>
+      {configError && (
+        <div className="shrink-0 flex items-start gap-3 border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <span className="font-semibold">Server error—speakers may not load. </span>
+            {configError}
+          </div>
+        </div>
+      )}
 
       {/* ============ BODY: left sidebar / main / right panel ============ */}
       <div className="flex min-h-0 flex-1">

@@ -703,6 +703,7 @@ def _workspace_frontend_config(base_config: Optional[Dict[str, Any]] = None) -> 
     config["concepts"] = concepts
     config["audio_dir"] = str(project_payload.get("audio_dir") or config.get("audio_dir") or "audio")
     config["annotations_dir"] = str(project_payload.get("annotations_dir") or config.get("annotations_dir") or "annotations")
+    config["schema_version"] = 1
     return config
 
 

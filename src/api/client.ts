@@ -42,11 +42,24 @@ function resolveJobId(payload: unknown): string {
   return "";
 }
 
+const EXPECTED_CONFIG_SCHEMA_VERSION = 1;
+
 function unwrapConfig(payload: unknown): ProjectConfig {
   if (isRecord(payload) && isRecord(payload.config)) {
-    return payload.config as ProjectConfig;
+    const cfg = payload.config;
+    if (cfg.schema_version !== EXPECTED_CONFIG_SCHEMA_VERSION) {
+      const got = cfg.schema_version === undefined ? "missing" : String(cfg.schema_version);
+      throw new Error(
+        `PARSE server is outdated (config schema_version: ${got}, expected: ${EXPECTED_CONFIG_SCHEMA_VERSION}). ` +
+        "Restart the Python server with the latest code and reload the page."
+      );
+    }
+    return cfg as ProjectConfig;
   }
-  return (payload ?? {}) as ProjectConfig;
+  throw new Error(
+    "PARSE server is outdated: /api/config response is missing the expected wrapper. " +
+    "Restart the Python server with the latest code and reload the page."
+  );
 }
 
 function unwrapEnrichments(payload: unknown): EnrichmentsPayload {
