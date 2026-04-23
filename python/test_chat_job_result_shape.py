@@ -22,7 +22,7 @@ def test_run_chat_job_stores_assistant_string_as_result(monkeypatch) -> None:
     )
 
     class _FakeOrchestrator:
-        def run(self, session_id, session_messages):
+        def run(self, session_id, session_messages, on_tool_call=None):
             return {
                 "assistant": {"content": "hello from grok"},
                 "model": "grok-4.20-0309-reasoning",
@@ -57,7 +57,7 @@ def test_run_chat_job_result_falls_back_to_default_when_content_missing(monkeypa
     )
 
     class _EmptyOrchestrator:
-        def run(self, session_id, session_messages):
+        def run(self, session_id, session_messages, on_tool_call=None):
             return {}
 
     monkeypatch.setattr(
