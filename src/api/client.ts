@@ -593,12 +593,16 @@ export async function pollNormalize(jobId: string): Promise<STTStatus> {
   });
 }
 
-// Pipeline state — powers the pre-flight checklist shown before Run Full
-// Pipeline. Each entry's `done` flag means that tier has at least one
-// non-empty text interval (or, for normalize, the working WAV exists). The
-// modal uses `done` to surface overwrite warnings per step.
+// Pipeline state — powers the pre-flight speaker/step grid shown before
+// running a transcription batch. Each entry carries both "what's done"
+// (done + counts) and "can it run now" (can_run + reason). The UI paints
+// three badges per cell: ✅ ok / ⏭️ will-skip / ❌ blocked, plus a
+// tooltip with the reason when blocked. `done` remains useful for the
+// overwrite warning ("will overwrite 128 ortho intervals").
 export interface PipelineStepState {
   done: boolean;
+  can_run: boolean;
+  reason: string | null;
 }
 
 export interface PipelineNormalizeState extends PipelineStepState {
@@ -625,6 +629,29 @@ export async function getPipelineState(speaker: string): Promise<PipelineState> 
   return apiFetch<PipelineState>(
     `/api/pipeline/state/${encodeURIComponent(speaker)}`,
   );
+}
+
+// Pipeline run result — returned from `startCompute('full_pipeline')`
+// after completion. Step-level `status` is the primary dimension the UI
+// cares about ("ok" / "skipped" / "error"); `traceback` is surfaced in
+// the Report modal's expand-for-details disclosure.
+export type PipelineStepStatus = "ok" | "skipped" | "error";
+
+export interface PipelineStepResultBase {
+  status: PipelineStepStatus;
+  reason?: string;
+  error?: string;
+  traceback?: string;
+  // Shape overlaps below are step-specific; carry them loosely — the
+  // UI only pulls what it knows about.
+  [key: string]: unknown;
+}
+
+export interface PipelineRunResult {
+  speaker: string;
+  steps_run: string[];
+  results: Partial<Record<"normalize" | "stt" | "ortho" | "ipa", PipelineStepResultBase>>;
+  summary: { ok: number; skipped: number; error: number };
 }
 
 // Onboard Speaker

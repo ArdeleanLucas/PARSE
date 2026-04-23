@@ -2849,54 +2849,95 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
 
         {
           "speaker": "Fail02",
-          "normalize": {"done": true, "path": "audio/working/Fail02/Fail02.wav"},
-          "stt":       {"done": true, "segments": 142, "source_wav": "..."},
-          "ortho":     {"done": true, "intervals": 84},
-          "ipa":       {"done": false, "intervals": 0}
+          "normalize": {"done": true,  "path": "audio/working/Fail02/Fail02.wav",
+                        "can_run": true,  "reason": null},
+          "stt":       {"done": true,  "segments": 142,
+                        "can_run": true,  "reason": null},
+          "ortho":     {"done": true,  "intervals": 84,
+                        "can_run": true,  "reason": null},
+          "ipa":       {"done": false, "intervals": 0,
+                        "can_run": false, "reason": "No ortho intervals yet — run ORTH first"}
         }
 
-    "done" means a tier has at least one non-empty text interval. The UI uses
-    this to drive the pre-flight checklist: unchecked steps are skipped;
-    steps with ``done=True`` surface an overwrite confirmation.
+    ``done`` means the tier has at least one non-empty text interval (or
+    for normalize, the working WAV exists). ``can_run`` means invoking the
+    step right now would succeed — the audio file exists, prerequisites
+    are in place. When ``can_run`` is false, ``reason`` explains why so
+    the pre-flight UI can surface it.
+
+    Note ``can_run`` is computed against the *current* state of the
+    filesystem; for a batch that runs multiple steps, ``ipa.can_run`` may
+    be false today but will succeed after the ORTH step in the same batch
+    runs. The batch orchestrator re-checks at execution time.
     """
     speaker_norm = _normalize_speaker_id(speaker)
     result: Dict[str, Any] = {"speaker": speaker_norm}
 
-    # Normalize: working WAV exists?
     try:
         annotation_path = _annotation_read_path_for_speaker(speaker_norm)
         record = _read_json_file(annotation_path, {}) if annotation_path.is_file() else {}
     except Exception:
         record = {}
 
+    has_annotation = isinstance(record, dict) and bool(record)
+
     source_rel = ""
     if isinstance(record, dict):
         source_rel = str(
             record.get("source_audio") or record.get("source_wav") or ""
         ).strip()
-    normalized_info: Dict[str, Any] = {"done": False, "path": None}
+    source_path: Optional[pathlib.Path] = None
+    source_exists = False
+    normalized_path: Optional[pathlib.Path] = None
+    normalized_exists = False
     if source_rel:
         try:
             source_path = _resolve_project_path(source_rel)
+            source_exists = source_path.exists()
             working_dir = _project_root() / "audio" / "working" / speaker_norm
             normalized_path = build_normalized_output_path(source_path, working_dir)
-            if normalized_path.exists():
-                normalized_info = {
-                    "done": True,
-                    "path": str(normalized_path.relative_to(_project_root())),
-                }
+            normalized_exists = normalized_path.exists()
         except Exception:
             pass
-    result["normalize"] = normalized_info
 
-    # STT: cache populated?
+    # --- Normalize ---
+    normalize_info: Dict[str, Any] = {
+        "done": normalized_exists,
+        "path": (
+            str(normalized_path.relative_to(_project_root()))
+            if normalized_exists and normalized_path is not None
+            else None
+        ),
+        "can_run": False,
+        "reason": None,
+    }
+    if not has_annotation:
+        normalize_info["reason"] = "No annotation for speaker"
+    elif not source_rel:
+        normalize_info["reason"] = "No source_audio on annotation"
+    elif not source_exists:
+        normalize_info["reason"] = "Source audio not found: {0}".format(source_rel)
+    else:
+        normalize_info["can_run"] = True
+    result["normalize"] = normalize_info
+
+    # --- STT ---
     cached_stt = _latest_stt_segments_for_speaker(speaker_norm)
-    stt_info: Dict[str, Any] = {"done": False, "segments": 0}
-    if cached_stt:
-        stt_info = {"done": True, "segments": len(cached_stt)}
+    stt_info: Dict[str, Any] = {
+        "done": bool(cached_stt),
+        "segments": len(cached_stt) if cached_stt else 0,
+        "can_run": False,
+        "reason": None,
+    }
+    if not has_annotation:
+        stt_info["reason"] = "No annotation for speaker"
+    elif not (normalized_exists or source_exists):
+        stt_info["reason"] = "No audio file reachable (neither normalized nor source exists)"
+    else:
+        stt_info["can_run"] = True
     result["stt"] = stt_info
 
-    # ORTHO + IPA: count non-empty intervals on the annotation tiers.
+    # --- ORTH + IPA (tier intervals) ---
     tiers = {}
     if isinstance(record, dict):
         tiers = record.get("tiers") if isinstance(record.get("tiers"), dict) else {}
@@ -2915,8 +2956,34 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
 
     ortho_count = _non_empty_count("ortho")
     ipa_count = _non_empty_count("ipa")
-    result["ortho"] = {"done": ortho_count > 0, "intervals": ortho_count}
-    result["ipa"] = {"done": ipa_count > 0, "intervals": ipa_count}
+
+    ortho_info: Dict[str, Any] = {
+        "done": ortho_count > 0,
+        "intervals": ortho_count,
+        "can_run": False,
+        "reason": None,
+    }
+    if not has_annotation:
+        ortho_info["reason"] = "No annotation for speaker"
+    elif not (normalized_exists or source_exists):
+        ortho_info["reason"] = "No audio file reachable (neither normalized nor source exists)"
+    else:
+        ortho_info["can_run"] = True
+    result["ortho"] = ortho_info
+
+    ipa_info: Dict[str, Any] = {
+        "done": ipa_count > 0,
+        "intervals": ipa_count,
+        "can_run": False,
+        "reason": None,
+    }
+    if not has_annotation:
+        ipa_info["reason"] = "No annotation for speaker"
+    elif ortho_count == 0:
+        ipa_info["reason"] = "No ortho intervals yet — run ORTH first (or include it in this batch)"
+    else:
+        ipa_info["can_run"] = True
+    result["ipa"] = ipa_info
 
     return result
 
@@ -3049,7 +3116,16 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     steps are skipped silently. Overwrite flags only matter for steps whose
     prior state already has data — an unchecked "overwrite" on a populated
     tier causes that step to skip with ``skipped=True`` in its sub-result.
-    Failure of any step aborts the pipeline and propagates the error.
+
+    **Step-level resilience:** each step runs in its own try/except. A
+    failure in STT does NOT stop ORTH / IPA from being attempted for this
+    speaker. Each step's result includes ``status`` (``"ok"`` /
+    ``"skipped"`` / ``"error"``), and errors capture the full traceback
+    for post-mortem in the UI. The pipeline job completes successfully
+    even if every step failed — the caller inspects the per-step
+    ``status`` field. This is a walk-away-friendly design: the user can
+    kick off a batch of 10 speakers × 4 steps, come back, and see
+    exactly what worked and what didn't.
     """
     speaker = _normalize_speaker_id(payload.get("speaker"))
 
@@ -3075,9 +3151,18 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
         str(language).strip() if isinstance(language, str) and language.strip() else None
     )
 
+    import traceback as _traceback_module
+
     results: Dict[str, Any] = {}
     steps_run: List[str] = []
     total = len(selected)
+
+    def _capture_error(exc: BaseException) -> Dict[str, Any]:
+        return {
+            "status": "error",
+            "error": str(exc),
+            "traceback": _traceback_module.format_exc(),
+        }
 
     for idx, step in enumerate(selected):
         step_base_pct = 5.0 + (idx / total) * 90.0
@@ -3087,100 +3172,131 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
             message="Pipeline step {0}/{1}: {2}".format(idx + 1, total, step),
         )
 
-        if step == "normalize":
-            source_rel = _annotation_primary_source_wav(speaker)
-            if not source_rel:
-                raise RuntimeError(
-                    "Cannot normalize {0!r}: no source_audio on annotation".format(speaker)
-                )
-            audio_path = _resolve_project_path(source_rel)
-            working_dir = _project_root() / "audio" / "working" / speaker
-            normalized_path = build_normalized_output_path(audio_path, working_dir)
-            if normalized_path.exists() and not overwrites.get("normalize", False):
+        try:
+            if step == "normalize":
+                source_rel = _annotation_primary_source_wav(speaker)
+                if not source_rel:
+                    raise RuntimeError(
+                        "Cannot normalize {0!r}: no source_audio on annotation".format(speaker)
+                    )
+                audio_path = _resolve_project_path(source_rel)
+                working_dir = _project_root() / "audio" / "working" / speaker
+                normalized_path = build_normalized_output_path(audio_path, working_dir)
+                if normalized_path.exists() and not overwrites.get("normalize", False):
+                    results["normalize"] = {
+                        "status": "skipped",
+                        "reason": "normalized output already exists; overwrite=False",
+                        "path": str(normalized_path.relative_to(_project_root())),
+                    }
+                    steps_run.append(step)
+                    continue
+                _run_normalize_job(job_id, speaker, source_rel)
+                snapshot = _get_job_snapshot(job_id) or {}
+                if str(snapshot.get("status") or "") == "error":
+                    raise RuntimeError(
+                        "normalize step failed: {0}".format(snapshot.get("error") or "unknown error")
+                    )
+                sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
                 results["normalize"] = {
-                    "skipped": True,
-                    "reason": "normalized output already exists; overwrite=False",
-                    "path": str(normalized_path.relative_to(_project_root())),
+                    "status": "ok",
+                    **(dict(sub_result) if sub_result else {"done": True}),
                 }
+                _reset_job_to_running(job_id)
                 steps_run.append(step)
-                continue
-            # Delegate to the background normalize runner, but execute inline
-            # (no new thread) so the pipeline job owns the job_id.
-            _run_normalize_job(job_id, speaker, source_rel)
-            # The runner swallows its own exceptions into _set_job_error —
-            # re-raise here so the pipeline aborts visibly.
-            snapshot = _get_job_snapshot(job_id) or {}
-            if str(snapshot.get("status") or "") == "error":
-                raise RuntimeError(
-                    "normalize step failed: {0}".format(snapshot.get("error") or "unknown error")
-                )
-            sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
-            results["normalize"] = dict(sub_result) if sub_result else {"done": True}
-            _reset_job_to_running(job_id)
-            steps_run.append(step)
 
-        elif step == "stt":
-            # Resolve the audio the same way the ORTHO step does — prefer the
-            # normalized working WAV if it exists, fall back to the raw source.
-            # Using ``_annotation_primary_source_wav`` directly would pass a
-            # bare filename (e.g. ``SK_Faili_F_1968.wav``) which fails to
-            # resolve when the raw file lives under ``audio/working/<speaker>/``
-            # and the bare-root copy has been cleaned up.
-            cached = _latest_stt_segments_for_speaker(speaker)
-            if cached and not overwrites.get("stt", False):
+            elif step == "stt":
+                # Resolve the audio the same way the ORTH step does — prefer
+                # the normalized working WAV, fall back to the raw source.
+                cached = _latest_stt_segments_for_speaker(speaker)
+                if cached and not overwrites.get("stt", False):
+                    results["stt"] = {
+                        "status": "skipped",
+                        "reason": "STT cache already exists; overwrite=False",
+                        "segments": len(cached),
+                    }
+                    steps_run.append(step)
+                    continue
+                try:
+                    audio_path = _pipeline_audio_path_for_speaker(speaker)
+                except (RuntimeError, FileNotFoundError) as exc:
+                    raise RuntimeError("Cannot run STT for {0!r}: {1}".format(speaker, exc))
+                _run_stt_job(job_id, speaker, str(audio_path), language_str)
+                snapshot = _get_job_snapshot(job_id) or {}
+                if str(snapshot.get("status") or "") == "error":
+                    raise RuntimeError(
+                        "stt step failed: {0}".format(snapshot.get("error") or "unknown error")
+                    )
+                sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
                 results["stt"] = {
-                    "skipped": True,
-                    "reason": "STT cache already exists; overwrite=False",
-                    "segments": len(cached),
+                    "status": "ok",
+                    "segments": len(sub_result.get("segments") or []) if isinstance(sub_result, dict) else 0,
+                    "done": True,
                 }
+                _reset_job_to_running(job_id)
                 steps_run.append(step)
-                continue
-            try:
-                audio_path = _pipeline_audio_path_for_speaker(speaker)
-            except (RuntimeError, FileNotFoundError) as exc:
-                raise RuntimeError("Cannot run STT for {0!r}: {1}".format(speaker, exc))
-            _run_stt_job(job_id, speaker, str(audio_path), language_str)
-            snapshot = _get_job_snapshot(job_id) or {}
-            if str(snapshot.get("status") or "") == "error":
-                raise RuntimeError(
-                    "stt step failed: {0}".format(snapshot.get("error") or "unknown error")
+
+            elif step == "ortho":
+                sub_result = _compute_speaker_ortho(
+                    job_id,
+                    {
+                        "speaker": speaker,
+                        "overwrite": overwrites.get("ortho", False),
+                        "language": language_str,
+                    },
                 )
-            sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
-            results["stt"] = {
-                "segments": len(sub_result.get("segments") or []) if isinstance(sub_result, dict) else 0,
-                "done": True,
-            }
+                # _compute_speaker_ortho returns {"skipped": True/False, ...} —
+                # translate to status vocabulary shared across steps.
+                if sub_result.get("skipped"):
+                    results["ortho"] = {"status": "skipped", **sub_result}
+                else:
+                    results["ortho"] = {"status": "ok", **sub_result}
+                steps_run.append(step)
+
+            elif step == "ipa":
+                sub_result = _compute_speaker_ipa(
+                    job_id,
+                    {"speaker": speaker, "overwrite": overwrites.get("ipa", False)},
+                )
+                # _compute_speaker_ipa returns counts, not skipped flag, but
+                # has a "message" when there's no ortho to work from.
+                if "message" in sub_result and sub_result.get("total", 0) == 0:
+                    results["ipa"] = {
+                        "status": "skipped",
+                        "reason": sub_result["message"],
+                        **sub_result,
+                    }
+                else:
+                    results["ipa"] = {"status": "ok", **sub_result}
+                steps_run.append(step)
+
+            else:
+                results[step] = {
+                    "status": "error",
+                    "error": "Unknown pipeline step: {0}".format(step),
+                    "traceback": None,
+                }
+
+        except Exception as exc:  # noqa: BLE001 — by design, we capture every failure
+            results[step] = _capture_error(exc)
+            steps_run.append(step)
+            # Make sure the outer job is back to "running" so subsequent
+            # steps can still report progress.
             _reset_job_to_running(job_id)
-            steps_run.append(step)
-
-        elif step == "ortho":
-            sub_result = _compute_speaker_ortho(
-                job_id,
-                {
-                    "speaker": speaker,
-                    "overwrite": overwrites.get("ortho", False),
-                    "language": language_str,
-                },
-            )
-            results["ortho"] = sub_result
-            steps_run.append(step)
-
-        elif step == "ipa":
-            sub_result = _compute_speaker_ipa(
-                job_id,
-                {"speaker": speaker, "overwrite": overwrites.get("ipa", False)},
-            )
-            results["ipa"] = sub_result
-            steps_run.append(step)
-
-        else:
-            raise RuntimeError("Unknown pipeline step: {0}".format(step))
 
     _set_job_progress(job_id, 99.0, message="Pipeline complete")
+
+    # Roll-up counts for the report UI — saves the client from iterating.
+    summary = {
+        "ok": sum(1 for r in results.values() if r.get("status") == "ok"),
+        "skipped": sum(1 for r in results.values() if r.get("status") == "skipped"),
+        "error": sum(1 for r in results.values() if r.get("status") == "error"),
+    }
+
     return {
         "speaker": speaker,
         "steps_run": steps_run,
         "results": results,
+        "summary": summary,
     }
 
 

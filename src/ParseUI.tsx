@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startSTT, startCompute, startNormalize, pollSTT, pollNormalize, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset } from './api/client';
 import type { OffsetDetectResult, OffsetPair } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
@@ -26,14 +26,19 @@ import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
 import { listActiveJobs } from './api/client';
-import type { PollResult } from './hooks/useActionJob';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
-import { PipelineChecklistModal, type PipelineChecklistResult } from './components/shared/PipelineChecklistModal';
+import {
+  TranscriptionRunModal,
+  type TranscriptionRunConfirm,
+  type PipelineStepId,
+} from './components/shared/TranscriptionRunModal';
+import { BatchReportModal } from './components/shared/BatchReportModal';
+import { useBatchPipelineJob } from './hooks/useBatchPipelineJob';
 import { ChatMarkdown } from './components/shared/ChatMarkdown';
 import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
@@ -1474,7 +1479,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
         {/* Waveform container — WaveSurfer owns this div. The left padding on
             the inner wrapper matches the lane label gutter so waveform t=0
-            lines up with segment t=0 in the STT/IPA/ORTHO strips, without
+            lines up with segment t=0 in the STT/IPA/ORTH strips, without
             wrapping WaveSurfer's container in a flex row (which caused the
             container width to be unstable on first render and made the
             Timeline plugin flicker). */}
@@ -1495,7 +1500,7 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
         </div>
 
-        {/* Transcription lanes — STT / IPA / ORTHO, toggled from the right drawer */}
+        {/* Transcription lanes — STT / IPA / ORTH, toggled from the right drawer */}
         <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady} onSeek={seek}/>
       </section>
 
@@ -1910,94 +1915,79 @@ export function ParseUI() {
     await loadSpeaker(speakerId);
   };
 
-  const normalizeJob = useActionJob({
-    start: () => {
-      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      return startNormalize(activeActionSpeaker);
-    },
-    poll: (id) => pollNormalize(id) as Promise<PollResult>,
-    label: 'Normalizing audio…',
-    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
-  });
+  // Single unified batch runner replaces the previous per-model hooks
+  // (normalizeJob / sttJob / ipaJob / orthoJob / pipelineJob). Every
+  // transcription action — single-model or full-pipeline — now goes
+  // through this batch pipeline: the TranscriptionRunModal picks
+  // speakers + steps, this hook iterates them sequentially, and
+  // BatchReportModal surfaces outcomes with expandable tracebacks.
+  // Continues on per-speaker failure; the walk-away-friendly design.
+  const batch = useBatchPipelineJob();
 
-  const sttJob = useActionJob({
-    start: () => {
-      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      const record = annotationRecords[activeActionSpeaker];
-      const sourceWav = (record?.source_audio ?? record?.source_wav ?? '').trim();
-      if (!sourceWav) {
-        return Promise.reject(new Error(
-          `No source_audio on annotation for ${activeActionSpeaker}. Import or onboard the speaker first.`,
-        ));
-      }
-      return startSTT(activeActionSpeaker, sourceWav, sttLanguageRef.current || undefined);
-    },
-    poll: (id) => pollSTT(id) as Promise<PollResult>,
-    label: 'Running STT…',
-    onComplete: () => {
-      const speaker = activeActionSpeaker;
-      if (speaker) void useTranscriptionLanesStore.getState().reloadStt(speaker);
-      return reloadSpeakerAnnotation(speaker);
-    },
-  });
+  // Transcription run modal — state holds the `fixedSteps` and title
+  // that the action-menu button supplied (null when closed). When
+  // `fixedSteps` is undefined, the modal renders step checkboxes;
+  // otherwise those checkboxes are locked to the supplied steps.
+  const [runModal, setRunModal] = useState<
+    | { title: string; fixedSteps: PipelineStepId[] | undefined }
+    | null
+  >(null);
 
-  const ipaJob = useActionJob({
-    start: () => {
-      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      return startCompute('ipa_only', { speaker: activeActionSpeaker });
-    },
-    poll: (id) => pollCompute('ipa_only', id),
-    label: 'Transcribing IPA…',
-    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
-  });
+  // Post-batch report modal. Opens when a batch finishes so the user
+  // sees what was done, what was skipped, and the full error traceback
+  // for each failure — the "come back from coffee, see the outcome" UX.
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportStepsRun, setReportStepsRun] = useState<PipelineStepId[]>([]);
+  const previousBatchStatusRef = useRef<typeof batch.state.status>('idle');
+  useEffect(() => {
+    if (previousBatchStatusRef.current === 'running' && batch.state.status === 'complete') {
+      setReportOpen(true);
+      void (async () => {
+        // Reload stores for every speaker that actually had work done
+        // so the transcription lanes / annotations refresh without a
+        // page reload.
+        for (const outcome of batch.state.outcomes) {
+          if (outcome.status === 'complete') {
+            void useTranscriptionLanesStore.getState().reloadStt(outcome.speaker);
+            await reloadSpeakerAnnotation(outcome.speaker);
+          }
+        }
+        await loadEnrichments();
+      })();
+    }
+    previousBatchStatusRef.current = batch.state.status;
+  }, [batch.state.status, batch.state.outcomes, loadEnrichments]);
 
-  const orthoJob = useActionJob({
-    start: () => {
-      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      // Default user-initiated run is "replace" — the Actions menu click
-      // means the user explicitly asked to regenerate ORTHO.
-      return startCompute('ortho', { speaker: activeActionSpeaker, overwrite: true });
-    },
-    poll: (id) => pollCompute('ortho', id),
-    label: 'Generating orthographic transcript…',
-    onComplete: () => reloadSpeakerAnnotation(activeActionSpeaker),
-  });
-
-  // Launched by the pre-flight checklist modal. The actual start payload is
-  // supplied when the user confirms the checklist, so we stash it in a ref.
-  const pipelinePayloadRef = useRef<Record<string, unknown> | null>(null);
-  const pipelineJob = useActionJob({
-    start: () => {
-      if (!activeActionSpeaker) return Promise.reject(new Error('No speaker selected'));
-      const payload = pipelinePayloadRef.current ?? { speaker: activeActionSpeaker };
-      return startCompute('full_pipeline', payload);
-    },
-    poll: (id) => pollCompute('full_pipeline', id),
-    label: 'Running full pipeline…',
-    onComplete: async () => {
-      if (activeActionSpeaker) {
-        void useTranscriptionLanesStore.getState().reloadStt(activeActionSpeaker);
-        await reloadSpeakerAnnotation(activeActionSpeaker);
-      }
-      await loadEnrichments();
-    },
-  });
-
-  const [pipelineChecklistOpen, setPipelineChecklistOpen] = useState(false);
-  const openPipelineChecklist = () => {
-    if (!activeActionSpeaker) return;
-    setPipelineChecklistOpen(true);
+  const openRunModal = (title: string, fixedSteps?: PipelineStepId[]) => {
+    setRunModal({ title, fixedSteps });
   };
-  const handlePipelineConfirm = (result: PipelineChecklistResult) => {
-    setPipelineChecklistOpen(false);
-    if (!activeActionSpeaker || result.steps.length === 0) return;
-    pipelinePayloadRef.current = {
-      speaker: activeActionSpeaker,
-      steps: result.steps,
-      overwrites: result.overwrites,
+
+  const handleRunConfirm = (confirm: TranscriptionRunConfirm) => {
+    setRunModal(null);
+    if (confirm.speakers.length === 0 || confirm.steps.length === 0) return;
+    void batch.run({
+      speakers: confirm.speakers,
+      steps: confirm.steps,
+      overwrites: confirm.overwrites,
       language: sttLanguageRef.current || undefined,
-    };
-    void pipelineJob.run();
+    });
+  };
+
+  const handleRerunFailed = (speakers: string[]) => {
+    if (speakers.length === 0 || reportStepsRun.length === 0) return;
+    setReportOpen(false);
+    void batch.run({
+      speakers,
+      steps: reportStepsRun,
+      // On re-run, allow overwrite for any steps that may have partially
+      // landed on the previous run — the user has explicitly asked to
+      // retry these speakers.
+      overwrites: reportStepsRun.reduce<Partial<Record<PipelineStepId, boolean>>>(
+        (acc, step) => { acc[step] = true; return acc; },
+        {},
+      ),
+      language: sttLanguageRef.current || undefined,
+    });
   };
 
   const crossSpeakerJob = useActionJob({
@@ -2007,14 +1997,18 @@ export function ParseUI() {
     onComplete: loadEnrichments,
   });
 
-  const allJobs = [normalizeJob, sttJob, ipaJob, orthoJob, pipelineJob, crossSpeakerJob];
-  const activeJobs = allJobs.filter(j => j.state.status !== 'idle');
+  const activeJobs = crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : [];
 
   // On mount, adopt any in-flight backend jobs so progress bars survive
   // a page reload. STT (and similar) run in a background thread that
   // outlives the browser tab — before this, the UI had no way to
   // reconnect, making the process look dead even though it was still
   // burning GPU cycles on the PC.
+  // Rehydrate cross-speaker-match jobs on mount — it's the only remaining
+  // long-lived job that runs outside the batch runner. Per-speaker
+  // transcription jobs (STT / normalize / ortho / ipa / full_pipeline)
+  // now flow through the batch runner; those are re-kicked from the
+  // TranscriptionRunModal rather than adopted here.
   const didRehydrateJobsRef = useRef(false);
   useEffect(() => {
     if (didRehydrateJobsRef.current) return;
@@ -2024,24 +2018,14 @@ export function ParseUI() {
       try {
         snapshots = await listActiveJobs();
       } catch {
-        return; // Endpoint may not exist on older servers; fail silent.
+        return;
       }
-      const speaker = activeActionSpeakerRef.current;
       for (const snap of snapshots) {
-        if (snap.type === 'stt' && snap.speaker && snap.speaker === speaker) {
-          sttJob.adopt(snap.jobId);
-        } else if (snap.type === 'normalize' && snap.speaker && snap.speaker === speaker) {
-          normalizeJob.adopt(snap.jobId);
-        } else if (snap.type === 'compute:ipa_only' && snap.speaker && snap.speaker === speaker) {
-          ipaJob.adopt(snap.jobId);
-        } else if (snap.type === 'compute:full_pipeline') {
-          pipelineJob.adopt(snap.jobId);
-        } else if (snap.type === 'compute:contact-lexemes') {
+        if (snap.type === 'compute:contact-lexemes') {
           crossSpeakerJob.adopt(snap.jobId);
         }
       }
     })();
-    // Intentionally run once on mount — sttJob etc. are stable handles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2255,7 +2239,8 @@ export function ParseUI() {
     useTagStore.setState({ tags: [] });
     usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
     useConfigStore.setState({ config: null, loading: false });
-    allJobs.forEach(j => j.reset());
+    crossSpeakerJob.reset();
+    batch.reset();
     resetComputeJob();
   };
 
@@ -2642,12 +2627,13 @@ export function ParseUI() {
                       <Import className="h-3.5 w-3.5 text-slate-400"/> Import Speaker Data…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); void normalizeJob.run(); }}
-                      disabled={!activeActionSpeaker || normalizeJob.state.status === 'running'}
+                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run Audio Normalization', ['normalize']); }}
+                      disabled={batch.state.status === 'running'}
+                      data-testid="actions-normalize"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <AudioLines className="h-3.5 w-3.5 text-slate-400"/>
-                      {normalizeJob.state.status === 'running' ? 'Normalizing…' : 'Run Audio Normalization'}
+                      Run Audio Normalization…
                     </button>
                     <div className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-slate-700">
                       <Mic className="h-3.5 w-3.5 shrink-0 text-slate-400"/>
@@ -2663,38 +2649,40 @@ export function ParseUI() {
                         title="ISO 639-1 code (e.g. en, de, ar). Whisper does not accept ISO 639-3 codes like ckb. Leave blank to auto-detect."
                       />
                       <button
-                        onClick={() => { setActionsMenuOpen(false); void sttJob.run(); }}
-                        disabled={!activeActionSpeaker || sttJob.state.status === 'running'}
+                        onClick={() => { setActionsMenuOpen(false); openRunModal('Run STT', ['stt']); }}
+                        disabled={batch.state.status === 'running'}
+                        data-testid="actions-stt"
                         className="ml-auto inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {sttJob.state.status === 'running' ? 'Running…' : 'Run STT'}
+                        Run STT…
                       </button>
                     </div>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); void orthoJob.run(); }}
-                      disabled={!activeActionSpeaker || orthoJob.state.status === 'running'}
+                      onClick={() => { setActionsMenuOpen(false); openRunModal('Generate ORTH (razhan)', ['ortho']); }}
+                      disabled={batch.state.status === 'running'}
                       data-testid="actions-generate-ortho"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Type className="h-3.5 w-3.5 text-slate-400"/>
-                      {orthoJob.state.status === 'running' ? 'Generating ORTHO…' : 'Generate ORTHO (razhan)'}
+                      Generate ORTH (razhan)…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); void ipaJob.run(); }}
-                      disabled={!activeActionSpeaker || ipaJob.state.status === 'running'}
+                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run IPA Transcription', ['ipa']); }}
+                      disabled={batch.state.status === 'running'}
+                      data-testid="actions-ipa"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Type className="h-3.5 w-3.5 text-slate-400"/>
-                      {ipaJob.state.status === 'running' ? 'Transcribing…' : 'Run IPA Transcription'}
+                      Run IPA Transcription…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); openPipelineChecklist(); }}
-                      disabled={!activeActionSpeaker || pipelineJob.state.status === 'running'}
+                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run Full Pipeline'); }}
+                      disabled={batch.state.status === 'running'}
                       data-testid="actions-run-full-pipeline"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Workflow className="h-3.5 w-3.5 text-slate-400"/>
-                      {pipelineJob.state.status === 'running' ? 'Running pipeline…' : 'Run Full Pipeline…'}
+                      Run Full Pipeline…
                     </button>
                     <button
                       onClick={() => { setActionsMenuOpen(false); void crossSpeakerJob.run(); }}
@@ -2768,6 +2756,60 @@ export function ParseUI() {
               )}
             </div>
 
+            {batch.state.status === 'running' && (
+              <div
+                className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-3 rounded-md border border-indigo-200 bg-indigo-50/95 px-3 py-1 shadow-sm backdrop-blur"
+                data-testid="topbar-batch-status"
+              >
+                <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />
+                <span className="text-[11px] font-medium text-indigo-900">
+                  Batch {Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/{batch.state.totalSpeakers}
+                </span>
+                {batch.state.currentSpeaker && (
+                  <span className="text-[11px] text-indigo-700">— {batch.state.currentSpeaker}</span>
+                )}
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-indigo-100">
+                  {batch.state.currentProgress < 0.02 ? (
+                    <div className="h-full w-1/3 animate-pulse rounded-full bg-indigo-400" />
+                  ) : (
+                    <div
+                      className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                      style={{ width: `${Math.round(batch.state.currentProgress * 100)}%` }}
+                    />
+                  )}
+                </div>
+                {batch.state.currentMessage && (
+                  <span className="max-w-[240px] truncate text-[11px] text-indigo-600" title={batch.state.currentMessage}>
+                    {batch.state.currentMessage}
+                  </span>
+                )}
+              </div>
+            )}
+            {batch.state.status === 'complete' && !reportOpen && (
+              <div
+                className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50/95 px-3 py-1 shadow-sm backdrop-blur"
+                data-testid="topbar-batch-complete"
+              >
+                <Check className="h-3 w-3 text-emerald-600" />
+                <span className="text-[11px] font-medium text-emerald-900">
+                  Batch done · {batch.state.outcomes.filter(o => o.status === 'complete').length}/{batch.state.totalSpeakers} ok
+                </span>
+                <button
+                  onClick={() => setReportOpen(true)}
+                  className="rounded px-2 py-0.5 text-[11px] font-semibold text-emerald-700 underline hover:text-emerald-800"
+                  data-testid="topbar-batch-view-report"
+                >
+                  View report
+                </button>
+                <button
+                  onClick={() => batch.reset()}
+                  className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             {activeJobs.length > 0 && (
               <div className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex flex-col gap-1 rounded-md border border-slate-200 bg-white/95 px-3 py-1 shadow-sm backdrop-blur" data-testid="topbar-action-statuses">
                 {activeJobs.map((job, i) => (
@@ -3582,11 +3624,26 @@ export function ParseUI() {
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
       </Modal>
-      <PipelineChecklistModal
-        open={pipelineChecklistOpen}
-        speaker={activeActionSpeaker || ''}
-        onClose={() => setPipelineChecklistOpen(false)}
-        onConfirm={handlePipelineConfirm}
+      <TranscriptionRunModal
+        open={runModal !== null}
+        title={runModal?.title ?? 'Run transcription'}
+        fixedSteps={runModal?.fixedSteps}
+        speakers={Object.keys(annotationRecords).sort()}
+        defaultSelectedSpeaker={activeActionSpeaker}
+        onClose={() => setRunModal(null)}
+        onConfirm={(confirm) => {
+          // Capture which steps the user asked for so the batch report
+          // modal knows which columns to render.
+          setReportStepsRun(confirm.steps);
+          handleRunConfirm(confirm);
+        }}
+      />
+      <BatchReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        outcomes={batch.state.outcomes}
+        stepsRun={reportStepsRun}
+        onRerunFailed={handleRerunFailed}
       />
       <Modal
         open={offsetState.phase !== 'idle'}
