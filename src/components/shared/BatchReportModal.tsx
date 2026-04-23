@@ -58,11 +58,64 @@ function okDetail(step: PipelineStepId, cell: PipelineStepResultBase): string {
     }
     case "ortho":
     case "ipa": {
+      // Both the explicit ``intervals`` key and the ``filled`` counter
+      // (which the backend returns from _compute_speaker_ortho and
+      // _compute_speaker_ipa) are acceptable sources. Fall back to
+      // ``total`` if present, else "done" so the cell is never empty.
       const ivs = cell["intervals"];
       if (typeof ivs === "number") return `${ivs} ivs`;
+      const filled = cell["filled"];
+      if (typeof filled === "number") return `${filled} ivs`;
+      const total = cell["total"];
+      if (typeof total === "number") return `${total} ivs`;
       return "done";
     }
   }
+}
+
+type CellKind = "ok" | "skipped" | "error" | "unknown";
+
+/** Classify a step-result object into one of four visual kinds.
+ *
+ *  The backend's ``_compute_full_pipeline`` tags every step result with
+ *  a ``status`` field ("ok" / "skipped" / "error"), but we also want to
+ *  be forgiving of older response shapes (pre-step-resilience main, or
+ *  direct calls to the per-step compute endpoints that return their
+ *  own shape without a ``status`` tag). The heuristics below recover
+ *  the visual intent even when the explicit field is missing.
+ *
+ *  Returns ``"unknown"`` only when we genuinely can't tell — the cell
+ *  then renders with a helpful "unclassified" label instead of a bare
+ *  em-dash, so the user knows there's data to inspect (via the raw
+ *  JSON download).
+ */
+function classifyCell(cell: PipelineStepResultBase): CellKind {
+  // 1. Explicit status field wins.
+  const explicit = cell["status"];
+  if (explicit === "ok" || explicit === "skipped" || explicit === "error") {
+    return explicit;
+  }
+  // 2. An error string implies error regardless of other fields.
+  if (typeof cell["error"] === "string" && cell["error"].trim()) {
+    return "error";
+  }
+  // 3. Old shape: ``skipped: true`` (pre-status-tag pipelines).
+  if (cell["skipped"] === true) {
+    return "skipped";
+  }
+  // 4. Any positive work output implies ok.
+  const numericKeys = ["filled", "segments", "intervals", "total"];
+  for (const k of numericKeys) {
+    const v = cell[k];
+    if (typeof v === "number" && v > 0) return "ok";
+  }
+  // 5. Explicit done flag.
+  if (cell["done"] === true) return "ok";
+  // 6. ``filled: 0`` with ``total: 0`` and no error = nothing to do — skipped.
+  if (cell["filled"] === 0 && (cell["total"] === 0 || cell["total"] === undefined)) {
+    return "skipped";
+  }
+  return "unknown";
 }
 
 function speakerHasFailure(outcome: BatchSpeakerOutcome): boolean {
@@ -70,7 +123,7 @@ function speakerHasFailure(outcome: BatchSpeakerOutcome): boolean {
   if (outcome.result) {
     for (const step of Object.keys(outcome.result.results) as PipelineStepId[]) {
       const cell = outcome.result.results[step];
-      if (cell && cell.status === "error") return true;
+      if (cell && classifyCell(cell) === "error") return true;
     }
   }
   return false;
@@ -93,9 +146,10 @@ function countTotals(
     for (const step of stepsRun) {
       const cell = outcome.result.results[step];
       if (!cell) continue;
-      if (cell.status === "ok") ok += 1;
-      else if (cell.status === "skipped") skipped += 1;
-      else if (cell.status === "error") errored += 1;
+      const kind = classifyCell(cell);
+      if (kind === "ok") ok += 1;
+      else if (kind === "skipped") skipped += 1;
+      else if (kind === "error") errored += 1;
     }
   }
   return { ok, skipped, errored };
@@ -178,36 +232,53 @@ function StepCell({
 }) {
   if (!stepInBatch) {
     return (
-      <td className="border-b border-slate-100 px-2 py-1.5 text-center text-slate-300">
+      <td
+        className="border-b border-slate-100 px-2 py-1.5 text-center text-slate-300"
+        title="Step was not selected for this batch"
+      >
         —
       </td>
     );
   }
   // Whole-speaker errors (no result) are handled by a banner row — for each
-  // individual step cell in that row we render a dim dash.
+  // individual step cell in that row we show a dim dash pointing at it.
   if (!outcome.result) {
     return (
-      <td className="border-b border-slate-100 px-2 py-1.5 text-center text-slate-300">
+      <td
+        className="border-b border-slate-100 px-2 py-1.5 text-center text-slate-300"
+        title="Speaker-level error — see the highlighted row below for details"
+      >
         —
       </td>
     );
   }
   const cell = outcome.result.results[step];
   if (!cell) {
+    // The backend didn't return a result entry for this step at all
+    // (pipeline finished but the step wasn't in its ``results`` dict).
+    // Prefer a labelled marker over a bare em-dash so the user knows
+    // there's nothing to inspect rather than silently ignoring it.
     return (
-      <td className="border-b border-slate-100 px-2 py-1.5 text-center text-slate-300">
-        —
+      <td
+        className="border-b border-slate-100 px-2 py-1.5 align-top"
+        title={`Backend returned no result entry for "${step}". Inspect via Download report.`}
+      >
+        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+          <SkipForward className="h-3.5 w-3.5" /> No data
+        </span>
       </td>
     );
   }
 
-  if (cell.status === "ok") {
+  const kind = classifyCell(cell);
+
+  if (kind === "ok") {
     return (
-      <td className="border-b border-slate-100 px-2 py-1.5 align-top">
-        <div className="flex items-center gap-1 text-emerald-700">
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">OK</span>
-          <span className="text-[11px] text-emerald-900/70">
+      <td className="border-b border-slate-100 bg-emerald-50/40 px-2 py-1.5 align-top">
+        <div className="flex items-center gap-1.5 text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span className="text-xs font-semibold">OK</span>
+          <span className="text-[11px] text-emerald-900/70 tabular-nums">
             {okDetail(step, cell)}
           </span>
         </div>
@@ -215,16 +286,19 @@ function StepCell({
     );
   }
 
-  if (cell.status === "skipped") {
-    const reason = cell.reason ?? "";
+  if (kind === "skipped") {
+    const reason =
+      (typeof cell.reason === "string" && cell.reason) ||
+      (typeof cell["message"] === "string" ? (cell["message"] as string) : "") ||
+      "Nothing to do";
     return (
-      <td className="border-b border-slate-100 px-2 py-1.5 align-top">
+      <td className="border-b border-slate-100 bg-slate-50 px-2 py-1.5 align-top">
         <div
-          className="flex items-center gap-1 text-slate-600"
-          title={reason || undefined}
+          className="flex items-center gap-1.5 text-slate-600"
+          title={reason}
         >
-          <SkipForward className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-medium">Skipped</span>
+          <SkipForward className="h-4 w-4 shrink-0" />
+          <span className="text-xs font-semibold">Skipped</span>
           {reason && (
             <span className="text-[11px] text-slate-500">
               {truncate(reason)}
@@ -235,7 +309,24 @@ function StepCell({
     );
   }
 
-  // cell.status === "error"
+  if (kind === "unknown") {
+    // We have a cell but couldn't classify it. Show a neutral marker
+    // + tooltip with the raw keys so the user can still tell there's
+    // *something* there — far better than a silent em-dash.
+    const keys = Object.keys(cell).join(", ");
+    return (
+      <td
+        className="border-b border-slate-100 bg-slate-50 px-2 py-1.5 align-top"
+        title={`Step ran but returned an unfamiliar shape. Keys: ${keys}. Use Download report to inspect.`}
+      >
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500">
+          <SkipForward className="h-4 w-4" /> Ran (unclassified)
+        </span>
+      </td>
+    );
+  }
+
+  // kind === "error"
   const shortError = cell.error ?? "Error";
   const traceback =
     typeof cell.traceback === "string" && cell.traceback.trim()

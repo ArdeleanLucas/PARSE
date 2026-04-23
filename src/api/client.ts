@@ -638,7 +638,10 @@ export async function getPipelineState(speaker: string): Promise<PipelineState> 
 export type PipelineStepStatus = "ok" | "skipped" | "error";
 
 export interface PipelineStepResultBase {
-  status: PipelineStepStatus;
+  /** Optional — older servers and direct per-step endpoints may omit it.
+   *  The UI classifier in ``BatchReportModal`` falls back to heuristics
+   *  (positive counts, skipped flag, error string) when missing. */
+  status?: PipelineStepStatus;
   reason?: string;
   error?: string;
   traceback?: string;

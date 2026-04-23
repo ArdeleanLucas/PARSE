@@ -45,7 +45,6 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
-type ModeTab = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 type AppMode = 'annotate' | 'compare' | 'tags';
 
 interface LingTag {
@@ -1791,7 +1790,6 @@ export function ParseUI() {
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [conceptId, setConceptId] = useState(1);
-  const [modeTab, setModeTab] = useState<ModeTab>('all');
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState('cognates');
@@ -2401,18 +2399,17 @@ export function ParseUI() {
       list = list.filter(c => c.tag === 'untagged');
     } else if (tagFilter === 'review') {
       list = list.filter(c => c.tag === 'review');
+    } else if (tagFilter === 'unreviewed') {
+      // Unreviewed ≡ not yet confirmed AND no cognate assignment yet.
+      // Formerly lived as a separate header tab; now a left-panel pill.
+      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
+    } else if (tagFilter === 'flagged') {
+      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
+    } else if (tagFilter === 'borrowings') {
+      list = list.filter(c => hasBorrowing(c.key));
     } else if (tagFilter !== 'all') {
       const storeTag = storeTags.find(t => t.id === tagFilter);
       if (storeTag) list = list.filter(c => storeTag.concepts.includes(c.key));
-    }
-    if (modeTab === 'unreviewed') {
-      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
-    }
-    if (modeTab === 'flagged') {
-      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
-    }
-    if (modeTab === 'borrowings') {
-      list = list.filter(c => hasBorrowing(c.key));
     }
     // In annotate mode, show all concepts for the selected speaker (filter by real data when available)
     if (currentMode === 'annotate') {
@@ -2435,7 +2432,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
+  }, [query, tagFilter, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
 
@@ -2563,13 +2560,6 @@ export function ParseUI() {
     setSelectedSpeakers((existing) => existing.includes(speakerId) ? existing : [...existing, speakerId]);
   };
 
-  const modeTabs: { key: ModeTab; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'unreviewed', label: 'Unreviewed' },
-    { key: 'flagged', label: 'Flagged' },
-    { key: 'borrowings', label: 'Borrowings' },
-  ];
-
   return (
     <div className="h-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased flex flex-col">
       {/* ============ MINIMAL TOP BAR ============ */}
@@ -2590,17 +2580,90 @@ export function ParseUI() {
             </div>
           </div>
 
-          <nav className="hidden items-center gap-1 rounded-lg bg-slate-100/80 p-0.5 md:flex">
-            {modeTabs.map(t => (
+          {/* The All / Unreviewed / Flagged / Borrowings tabs that used
+              to live here are now left-panel tag pills (so this row
+              has room to show batch status during long GPU runs). */}
+
+          {/* ===== Inline batch status — reclaims the space freed by
+               moving the filter tabs down into the left panel. Only
+               renders when a batch is running / cancelling / has just
+               completed. ===== */}
+          {(batch.state.status === 'running' || batch.state.status === 'cancelling') && (
+            <div
+              className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
+                batch.state.status === 'cancelling'
+                  ? 'border-amber-200 bg-amber-50'
+                  : 'border-indigo-200 bg-indigo-50'
+              }`}
+              data-testid="topbar-batch-status"
+            >
+              <Loader2 className={`h-3 w-3 shrink-0 animate-spin ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} />
+              <span className={`text-[11px] font-medium ${batch.state.status === 'cancelling' ? 'text-amber-900' : 'text-indigo-900'}`}>
+                {batch.state.status === 'cancelling'
+                  ? 'Cancelling…'
+                  : `Batch ${Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/${batch.state.totalSpeakers}`}
+              </span>
+              {batch.state.currentSpeaker && (
+                <span className={`text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-700' : 'text-indigo-700'}`}>— {batch.state.currentSpeaker}</span>
+              )}
+              <div className={`h-1.5 w-16 shrink-0 overflow-hidden rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-100' : 'bg-indigo-100'}`}>
+                {batch.state.currentProgress < 0.02 ? (
+                  <div className={`h-full w-1/3 animate-pulse rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
+                ) : (
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${batch.state.status === 'cancelling' ? 'bg-amber-600' : 'bg-indigo-600'}`}
+                    style={{ width: `${Math.round(batch.state.currentProgress * 100)}%` }}
+                  />
+                )}
+              </div>
+              {batch.state.currentMessage && (
+                <span className={`hidden max-w-[180px] truncate text-[11px] lg:inline ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} title={batch.state.currentMessage}>
+                  {batch.state.currentMessage}
+                </span>
+              )}
+              {batch.state.status === 'running' && (
+                <button
+                  onClick={() => batch.cancel()}
+                  className="rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                  data-testid="topbar-batch-cancel"
+                  title="Stop after the current speaker finishes. Current speaker's compute continues — razhan/whisper can't be aborted mid-transcription."
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
+          {batch.state.status === 'complete' && !reportOpen && (
+            <div
+              className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
+                batch.state.cancelled
+                  ? 'border-amber-200 bg-amber-50'
+                  : 'border-emerald-200 bg-emerald-50'
+              }`}
+              data-testid="topbar-batch-complete"
+            >
+              <Check className={`h-3 w-3 shrink-0 ${batch.state.cancelled ? 'text-amber-600' : 'text-emerald-600'}`} />
+              <span className={`text-[11px] font-medium ${batch.state.cancelled ? 'text-amber-900' : 'text-emerald-900'}`}>
+                {batch.state.cancelled ? 'Cancelled' : 'Done'} · {batch.state.outcomes.filter(o => o.status === 'complete').length} ok
+                {batch.state.outcomes.filter(o => o.status === 'error').length > 0 && `, ${batch.state.outcomes.filter(o => o.status === 'error').length} err`}
+                {batch.state.outcomes.filter(o => o.status === 'cancelled').length > 0 && `, ${batch.state.outcomes.filter(o => o.status === 'cancelled').length} skip`}
+              </span>
               <button
-                key={t.key}
-                onClick={() => setModeTab(t.key)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition ${modeTab === t.key ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+                onClick={() => setReportOpen(true)}
+                className={`rounded px-1.5 py-0.5 text-[11px] font-semibold underline ${batch.state.cancelled ? 'text-amber-700 hover:text-amber-800' : 'text-emerald-700 hover:text-emerald-800'}`}
+                data-testid="topbar-batch-view-report"
               >
-                {t.label}
+                View report
               </button>
-            ))}
-          </nav>
+              <button
+                onClick={() => batch.reset()}
+                className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
+                aria-label="Dismiss batch status"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             {/* Mode dropdown */}
@@ -2786,78 +2849,9 @@ export function ParseUI() {
               )}
             </div>
 
-            {(batch.state.status === 'running' || batch.state.status === 'cancelling') && (
-              <div
-                className={`pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-3 rounded-md border px-3 py-1 shadow-sm backdrop-blur ${
-                  batch.state.status === 'cancelling'
-                    ? 'border-amber-200 bg-amber-50/95'
-                    : 'border-indigo-200 bg-indigo-50/95'
-                }`}
-                data-testid="topbar-batch-status"
-              >
-                <Loader2 className={`h-3 w-3 animate-spin ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} />
-                <span className={`text-[11px] font-medium ${batch.state.status === 'cancelling' ? 'text-amber-900' : 'text-indigo-900'}`}>
-                  {batch.state.status === 'cancelling' ? 'Cancelling after current speaker…' : `Batch ${Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/${batch.state.totalSpeakers}`}
-                </span>
-                {batch.state.currentSpeaker && (
-                  <span className={`text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-700' : 'text-indigo-700'}`}>— {batch.state.currentSpeaker}</span>
-                )}
-                <div className={`h-1.5 w-24 overflow-hidden rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-100' : 'bg-indigo-100'}`}>
-                  {batch.state.currentProgress < 0.02 ? (
-                    <div className={`h-full w-1/3 animate-pulse rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
-                  ) : (
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${batch.state.status === 'cancelling' ? 'bg-amber-600' : 'bg-indigo-600'}`}
-                      style={{ width: `${Math.round(batch.state.currentProgress * 100)}%` }}
-                    />
-                  )}
-                </div>
-                {batch.state.currentMessage && (
-                  <span className={`max-w-[240px] truncate text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} title={batch.state.currentMessage}>
-                    {batch.state.currentMessage}
-                  </span>
-                )}
-                {batch.state.status === 'running' && (
-                  <button
-                    onClick={() => batch.cancel()}
-                    className="rounded border border-indigo-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                    data-testid="topbar-batch-cancel"
-                    title="Stop after the current speaker finishes. The current speaker's compute continues — we can't abort razhan/whisper mid-transcription."
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            )}
-            {batch.state.status === 'complete' && !reportOpen && (
-              <div
-                className={`pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-2 rounded-md border px-3 py-1 shadow-sm backdrop-blur ${
-                  batch.state.cancelled
-                    ? 'border-amber-200 bg-amber-50/95'
-                    : 'border-emerald-200 bg-emerald-50/95'
-                }`}
-                data-testid="topbar-batch-complete"
-              >
-                <Check className={`h-3 w-3 ${batch.state.cancelled ? 'text-amber-600' : 'text-emerald-600'}`} />
-                <span className={`text-[11px] font-medium ${batch.state.cancelled ? 'text-amber-900' : 'text-emerald-900'}`}>
-                  {batch.state.cancelled ? 'Batch cancelled' : 'Batch done'} · {batch.state.outcomes.filter(o => o.status === 'complete').length} ok{batch.state.outcomes.filter(o => o.status === 'error').length > 0 ? `, ${batch.state.outcomes.filter(o => o.status === 'error').length} failed` : ''}{batch.state.outcomes.filter(o => o.status === 'cancelled').length > 0 ? `, ${batch.state.outcomes.filter(o => o.status === 'cancelled').length} skipped` : ''}
-                </span>
-                <button
-                  onClick={() => setReportOpen(true)}
-                  className="rounded px-2 py-0.5 text-[11px] font-semibold text-emerald-700 underline hover:text-emerald-800"
-                  data-testid="topbar-batch-view-report"
-                >
-                  View report
-                </button>
-                <button
-                  onClick={() => batch.reset()}
-                  className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
-                  aria-label="Dismiss"
-                >
-                  ×
-                </button>
-              </div>
-            )}
+            {/* Batch banners moved INTO the header above — previously
+                floated below the topbar and obscured the mode tabs +
+                Actions menu + waveform controls. */}
             {activeJobs.length > 0 && (
               <div className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex flex-col gap-1 rounded-md border border-slate-200 bg-white/95 px-3 py-1 shadow-sm backdrop-blur" data-testid="topbar-action-statuses">
                 {activeJobs.map((job, i) => (
@@ -2971,25 +2965,57 @@ export function ParseUI() {
               </div>
               <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
             </div>
-            {tagsList.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
+            <div className="mt-2 flex flex-wrap gap-1">
+              {/* Built-in filter pills — replace the old header tabs.
+                  Order: All (reset) · Unreviewed · Flagged · Borrowings.
+                  Each is a tag-shaped pill with a distinctive accent
+                  colour so they read as semantic filters, not as user
+                  tags. Clicking an active pill returns to "All". */}
+              <button
+                onClick={() => setTagFilter('all')}
+                data-testid="tagfilter-all"
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              >All</button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'unreviewed' ? 'all' : 'unreviewed')}
+                title="Concepts not yet confirmed and without a cognate assignment"
+                data-testid="tagfilter-unreviewed"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'unreviewed' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'unreviewed' ? 'bg-white' : 'bg-amber-400'}`}/>
+                Unreviewed
+              </button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'flagged' ? 'all' : 'flagged')}
+                title="Concepts tagged problematic, or with a flagged speaker utterance"
+                data-testid="tagfilter-flagged"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'flagged' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'flagged' ? 'bg-white' : 'bg-rose-400'}`}/>
+                Flagged
+              </button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'borrowings' ? 'all' : 'borrowings')}
+                title="Concepts with at least one borrowing"
+                data-testid="tagfilter-borrowings"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'borrowings' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'borrowings' ? 'bg-white' : 'bg-violet-400'}`}/>
+                Borrowings
+              </button>
+              {/* User-defined tags, appended after the built-ins. */}
+              {tagsList.map(t => (
                 <button
-                  onClick={() => setTagFilter('all')}
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                >All</button>
-                {tagsList.map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    style={tagFilter === t.id ? { background: t.color } : {}}
-                  >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            )}
+                  key={t.id}
+                  onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  style={tagFilter === t.id ? { background: t.color } : {}}
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
+                  {t.name}
+                </button>
+              ))}
+            </div>
           </div>
           <nav className="flex-1 overflow-y-auto px-2 pb-6">
             {filtered.map(c => {
