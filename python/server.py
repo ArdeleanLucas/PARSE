@@ -2806,6 +2806,11 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     Payload: ``{ "speaker": "Fail02", "overwrite": false }``.
     """
+    # Diagnostics v2: trace every call-site that could silently crash
+    # the process (CUDA / torch init). Prints are unbuffered + flushed
+    # so we land in stderr even on native crashes.
+    print("[IPA] enter _compute_speaker_ipa payload={0}".format(payload), file=sys.stderr, flush=True)
+
     speaker = _normalize_speaker_id(payload.get("speaker"))
     overwrite = bool(payload.get("overwrite", False))
 
@@ -2819,6 +2824,7 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     else:
         raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
 
+    print("[IPA] loaded annotation_path={0}".format(annotation_path), file=sys.stderr, flush=True)
     annotation = _read_json_file(annotation_path, {})
     if not isinstance(annotation, dict):
         raise RuntimeError("Annotation is not a JSON object")
@@ -2827,6 +2833,7 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     ortho_tier = tiers.get("ortho") or {}
     ortho_intervals = list(ortho_tier.get("intervals") or [])
     if not ortho_intervals:
+        print("[IPA] no ortho intervals — early return", file=sys.stderr, flush=True)
         return {"speaker": speaker, "filled": 0, "skipped": 0, "total": 0, "message": "No ortho intervals."}
 
     ipa_tier = tiers.setdefault("ipa", {"type": "interval", "display_order": 1, "intervals": []})
@@ -2836,20 +2843,39 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         return (round(float(interval.get("start", 0.0)), 3), round(float(interval.get("end", 0.0)), 3))
 
     ipa_by_key: Dict[Tuple[float, float], Dict[str, Any]] = {_key(i): i for i in ipa_intervals}
-
-    # Resolve the speaker's working audio once; a 5-hour recording loads
-    # into ~300 MB of float32 which is fine for a one-shot pass.
-    audio_path = _pipeline_audio_path_for_speaker(speaker)
-    from ai.forced_align import _load_audio_mono_16k
     print(
-        "[IPA] speaker={0} ortho_intervals={1} audio={2}".format(
-            speaker, len(ortho_intervals), audio_path
+        "[IPA] ortho_intervals={0} existing_ipa_intervals={1}".format(
+            len(ortho_intervals), len(ipa_intervals)
         ),
         file=sys.stderr,
         flush=True,
     )
+
+    # Resolve the speaker's working audio once; a 5-hour recording loads
+    # into ~300 MB of float32 which is fine for a one-shot pass.
+    print("[IPA] resolving audio path for speaker={0}…".format(speaker), file=sys.stderr, flush=True)
+    audio_path = _pipeline_audio_path_for_speaker(speaker)
+    print("[IPA] audio_path={0} — importing ai.forced_align".format(audio_path), file=sys.stderr, flush=True)
+    from ai.forced_align import _load_audio_mono_16k
+    print("[IPA] import ok — calling _load_audio_mono_16k()", file=sys.stderr, flush=True)
+    import time as _t_load
+    _t0 = _t_load.time()
     audio_tensor = _load_audio_mono_16k(audio_path)
+    _load_elapsed = _t_load.time() - _t0
+    try:
+        _numel = int(audio_tensor.numel())
+    except Exception:
+        _numel = -1
+    print(
+        "[IPA] audio loaded in {0:.1f}s numel={1} (~{2:.1f}s of 16 kHz mono)".format(
+            _load_elapsed, _numel, _numel / 16000.0 if _numel > 0 else 0.0
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    print("[IPA] calling _get_ipa_aligner()…", file=sys.stderr, flush=True)
     aligner = _get_ipa_aligner()
+    print("[IPA] aligner ready — entering per-interval loop (n={0})".format(len(ortho_intervals)), file=sys.stderr, flush=True)
 
     filled = 0
     skipped = 0
@@ -3738,9 +3764,24 @@ def _reset_job_to_running(job_id: str) -> None:
 
 
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
+    # Diagnostics v2: emit on every entry so we can tell if the compute
+    # thread is even starting — previous Fail02 runs died between the
+    # HTTP POST accepting and the first downstream log line.
+    print(
+        "[COMPUTE] _run_compute_job entry job_id={0} compute_type={1} payload={2}".format(
+            job_id, compute_type, payload
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         normalized_type = str(compute_type or "").strip().lower()
         _set_job_progress(job_id, 5.0, message="Starting compute job")
+        print(
+            "[COMPUTE] dispatching normalized_type={0}".format(normalized_type),
+            file=sys.stderr,
+            flush=True,
+        )
 
         if normalized_type in {"cognates", "similarity"}:
             result = _compute_cognates(job_id, payload)
