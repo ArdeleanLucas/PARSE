@@ -26,7 +26,8 @@ Tools exposed:
     audio_normalize_start, enrichments_write, lexeme_notes_write,
     export_annotations_csv, export_lingpy_tsv, export_nexus
   New read tools:
-    audio_normalize_status, enrichments_read, lexeme_notes_read
+    audio_normalize_status, enrichments_read, lexeme_notes_read,
+    jobs_list_active, source_index_validate
 
 Usage:
     python python/adapters/mcp_adapter.py
@@ -424,6 +425,35 @@ def _build_normalize_callback():
     return start_normalize_job
 
 
+def _build_jobs_callback():
+    """Build ParseChatTools' list_active_jobs callback that proxies to the HTTP server."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def list_active_jobs() -> List[Dict[str, Any]]:
+        req = urllib.request.Request(
+            url="{0}/api/jobs/active".format(base_url),
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10.0) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            raise RuntimeError(
+                "PARSE API jobs/active failed ({0})".format(http_err.code)
+            )
+        except urllib.error.URLError as exc:
+            raise RuntimeError("PARSE API unreachable at {0}: {1}".format(base_url, exc))
+        parsed = _json.loads(body) if body else {}
+        return list(parsed.get("jobs") or [])
+
+    return list_active_jobs
+
+
 def _resolve_external_read_roots() -> list:
     """Parse PARSE_EXTERNAL_READ_ROOTS from env into a list of Paths.
 
@@ -608,6 +638,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     pipeline_state_cb, start_compute_cb = _build_pipeline_callbacks()
     onboard_callback = _build_onboard_callback()
     normalize_cb = _build_normalize_callback()
+    jobs_cb = _build_jobs_callback()
     tools = ParseChatTools(
         project_root=root,
         start_stt_job=start_stt,
@@ -618,6 +649,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         pipeline_state=pipeline_state_cb,
         start_compute_job=start_compute_cb,
         start_normalize_job=normalize_cb,
+        list_active_jobs=jobs_cb,
     )
 
     mcp = FastMCP(

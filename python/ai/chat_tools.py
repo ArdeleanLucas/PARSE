@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "export_nexus",
     "import_tag_csv",
     "peaks_generate",
+    "source_index_validate",
     "transcript_reformat",
     "import_processed_speaker",
     "lexeme_notes_write",
@@ -307,6 +309,8 @@ class ParseChatTools:
         # Start a normalize job for a speaker. Takes (speaker, source_wav_or_None),
         # returns a jobId to poll via audio_normalize_status / compute_status.
         start_normalize_job: Optional[Callable[[str, Optional[str]], str]] = None,
+        # Return all currently-running job snapshots from the server's job registry.
+        list_active_jobs: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     ) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
         self.config_path = (Path(config_path).expanduser().resolve() if config_path else self.project_root / "config" / "ai_config.json")
@@ -355,6 +359,7 @@ class ParseChatTools:
         self._start_compute_job = start_compute_job
         self._pipeline_state = pipeline_state
         self._start_normalize_job = start_normalize_job
+        self._list_active_jobs = list_active_jobs
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
             "project_context_read": ChatToolSpec(
@@ -1530,6 +1535,61 @@ class ParseChatTools:
                         },
                         "dryRun": {"type": "boolean", "description": "Compute peaks but do not write to disk."},
                     },
+                },
+            ),
+            "source_index_validate": ChatToolSpec(
+                name="source_index_validate",
+                description=(
+                    "Validate a speaker manifest entry or full manifest against the SourceIndex schema. "
+                    "Two modes:\n"
+                    "  speaker — validate + transform one speaker entry; returns errors and transformed shape\n"
+                    "  full    — validate + build the complete source_index.json; "
+                    "optionally write to outputPath inside the project"
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["speaker", "full"],
+                            "description": "Validation scope (default: speaker).",
+                        },
+                        "speakerId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID (required for mode=speaker).",
+                        },
+                        "speakerData": {
+                            "type": "object",
+                            "description": "Speaker manifest entry to validate (required for mode=speaker).",
+                        },
+                        "manifest": {
+                            "type": "object",
+                            "description": "Full manifest with top-level 'speakers' key (required for mode=full).",
+                        },
+                        "outputPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Write built source_index.json here (mode=full only, project-relative or absolute inside project).",
+                        },
+                    },
+                },
+            ),
+            "jobs_list_active": ChatToolSpec(
+                name="jobs_list_active",
+                description=(
+                    "List all currently-running jobs in the PARSE job registry "
+                    "(STT, normalize, compute, onboard, etc.). "
+                    "Returns type, status, progress, speaker, and message for each active job. "
+                    "Useful for recovering jobIds after a session restart."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {},
                 },
             ),
         }
@@ -3163,6 +3223,122 @@ class ParseChatTools:
             "peakCount": len(peak_data) // 2,
             "durationSec": round(total_samples / sample_rate, 3) if sample_rate else None,
         }
+
+    # ------------------------------------------------------------------
+    # Tier 3 — infrastructure / preflight
+    # ------------------------------------------------------------------
+
+    def _tool_source_index_validate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate a speaker manifest entry or full manifest; optionally write source_index.json."""
+        try:
+            from source_index import validate_speaker, transform_speaker, build_source_index  # type: ignore[import]
+        except Exception as exc:
+            raise ChatToolExecutionError("source_index is not importable: {0}".format(exc))
+
+        import io as _io
+
+        def _call(fn: Any, *fn_args: Any) -> Tuple[bool, List[str], Any]:
+            """Invoke a source_index function; capture stderr and catch SystemExit."""
+            old_stderr = sys.stderr
+            sys.stderr = _io.StringIO()
+            result = None
+            try:
+                result = fn(*fn_args)
+                errors: List[str] = []
+                ok = True
+            except SystemExit:
+                raw = sys.stderr.getvalue()
+                errors = [
+                    line.replace("ERROR: ", "", 1).strip()
+                    for line in raw.strip().splitlines()
+                    if line.strip()
+                ]
+                ok = False
+            finally:
+                sys.stderr = old_stderr
+            return ok, errors, result
+
+        mode = str(args.get("mode") or "speaker").strip().lower()
+
+        if mode == "speaker":
+            speaker_id = str(args.get("speakerId") or "").strip()
+            if not speaker_id:
+                raise ChatToolValidationError("speakerId is required for mode=speaker")
+            speaker_data = args.get("speakerData")
+            if not isinstance(speaker_data, dict):
+                raise ChatToolValidationError("speakerData must be an object for mode=speaker")
+
+            valid, errors, _ = _call(validate_speaker, speaker_id, speaker_data)
+            transformed = None
+            if valid:
+                ok2, errs2, transformed = _call(transform_speaker, speaker_id, speaker_data)
+                if not ok2:
+                    valid = False
+                    errors = errs2
+
+            return {
+                "readOnly": True,
+                "mode": "speaker",
+                "speakerId": speaker_id,
+                "valid": valid,
+                "errors": errors,
+                "transformed": transformed,
+            }
+
+        if mode == "full":
+            manifest = args.get("manifest")
+            if not isinstance(manifest, dict):
+                raise ChatToolValidationError("manifest must be an object for mode=full")
+            output_path_str = str(args.get("outputPath") or "").strip()
+
+            valid, errors, source_index = _call(build_source_index, manifest)
+
+            if not valid or source_index is None:
+                return {"readOnly": True, "mode": "full", "valid": False, "errors": errors}
+
+            speaker_count = len(source_index.get("speakers") or {})
+            wav_count = sum(
+                len(v.get("source_wavs") or [])
+                for v in (source_index.get("speakers") or {}).values()
+            )
+
+            if output_path_str:
+                out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(
+                    json.dumps(source_index, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                return {
+                    "success": True,
+                    "mode": "full",
+                    "valid": True,
+                    "errors": [],
+                    "speakerCount": speaker_count,
+                    "wavCount": wav_count,
+                    "outputPath": str(out_path),
+                }
+
+            return {
+                "readOnly": True,
+                "mode": "full",
+                "valid": True,
+                "errors": [],
+                "speakerCount": speaker_count,
+                "wavCount": wav_count,
+                "sourceIndex": source_index,
+            }
+
+        raise ChatToolValidationError("mode must be 'speaker' or 'full'")
+
+    def _tool_jobs_list_active(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return all running jobs from the PARSE job registry for session-restart recovery."""
+        if self._list_active_jobs is None:
+            raise ChatToolExecutionError("list_active_jobs callback is unavailable")
+        try:
+            jobs = self._list_active_jobs()
+        except Exception as exc:
+            raise ChatToolExecutionError("jobs_list_active failed: {0}".format(exc)) from exc
+        return {"readOnly": True, "jobs": jobs, "count": len(jobs)}
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.
