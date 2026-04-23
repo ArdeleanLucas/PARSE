@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleSlash,
   Copy,
   Download,
   RotateCw,
@@ -73,7 +74,7 @@ function okDetail(step: PipelineStepId, cell: PipelineStepResultBase): string {
   }
 }
 
-type CellKind = "ok" | "skipped" | "error" | "unknown";
+type CellKind = "ok" | "skipped" | "empty" | "error" | "unknown";
 
 /** Classify a step-result object into one of four visual kinds.
  *
@@ -90,9 +91,26 @@ type CellKind = "ok" | "skipped" | "error" | "unknown";
  *  JSON download).
  */
 function classifyCell(cell: PipelineStepResultBase): CellKind {
-  // 1. Explicit status field wins.
+  // 1. Explicit status field wins — BUT promote "ok" to "empty" when
+  //    the step ran against real work and wrote nothing. This is the
+  //    Fail02 Tier-3 case: status=ok, filled=0, total=38 means the
+  //    server did not raise, yet no intervals landed. The user needs
+  //    to see that immediately — an OK badge on an empty step hides
+  //    the failure mode we added diagnostics for.
   const explicit = cell["status"];
   if (explicit === "ok" || explicit === "skipped" || explicit === "error") {
+    if (explicit === "ok") {
+      const filled = cell["filled"];
+      const total = cell["total"];
+      if (
+        typeof filled === "number" &&
+        filled === 0 &&
+        typeof total === "number" &&
+        total > 0
+      ) {
+        return "empty";
+      }
+    }
     return explicit;
   }
   // 2. An error string implies error regardless of other fields.
@@ -123,7 +141,12 @@ function speakerHasFailure(outcome: BatchSpeakerOutcome): boolean {
   if (outcome.result) {
     for (const step of Object.keys(outcome.result.results) as PipelineStepId[]) {
       const cell = outcome.result.results[step];
-      if (cell && classifyCell(cell) === "error") return true;
+      if (!cell) continue;
+      const kind = classifyCell(cell);
+      // "empty" (filled=0 total>0) counts as a failure for re-run
+      // purposes: the step ran but produced nothing, so the user
+      // almost always wants to rerun-failed with that step included.
+      if (kind === "error" || kind === "empty") return true;
     }
   }
   return false;
@@ -132,9 +155,10 @@ function speakerHasFailure(outcome: BatchSpeakerOutcome): boolean {
 function countTotals(
   outcomes: BatchSpeakerOutcome[],
   stepsRun: PipelineStepId[],
-): { ok: number; skipped: number; errored: number } {
+): { ok: number; skipped: number; empty: number; errored: number } {
   let ok = 0;
   let skipped = 0;
+  let empty = 0;
   let errored = 0;
   for (const outcome of outcomes) {
     if (outcome.status === "error" && !outcome.result) {
@@ -149,10 +173,11 @@ function countTotals(
       const kind = classifyCell(cell);
       if (kind === "ok") ok += 1;
       else if (kind === "skipped") skipped += 1;
+      else if (kind === "empty") empty += 1;
       else if (kind === "error") errored += 1;
     }
   }
-  return { ok, skipped, errored };
+  return { ok, skipped, empty, errored };
 }
 
 function DetailsBlock({
@@ -303,6 +328,89 @@ function StepCell({
             <span className="text-[11px] text-slate-500">
               {truncate(reason)}
             </span>
+          )}
+        </div>
+      </td>
+    );
+  }
+
+  if (kind === "empty") {
+    // Step ran, returned status:ok, but wrote zero intervals. The
+    // user needs to see this immediately — a green OK badge on a
+    // zero-filled step is the exact trap that hid the Fail02 Tier 3
+    // torchcodec crash for a day. Pull the skip_breakdown and
+    // first exception sample (populated by the diagnostic commit
+    // in server.py) into an expandable details block.
+    const filled = typeof cell.filled === "number" ? cell.filled : 0;
+    const total = typeof cell.total === "number" ? cell.total : 0;
+    const breakdown = cell.skip_breakdown ?? null;
+    const samples = Array.isArray(cell.exception_samples)
+      ? (cell.exception_samples as unknown[]).filter(
+          (s): s is string => typeof s === "string" && s.length > 0,
+        )
+      : [];
+    const hasDetails =
+      samples.length > 0 ||
+      (breakdown &&
+        Object.values(breakdown).some(
+          (v) => typeof v === "number" && v > 0,
+        ));
+
+    return (
+      <td className="border-b border-slate-100 bg-amber-50/60 px-2 py-1.5 align-top">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-amber-800">
+            <CircleSlash className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-xs font-semibold">Empty</span>
+            <span className="text-[11px] text-amber-900/80 tabular-nums">
+              {filled}/{total} written
+            </span>
+          </div>
+          {hasDetails && (
+            <>
+              <button
+                type="button"
+                onClick={onToggle}
+                className="inline-flex w-fit items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-amber-800 hover:bg-amber-100"
+                aria-expanded={isOpen}
+              >
+                {isOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                Why
+              </button>
+              {isOpen && (
+                <div
+                  role="region"
+                  aria-label={`Empty-step details for ${outcome.speaker} ${step}`}
+                  className="mt-1 rounded border border-amber-200 bg-white p-2 text-[11px] text-amber-900"
+                >
+                  {breakdown && (
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                      {Object.entries(breakdown)
+                        .filter(([, v]) => typeof v === "number" && v > 0)
+                        .map(([k, v]) => (
+                          <React.Fragment key={k}>
+                            <dt className="font-mono text-amber-800/80">
+                              {k}
+                            </dt>
+                            <dd className="text-right font-mono tabular-nums">
+                              {String(v)}
+                            </dd>
+                          </React.Fragment>
+                        ))}
+                    </dl>
+                  )}
+                  {samples.length > 0 && (
+                    <pre className="mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded bg-amber-50 p-1.5 font-mono text-[10.5px] leading-snug text-amber-900">
+                      {samples.join("\n")}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </td>
@@ -550,7 +658,8 @@ export function BatchReportModal({
   };
 
   const columnCount = stepsRun.length + 2; // speaker col + steps + trailing status col
-  const allClean = totals.errored === 0 && totals.skipped === 0;
+  const allClean =
+    totals.errored === 0 && totals.skipped === 0 && totals.empty === 0;
 
   const title = `Batch Report — ${outcomes.length} speakers × ${stepsRun.length} steps`;
 
@@ -576,6 +685,16 @@ export function BatchReportModal({
             <SkipForward className="h-3 w-3" />
             {totals.skipped} skipped
           </span>
+          {totals.empty > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+              data-testid="batch-report-chip-empty"
+              title="Step ran but wrote zero intervals — see per-cell details"
+            >
+              <CircleSlash className="h-3 w-3" />
+              {totals.empty} empty
+            </span>
+          )}
           <span
             className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-800"
             data-testid="batch-report-chip-errored"
