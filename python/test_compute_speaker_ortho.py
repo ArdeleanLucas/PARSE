@@ -375,11 +375,11 @@ def test_full_pipeline_step_failure_is_captured_not_raised(tmp_path, monkeypatch
         {"speaker": "Fail02", "steps": ["ortho", "ipa"]},
     )
 
-    # ORTHO captured the error — no raise.
+    # ORTH captured the error — no raise.
     assert result["results"]["ortho"]["status"] == "error"
     assert "razhan exploded" in result["results"]["ortho"]["error"]
     assert result["results"]["ortho"]["traceback"]  # non-empty
-    # IPA STILL ran after ORTHO failed — that's the whole point.
+    # IPA STILL ran after ORTH failed — that's the whole point.
     assert ipa_called["count"] == 1
     assert result["results"]["ipa"]["status"] in {"ok", "skipped"}
     # Summary roll-up reflects the outcome.
@@ -432,7 +432,7 @@ def test_preflight_ipa_blocked_when_no_ortho(tmp_path, monkeypatch):
     state = server._pipeline_state_for_speaker("Fail02")
     assert state["ipa"]["can_run"] is False
     assert "ORTH" in state["ipa"]["reason"]
-    # ORTHO itself can still run (audio exists) — it's the unblocker.
+    # ORTH itself can still run (audio exists) — it's the unblocker.
     assert state["ortho"]["can_run"] is True
 
 
