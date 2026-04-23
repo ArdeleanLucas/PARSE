@@ -1761,6 +1761,7 @@ export function ParseUI() {
   const rawSpeakers      = useConfigStore(s => s.config?.speakers ?? []);
   const rawConcepts      = useConfigStore(s => s.config?.concepts ?? []);
   const configError      = useConfigStore(s => s.error);
+  const [dismissedConfigError, setDismissedConfigError] = useState<string | null>(null);
   const storeTags        = useTagStore(s => s.tags);
   const storeAddTag      = useTagStore(s => s.addTag);
   const hydrateTagStore  = useTagStore(s => s.hydrate);
@@ -2941,13 +2942,22 @@ export function ParseUI() {
           </div>
         </div>
       </header>
-      {configError && (
-        <div className="shrink-0 flex items-start gap-3 border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">
+      {configError && configError !== dismissedConfigError && (
+        <div className="shrink-0 flex items-center gap-3 border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
+          <div className="flex-1">
             <span className="font-semibold">Server error—speakers may not load. </span>
             {configError}
           </div>
+          <button
+            onClick={() => { setDismissedConfigError(null); loadConfig(); }}
+            className="shrink-0 rounded px-2 py-1 text-xs font-medium hover:bg-rose-100"
+          >Retry</button>
+          <button
+            onClick={() => setDismissedConfigError(configError)}
+            className="shrink-0 rounded p-1 hover:bg-rose-100"
+            aria-label="Dismiss"
+          ><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
 

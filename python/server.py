@@ -36,6 +36,7 @@ except Exception:
 HOST = "0.0.0.0"
 PORT = 8766
 JOB_RETENTION_SECONDS = 60 * 60
+_CONFIG_SCHEMA_VERSION = 1
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -703,7 +704,7 @@ def _workspace_frontend_config(base_config: Optional[Dict[str, Any]] = None) -> 
     config["concepts"] = concepts
     config["audio_dir"] = str(project_payload.get("audio_dir") or config.get("audio_dir") or "audio")
     config["annotations_dir"] = str(project_payload.get("annotations_dir") or config.get("annotations_dir") or "annotations")
-    config["schema_version"] = 1
+    config["schema_version"] = _CONFIG_SCHEMA_VERSION
     return config
 
 
