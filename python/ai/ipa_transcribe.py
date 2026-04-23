@@ -149,6 +149,7 @@ def transcribe_words_with_forced_align(
     pad_ms: int = DEFAULT_PAD_MS,
     aligner: Optional[Aligner] = None,
     progress_callback: Optional[Any] = None,
+    segment_batch_size: int = 20,
 ) -> List[IpaResult]:
     """Full 3-tier IPA: G2P + torchaudio forced alignment → word windows → wav2vec2 CTC.
 
@@ -160,6 +161,13 @@ def transcribe_words_with_forced_align(
     Returns one :class:`IpaResult` per word. Segments that carry no
     ``words[]`` are skipped. Falls back to segment-level
     :func:`transcribe_intervals` when no words are found at all.
+
+    ``segment_batch_size`` controls how many Whisper segments are fed to
+    ``align_segments`` at a time. Processing all segments in one call
+    accumulates GPU state across hundreds of forced-align invocations and
+    can exhaust VRAM / WSL memory on long recordings (≥150 segments).
+    Batching keeps peak memory proportional to the batch rather than the
+    full recording.
     """
     try:
         from .forced_align import align_segments as _align_segments
@@ -173,29 +181,32 @@ def transcribe_words_with_forced_align(
     local_aligner = aligner or Aligner.load(model_name=model_name, device=device)
     audio = _load_audio_mono_16k(path)
 
-    # Tier 2: forced alignment — pass pre-loaded tensor to avoid double-load
-    aligned = _align_segments(
-        audio_path=path,
-        segments=list(segments),
-        language=language,
-        pad_ms=pad_ms,
-        aligner=local_aligner,
-        audio_tensor=audio,
-    )
-
+    seg_list = list(segments)
     word_intervals: List[IntervalSpec] = []
-    for seg_words in aligned:
-        for word in seg_words:
-            s = float(word.get("start", 0.0) or 0.0)
-            e = float(word.get("end", 0.0) or 0.0)
-            if e > s:
-                word_intervals.append(IntervalSpec(start=s, end=e))
+
+    # Tier 2: forced alignment in batches to bound peak GPU memory
+    for batch_start in range(0, len(seg_list), segment_batch_size):
+        batch = seg_list[batch_start: batch_start + segment_batch_size]
+        aligned_batch = _align_segments(
+            audio_path=path,
+            segments=batch,
+            language=language,
+            pad_ms=pad_ms,
+            aligner=local_aligner,
+            audio_tensor=audio,
+        )
+        for seg_words in aligned_batch:
+            for word in seg_words:
+                s = float(word.get("start", 0.0) or 0.0)
+                e = float(word.get("end", 0.0) or 0.0)
+                if e > s:
+                    word_intervals.append(IntervalSpec(start=s, end=e))
 
     if not word_intervals:
         # No words produced — fall back to segment-level coarse transcription
         seg_intervals = [
             {"start": s.get("start", 0.0), "end": s.get("end", 0.0)}
-            for s in segments
+            for s in seg_list
         ]
         return transcribe_intervals(
             path, seg_intervals, aligner=local_aligner,
