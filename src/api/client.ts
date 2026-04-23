@@ -42,11 +42,29 @@ function resolveJobId(payload: unknown): string {
   return "";
 }
 
+const CONFIG_SCHEMA_VERSION = 1;
+
+// Validates the {config: ...} wrapper and schema_version added in PR #155.
+// Before that fix, a stale server (pre-PR #24 code) returned speakers as a
+// plain dict instead of string[]; TypeScript cast it silently and the UI
+// rendered an empty workspace with no error. schema_version makes the mismatch
+// explicit so the banner fires instead.
 function unwrapConfig(payload: unknown): ProjectConfig {
   if (isRecord(payload) && isRecord(payload.config)) {
-    return payload.config as ProjectConfig;
+    const cfg = payload.config;
+    if (cfg.schema_version !== CONFIG_SCHEMA_VERSION) {
+      const got = cfg.schema_version === undefined ? "missing" : String(cfg.schema_version);
+      throw new Error(
+        `PARSE server is outdated (config schema_version: ${got}, expected: ${CONFIG_SCHEMA_VERSION}). ` +
+        "Restart the Python server with the latest code and reload the page."
+      );
+    }
+    return cfg as ProjectConfig;
   }
-  return (payload ?? {}) as ProjectConfig;
+  throw new Error(
+    "PARSE server is outdated: /api/config response is missing the expected wrapper. " +
+    "Restart the Python server with the latest code and reload the page."
+  );
 }
 
 function unwrapEnrichments(payload: unknown): EnrichmentsPayload {

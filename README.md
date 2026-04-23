@@ -204,6 +204,8 @@ This matters for thesis workflows where the richest aligned source is not a fres
 
 The active frontend speaker list comes from the live workspace behind `/api/config`, not necessarily from the bare repo checkout. When running PARSE with `PARSE_WORKSPACE_ROOT` set, imports and runtime writes must land in that workspace for the UI to see them.
 
+> **API schema version contract:** Every `/api/config` response carries `schema_version: 1`. The React client validates this on boot; a mismatch (old server code running against a new frontend) surfaces as a banner instead of a silent empty workspace. When a breaking change to the config payload shape is needed, bump `CONFIG_SCHEMA_VERSION` in `python/server.py` **and** `EXPECTED_CONFIG_SCHEMA_VERSION` in `src/api/client.ts` together in the same PR.
+
 ---
 
 ## Quick Start

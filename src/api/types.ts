@@ -56,6 +56,7 @@ export interface ProjectConfig {
   concepts: ConceptEntry[];
   audio_dir: string;
   annotations_dir: string;
+  schema_version?: number;
   [key: string]: unknown;
 }
 
