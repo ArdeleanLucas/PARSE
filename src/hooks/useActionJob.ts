@@ -14,6 +14,8 @@ export interface ActionJobState {
   label: string | null;
   /** ms remaining, projected from elapsed time and current progress. null until the projection is stable. */
   etaMs: number | null;
+  /** Latest status message from the backend (e.g. "Loading model", "Transcribing"). null when idle or unknown. */
+  message: string | null;
 }
 
 const MIN_PROGRESS_FOR_ETA = 0.05
@@ -61,6 +63,7 @@ const IDLE_STATE: ActionJobState = {
   error: null,
   label: null,
   etaMs: null,
+  message: null,
 };
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -167,6 +170,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
             error: toErrorMessage(error, `${config.label} follow-up failed`),
             label: config.label,
             etaMs: null,
+            message: null,
           });
           return;
         }
@@ -181,6 +185,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
           error: null,
           label: config.label,
           etaMs: 0,
+          message: null,
         });
 
         if (config.autoDismissMs !== 0) {
@@ -198,6 +203,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         setStateIfMounted({
           status: "error",
           progress,
+          message: null,
           // Surface the actual exception (`poll.error`) first — `poll.message`
           // is the last in-progress status line ("Loading model", "Initializing
           // STT provider") and was masking the real failures.
@@ -210,11 +216,13 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
 
       const elapsed = startedAtRef.current === null ? 0 : Date.now() - startedAtRef.current;
       const etaMs = projectEtaMs(progress, elapsed);
+      const message = poll.message != null ? String(poll.message) : null;
       setStateIfMounted((prev) => ({
         ...prev,
         status: "running",
         progress,
         etaMs,
+        message,
       }));
     } catch (error) {
       if (activeRunIdRef.current !== runId) {
@@ -227,6 +235,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         error: toErrorMessage(error, "Job polling failed"),
         label: config.label,
         etaMs: null,
+        message: null,
       });
     } finally {
       pollInFlightRef.current = false;
@@ -244,7 +253,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
     startInFlightRef.current = true;
     stopPolling();
     startedAtRef.current = Date.now();
-    setStateIfMounted({ status: "running", progress: 0, error: null, label: config.label, etaMs: null });
+    setStateIfMounted({ status: "running", progress: 0, error: null, label: config.label, etaMs: null, message: null });
 
     try {
       const job = await config.start();
@@ -272,6 +281,7 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
         error: toErrorMessage(error, "Job start failed"),
         label: config.label,
         etaMs: null,
+        message: null,
       });
     } finally {
       if (activeRunIdRef.current === runId) {

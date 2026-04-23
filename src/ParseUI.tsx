@@ -2663,12 +2663,20 @@ export function ParseUI() {
                         <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
                         <span className="text-slate-600">{job.state.label}</span>
                         <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-                          <div
-                            className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-                            style={{ width: `${Math.round(job.state.progress * 100)}%` }}
-                          />
+                          {job.state.progress < 0.05 ? (
+                            <div className="h-full w-2/5 animate-pulse rounded-full bg-indigo-400" />
+                          ) : (
+                            <div
+                              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                              style={{ width: `${Math.round(job.state.progress * 100)}%` }}
+                            />
+                          )}
                         </div>
-                        <span className="tabular-nums text-slate-400">{Math.round(job.state.progress * 100)}%</span>
+                        {job.state.progress < 0.05 ? (
+                          <span className="text-slate-400">{job.state.message ?? 'Starting…'}</span>
+                        ) : (
+                          <span className="tabular-nums text-slate-400">{Math.round(job.state.progress * 100)}%</span>
+                        )}
                         {job.state.etaMs !== null && job.state.etaMs > 0 && (
                           <span className="tabular-nums text-slate-400" title="Estimated time remaining">
                             · ~{formatEta(job.state.etaMs)} left
