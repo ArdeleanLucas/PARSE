@@ -285,6 +285,64 @@ def test_full_pipeline_enforces_canonical_order(tmp_path, monkeypatch):
     assert called == ["ortho", "ipa"]
 
 
+def test_full_pipeline_stt_step_uses_normalized_working_wav(tmp_path, monkeypatch):
+    """The STT branch must resolve audio via _pipeline_audio_path_for_speaker —
+    i.e. prefer ``audio/working/<speaker>/<name>.wav`` over the bare source
+    filename, which fails to resolve when the raw file has been cleaned up
+    post-normalization. Regression guard for an error surfaced in prod where
+    the pipeline looked for ``SK_Faili_F_1968.wav`` at the project root even
+    though the normalized copy sat under ``audio/working/Fail02/``.
+    """
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="SK_Faili_F_1968.wav")
+    # Deliberately NOT writing the raw source at project root — only the
+    # normalized working copy exists, mirroring the failure mode.
+    normalized = _write_fake_source_wav(
+        tmp_path, "audio/working/Fail02/SK_Faili_F_1968.wav",
+    )
+
+    observed: dict = {}
+
+    def fake_stt(job_id, speaker, source_wav, language):
+        observed["source_wav"] = source_wav
+        observed["speaker"] = speaker
+
+    monkeypatch.setattr(server, "_run_stt_job", fake_stt)
+    monkeypatch.setattr(server, "_latest_stt_segments_for_speaker", lambda s: None)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    # After _run_stt_job returns (no-op in this stub), the sequencer checks
+    # the job snapshot for errors and resets it to running. Return a running
+    # snapshot so the sequencer doesn't treat the no-op as a failure.
+    monkeypatch.setattr(server, "_get_job_snapshot", lambda jid: {"status": "running"})
+    monkeypatch.setattr(server, "_reset_job_to_running", lambda jid: None)
+
+    server._compute_full_pipeline(
+        "j1",
+        {"speaker": "Fail02", "steps": ["stt"], "overwrites": {"stt": True}},
+    )
+
+    # The audio path handed to _run_stt_job must resolve — it's the
+    # normalized working copy, not the bare filename.
+    assert observed["source_wav"] == str(normalized)
+
+
+def test_full_pipeline_stt_raises_when_no_audio_reachable(tmp_path, monkeypatch):
+    """If neither normalized nor raw source exists, STT must abort cleanly."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="SK_Faili_F_1968.wav")
+    # No audio file written anywhere — simulate the prod-error condition.
+
+    monkeypatch.setattr(server, "_run_stt_job", lambda *a, **kw: None)
+    monkeypatch.setattr(server, "_latest_stt_segments_for_speaker", lambda s: None)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+
+    with pytest.raises(RuntimeError, match="Cannot run STT"):
+        server._compute_full_pipeline(
+            "j1",
+            {"speaker": "Fail02", "steps": ["stt"], "overwrites": {"stt": True}},
+        )
+
+
 def test_full_pipeline_propagates_step_failure(tmp_path, monkeypatch):
     """A step raising should abort the pipeline and propagate the error."""
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)

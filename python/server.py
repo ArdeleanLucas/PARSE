@@ -3120,11 +3120,12 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
             steps_run.append(step)
 
         elif step == "stt":
-            source_rel = _annotation_primary_source_wav(speaker)
-            if not source_rel:
-                raise RuntimeError(
-                    "Cannot run STT for {0!r}: no source_audio on annotation".format(speaker)
-                )
+            # Resolve the audio the same way the ORTHO step does — prefer the
+            # normalized working WAV if it exists, fall back to the raw source.
+            # Using ``_annotation_primary_source_wav`` directly would pass a
+            # bare filename (e.g. ``SK_Faili_F_1968.wav``) which fails to
+            # resolve when the raw file lives under ``audio/working/<speaker>/``
+            # and the bare-root copy has been cleaned up.
             cached = _latest_stt_segments_for_speaker(speaker)
             if cached and not overwrites.get("stt", False):
                 results["stt"] = {
@@ -3134,7 +3135,11 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
                 }
                 steps_run.append(step)
                 continue
-            _run_stt_job(job_id, speaker, source_rel, language_str)
+            try:
+                audio_path = _pipeline_audio_path_for_speaker(speaker)
+            except (RuntimeError, FileNotFoundError) as exc:
+                raise RuntimeError("Cannot run STT for {0!r}: {1}".format(speaker, exc))
+            _run_stt_job(job_id, speaker, str(audio_path), language_str)
             snapshot = _get_job_snapshot(job_id) or {}
             if str(snapshot.get("status") or "") == "error":
                 raise RuntimeError(
