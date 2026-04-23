@@ -1688,6 +1688,270 @@ def _chat_pipeline_state(speaker: str) -> Dict[str, Any]:
     return _pipeline_state_for_speaker(speaker)
 
 
+def _launch_compute_runner(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
+    """Start the backing worker for a compute job.
+
+    Two modes, selected by the ``PARSE_COMPUTE_MODE`` env var:
+
+    - ``"thread"`` (default) — legacy behaviour. Spawns a
+      ``threading.Thread`` that runs ``_run_compute_job`` in the same
+      Python process as the HTTP server. Simple, works on Linux
+      native, but wedges on Windows python.exe + WSL interop when the
+      compute thread touches CUDA (observed 2026-04-23, see
+      fix/compute-subprocess-runner).
+
+    - ``"subprocess"`` — spawns a fresh Python process via
+      ``multiprocessing.get_context("spawn")``. The child imports
+      ``server``, runs the same ``_run_compute_job`` function, and
+      writes its result to a temp JSON file. A monitor thread reads
+      that file and updates the in-memory ``_jobs`` dict so status
+      polls work unchanged. CUDA initialisation happens in the child,
+      isolated from the HTTP server's address space — whatever
+      threading quirk is causing the wedge can't reach us here. The
+      trade-off is startup overhead (~1-3s per job to import + reload
+      torch) which is negligible for multi-minute compute jobs.
+
+    Env vars:
+        PARSE_COMPUTE_MODE=subprocess — opt in to subprocess mode.
+        PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC — hard kill deadline
+            (default 4 hours; covers a razhan+wav2vec2 run on a
+            multi-hour recording on CPU).
+    """
+    mode = os.environ.get("PARSE_COMPUTE_MODE", "thread").strip().lower()
+    if mode == "subprocess":
+        _compute_checkpoint(
+            "LAUNCH.subprocess", job_id=job_id, compute_type=compute_type
+        )
+        _launch_compute_subprocess(job_id, compute_type, payload)
+        return
+    _compute_checkpoint("LAUNCH.thread", job_id=job_id, compute_type=compute_type)
+    thread = threading.Thread(
+        target=_run_compute_job,
+        args=(job_id, compute_type, payload),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _launch_compute_subprocess(
+    job_id: str, compute_type: str, payload: Dict[str, Any]
+) -> None:
+    """Spawn a child Python process to run the compute job.
+
+    The child writes its outcome to ``/tmp/parse-compute-<job_id>.json``.
+    A local monitor thread reads that file when the child exits and
+    promotes the outcome to ``_set_job_complete`` / ``_set_job_error``
+    so the existing HTTP status polling keeps working.
+
+    Uses ``get_context("spawn")`` explicitly — on Windows python.exe
+    this is the default but we name it so Linux native servers get
+    the same isolation guarantees (fork would share torch state
+    between parent and child, which is exactly the hazard we're
+    trying to escape).
+    """
+    import multiprocessing
+    import tempfile
+    import json as _json
+
+    result_path = os.path.join(
+        tempfile.gettempdir(), "parse-compute-{0}.json".format(job_id)
+    )
+    try:
+        if os.path.exists(result_path):
+            os.remove(result_path)
+    except OSError:
+        pass
+
+    checkpoint_path = _compute_checkpoint_path()
+
+    ctx = multiprocessing.get_context("spawn")
+    child = ctx.Process(
+        target=_compute_subprocess_entry,
+        name="parse-compute-{0}".format(compute_type),
+        args=(job_id, compute_type, payload, result_path, checkpoint_path),
+        daemon=True,
+    )
+    child.start()
+    _compute_checkpoint(
+        "SUBPROCESS.started", job_id=job_id, child_pid=child.pid, result_path=result_path
+    )
+
+    try:
+        timeout_raw = os.environ.get("PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC", "14400")
+        timeout_sec = max(60.0, float(timeout_raw))
+    except ValueError:
+        timeout_sec = 14400.0
+
+    def _monitor() -> None:
+        child.join(timeout=timeout_sec)
+        if child.is_alive():
+            _compute_checkpoint(
+                "SUBPROCESS.timeout", job_id=job_id, pid=child.pid, timeout=timeout_sec
+            )
+            try:
+                child.terminate()
+                child.join(timeout=10.0)
+            except Exception:
+                pass
+            _set_job_error(
+                job_id,
+                "Compute subprocess exceeded PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC ({0}s) and was terminated.".format(
+                    int(timeout_sec)
+                ),
+            )
+            return
+
+        exit_code = child.exitcode
+        _compute_checkpoint(
+            "SUBPROCESS.exited", job_id=job_id, exit_code=exit_code
+        )
+
+        if not os.path.exists(result_path):
+            _set_job_error(
+                job_id,
+                "Compute subprocess exited code={0} without writing result file {1}".format(
+                    exit_code, result_path
+                ),
+            )
+            return
+
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                payload_out = _json.load(f)
+        except Exception as exc:
+            _set_job_error(
+                job_id,
+                "Compute subprocess result file unreadable: {0}".format(exc),
+            )
+            return
+        finally:
+            try:
+                os.remove(result_path)
+            except OSError:
+                pass
+
+        ok = bool(payload_out.get("ok"))
+        if ok:
+            _set_job_complete(
+                job_id,
+                payload_out.get("result"),
+                message="Compute subprocess complete",
+            )
+        else:
+            err = str(payload_out.get("error") or "Compute subprocess reported failure")
+            tb = str(payload_out.get("traceback") or "")
+            if tb:
+                err = "{0}\n{1}".format(err, tb)
+            _set_job_error(job_id, err)
+
+    monitor = threading.Thread(
+        target=_monitor,
+        name="parse-compute-monitor-{0}".format(job_id),
+        daemon=True,
+    )
+    monitor.start()
+
+
+def _compute_subprocess_entry(
+    job_id: str,
+    compute_type: str,
+    payload: Dict[str, Any],
+    result_path: str,
+    checkpoint_path: str,
+) -> None:
+    """Runs in a fresh Python process.
+
+    Imports the server module to reuse every compute function and
+    its dependency graph, then writes a JSON outcome to ``result_path``.
+    Any import-time / compute-time failure is captured as
+    ``{ok: False, error, traceback}``.
+
+    The child writes to the shared ``checkpoint_path`` (same buffer-
+    free file the parent uses) so we get a continuous per-stage log
+    across process boundaries. Pipe buffering can't hide it — the
+    file is append-only + fsync'd per write on both sides.
+    """
+    import json as _json
+    import traceback as _tb
+
+    # Redirect child stderr into a dedicated file so torch/CUDA init
+    # noise doesn't pollute the parent's log, and so the child's own
+    # crashes can be post-mortemed independently.
+    try:
+        child_stderr = open(
+            "/tmp/parse-compute-{0}.stderr.log".format(job_id),
+            "w",
+            encoding="utf-8",
+        )
+        sys.stderr = child_stderr
+    except Exception:
+        pass
+
+    # Re-use the parent's checkpoint file path so MAIN and CHILD
+    # entries interleave in one timeline. The parent's
+    # ``_compute_checkpoint`` writes via module-level fd caching; the
+    # child's module is a fresh import so its own fd cache is
+    # independent — which is actually what we want (two writers, one
+    # file, both with O_APPEND).
+    os.environ["PARSE_COMPUTE_CHECKPOINT_LOG"] = checkpoint_path
+
+    outcome: Dict[str, Any] = {"ok": False}
+    try:
+        # Imports happen here, AFTER spawn, so the CUDA init is
+        # guaranteed to be in THIS process's context, not inherited.
+        import server as _server  # noqa: F401
+
+        _compute_checkpoint("CHILD.entry", job_id=job_id, compute_type=compute_type)
+
+        # Run the compute synchronously on the main thread of this
+        # child process. ``_run_compute_job`` writes to the parent's
+        # ``_jobs`` dict via in-module functions, but in the child those
+        # calls target the child's own (separate) ``_jobs`` dict — a
+        # harmless no-op. We don't read from that dict in the child;
+        # we only care about the return value of the compute function,
+        # which we reconstruct by calling the function directly rather
+        # than via ``_run_compute_job``.
+        normalized_type = str(compute_type or "").strip().lower()
+        if normalized_type in {"cognates", "similarity"}:
+            result = _server._compute_cognates("child-{0}".format(job_id), payload)
+        elif normalized_type == "contact-lexemes":
+            result = _server._compute_contact_lexemes("child-{0}".format(job_id), payload)
+        elif normalized_type in {"ipa_only", "ipa-only", "ipa"}:
+            result = _server._compute_speaker_ipa("child-{0}".format(job_id), payload)
+        elif normalized_type in {"ortho", "ortho_only", "ortho-only"}:
+            result = _server._compute_speaker_ortho("child-{0}".format(job_id), payload)
+        elif normalized_type in {"forced_align", "forced-align", "align"}:
+            result = _server._compute_speaker_forced_align(
+                "child-{0}".format(job_id), payload
+            )
+        elif normalized_type in {"full_pipeline", "full-pipeline", "pipeline"}:
+            result = _server._compute_full_pipeline("child-{0}".format(job_id), payload)
+        else:
+            raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
+
+        _compute_checkpoint("CHILD.ok", job_id=job_id)
+        outcome = {"ok": True, "result": result}
+    except Exception as exc:
+        _compute_checkpoint(
+            "CHILD.exc", job_id=job_id, exc_type=type(exc).__name__, exc=str(exc)[:200]
+        )
+        outcome = {
+            "ok": False,
+            "error": str(exc),
+            "traceback": _tb.format_exc(),
+        }
+
+    try:
+        with open(result_path, "w", encoding="utf-8") as f:
+            _json.dump(outcome, f, ensure_ascii=False, default=str)
+    except Exception as exc:
+        _compute_checkpoint(
+            "CHILD.result_write_failed",
+            job_id=job_id,
+            exc=str(exc)[:200],
+        )
+
+
 def _chat_start_compute_job(compute_type: str, payload: Dict[str, Any]) -> str:
     """Start a compute job and return its jobId.
 
@@ -1714,12 +1978,8 @@ def _chat_start_compute_job(compute_type: str, payload: Dict[str, Any]) -> str:
             "origin": "chat_tool",
         },
     )
-    thread = threading.Thread(
-        target=_run_compute_job,
-        args=(job_id, normalized_type, body_obj),
-        daemon=True,
-    )
-    thread.start()
+    # Delegates to thread / subprocess depending on PARSE_COMPUTE_MODE.
+    _launch_compute_runner(job_id, normalized_type, body_obj)
     return job_id
 
 
@@ -1985,6 +2245,89 @@ def _create_job(job_type: str, metadata: Optional[Dict[str, Any]] = None) -> str
         }
 
     return job_id
+
+
+# ---------------------------------------------------------------------------
+# Compute-checkpoint log (buffer-free, for Windows-python.exe hang diagnosis)
+# ---------------------------------------------------------------------------
+#
+# Symptom: when ``_compute_speaker_ipa`` runs in a threaded job under
+# Windows python.exe via WSL, the process wedges mid-function. stderr
+# shows only the first print; subsequent prints never land in the log
+# even with ``flush=True``. Hypothesis: the redirection pipe
+# ``python.exe 2> /tmp/parse_api_stderr.log`` goes through Windows's
+# stream buffer, and ``sys.stderr.flush()`` only flushes Python's
+# internal buffer — the OS pipe buffer can still hold kilobytes that
+# never reach disk if the process stops writing.
+#
+# This checkpoint logger bypasses stderr/pipe entirely: it opens a
+# dedicated log file with O_APPEND|O_CREAT, writes each line with
+# ``os.write`` (no Python-level buffering), and calls ``os.fsync`` to
+# force the kernel to flush to disk. If the process hangs after
+# checkpoint N but before N+1, we know exactly which call line is at
+# fault — regardless of pipe buffering.
+#
+# Log file: PARSE_COMPUTE_CHECKPOINT_LOG (env) or /tmp/parse_compute_checkpoint.log
+# Format: ISO8601 UTC \t thread_name \t pid \t label \t key=value ...
+#
+# Cheap enough to call every few lines: one syscall pair per checkpoint.
+# Log is append-only; caller can ``> file`` to truncate between runs.
+
+_COMPUTE_CHECKPOINT_LOG_PATH: Optional[str] = None
+_COMPUTE_CHECKPOINT_FD: Optional[int] = None
+_COMPUTE_CHECKPOINT_LOCK = threading.Lock()
+
+
+def _compute_checkpoint_path() -> str:
+    global _COMPUTE_CHECKPOINT_LOG_PATH
+    if _COMPUTE_CHECKPOINT_LOG_PATH is None:
+        raw = os.environ.get("PARSE_COMPUTE_CHECKPOINT_LOG", "").strip()
+        _COMPUTE_CHECKPOINT_LOG_PATH = raw or "/tmp/parse_compute_checkpoint.log"
+    return _COMPUTE_CHECKPOINT_LOG_PATH
+
+
+def _compute_checkpoint(label: str, **kv: Any) -> None:
+    """Append one buffer-free checkpoint line.
+
+    Safe to call from any thread. Each call:
+      1. Serialises under ``_COMPUTE_CHECKPOINT_LOCK`` so interleaved
+         writes from the HTTP thread + compute thread don't tear lines.
+      2. Opens the fd on first use (one-shot per process), reuses it
+         after. The fd is never closed — OS cleans up on exit.
+      3. Writes the formatted line via ``os.write`` then ``os.fsync``.
+         fsync is the point — if the process wedges 100ms after
+         returning from here, the line is already durable on disk.
+    """
+    try:
+        global _COMPUTE_CHECKPOINT_FD
+        path = _compute_checkpoint_path()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        thread_name = threading.current_thread().name
+        pid = os.getpid()
+        parts = [now, thread_name, str(pid), label]
+        for key, value in kv.items():
+            try:
+                parts.append("{0}={1}".format(key, value))
+            except Exception:
+                parts.append("{0}=?".format(key))
+        line = ("\t".join(parts) + "\n").encode("utf-8", errors="replace")
+
+        with _COMPUTE_CHECKPOINT_LOCK:
+            if _COMPUTE_CHECKPOINT_FD is None:
+                _COMPUTE_CHECKPOINT_FD = os.open(
+                    path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644
+                )
+            os.write(_COMPUTE_CHECKPOINT_FD, line)
+            try:
+                os.fsync(_COMPUTE_CHECKPOINT_FD)
+            except OSError:
+                # On some platforms fsync on an appended pipe-like FD
+                # raises; the write itself already went through.
+                pass
+    except Exception:
+        # Checkpointing MUST NOT ever raise back into the compute path.
+        # If the log file is unreachable the compute continues.
+        pass
 
 
 def _set_job_progress(
@@ -2755,10 +3098,13 @@ def _get_ipa_aligner() -> Any:
     """
     global _IPA_ALIGNER
     if _IPA_ALIGNER is not None:
+        _compute_checkpoint("ALIGNER.cached")
         return _IPA_ALIGNER
 
     import time as _time
+    _compute_checkpoint("ALIGNER.import_begin")
     from ai.forced_align import Aligner, DEFAULT_MODEL_NAME
+    _compute_checkpoint("ALIGNER.import_done", model=DEFAULT_MODEL_NAME)
 
     t0 = _time.time()
     print(
@@ -2767,9 +3113,17 @@ def _get_ipa_aligner() -> Any:
         flush=True,
     )
     try:
+        _compute_checkpoint("ALIGNER.load_begin")
         _IPA_ALIGNER = Aligner.load()
+        _compute_checkpoint("ALIGNER.load_done", elapsed=round(_time.time() - t0, 2))
     except Exception as exc:
         elapsed = _time.time() - t0
+        _compute_checkpoint(
+            "ALIGNER.load_error",
+            elapsed=round(elapsed, 2),
+            exc_type=type(exc).__name__,
+            exc=str(exc)[:200],
+        )
         print(
             "[IPA][ERROR] Aligner.load() failed after {0:.1f}s: {1}".format(elapsed, exc),
             file=sys.stderr,
@@ -2780,6 +3134,9 @@ def _get_ipa_aligner() -> Any:
     elapsed = _time.time() - t0
     device = getattr(_IPA_ALIGNER, "device", "?")
     vocab_size = len(getattr(_IPA_ALIGNER, "vocab", {}) or {})
+    _compute_checkpoint(
+        "ALIGNER.ready", elapsed=round(elapsed, 2), device=device, vocab_size=vocab_size
+    )
     print(
         "[IPA] Aligner ready in {0:.1f}s device={1} vocab_size={2}".format(
             elapsed, device, vocab_size
@@ -2806,26 +3163,33 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     Payload: ``{ "speaker": "Fail02", "overwrite": false }``.
     """
-    # Diagnostics v2: trace every call-site that could silently crash
-    # the process (CUDA / torch init). Prints are unbuffered + flushed
-    # so we land in stderr even on native crashes.
+    # Diagnostics v3: stderr prints for human tailers + buffer-free
+    # checkpoint log for post-mortem when Windows pipe buffering eats
+    # the tail of stderr.
+    _compute_checkpoint("IPA.enter", payload=payload)
     print("[IPA] enter _compute_speaker_ipa payload={0}".format(payload), file=sys.stderr, flush=True)
 
     speaker = _normalize_speaker_id(payload.get("speaker"))
     overwrite = bool(payload.get("overwrite", False))
+    _compute_checkpoint("IPA.parsed_args", speaker=speaker, overwrite=overwrite)
 
     canonical_path = _project_root() / _annotation_record_relative_path(speaker)
     legacy_path = _project_root() / _annotation_legacy_record_relative_path(speaker)
+    _compute_checkpoint("IPA.resolved_paths", canonical=str(canonical_path), legacy=str(legacy_path))
 
+    _compute_checkpoint("IPA.is_file_begin")
     if canonical_path.is_file():
         annotation_path = canonical_path
     elif legacy_path.is_file():
         annotation_path = legacy_path
     else:
         raise RuntimeError("No annotation found for speaker {0!r}".format(speaker))
+    _compute_checkpoint("IPA.is_file_done", annotation_path=str(annotation_path))
 
     print("[IPA] loaded annotation_path={0}".format(annotation_path), file=sys.stderr, flush=True)
+    _compute_checkpoint("IPA.read_json_begin")
     annotation = _read_json_file(annotation_path, {})
+    _compute_checkpoint("IPA.read_json_done")
     if not isinstance(annotation, dict):
         raise RuntimeError("Annotation is not a JSON object")
 
@@ -2853,12 +3217,19 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
     # Resolve the speaker's working audio once; a 5-hour recording loads
     # into ~300 MB of float32 which is fine for a one-shot pass.
+    _compute_checkpoint("IPA.resolve_audio_begin", speaker=speaker)
     print("[IPA] resolving audio path for speaker={0}…".format(speaker), file=sys.stderr, flush=True)
     audio_path = _pipeline_audio_path_for_speaker(speaker)
+    _compute_checkpoint("IPA.resolve_audio_done", audio_path=str(audio_path))
     print("[IPA] audio_path={0} — importing ai.forced_align".format(audio_path), file=sys.stderr, flush=True)
+
+    _compute_checkpoint("IPA.import_forced_align_begin")
     from ai.forced_align import _load_audio_mono_16k
+    _compute_checkpoint("IPA.import_forced_align_done")
     print("[IPA] import ok — calling _load_audio_mono_16k()", file=sys.stderr, flush=True)
+
     import time as _t_load
+    _compute_checkpoint("IPA.load_audio_begin")
     _t0 = _t_load.time()
     audio_tensor = _load_audio_mono_16k(audio_path)
     _load_elapsed = _t_load.time() - _t0
@@ -2866,6 +3237,9 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         _numel = int(audio_tensor.numel())
     except Exception:
         _numel = -1
+    _compute_checkpoint(
+        "IPA.load_audio_done", elapsed=round(_load_elapsed, 2), numel=_numel
+    )
     print(
         "[IPA] audio loaded in {0:.1f}s numel={1} (~{2:.1f}s of 16 kHz mono)".format(
             _load_elapsed, _numel, _numel / 16000.0 if _numel > 0 else 0.0
@@ -2874,8 +3248,11 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         flush=True,
     )
     print("[IPA] calling _get_ipa_aligner()…", file=sys.stderr, flush=True)
+    _compute_checkpoint("IPA.get_aligner_begin")
     aligner = _get_ipa_aligner()
+    _compute_checkpoint("IPA.get_aligner_done")
     print("[IPA] aligner ready — entering per-interval loop (n={0})".format(len(ortho_intervals)), file=sys.stderr, flush=True)
+    _compute_checkpoint("IPA.loop_begin", n=len(ortho_intervals))
 
     filled = 0
     skipped = 0
@@ -2914,11 +3291,26 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
             skipped_zero_range += 1
             continue
 
+        # Checkpoint the first 3 iterations at slice-grain so a per-call
+        # CUDA hang can be pinpointed. Later iterations only checkpoint
+        # every 10th to keep the log bounded.
+        _trace_iv = idx < 3 or idx % 10 == 0
+        if _trace_iv:
+            _compute_checkpoint(
+                "IPA.iv_begin", idx=idx, start=start_sec, end=end_sec
+            )
         try:
             new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
         except Exception as exc:
             skipped += 1
             skipped_exception += 1
+            if _trace_iv:
+                _compute_checkpoint(
+                    "IPA.iv_exc",
+                    idx=idx,
+                    exc_type=type(exc).__name__,
+                    exc=str(exc)[:200],
+                )
             if len(exception_samples) < 3:
                 exception_samples.append(
                     "interval[{0}] {1:.2f}-{2:.2f}: {3}: {4}".format(
@@ -2927,6 +3319,12 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
                 )
             continue
 
+        if _trace_iv:
+            _compute_checkpoint(
+                "IPA.iv_done",
+                idx=idx,
+                out_len=len(str(new_ipa or "")),
+            )
         new_ipa = str(new_ipa or "").strip()
         if not new_ipa:
             skipped += 1
@@ -3764,9 +4162,12 @@ def _reset_job_to_running(job_id: str) -> None:
 
 
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
-    # Diagnostics v2: emit on every entry so we can tell if the compute
-    # thread is even starting — previous Fail02 runs died between the
-    # HTTP POST accepting and the first downstream log line.
+    # Diagnostics v3: belt-and-suspenders observability.
+    #   - stderr print for humans watching the log
+    #   - checkpoint file for buffer-safe post-mortem (see
+    #     ``_compute_checkpoint`` for why Windows-python.exe stderr is
+    #     unreliable)
+    _compute_checkpoint("COMPUTE.entry", job_id=job_id, compute_type=compute_type)
     print(
         "[COMPUTE] _run_compute_job entry job_id={0} compute_type={1} payload={2}".format(
             job_id, compute_type, payload
@@ -3777,6 +4178,7 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
     try:
         normalized_type = str(compute_type or "").strip().lower()
         _set_job_progress(job_id, 5.0, message="Starting compute job")
+        _compute_checkpoint("COMPUTE.dispatch", job_id=job_id, normalized=normalized_type)
         print(
             "[COMPUTE] dispatching normalized_type={0}".format(normalized_type),
             file=sys.stderr,
@@ -4909,12 +5311,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             },
         )
 
-        thread = threading.Thread(
-            target=_run_compute_job,
-            args=(job_id, normalized_type, body_obj),
-            daemon=True,
-        )
-        thread.start()
+        _launch_compute_runner(job_id, normalized_type, body_obj)
 
         self._send_json(
             HTTPStatus.OK,
