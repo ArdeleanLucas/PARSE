@@ -28,10 +28,12 @@ Per-speaker segmentation and transcription workstation.
 - Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
 - Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTH**, with waveform-aligned timestamps and synchronized horizontal scrolling
 - Audio normalization job (`/api/normalize`) with in-place working-audio support
-- Speaker-level STT job (`/api/stt`) with progress/error reporting, automatic language detection from project metadata when available, and tunable VAD / task / beam-size settings
+- Speaker-level STT job (`/api/stt`) with progress/error reporting, automatic language detection from project metadata when available, tunable VAD / task / beam-size settings, and nested word-level timestamps (`segments[].words[]`)
+- Tier 2 acoustic forced alignment refines Tier 1 word windows with `torchaudio.functional.forced_align` against wav2vec2, yielding tighter per-word boundaries and optional phoneme spans
 - Speaker-level ORTH job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
-- Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
+- Speaker-level IPA fill job (`computeType='ipa_only'`) now runs **acoustic wav2vec2-only IPA** on each ortho interval's audio slice; text-to-IPA fallbacks have been removed
 - Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks
+- Preflight now distinguishes **"tier has intervals"** from **"the full WAV has been processed"** via coverage-aware fields (`duration_sec`, `coverage_start_sec`, `coverage_end_sec`, `coverage_fraction`, `full_coverage`)
 - Full pipeline execution now runs explicit ordered steps — **normalize → STT → ORTH → IPA** — with per-step skip/error reporting instead of treating the run as a single opaque job
 - Draggable lexeme timestamp editing and manual boundary correction
 - Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment, now with monotonic alignment, quantile anchor sampling, and manual single-pair fallback
@@ -91,28 +93,27 @@ PARSE supports multiple AI backends, routed per task type:
 
 | Task | Supported providers |
 |---|---|
-| STT (speech-to-text) | faster-whisper (local, GPU-first with CPU/int8 fallback), OpenAI Whisper API |
-| IPA transcription | local IPA provider via `ipa_only` compute (wav2vec2 / transliteration-backed provider path, depending on config) |
+| STT (speech-to-text) | faster-whisper (local, GPU-first with CPU/int8 fallback; word-level timestamps enabled), OpenAI Whisper API |
+| IPA transcription | acoustic wav2vec2 via `ipa_only` compute on audio slices (no text-to-IPA endpoint or Epitran fallback) |
 | LLM / chat | xAI (Grok), OpenAI |
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
-**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), and both STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`.
+**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`, and Tier 2 forced alignment uses `torchaudio.functional.forced_align` with wav2vec2 to tighten word boundaries.
 
 ### Models
 
 | Model | Task | Source |
 |---|---|---|
 | [`razhan/whisper-base-sdh`](https://huggingface.co/razhan/whisper-base-sdh) | ORTH transcription / Southern Kurdish speech recognition | HuggingFace (local CT2) |
-| [`facebook/wav2vec2-xlsr-53-espeak-cv-ft`](https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft) | IPA transcription — multilingual phoneme recognition | HuggingFace (local) |
+| [`facebook/wav2vec2-xlsr-53-espeak-cv-ft`](https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft) | Acoustic IPA transcription + forced alignment head | HuggingFace (local) |
 | Silero VAD | Voice activity detection — segment boundary detection in long recordings | bundled with faster-whisper |
-| epitran | IPA transliteration — rule-based fallback for Arabic-script Southern Kurdish | Python library |
 
 **Razhan** is the key model for the Southern Kurdish thesis project. It is a Whisper variant fine-tuned directly on Southern Kurdish (`sdh`) speech data, converted to CTranslate2 format for GPU-accelerated inference (`device=cuda, compute_type=float16`). It produces **Kurdish Arabic-script orthographic transcriptions with word-level timestamps** — not IPA. IPA is a separate stage handled by wav2vec2.
 
 Silero VAD segments each full-length recording before Razhan processes it. VAD parameters are tuned specifically for the elicitation recording format: activation threshold 0.35 (lower than default, to catch soft-spoken consultants at variable microphone distances) and minimum silence of 300 ms between segments (to prevent interviewer-prompt and speaker-response pairs from being collapsed into single units).
 
-The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) handles IPA transcription of annotated segments via CTC phoneme-to-word alignment. Both models are stored locally — no internet connection is required at inference time.
+The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) now serves both Tier 2 forced alignment and Tier 3 acoustic IPA. PARSE runs CTC over the audio slice under each ortho interval; the older Epitran / text-IPA / LLM IPA paths are gone, and the synchronous `POST /api/ipa` endpoint has been removed.
 
 ### Citation and external dependency links
 
@@ -121,11 +122,10 @@ For academic integrity, the following table lists the **core external models and
 | Component | Type | Used in PARSE for | Link |
 |---|---|---|---|
 | `razhan/whisper-base-sdh` | Model | ORTH transcription of Southern Kurdish speech | https://huggingface.co/razhan/whisper-base-sdh |
-| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | Model | IPA transcription / phoneme recognition | https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft |
+| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | Model | Acoustic IPA transcription + forced alignment | https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft |
 | Silero VAD | Model / repo | Voice activity detection during Whisper-style decoding | https://github.com/snakers4/silero-vad |
 | faster-whisper | Repository / library | Local STT + ORTH inference backend | https://github.com/SYSTRAN/faster-whisper |
 | CTranslate2 | Repository / library | Optimized local inference runtime for Whisper-family models | https://github.com/OpenNMT/CTranslate2 |
-| Epitran | Repository / library | Orthography-to-IPA transliteration fallback | https://github.com/dmort27/epitran |
 | WaveSurfer.js | Repository / library | Long-recording waveform UI, regions, and timeline | https://github.com/katspaugh/wavesurfer.js |
 | React | Repository / library | Frontend application framework | https://github.com/facebook/react |
 | Vite | Repository / library | Frontend dev/build toolchain | https://github.com/vitejs/vite |
@@ -369,7 +369,7 @@ python/
   ai/                   -- AI provider layer
     chat_tools.py       -- ParseChatTools — AI assistant tool interface (26 tools)
     chat_orchestrator.py-- Chat session management
-    stt_pipeline.py     -- Tier 1 word-level STT (faster-whisper + word_timestamps=True)
+    stt_pipeline.py     -- Tier 1 word-level STT (faster-whisper + `word_timestamps=True`)
     forced_align.py     -- Tier 2 acoustic forced alignment (torchaudio + wav2vec2-xlsr)
     ipa_transcribe.py   -- Tier 3 acoustic IPA (wav2vec2 CTC on audio slices, wav2vec2-only)
   compare/              -- Compare pipeline (cognates, offsets, matching)
@@ -389,16 +389,19 @@ dist/                   -- Vite build output (generated, gitignored)
 
 ## AI Chat Tools
 
-The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **20 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
+The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **26 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
 
-### Tools (20)
+### Tools (26)
 
 **Read-only / preview**
 
 | Tool | Description |
 |---|---|
 | `project_context_read` | Full project metadata and speaker status |
+| `speakers_list` | Enumerate annotated speakers for batch/preflight workflows |
 | `annotation_read` | Read annotation data for a speaker (with optional tier/concept filtering) |
+| `pipeline_state_read` | Preflight one speaker's pipeline state with per-step `done` / `can_run`, coverage fields, counts, and reasons; agents should prefer `full_coverage` over bare `done` when deciding whether a rerun is needed |
+| `pipeline_state_batch` | Preflight multiple speakers and summarize blocked / partial-coverage speakers before a batch run |
 | `cognate_compute_preview` | Preview cognate computation results |
 | `cross_speaker_match_preview` | Preview cross-speaker matching candidates |
 | `spectrogram_preview` | Generate spectrogram preview for a segment |
@@ -413,6 +416,14 @@ The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its p
 |---|---|
 | `stt_start` | Start STT pipeline on a recording. Returns job ID |
 | `stt_status` | Poll status of a running STT job |
+| `compute_status` | Generic poller for compute jobs, including full-pipeline runs and step-level results |
+| `stt_word_level_start` | Start Tier 1 word-level STT (`word_timestamps=True`, nested `segments[].words[]`) |
+| `stt_word_level_status` | Poll status/result of a Tier 1 word-level STT job |
+| `forced_align_start` | Start Tier 2 acoustic forced alignment for one speaker |
+| `forced_align_status` | Poll status/result of a Tier 2 forced-alignment job |
+| `pipeline_run` | Start a one-speaker pipeline or ORTH-only run with explicit steps/overwrites |
+| `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription for one speaker |
+| `ipa_transcribe_acoustic_status` | Poll status/result of a Tier 3 acoustic IPA job |
 | `detect_timestamp_offset` | Detect a constant timestamp offset between annotation data and audio/STT evidence |
 | `detect_timestamp_offset_from_pair` | Compute an offset from one or more manually known CSV↔audio anchor pairs when automated STT-based matching is weak or unavailable |
 | `apply_timestamp_offset` | Apply a constant offset to lexeme timestamps for one speaker (`dryRun=true` first) |
@@ -439,7 +450,7 @@ The built-in assistant operates with both read and write access to the project, 
 
 ## MCP Server Mode
 
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing **18 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing **25 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This lets third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — call PARSE tools programmatically without going through the browser UI.
 
 ```bash
 python python/adapters/mcp_adapter.py                          # auto-detect project root
@@ -471,12 +482,17 @@ If you launch the adapter without an explicit `env` block, it also reads repo-lo
 
 ### Exposed Tools
 
-The MCP adapter currently registers **18 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
+The MCP adapter currently registers **25 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
+
+For pipeline-preflight tools, note that PARSE now exposes **coverage-aware state**, not just interval presence. At the top level this includes `duration_sec`; per step (STT / ORTH / IPA) it includes `coverage_start_sec`, `coverage_end_sec`, `coverage_fraction`, and `full_coverage`. For automation, `full_coverage` is the field that answers "has the entire WAV really been processed?".
 
 | Tool | Description |
 |---|---|
 | `project_context_read` | Project metadata, source index, annotation inventory, enrichments summary |
+| `speakers_list` | Enumerate annotated speakers for batch/preflight tooling |
 | `annotation_read` | Read speaker annotation data with optional concept/tier filtering |
+| `pipeline_state_read` | Preflight one speaker's pipeline state with per-step `done` / `can_run`, coverage fields, counts, and reasons; use `full_coverage` rather than bare `done` when deciding whether a tier truly covers the whole recording |
+| `pipeline_state_batch` | Preflight multiple speakers at once and summarize blocked / partial-coverage speakers before a batch run |
 | `read_csv_preview` | Preview CSV files (columns, row count, sample rows) |
 | `cognate_compute_preview` | Compute cognate/similarity preview from annotations (read-only) |
 | `cross_speaker_match_preview` | Cross-speaker match candidates from STT output |
@@ -484,6 +500,14 @@ The MCP adapter currently registers **18 tools** from `ParseChatTools` in `pytho
 | `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); **dryRun required** — pass dryRun=true to preview, dryRun=false to merge into sil_contact_languages.json |
 | `stt_start` | Start STT background job on an audio file (proxied to the running PARSE HTTP server on PARSE_API_PORT, default 8766, so job state is shared with the browser UI) |
 | `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
+| `compute_status` | Poll any compute job, including full-pipeline runs, and return the backend snapshot/result |
+| `stt_word_level_start` | Start Tier 1 word-level STT; segments include nested `words[]` spans from `word_timestamps=True` |
+| `stt_word_level_status` | Poll status/progress of a Tier 1 word-level STT job |
+| `forced_align_start` | Start Tier 2 forced alignment with torchaudio + wav2vec2 on Tier 1 word windows |
+| `forced_align_status` | Poll status/progress of a Tier 2 forced-alignment job |
+| `pipeline_run` | Start a one-speaker `full_pipeline` run or an ORTH-only/step-subset run with explicit overwrites |
+| `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription (`ipa_only`) on one speaker |
+| `ipa_transcribe_acoustic_status` | Poll status/progress of a Tier 3 acoustic IPA job |
 | `detect_timestamp_offset` | Detect a constant timestamp offset between transcript/annotation timestamps and audio evidence, with monotonic alignment and quantile anchor selection |
 | `detect_timestamp_offset_from_pair` | Detect an offset from manually supplied audio↔CSV anchor pair(s) when automated alignment is unreliable |
 | `apply_timestamp_offset` | Apply a constant offset to speaker lexeme timestamps; dry-run first |
@@ -524,7 +548,6 @@ The Python backend (`python/server.py`, port `8766`) exposes the following endpo
 | `/api/normalize/status` | Poll normalization job status |
 | `/api/stt` | Start STT pipeline |
 | `/api/stt/status` | Poll STT job status |
-| `/api/ipa` | Request IPA transcription for text |
 | `/api/suggest` | Request annotation suggestions |
 | `/api/chat/session` | Create or resume a chat session |
 | `/api/chat/run` | Send a message to the chat assistant |
