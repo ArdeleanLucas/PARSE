@@ -20,7 +20,7 @@ import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
 import { useTranscriptionLanesStore, type LaneKind } from './stores/transcriptionLanesStore';
-import { TranscriptionLanes } from './components/annotate/TranscriptionLanes';
+import { TranscriptionLanes, LABEL_COL_PX } from './components/annotate/TranscriptionLanes';
 import { LaneColorPicker } from './components/annotate/LaneColorPicker';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
@@ -1473,19 +1473,28 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
 
         {/* Waveform container — WaveSurfer owns this div */}
         <div className="relative px-5 pt-4 pb-2">
-          <div className="relative">
+          <div className="flex items-stretch">
+            {/* Left gutter matches the lane label column so waveform t=0
+                lines up with segment t=0 in the STT/IPA/ORTHO strips. */}
             <div
-              ref={containerRef}
-              className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
-              style={{ minHeight: 110 }}
+              className="shrink-0"
+              style={{ width: LABEL_COL_PX }}
+              aria-hidden="true"
             />
-            {spectroOn && (
-              <canvas
-                ref={spectroCanvasRef}
-                className="pointer-events-none absolute inset-0 rounded-lg"
-                style={{ width: '100%', height: '100%', opacity: 0.6, mixBlendMode: 'multiply' }}
+            <div className="relative flex-1">
+              <div
+                ref={containerRef}
+                className="relative w-full overflow-hidden rounded-lg ring-1 ring-slate-100"
+                style={{ minHeight: 110 }}
               />
-            )}
+              {spectroOn && (
+                <canvas
+                  ref={spectroCanvasRef}
+                  className="pointer-events-none absolute inset-0 rounded-lg"
+                  style={{ width: '100%', height: '100%', opacity: 0.6, mixBlendMode: 'multiply' }}
+                />
+              )}
+            </div>
           </div>
         </div>
 
