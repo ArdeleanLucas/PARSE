@@ -32,6 +32,7 @@ Per-speaker segmentation and transcription workstation.
 - Speaker-level ORTH job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
 - Speaker-level IPA fill job (`computeType='ipa_only'`) for missing IPA intervals
 - Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks
+- Full pipeline execution now runs explicit ordered steps — **normalize → STT → ORTH → IPA** — with per-step skip/error reporting instead of treating the run as a single opaque job
 - Draggable lexeme timestamp editing and manual boundary correction
 - Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment, now with monotonic alignment, quantile anchor sampling, and manual single-pair fallback
 - Clip-bounded playback for the selected region plus global **Space** play/pause hotkey
@@ -102,7 +103,7 @@ Provider selection is feature-specific — STT, IPA, and LLM tasks can each rout
 
 | Model | Task | Source |
 |---|---|---|
-| [`razhan/whisper-base-sdh`](https://huggingface.co/razhan/whisper-base-sdh) | STT — Southern Kurdish speech recognition | HuggingFace (local CT2) |
+| [`razhan/whisper-base-sdh`](https://huggingface.co/razhan/whisper-base-sdh) | ORTH transcription / Southern Kurdish speech recognition | HuggingFace (local CT2) |
 | [`facebook/wav2vec2-xlsr-53-espeak-cv-ft`](https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft) | IPA transcription — multilingual phoneme recognition | HuggingFace (local) |
 | Silero VAD | Voice activity detection — segment boundary detection in long recordings | bundled with faster-whisper |
 | epitran | IPA transliteration — rule-based fallback for Arabic-script Southern Kurdish | Python library |
