@@ -268,9 +268,41 @@ def _coerce_float(
 
 
 def resolve_ai_config_path(config_path: Optional[Path] = None) -> Path:
-    """Resolve ai_config.json path, defaulting to parse/config/ai_config.json."""
+    """Resolve ai_config.json path.
+
+    Search order (first match wins):
+      1. ``config_path`` arg, if provided.
+      2. ``PARSE_AI_CONFIG`` env var (escape hatch for operators).
+      3. ``<cwd>/config/ai_config.json`` — matches server.py's ``_config_path()``
+         which reads from cwd. The server runs with cwd set to the
+         project workspace (e.g. ``/home/lucas/parse-workspace``), so
+         this is where the user's real config lives.
+      4. ``<repo>/config/ai_config.json`` — the historical location,
+         relative to this module's path. Kept as a fallback for
+         scripts/tests that import ``load_ai_config`` without a
+         meaningful cwd.
+
+    Returns the *first existing* path, else the repo path (so the
+    "missing" WARN in ``load_ai_config`` surfaces a coherent message).
+
+    Fixes a silent bug where the server reported
+    ``stt.model_path: C:\\...razhan-whisper-ct2`` via ``/api/config``
+    (which reads from cwd) while ``get_stt_provider()`` fell back to
+    defaults — because this function was only checking the repo path,
+    which is empty on a fresh deploy. ORTHO in particular needs razhan
+    configured; defaults hand it the HF repo id which faster-whisper
+    can't load, and every ORTH run silently errored.
+    """
     if config_path is not None:
         return Path(config_path).expanduser().resolve()
+
+    env_override = os.environ.get("PARSE_AI_CONFIG", "").strip()
+    if env_override:
+        return Path(env_override).expanduser().resolve()
+
+    cwd_candidate = Path.cwd() / "config" / "ai_config.json"
+    if cwd_candidate.exists():
+        return cwd_candidate.resolve()
 
     return Path(__file__).resolve().parents[2] / "config" / "ai_config.json"
 

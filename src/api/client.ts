@@ -547,6 +547,14 @@ export async function pollCompute(computeType: string, jobId: string): Promise<C
           ? payload.error
           : undefined,
     error: typeof payload.error === "string" ? payload.error : undefined,
+    // Forward the backend's opaque ``result`` field. ``full_pipeline``
+    // returns its per-step results here; ``useBatchPipelineJob`` reads
+    // this to populate the BatchReportModal. Previously this field was
+    // silently dropped, causing every batch report to show 0/0/0 with
+    // em-dashes even when the server completed the work. Callers that
+    // don't care about the payload ignore it; typed callers cast to
+    // their expected compute-specific shape.
+    result: payload.result,
   };
 }
 

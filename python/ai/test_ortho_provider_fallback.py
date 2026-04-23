@@ -173,6 +173,53 @@ def test_ortho_vad_filter_explicit_override_wins(tmp_path):
     assert provider.vad_filter is True
 
 
+def test_resolve_ai_config_explicit_arg_wins(tmp_path):
+    from ai.provider import resolve_ai_config_path
+    explicit = tmp_path / "my-config.json"
+    explicit.write_text("{}")
+    assert resolve_ai_config_path(explicit) == explicit.resolve()
+
+
+def test_resolve_ai_config_env_var(tmp_path, monkeypatch):
+    """``PARSE_AI_CONFIG`` env var is the operator escape hatch — takes
+    precedence over every path-based lookup but the explicit arg."""
+    from ai.provider import resolve_ai_config_path
+    special = tmp_path / "special.json"
+    special.write_text("{}")
+    monkeypatch.setenv("PARSE_AI_CONFIG", str(special))
+    assert resolve_ai_config_path() == special.resolve()
+
+
+def test_resolve_ai_config_prefers_cwd_over_repo_path(tmp_path, monkeypatch):
+    """The server runs with ``cwd = <project-workspace>`` — that's where
+    the real ai_config.json lives. A prior revision only checked the
+    repo path, which was empty on a fresh deploy, so providers silently
+    fell back to defaults and every razhan/ortho run errored out with
+    the HF-id model_path crash. Regression guard.
+    """
+    from ai.provider import resolve_ai_config_path
+    monkeypatch.delenv("PARSE_AI_CONFIG", raising=False)
+    cwd_cfg_dir = tmp_path / "config"
+    cwd_cfg_dir.mkdir()
+    cwd_cfg = cwd_cfg_dir / "ai_config.json"
+    cwd_cfg.write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    resolved = resolve_ai_config_path()
+    assert resolved == cwd_cfg.resolve()
+
+
+def test_resolve_ai_config_falls_back_to_repo_when_nothing_found(tmp_path, monkeypatch):
+    from ai.provider import resolve_ai_config_path
+    monkeypatch.delenv("PARSE_AI_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    resolved = resolve_ai_config_path()
+    # Lands on repo-relative ai_config.json path (which may or may not
+    # exist) — this lets the caller emit a clean "AI config not found"
+    # warning with a stable path instead of a cwd-dependent one.
+    assert resolved.name == "ai_config.json"
+    assert resolved.parent.name == "config"
+
+
 def test_collect_nvidia_wheel_bin_dirs_returns_empty_when_nvidia_absent(monkeypatch):
     """No nvidia wheels installed → empty list, no exception."""
     import sys as _sys
