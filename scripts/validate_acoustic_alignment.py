@@ -44,15 +44,30 @@ from typing import Any, Dict, List
 
 
 def _slice_audio(src: Path, start_sec: float, duration_sec: float, out: Path) -> Path:
-    """Extract [start, start+duration] from src into out (mono 16 kHz)."""
-    import torchaudio  # type: ignore
+    """Extract [start, start+duration] from src into out (mono 16 kHz).
+
+    Uses soundfile + torch to avoid torchaudio.load's torchcodec dependency
+    (torchaudio 2.5+ raises ImportError when torchcodec is not installed).
+    """
+    import soundfile as sf  # type: ignore
+    import numpy as np  # type: ignore
     import torch  # type: ignore
 
-    waveform, sr = torchaudio.load(str(src))
-    if waveform.ndim == 2 and waveform.shape[0] > 1:
+    data, sr = sf.read(str(src), always_2d=True)
+    # data shape: (samples, channels) — convert to (channels, samples)
+    waveform = torch.from_numpy(data.T.astype("float32"))
+    if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if sr != 16000:
-        waveform = torchaudio.functional.resample(waveform, sr, 16000)
+        try:
+            import torchaudio.functional as _taf  # type: ignore
+            waveform = _taf.resample(waveform, sr, 16000)
+        except Exception:
+            # Fallback: simple decimation (good enough for validation slicing)
+            ratio = sr / 16000
+            indices = torch.arange(0, waveform.shape[-1], ratio).long()
+            indices = indices[indices < waveform.shape[-1]]
+            waveform = waveform[:, indices]
         sr = 16000
 
     start_sample = max(0, int(start_sec * sr))
@@ -60,7 +75,7 @@ def _slice_audio(src: Path, start_sec: float, duration_sec: float, out: Path) ->
     clipped = waveform[:, start_sample:end_sample]
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    torchaudio.save(str(out), clipped, sr)
+    sf.write(str(out), clipped.squeeze(0).numpy(), sr, subtype="PCM_16")
     return out
 
 
