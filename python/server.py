@@ -2071,6 +2071,34 @@ def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _list_active_jobs_snapshots() -> List[Dict[str, Any]]:
+    """Return public snapshots for all currently-running jobs.
+
+    Used by the frontend on page load to rehydrate in-flight progress bars
+    (STT, normalize, IPA, etc.) after a reload — backend threads outlive the
+    browser, so the job is still running; the UI just lost its ``job_id``.
+    """
+    results: List[Dict[str, Any]] = []
+    with _jobs_lock:
+        for job in _jobs.values():
+            if job.get("status") != "running":
+                continue
+            payload = _job_response_payload(job)
+            meta = job.get("meta") if isinstance(job.get("meta"), dict) else {}
+            if isinstance(meta, dict) and meta:
+                # Only surface safe metadata the UI already has access to:
+                # speaker identifies which hook should adopt this job.
+                speaker = meta.get("speaker")
+                if isinstance(speaker, str) and speaker.strip():
+                    payload["speaker"] = speaker.strip()
+                language = meta.get("language")
+                if isinstance(language, str) and language.strip():
+                    payload["language"] = language.strip()
+            results.append(payload)
+    return results
+
+
+
 def _load_cached_suggestions(speaker: str, concept_ids: List[str]) -> List[Dict[str, Any]]:
     suggestions_path = _project_root() / "ai_suggestions.json"
     if not suggestions_path.exists():
@@ -2943,6 +2971,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_chat_session(parts[3])
             return
 
+        if request_path == "/api/jobs/active":
+            self._api_get_jobs_active()
+            return
+
         if request_path == "/api/enrichments":
             self._api_get_enrichments()
             return
@@ -3682,6 +3714,11 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is not a normalize job")
 
         self._send_json(HTTPStatus.OK, _job_response_payload(job))
+
+    def _api_get_jobs_active(self) -> None:
+        """Return a list of currently-running jobs so the UI can rehydrate
+        progress after a page reload. See ``_list_active_jobs_snapshots``."""
+        self._send_json(HTTPStatus.OK, {"jobs": _list_active_jobs_snapshots()})
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

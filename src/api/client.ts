@@ -265,6 +265,54 @@ export async function pollSTT(jobId: string): Promise<STTStatus> {
   });
 }
 
+export interface ActiveJobSnapshot {
+  jobId: string;
+  type: string;
+  status: string;
+  progress: number;
+  message?: string;
+  error?: string;
+  /** Only set for speaker-scoped jobs (STT, normalize, IPA). */
+  speaker?: string;
+  language?: string;
+}
+
+/** List currently-running backend jobs so the UI can rehydrate progress
+ * indicators after a page reload. Backend threads outlive the browser. */
+export async function listActiveJobs(): Promise<ActiveJobSnapshot[]> {
+  const payload = await apiFetch<{ jobs?: unknown }>("/api/jobs/active");
+  const raw = Array.isArray(payload?.jobs) ? payload!.jobs : [];
+  const out: ActiveJobSnapshot[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const jobId = String(record.jobId ?? record.job_id ?? "").trim();
+    const type = String(record.type ?? "").trim();
+    if (!jobId || !type) continue;
+    const progressRaw = Number(record.progress ?? 0);
+    const snapshot: ActiveJobSnapshot = {
+      jobId,
+      type,
+      status: String(record.status ?? "running"),
+      progress: Number.isFinite(progressRaw) ? progressRaw : 0,
+    };
+    if (typeof record.message === "string" && record.message.trim()) {
+      snapshot.message = record.message;
+    }
+    if (typeof record.error === "string" && record.error.trim()) {
+      snapshot.error = record.error;
+    }
+    if (typeof record.speaker === "string" && record.speaker.trim()) {
+      snapshot.speaker = record.speaker.trim();
+    }
+    if (typeof record.language === "string" && record.language.trim()) {
+      snapshot.language = record.language.trim();
+    }
+    out.push(snapshot);
+  }
+  return out;
+}
+
 // Timestamp offset — detect a constant CSV/STT misalignment and (optionally) apply it.
 export interface OffsetMatch {
   anchor_index: number;
