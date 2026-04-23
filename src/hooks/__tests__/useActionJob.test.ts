@@ -31,6 +31,7 @@ describe("useActionJob", () => {
       error: null,
       label: null,
       etaMs: null,
+      message: null,
     });
   });
 
@@ -199,6 +200,7 @@ describe("useActionJob", () => {
       error: null,
       label: null,
       etaMs: null,
+      message: null,
     });
   });
 
@@ -279,6 +281,7 @@ describe("useActionJob", () => {
       error: "Start failed",
       label: "Running action…",
       etaMs: null,
+      message: null,
     });
     expect(poll).not.toHaveBeenCalled();
   });

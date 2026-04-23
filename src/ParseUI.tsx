@@ -25,6 +25,7 @@ import { LaneColorPicker } from './components/annotate/LaneColorPicker';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
+import { listActiveJobs } from './api/client';
 import type { PollResult } from './hooks/useActionJob';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -1854,6 +1855,8 @@ export function ParseUI() {
     catch { /* storage unavailable */ }
   }, [sttLanguage]);
   const activeActionSpeaker = selectedSpeakers[0] ?? null;
+  const activeActionSpeakerRef = useRef(activeActionSpeaker);
+  useEffect(() => { activeActionSpeakerRef.current = activeActionSpeaker; }, [activeActionSpeaker]);
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
 
@@ -1941,6 +1944,42 @@ export function ParseUI() {
 
   const allJobs = [normalizeJob, sttJob, ipaJob, pipelineJob, crossSpeakerJob];
   const activeJobs = allJobs.filter(j => j.state.status !== 'idle');
+
+  // On mount, adopt any in-flight backend jobs so progress bars survive
+  // a page reload. STT (and similar) run in a background thread that
+  // outlives the browser tab — before this, the UI had no way to
+  // reconnect, making the process look dead even though it was still
+  // burning GPU cycles on the PC.
+  const didRehydrateJobsRef = useRef(false);
+  useEffect(() => {
+    if (didRehydrateJobsRef.current) return;
+    didRehydrateJobsRef.current = true;
+    void (async () => {
+      let snapshots;
+      try {
+        snapshots = await listActiveJobs();
+      } catch {
+        return; // Endpoint may not exist on older servers; fail silent.
+      }
+      const speaker = activeActionSpeakerRef.current;
+      for (const snap of snapshots) {
+        if (snap.type === 'stt' && snap.speaker && snap.speaker === speaker) {
+          sttJob.adopt(snap.jobId);
+        } else if (snap.type === 'normalize' && snap.speaker && snap.speaker === speaker) {
+          normalizeJob.adopt(snap.jobId);
+        } else if (snap.type === 'compute:ipa_only' && snap.speaker && snap.speaker === speaker) {
+          ipaJob.adopt(snap.jobId);
+        } else if (snap.type === 'compute:full_pipeline') {
+          pipelineJob.adopt(snap.jobId);
+        } else if (snap.type === 'compute:contact-lexemes') {
+          crossSpeakerJob.adopt(snap.jobId);
+        }
+      }
+    })();
+    // Intentionally run once on mount — sttJob etc. are stable handles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   const [importModalOpen, setImportModalOpen] = useState(false);
 
@@ -2455,7 +2494,7 @@ export function ParseUI() {
     <div className="h-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased flex flex-col">
       {/* ============ MINIMAL TOP BAR ============ */}
       <header className="relative z-50 shrink-0 h-14 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
-        <div className="flex h-full items-center justify-between px-5">
+        <div className="relative flex h-full items-center justify-between px-5">
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-2">
               <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm">
@@ -2655,7 +2694,7 @@ export function ParseUI() {
             </div>
 
             {activeJobs.length > 0 && (
-              <div className="ml-2 flex flex-col gap-1" data-testid="topbar-action-statuses">
+              <div className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex flex-col gap-1 rounded-md border border-slate-200 bg-white/95 px-3 py-1 shadow-sm backdrop-blur" data-testid="topbar-action-statuses">
                 {activeJobs.map((job, i) => (
                   <div key={i} className="flex items-center gap-2 text-[11px]">
                     {job.state.status === 'running' && (

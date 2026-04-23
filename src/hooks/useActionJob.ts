@@ -55,6 +55,9 @@ export interface ActionJobHandle {
   state: ActionJobState;
   run: () => Promise<void>;
   reset: () => void;
+  /** Attach to an already-running backend job (e.g. one launched before a
+   * page reload) and start polling its status. Skips config.start(). */
+  adopt: (jobId: string) => void;
 }
 
 const IDLE_STATE: ActionJobState = {
@@ -242,6 +245,35 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
     }
   }, [config, setStateIfMounted, stopPolling]);
 
+  const adopt = useCallback((jobId: string): void => {
+    const trimmed = String(jobId || "").trim();
+    if (!trimmed || stateRef.current.status === "running") {
+      return;
+    }
+
+    activeRunIdRef.current += 1;
+    const runId = activeRunIdRef.current;
+
+    stopPolling();
+    startedAtRef.current = Date.now();
+    jobIdRef.current = trimmed;
+    setStateIfMounted({
+      status: "running",
+      progress: 0,
+      error: null,
+      label: config.label,
+      etaMs: null,
+      message: null,
+    });
+
+    // Fire an immediate poll so the bar picks up real progress without
+    // waiting a full interval.
+    void pollOnce(runId);
+    intervalRef.current = setInterval(() => {
+      void pollOnce(runId);
+    }, config.pollIntervalMs ?? 1000);
+  }, [config.label, config.pollIntervalMs, pollOnce, setStateIfMounted, stopPolling]);
+
   const run = useCallback(async (): Promise<void> => {
     if (startInFlightRef.current || stateRef.current.status === "running") {
       return;
@@ -300,5 +332,5 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
     };
   }, [stopPolling]);
 
-  return { state, run, reset };
+  return { state, run, reset, adopt };
 }
