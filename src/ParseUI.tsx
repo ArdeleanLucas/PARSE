@@ -1883,8 +1883,6 @@ export function ParseUI() {
     catch { /* storage unavailable */ }
   }, [sttLanguage]);
   const activeActionSpeaker = selectedSpeakers[0] ?? null;
-  const activeActionSpeakerRef = useRef(activeActionSpeaker);
-  useEffect(() => { activeActionSpeakerRef.current = activeActionSpeaker; }, [activeActionSpeaker]);
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
 
@@ -1975,14 +1973,46 @@ export function ParseUI() {
 
   const handleRerunFailed = (speakers: string[]) => {
     if (speakers.length === 0 || reportStepsRun.length === 0) return;
+
+    // For each failed speaker, rerun ONLY the steps that errored last
+    // time — preserves steps that succeeded. Whole-speaker failures
+    // (result === null, typically a network error before the pipeline
+    // even started) retry the full step list.
+    const stepsBySpeaker: Partial<Record<string, PipelineStepId[]>> = {};
+    for (const outcome of batch.state.outcomes) {
+      if (!speakers.includes(outcome.speaker)) continue;
+      if (outcome.result == null) {
+        // Whole-speaker error → rerun everything the batch was asked to do.
+        stepsBySpeaker[outcome.speaker] = reportStepsRun;
+        continue;
+      }
+      const failedSteps = reportStepsRun.filter((step) => {
+        const stepResult = outcome.result?.results[step];
+        return stepResult?.status === 'error';
+      });
+      stepsBySpeaker[outcome.speaker] = failedSteps;
+    }
+
+    // Build the overwrite map from the UNION of all steps actually being
+    // rerun. Failed steps either produced no output or partial output,
+    // so overwrite=true is safe and often necessary.
+    const stepsToRerun = new Set<PipelineStepId>();
+    for (const steps of Object.values(stepsBySpeaker)) {
+      for (const step of steps ?? []) stepsToRerun.add(step);
+    }
+    if (stepsToRerun.size === 0) return;  // nothing to do
+
     setReportOpen(false);
     void batch.run({
       speakers,
-      steps: reportStepsRun,
-      // On re-run, allow overwrite for any steps that may have partially
-      // landed on the previous run — the user has explicitly asked to
-      // retry these speakers.
-      overwrites: reportStepsRun.reduce<Partial<Record<PipelineStepId, boolean>>>(
+      // The global `steps` list is a fallback for any speaker without an
+      // entry in stepsBySpeaker (shouldn't happen, but defensive).
+      steps: Array.from(stepsToRerun).sort((a, b) => {
+        const order: PipelineStepId[] = ['normalize', 'stt', 'ortho', 'ipa'];
+        return order.indexOf(a) - order.indexOf(b);
+      }),
+      stepsBySpeaker,
+      overwrites: Array.from(stepsToRerun).reduce<Partial<Record<PipelineStepId, boolean>>>(
         (acc, step) => { acc[step] = true; return acc; },
         {},
       ),
@@ -2756,43 +2786,61 @@ export function ParseUI() {
               )}
             </div>
 
-            {batch.state.status === 'running' && (
+            {(batch.state.status === 'running' || batch.state.status === 'cancelling') && (
               <div
-                className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-3 rounded-md border border-indigo-200 bg-indigo-50/95 px-3 py-1 shadow-sm backdrop-blur"
+                className={`pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-3 rounded-md border px-3 py-1 shadow-sm backdrop-blur ${
+                  batch.state.status === 'cancelling'
+                    ? 'border-amber-200 bg-amber-50/95'
+                    : 'border-indigo-200 bg-indigo-50/95'
+                }`}
                 data-testid="topbar-batch-status"
               >
-                <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />
-                <span className="text-[11px] font-medium text-indigo-900">
-                  Batch {Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/{batch.state.totalSpeakers}
+                <Loader2 className={`h-3 w-3 animate-spin ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} />
+                <span className={`text-[11px] font-medium ${batch.state.status === 'cancelling' ? 'text-amber-900' : 'text-indigo-900'}`}>
+                  {batch.state.status === 'cancelling' ? 'Cancelling after current speaker…' : `Batch ${Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/${batch.state.totalSpeakers}`}
                 </span>
                 {batch.state.currentSpeaker && (
-                  <span className="text-[11px] text-indigo-700">— {batch.state.currentSpeaker}</span>
+                  <span className={`text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-700' : 'text-indigo-700'}`}>— {batch.state.currentSpeaker}</span>
                 )}
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-indigo-100">
+                <div className={`h-1.5 w-24 overflow-hidden rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-100' : 'bg-indigo-100'}`}>
                   {batch.state.currentProgress < 0.02 ? (
-                    <div className="h-full w-1/3 animate-pulse rounded-full bg-indigo-400" />
+                    <div className={`h-full w-1/3 animate-pulse rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
                   ) : (
                     <div
-                      className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                      className={`h-full rounded-full transition-all duration-300 ${batch.state.status === 'cancelling' ? 'bg-amber-600' : 'bg-indigo-600'}`}
                       style={{ width: `${Math.round(batch.state.currentProgress * 100)}%` }}
                     />
                   )}
                 </div>
                 {batch.state.currentMessage && (
-                  <span className="max-w-[240px] truncate text-[11px] text-indigo-600" title={batch.state.currentMessage}>
+                  <span className={`max-w-[240px] truncate text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} title={batch.state.currentMessage}>
                     {batch.state.currentMessage}
                   </span>
+                )}
+                {batch.state.status === 'running' && (
+                  <button
+                    onClick={() => batch.cancel()}
+                    className="rounded border border-indigo-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                    data-testid="topbar-batch-cancel"
+                    title="Stop after the current speaker finishes. The current speaker's compute continues — we can't abort razhan/whisper mid-transcription."
+                  >
+                    Cancel
+                  </button>
                 )}
               </div>
             )}
             {batch.state.status === 'complete' && !reportOpen && (
               <div
-                className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50/95 px-3 py-1 shadow-sm backdrop-blur"
+                className={`pointer-events-auto absolute right-5 top-full z-40 mt-1 flex items-center gap-2 rounded-md border px-3 py-1 shadow-sm backdrop-blur ${
+                  batch.state.cancelled
+                    ? 'border-amber-200 bg-amber-50/95'
+                    : 'border-emerald-200 bg-emerald-50/95'
+                }`}
                 data-testid="topbar-batch-complete"
               >
-                <Check className="h-3 w-3 text-emerald-600" />
-                <span className="text-[11px] font-medium text-emerald-900">
-                  Batch done · {batch.state.outcomes.filter(o => o.status === 'complete').length}/{batch.state.totalSpeakers} ok
+                <Check className={`h-3 w-3 ${batch.state.cancelled ? 'text-amber-600' : 'text-emerald-600'}`} />
+                <span className={`text-[11px] font-medium ${batch.state.cancelled ? 'text-amber-900' : 'text-emerald-900'}`}>
+                  {batch.state.cancelled ? 'Batch cancelled' : 'Batch done'} · {batch.state.outcomes.filter(o => o.status === 'complete').length} ok{batch.state.outcomes.filter(o => o.status === 'error').length > 0 ? `, ${batch.state.outcomes.filter(o => o.status === 'error').length} failed` : ''}{batch.state.outcomes.filter(o => o.status === 'cancelled').length > 0 ? `, ${batch.state.outcomes.filter(o => o.status === 'cancelled').length} skipped` : ''}
                 </span>
                 <button
                   onClick={() => setReportOpen(true)}

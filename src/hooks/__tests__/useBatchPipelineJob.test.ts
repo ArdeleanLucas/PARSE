@@ -222,5 +222,127 @@ describe("useBatchPipelineJob", () => {
     expect(result.current.state.currentMessage).toBeNull();
     expect(result.current.state.completedSpeakers).toBe(3);
     expect(result.current.state.outcomes.every((o) => o.status === "complete")).toBe(true);
+    expect(result.current.state.cancelled).toBe(false);
+  });
+
+  it("cancel() stops the batch after the current speaker, marks rest cancelled", async () => {
+    // Control A's poll completion manually so we can cancel while A is mid-run.
+    const releases: Record<string, () => void> = {};
+    const pending: Record<string, Promise<void>> = {};
+    for (const s of ["A", "B", "C"]) {
+      pending[s] = new Promise<void>((r) => {
+        releases[s] = r;
+      });
+    }
+    mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => ({
+      job_id: `job-${String(body.speaker)}`,
+    }));
+    mockPoll.mockImplementation(async (_type: string, jobId: string) => {
+      const speaker = jobId.replace("job-", "");
+      await pending[speaker];
+      return {
+        status: "complete",
+        progress: 1,
+        result: { speaker, steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } },
+      };
+    });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.run(baseRequest(["A", "B", "C"]));
+      await flushAsync(5);
+    });
+
+    // A is in-flight.
+    expect(result.current.state.currentSpeaker).toBe("A");
+
+    // Request cancel while A is running.
+    await act(async () => {
+      result.current.cancel();
+      await flushAsync(2);
+    });
+    expect(result.current.state.status).toBe("cancelling");
+
+    // A completes server-side — batch must not launch B or C.
+    await act(async () => {
+      releases["A"]();
+      await runPromise;
+    });
+
+    expect(mockStart).toHaveBeenCalledTimes(1); // ONLY A got started
+    expect(result.current.state.status).toBe("complete");
+    expect(result.current.state.cancelled).toBe(true);
+    expect(result.current.state.outcomes[0].status).toBe("complete");
+    expect(result.current.state.outcomes[1].status).toBe("cancelled");
+    expect(result.current.state.outcomes[2].status).toBe("cancelled");
+  });
+
+  it("stepsBySpeaker overrides the default steps for that speaker", async () => {
+    // Speaker B only gets the ORTH step; A and C get the full list.
+    const bodies: Record<string, unknown>[] = [];
+    mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => {
+      bodies.push(body);
+      return { job_id: `job-${String(body.speaker)}` };
+    });
+    mockPoll.mockImplementation(async (_type: string, jobId: string) => {
+      const speaker = jobId.replace("job-", "");
+      return {
+        status: "complete",
+        progress: 1,
+        result: { speaker, steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } },
+      };
+    });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    await act(async () => {
+      await result.current.run({
+        speakers: ["A", "B", "C"],
+        steps: ["normalize", "stt", "ortho", "ipa"],
+        overwrites: {},
+        stepsBySpeaker: { B: ["ortho"] },
+      });
+    });
+
+    // Every speaker's step list reflects the per-speaker override.
+    const bodyFor = (s: string) => bodies.find((b) => b.speaker === s);
+    expect(bodyFor("A")?.steps).toEqual(["normalize", "stt", "ortho", "ipa"]);
+    expect(bodyFor("B")?.steps).toEqual(["ortho"]);
+    expect(bodyFor("C")?.steps).toEqual(["normalize", "stt", "ortho", "ipa"]);
+  });
+
+  it("stepsBySpeaker with empty array marks speaker cancelled without calling backend", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => {
+      bodies.push(body);
+      return { job_id: `job-${String(body.speaker)}` };
+    });
+    mockPoll.mockImplementation(async (_type: string, jobId: string) => {
+      const speaker = jobId.replace("job-", "");
+      return {
+        status: "complete",
+        progress: 1,
+        result: { speaker, steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } },
+      };
+    });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    await act(async () => {
+      await result.current.run({
+        speakers: ["A", "B", "C"],
+        steps: ["ortho"],
+        overwrites: {},
+        stepsBySpeaker: { B: [] },
+      });
+    });
+
+    // B was skipped client-side; only A and C hit the backend.
+    expect(bodies.map((b) => b.speaker)).toEqual(["A", "C"]);
+    expect(result.current.state.outcomes[0].status).toBe("complete");
+    expect(result.current.state.outcomes[1].status).toBe("cancelled");
+    expect(result.current.state.outcomes[2].status).toBe("complete");
   });
 });

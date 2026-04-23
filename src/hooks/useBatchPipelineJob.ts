@@ -9,11 +9,19 @@ export interface BatchRunRequest {
   steps: PipelineStepId[];
   overwrites: Partial<Record<PipelineStepId, boolean>>;
   language?: string;
+  /** Optional per-speaker step overrides. When a speaker key is present here,
+   *  the batch runs those steps for that speaker instead of the global
+   *  `steps` list. Used by "Rerun failed" so each speaker only retries the
+   *  steps that actually failed last time — prevents re-running (and
+   *  overwriting) steps that succeeded for that speaker. */
+  stepsBySpeaker?: Partial<Record<string, PipelineStepId[]>>;
 }
 
 export interface BatchSpeakerOutcome {
   speaker: string;
-  status: "pending" | "running" | "complete" | "error";
+  /** "cancelled" means the user cancelled the batch before this speaker ran.
+   *  The speaker's pipeline never started server-side. */
+  status: "pending" | "running" | "complete" | "error" | "cancelled";
   /** Whole-speaker error (e.g. network failure before the pipeline job even started).
    *  Step-level errors live in `result.results[step].error` instead. */
   error: string | null;
@@ -21,7 +29,12 @@ export interface BatchSpeakerOutcome {
 }
 
 export interface BatchState {
-  status: "idle" | "running" | "complete";
+  /** "cancelling" is a brief transitional state between cancel() and the
+   *  current speaker's poll loop exiting. "complete" means the batch
+   *  finished — either organically or because it was cancelled. Use
+   *  `cancelled` to tell the two complete variants apart. */
+  status: "idle" | "running" | "cancelling" | "complete";
+  cancelled: boolean;
   totalSpeakers: number;
   completedSpeakers: number;
   currentSpeakerIndex: number | null;
@@ -35,11 +48,18 @@ export interface BatchState {
 export interface UseBatchPipelineJobResult {
   state: BatchState;
   run: (request: BatchRunRequest) => Promise<void>;
+  /** Request that the batch stop after the currently-running speaker's
+   *  pipeline finishes. The current speaker's server-side work continues
+   *  to completion (there is no server cancel endpoint — the GPU cycles
+   *  are already spent). Remaining unstarted speakers are marked
+   *  "cancelled" in outcomes. Safe to call any time; no-op when idle. */
+  cancel: () => void;
   reset: () => void;
 }
 
 const IDLE_STATE: BatchState = {
   status: "idle",
+  cancelled: false,
   totalSpeakers: 0,
   completedSpeakers: 0,
   currentSpeakerIndex: null,
@@ -95,6 +115,10 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
   const activeRunIdRef = useRef(0);
+  // Set by `cancel()`; checked between speakers to stop launching new
+  // pipeline jobs. The current speaker's in-flight poll continues until
+  // the server-side job completes (there is no server-side abort).
+  const cancelRequestedRef = useRef(false);
 
   const setStateIfMounted = useCallback(
     (nextState: SetStateAction<BatchState>) => {
@@ -119,8 +143,15 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
       return;
     }
     activeRunIdRef.current += 1;
+    cancelRequestedRef.current = false;
     stateRef.current = IDLE_STATE;
     setStateIfMounted(IDLE_STATE);
+  }, [setStateIfMounted]);
+
+  const cancel = useCallback(() => {
+    if (!runningRef.current) return;
+    cancelRequestedRef.current = true;
+    setStateIfMounted((prev) => ({ ...prev, status: "cancelling" }));
   }, [setStateIfMounted]);
 
   const run = useCallback(
@@ -129,6 +160,7 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
         return;
       }
       runningRef.current = true;
+      cancelRequestedRef.current = false;
       activeRunIdRef.current += 1;
       const runId = activeRunIdRef.current;
 
@@ -142,6 +174,7 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
 
       const initial: BatchState = {
         status: "running",
+        cancelled: false,
         totalSpeakers: speakers.length,
         completedSpeakers: 0,
         currentSpeakerIndex: null,
@@ -163,6 +196,21 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
 
           const speaker = speakers[i];
 
+          // Honor cancel: mark this and all subsequent speakers as
+          // "cancelled" and exit the loop. No new server-side jobs.
+          if (cancelRequestedRef.current) {
+            setStateIfMounted((prev) => {
+              const nextOutcomes = prev.outcomes.slice();
+              for (let j = i; j < nextOutcomes.length; j += 1) {
+                if (nextOutcomes[j].status === "pending") {
+                  nextOutcomes[j] = { ...nextOutcomes[j], status: "cancelled" };
+                }
+              }
+              return { ...prev, outcomes: nextOutcomes };
+            });
+            break;
+          }
+
           // Mark this speaker as running.
           setStateIfMounted((prev) => {
             const nextOutcomes = prev.outcomes.slice();
@@ -178,12 +226,39 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
             };
           });
 
+          // Resolve the steps for THIS speaker — either a per-speaker
+          // override (e.g. rerun-failed with speaker-specific failed
+          // steps) or the batch-wide default.
+          const stepsForSpeaker =
+            request.stepsBySpeaker?.[speaker] ?? request.steps;
+
+          // If the per-speaker override is empty, there's nothing to do
+          // for this speaker — mark it cancelled (not errored, since the
+          // caller chose to skip) and move on.
+          if (stepsForSpeaker.length === 0) {
+            setStateIfMounted((prev) => {
+              const nextOutcomes = prev.outcomes.slice();
+              nextOutcomes[i] = { ...nextOutcomes[i], status: "cancelled" };
+              return {
+                ...prev,
+                completedSpeakers: prev.completedSpeakers + 1,
+                currentSpeakerIndex: null,
+                currentSpeaker: null,
+                currentSubJobId: null,
+                currentProgress: 0,
+                currentMessage: null,
+                outcomes: nextOutcomes,
+              };
+            });
+            continue;
+          }
+
           // Start the per-speaker pipeline job.
           let jobId = "";
           try {
             const body: Record<string, unknown> = {
               speaker,
-              steps: request.steps,
+              steps: stepsForSpeaker,
               overwrites: request.overwrites,
             };
             if (request.language) {
@@ -295,9 +370,11 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
 
         if (!isActive()) return;
 
+        const wasCancelled = cancelRequestedRef.current;
         setStateIfMounted((prev) => ({
           ...prev,
           status: "complete",
+          cancelled: wasCancelled,
           currentSpeakerIndex: null,
           currentSpeaker: null,
           currentSubJobId: null,
@@ -307,6 +384,7 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
       } finally {
         if (activeRunIdRef.current === runId) {
           runningRef.current = false;
+          cancelRequestedRef.current = false;
         }
       }
     },
@@ -322,5 +400,5 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
     };
   }, []);
 
-  return { state, run, reset };
+  return { state, run, cancel, reset };
 }

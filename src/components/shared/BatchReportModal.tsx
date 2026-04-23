@@ -16,7 +16,9 @@ export type PipelineStepId = "normalize" | "stt" | "ortho" | "ipa";
 
 export interface BatchSpeakerOutcome {
   speaker: string;
-  status: "pending" | "running" | "complete" | "error";
+  /** "cancelled" means the user cancelled the batch before this speaker ran.
+   *  The speaker's pipeline never started server-side; its result is null. */
+  status: "pending" | "running" | "complete" | "error" | "cancelled";
   /** Whole-speaker error (e.g. network failure before the pipeline job even started). */
   error: string | null;
   result: PipelineRunResult | null;
@@ -310,6 +312,15 @@ function SpeakerStatusCell({ outcome }: { outcome: BatchSpeakerOutcome }) {
       <td className="border-b border-slate-100 px-2 py-1.5 align-top">
         <span className="inline-flex items-center gap-1 text-xs text-indigo-700">
           <RotateCw className="h-3.5 w-3.5 animate-spin" /> running
+        </span>
+      </td>
+    );
+  }
+  if (outcome.status === "cancelled") {
+    return (
+      <td className="border-b border-slate-100 px-2 py-1.5 align-top">
+        <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+          <SkipForward className="h-3.5 w-3.5" /> cancelled
         </span>
       </td>
     );
