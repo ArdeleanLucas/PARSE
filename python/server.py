@@ -1688,10 +1688,33 @@ def _chat_pipeline_state(speaker: str) -> Dict[str, Any]:
     return _pipeline_state_for_speaker(speaker)
 
 
+# Set by the ``--compute-mode`` CLI flag in ``main()``. CLI beats env var
+# because Windows python.exe launched via WSL interop does NOT inherit
+# WSL-side env vars (confirmed 2026-04-23: ``PARSE_COMPUTE_MODE=subprocess
+# python.exe server.py`` — inside the process, os.environ.get returns
+# None for anything outside a small whitelist like HOME/PATH/USER).
+# argv DOES propagate across the interop boundary, so the flag is the
+# reliable way to pin the mode on that deployment.
+_COMPUTE_MODE_OVERRIDE: Optional[str] = None
+
+
+def _resolve_compute_mode() -> str:
+    """Return the active compute mode — 'thread' (default) or 'subprocess'.
+
+    Precedence: CLI override → env var → 'thread'.
+    """
+    if _COMPUTE_MODE_OVERRIDE:
+        return _COMPUTE_MODE_OVERRIDE.strip().lower() or "thread"
+    env = os.environ.get("PARSE_COMPUTE_MODE", "").strip().lower()
+    return env or "thread"
+
+
 def _launch_compute_runner(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
     """Start the backing worker for a compute job.
 
-    Two modes, selected by the ``PARSE_COMPUTE_MODE`` env var:
+    Two modes, selected by ``--compute-mode`` CLI flag or
+    ``PARSE_COMPUTE_MODE`` env var (CLI wins — env vars don't cross the
+    WSL↔Windows python.exe boundary):
 
     - ``"thread"`` (default) — legacy behaviour. Spawns a
       ``threading.Thread`` that runs ``_run_compute_job`` in the same
@@ -1717,14 +1740,14 @@ def _launch_compute_runner(job_id: str, compute_type: str, payload: Dict[str, An
             (default 4 hours; covers a razhan+wav2vec2 run on a
             multi-hour recording on CPU).
     """
-    mode = os.environ.get("PARSE_COMPUTE_MODE", "thread").strip().lower()
+    mode = _resolve_compute_mode()
     if mode == "subprocess":
         _compute_checkpoint(
             "LAUNCH.subprocess", job_id=job_id, compute_type=compute_type
         )
         _launch_compute_subprocess(job_id, compute_type, payload)
         return
-    _compute_checkpoint("LAUNCH.thread", job_id=job_id, compute_type=compute_type)
+    _compute_checkpoint("LAUNCH.thread", job_id=job_id, compute_type=compute_type, mode=mode)
     thread = threading.Thread(
         target=_run_compute_job,
         args=(job_id, compute_type, payload),
@@ -6404,6 +6427,31 @@ def _startup_banner_lines(
 
 
 def main() -> None:
+    import argparse as _argparse
+    parser = _argparse.ArgumentParser(description="PARSE HTTP server")
+    parser.add_argument(
+        "--compute-mode",
+        choices=("thread", "subprocess"),
+        default=None,
+        help=(
+            "Backing runner for compute jobs. ``thread`` (default) runs in "
+            "threading.Thread inside the server process. ``subprocess`` "
+            "spawns a fresh Python process per job (recommended on "
+            "Windows python.exe via WSL where threaded CUDA init wedges). "
+            "Overrides PARSE_COMPUTE_MODE env var when both are set."
+        ),
+    )
+    args, _unknown = parser.parse_known_args()
+
+    if args.compute_mode:
+        global _COMPUTE_MODE_OVERRIDE
+        _COMPUTE_MODE_OVERRIDE = args.compute_mode
+        print(
+            "[INFO] compute mode = {0} (from --compute-mode)".format(args.compute_mode),
+            file=sys.stderr,
+            flush=True,
+        )
+
     serve_dir = _project_root()
 
     # Guard: refuse to run if workspace is on a Windows mount (WSL /mnt/ path).
