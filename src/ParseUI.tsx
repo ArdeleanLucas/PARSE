@@ -45,7 +45,6 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
-type ModeTab = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 type AppMode = 'annotate' | 'compare' | 'tags';
 
 interface LingTag {
@@ -1791,7 +1790,6 @@ export function ParseUI() {
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [conceptId, setConceptId] = useState(1);
-  const [modeTab, setModeTab] = useState<ModeTab>('all');
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState('cognates');
@@ -2401,18 +2399,17 @@ export function ParseUI() {
       list = list.filter(c => c.tag === 'untagged');
     } else if (tagFilter === 'review') {
       list = list.filter(c => c.tag === 'review');
+    } else if (tagFilter === 'unreviewed') {
+      // Unreviewed ≡ not yet confirmed AND no cognate assignment yet.
+      // Formerly lived as a separate header tab; now a left-panel pill.
+      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
+    } else if (tagFilter === 'flagged') {
+      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
+    } else if (tagFilter === 'borrowings') {
+      list = list.filter(c => hasBorrowing(c.key));
     } else if (tagFilter !== 'all') {
       const storeTag = storeTags.find(t => t.id === tagFilter);
       if (storeTag) list = list.filter(c => storeTag.concepts.includes(c.key));
-    }
-    if (modeTab === 'unreviewed') {
-      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
-    }
-    if (modeTab === 'flagged') {
-      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
-    }
-    if (modeTab === 'borrowings') {
-      list = list.filter(c => hasBorrowing(c.key));
     }
     // In annotate mode, show all concepts for the selected speaker (filter by real data when available)
     if (currentMode === 'annotate') {
@@ -2435,7 +2432,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, tagFilter, sortMode, modeTab, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
+  }, [query, tagFilter, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
 
@@ -2563,13 +2560,6 @@ export function ParseUI() {
     setSelectedSpeakers((existing) => existing.includes(speakerId) ? existing : [...existing, speakerId]);
   };
 
-  const modeTabs: { key: ModeTab; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'unreviewed', label: 'Unreviewed' },
-    { key: 'flagged', label: 'Flagged' },
-    { key: 'borrowings', label: 'Borrowings' },
-  ];
-
   return (
     <div className="h-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased flex flex-col">
       {/* ============ MINIMAL TOP BAR ============ */}
@@ -2590,22 +2580,14 @@ export function ParseUI() {
             </div>
           </div>
 
-          <nav className="hidden items-center gap-1 rounded-lg bg-slate-100/80 p-0.5 md:flex">
-            {modeTabs.map(t => (
-              <button
-                key={t.key}
-                onClick={() => setModeTab(t.key)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition ${modeTab === t.key ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
+          {/* The All / Unreviewed / Flagged / Borrowings tabs that used
+              to live here are now left-panel tag pills (so this row
+              has room to show batch status during long GPU runs). */}
 
-          {/* ===== Inline batch status — lives here so it doesn't hang
-               below the header and obscure the mode tabs / Actions
-               menu / waveform controls underneath. Only renders when a
-               batch is running / cancelling / has just completed. ===== */}
+          {/* ===== Inline batch status — reclaims the space freed by
+               moving the filter tabs down into the left panel. Only
+               renders when a batch is running / cancelling / has just
+               completed. ===== */}
           {(batch.state.status === 'running' || batch.state.status === 'cancelling') && (
             <div
               className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
@@ -2983,25 +2965,57 @@ export function ParseUI() {
               </div>
               <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
             </div>
-            {tagsList.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
+            <div className="mt-2 flex flex-wrap gap-1">
+              {/* Built-in filter pills — replace the old header tabs.
+                  Order: All (reset) · Unreviewed · Flagged · Borrowings.
+                  Each is a tag-shaped pill with a distinctive accent
+                  colour so they read as semantic filters, not as user
+                  tags. Clicking an active pill returns to "All". */}
+              <button
+                onClick={() => setTagFilter('all')}
+                data-testid="tagfilter-all"
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              >All</button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'unreviewed' ? 'all' : 'unreviewed')}
+                title="Concepts not yet confirmed and without a cognate assignment"
+                data-testid="tagfilter-unreviewed"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'unreviewed' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'unreviewed' ? 'bg-white' : 'bg-amber-400'}`}/>
+                Unreviewed
+              </button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'flagged' ? 'all' : 'flagged')}
+                title="Concepts tagged problematic, or with a flagged speaker utterance"
+                data-testid="tagfilter-flagged"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'flagged' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'flagged' ? 'bg-white' : 'bg-rose-400'}`}/>
+                Flagged
+              </button>
+              <button
+                onClick={() => setTagFilter(tagFilter === 'borrowings' ? 'all' : 'borrowings')}
+                title="Concepts with at least one borrowing"
+                data-testid="tagfilter-borrowings"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'borrowings' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'borrowings' ? 'bg-white' : 'bg-violet-400'}`}/>
+                Borrowings
+              </button>
+              {/* User-defined tags, appended after the built-ins. */}
+              {tagsList.map(t => (
                 <button
-                  onClick={() => setTagFilter('all')}
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                >All</button>
-                {tagsList.map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    style={tagFilter === t.id ? { background: t.color } : {}}
-                  >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            )}
+                  key={t.id}
+                  onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  style={tagFilter === t.id ? { background: t.color } : {}}
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
+                  {t.name}
+                </button>
+              ))}
+            </div>
           </div>
           <nav className="flex-1 overflow-y-auto px-2 pb-6">
             {filtered.map(c => {
