@@ -1683,26 +1683,43 @@ def _chat_get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
     return _get_job_snapshot(job_id)
 
 
+def _chat_pipeline_state(speaker: str) -> Dict[str, Any]:
+    """Thin wrapper so ParseChatTools can reach the preflight probe."""
+    return _pipeline_state_for_speaker(speaker)
+
+
 def _chat_start_compute_job(compute_type: str, payload: Dict[str, Any]) -> str:
-    """Launch a compute-type job (Tier 2 forced_align, Tier 3 ipa_only) from
-    a ParseChatTools MCP handler. Mirrors the existing _chat_start_stt_job
-    shape so both are trivially replaceable in tests.
+    """Start a compute job and return its jobId.
+
+    Backs both the Tier 2/3 acoustic-alignment tools
+    (``forced_align`` / ``ipa_only``) and the pipeline-run tool
+    (``full_pipeline``). Mirrors ``_api_post_compute_start`` without the
+    HTTP layer so chat-tool / MCP callers get the same behaviour as the
+    REST client: ``full_pipeline`` runs step-resilient, records per-step
+    tracebacks, and the returned jobId is pollable via
+    ``_get_job_snapshot``. The job type is recorded as
+    ``compute:<type>`` so ``compute_status`` and
+    ``_generic_compute_status`` can filter by compute-type suffix.
     """
     normalized_type = str(compute_type or "").strip().lower()
-    job_payload: Dict[str, Any] = {
-        **(payload or {}),
-        "computeType": normalized_type,
-        "origin": "chat_tool",
-    }
-    job_id = _create_job("compute", job_payload)
+    if not normalized_type:
+        raise ValueError("compute_type is required")
 
+    body_obj = dict(payload or {})
+    job_id = _create_job(
+        "compute:{0}".format(normalized_type),
+        {
+            "computeType": normalized_type,
+            "payload": body_obj,
+            "origin": "chat_tool",
+        },
+    )
     thread = threading.Thread(
         target=_run_compute_job,
-        args=(job_id, normalized_type, dict(payload or {})),
+        args=(job_id, normalized_type, body_obj),
         daemon=True,
     )
     thread.start()
-
     return job_id
 
 
@@ -1851,6 +1868,7 @@ def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
                 memory_path=_chat_memory_path(),
                 onboard_speaker=_chat_onboard_speaker,
                 start_compute_job=_chat_start_compute_job,
+                pipeline_state=_chat_pipeline_state,
             )
 
         if _chat_orchestrator_runtime is None:
