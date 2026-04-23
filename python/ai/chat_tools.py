@@ -1342,7 +1342,8 @@ class ParseChatTools:
                 description=(
                     "Export a NEXUS cognate-character matrix for BEAST2 / phylogenetic tools. "
                     "Characters are (concept, cognate group) pairs; values are 1/0/? per speaker. "
-                    "Without outputPath returns a preview; with outputPath writes inside the project."
+                    "Without outputPath returns a preview (first 2000 chars); "
+                    "with outputPath writes inside the project."
                 ),
                 parameters={
                     "type": "object",
@@ -2504,6 +2505,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_audio_normalize_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start a two-pass ffmpeg loudnorm job; returns jobId for polling."""
         if self._start_normalize_job is None:
             raise ChatToolExecutionError("normalize callback is unavailable")
 
@@ -2523,6 +2525,7 @@ class ParseChatTools:
         }
 
     def _tool_audio_normalize_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Poll a normalize job; validates job type == 'normalize' before returning."""
         if self._get_job_snapshot is None:
             raise ChatToolExecutionError("Job snapshot callback is unavailable")
 
@@ -2564,6 +2567,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_enrichments_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return parse-enrichments.json, optionally filtered to specified top-level keys."""
         payload = _read_json_file(self.enrichments_path, {})
         if not isinstance(payload, dict):
             payload = {}
@@ -2573,6 +2577,7 @@ class ParseChatTools:
         return {"readOnly": True, "enrichments": payload}
 
     def _tool_enrichments_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Shallow-merge (default) or replace parse-enrichments.json with the provided object."""
         incoming = args.get("enrichments")
         if not isinstance(incoming, dict):
             raise ChatToolValidationError("enrichments must be an object")
@@ -2597,6 +2602,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_lexeme_notes_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return lexeme_notes block from enrichments, optionally filtered by speaker / conceptId."""
         enrichments = _read_json_file(self.enrichments_path, {})
         notes: Any = enrichments.get("lexeme_notes") or {}
         if not isinstance(notes, dict):
@@ -2617,6 +2623,7 @@ class ParseChatTools:
         return {"readOnly": True, "lexeme_notes": notes}
 
     def _tool_lexeme_notes_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Upsert or delete a single (speaker, conceptId) lexeme note inside parse-enrichments.json."""
         speaker = self._normalize_speaker(args.get("speaker"))
         concept_id = _normalize_concept_id(args.get("conceptId") or "")
         if not concept_id:
@@ -2661,6 +2668,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_export_annotations_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export annotations as CSV. Preview = first 20 rows; write requires outputPath."""
         try:
             from csv_export import (  # type: ignore[import]
                 annotations_to_csv_str,
@@ -2712,6 +2720,7 @@ class ParseChatTools:
         }
 
     def _tool_export_lingpy_tsv(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export LingPy wordlist TSV. Preview = first 20 lines via temp file; write requires outputPath."""
         if cognate_compute_module is None:
             raise ChatToolExecutionError("cognate_compute is not importable")
 
@@ -2758,6 +2767,7 @@ class ParseChatTools:
             raise ChatToolExecutionError("LingPy TSV export failed: {0}".format(exc)) from exc
 
     def _tool_export_nexus(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Build NEXUS matrix via _build_nexus_text(). Preview = first 2000 chars; write requires outputPath."""
         output_path_str = str(args.get("outputPath") or "").strip()
         dry_run = bool(args.get("dryRun", False))
 
@@ -2886,6 +2896,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_export_annotations_elan(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export annotation to ELAN .eaf XML. Preview = first 2000 chars; write requires outputPath."""
         try:
             from elan_export import annotations_to_elan_str, export_elan  # type: ignore[import]
         except Exception as exc:
@@ -2920,6 +2931,7 @@ class ParseChatTools:
             raise ChatToolExecutionError("ELAN export failed: {0}".format(exc)) from exc
 
     def _tool_export_annotations_textgrid(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export annotation to Praat TextGrid. Preview = first 2000 chars; write requires outputPath."""
         try:
             from textgrid_io import annotations_to_textgrid_str, write_textgrid  # type: ignore[import]
         except Exception as exc:
@@ -2958,6 +2970,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_phonetic_rules_apply(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize, apply, or compare IPA forms using project phonetic rules."""
         try:
             from compare.phonetic_rules import (  # type: ignore[import]
                 apply_rules,
@@ -3021,6 +3034,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_transcript_reformat(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert *_coarse.json alignment to CoarseTranscript schema. Dry-run returns parsed object."""
         import os as _os
         import tempfile
 
@@ -3073,6 +3087,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_peaks_generate(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate waveform peak data; resolves audio from annotation source_audio when only speaker given."""
         try:
             from peaks import (  # type: ignore[import]
                 generate_peaks_for_audio,
