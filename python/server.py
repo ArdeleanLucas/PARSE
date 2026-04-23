@@ -2746,11 +2746,47 @@ _IPA_ALIGNER: Any = None
 
 
 def _get_ipa_aligner() -> Any:
-    """Lazy-load the Tier 2/3 wav2vec2 Aligner. Cached for the server lifetime."""
+    """Lazy-load the Tier 2/3 wav2vec2 Aligner. Cached for the server lifetime.
+
+    Prints one-shot load diagnostics so the very-slow first call ("Loading
+    wav2vec2 …" can take 30s+ on first download, minutes on CPU) is
+    observable in the API stderr log. Subsequent calls reuse the cached
+    model and are free.
+    """
     global _IPA_ALIGNER
-    if _IPA_ALIGNER is None:
-        from ai.forced_align import Aligner
+    if _IPA_ALIGNER is not None:
+        return _IPA_ALIGNER
+
+    import time as _time
+    from ai.forced_align import Aligner, DEFAULT_MODEL_NAME
+
+    t0 = _time.time()
+    print(
+        "[IPA] Loading wav2vec2 aligner model={0}…".format(DEFAULT_MODEL_NAME),
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
         _IPA_ALIGNER = Aligner.load()
+    except Exception as exc:
+        elapsed = _time.time() - t0
+        print(
+            "[IPA][ERROR] Aligner.load() failed after {0:.1f}s: {1}".format(elapsed, exc),
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
+
+    elapsed = _time.time() - t0
+    device = getattr(_IPA_ALIGNER, "device", "?")
+    vocab_size = len(getattr(_IPA_ALIGNER, "vocab", {}) or {})
+    print(
+        "[IPA] Aligner ready in {0:.1f}s device={1} vocab_size={2}".format(
+            elapsed, device, vocab_size
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     return _IPA_ALIGNER
 
 
@@ -2805,12 +2841,28 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     # into ~300 MB of float32 which is fine for a one-shot pass.
     audio_path = _pipeline_audio_path_for_speaker(speaker)
     from ai.forced_align import _load_audio_mono_16k
+    print(
+        "[IPA] speaker={0} ortho_intervals={1} audio={2}".format(
+            speaker, len(ortho_intervals), audio_path
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     audio_tensor = _load_audio_mono_16k(audio_path)
     aligner = _get_ipa_aligner()
 
     filled = 0
     skipped = 0
     total = len(ortho_intervals)
+    # Categorised skip counters so the job result can show *why* nothing
+    # got filled. Aligned with the user-visible failure modes we traced
+    # on Fail02 where filled=0 skipped=38 with no surfaced reason.
+    skipped_empty_ortho = 0
+    skipped_existing_ipa = 0
+    skipped_zero_range = 0
+    skipped_exception = 0
+    skipped_empty_ipa = 0
+    exception_samples: List[str] = []  # first 3 exceptions, full message
 
     for idx, ortho in enumerate(ortho_intervals):
         text = str(ortho.get("text") or "").strip()
@@ -2825,23 +2877,34 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         # user hasn't labelled).
         if not text:
             skipped += 1
+            skipped_empty_ortho += 1
             continue
         if existing_text and not overwrite:
             skipped += 1
+            skipped_existing_ipa += 1
             continue
         if end_sec <= start_sec:
             skipped += 1
+            skipped_zero_range += 1
             continue
 
         try:
             new_ipa = _acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
-        except Exception:
+        except Exception as exc:
             skipped += 1
+            skipped_exception += 1
+            if len(exception_samples) < 3:
+                exception_samples.append(
+                    "interval[{0}] {1:.2f}-{2:.2f}: {3}: {4}".format(
+                        idx, start_sec, end_sec, type(exc).__name__, exc
+                    )
+                )
             continue
 
         new_ipa = str(new_ipa or "").strip()
         if not new_ipa:
             skipped += 1
+            skipped_empty_ipa += 1
             continue
 
         if existing is not None:
@@ -2869,7 +2932,32 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
     if legacy_path != annotation_path:
         _write_json_file(legacy_path, annotation)
 
-    return {"speaker": speaker, "filled": filled, "skipped": skipped, "total": total}
+    skip_breakdown = {
+        "empty_ortho": skipped_empty_ortho,
+        "existing_ipa_no_overwrite": skipped_existing_ipa,
+        "zero_range": skipped_zero_range,
+        "exception": skipped_exception,
+        "empty_ipa_from_model": skipped_empty_ipa,
+    }
+    print(
+        "[IPA] speaker={0} filled={1} skipped={2} total={3} breakdown={4}".format(
+            speaker, filled, skipped, total, skip_breakdown
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    if exception_samples:
+        for sample in exception_samples:
+            print("[IPA][EXC] {0}".format(sample), file=sys.stderr, flush=True)
+
+    return {
+        "speaker": speaker,
+        "filled": filled,
+        "skipped": skipped,
+        "total": total,
+        "skip_breakdown": skip_breakdown,
+        "exception_samples": exception_samples,
+    }
 
 
 def _compute_speaker_forced_align(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -3584,6 +3672,43 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
         "skipped": sum(1 for r in results.values() if r.get("status") == "skipped"),
         "error": sum(1 for r in results.values() if r.get("status") == "error"),
     }
+
+    # Diagnostic tail: always land the per-step outcome on stderr so the
+    # API log gives a clear post-mortem even when the frontend batch
+    # report drops ``result`` (as happened on the 2026-04-23 Fail02 run).
+    print(
+        "[PIPELINE] speaker={0} steps={1} summary={2}".format(
+            speaker, steps_run, summary
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    for step_name, step_result in results.items():
+        status = step_result.get("status")
+        if status == "ok":
+            concise = {k: v for k, v in step_result.items() if k not in ("status", "traceback")}
+            print(
+                "[PIPELINE][{0}] ok {1}".format(step_name, concise),
+                file=sys.stderr,
+                flush=True,
+            )
+        elif status == "skipped":
+            print(
+                "[PIPELINE][{0}] skipped reason={1}".format(
+                    step_name, step_result.get("reason")
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        elif status == "error":
+            print(
+                "[PIPELINE][{0}] ERROR {1}".format(step_name, step_result.get("error")),
+                file=sys.stderr,
+                flush=True,
+            )
+            tb = step_result.get("traceback")
+            if tb:
+                print(tb, file=sys.stderr, flush=True)
 
     return {
         "speaker": speaker,
