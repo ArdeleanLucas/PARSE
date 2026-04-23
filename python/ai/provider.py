@@ -89,11 +89,35 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "language": "sd",
         "device": "cuda",
         "compute_type": "float16",
-        # VAD off for ortho (see LocalWhisperProvider.__init__ for the
-        # reasoning). Razhan is expected to produce a full-waveform
-        # transcript; Silero's conservative stock threshold was
-        # dropping coverage to 2 intervals on real recordings.
-        "vad_filter": False,
+        # ORTH: VAD on with TUNED Silero parameters that don't
+        # collapse coverage. Flipped from ``vad_filter=False`` on
+        # 2026-04-23 after Fail02 regressed from 131 full-coverage
+        # intervals to 38 intervals truncating at 06:31 with classic
+        # whisper repetition-loop hallucination ("ئە ئە ئە ئە ئە ...").
+        # Root cause was faster-whisper's ``condition_on_previous_text``
+        # default carrying a poisoned segment forward into every
+        # subsequent segment; tuned VAD gating silence gaps prevents
+        # the decoder from entering that state in the first place.
+        # Untuned Silero is too conservative for fieldwork recordings,
+        # hence the explicit params below. See provider __init__ for
+        # the full back-story.
+        "vad_filter": True,
+        "vad_parameters": {
+            # Require 500 ms of silence before gating (leaves
+            # inter-word pauses to Whisper). Stock Silero uses
+            # 2000 ms which misses short Kurdish utterance gaps.
+            "min_silence_duration_ms": 500,
+            # 0.35 voice-probability threshold (stock 0.5). Catches
+            # quieter elicitation speech that the default misses.
+            "threshold": 0.35,
+        },
+        # Keep one bad segment from poisoning the entire downstream
+        # decode — this is THE fix for the repetition cascade.
+        "condition_on_previous_text": False,
+        # Stricter than Whisper's 2.4 default so the decoder falls
+        # back to higher temperature (or drops the segment) earlier
+        # when it detects repetition.
+        "compression_ratio_threshold": 1.8,
     },
     "llm": {
         "provider": "openai",
@@ -315,7 +339,7 @@ def resolve_ai_config_path(config_path: Optional[Path] = None) -> Path:
     ``stt.model_path: C:\\...razhan-whisper-ct2`` via ``/api/config``
     (which reads from cwd) while ``get_stt_provider()`` fell back to
     defaults — because this function was only checking the repo path,
-    which is empty on a fresh deploy. ORTHO in particular needs razhan
+    which is empty on a fresh deploy. ORTH in particular needs razhan
     configured; defaults hand it the HF repo id which faster-whisper
     can't load, and every ORTH run silently errored.
     """
@@ -985,7 +1009,7 @@ class AIProvider(abc.ABC):
 class LocalWhisperProvider(AIProvider):
     """Local provider backed by faster-whisper.
 
-    Used by both STT (``config_section="stt"``) and ORTHO
+    Used by both STT (``config_section="stt"``) and ORTH
     (``config_section="ortho"``, razhan/whisper-base-sdh). The section
     selects which ai_config block supplies model_path/device/compute_type.
     """
@@ -1005,9 +1029,9 @@ class LocalWhisperProvider(AIProvider):
         section_config = self.config.get(self.config_section, {})
         self.model_path = str(section_config.get("model_path", "")).strip()
 
-        # If an ORTHO provider has no explicit model_path, fall back to
+        # If an ORTH provider has no explicit model_path, fall back to
         # stt.model_path — users who configured razhan (or any local CT2)
-        # for STT almost always want the same model for ORTHO, and
+        # for STT almost always want the same model for ORTH, and
         # HuggingFace-repo-id defaults like "razhan/whisper-base-sdh" don't
         # resolve to faster-whisper's CT2 format so they fail at load time.
         # Explicit empty/HF-id → stt.model_path (when non-empty).
@@ -1037,28 +1061,33 @@ class LocalWhisperProvider(AIProvider):
             self.beam_size = 5
         task_raw = str(section_config.get("task", "transcribe") or "transcribe").strip().lower()
         self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
-        # VAD default differs by section:
+        # VAD + condition_on_previous_text defaults differ by section.
+        # ``config_section="ortho"`` drives the ORTH pipeline step — the
+        # key is historical, but every comment and print below refers to
+        # ORTH to match the tier label in the UI and annotation JSON.
         #
-        # * STT — default **True**. STT is meant to produce a coarse
-        #   transcript where silence-free segments are the useful unit;
-        #   VAD also avoids Whisper's "hallucinate in long silence"
-        #   failure mode (see PR #135 for empirical evidence).
+        # * STT — default VAD **True**, condition_on_previous_text
+        #   **True** (Whisper default). STT is a coarse sentence-level
+        #   transcript; VAD gates long silences; cross-segment
+        #   conditioning helps with coherent multi-sentence chunks.
         #
-        # * ORTHO — default **False**. ORTHO's purpose is a
-        #   full-waveform orthographic transcript, and razhan's own
-        #   30-second-window attention handles silence well enough. With
-        #   VAD on + un-tuned ``vad_parameters``, Silero's stock
-        #   threshold is conservative and frequently collapses coverage
-        #   to only the loudest stretches — e.g. a 6-minute recording
-        #   returning just 2 ortho intervals while STT (with tuned VAD
-        #   params) produced 80+. VAD off gives razhan the full file and
-        #   full waveform coverage; spurious silence segments can be
-        #   deleted in the UI but MISSING segments can't be recovered
-        #   without re-running the whole model.
+        # * ORTH — default VAD **True** with tuned params
+        #   (``min_silence_duration_ms=500, threshold=0.35``) and
+        #   condition_on_previous_text **False**. Flipped on
+        #   2026-04-23 to fix the Fail02 regression where razhan on
+        #   a 66-minute recording collapsed from 131 intervals to 38,
+        #   ending in the classic whisper repetition loop
+        #   ("ئە ئە ئە ئە ئە ..."). Without VAD, razhan can hallucinate
+        #   on long silence; with VAD + default Silero threshold, the
+        #   same recording used to collapse to 2 intervals. The tuned
+        #   values in _DEFAULT_AI_CONFIG["ortho"] above split the
+        #   difference. condition_on_previous_text=False is the
+        #   critical piece — even one bad segment can no longer
+        #   poison every segment after it.
         #
-        # Users can still override via an explicit ``vad_filter`` entry
-        # in their ai_config.json section.
-        vad_default = False if self.config_section == "ortho" else True
+        # Users can override either knob via their ai_config.json
+        # section.
+        vad_default = True if self.config_section in {"ortho", "stt"} else False
         self.vad_filter = bool(section_config.get("vad_filter", vad_default))
         vad_params_raw = section_config.get("vad_parameters")
         # Only forward a dict when the user has set explicit parameters;
@@ -1066,6 +1095,29 @@ class LocalWhisperProvider(AIProvider):
         self.vad_parameters: Optional[Dict[str, Any]] = (
             dict(vad_params_raw) if isinstance(vad_params_raw, dict) and vad_params_raw else None
         )
+
+        # condition_on_previous_text: False disables Whisper's
+        # cross-segment prompt chaining. Default is True for STT
+        # (coherent sentences), False for ORTH (prevents the
+        # repetition cascade on long fieldwork audio).
+        cond_default = False if self.config_section == "ortho" else True
+        self.condition_on_previous_text = bool(
+            section_config.get("condition_on_previous_text", cond_default)
+        )
+
+        # compression_ratio_threshold: Whisper rejects segments whose
+        # decoded text compresses above this ratio (usually a
+        # repetition-loop hallucination). Defaults: 2.4 for STT
+        # (Whisper's default), 1.8 for ORTH (stricter, catches
+        # repetition earlier). Pass None to disable.
+        ratio_default = 1.8 if self.config_section == "ortho" else 2.4
+        ratio_raw = section_config.get("compression_ratio_threshold", ratio_default)
+        try:
+            self.compression_ratio_threshold: Optional[float] = (
+                float(ratio_raw) if ratio_raw is not None else None
+            )
+        except (TypeError, ValueError):
+            self.compression_ratio_threshold = ratio_default
 
         if _stt_force_cpu_env() and self.device.lower().startswith("cuda"):
             print(
@@ -1198,9 +1250,14 @@ class LocalWhisperProvider(AIProvider):
                 "task": self.task,
                 "vad_filter": self.vad_filter,
                 "word_timestamps": True,
+                # Configurable per section; see __init__ for defaults.
+                # ORTH defaults to False to break the repetition cascade.
+                "condition_on_previous_text": self.condition_on_previous_text,
             }
             if self.vad_filter and self.vad_parameters is not None:
                 transcribe_kwargs["vad_parameters"] = self.vad_parameters
+            if self.compression_ratio_threshold is not None:
+                transcribe_kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
             segs_iter, info = m.transcribe(str(path), **transcribe_kwargs)
             total_duration = float(getattr(info, "duration", 0.0) or 0.0)
             for segment in segs_iter:
@@ -1596,7 +1653,7 @@ def get_stt_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
 def get_ortho_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     """Factory for the orthographic transcription provider (razhan/whisper-base-sdh).
 
-    ORTHO is always a faster-whisper model configured in the `ortho` block,
+    ORTH is always a faster-whisper model configured in the `ortho` block,
     distinct from whatever general-purpose model STT uses. This goes straight
     to ``LocalWhisperProvider`` with ``config_section="ortho"`` so
     model_path / device / language come from the ortho block rather than stt.

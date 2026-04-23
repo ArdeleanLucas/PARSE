@@ -172,3 +172,106 @@ def test_invalid_beam_size_falls_back_to_five(tmp_path, monkeypatch):
     )
     provider.transcribe(_make_audio(tmp_path))
     assert _StubWhisperModel.last_call["beam_size"] == 5
+
+
+# ---------------------------------------------------------------------------
+# ORTH repetition-cascade guard (2026-04-23)
+# ---------------------------------------------------------------------------
+
+
+def test_stt_defaults_condition_on_previous_text_true(tmp_path, monkeypatch):
+    """STT preserves Whisper's default — cross-segment conditioning ON."""
+    provider = _make_provider(tmp_path, {}, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["condition_on_previous_text"] is True
+
+
+def test_stt_defaults_compression_ratio_threshold_24(tmp_path, monkeypatch):
+    """STT uses Whisper's default 2.4 compression-ratio threshold."""
+    provider = _make_provider(tmp_path, {}, monkeypatch)
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["compression_ratio_threshold"] == 2.4
+
+
+def test_condition_on_previous_text_override(tmp_path, monkeypatch):
+    """User can set condition_on_previous_text=False on STT too."""
+    provider = _make_provider(
+        tmp_path, {"condition_on_previous_text": False}, monkeypatch
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["condition_on_previous_text"] is False
+
+
+def test_compression_ratio_threshold_override(tmp_path, monkeypatch):
+    provider = _make_provider(
+        tmp_path, {"compression_ratio_threshold": 1.5}, monkeypatch
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    assert _StubWhisperModel.last_call["compression_ratio_threshold"] == 1.5
+
+
+def test_compression_ratio_threshold_null_disables_it(tmp_path, monkeypatch):
+    """Passing None in config removes the kwarg entirely — Whisper then
+    falls back to its library default and never rejects on this metric."""
+    provider = _make_provider(
+        tmp_path, {"compression_ratio_threshold": None}, monkeypatch
+    )
+    provider.transcribe(_make_audio(tmp_path))
+    assert "compression_ratio_threshold" not in _StubWhisperModel.last_call
+
+
+def test_ortho_section_defaults_cascade_guard(tmp_path, monkeypatch):
+    """ORTH's defaults stop the repetition cascade that truncated Fail02
+    at 06:31 on 2026-04-23:
+      - condition_on_previous_text=False (critical — the cascade fix)
+      - vad_filter=True with tuned Silero params (gate silence)
+      - compression_ratio_threshold=1.8 (reject repetition earlier)
+    """
+    _StubWhisperModel.last_call = {}
+    monkeypatch.setattr(
+        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
+    )
+    import faster_whisper  # type: ignore
+    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+
+    ortho_provider = LocalWhisperProvider(
+        config={"ortho": {"language": "sd"}},
+        config_path=tmp_path / "ai_config.json",
+        config_section="ortho",
+    )
+    ortho_provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["condition_on_previous_text"] is False
+    assert call["vad_filter"] is True
+    assert call["vad_parameters"] == {
+        "min_silence_duration_ms": 500,
+        "threshold": 0.35,
+    }
+    assert call["compression_ratio_threshold"] == 1.8
+
+
+def test_ortho_explicit_override_beats_defaults(tmp_path, monkeypatch):
+    """Config override wins over the ORTH-specific defaults — so a user
+    who intentionally wants the old permissive behaviour can restore it."""
+    _StubWhisperModel.last_call = {}
+    monkeypatch.setattr(
+        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
+    )
+    import faster_whisper  # type: ignore
+    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+
+    ortho_provider = LocalWhisperProvider(
+        config={"ortho": {
+            "language": "sd",
+            "vad_filter": False,
+            "condition_on_previous_text": True,
+            "compression_ratio_threshold": 2.4,
+        }},
+        config_path=tmp_path / "ai_config.json",
+        config_section="ortho",
+    )
+    ortho_provider.transcribe(_make_audio(tmp_path))
+    call = _StubWhisperModel.last_call
+    assert call["vad_filter"] is False
+    assert call["condition_on_previous_text"] is True
+    assert call["compression_ratio_threshold"] == 2.4

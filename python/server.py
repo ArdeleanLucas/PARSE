@@ -3398,7 +3398,7 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
 def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Generate an orthographic transcript for a speaker using the razhan model.
 
-    Runs the ORTHO provider (faster-whisper with razhan/whisper-base-sdh)
+    Runs the ORTH provider (faster-whisper with razhan/whisper-base-sdh)
     full-file against the speaker's working WAV (normalized copy preferred,
     raw source as fallback) and writes razhan's own segments to the
     ``ortho`` tier of the annotation.
@@ -3457,7 +3457,7 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
         _set_job_progress(
             job_id,
             max(2.0, clamped),
-            message="ORTHO transcribing ({0} segments)".format(segments_processed),
+            message="ORTH transcribing ({0} segments)".format(segments_processed),
             segments_processed=segments_processed,
         )
 
@@ -3491,7 +3491,7 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     if legacy_path != annotation_path:
         _write_json_file(legacy_path, annotation)
 
-    _set_job_progress(job_id, 99.0, message="ORTHO written ({0} intervals)".format(len(new_intervals)))
+    _set_job_progress(job_id, 99.0, message="ORTH written ({0} intervals)".format(len(new_intervals)))
 
     return {
         "speaker": speaker,
@@ -3516,7 +3516,7 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
           "speaker": "Fail02",
           "steps": ["normalize", "stt", "ortho", "ipa"],
           "overwrites": {"normalize": false, "stt": false, "ortho": true, "ipa": false},
-          "language": "sd"       // optional, forwarded to STT + ORTHO
+          "language": "sd"       // optional, forwarded to STT + ORTH
         }
 
     Steps run in canonical order (normalize → stt → ortho → ipa). Unselected
