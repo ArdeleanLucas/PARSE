@@ -8,9 +8,11 @@
     "compute_type": "float16",
     "beam_size": 5
   },
+  "_ipa_comment": "Tier 3 acoustic alignment: wav2vec2 is the ONLY IPA engine. The former text-based providers (local/epitran, openai, ollama) and the southern_kurdish_arabic_to_ipa fallback have been removed. The ipa block below is informational; the code path is hard-wired via ai.forced_align.Aligner to the model declared in the wav2vec2 block at the bottom of this file.",
   "ipa": {
-    "provider": "local",
-    "model": "epitran"
+    "engine": "wav2vec2",
+    "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
+    "model_only": true
   },
   "ortho": {
     "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH model. model_path may be a HuggingFace repo id (razhan/whisper-base-sdh) or a local CTranslate2 path. vad_filter defaults to false for ortho so razhan produces full-waveform coverage; leave it false unless you've tuned vad_parameters for your recordings.",

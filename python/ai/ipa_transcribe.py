@@ -1,267 +1,227 @@
 #!/usr/bin/env python3
-"""Orthography -> IPA conversion utility for PARSE.
+"""Tier 3 acoustic IPA transcription for PARSE.
 
-Single example:
-    python ipa_transcribe.py --input "یەک" --language sdh --provider epitran
+wav2vec2 CTC is the **only** IPA engine after this module landed. The
+previous text-driven chain (Epitran, ``southern_kurdish_arabic_to_ipa``,
+LLM-prompt fallbacks) has been removed. Input is always audio slices;
+output is always the phoneme sequence the acoustic model predicted.
 
-Batch example:
-    python ipa_transcribe.py --input-file words.txt --output-file ipa.txt --language sdh
+CLI:
+    # Per-interval mode — reads a Tier 1 STT artifact or raw interval list,
+    # writes an IPA string per interval.
+    python -m ai.ipa_transcribe \\
+        --audio recording.wav \\
+        --intervals intervals.json \\
+        --output ipa.json
+
+Library API:
+    - :func:`transcribe_intervals` - batch audio+intervals -> List[IpaResult]
+    - :func:`transcribe_slice`     - single audio slice   -> str
 """
 
+from __future__ import annotations
+
 import argparse
+import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Iterable, List, Optional, Sequence, TypedDict
 
 try:
-    from .provider import get_ipa_provider, load_ai_config, southern_kurdish_arabic_to_ipa
-except ImportError:
-    from provider import get_ipa_provider, load_ai_config, southern_kurdish_arabic_to_ipa  # type: ignore
+    from .forced_align import (
+        DEFAULT_MODEL_NAME,
+        DEFAULT_SAMPLE_RATE,
+        Aligner,
+        _load_audio_mono_16k,
+    )
+except ImportError:  # pragma: no cover - CLI invocation
+    from forced_align import (  # type: ignore
+        DEFAULT_MODEL_NAME,
+        DEFAULT_SAMPLE_RATE,
+        Aligner,
+        _load_audio_mono_16k,
+    )
 
 
-def is_arabic_script(text: str) -> bool:
-    """Return True if text likely uses Arabic-script code points."""
-    for char in text:
-        code = ord(char)
-        if 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:
-            return True
-    return False
+class IpaResult(TypedDict):
+    """One interval's acoustic IPA output."""
+
+    start: float
+    end: float
+    ipa: str
 
 
-def normalize_provider_name(provider_name: Optional[str], config: Dict[str, object]) -> str:
-    """Resolve provider name from CLI argument or config."""
-    if provider_name:
-        value = provider_name.strip().lower()
-    else:
-        ipa_config = config.get("ipa", {})
-        if isinstance(ipa_config, dict):
-            raw_provider = ipa_config.get("provider", "epitran")
-            value = str(raw_provider).strip().lower() if raw_provider is not None else "epitran"
-        else:
-            value = "epitran"
+@dataclass
+class IntervalSpec:
+    """Minimal shape an input interval needs: (start, end). Any ``text`` key
+    present on the source dict is ignored — Tier 3 is acoustic."""
 
-    if value in {"", "none", "null"}:
-        value = "epitran"
-
-    aliases = {
-        "local": "epitran",
-        "faster-whisper": "epitran",
-        "local-whisper": "epitran",
-        "whisper": "epitran",
-    }
-
-    normalized = aliases.get(value, value)
-    if not normalized:
-        raise ValueError("Unsupported IPA provider: {0}".format(value))
-    return normalized
+    start: float
+    end: float
 
 
-def get_factory_provider_name(provider_name: str) -> str:
-    """Map IPA provider aliases to provider factory names."""
-    if provider_name == "epitran":
-        return "local"
-    return provider_name
+# ---------------------------------------------------------------------------
+# Core transcription
+# ---------------------------------------------------------------------------
 
 
-def build_ipa_provider_config(
-    base_config: Dict[str, object],
-    provider_name: str,
-) -> Dict[str, object]:
-    """Build config override for IPA provider factory selection."""
-    merged_config: Dict[str, object] = dict(base_config)
-
-    ipa_config = merged_config.get("ipa", {})
-    if isinstance(ipa_config, dict):
-        ipa_override: Dict[str, object] = dict(ipa_config)
-    else:
-        ipa_override = {}
-
-    ipa_override["provider"] = get_factory_provider_name(provider_name)
-    merged_config["ipa"] = ipa_override
-
-    return merged_config
-
-
-def convert_single_text(
-    text: str,
-    language: str,
-    provider_name: str,
-    config: Dict[str, object],
-    config_path: Optional[Path] = None,
+def transcribe_slice(
+    audio_16k: Any,
+    start_sec: float,
+    end_sec: float,
+    aligner: Aligner,
 ) -> str:
-    """Convert one orthographic token/string to IPA."""
-    value = str(text or "").strip()
-    if not value:
+    """Run wav2vec2 CTC on a single [start, end] audio window.
+
+    The caller owns the loaded mono-16 kHz tensor so that the full-file
+    load happens once per speaker rather than once per interval.
+    """
+    if end_sec <= start_sec:
         return ""
-
-    selected_provider = get_factory_provider_name(provider_name)
-    provider_config = build_ipa_provider_config(config, provider_name)
-
-    try:
-        provider = get_ipa_provider(provider_config)
-    except ValueError as exc:
-        print(
-            "[WARN] Unsupported provider '{0}', falling back locally: {1}".format(
-                selected_provider,
-                exc,
-            ),
-            file=sys.stderr,
-        )
-        local_config = build_ipa_provider_config(config, "epitran")
-        provider = get_ipa_provider(local_config)
-        selected_provider = "local"
-
-    ipa = ""
-    try:
-        ipa = provider.to_ipa(value, language)
-        if ipa:
-            return ipa
-    except Exception as exc:
-        print(
-            "[WARN] IPA conversion failed with provider '{0}', falling back locally: {1}".format(
-                selected_provider,
-                exc,
-            ),
-            file=sys.stderr,
-        )
-
-    if selected_provider != "local":
-        local_config = build_ipa_provider_config(config, "epitran")
-        local_provider = get_ipa_provider(local_config)
-        local_ipa = local_provider.to_ipa(value, language)
-        if local_ipa:
-            return local_ipa
-
-    if is_arabic_script(value):
-        return southern_kurdish_arabic_to_ipa(value)
-
-    return value
+    total = int(audio_16k.shape[0])
+    start_sample = max(0, int(round(float(start_sec) * DEFAULT_SAMPLE_RATE)))
+    end_sample = min(total, int(round(float(end_sec) * DEFAULT_SAMPLE_RATE)))
+    if end_sample <= start_sample:
+        return ""
+    window = audio_16k[start_sample:end_sample]
+    return aligner.transcribe_window(window)
 
 
-def convert_batch(
-    input_file: Path,
-    output_file: Path,
-    language: str,
-    provider_name: str,
-    config: Dict[str, object],
-    config_path: Optional[Path] = None,
-) -> int:
-    """Convert a newline-delimited text file to IPA line-by-line."""
-    input_path = Path(input_file).expanduser().resolve()
-    output_path = Path(output_file).expanduser().resolve()
+def transcribe_intervals(
+    audio_path: Path,
+    intervals: Sequence[Any],
+    *,
+    model_name: str = DEFAULT_MODEL_NAME,
+    device: Optional[str] = None,
+    aligner: Optional[Aligner] = None,
+    progress_callback: Optional[Any] = None,
+) -> List[IpaResult]:
+    """Transcribe every [start, end] interval to an IPA string.
 
-    if not input_path.exists():
-        raise FileNotFoundError("Input file not found: {0}".format(input_path))
+    ``intervals`` can be dicts with ``start``/``end`` keys (e.g. the
+    annotation JSON's ``ortho.intervals``) or tuples/lists of
+    ``(start, end, ...)``. Any extra keys (``text``, ``ortho``, ...) are
+    ignored — Tier 3 is purely acoustic.
 
-    lines = input_path.read_text(encoding="utf-8").splitlines()
-    output_lines: List[str] = []
+    ``aligner`` is lazy-loaded when not provided so the caller can reuse
+    one model load across many speakers.
+    """
+    path = Path(audio_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError("Audio file not found: {0}".format(path))
 
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            output_lines.append("")
+    parsed = _coerce_intervals(intervals)
+    if not parsed:
+        return []
+
+    audio = _load_audio_mono_16k(path)
+
+    local_aligner = aligner or Aligner.load(model_name=model_name, device=device)
+
+    total = len(parsed)
+    out: List[IpaResult] = []
+    for idx, spec in enumerate(parsed):
+        ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+        out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+        if progress_callback is not None:
+            try:
+                progress_callback((idx + 1) / float(total) * 100.0, idx + 1)
+            except Exception:
+                pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _coerce_intervals(raw: Iterable[Any]) -> List[IntervalSpec]:
+    """Normalise dict/tuple/list interval inputs to IntervalSpec."""
+    out: List[IntervalSpec] = []
+    for item in raw:
+        try:
+            if isinstance(item, dict):
+                start = float(item.get("start", 0.0) or 0.0)
+                end = float(item.get("end", start) or start)
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                start = float(item[0])
+                end = float(item[1])
+            else:
+                continue
+        except (TypeError, ValueError):
             continue
+        if end <= start:
+            continue
+        out.append(IntervalSpec(start=start, end=end))
+    return out
 
-        output_lines.append(
-            convert_single_text(
-                text=stripped,
-                language=language,
-                provider_name=provider_name,
-                config=config,
-                config_path=config_path,
-            )
-        )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
-    return len(output_lines)
+def _load_intervals_json(path: Path) -> List[Any]:
+    """Accept a Tier 1 STT artifact, an annotation-tier dump, or a raw list."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        if isinstance(data.get("intervals"), list):
+            return data["intervals"]
+        if isinstance(data.get("segments"), list):
+            return data["segments"]
+        tiers = data.get("tiers")
+        if isinstance(tiers, dict):
+            ortho = tiers.get("ortho")
+            if isinstance(ortho, dict) and isinstance(ortho.get("intervals"), list):
+                return ortho["intervals"]
+    raise ValueError("Unrecognized interval JSON shape in {0}".format(path))
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build CLI parser."""
-    parser = argparse.ArgumentParser(description="Convert orthographic text to IPA.")
-
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--input", help="Inline input text")
-    input_group.add_argument("--input-file", help="Path to newline-delimited input file")
-
-    parser.add_argument("--output-file", help="Output path for single or batch mode")
-    parser.add_argument("--language", required=True, help="Language code (e.g., sdh, ckb, fa)")
-    parser.add_argument(
-        "--provider",
-        choices=["epitran", "local", "openai"],
-        default=None,
-        help="IPA backend provider (defaults to config ipa.provider)",
+    parser = argparse.ArgumentParser(
+        description="Acoustic IPA transcription via wav2vec2 CTC (Tier 3).",
     )
+    parser.add_argument("--audio", required=True, help="Input WAV/audio path")
     parser.add_argument(
-        "--config",
-        default=None,
-        help="Optional path to ai_config.json (defaults to config/ai_config.json)",
+        "--intervals",
+        required=True,
+        help="JSON file with intervals (STT artifact, annotation tier, or raw list)",
     )
+    parser.add_argument("--output", required=True, help="Output JSON path")
+    parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--device", default=None, help="cpu|cuda (auto-detect by default)")
     return parser
 
 
 def main() -> int:
-    """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args()
 
-    config_path = Path(args.config).expanduser().resolve() if args.config else None
-    config = load_ai_config(config_path)
+    audio_path = Path(args.audio).expanduser().resolve()
+    intervals_path = Path(args.intervals).expanduser().resolve()
+    output_path = Path(args.output).expanduser().resolve()
 
-    try:
-        provider_name = normalize_provider_name(args.provider, config)
-    except ValueError as exc:
-        print("[ERROR] {0}".format(exc), file=sys.stderr)
-        return 1
+    intervals = _load_intervals_json(intervals_path)
+    results = transcribe_intervals(
+        audio_path=audio_path,
+        intervals=intervals,
+        model_name=args.model,
+        device=args.device,
+    )
 
-    if args.input_file:
-        if not args.output_file:
-            print(
-                "[ERROR] --output-file is required when using --input-file",
-                file=sys.stderr,
-            )
-            return 1
-
-        try:
-            line_count = convert_batch(
-                input_file=Path(args.input_file),
-                output_file=Path(args.output_file),
-                language=args.language,
-                provider_name=provider_name,
-                config=config,
-                config_path=config_path,
-            )
-        except Exception as exc:
-            print("[ERROR] Batch IPA conversion failed: {0}".format(exc), file=sys.stderr)
-            return 1
-
-        print(
-            "[INFO] Wrote {0} IPA lines to {1}".format(line_count, Path(args.output_file)),
-            file=sys.stderr,
-        )
-        return 0
-
-    try:
-        ipa = convert_single_text(
-            text=str(args.input),
-            language=args.language,
-            provider_name=provider_name,
-            config=config,
-            config_path=config_path,
-        )
-    except Exception as exc:
-        print("[ERROR] IPA conversion failed: {0}".format(exc), file=sys.stderr)
-        return 1
-
-    if args.output_file:
-        output_path = Path(args.output_file).expanduser().resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(ipa + "\n", encoding="utf-8")
-        print("[INFO] Wrote IPA to {0}".format(output_path), file=sys.stderr)
-    else:
-        print(ipa)
-
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps({"intervals": results}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(
+        "[INFO] Wrote {0} acoustic IPA intervals -> {1}".format(len(results), output_path),
+        file=sys.stderr,
+    )
     return 0
 
 
