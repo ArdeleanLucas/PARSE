@@ -144,7 +144,7 @@ def test_refine_lexemes_payload_override_enables_fallback(tmp_path, monkeypatch)
 
     ann = _load(tmp_path, "Fail02")
     words = ann["tiers"]["ortho_words"]["intervals"]
-    refined = [w for w in words if w.get("source") == "short_clip_whisper"]
+    refined = [w for w in words if w.get("source") == "short_clip_fallback"]
     assert len(refined) == 1
     assert refined[0]["text"] == "هیر"
     assert refined[0]["start"] == pytest.approx(1.0)

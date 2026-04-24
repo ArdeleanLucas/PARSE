@@ -2000,6 +2000,7 @@ export function ParseUI() {
       steps: confirm.steps,
       overwrites: confirm.overwrites,
       language: sttLanguageRef.current || undefined,
+      refineLexemes: confirm.refineLexemes,
     });
   };
 

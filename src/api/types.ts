@@ -10,7 +10,7 @@ export interface AnnotationInterval {
 
 export interface OrthoWordInterval extends AnnotationInterval {
   confidence?: number;
-  source?: "forced_align" | "short_clip_whisper";
+  source?: "forced_align" | "short_clip_fallback";
 }
 
 export interface AnnotationTier {

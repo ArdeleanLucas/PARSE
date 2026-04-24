@@ -15,6 +15,11 @@ export interface BatchRunRequest {
    *  steps that actually failed last time — prevents re-running (and
    *  overwriting) steps that succeeded for that speaker. */
   stepsBySpeaker?: Partial<Record<string, PipelineStepId[]>>;
+  /** Opt-in short-clip Whisper fallback for the ORTH step. When true the
+   *  backend re-transcribes a ±0.8s window per concept whose forced-
+   *  alignment match is weak/missing — adds ~1-2 min to a thesis-scale
+   *  speaker. Omit to defer to the provider's ai_config default. */
+  refineLexemes?: boolean;
 }
 
 export interface BatchSpeakerOutcome {
@@ -263,6 +268,9 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
             };
             if (request.language) {
               body.language = request.language;
+            }
+            if (request.refineLexemes) {
+              body.refine_lexemes = true;
             }
             const job = await startCompute("full_pipeline", body);
             if (!isActive()) return;

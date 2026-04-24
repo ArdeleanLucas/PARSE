@@ -1369,9 +1369,11 @@ class LocalWhisperProvider(AIProvider):
         initial_prompt: Optional[str] = None,
         language: Optional[str] = None,
     ) -> Tuple[str, float]:
-        """Transcribe a preloaded mono-16kHz numpy array (not a file path).
+        """Transcribe a preloaded mono-16kHz numpy array and return ``(text, confidence)``.
 
-        Returns ``(text, confidence)``. ``confidence`` is derived from the
+        Unlike :meth:`transcribe` this takes an in-memory audio array (not a
+        file path) and returns a flat ``(text, confidence)`` tuple rather
+        than a list of segments. ``confidence`` is derived from the best
         segment ``avg_logprob`` the same way :meth:`transcribe` does; the
         returned text is the concatenation of all segments (usually 1 for
         short clips). Empty input yields ``("", 0.0)``.

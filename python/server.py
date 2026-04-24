@@ -4069,7 +4069,7 @@ def _short_clip_refine_lexemes(
     """Re-transcribe a ±``pad_sec`` window per concept whose ortho_words
     match is missing or weak, using a Whisper ``initial_prompt`` built from
     the concept labels themselves. Returns new ``ortho_words``-shaped
-    entries with ``source="short_clip_whisper"`` that the caller should
+    entries with ``source="short_clip_fallback"`` that the caller should
     merge (upsert) into the main list.
     """
     if not concept_intervals:
@@ -4183,14 +4183,25 @@ def _short_clip_refine_lexemes(
             "end": c_end,
             "text": text,
             "confidence": float(conf or 0.0),
-            "source": "short_clip_whisper",
+            "source": "short_clip_fallback",
         })
 
-        if job_id and idx and idx % 50 == 0:
+        # Per-concept stderr log keeps long runs legible in the server log.
+        # The UI progress bar is throttled to every 10 concepts so the
+        # websocket/poll channel doesn't drown in updates.
+        print(
+            "[ORTH] refine_lexemes {0}/{1} concept='{2}' → '{3}' (conf {4:.2f})".format(
+                idx + 1, total, str(concept_iv.get("text") or "")[:40], text[:40], float(conf or 0.0),
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        if job_id and (idx + 1) % 10 == 0:
+            pct = 97.0 + 2.0 * (idx + 1) / max(total, 1)
             _set_job_progress(
                 job_id,
-                98.0,
-                message="ORTH refine_lexemes ({0}/{1})".format(idx, total),
+                pct,
+                message="Refining lexeme {0}/{1}".format(idx + 1, total),
             )
 
     return additions
@@ -4550,14 +4561,18 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
                 steps_run.append(step)
 
             elif step == "ortho":
-                sub_result = _compute_speaker_ortho(
-                    job_id,
-                    {
-                        "speaker": speaker,
-                        "overwrite": overwrites.get("ortho", False),
-                        "language": language_str,
-                    },
-                )
+                ortho_sub_payload: Dict[str, Any] = {
+                    "speaker": speaker,
+                    "overwrite": overwrites.get("ortho", False),
+                    "language": language_str,
+                }
+                # Forward the batch-level refine_lexemes flag so the ORTH
+                # runner's provider-config default can be overridden by the
+                # compute dialog. Omit when unset so _compute_speaker_ortho
+                # falls back to the provider's ai_config default.
+                if payload.get("refine_lexemes") is not None:
+                    ortho_sub_payload["refine_lexemes"] = bool(payload.get("refine_lexemes"))
+                sub_result = _compute_speaker_ortho(job_id, ortho_sub_payload)
                 # _compute_speaker_ortho returns {"skipped": True/False, ...} —
                 # translate to status vocabulary shared across steps.
                 if sub_result.get("skipped"):
