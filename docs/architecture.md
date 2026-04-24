@@ -1,0 +1,324 @@
+# Architecture & Data Model
+
+> Last updated: 2026-04-24
+>
+> This document summarizes the current PARSE system shape: the unified React shell, Python backend, hybrid data model, Lexical Anchor Alignment System, CLEF provider registry, and export flow.
+
+PARSE is a research workstation rather than a single-purpose annotator. Its architecture is designed to keep per-speaker timing work, cross-speaker comparison, AI-assisted workflows, and export pipelines in one coherent system.
+
+## System overview
+
+```mermaid
+flowchart LR
+    Browser[React + Vite frontend\nAnnotate / Compare / Tags / AI Chat] --> Client[src/api/client.ts]
+    Client --> Server[python/server.py\nHTTP API + built frontend serving]
+    Server --> Annotations[annotations/<Speaker>.json\nper-speaker annotation records]
+    Server --> Enrichments[parse-enrichments.json\ncomparative overlays + notes]
+    Server --> ChatTools[python/ai/chat_tools.py\n47 PARSE-specific tools]
+    Server --> Compare[python/compare/*\ncognates + CLEF providers]
+    Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
+    ChatTools --> MCP[python/adapters/mcp_adapter.py\n29-tool MCP server mode]
+    Compare --> Exports[LingPy TSV + NEXUS]
+```
+
+## Unified dual-mode shell
+
+The current frontend architecture is **React + Vite** with a unified shell hosted in `ParseUI.tsx`.
+
+That shell brings together:
+
+- **Annotate mode** for per-speaker segmentation and review
+- **Compare mode** for cross-speaker comparative analysis
+- the shared **tag system**
+- the **action menu** and compute workflows
+- the built-in **AI chat dock**
+
+This is a major architectural choice: PARSE does not treat annotation, comparison, and workflow assistance as separate apps. The same project state is reused across modes.
+
+### Current runtime routes
+
+Preferred development routes:
+
+- `http://localhost:5173/` — Annotate
+- `http://localhost:5173/compare` — Compare
+
+After `npm run build`, the Python backend can also serve the built frontend at:
+
+- `http://localhost:8766/`
+- `http://localhost:8766/compare`
+
+## Frontend structure
+
+The current top-level structure described in the README is:
+
+```text
+index.html              -- React/Vite entry HTML
+src/
+  App.tsx               -- BrowserRouter shell → <ParseUI />
+  ParseUI.tsx           -- Unified UI shell
+  api/
+    client.ts           -- Typed API client
+    types.ts            -- Shared TypeScript types
+  components/
+    annotate/           -- Annotate mode components
+    compare/            -- Compare mode components
+    shared/             -- Cross-mode shared components
+  hooks/                -- React hooks
+  stores/               -- Zustand stores
+python/
+  server.py             -- Backend API server + built-frontend serving
+  adapters/
+    mcp_adapter.py      -- MCP adapter
+  ai/                   -- AI provider layer and chat tools
+  compare/              -- Compare pipeline and CLEF providers
+config/
+  ai_config.example.json
+  ai_config.json
+annotations/            -- Runtime annotation JSON
+parse-enrichments.json  -- Runtime comparative overlays
+desktop/                -- Electron shell scaffold
+docs/                   -- Documentation and planning material
+dist/                   -- Vite build output
+```
+
+## Backend design
+
+The backend is centered on `python/server.py`.
+
+It is responsible for:
+
+- serving workspace configuration
+- reading and writing annotation records
+- managing background jobs
+- coordinating STT / normalization / compute endpoints
+- exposing chat and auth routes
+- generating exports
+- serving the built frontend for non-dev/local-server usage
+
+The backend is not just a thin file server. It is the orchestration layer for PARSE's workflow-specific automation.
+
+## Hybrid data architecture
+
+PARSE uses a layered data model rather than a single monolithic database.
+
+```mermaid
+flowchart TD
+    Audio[Source / working audio] --> Ann[annotations/<Speaker>.json]
+    Ann --> Compare[Comparative computation]
+    Compare --> Enrich[parse-enrichments.json]
+    Ann --> Export[LingPy TSV / NEXUS / ELAN / TextGrid]
+    Enrich --> Export
+    Tags[Zustand tagStore persistence] --> AnnotateUI[Annotate mode]
+    Tags --> CompareUI[Compare mode]
+```
+
+### 1. Live annotations
+
+Primary speaker-level data lives in:
+
+- `annotations/<Speaker>.json`
+- or the canonical `.parse.json` variant where present
+
+These files are the primary source of truth for time-aligned annotation work.
+
+The current README emphasizes an important rule: timestamps are not treated as disposable AI output. Timing remains central to the review workflow.
+
+### 2. Computed enrichments
+
+Comparative overlays live in:
+
+- `parse-enrichments.json`
+
+This layer stores computed comparative structures such as:
+
+- cognate sets
+- similarity signals
+- borrowing-related overlays
+- lexeme notes
+- manual overrides layered onto computed output
+
+The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format.
+
+### 3. Tags
+
+The tag system is shared across Annotate and Compare.
+
+The current README describes it as a **Zustand `tagStore` persisted to localStorage**, scoped to the project and reused across workflows.
+
+### 4. Transcript and analysis sidecars
+
+PARSE also depends on supporting artifacts such as:
+
+- `coarse_transcripts/<speaker>.json`
+- `peaks/<Speaker>.json`
+- optional import/legacy transcript CSVs
+- `source_index.json`
+
+These are not the same thing as the main annotation truth, but they materially support search, alignment, import, and visualization.
+
+## Workspace-first design
+
+PARSE can run directly from the repo, but its architecture is explicitly workspace-friendly.
+
+When `PARSE_WORKSPACE_ROOT` is set, runtime writes and imports should land in that workspace rather than the bare repository tree.
+
+This matters because PARSE is designed for:
+
+- copied source audio
+- imported processed artifacts
+- persistent chat memory
+- iterative fieldwork data preparation
+
+In other words, the architecture assumes the active research workspace may be larger and more dynamic than the git checkout itself.
+
+## AI provider architecture
+
+PARSE routes different tasks to different provider families.
+
+```mermaid
+flowchart LR
+    STT[STT request] --> FW[faster-whisper / Whisper API]
+    ORTH[ORTH request] --> Razhan[razhan/whisper-base-sdh]
+    Align[Forced alignment] --> W2V[wav2vec2-xlsr-53-espeak-cv-ft]
+    IPA[Acoustic IPA] --> W2V
+    Chat[AI chat dock] --> LLM[OpenAI or xAI]
+```
+
+This separation is important conceptually:
+
+- speech recognition is not conflated with orthographic transcription
+- orthographic transcription is not conflated with IPA generation
+- workflow chat is not treated as the engine of alignment or export logic
+
+## Lexical Anchor Alignment System
+
+The **Lexical Anchor Alignment System** is the core PARSE feature for locating repeated lexical items in long recordings.
+
+### Problem it solves
+
+Long elicitation recordings often contain:
+
+- conversational framing
+- interviewer prompts
+- repeated productions
+- metalinguistic commentary
+- ambient noise
+
+A purely manual search process does not scale well across many speakers and concepts.
+
+### Two-signal candidate ranking
+
+```mermaid
+flowchart TD
+    Input[Target variants + optional concept_id] --> A[Signal A: within-speaker repetition]
+    Input --> B[Signal B: cross-speaker concept matching]
+    A --> Score[Weighted candidate score]
+    B --> Score
+    Score --> Ranked[Ranked candidate time ranges]
+    Ranked --> Confirm[Human confirmation in Annotate mode]
+    Confirm --> Anchors[confirmed_anchors sidecar]
+    Anchors --> Future[Improved cross-speaker evidence for later speakers]
+```
+
+#### Signal A — within-speaker repetition detection
+
+PARSE looks for repeated phonetically similar forms within a short time window. This is motivated by elicitation behavior where the same target form may be repeated several times in succession.
+
+#### Signal B — cross-speaker concept matching
+
+PARSE compares unassigned material against verified annotations from other speakers for the same concept using exact, fuzzy, phonetic-rule, and positional strategies.
+
+#### Current confidence formula
+
+```text
+confidence = 0.50 × phonetic + 0.25 × repetition + 0.15 × positional + 0.10 × cluster
+```
+
+The positional component uses a 45-second tolerance window around the expected cross-speaker median timestamp.
+
+### Human-in-the-loop design
+
+Architecturally, this system is ranking-and-review, not auto-commit.
+
+The annotator verifies a candidate, adjusts boundaries if needed, and explicitly confirms it. Confirmed anchors are then written to `AnnotationRecord.confirmed_anchors[concept_id]`, strengthening the cross-speaker signal for the remaining speakers.
+
+## CLEF provider registry
+
+**CLEF** (Contact Lexeme Explorer Feature) is the contact-language evidence layer used during borrowing adjudication in Compare mode.
+
+It is implemented as a provider registry under `python/compare/providers/`.
+
+### Registry shape
+
+The current README describes a 10-provider stack:
+
+- `asjp`
+- `cldf`
+- `csv_override`
+- `grokipedia`
+- `lingpy_wordlist`
+- `literature`
+- `pycldf_provider`
+- `pylexibank_provider`
+- `wikidata`
+- `wiktionary`
+
+### Architectural role of CLEF
+
+```mermaid
+flowchart LR
+    CompareRow[Compare row / candidate borrowing case] --> CLEFReq[Contact lexeme request]
+    CLEFReq --> Registry[Provider registry]
+    Registry --> Sources[External and local lexical sources]
+    Sources --> Evidence[Reference forms + coverage]
+    Evidence --> Panel[ContactLexemePanel]
+    Panel --> Decision[Borrowing adjudication]
+```
+
+CLEF is intentionally separated from the main annotation store. It augments comparison with external evidence rather than overwriting the primary annotation record.
+
+## Chat tool architecture
+
+The in-app assistant works through `python/ai/chat_tools.py`.
+
+Current counts:
+
+- **47** built-in PARSE chat tools
+- **29** MCP-exposed tools via `python/adapters/mcp_adapter.py`
+
+This separation matters architecturally:
+
+- the browser assistant can use the broader tool surface
+- external MCP clients get a curated subset
+- the system stays bounded to PARSE-specific workflows rather than arbitrary shell access
+
+## Export architecture
+
+PARSE's export layer exists to carry reviewed annotation and comparative decisions into downstream analysis.
+
+Current export paths mentioned in the README and code include:
+
+- LingPy TSV
+- NEXUS
+- annotations CSV
+- ELAN XML
+- Praat TextGrid
+
+These exports are downstream products of the annotation + enrichment layers rather than independent sources of truth.
+
+## Design principles visible in the current architecture
+
+Several design principles recur across the current implementation:
+
+1. **Timestamps remain central** — PARSE is not a text-only annotation tool
+2. **Human review stays explicit** — automation ranks, pre-fills, or computes, but confirmation remains visible
+3. **Modes share one workspace** — Annotate and Compare are not disconnected applications
+4. **AI is task-routed** — different providers handle different kinds of work
+5. **Research outputs matter** — export is part of the architecture, not an afterthought
+
+## Related docs
+
+- Setup and runtime details: [Getting Started](./getting-started.md)
+- User workflow walkthrough: [User Guide](./user-guide.md)
+- Provider and tool surface details: [AI Integration](./ai-integration.md)
+- Extension points and project layout: [Developer Guide](./developer-guide.md)
