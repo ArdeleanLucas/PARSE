@@ -67,9 +67,30 @@ Critical for long-running agent jobs:
 
 ## 5. Standardize the external API surface
 
-- Generate and serve a full **OpenAPI 3.1 spec** for the HTTP API (port 8766).
-- Publish official **LangChain / LlamaIndex / CrewAI** tool wrappers as a `parse-mcp` Python package.
-- Document the MCP schema and authentication model clearly in the README.
+**Status:** ✅ Complete
+
+**Shipped:**
+- `python/server.py` now serves a full **OpenAPI 3.1** document at `GET /openapi.json` plus interactive docs at `GET /docs` and `GET /redoc`.
+- Added a read/write **HTTP MCP bridge** on the same server:
+  - `GET /api/mcp/exposure`
+  - `GET /api/mcp/tools`
+  - `GET /api/mcp/tools/{toolName}`
+  - `POST /api/mcp/tools/{toolName}`
+- Added shared schema/discovery helpers under `python/external_api/` so the HTTP MCP bridge and stdio adapter reuse the same MCP metadata source of truth.
+- Added the official publishable **`parse-mcp`** package scaffold under `python/packages/parse_mcp/` with:
+  - `ParseMcpClient`
+  - LangChain wrappers
+  - LlamaIndex wrappers
+  - CrewAI wrappers
+- Added `docs/mcp-schema.md` and expanded `README.md` / `docs/api-reference.md` to document:
+  - the MCP schema
+  - exposure modes
+  - the local authentication model
+  - the OpenAPI endpoints
+
+**Notes:**
+- Existing HTTP and MCP tool behavior remains unchanged; Task 5 standardizes discoverability, schemas, and packaging around the current surface.
+- The local PARSE HTTP API remains workstation-local and is **not bearer-protected**. Provider credentials continue to be managed separately via `/api/auth/*` and local `config/auth_tokens.json`.
 
 ---
 

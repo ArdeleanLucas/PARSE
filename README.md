@@ -85,21 +85,69 @@ This assistant is not a generic chatbot. It operates through `ParseChatTools` an
 
 Supported LLM backends currently include **xAI (Grok)** and **OpenAI**. Local speech and alignment work is handled separately through faster-whisper, Razhan, Silero VAD, and wav2vec2.
 
-### MCP Server Mode
+### MCP & External API
 
-PARSE can also run as an **MCP (Model Context Protocol) server**.
+PARSE exposes three machine-facing integration surfaces:
+
+1. **HTTP API** on `http://localhost:8766`
+2. **HTTP MCP bridge** on the same server for schema discovery + tool execution
+3. **stdio MCP adapter** in `python/adapters/mcp_adapter.py`
 
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
-The MCP adapter currently exposes **32 task tools** drawn from the broader in-app PARSE tool surface, plus read-only `mcp_get_exposure_mode` for self-inspection.
+Current counts:
+- **47** built-in `ParseChatTools`
+- **3** workflow macros in `python/ai/workflow_tools.py`
+- **32** default MCP task tools
+- **33** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
+- **51** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+
+#### OpenAPI and interactive docs
+
+- `GET /openapi.json` — full OpenAPI 3.1 spec
+- `GET /docs` — Swagger UI
+- `GET /redoc` — ReDoc
+
+#### HTTP MCP bridge
+
+- `GET /api/mcp/exposure`
+- `GET /api/mcp/tools`
+- `GET /api/mcp/tools/{toolName}`
+- `POST /api/mcp/tools/{toolName}`
+
+These endpoints expose the MCP schema, strict parameter JSON schemas, and PARSE-specific safety metadata (`meta.x-parse`) over plain HTTP.
+
+#### Authentication model
+
+- The local PARSE HTTP server is **not bearer-protected**; it is intended for local workstation use.
+- Provider credentials are managed separately through `/api/auth/*` and stored locally in `config/auth_tokens.json`.
+- Supported auth methods currently include:
+  - direct API keys via `POST /api/auth/key`
+  - OpenAI device/OAuth flow via `POST /api/auth/start` + `POST /api/auth/poll`
+
+#### Python package
+
+Task 5 also adds the official publishable package scaffold:
+
+- `python/packages/parse_mcp/`
+- package name: **`parse-mcp`**
+
+It provides:
+- schema discovery from a running PARSE server
+- HTTP tool execution against the MCP bridge
+- framework wrappers for:
+  - LangChain
+  - LlamaIndex
+  - CrewAI
 
 ## 📚 Documentation
 
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
 - [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 47-tool chat surface, and MCP workflow macros
-- [API Reference](docs/api-reference.md) — HTTP endpoints, compute routes, examples, and the full 32-tool MCP task surface
-- [Architecture](docs/architecture.md) — unified shell, backend/data design, Lexical Anchor Alignment scoring, and CLEF provider registry
+- [API Reference](docs/api-reference.md) — HTTP endpoints, OpenAPI docs, MCP bridge routes, examples, and the full 32-tool MCP task surface
+- [MCP Schema](docs/mcp-schema.md) — MCP schema shape, HTTP bridge endpoints, exposure modes, and authentication model
+- [Architecture](docs/architecture.md) — unified shell, backend/data design, OpenAPI/MCP standardization points, and CLEF provider registry
 - [Developer Guide](docs/developer-guide.md) — project structure, tech stack, local development flow, and extension points for chat tools, MCP tools, and endpoints
 - [Research Context](docs/research-context.md) — thesis background, citation guidance, and research-software framing
 

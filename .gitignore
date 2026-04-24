@@ -4,6 +4,8 @@
 # Python
 python/__pycache__/
 *.pyc
+*.egg-info/
+build/
 .venv-ortho/
 config/auth_tokens.json
 config/ai_config.json

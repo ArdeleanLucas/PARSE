@@ -302,9 +302,59 @@ GET /api/export/nexus
 
 Both endpoints return downloadable file content rather than JSON.
 
+## OpenAPI 3.1 and interactive API docs
+
+PARSE now serves a machine-readable OpenAPI 3.1 document directly from `python/server.py`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /openapi.json` | Full OpenAPI 3.1 spec for the HTTP API + HTTP MCP bridge |
+| `GET /docs` | Swagger UI |
+| `GET /redoc` | ReDoc |
+
+The OpenAPI document intentionally describes the HTTP workstation API and the HTTP MCP bridge. The stdio MCP adapter remains documented separately below because it is a process transport, not an HTTP route.
+
+## HTTP MCP bridge
+
+Task 5 adds a discovery/execution bridge so external Python tooling can use the PARSE MCP schema without spawning the stdio adapter.
+
+| Endpoint | Purpose | Notes |
+|---|---|---|
+| `GET /api/mcp/exposure` | Read active MCP exposure configuration | Supports `mode=active|default|all` |
+| `GET /api/mcp/tools` | List MCP-visible tool schemas | Returns `parameters`, `annotations`, and `meta.x-parse` |
+| `GET /api/mcp/tools/{toolName}` | Read one MCP tool schema | 404 if hidden in the selected mode |
+| `POST /api/mcp/tools/{toolName}` | Execute one MCP-visible tool over HTTP | Uses the same validation + execution layer as the PARSE tool runtime |
+
+### Exposure modes
+
+`mode` query parameter accepts:
+- `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
+- `default` — force the curated MCP subset
+- `all` — force the full tool surface
+
+### Tool schema payload
+
+Each tool entry returned by the bridge includes:
+- `name`
+- `family`
+  - `adapter`
+  - `chat`
+  - `workflow`
+- `description`
+- `parameters`
+- `annotations`
+- `meta.x-parse`
+
+`meta.x-parse` remains the key safety payload for agents. It includes:
+- `mutability`
+- `supports_dry_run`
+- `dry_run_parameter`
+- `preconditions`
+- `postconditions`
+
 ## MCP server mode
 
-PARSE can run as an MCP server by exposing a curated subset of `ParseChatTools` through `python/adapters/mcp_adapter.py`.
+PARSE can also run as a stdio MCP server by exposing a curated subset of `ParseChatTools` plus the 3 workflow macros through `python/adapters/mcp_adapter.py`.
 
 ### Start the adapter
 
@@ -340,7 +390,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Full MCP tool surface (32 tools)
+## Full MCP task surface (32 task tools + `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -399,12 +449,47 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `prepare_compare_mode` | Resolve a concept slice across speakers and return a compare-ready preview bundle |
 | `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
 
+## `parse-mcp` Python package
+
+Task 5 adds the official package scaffold under:
+
+- `python/packages/parse_mcp/`
+- package name: **`parse-mcp`**
+
+It provides:
+- `ParseMcpClient` for discovery + execution against the HTTP MCP bridge
+- `build_langchain_tools(...)`
+- `build_llamaindex_tools(...)`
+- `build_crewai_tools(...)`
+
+## Authentication model
+
+### HTTP transport auth
+PARSE's local HTTP surface is not bearer-protected today. It is intended for a local workstation deployment on `localhost` / `127.0.0.1`.
+
+### Provider credentials
+Provider credentials are managed locally through:
+- `GET /api/auth/status`
+- `POST /api/auth/key`
+- `POST /api/auth/start`
+- `POST /api/auth/poll`
+- `POST /api/auth/logout`
+
+Credentials are stored in local `config/auth_tokens.json`.
+
+### MCP process auth
+The stdio MCP adapter does not add a separate network auth layer. Access is governed by the local process launch context and environment variables such as:
+- `PARSE_PROJECT_ROOT`
+- `PARSE_EXTERNAL_READ_ROOTS`
+- `PARSE_CHAT_MEMORY_PATH`
+- `PARSE_API_PORT`
+- `PARSE_PORT`
+
 ## MCP usage notes
 
 The MCP surface is a curated subset of the low-level chat tools plus 3 high-level workflow macros.
 
-A few operational rules remain important:
-
+Operational rules that remain important:
 - use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `onboard_speaker_import`, and timestamp/application workflows
 - prefer `full_coverage` rather than bare `done` when making automation decisions about whether a tier really covers the full recording
 - onboarding remains **one speaker at a time**
@@ -414,3 +499,4 @@ A few operational rules remain important:
 - Provider and model overview: [AI Integration](./ai-integration.md)
 - User-facing workflow context: [User Guide](./user-guide.md)
 - Data model and system design: [Architecture](./architecture.md)
+- Schema/auth details: [MCP Schema](./mcp-schema.md)

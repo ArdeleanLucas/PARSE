@@ -17,7 +17,9 @@ flowchart LR
     Server --> ChatTools[python/ai/chat_tools.py\n47 PARSE-specific tools]
     Server --> Compare[python/compare/*\ncognates + CLEF providers]
     Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
+    Server --> External[OpenAPI 3.1 + HTTP MCP bridge\n/openapi.json + /api/mcp/*]
     ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + workflow macros]
+    External --> PyPkg[python/packages/parse_mcp\nLangChain / LlamaIndex / CrewAI wrappers]
     Compare --> Exports[LingPy TSV + NEXUS]
 ```
 
@@ -70,7 +72,10 @@ python/
   adapters/
     mcp_adapter.py      -- MCP adapter
   ai/                   -- AI provider layer and chat tools
+  external_api/         -- OpenAPI generation + HTTP MCP bridge catalog helpers
   compare/              -- Compare pipeline and CLEF providers
+  packages/
+    parse_mcp/          -- Publishable Python client/wrapper package
 config/
   ai_config.example.json
   ai_config.json
@@ -93,6 +98,7 @@ It is responsible for:
 - coordinating STT / normalization / compute endpoints
 - exposing chat and auth routes
 - generating exports
+- serving the OpenAPI 3.1 document and HTTP MCP bridge
 - serving the built frontend for non-dev/local-server usage
 
 The backend is not just a thin file server. It is the orchestration layer for PARSE's workflow-specific automation.

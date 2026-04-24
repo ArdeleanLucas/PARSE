@@ -319,4 +319,12 @@ Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow
 - **Default MCP adapter surface including `mcp_get_exposure_mode`**: 33
 - **Full MCP adapter surface with `expose_all_tools=true`**: 51
 
+Task 5 adds an HTTP MCP bridge on top of that same schema surface:
+- `GET /api/mcp/exposure`
+- `GET /api/mcp/tools`
+- `GET /api/mcp/tools/{toolName}`
+- `POST /api/mcp/tools/{toolName}`
+
+That bridge reuses `ChatToolSpec` metadata (`parameters`, MCP annotations, and `meta.x-parse`) so external Python wrappers can discover the same tool contracts without spawning the stdio adapter.
+
 For the exact MCP subset, startup instructions, and usage examples, see [API Reference](./api-reference.md).

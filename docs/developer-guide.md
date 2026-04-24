@@ -43,9 +43,12 @@ python/
     stt_pipeline.py
     forced_align.py
     ipa_transcribe.py
+  external_api/         -- OpenAPI generation + HTTP MCP bridge helpers
   compare/
     providers/          -- CLEF provider registry and adapters
   shared/               -- Shared Python utilities
+  packages/
+    parse_mcp/          -- Publishable Python client/wrapper package
 config/
   ai_config.example.json -- tracked template
   ai_config.json         -- machine-local config (gitignored)
@@ -72,6 +75,8 @@ dist/                   -- build output
 
 - Python 3.10–3.12
 - local HTTP server in `python/server.py`
+- OpenAPI 3.1 generation + interactive docs (`/openapi.json`, `/docs`, `/redoc`)
+- HTTP MCP bridge for schema discovery + tool execution (`/api/mcp/*`)
 - background job orchestration for STT / normalize / compute / chat
 - JSON-file persistence for runtime state
 
@@ -272,6 +277,26 @@ To expose a tool over MCP:
 4. Re-check the exported-tool count and update docs if the MCP subset changed
 
 The adapter is intentionally a curated PARSE tool surface. Low-level browser/chat tools live in `ParseChatTools`; high-level agent workflow macros live in `WorkflowTools`.
+
+## External API standardization points
+
+Task 5 adds two more extension surfaces that matter for contributors:
+
+1. **OpenAPI builder** — `python/external_api/openapi.py`
+   - keep the served `/openapi.json` spec aligned with real routes in `python/server.py`
+   - when adding HTTP routes, update the OpenAPI path table in the same PR
+2. **HTTP MCP bridge** — `python/external_api/catalog.py` + `python/server.py`
+   - exposes MCP tool schemas over HTTP
+   - executes MCP-visible tools over `POST /api/mcp/tools/{toolName}`
+   - should reuse existing `ChatToolSpec` metadata rather than inventing parallel schemas
+3. **Publishable wrapper package** — `python/packages/parse_mcp/`
+   - keep discovery/execution behavior aligned with the HTTP MCP bridge
+   - framework wrappers should remain thin adapters over the discovered tool schema
+
+When adding or renaming MCP-visible tools, update all three layers together:
+- stdio adapter
+- HTTP MCP bridge
+- `parse-mcp` package docs/tests
 
 ## How to add or extend a CLEF provider
 

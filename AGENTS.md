@@ -34,6 +34,16 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - `export_complete_lingpy_dataset`
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 - `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
+- Task 5 adds a parallel **HTTP MCP bridge** in `python/server.py`:
+  - `GET /api/mcp/exposure`
+  - `GET /api/mcp/tools`
+  - `GET /api/mcp/tools/{toolName}`
+  - `POST /api/mcp/tools/{toolName}`
+- Task 5 also adds OpenAPI docs served directly by `python/server.py`:
+  - `GET /openapi.json`
+  - `GET /docs`
+  - `GET /redoc`
+- Official external wrappers now live in `python/packages/parse_mcp/`.
 - Mutability meanings:
   - `read_only` — inspection only; no writes or background jobs
   - `stateful_job` — starts or manages a background job that can later mutate project artifacts

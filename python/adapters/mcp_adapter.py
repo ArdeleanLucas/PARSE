@@ -61,8 +61,6 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("parse.mcp_adapter")
 
-MCP_CONFIG_FILENAME = "mcp_config.json"
-
 # ---------------------------------------------------------------------------
 # Ensure the python/ package is importable
 # ---------------------------------------------------------------------------
@@ -72,8 +70,13 @@ _PYTHON_DIR = _ADAPTER_DIR.parent
 if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
-from ai.chat_tools import DEFAULT_MCP_TOOL_NAMES
 from ai.workflow_tools import DEFAULT_MCP_WORKFLOW_TOOL_NAMES
+from external_api.catalog import (
+    load_mcp_config as _shared_load_mcp_config,
+    mcp_exposure_payload as _shared_mcp_exposure_payload,
+    resolve_mcp_config_path as _shared_resolve_mcp_config_path,
+    selected_mcp_tool_names as _shared_selected_mcp_tool_names,
+)
 
 # ---------------------------------------------------------------------------
 # Lazy MCP SDK import
@@ -108,52 +111,18 @@ def _resolve_project_root(cli_root: Optional[str] = None) -> Path:
 
 
 def _resolve_mcp_config_path(project_root_path: Path) -> Optional[Path]:
-    """Return the preferred mcp_config.json path if one exists.
-
-    Preferred location is config/mcp_config.json for consistency with the
-    other PARSE config files. For backward compatibility, also accept a
-    project-root mcp_config.json fallback.
-    """
-    candidates = [
-        project_root_path / "config" / MCP_CONFIG_FILENAME,
-        project_root_path / MCP_CONFIG_FILENAME,
-    ]
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            return candidate
-    return None
+    """Return the preferred mcp_config.json path if one exists."""
+    return _shared_resolve_mcp_config_path(project_root_path)
 
 
 def _load_mcp_config(project_root_path: Path) -> Dict[str, Any]:
-    """Load MCP adapter config, defaulting to the legacy 29-tool surface."""
-    config_path = _resolve_mcp_config_path(project_root_path)
-    if config_path is None:
-        return {"expose_all_tools": False}
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to read %s: %s. Falling back to expose_all_tools=false.", config_path, exc)
-        return {"expose_all_tools": False}
-    if not isinstance(payload, dict):
-        logger.warning("Ignoring non-object MCP config at %s. Falling back to expose_all_tools=false.", config_path)
-        return {"expose_all_tools": False}
-    expose_all_tools_raw = payload.get("expose_all_tools", False)
-    if not isinstance(expose_all_tools_raw, bool):
-        logger.warning(
-            "Ignoring non-boolean expose_all_tools=%r at %s. Falling back to expose_all_tools=false.",
-            expose_all_tools_raw,
-            config_path,
-        )
-        expose_all_tools_raw = False
-    return {"expose_all_tools": expose_all_tools_raw, "config_path": str(config_path)}
+    """Load MCP adapter config, defaulting to the legacy curated surface."""
+    return _shared_load_mcp_config(project_root_path)
 
 
 def _selected_mcp_tool_names(all_tool_names: List[str], expose_all_tools: bool) -> List[str]:
     """Return the MCP tool surface for this server instance."""
-    if expose_all_tools:
-        return list(all_tool_names)
-    available_names = set(all_tool_names)
-    return [name for name in DEFAULT_MCP_TOOL_NAMES if name in available_names]
+    return _shared_selected_mcp_tool_names(all_tool_names, expose_all_tools)
 
 
 def _mcp_exposure_payload(
@@ -165,22 +134,13 @@ def _mcp_exposure_payload(
     mcp_tool_count: int,
 ) -> Dict[str, Any]:
     """Build a read-only MCP payload describing the active exposure mode."""
-    return {
-        "tool": "mcp_get_exposure_mode",
-        "ok": True,
-        "result": {
-            "readOnly": True,
-            "previewOnly": True,
-            "mode": "read-only",
-            "exposeAllTools": expose_all_tools,
-            "configSource": config_source,
-            "parseChatToolCount": parse_chat_tool_count,
-            "workflowToolCount": workflow_tool_count,
-            "mcpToolCount": mcp_tool_count,
-            "defaultParseMcpToolCount": len(DEFAULT_MCP_TOOL_NAMES),
-            "defaultWorkflowMcpToolCount": len(DEFAULT_MCP_WORKFLOW_TOOL_NAMES),
-        },
-    }
+    return _shared_mcp_exposure_payload(
+        expose_all_tools=expose_all_tools,
+        config_source=config_source,
+        parse_chat_tool_count=parse_chat_tool_count,
+        workflow_tool_count=workflow_tool_count,
+        mcp_tool_count=mcp_tool_count,
+    )
 
 
 def _load_repo_parse_env(project_root_path: Path) -> Dict[str, str]:

@@ -19,14 +19,17 @@ import uuid
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
-from ai.chat_tools import ParseChatTools
+from ai.chat_tools import ChatToolExecutionError, ChatToolValidationError, ParseChatTools
+from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
 from audio_pipeline_paths import build_normalized_output_path
+from external_api.catalog import build_mcp_http_catalog, get_mcp_tool_entry, mcp_exposure_payload, resolve_catalog_mode
+from external_api.openapi import build_openapi_document, render_redoc_html, render_swagger_ui_html
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -2358,6 +2361,60 @@ def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
             )
 
         return _chat_tools_runtime, _chat_orchestrator_runtime
+
+
+def _build_workflow_runtime() -> WorkflowTools:
+    return WorkflowTools(
+        project_root=_project_root(),
+        config_path=_config_path(),
+        docs_root=_chat_docs_root(),
+        start_stt_job=_chat_start_stt_job,
+        get_job_snapshot=_chat_get_job_snapshot,
+        external_read_roots=_chat_external_read_roots(),
+        memory_path=_chat_memory_path(),
+        onboard_speaker=_chat_onboard_speaker,
+        start_compute_job=_chat_start_compute_job,
+        pipeline_state=_chat_pipeline_state,
+    )
+
+
+def _execute_mcp_http_tool(tool_name: str, raw_args: Dict[str, Any], mode: str = "active") -> Dict[str, Any]:
+    if not isinstance(raw_args, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Tool arguments must be a JSON object")
+
+    parse_tools, _ = _get_chat_runtime()
+    workflow_tools = _build_workflow_runtime()
+    tool_entry = get_mcp_tool_entry(
+        tool_name,
+        project_root=_project_root(),
+        mode=mode,
+        parse_tools=parse_tools,
+        workflow_tools=workflow_tools,
+    )
+    if tool_entry is None:
+        raise ApiError(HTTPStatus.NOT_FOUND, "Unknown MCP tool: {0}".format(tool_name))
+
+    family = str(tool_entry.get("family") or "chat")
+    try:
+        if family == "adapter" and tool_name == "mcp_get_exposure_mode":
+            catalog = build_mcp_http_catalog(
+                project_root=_project_root(),
+                mode=mode,
+                parse_tools=parse_tools,
+                workflow_tools=workflow_tools,
+            )
+            return mcp_exposure_payload(
+                expose_all_tools=bool(catalog["exposure"].get("exposeAllTools", False)),
+                config_source=catalog["exposure"].get("configSource"),
+                parse_chat_tool_count=int(catalog["exposure"].get("parseChatToolCount", len(parse_tools.tool_names()))),
+                workflow_tool_count=int(catalog["exposure"].get("workflowToolCount", 0)),
+                mcp_tool_count=int(catalog["exposure"].get("mcpToolCount", catalog.get("count", 0))),
+            )
+        if family == "workflow":
+            return workflow_tools.execute(tool_name, raw_args)
+        return parse_tools.execute(tool_name, raw_args)
+    except (ChatToolValidationError, ChatToolExecutionError, ValueError) as exc:
+        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
 
 
 def _run_chat_job(job_id: str, session_id: str) -> None:
@@ -5674,6 +5731,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        if self._handle_builtin_docs_get():
+            return
         if self._handle_api("GET"):
             return
 
@@ -5717,6 +5776,13 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _request_path(self) -> str:
         return urlparse(self.path).path or "/"
+
+    def _request_query_params(self) -> Dict[str, List[str]]:
+        return parse_qs(urlparse(self.path).query, keep_blank_values=True)
+
+    def _request_base_url(self) -> str:
+        host = str(self.headers.get("Host") or "127.0.0.1:{0}".format(PORT)).strip() or "127.0.0.1:{0}".format(PORT)
+        return "http://{0}".format(host)
 
     def _is_api_path(self, raw_path: str) -> bool:
         return (urlparse(raw_path).path or "").startswith("/api/")
@@ -5771,8 +5837,32 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
+    def _send_text(self, status: HTTPStatus, body: str, *, content_type: str) -> None:
+        encoded = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        try:
+            self.wfile.write(encoded)
+        except BrokenPipeError:
+            pass
+
     def _send_json_error(self, status: HTTPStatus, message: str) -> None:
         self._send_json(status, {"error": str(message)})
+
+    def _handle_builtin_docs_get(self) -> bool:
+        request_path = self._request_path()
+        if request_path == "/openapi.json":
+            self._send_json(HTTPStatus.OK, build_openapi_document(base_url=self._request_base_url()))
+            return True
+        if request_path == "/docs":
+            self._send_text(HTTPStatus.OK, render_swagger_ui_html("/openapi.json"), content_type="text/html; charset=utf-8")
+            return True
+        if request_path == "/redoc":
+            self._send_text(HTTPStatus.OK, render_redoc_html("/openapi.json"), content_type="text/html; charset=utf-8")
+            return True
+        return False
 
     def _handle_api(self, method: str) -> bool:
         request_path = self._request_path()
@@ -5814,6 +5904,18 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "chat" and parts[2] == "session":
             self._api_get_chat_session(parts[3])
+            return
+
+        if request_path == "/api/mcp/exposure":
+            self._api_get_mcp_exposure()
+            return
+
+        if request_path == "/api/mcp/tools":
+            self._api_get_mcp_tools()
+            return
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "mcp" and parts[2] == "tools":
+            self._api_get_mcp_tool(parts[3])
             return
 
         if request_path == "/api/jobs":
@@ -5971,6 +6073,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         parts = self._path_parts(request_path)
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "mcp" and parts[2] == "tools":
+            self._api_post_mcp_tool(parts[3])
+            return
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_post_annotation(parts[2])
@@ -6647,6 +6753,46 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ApiError(HTTPStatus.NOT_FOUND, "Unknown sessionId")
 
         self._send_json(HTTPStatus.OK, _chat_session_public_payload(session))
+
+    def _api_get_mcp_exposure(self) -> None:
+        try:
+            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        catalog = build_mcp_http_catalog(project_root=_project_root(), mode=mode, parse_tools=_get_chat_runtime()[0], workflow_tools=_build_workflow_runtime())
+        self._send_json(HTTPStatus.OK, catalog["exposure"])
+
+    def _api_get_mcp_tools(self) -> None:
+        try:
+            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        catalog = build_mcp_http_catalog(project_root=_project_root(), mode=mode, parse_tools=_get_chat_runtime()[0], workflow_tools=_build_workflow_runtime())
+        self._send_json(HTTPStatus.OK, catalog)
+
+    def _api_get_mcp_tool(self, tool_name: str) -> None:
+        try:
+            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        tool_entry = get_mcp_tool_entry(
+            tool_name,
+            project_root=_project_root(),
+            mode=mode,
+            parse_tools=_get_chat_runtime()[0],
+            workflow_tools=_build_workflow_runtime(),
+        )
+        if tool_entry is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown MCP tool: {0}".format(tool_name))
+        self._send_json(HTTPStatus.OK, tool_entry)
+
+    def _api_post_mcp_tool(self, tool_name: str) -> None:
+        try:
+            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        body = self._expect_object(self._read_json_body(required=False) or {}, "Request body")
+        self._send_json(HTTPStatus.OK, _execute_mcp_http_tool(tool_name, body, mode=mode))
 
     def _api_post_chat_session(self) -> None:
         body = self._read_json_body(required=False)

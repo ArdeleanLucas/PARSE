@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parse-mcp"
+version = "0.1.0"
+description = "Official PARSE MCP HTTP bridge client and agent-framework wrappers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Lucas Ardelean"}
+]
+dependencies = [
+  "pydantic>=2.7,<3",
+]
+keywords = ["mcp", "linguistics", "fieldwork", "phonetics", "langchain", "llamaindex", "crewai"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.2"]
+llamaindex = ["llama-index-core>=0.10"]
+crewai = ["crewai>=0.30"]
+all = [
+  "langchain-core>=0.2",
+  "llama-index-core>=0.10",
+  "crewai>=0.30",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
