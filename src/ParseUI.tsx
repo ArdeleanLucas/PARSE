@@ -1901,7 +1901,20 @@ export function ParseUI() {
       setSpeakerPicker(rawSpeakers.find(s => !rawSpeakers.includes(s)) ?? rawSpeakers[0] ?? null);
     }
   }, [rawSpeakers]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [currentMode, setCurrentMode] = useState<AppMode>('compare');
+  // Persist the active mode so an accidental unmount (HMR, error boundary
+  // reset, or a root-level remount) doesn't snap the user back to Compare
+  // and away from an in-flight Annotate session.
+  const [currentMode, setCurrentMode] = useState<AppMode>(() => {
+    try {
+      const raw = localStorage.getItem('parse.currentMode');
+      if (raw === 'annotate' || raw === 'compare' || raw === 'tags') return raw;
+    } catch { /* localStorage disabled — fall through */ }
+    return 'compare';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('parse.currentMode', currentMode); }
+    catch { /* non-fatal */ }
+  }, [currentMode]);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [sttLanguage, setSttLanguage] = useState<string>(() => {
