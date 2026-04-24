@@ -32,6 +32,11 @@ module.exports = {
       env: {
         PARSE_WORKSPACE_ROOT: "/home/lucas/parse-workspace",
         PARSE_AI_CONFIG: "/home/lucas/parse-workspace/config/ai_config.json",
+        OMP_NUM_THREADS: "1",
+        MKL_NUM_THREADS: "1",
+        OPENBLAS_NUM_THREADS: "1",
+        VECLIB_MAXIMUM_THREADS: "1",
+        NUMEXPR_NUM_THREADS: "1",
       },
     },
   ],

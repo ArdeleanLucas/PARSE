@@ -6526,6 +6526,7 @@ def main() -> None:
 
     server_address = (HOST, PORT)
     httpd = http.server.ThreadingHTTPServer(server_address, RangeRequestHandler)
+    httpd.daemon_threads = True
     local_ips = _get_local_ips()
 
     for line in _startup_banner_lines(serve_dir, local_ips):
