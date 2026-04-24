@@ -32,7 +32,7 @@ Per-speaker segmentation and transcription workstation.
 - Tier 2 acoustic forced alignment refines Tier 1 word windows with `torchaudio.functional.forced_align` against wav2vec2, yielding tighter per-word boundaries and optional phoneme spans
 - Speaker-level ORTH job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
 - Speaker-level IPA fill job (`computeType='ipa_only'`) now runs **acoustic wav2vec2-only IPA** through the full forced-alignment path when word-level STT cache is available, yielding word-level IPA intervals; it falls back to coarse ORTH-interval slices only when no STT word cache exists
-- Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks
+- Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks, "empty" step detection, skip-breakdown counters, and exception samples for steps that ran but wrote no intervals
 - Preflight now distinguishes **"tier has intervals"** from **"the full WAV has been processed"** via coverage-aware fields (`duration_sec`, `coverage_start_sec`, `coverage_end_sec`, `coverage_fraction`, `full_coverage`)
 - Full pipeline execution now runs explicit ordered steps — **normalize → STT → ORTH → IPA** — with per-step skip/error reporting instead of treating the run as a single opaque job
 - Draggable lexeme timestamp editing and manual boundary correction
@@ -99,7 +99,7 @@ PARSE supports multiple AI backends, routed per task type:
 
 Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
 
-**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`, and Tier 2 forced alignment uses `torchaudio.functional.forced_align` with wav2vec2 to tighten word boundaries.
+**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection, an emergency `PARSE_STT_FORCE_CPU=1` override, and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`, and mid-run CUDA failures rebuild the Whisper model on CPU instead of leaving the job wedged.
 
 ### Models
 
@@ -113,7 +113,7 @@ Provider selection is feature-specific — STT, IPA, and LLM tasks can each rout
 
 Silero VAD segments each full-length recording before Razhan processes it. VAD parameters are tuned specifically for the elicitation recording format: activation threshold 0.35 (lower than default, to catch soft-spoken consultants at variable microphone distances) and minimum silence of 300 ms between segments (to prevent interviewer-prompt and speaker-response pairs from being collapsed into single units).
 
-The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) now serves Tier 2 forced alignment and Tier 3 acoustic IPA. By default, `ipa_only` prefers the word-level STT cache (`coarse_transcripts/<speaker>.json`) and runs the full forced-align path word-by-word; if no word cache exists, PARSE falls back to coarse ORTH-interval slices. The older Epitran / text-IPA / LLM IPA paths are gone, and the synchronous `POST /api/ipa` endpoint has been removed.
+The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) now serves Tier 2 forced alignment and Tier 3 acoustic IPA. By default, `ipa_only` prefers the word-level STT cache (`coarse_transcripts/<speaker>.json`) and runs the full forced-align path word-by-word; if no word cache exists, PARSE falls back to coarse ORTH-interval slices. The older Epitran / text-IPA / LLM IPA paths are gone, and the synchronous `POST /api/ipa` endpoint has been removed. On WSL, the aligner now resolves to **CPU by default** to avoid GPU-driver crashes under long CTC workloads; `config/ai_config.json` also exposes `wav2vec2.force_cpu` and `wav2vec2.chunk_size` so long runs can be tuned without code changes. Recent fixes also cache `EspeakBackend` instances per language and report progress during Tier 2 forced alignment, so long CPU runs no longer sit at a misleading 0% while G2P / alignment work is underway.
 
 ### Citation and external dependency links
 
@@ -237,6 +237,14 @@ On success you will see:
 ```
 
 Open **http://localhost:5173/** in your browser for the React UI.
+
+### Runtime and deployment notes
+
+- The HTTP server now runs behind a **bounded 4-worker request pool** rather than one ad-hoc OS thread per request, which keeps long polling runs stable during batch STT / ORTH / IPA jobs.
+- Compute jobs support three launcher modes: the default in-process `thread` mode, an opt-in `subprocess` mode (`python python/server.py --compute-mode=subprocess` or `PARSE_COMPUTE_MODE=subprocess`), and a **persistent** worker mode (`python python/server.py --compute-mode=persistent` or `PARSE_USE_PERSISTENT_WORKER=true`) that preloads wav2vec2 once and reuses it across compute jobs.
+- If you supervise the backend with PM2, use the tracked `deploy/pm2-ecosystem.config.cjs` file and keep `cwd` pointed at the **live workspace**, not the git checkout, so annotations and derived artifacts land in the runtime workspace rather than in the repo tree.
+- The PM2 config now also documents the current WSL safety defaults: `PARSE_STT_FORCE_CPU=1` and `CUDA_VISIBLE_DEVICES=""`, so STT / ORTH / IPA can fall back to all-CPU operation on unstable WSL GPU stacks.
+- For persistent-worker deployments, `GET /api/worker/status` provides a health check suitable for PM2 or external monitors; non-persistent modes return mode information but no worker liveness probe.
 
 ### Workspace-first bootstrap (recommended on a fresh machine)
 
@@ -475,9 +483,7 @@ The built-in assistant operates with both read and write access to the project, 
 
 ### Agent Tools (MCP)
 
-PARSE can run as an **MCP server**, exposing a curated subset of **29 tools** (out of **47** total `ParseChatTools`). This lets third-party agents — Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or any MCP-compatible client — call PARSE functions programmatically without ever touching the browser UI.
-
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing **29 MCP tools** from its PARSE-specific AI tooling surface over the standard MCP protocol. This is a curated subset of the broader 47-tool in-app `ParseChatTools` surface — not every chat tool is exported over MCP. Third-party agents — Claude Code, Cursor, Codex, Windsurf, or any MCP-compatible client — can call these PARSE tools programmatically without going through the browser UI.
+PARSE can run as an **MCP (Model Context Protocol) server**, exposing a curated subset of **29 MCP tools** from its broader **47-tool** `ParseChatTools` surface. This is the agent-facing entrypoint for Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, and other MCP-compatible clients: they can call PARSE's project-aware tools programmatically without going through the browser UI. The MCP surface is intentionally narrower than the in-app chat surface; not every chat tool is exported over MCP.
 
 ```bash
 python python/adapters/mcp_adapter.py                          # auto-detect project root
@@ -563,6 +569,7 @@ The Python backend (`python/server.py`, port `8766`) exposes the following endpo
 | `/api/export/lingpy` | LingPy-compatible TSV export |
 | `/api/export/nexus` | NEXUS export *(placeholder — not yet implemented)* |
 | `/api/contact-lexemes/coverage` | CLEF provider coverage status |
+| `/api/worker/status` | Persistent compute-worker health check (`alive`, `pid`, `jobs_in_flight`) |
 | `/api/tags` | Tag definitions and assignments |
 
 ### POST
@@ -614,9 +621,9 @@ The enrichments layer stores computed structures while preserving manual adjudic
 - Tailwind CSS v3 (styling)
 - Python 3.10–3.12 backend serving API routes and the built frontend (`dist/`) for non-dev usage (3.13+ is blocked by `cgi.FieldStorage` removal until `python/server.py` migrates off it)
 - WaveSurfer 7
-- faster-whisper + CTranslate2 (local STT)
-- wav2vec2 via HuggingFace transformers (local IPA)
-- CUDA 12/13 + PyTorch (GPU inference)
+- faster-whisper + CTranslate2 (local STT / ORTH, with CPU fallback)
+- wav2vec2 via HuggingFace transformers (local forced alignment + IPA; CPU-first on WSL)
+- PyTorch runtime for local ML, with GPU where the host/runtime stack is stable
 
 ---
 
