@@ -61,6 +61,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("parse.mcp_adapter")
 
+MCP_CONFIG_FILENAME = "mcp_config.json"
+
 # ---------------------------------------------------------------------------
 # Ensure the python/ package is importable
 # ---------------------------------------------------------------------------
@@ -69,6 +71,8 @@ _ADAPTER_DIR = Path(__file__).resolve().parent
 _PYTHON_DIR = _ADAPTER_DIR.parent
 if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
+
+from ai.chat_tools import DEFAULT_MCP_TOOL_NAMES
 
 # ---------------------------------------------------------------------------
 # Lazy MCP SDK import
@@ -98,6 +102,79 @@ def _resolve_project_root(cli_root: Optional[str] = None) -> Path:
     if (candidate / "python" / "ai" / "chat_tools.py").exists():
         return candidate
     return Path.cwd()
+
+
+def _resolve_mcp_config_path(project_root_path: Path) -> Optional[Path]:
+    """Return the preferred mcp_config.json path if one exists.
+
+    Preferred location is config/mcp_config.json for consistency with the
+    other PARSE config files. For backward compatibility, also accept a
+    project-root mcp_config.json fallback.
+    """
+    candidates = [
+        project_root_path / "config" / MCP_CONFIG_FILENAME,
+        project_root_path / MCP_CONFIG_FILENAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_mcp_config(project_root_path: Path) -> Dict[str, Any]:
+    """Load MCP adapter config, defaulting to the legacy 29-tool surface."""
+    config_path = _resolve_mcp_config_path(project_root_path)
+    if config_path is None:
+        return {"expose_all_tools": False}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read %s: %s. Falling back to expose_all_tools=false.", config_path, exc)
+        return {"expose_all_tools": False}
+    if not isinstance(payload, dict):
+        logger.warning("Ignoring non-object MCP config at %s. Falling back to expose_all_tools=false.", config_path)
+        return {"expose_all_tools": False}
+    expose_all_tools_raw = payload.get("expose_all_tools", False)
+    if not isinstance(expose_all_tools_raw, bool):
+        logger.warning(
+            "Ignoring non-boolean expose_all_tools=%r at %s. Falling back to expose_all_tools=false.",
+            expose_all_tools_raw,
+            config_path,
+        )
+        expose_all_tools_raw = False
+    return {"expose_all_tools": expose_all_tools_raw, "config_path": str(config_path)}
+
+
+def _selected_mcp_tool_names(all_tool_names: List[str], expose_all_tools: bool) -> List[str]:
+    """Return the MCP tool surface for this server instance."""
+    if expose_all_tools:
+        return list(all_tool_names)
+    available_names = set(all_tool_names)
+    return [name for name in DEFAULT_MCP_TOOL_NAMES if name in available_names]
+
+
+def _mcp_exposure_payload(
+    *,
+    expose_all_tools: bool,
+    config_source: Optional[str],
+    parse_chat_tool_count: int,
+    mcp_tool_count: int,
+) -> Dict[str, Any]:
+    """Build a read-only MCP payload describing the active exposure mode."""
+    return {
+        "tool": "mcp_get_exposure_mode",
+        "ok": True,
+        "result": {
+            "readOnly": True,
+            "previewOnly": True,
+            "mode": "read-only",
+            "exposeAllTools": expose_all_tools,
+            "configSource": config_source,
+            "parseChatToolCount": parse_chat_tool_count,
+            "mcpToolCount": mcp_tool_count,
+            "defaultParseMcpToolCount": len(DEFAULT_MCP_TOOL_NAMES),
+        },
+    }
 
 
 def _load_repo_parse_env(project_root_path: Path) -> Dict[str, str]:
@@ -651,6 +728,10 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         start_normalize_job=normalize_cb,
         list_active_jobs=jobs_cb,
     )
+    mcp_config = _load_mcp_config(root)
+    expose_all_tools = mcp_config.get("expose_all_tools", False)
+    all_mcp_tool_names = ParseChatTools.get_all_tool_names()
+    selected_mcp_tool_names = _selected_mcp_tool_names(all_mcp_tool_names, expose_all_tools)
 
     mcp = FastMCP(
         "parse",
@@ -660,6 +741,21 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             "cognate analysis, STT pipeline control, and contact-language lookup."
         ),
     )
+
+    def _json_tool_result(tool_name: str, args: Dict[str, Any]) -> str:
+        result = tools.execute(tool_name, args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool(name="mcp_get_exposure_mode")
+    def mcp_get_exposure_mode() -> str:
+        """Read the active MCP exposure mode, config source, and tool counts."""
+        payload = _mcp_exposure_payload(
+            expose_all_tools=expose_all_tools,
+            config_source=mcp_config.get("config_path"),
+            parse_chat_tool_count=len(all_mcp_tool_names),
+            mcp_tool_count=len(selected_mcp_tool_names) + 1,
+        )
+        return json.dumps(payload, indent=2, ensure_ascii=False)
 
     # -- Register each ParseChatTools tool as an MCP tool --------------------
     # The cross-check test in python/adapters/test_mcp_adapter.py enforces
@@ -1462,6 +1558,248 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             args["computeType"] = computeType
         result = tools.execute("compute_status", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
+
+    if expose_all_tools:
+        # These wrappers intentionally stay explicit, even in the "all tools"
+        # mode, so the MCP surface remains readable/auditable in code rather
+        # than being generated by reflection magic.
+        def mcp_audio_normalize_start(speaker: str, sourceWav: Optional[str] = None) -> str:
+            """Start speaker audio normalization. Returns a jobId for audio_normalize_status."""
+            args: Dict[str, Any] = {"speaker": speaker}
+            if sourceWav is not None:
+                args["sourceWav"] = sourceWav
+            return _json_tool_result("audio_normalize_start", args)
+        mcp.tool(name="audio_normalize_start")(mcp_audio_normalize_start)
+
+        def mcp_audio_normalize_status(jobId: str) -> str:
+            """Poll a normalize job started with audio_normalize_start."""
+            return _json_tool_result("audio_normalize_status", {"jobId": jobId})
+        mcp.tool(name="audio_normalize_status")(mcp_audio_normalize_status)
+
+        def mcp_enrichments_read(keys: Optional[List[str]] = None) -> str:
+            """Read parse-enrichments.json, optionally filtered to top-level keys."""
+            args: Dict[str, Any] = {}
+            if keys is not None:
+                args["keys"] = keys
+            return _json_tool_result("enrichments_read", args)
+        mcp.tool(name="enrichments_read")(mcp_enrichments_read)
+
+        def mcp_enrichments_write(enrichments: Dict[str, Any], merge: Optional[bool] = None) -> str:
+            """Write or merge enrichments into parse-enrichments.json."""
+            args: Dict[str, Any] = {"enrichments": enrichments}
+            if merge is not None:
+                args["merge"] = merge
+            return _json_tool_result("enrichments_write", args)
+        mcp.tool(name="enrichments_write")(mcp_enrichments_write)
+
+        def mcp_export_annotations_csv(
+            speaker: Optional[str] = None,
+            outputPath: Optional[str] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
+            """Export annotations to CSV, or preview when outputPath is omitted."""
+            args: Dict[str, Any] = {}
+            if speaker is not None:
+                args["speaker"] = speaker
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("export_annotations_csv", args)
+        mcp.tool(name="export_annotations_csv")(mcp_export_annotations_csv)
+
+        def mcp_export_annotations_elan(
+            speaker: str,
+            outputPath: Optional[str] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
+            """Export one speaker's annotations to ELAN .eaf XML."""
+            args: Dict[str, Any] = {"speaker": speaker}
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("export_annotations_elan", args)
+        mcp.tool(name="export_annotations_elan")(mcp_export_annotations_elan)
+
+        def mcp_export_annotations_textgrid(
+            speaker: str,
+            outputPath: Optional[str] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
+            """Export one speaker's annotations to Praat TextGrid."""
+            args: Dict[str, Any] = {"speaker": speaker}
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("export_annotations_textgrid", args)
+        mcp.tool(name="export_annotations_textgrid")(mcp_export_annotations_textgrid)
+
+        def mcp_export_lingpy_tsv(outputPath: Optional[str] = None, dryRun: Optional[bool] = None) -> str:
+            """Export a LingPy TSV preview or write it inside the project."""
+            args: Dict[str, Any] = {}
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("export_lingpy_tsv", args)
+        mcp.tool(name="export_lingpy_tsv")(mcp_export_lingpy_tsv)
+
+        def mcp_export_nexus(outputPath: Optional[str] = None, dryRun: Optional[bool] = None) -> str:
+            """Export a NEXUS preview or write it inside the project."""
+            args: Dict[str, Any] = {}
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("export_nexus", args)
+        mcp.tool(name="export_nexus")(mcp_export_nexus)
+
+        def mcp_jobs_list_active() -> str:
+            """List active jobs in the shared PARSE job registry."""
+            return _json_tool_result("jobs_list_active", {})
+        mcp.tool(name="jobs_list_active")(mcp_jobs_list_active)
+
+        def mcp_lexeme_notes_read(speaker: Optional[str] = None, conceptId: Optional[str] = None) -> str:
+            """Read lexeme notes, optionally narrowed by speaker and/or concept."""
+            args: Dict[str, Any] = {}
+            if speaker is not None:
+                args["speaker"] = speaker
+            if conceptId is not None:
+                args["conceptId"] = conceptId
+            return _json_tool_result("lexeme_notes_read", args)
+        mcp.tool(name="lexeme_notes_read")(mcp_lexeme_notes_read)
+
+        def mcp_lexeme_notes_write(
+            speaker: str,
+            conceptId: str,
+            userNote: Optional[str] = None,
+            importNote: Optional[str] = None,
+            delete: Optional[bool] = None,
+        ) -> str:
+            """Write or delete one lexeme note entry."""
+            args: Dict[str, Any] = {"speaker": speaker, "conceptId": conceptId}
+            if userNote is not None:
+                args["userNote"] = userNote
+            if importNote is not None:
+                args["importNote"] = importNote
+            if delete is not None:
+                args["delete"] = delete
+            return _json_tool_result("lexeme_notes_write", args)
+        mcp.tool(name="lexeme_notes_write")(mcp_lexeme_notes_write)
+
+        def mcp_peaks_generate(
+            speaker: Optional[str] = None,
+            audioPath: Optional[str] = None,
+            outputPath: Optional[str] = None,
+            samplesPerPixel: Optional[int] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
+            """Generate waveform peaks for a speaker or explicit audio file."""
+            args: Dict[str, Any] = {}
+            if speaker is not None:
+                args["speaker"] = speaker
+            if audioPath is not None:
+                args["audioPath"] = audioPath
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if samplesPerPixel is not None:
+                args["samplesPerPixel"] = samplesPerPixel
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("peaks_generate", args)
+        mcp.tool(name="peaks_generate")(mcp_peaks_generate)
+
+        def mcp_phonetic_rules_apply(
+            form: str,
+            mode: Optional[str] = None,
+            form2: Optional[str] = None,
+            rules: Optional[List[Dict[str, Any]]] = None,
+        ) -> str:
+            """Normalize/apply/compare IPA forms using project phonetic rules."""
+            args: Dict[str, Any] = {"form": form}
+            if mode is not None:
+                args["mode"] = mode
+            if form2 is not None:
+                args["form2"] = form2
+            if rules is not None:
+                args["rules"] = rules
+            return _json_tool_result("phonetic_rules_apply", args)
+        mcp.tool(name="phonetic_rules_apply")(mcp_phonetic_rules_apply)
+
+        def mcp_read_audio_info(sourceWav: str) -> str:
+            """Read WAV metadata without loading audio samples."""
+            return _json_tool_result("read_audio_info", {"sourceWav": sourceWav})
+        mcp.tool(name="read_audio_info")(mcp_read_audio_info)
+
+        def mcp_read_text_preview(
+            path: str,
+            startLine: Optional[int] = None,
+            maxLines: Optional[int] = None,
+            maxChars: Optional[int] = None,
+        ) -> str:
+            """Read a bounded preview of a markdown/text file."""
+            args: Dict[str, Any] = {"path": path}
+            if startLine is not None:
+                args["startLine"] = startLine
+            if maxLines is not None:
+                args["maxLines"] = maxLines
+            if maxChars is not None:
+                args["maxChars"] = maxChars
+            return _json_tool_result("read_text_preview", args)
+        mcp.tool(name="read_text_preview")(mcp_read_text_preview)
+
+        def mcp_source_index_validate(
+            mode: Optional[str] = None,
+            speakerId: Optional[str] = None,
+            speakerData: Optional[Dict[str, Any]] = None,
+            manifest: Optional[Dict[str, Any]] = None,
+            outputPath: Optional[str] = None,
+        ) -> str:
+            """Validate one source-index entry or a full source-index manifest."""
+            args: Dict[str, Any] = {}
+            if mode is not None:
+                args["mode"] = mode
+            if speakerId is not None:
+                args["speakerId"] = speakerId
+            if speakerData is not None:
+                args["speakerData"] = speakerData
+            if manifest is not None:
+                args["manifest"] = manifest
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            return _json_tool_result("source_index_validate", args)
+        mcp.tool(name="source_index_validate")(mcp_source_index_validate)
+
+        def mcp_transcript_reformat(
+            inputPath: str,
+            outputPath: Optional[str] = None,
+            speaker: Optional[str] = None,
+            sourceWav: Optional[str] = None,
+            durationSec: Optional[float] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
+            """Reformat a *_coarse.json file into PARSE coarse-transcript schema."""
+            args: Dict[str, Any] = {"inputPath": inputPath}
+            if outputPath is not None:
+                args["outputPath"] = outputPath
+            if speaker is not None:
+                args["speaker"] = speaker
+            if sourceWav is not None:
+                args["sourceWav"] = sourceWav
+            if durationSec is not None:
+                args["durationSec"] = durationSec
+            if dryRun is not None:
+                args["dryRun"] = dryRun
+            return _json_tool_result("transcript_reformat", args)
+        mcp.tool(name="transcript_reformat")(mcp_transcript_reformat)
+
+    logger.info(
+        "MCP exposing %s tools (expose_all_tools=%s)",
+        len(selected_mcp_tool_names),
+        str(expose_all_tools).lower(),
+    )
 
     return mcp
 
