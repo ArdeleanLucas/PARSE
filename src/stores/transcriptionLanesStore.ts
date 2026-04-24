@@ -50,6 +50,9 @@ const DEFAULT_LANES: Record<LaneKind, LaneConfig> = {
   ipa: { visible: true, color: "#059669" },       // emerald — word/lexeme IPA
   stt: { visible: true, color: "#6366f1" },       // indigo
   ortho: { visible: true, color: "#d97706" },     // amber
+  // To surface the sentence tier as a lane later: add "sentence" to LaneKind,
+  // LANE_LABELS above, LANE_ORDER in TranscriptionLanes.tsx, and uncomment:
+  // sentence: { visible: false, color: "#0ea5e9" }, // sky — sentence grouping
 };
 
 async function fetchSttInto(

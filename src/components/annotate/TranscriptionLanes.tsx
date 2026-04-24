@@ -190,6 +190,30 @@ export function TranscriptionLanes({
     }
   }, [scrollLeft]);
 
+  // Keyboard shortcut: `s` splits the currently selected interval at the
+  // WaveSurfer playhead. Suppressed while typing in any input/contenteditable
+  // (including the inline lane editor) so it doesn't hijack keystrokes.
+  useEffect(() => {
+    const sel = selectedInterval;
+    if (!sel || sel.speaker !== speaker) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "s" && e.key !== "S") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (target.isContentEditable) return;
+      }
+      const ws = wsRef.current;
+      const t = ws?.getCurrentTime() ?? 0;
+      e.preventDefault();
+      splitInterval(sel.speaker, sel.tier, sel.index, t);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedInterval, speaker, splitInterval, wsRef]);
+
   // Focus + select-all when entering inline edit mode.
   useEffect(() => {
     if (!editing) return;
@@ -456,31 +480,38 @@ export function TranscriptionLanes({
         );
       })}
 
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          onEdit={() => {
-            setEditing({ kind: menu.kind, index: menu.index });
-            setMenu(null);
-          }}
-          onSplit={() => {
-            const ws = wsRef.current;
-            const t = ws?.getCurrentTime() ?? 0;
-            splitInterval(speaker, menu.kind, menu.index, t);
-            setMenu(null);
-          }}
-          onMerge={() => {
-            mergeIntervals(speaker, menu.kind, menu.index);
-            setMenu(null);
-          }}
-          onDelete={() => {
-            removeInterval(speaker, menu.kind, menu.index);
-            setSelectedInterval(null);
-            setMenu(null);
-          }}
-        />
-      )}
+      {menu && (() => {
+        const target = record?.tiers?.[menu.kind]?.intervals?.[menu.index];
+        if (!target) return null;
+        return (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            laneLabel={LANE_LABELS[menu.kind]}
+            start={target.start}
+            end={target.end}
+            onEdit={() => {
+              setEditing({ kind: menu.kind, index: menu.index });
+              setMenu(null);
+            }}
+            onSplit={() => {
+              const ws = wsRef.current;
+              const t = ws?.getCurrentTime() ?? 0;
+              splitInterval(speaker, menu.kind, menu.index, t);
+              setMenu(null);
+            }}
+            onMerge={() => {
+              mergeIntervals(speaker, menu.kind, menu.index);
+              setMenu(null);
+            }}
+            onDelete={() => {
+              removeInterval(speaker, menu.kind, menu.index);
+              setSelectedInterval(null);
+              setMenu(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -488,22 +519,42 @@ export function TranscriptionLanes({
 interface ContextMenuProps {
   x: number;
   y: number;
+  laneLabel: string;
+  start: number;
+  end: number;
   onEdit: () => void;
   onSplit: () => void;
   onMerge: () => void;
   onDelete: () => void;
 }
 
-function ContextMenu({ x, y, onEdit, onSplit, onMerge, onDelete }: ContextMenuProps) {
+function ContextMenu({
+  x,
+  y,
+  laneLabel,
+  start,
+  end,
+  onEdit,
+  onSplit,
+  onMerge,
+  onDelete,
+}: ContextMenuProps) {
   return (
     <div
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-50 min-w-[160px] rounded border border-slate-200 bg-white py-1 text-[12px] shadow-lg"
+      className="fixed z-50 min-w-[200px] rounded border border-slate-200 bg-white py-1 text-[12px] shadow-lg"
       style={{ left: x, top: y }}
       role="menu"
     >
-      <MenuItem label="Edit text" hint="Enter" onClick={onEdit} />
-      <MenuItem label="Split at playhead" onClick={onSplit} />
+      <div className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        {laneLabel}
+        <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-slate-400">
+          {start.toFixed(3)}–{end.toFixed(3)}s
+        </span>
+      </div>
+      <div className="mb-1 h-px bg-slate-100" />
+      <MenuItem label="Edit text" hint="dbl-click" onClick={onEdit} />
+      <MenuItem label="Split at playhead" hint="S" onClick={onSplit} />
       <MenuItem label="Merge with next" onClick={onMerge} />
       <div className="my-1 h-px bg-slate-100" />
       <MenuItem label="Delete" danger onClick={onDelete} />
