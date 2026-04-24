@@ -335,8 +335,23 @@ def test_mcp_forwards_annotations_meta_and_strict_schema_for_dangerous_mutator(t
     assert enrichments_write.annotations.destructiveHint is True
     assert enrichments_write.annotations.readOnlyHint is False
     assert enrichments_write.meta["x-parse"]["mutability"] == "mutating"
-    assert enrichments_write.meta["x-parse"]["supportsDryRun"] is True
+    assert enrichments_write.meta["x-parse"]["supports_dry_run"] is True
+    assert enrichments_write.meta["x-parse"]["dry_run_parameter"] == "dryRun"
     assert any(
         cond["id"] == "project_loaded"
         for cond in enrichments_write.meta["x-parse"]["preconditions"]
     )
+
+
+def test_can_list_tools_requiring_project_loaded(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    requiring_project = {
+        spec.name
+        for spec in tools.iter_tool_specs()
+        if any(cond.id == "project_loaded" for cond in spec.preconditions)
+    }
+
+    assert "enrichments_write" in requiring_project
+    assert "pipeline_run" in requiring_project
+    assert "project_context_read" not in requiring_project

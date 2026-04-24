@@ -29,6 +29,22 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 - Default MCP surface is **30 tools**: the legacy 29 `ParseChatTools` wrappers plus read-only `mcp_get_exposure_mode` for self-inspection.
 - Enabling `expose_all_tools` expands the MCP surface to **48 tools**: all 47 `ParseChatTools` plus `mcp_get_exposure_mode`.
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
+- `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
+- Mutability meanings:
+  - `read_only` — inspection only; no writes or background jobs
+  - `stateful_job` — starts or manages a background job that can later mutate project artifacts
+  - `mutating` — can write files or otherwise change project state directly
+- Agent-facing safety reasoning should read `meta["x-parse"]["preconditions"]` / `postconditions` instead of guessing from prose. Example:
+
+```python
+x_parse = tool.meta["x-parse"]
+if any(cond["id"] == "project_loaded" for cond in x_parse["preconditions"]):
+    # Load / verify project context before calling the tool.
+    ...
+if x_parse["supports_dry_run"]:
+    # Prefer a preview call before a mutating call.
+    ...
+```
 
 ## Client/Server Contract Surface
 

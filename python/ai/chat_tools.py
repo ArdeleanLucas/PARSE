@@ -102,6 +102,23 @@ ONBOARD_AUDIO_EXTENSIONS = frozenset({".wav", ".flac", ".mp3", ".ogg", ".m4a"})
 MEMORY_MAX_BYTES = 256 * 1024  # 256 KB cap on parse-memory.md
 MEMORY_SECTION_SLUG_RE = re.compile(r"[^A-Za-z0-9 _./-]+")
 
+TOOL_MUTABILITY_READ_ONLY = "read_only"
+TOOL_MUTABILITY_STATEFUL_JOB = "stateful_job"
+TOOL_MUTABILITY_MUTATING = "mutating"
+
+TOOL_CONDITION_KIND_PROJECT_STATE = "project_state"
+TOOL_CONDITION_KIND_FILE_PRESENCE = "file_presence"
+TOOL_CONDITION_KIND_INPUT_SHAPE = "input_shape"
+TOOL_CONDITION_KIND_FILESYSTEM_WRITE = "filesystem_write"
+TOOL_CONDITION_KIND_JOB_STATE = "job_state"
+TOOL_CONDITION_KINDS = frozenset({
+    TOOL_CONDITION_KIND_PROJECT_STATE,
+    TOOL_CONDITION_KIND_FILE_PRESENCE,
+    TOOL_CONDITION_KIND_INPUT_SHAPE,
+    TOOL_CONDITION_KIND_FILESYSTEM_WRITE,
+    TOOL_CONDITION_KIND_JOB_STATE,
+})
+
 
 class ChatToolError(Exception):
     """Base chat tool error."""
@@ -122,7 +139,7 @@ class ToolCondition:
     id: str
     description: str
     severity: str = "required"
-    kind: str = "project_state"
+    kind: str = TOOL_CONDITION_KIND_PROJECT_STATE
 
     def to_payload(self) -> Dict[str, str]:
         return {
@@ -140,15 +157,15 @@ class ChatToolSpec:
     name: str
     description: str
     parameters: Dict[str, Any]
-    mutability: str = "read_only"
+    mutability: str = TOOL_MUTABILITY_READ_ONLY
     supports_dry_run: bool = False
     dry_run_parameter: Optional[str] = None
     preconditions: Tuple[ToolCondition, ...] = ()
     postconditions: Tuple[ToolCondition, ...] = ()
 
     def mcp_annotations_payload(self) -> Dict[str, Any]:
-        destructive = self.mutability == "mutating"
-        read_only = self.mutability == "read_only"
+        destructive = self.mutability == TOOL_MUTABILITY_MUTATING
+        read_only = self.mutability == TOOL_MUTABILITY_READ_ONLY
         payload: Dict[str, Any] = {
             "readOnlyHint": read_only,
             "destructiveHint": destructive,
@@ -159,8 +176,8 @@ class ChatToolSpec:
     def mcp_meta_payload(self) -> Dict[str, Any]:
         return {
             "mutability": self.mutability,
-            "supportsDryRun": self.supports_dry_run,
-            "dryRunParameter": self.dry_run_parameter,
+            "supports_dry_run": self.supports_dry_run,
+            "dry_run_parameter": self.dry_run_parameter,
             "preconditions": [condition.to_payload() for condition in self.preconditions],
             "postconditions": [condition.to_payload() for condition in self.postconditions],
         }
@@ -171,8 +188,10 @@ def _tool_condition(
     description: str,
     *,
     severity: str = "required",
-    kind: str = "project_state",
+    kind: str = TOOL_CONDITION_KIND_PROJECT_STATE,
 ) -> ToolCondition:
+    if kind not in TOOL_CONDITION_KINDS:
+        raise ValueError("Unsupported ToolCondition kind: {0}".format(kind))
     return ToolCondition(
         id=condition_id,
         description=description,
@@ -185,6 +204,7 @@ def _project_loaded_condition() -> ToolCondition:
     return _tool_condition(
         "project_loaded",
         "The PARSE project root must be available and readable.",
+        kind=TOOL_CONDITION_KIND_PROJECT_STATE,
     )
 
 
@@ -2003,6 +2023,10 @@ class ParseChatTools:
                 }
             )
         return payload
+
+    def iter_tool_specs(self) -> Tuple[ChatToolSpec, ...]:
+        """Return all registered tool specs in a stable name-sorted order."""
+        return tuple(self._tool_specs[name] for name in self.tool_names())
 
     def tool_spec(self, tool_name: str) -> ChatToolSpec:
         """Return the ChatToolSpec for a registered tool."""
