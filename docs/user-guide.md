@@ -45,9 +45,11 @@ The current Annotate surface includes:
   - STT
   - IPA
   - ORTH
+- **Inline lane editing** across STT, IPA, and ORTH via double-click or right-click context actions
 - **Synchronized horizontal scrolling** between waveform and lanes
 - **Clip-bounded playback** for the selected region
 - A global **Space** play/pause hotkey
+- **Per-speaker undo/redo** controls in the Annotate playback bar, with `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+Y`
 - Concept display and sorting controls
 - Tag/filter controls for selective review
 - The shared **AI chat dock**
@@ -74,6 +76,7 @@ The speaker-level STT job (`/api/stt`) provides:
 - automatic language detection from project metadata when available
 - tunable task / VAD / beam-size settings through config
 - nested word-level timestamps in `segments[].words[]`
+- an editable STT lane in Annotate mode: the first manual STT edit lazily migrates cached STT segments into `record.tiers.stt`, after which STT supports the same inline edit / split / merge / delete affordances as IPA and ORTH
 
 This is the main starting point for locating lexical material in long recordings.
 
@@ -126,6 +129,8 @@ Automation in PARSE is intentionally review-first.
 
 Annotate mode supports:
 
+- inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions
+- per-speaker undo/redo with merge recovery and operation-labelled toasts
 - draggable lexeme timestamp editing
 - manual boundary correction
 - constant timestamp-offset detect/apply workflows for CSV↔audio misalignment

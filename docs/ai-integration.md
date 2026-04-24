@@ -217,11 +217,11 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (47 tools)
+## Full built-in chat tool surface (50 tools)
 
-The in-app assistant currently exposes **47 PARSE-specific tools**.
+The in-app assistant currently exposes **50 PARSE-specific tools**.
 
-### Read-only / preview tools (16)
+### Read-only / preview tools (15)
 
 | Tool | Description |
 |---|---|
@@ -240,7 +240,15 @@ The in-app assistant currently exposes **47 PARSE-specific tools**.
 | `enrichments_read` | Read computed enrichments with optional top-level filtering |
 | `lexeme_notes_read` | Read stored lexeme notes with optional speaker/concept filtering |
 | `phonetic_rules_apply` | Apply or inspect phonetic-rule normalization / equivalence logic |
-| `jobs_list_active` | List active background jobs so agents can recover state after restarts |
+
+### Job observability tools (4)
+
+| Tool | Description |
+|---|---|
+| `jobs_list_active` | List active backend jobs so the in-app assistant can recover progress after reloads |
+| `jobs_list` | List active or recent jobs with status / type / speaker filters |
+| `job_status` | Read one generic job snapshot, including `errorCode`, progress, lock metadata, and log counts |
+| `job_logs` | Read structured per-job logs and surfaced crash-log tails |
 
 ### Job-triggering tools (12)
 
@@ -312,12 +320,12 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros that live outside the built-in 47-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 50-tool chat surface.
 
-- **Built-in chat tools**: 47
+- **Built-in chat tools**: 50
 - **Default MCP task tools**: 32
-- **Default MCP adapter surface including `mcp_get_exposure_mode`**: 33
-- **Full MCP adapter surface with `expose_all_tools=true`**: 51
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 36
+- **Full MCP adapter surface with `expose_all_tools=true`**: 54
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

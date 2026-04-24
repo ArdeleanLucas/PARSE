@@ -266,7 +266,12 @@ That is normal. The default MCP surface is curated. If you need the full PARSE t
 
 ### Can I use an official `parse_mcp` Python package or an HTTP MCP bridge?
 
-Not from the current repository state. The shipped, code-verified external-agent interfaces in this repo are the **stdio MCP adapter** and the **local HTTP API**.
+Yes. Current `main` ships both:
+
+- the **HTTP MCP bridge** on the local PARSE server (`/api/mcp/exposure`, `/api/mcp/tools`, `/api/mcp/tools/{toolName}`)
+- the official **`parse-mcp`** Python package scaffold under `python/packages/parse_mcp/`
+
+For most local agent setups, the **stdio MCP adapter** is still the simplest place to start. Use the HTTP bridge or `parse-mcp` when you need schema discovery / execution over HTTP or wrapper integration with LangChain, LlamaIndex, or CrewAI.
 
 ## What’s next
 

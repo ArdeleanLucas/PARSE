@@ -14,11 +14,11 @@ flowchart LR
     Client --> Server[python/server.py\nHTTP API + built frontend serving]
     Server --> Annotations[annotations/<Speaker>.json\nper-speaker annotation records]
     Server --> Enrichments[parse-enrichments.json\ncomparative overlays + notes]
-    Server --> ChatTools[python/ai/chat_tools.py\n47 PARSE-specific tools]
+    Server --> ChatTools[python/ai/chat_tools.py\n50 PARSE-specific tools]
     Server --> Compare[python/compare/*\ncognates + CLEF providers]
     Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
     Server --> External[OpenAPI 3.1 + HTTP MCP bridge\n/openapi.json + /api/mcp/*]
-    ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + workflow macros]
+    ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + 3 workflow macros]
     External --> PyPkg[python/packages/parse_mcp\nLangChain / LlamaIndex / CrewAI wrappers]
     Compare --> Exports[LingPy TSV + NEXUS]
 ```
@@ -289,9 +289,9 @@ The in-app assistant works through `python/ai/chat_tools.py`.
 
 Current counts:
 
-- **47** built-in PARSE chat tools
+- **50** built-in PARSE chat tools
 - **32** MCP task tools via `python/adapters/mcp_adapter.py`
-- **33** total default MCP adapter tools including `mcp_get_exposure_mode`
+- **36** total default MCP adapter tools including workflow macros + `mcp_get_exposure_mode`
 
 This separation matters architecturally:
 

@@ -4,23 +4,23 @@ Future improvements to make PARSE a first-class citizen in agent-driven workflow
 
 ---
 
-## 1. Expose all 47 ParseChatTools via MCP
+## 1. Expose all 50 ParseChatTools via MCP
 
 **Status:** ✅ Complete
 
 **Shipped:**
-- `python/adapters/mcp_adapter.py` still exposes the legacy **29 `ParseChatTools`** surface by default.
-- Task 3 adds 3 workflow macros on top of that base, so the current default adapter surface is **33 tools total** including `mcp_get_exposure_mode`.
-- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface; with the 3 workflow macros and `mcp_get_exposure_mode`, the current full adapter surface is **51 tools total**:
+- `python/adapters/mcp_adapter.py` exposes a curated **32-tool default task surface** by default.
+- Task 3 adds 3 workflow macros on top of that base, so the current default adapter surface is **36 tools total** including `mcp_get_exposure_mode`.
+- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **50-tool** `ParseChatTools` surface; with the 3 workflow macros and `mcp_get_exposure_mode`, the current full adapter surface is **54 tools total**:
 
 ```json
 { "expose_all_tools": true }
 ```
 
 **Notes:**
-- Default behavior is unchanged for existing callers that rely on the legacy 29 PARSE tool wrappers.
+- Default behavior remains curated for external agents rather than mirroring the entire in-app chat surface.
 - The internal chat dock still uses `ParseChatTools` directly; this task only changes MCP exposure.
-- Newly exposed tools include the missing write/export/pipeline helpers such as normalize, enrichments, lexeme notes, exports, peaks, source-index validation, and transcript reformatting.
+- Newly exposed tools now also include the generic job observability trio (`jobs_list`, `job_status`, `job_logs`) alongside the earlier write/export/pipeline helpers.
 - `mcp_get_exposure_mode` lets external agents self-inspect whether the active MCP server is running in the default or full-exposure mode.
 
 ---
@@ -57,11 +57,22 @@ Macros are easier to discover, easier to prompt, and safer to execute.
 
 ## 4. Observability & control layer
 
-Critical for long-running agent jobs:
+**Status:** ✅ Complete
 
-- Expose job queue status, progress percentage, and live logs via MCP/HTTP.
-- Add webhook / callback URL support so agents are notified when heavy jobs finish (e.g., batch STT on a 2-hour recording).
-- Resource locking so a human and an agent can't mutate the same speaker concurrently.
+**Shipped:**
+- Generic HTTP observability endpoints:
+  - `GET /api/jobs`
+  - `GET /api/jobs/{jobId}`
+  - `GET /api/jobs/{jobId}/logs`
+- Matching MCP tools:
+  - `jobs_list`
+  - `job_status`
+  - `job_logs`
+- Shared job payloads now include structured progress, `errorCode`, `logCount`, and lock metadata.
+- Heavy job starters can carry a `callbackUrl`, so external automation can receive the final generic job payload on `complete` / `error`.
+- Speaker-scoped lock metadata prevents humans and agents from mutating the same resources silently in parallel.
+
+These changes make long-running PARSE jobs inspectable across the UI, HTTP automation, and MCP clients with one consistent status shape.
 
 ---
 

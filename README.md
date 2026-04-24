@@ -12,8 +12,8 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 
 - **Dual-mode unified React shell** for annotation and comparison in one workspace
 - **Fieldwork-first design** for long recordings, uneven metadata, and iterative review
-- **AI-native workflow surface** with a built-in chat assistant powered by **47 PARSE-specific tools**
-- **Full MCP server mode** exposing a curated **32-tool task surface** for external agents and automation, plus `mcp_get_exposure_mode`
+- **AI-native workflow surface** with a built-in chat assistant powered by **50 PARSE-specific tools**
+- **Full MCP server mode** exposing a curated **32-tool task surface** by default (**36** adapter tools including workflow macros + `mcp_get_exposure_mode`)
 - **CLEF — Contact Lexeme Explorer Feature** for borrowing adjudication via a 10-provider contact-language lookup stack
 - **Lexical Anchor Alignment System** for locating repeated lexical items across long recordings and across speakers
 - **Export pipeline** for LingPy TSV and NEXUS outputs used in downstream comparative workflows
@@ -49,12 +49,13 @@ It combines:
 
 - **WaveSurfer 7** waveform review for long recordings
 - **Four annotation tiers**: IPA, orthography, concept, and speaker
-- **Stacked transcription lanes** for STT, IPA, and ORTH with synchronized horizontal scrolling
+- **Stacked transcription lanes** for STT, IPA, and ORTH with synchronized horizontal scrolling and inline edit / split / merge / delete controls
 - **Audio normalization**, **speaker-level STT**, **ORTH transcription**, and **acoustic IPA fill** jobs
 - **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries
+- **Per-speaker undo/redo** for annotation edits, including merge recovery and STT-tier migration
 - **Draggable timestamp correction** and clip-bounded playback for manual review
 - **Batch transcription** with preflight checks and rerun-failed support
-- **Timestamp-offset detection/apply workflows** for constant CSV↔audio misalignment
+- **Timestamp-offset detection/apply workflows** for constant CSV↔audio misalignment, now with async progress, crash-log surfacing, and protection for manually adjusted / anchored lexemes
 - **Search & anchor lexeme** tooling built on the Lexical Anchor Alignment System
 - **Shared tags** and the in-session **AI chat dock**
 
@@ -96,11 +97,19 @@ PARSE exposes three machine-facing integration surfaces:
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
 Current counts:
-- **47** built-in `ParseChatTools`
+- **50** built-in `ParseChatTools`
 - **3** workflow macros in `python/ai/workflow_tools.py`
 - **32** default MCP task tools
-- **33** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
-- **51** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+- **36** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
+- **54** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+
+#### Generic job observability
+
+- `GET /api/jobs` — list recent jobs with status / progress / type filters
+- `GET /api/jobs/{jobId}` — read one generic job snapshot, including `errorCode`, `logCount`, and lock metadata
+- `GET /api/jobs/{jobId}/logs` — read structured per-job logs (and crash-log tails when present)
+
+These endpoints back the in-app progress UI, the MCP observability tools, and callback-driven external automation.
 
 #### OpenAPI and interactive docs
 
@@ -143,10 +152,10 @@ It provides:
 ## 📚 Documentation
 
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
-- [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP automation entry points, environment conventions, and agent-facing examples
+- [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP MCP bridge / `parse-mcp` entry points, environment conventions, and agent-facing examples
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
-- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 47-tool chat surface, and MCP workflow macros
-- [API Reference](docs/api-reference.md) — HTTP endpoints, OpenAPI docs, MCP bridge routes, examples, and the full 32-tool MCP task surface
+- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 50-tool chat surface, and MCP workflow macros
+- [API Reference](docs/api-reference.md) — HTTP endpoints, generic job observability, OpenAPI docs, MCP bridge routes, examples, and the full 32-tool MCP task surface
 - [MCP Schema](docs/mcp-schema.md) — MCP schema shape, HTTP bridge endpoints, exposure modes, and authentication model
 - [Architecture](docs/architecture.md) — unified shell, backend/data design, OpenAPI/MCP standardization points, and CLEF provider registry
 - [Developer Guide](docs/developer-guide.md) — project structure, tech stack, local development flow, and extension points for chat tools, MCP tools, and endpoints

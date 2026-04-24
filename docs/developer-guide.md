@@ -38,7 +38,7 @@ python/
   adapters/
     mcp_adapter.py      -- MCP adapter
   ai/
-    chat_tools.py       -- ParseChatTools (47 tools)
+    chat_tools.py       -- ParseChatTools (50 tools)
     chat_orchestrator.py
     stt_pipeline.py
     forced_align.py
@@ -259,7 +259,7 @@ A new tool should follow this pattern:
    - alignment / correction
    - tag-related
    - write / export / merge
-4. Update `docs/ai-integration.md` to keep the 47-tool list current
+4. Update `docs/ai-integration.md` to keep the 50-tool list current
 5. If the tool should also be exposed externally, add it to the MCP adapter and update `docs/api-reference.md`
 
 ### Why this matters

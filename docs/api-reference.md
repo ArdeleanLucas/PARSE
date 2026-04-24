@@ -28,6 +28,8 @@ A few patterns recur across the API:
 
 - job-start endpoints usually return `{ "jobId": "...", "status": "running" }`
 - status endpoints typically accept either `jobId` or `job_id`
+- generic job snapshots expose shared fields such as `type`, `status`, `progress`, `message`, `errorCode`, `logCount`, and `locks`
+- heavy-job starters can optionally attach a `callbackUrl` so external automation can receive the final generic job payload on completion or error
 - binary export/image endpoints return files rather than JSON
 - compute endpoints normalize job handling across multiple background workflows
 - `/api/config` carries a schema-versioned payload; if the config contract changes incompatibly, update the corresponding version constants in both `python/server.py` and `src/api/client.ts`
@@ -43,7 +45,10 @@ A few patterns recur across the API:
 | `GET /api/stt-segments/{speaker}` | Read cached STT segments for a speaker | Returns `segments: []` when cache is missing rather than 404 |
 | `GET /api/enrichments` | Read comparative enrichments | Returns `{ enrichments: ... }` |
 | `GET /api/tags` | Read tag definitions and assignments | Shared across Annotate and Compare |
+| `GET /api/jobs` | List recent backend jobs | Supports status / type / speaker filters and returns generic job snapshots |
 | `GET /api/jobs/active` | List active backend jobs | Used to rehydrate progress after reload |
+| `GET /api/jobs/{jobId}` | Read one backend job | Includes generic status, progress, `errorCode`, `logCount`, and lock metadata |
+| `GET /api/jobs/{jobId}/logs` | Read structured logs for one backend job | Returns per-entry timestamps, levels, events, and crash-log tails when present |
 | `GET /api/pipeline/state/{speaker}` | Read coverage-aware pipeline state | Includes `full_coverage` metadata per step |
 | `GET /api/chat/session/{sessionId}` | Read one chat session | Returns message history and token metadata |
 
@@ -111,9 +116,9 @@ A few patterns recur across the API:
 | `POST /api/enrichments` | Save enrichments | Accepts either `{ enrichments: ... }` or the raw object |
 | `POST /api/config` | Update project configuration | Current server accepts POST as an update path |
 | `POST /api/tags/merge` | Merge tag definitions | Shared tag persistence |
-| `POST /api/offset/detect` | Detect a constant timestamp offset | Supports STT-based alignment checks |
-| `POST /api/offset/detect-from-pair` | Detect a timestamp offset from trusted manual pairs | STT-free correction path |
-| `POST /api/offset/apply` | Apply a constant timestamp shift | Mutates the speaker annotation file |
+| `POST /api/offset/detect` | Detect a constant timestamp offset | Starts an async compute job with progress updates and crash-log capture |
+| `POST /api/offset/detect-from-pair` | Detect a timestamp offset from trusted manual pairs | STT-free async correction path |
+| `POST /api/offset/apply` | Apply a constant timestamp shift | Mutates the speaker annotation file while preserving manually adjusted / anchored lexemes |
 
 ## PUT endpoints
 
@@ -390,7 +395,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Full MCP task surface (32 task tools + `mcp_get_exposure_mode`)
+## Full MCP task surface (32 task tools + 3 workflow macros; 36 default adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -422,6 +427,14 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `pipeline_run` | Start a one-speaker full pipeline or step-subset run |
 | `compute_status` | Poll any compute job |
 
+### Job observability
+
+| Tool | Description |
+|---|---|
+| `jobs_list` | List active or recent jobs with optional status / type / speaker filters |
+| `job_status` | Read one generic job snapshot, including `errorCode`, progress, `logCount`, and lock metadata |
+| `job_logs` | Read structured per-job logs and surfaced crash-log tails |
+
 ### Alignment / correction
 
 | Tool | Description |
@@ -448,6 +461,8 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `run_full_annotation_pipeline` | Run STT → forced alignment → acoustic IPA for one speaker in one call |
 | `prepare_compare_mode` | Resolve a concept slice across speakers and return a compare-ready preview bundle |
 | `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
+
+`jobs_list_active` remains an in-app assistant helper, but the MCP/default external surface now uses the generic `jobs_list` / `job_status` / `job_logs` trio so agents can inspect both active and recent work consistently.
 
 ## `parse-mcp` Python package
 
