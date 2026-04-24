@@ -1,0 +1,219 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  schema-compatibility:
+    name: Schema Compatibility Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate frontend/backend config schema contract
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          server_text = pathlib.Path("python/server.py").read_text(encoding="utf-8")
+          client_text = pathlib.Path("src/api/client.ts").read_text(encoding="utf-8")
+
+          patterns = {
+              "server": r"^CONFIG_SCHEMA_VERSION\s*=\s*(\d+)\b",
+              "client": r"^const CONFIG_SCHEMA_VERSION\s*=\s*(\d+)\b",
+          }
+
+          values = {}
+          for label, pattern in patterns.items():
+              match = re.search(pattern, server_text if label == "server" else client_text, re.MULTILINE)
+              if not match:
+                  raise SystemExit(f"Could not find schema version constant for {label}: {pattern}")
+              values[label] = int(match.group(1))
+
+          print(f"Backend CONFIG_SCHEMA_VERSION = {values['server']}")
+          print(f"Frontend CONFIG_SCHEMA_VERSION = {values['client']}")
+
+          if values["server"] != values["client"]:
+              raise SystemExit(
+                  "Schema version mismatch: "
+                  f"backend={values['server']} frontend={values['client']}. "
+                  "Bump python/server.py and src/api/client.ts together."
+              )
+          PY
+
+  frontend:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # setup-node caches the npm download cache; this cache keeps the fully
+      # materialized node_modules tree so repeat runs can skip npm ci entirely.
+      - name: Restore node_modules cache
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-
+
+      - name: Install frontend dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Setup Python for API regression tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Type check
+        run: ./node_modules/.bin/tsc --noEmit
+
+      - name: Detect ESLint
+        id: eslint
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+          const eslintConfigFiles = [
+            'eslint.config.js',
+            'eslint.config.cjs',
+            'eslint.config.mjs',
+            '.eslintrc',
+            '.eslintrc.js',
+            '.eslintrc.cjs',
+            '.eslintrc.json',
+            '.eslintrc.yml',
+            '.eslintrc.yaml',
+          ];
+          const hasConfig = eslintConfigFiles.some((file) => fs.existsSync(file));
+          const hasDependency = Boolean(deps.eslint);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `present=${hasConfig || hasDependency}\n`);
+          NODE
+
+      - name: Lint frontend
+        if: steps.eslint.outputs.present == 'true'
+        run: npx eslint . --ext .ts,.tsx
+
+      - name: Skip frontend lint
+        if: steps.eslint.outputs.present != 'true'
+        run: echo "No ESLint dependency/config found; skipping lint."
+
+      - name: Run Vitest unit tests
+        run: npm run test
+
+      - name: Run API regression integration tests
+        env:
+          PARSE_PYTHON_BIN: python
+        run: npm run test:api
+
+      - name: Build frontend
+        run: npm run build
+
+  backend-light:
+    name: Backend CI (lightweight)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Restore pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-
+
+      - name: Install lightweight backend CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The repo currently has no requirements.txt / pyproject lockfile.
+          # Keep CI cheap and deterministic: install only lint + test tooling,
+          # and rely on PARSE's lazy imports to avoid heavy ML/GPU packages.
+          python -m pip install pytest ruff
+
+      - name: Lint backend runtime modules (fatal rules only)
+        run: |
+          python -m ruff check python/ --select E9,F63,F7,F82
+
+      - name: Compile Python sources
+        run: python -m compileall python
+
+      - name: Smoke-import server and key backend modules
+        env:
+          PYTHONPATH: python
+        run: |
+          python - <<'PY'
+          import importlib
+
+          modules = [
+              'server',
+              'ai.provider',
+              'ai.stt_pipeline',
+              'ai.openai_auth',
+              'compare.offset_detect',
+              'compare.cross_speaker_match',
+              'shared.runtime_config',
+          ]
+
+          for module_name in modules:
+              importlib.import_module(module_name)
+              print(f"Imported {module_name}")
+          PY
+
+      - name: Run lightweight backend regression tests
+        env:
+          PYTHONPATH: python
+        run: |
+          python -m pytest -q \
+            python/test_server_workspace_config.py \
+            python/test_server_static_paths.py \
+            python/test_openai_auth_status.py \
+            python/test_chat_job_result_shape.py \
+            python/test_run_stt_job.py \
+            python/test_server_auth_key_refresh.py
