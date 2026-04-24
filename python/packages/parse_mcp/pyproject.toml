@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,21 +8,31 @@ version = "0.1.0"
 description = "Official PARSE MCP HTTP bridge client and agent-framework wrappers"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   {name = "Lucas Ardelean"}
 ]
 dependencies = [
   "pydantic>=2.7,<3",
 ]
-keywords = ["mcp", "linguistics", "fieldwork", "phonetics", "langchain", "llamaindex", "crewai"]
+keywords = ["mcp", "linguistics", "fieldwork", "phonetics", "langchain", "llama-index", "llamaindex", "crewai"]
 classifiers = [
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
   "Topic :: Software Development :: Libraries",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ArdeleanLucas/PARSE"
+Repository = "https://github.com/ArdeleanLucas/PARSE"
+Issues = "https://github.com/ArdeleanLucas/PARSE/issues"
+Documentation = "https://github.com/ArdeleanLucas/PARSE/tree/main/docs"
 
 [project.optional-dependencies]
 langchain = ["langchain-core>=0.2"]

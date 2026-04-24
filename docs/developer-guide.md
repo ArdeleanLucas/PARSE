@@ -299,6 +299,30 @@ When adding or renaming MCP-visible tools, update all three layers together:
 - HTTP MCP bridge
 - `parse-mcp` package docs/tests
 
+### Publishing `parse-mcp` to PyPI
+
+When the package metadata or release contents change, validate and publish from the repo root.
+
+1. Validate locally and build the release artifacts.
+2. Test on TestPyPI first so you can confirm installability before the real release.
+3. Publish the same version to PyPI only after the TestPyPI smoke check looks correct.
+
+```bash
+python3 -m pip install build twine
+python3 -m pytest python/packages/parse_mcp/tests -q
+python3 -m build python/packages/parse_mcp
+python3 -m twine check python/packages/parse_mcp/dist/*
+python3 -m twine upload --repository testpypi python/packages/parse_mcp/dist/*
+python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ parse-mcp
+python3 -m twine upload python/packages/parse_mcp/dist/*
+```
+
+Release notes:
+- preferred public package name: `parse-mcp`
+- current metadata lives in `python/packages/parse_mcp/pyproject.toml`
+- the repo owner should remain the primary PyPI maintainer
+- publish to TestPyPI first when releasing a version for the first time or after metadata changes
+
 ## How to add or extend a CLEF provider
 
 CLEF providers live under `python/compare/providers/`.
