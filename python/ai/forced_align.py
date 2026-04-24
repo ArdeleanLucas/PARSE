@@ -144,16 +144,18 @@ class Aligner:
         # Persistent-worker fast path: when a long-lived worker pre-loaded
         # the default model at startup, subsequent calls for the same
         # model reuse the cached instance instead of reloading 1.2 GB
-        # of weights (and, critically, avoid re-calling
-        # ``torch.set_num_interop_threads`` which raises once parallel
-        # work has started — see PRs #162-169). Compare via
-        # ``resolve_device`` so a caller asking for ``"cuda"`` on WSL
-        # still matches the preloaded ``"cpu"`` aligner. Tests and
-        # non-worker callers are unaffected because the cache stays
-        # ``None``.
-        if _PRELOADED_ALIGNER is not None and model_name == DEFAULT_MODEL_NAME:
-            if resolve_device(device) == _PRELOADED_ALIGNER.device:
-                return _PRELOADED_ALIGNER
+        # of weights (and avoid re-calling torch.set_num_interop_threads).
+        if (
+            _PRELOADED_ALIGNER is not None
+            and model_name == DEFAULT_MODEL_NAME
+            # We only reuse the preloaded instance when the caller did not
+            # explicitly request a different device (or when it matches).
+            # This is a safety net: if someone later passes device="cuda"
+            # we do NOT silently hand them the CPU version that the worker
+            # pre-loaded under WSL force-CPU rules.
+            and (device is None or resolve_device(device) == _PRELOADED_ALIGNER.device)
+        ):
+            return _PRELOADED_ALIGNER
 
         try:
             import torch  # type: ignore

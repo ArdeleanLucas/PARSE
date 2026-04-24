@@ -168,6 +168,9 @@ class WorkerHandle:
                     self._mark_survivors_errored(
                         "Persistent compute worker exited unexpectedly."
                     )
+                    print(
+                        "[WORKER] process died unexpectedly", file=sys.stderr, flush=True
+                    )
                     return
                 continue
 
@@ -292,12 +295,18 @@ def _install_parent_emitters(event_queue: Any) -> None:
 def _install_aligner_preload() -> Any:
     """Load the wav2vec2 Aligner once and expose it to forced_align.
 
-    ``resolve_device(None)`` honours the existing WSL force-CPU logic.
+    Explicitly resolves device (honours WSL force-CPU / CUDA_VISIBLE_DEVICES etc.)
+    and logs the final device. Helpful when we start testing GPU in persistent mode.
     """
-    from ai.forced_align import Aligner
+    from ai.forced_align import Aligner, resolve_device
     from ai import forced_align as fa
 
+    device = resolve_device(None)  # respects all WSL/PM2 force-CPU guards
     aligner = Aligner.load()
+    print(
+        f"[WORKER] Aligner pre-loaded on {getattr(aligner, 'device', device)}",
+        file=sys.stderr, flush=True
+    )
     fa._PRELOADED_ALIGNER = aligner
     return aligner
 
@@ -351,7 +360,7 @@ def worker_main(job_queue: Any, event_queue: Any) -> None:
     )
 
     try:
-        aligner = _install_aligner_preload()
+        _install_aligner_preload()
     except Exception as exc:
         print(
             "[WORKER] Aligner.load() failed at startup: {0}\n{1}".format(
@@ -362,12 +371,6 @@ def worker_main(job_queue: Any, event_queue: Any) -> None:
         )
         # Do NOT emit ready — parent's wait() will time out and report.
         return
-
-    print(
-        "[WORKER] Aligner pre-loaded on {0}".format(getattr(aligner, "device", "?")),
-        file=sys.stderr,
-        flush=True,
-    )
 
     try:
         import server as server_mod  # noqa: F401

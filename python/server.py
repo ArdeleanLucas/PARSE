@@ -4080,13 +4080,13 @@ def _compute_training_job(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any
 
     Wired into the compute dispatcher so the frontend / API can already
     POST `/api/compute/train_ipa_model`. The actual run will delegate to
-    the `ipa-phonetic-autoresearch` harness once that persistent-worker
-    integration lands.
+    the `ipa-phonetic-autoresearch` harness (runs in the persistent worker
+    once that integration lands — GPU training will be fully supported here).
     """
     _set_job_progress(
         job_id,
         0.0,
-        message="Training job accepted (harness integration pending)",
+        message="Training job accepted (persistent-worker GPU harness pending)",
     )
     return {
         "status": "pending",
