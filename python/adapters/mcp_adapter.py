@@ -81,9 +81,11 @@ from ai.chat_tools import DEFAULT_MCP_TOOL_NAMES
 _MCP_AVAILABLE = False
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
     _MCP_AVAILABLE = True
 except ImportError:
     FastMCP = None  # type: ignore[assignment,misc]
+    ToolAnnotations = None  # type: ignore[assignment,misc]
 
 
 # ---------------------------------------------------------------------------
@@ -745,6 +747,17 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     def _json_tool_result(tool_name: str, args: Dict[str, Any]) -> str:
         result = tools.execute(tool_name, args)
         return json.dumps(result, indent=2, ensure_ascii=False)
+
+    def _sync_registered_tool_metadata(tool_name: str) -> None:
+        spec = tools.tool_spec(tool_name)
+        registered = mcp._tool_manager._tools.get(tool_name)
+        if registered is None:
+            return
+        registered.description = spec.description
+        registered.parameters = json.loads(json.dumps(spec.parameters))
+        annotation_payload = spec.mcp_annotations_payload()
+        registered.annotations = ToolAnnotations(**annotation_payload) if ToolAnnotations is not None else None
+        registered.meta = {"x-parse": spec.mcp_meta_payload()}
 
     @mcp.tool(name="mcp_get_exposure_mode")
     def mcp_get_exposure_mode() -> str:
@@ -1509,6 +1522,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         steps: list,
         overwrites: Optional[dict] = None,
         language: Optional[str] = None,
+        dryRun: Optional[bool] = None,
     ) -> str:
         """Start a transcription pipeline for ONE speaker. Returns jobId.
 
@@ -1531,12 +1545,15 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             steps: Subset of ["normalize", "stt", "ortho", "ipa"].
             overwrites: Per-step overwrite flags (default: all false).
             language: Optional language override for STT + ORTH.
+            dryRun: If true, preview the full_pipeline payload without starting a job.
         """
         args: Dict[str, Any] = {"speaker": speaker, "steps": steps}
         if overwrites is not None:
             args["overwrites"] = overwrites
         if language is not None:
             args["language"] = language
+        if dryRun is not None:
+            args["dryRun"] = dryRun
         result = tools.execute("pipeline_run", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -1584,11 +1601,17 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             return _json_tool_result("enrichments_read", args)
         mcp.tool(name="enrichments_read")(mcp_enrichments_read)
 
-        def mcp_enrichments_write(enrichments: Dict[str, Any], merge: Optional[bool] = None) -> str:
+        def mcp_enrichments_write(
+            enrichments: Dict[str, Any],
+            merge: Optional[bool] = None,
+            dryRun: Optional[bool] = None,
+        ) -> str:
             """Write or merge enrichments into parse-enrichments.json."""
             args: Dict[str, Any] = {"enrichments": enrichments}
             if merge is not None:
                 args["merge"] = merge
+            if dryRun is not None:
+                args["dryRun"] = dryRun
             return _json_tool_result("enrichments_write", args)
         mcp.tool(name="enrichments_write")(mcp_enrichments_write)
 
@@ -1677,6 +1700,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             userNote: Optional[str] = None,
             importNote: Optional[str] = None,
             delete: Optional[bool] = None,
+            dryRun: Optional[bool] = None,
         ) -> str:
             """Write or delete one lexeme note entry."""
             args: Dict[str, Any] = {"speaker": speaker, "conceptId": conceptId}
@@ -1686,6 +1710,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
                 args["importNote"] = importNote
             if delete is not None:
                 args["delete"] = delete
+            if dryRun is not None:
+                args["dryRun"] = dryRun
             return _json_tool_result("lexeme_notes_write", args)
         mcp.tool(name="lexeme_notes_write")(mcp_lexeme_notes_write)
 
@@ -1794,6 +1820,9 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
                 args["dryRun"] = dryRun
             return _json_tool_result("transcript_reformat", args)
         mcp.tool(name="transcript_reformat")(mcp_transcript_reformat)
+
+    for tool_name in selected_mcp_tool_names:
+        _sync_registered_tool_metadata(tool_name)
 
     logger.info(
         "MCP exposing %s tools (expose_all_tools=%s)",

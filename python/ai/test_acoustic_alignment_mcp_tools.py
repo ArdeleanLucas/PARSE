@@ -178,6 +178,7 @@ def test_forced_align_start_live_dispatches_forced_align_compute(tmp_path) -> No
             "forced_align",
             {
                 "speaker": "Fail02",
+                "overwrite": False,
                 "language": "ku",
                 "padMs": 150,
                 "emitPhonemes": False,

@@ -116,12 +116,76 @@ class ChatToolExecutionError(ChatToolError):
 
 
 @dataclass(frozen=True)
+class ToolCondition:
+    """Machine-readable safety condition for agent-facing tool metadata."""
+
+    id: str
+    description: str
+    severity: str = "required"
+    kind: str = "project_state"
+
+    def to_payload(self) -> Dict[str, str]:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "severity": self.severity,
+            "kind": self.kind,
+        }
+
+
+@dataclass(frozen=True)
 class ChatToolSpec:
-    """Tool definition for OpenAI function-calling and validation."""
+    """Tool definition for OpenAI function-calling, validation, and MCP metadata."""
 
     name: str
     description: str
     parameters: Dict[str, Any]
+    mutability: str = "read_only"
+    supports_dry_run: bool = False
+    dry_run_parameter: Optional[str] = None
+    preconditions: Tuple[ToolCondition, ...] = ()
+    postconditions: Tuple[ToolCondition, ...] = ()
+
+    def mcp_annotations_payload(self) -> Dict[str, Any]:
+        destructive = self.mutability == "mutating"
+        read_only = self.mutability == "read_only"
+        payload: Dict[str, Any] = {
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": read_only,
+        }
+        return payload
+
+    def mcp_meta_payload(self) -> Dict[str, Any]:
+        return {
+            "mutability": self.mutability,
+            "supportsDryRun": self.supports_dry_run,
+            "dryRunParameter": self.dry_run_parameter,
+            "preconditions": [condition.to_payload() for condition in self.preconditions],
+            "postconditions": [condition.to_payload() for condition in self.postconditions],
+        }
+
+
+def _tool_condition(
+    condition_id: str,
+    description: str,
+    *,
+    severity: str = "required",
+    kind: str = "project_state",
+) -> ToolCondition:
+    return ToolCondition(
+        id=condition_id,
+        description=description,
+        severity=severity,
+        kind=kind,
+    )
+
+
+def _project_loaded_condition() -> ToolCondition:
+    return _tool_condition(
+        "project_loaded",
+        "The PARSE project root must be available and readable.",
+    )
 
 
 def _utc_now_iso() -> str:
@@ -534,11 +598,40 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker", "offsetSec", "dryRun"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "offsetSec": {"type": "number"},
-                        "dryRun": {"type": "boolean"},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID whose annotation intervals will be shifted.",
+                        },
+                        "offsetSec": {
+                            "type": "number",
+                            "description": "Seconds to add to every interval start/end; negative values pull timestamps earlier.",
+                        },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the timestamp shift without writing annotations/<speaker>.parse.json.",
+                        },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "speaker_annotation_exists",
+                        "The target speaker must already have an annotation file under annotations/.",
+                        kind="file_presence",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "annotation_timestamps_shifted",
+                        "When dryRun=false, the speaker's annotation intervals are rewritten with the requested offset.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "stt_start": ChatToolSpec(
                 name="stt_start",
@@ -961,9 +1054,23 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker", "sourceWav", "dryRun"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "sourceCsv": {"type": "string", "maxLength": 1024},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID to create or extend in the current project.",
+                        },
+                        "sourceWav": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024,
+                            "description": "Absolute or project-relative path to the source audio file to copy into the workspace.",
+                        },
+                        "sourceCsv": {
+                            "type": "string",
+                            "maxLength": 1024,
+                            "description": "Optional transcript CSV to store alongside the imported source WAV.",
+                        },
                         "isPrimary": {
                             "type": "boolean",
                             "description": "Flag this WAV as the speaker's primary source. Defaults to true when the speaker has no existing sources.",
@@ -974,6 +1081,24 @@ class ParseChatTools:
                         },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "source_audio_readable",
+                        "The sourceWav path must resolve to a readable audio file within the allowed import roots.",
+                        kind="file_presence",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "speaker_source_registered",
+                        "When dryRun=false, the source audio is copied into the workspace and source_index.json / project metadata are updated.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "import_processed_speaker": ChatToolSpec(
                 name="import_processed_speaker",
@@ -989,14 +1114,58 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker", "workingWav", "annotationJson", "dryRun"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "workingWav": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "annotationJson": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "peaksJson": {"type": "string", "maxLength": 1024},
-                        "transcriptCsv": {"type": "string", "maxLength": 1024},
-                        "dryRun": {"type": "boolean"},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID to import into the PARSE workspace.",
+                        },
+                        "workingWav": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024,
+                            "description": "Path to the processed/working WAV whose timestamps already align with the annotation JSON.",
+                        },
+                        "annotationJson": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024,
+                            "description": "Path to the timestamp-bearing annotation JSON to copy into annotations/.",
+                        },
+                        "peaksJson": {
+                            "type": "string",
+                            "maxLength": 1024,
+                            "description": "Optional precomputed peaks JSON aligned to the working WAV.",
+                        },
+                        "transcriptCsv": {
+                            "type": "string",
+                            "maxLength": 1024,
+                            "description": "Optional legacy transcript CSV to preserve in the imported workspace.",
+                        },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the file-copy and metadata-write plan without mutating the workspace.",
+                        },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "processed_artifacts_readable",
+                        "The working WAV and annotation JSON must both exist and be readable.",
+                        kind="file_presence",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "processed_speaker_imported",
+                        "When dryRun=false, the processed speaker artifacts are copied into the workspace and project/source-index metadata are updated.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "parse_memory_read": ChatToolSpec(
                 name="parse_memory_read",
@@ -1133,7 +1302,12 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker", "steps"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID whose pipeline should run.",
+                        },
                         "steps": {
                             "type": "array",
                             "items": {
@@ -1142,6 +1316,7 @@ class ParseChatTools:
                             },
                             "minItems": 1,
                             "maxItems": 4,
+                            "description": "Ordered pipeline subset to execute for this speaker.",
                         },
                         "overwrites": {
                             "type": "object",
@@ -1168,8 +1343,30 @@ class ParseChatTools:
                                 "``sd`` for ORTH (razhan's fine-tuning target)."
                             ),
                         },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the planned compute payload without starting a background job.",
+                        },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "speaker_ready_for_pipeline",
+                        "The target speaker must exist in the current project and have the files needed for the requested steps.",
+                        kind="project_state",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "pipeline_job_started",
+                        "When dryRun=false, a full_pipeline background job is created and can be polled via compute_status.",
+                        kind="job_state",
+                    ),
+                ),
             ),
             "compute_status": ChatToolSpec(
                 name="compute_status",
@@ -1279,8 +1476,30 @@ class ParseChatTools:
                             "type": "boolean",
                             "description": "If true (default), shallow-merge into existing data. If false, replace entirely.",
                         },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the resulting top-level keys without writing parse-enrichments.json.",
+                        },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "enrichments_payload_provided",
+                        "The caller must supply an enrichments object to merge or replace.",
+                        kind="input_shape",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "enrichments_file_updated",
+                        "When dryRun=false, parse-enrichments.json is merged or replaced with the supplied payload.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "lexeme_notes_read": ChatToolSpec(
                 name="lexeme_notes_read",
@@ -1318,16 +1537,56 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker", "conceptId"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "conceptId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "userNote": {"type": "string", "maxLength": 4096},
-                        "importNote": {"type": "string", "maxLength": 4096},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID whose lexeme note will be updated.",
+                        },
+                        "conceptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "description": "Concept ID whose note entry will be created, updated, or deleted.",
+                        },
+                        "userNote": {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "description": "Human-authored note text to store under user_note.",
+                        },
+                        "importNote": {
+                            "type": "string",
+                            "maxLength": 4096,
+                            "description": "Machine/import provenance note to store under import_note.",
+                        },
                         "delete": {
                             "type": "boolean",
                             "description": "If true, removes the note entry for this speaker+concept.",
                         },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the resulting lexeme_notes block without writing parse-enrichments.json.",
+                        },
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "speaker_and_concept_provided",
+                        "The caller must provide both speaker and conceptId to identify a single lexeme-note entry.",
+                        kind="input_shape",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "lexeme_note_written",
+                        "When dryRun=false, the targeted lexeme_notes entry is created, updated, or deleted in parse-enrichments.json.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "export_annotations_csv": ChatToolSpec(
                 name="export_annotations_csv",
@@ -1355,6 +1614,24 @@ class ParseChatTools:
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "annotations_available_for_export",
+                        "At least one annotation payload must be available for the requested speaker scope.",
+                        kind="project_state",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "export_file_written",
+                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "export_lingpy_tsv": ChatToolSpec(
                 name="export_lingpy_tsv",
@@ -1376,6 +1653,24 @@ class ParseChatTools:
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "enrichments_and_annotations_available",
+                        "parse-enrichments.json and the annotation inventory must contain enough data to build a LingPy export.",
+                        kind="project_state",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "export_file_written",
+                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "export_nexus": ChatToolSpec(
                 name="export_nexus",
@@ -1398,6 +1693,24 @@ class ParseChatTools:
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "cognate_matrix_available",
+                        "The project must contain enough cognate/enrichment data to build a NEXUS character matrix.",
+                        kind="project_state",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "export_file_written",
+                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "export_annotations_elan": ChatToolSpec(
                 name="export_annotations_elan",
@@ -1411,7 +1724,12 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID whose annotations should be converted to ELAN format.",
+                        },
                         "outputPath": {
                             "type": "string",
                             "minLength": 1,
@@ -1421,6 +1739,24 @@ class ParseChatTools:
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "speaker_annotation_exists",
+                        "The requested speaker must already have an annotation file to export.",
+                        kind="file_presence",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "export_file_written",
+                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "export_annotations_textgrid": ChatToolSpec(
                 name="export_annotations_textgrid",
@@ -1434,7 +1770,12 @@ class ParseChatTools:
                     "additionalProperties": False,
                     "required": ["speaker"],
                     "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "speaker": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "Speaker ID whose annotations should be converted to TextGrid format.",
+                        },
                         "outputPath": {
                             "type": "string",
                             "minLength": 1,
@@ -1444,6 +1785,24 @@ class ParseChatTools:
                         "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                     },
                 },
+                mutability="mutating",
+                supports_dry_run=True,
+                dry_run_parameter="dryRun",
+                preconditions=(
+                    _project_loaded_condition(),
+                    _tool_condition(
+                        "speaker_annotation_exists",
+                        "The requested speaker must already have an annotation file to export.",
+                        kind="file_presence",
+                    ),
+                ),
+                postconditions=(
+                    _tool_condition(
+                        "export_file_written",
+                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                        kind="filesystem_write",
+                    ),
+                ),
             ),
             "phonetic_rules_apply": ChatToolSpec(
                 name="phonetic_rules_apply",
@@ -1644,6 +2003,13 @@ class ParseChatTools:
                 }
             )
         return payload
+
+    def tool_spec(self, tool_name: str) -> ChatToolSpec:
+        """Return the ChatToolSpec for a registered tool."""
+        name = str(tool_name or "").strip()
+        if name not in self._tool_specs:
+            raise ChatToolValidationError("Tool is not allowlisted: {0}".format(name))
+        return self._tool_specs[name]
 
     def tool_names(self) -> List[str]:
         """Return sorted tool names in allowlist."""
@@ -2547,6 +2913,16 @@ class ParseChatTools:
         if language:
             payload["language"] = language
 
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "pipeline_run",
+                "plan": payload,
+                "message": "Dry run. Would start a full_pipeline compute job for this speaker.",
+            }
+
         try:
             job_id = self._start_compute_job("full_pipeline", payload)
         except Exception as exc:
@@ -2694,6 +3070,17 @@ class ParseChatTools:
         else:
             payload = incoming
 
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "dryRun": True,
+                "merge": merge,
+                "incomingKeys": list(incoming.keys()),
+                "resultingKeys": list(payload.keys()),
+                "path": str(self.enrichments_path),
+            }
+
         self.enrichments_path.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -2759,6 +3146,17 @@ class ParseChatTools:
                 entry["import_note"] = str(args.get("importNote") or "")
             entry["updated_at"] = _utc_now_iso()
             speaker_block[concept_id] = entry
+
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "dryRun": True,
+                "speaker": speaker,
+                "conceptId": concept_id,
+                "delete": bool(args.get("delete", False)),
+                "lexeme_notes": payload.get("lexeme_notes") or {},
+            }
 
         self.enrichments_path.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
