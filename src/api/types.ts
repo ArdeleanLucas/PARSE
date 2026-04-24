@@ -16,7 +16,7 @@ export interface AnnotationTier {
 
 export interface AnnotationRecord {
   speaker: string;
-  tiers: Record<string, AnnotationTier>; // keys: ipa, ortho, concept, speaker
+  tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, stt, concept, sentence, speaker
   created_at?: string;
   modified_at?: string;
   source_wav?: string;

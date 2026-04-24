@@ -25,18 +25,31 @@ import sys
 from pathlib import Path
 
 
+# Canonical tier names emitted into TextGrid files. The `ipa_phone` tier was
+# added when phone-level IPA lanes shipped — Praat convention is short tier
+# names, so we use "Phones" rather than "IPA (phones)". The word/lexeme tier
+# stays "IPA". The `sentence` tier ships empty until sentence segmentation is
+# wired up; it round-trips so external Praat edits aren't lost.
 _CANONICAL_TEXTGRID_NAMES = {
+    "ipa_phone": "Phones",
     "ipa": "IPA",
     "ortho": "Ortho",
+    "stt": "STT",
     "concept": "Concept",
+    "sentence": "Sentence",
     "speaker": "Speaker",
 }
 
+# Numeric ordering used to sort exported TextGrid tiers. Matches
+# CANONICAL_TIER_ORDER in src/stores/annotationStore.ts — keep in sync.
 _CANONICAL_DISPLAY_ORDERS = {
-    "ipa": 1,
-    "ortho": 2,
-    "concept": 3,
-    "speaker": 4,
+    "ipa_phone": 1,
+    "ipa": 2,
+    "ortho": 3,
+    "stt": 4,
+    "concept": 5,
+    "sentence": 6,
+    "speaker": 7,
 }
 
 _LONG_ITEM_HEADER_RE = re.compile(r"^item\s*\[\s*(\d+)\s*\]\s*:$")
@@ -876,7 +889,7 @@ def textgrid_to_annotations(
     """
     Convert parsed TextGrid tier data to full PARSE annotation file schema.
 
-    Tier names are matched case-insensitively to IPA/Ortho/Concept/Speaker.
+    Tier names are matched case-insensitively to Phones/IPA/Ortho/STT/Concept/Sentence/Speaker.
     Unknown tiers are preserved using their original names.
     """
     if not isinstance(textgrid_data, dict):
@@ -897,14 +910,12 @@ def textgrid_to_annotations(
         raise ValueError("textgrid_data['tiers'] must be an object")
 
     tiers_out = {
-        "ipa": {"type": "interval", "display_order": 1, "intervals": []},
-        "ortho": {"type": "interval", "display_order": 2, "intervals": []},
-        "concept": {"type": "interval", "display_order": 3, "intervals": []},
-        "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+        name: {"type": "interval", "display_order": order, "intervals": []}
+        for name, order in _CANONICAL_DISPLAY_ORDERS.items()
     }
 
     seen_canonical = set()
-    next_custom_display_order = 5
+    next_custom_display_order = max(_CANONICAL_DISPLAY_ORDERS.values()) + 1
 
     for tier_name, tier_data in tiers_value.items():
         if not isinstance(tier_name, str):

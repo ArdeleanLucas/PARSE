@@ -1,7 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useUIStore } from "../../stores/uiStore";
 import { usePlaybackStore } from "../../stores/playbackStore";
 import { useAnnotationStore } from "../../stores/annotationStore";
+import {
+  useTranscriptionLanesStore,
+  LANE_LABELS,
+} from "../../stores/transcriptionLanesStore";
 import { Button } from "../shared/Button";
 import { Input } from "../shared/Input";
 import type { AnnotationInterval } from "../../api/types";
@@ -26,11 +30,18 @@ export function AnnotationPanel({ onAnnotationSaved }: AnnotationPanelProps) {
   const activeSpeaker = useUIStore((s) => s.activeSpeaker);
   const activeConcept = useUIStore((s) => s.activeConcept);
   const selectedRegion = usePlaybackStore((s) => s.selectedRegion);
+  const currentTime = usePlaybackStore((s) => s.currentTime);
   const record = useAnnotationStore((s) =>
     activeSpeaker ? (s.records[activeSpeaker] ?? null) : null,
   );
   const addInterval = useAnnotationStore((s) => s.addInterval);
   const removeInterval = useAnnotationStore((s) => s.removeInterval);
+  const updateInterval = useAnnotationStore((s) => s.updateInterval);
+  const updateIntervalTimes = useAnnotationStore((s) => s.updateIntervalTimes);
+  const mergeIntervals = useAnnotationStore((s) => s.mergeIntervals);
+  const splitInterval = useAnnotationStore((s) => s.splitInterval);
+  const selectedInterval = useTranscriptionLanesStore((s) => s.selectedInterval);
+  const setSelectedInterval = useTranscriptionLanesStore((s) => s.setSelectedInterval);
 
   const [ipa, setIpa] = useState("");
   const [ortho, setOrtho] = useState("");
@@ -152,6 +163,28 @@ export function AnnotationPanel({ onAnnotationSaved }: AnnotationPanelProps) {
         </div>
       )}
 
+      {/* Segment controls — visible when a lane interval is selected */}
+      <SegmentControls
+        speaker={activeSpeaker}
+        currentTime={currentTime}
+        selected={
+          selectedInterval && selectedInterval.speaker === activeSpeaker
+            ? selectedInterval
+            : null
+        }
+        record={record}
+        onUpdateText={updateInterval}
+        onUpdateTimes={updateIntervalTimes}
+        onMerge={mergeIntervals}
+        onSplit={splitInterval}
+        onDelete={(tier, index) => {
+          if (!activeSpeaker) return;
+          removeInterval(activeSpeaker, tier, index);
+          setSelectedInterval(null);
+        }}
+        onClearSelection={() => setSelectedInterval(null)}
+      />
+
       {/* Existing annotations */}
       <div
         style={{
@@ -197,6 +230,171 @@ export function AnnotationPanel({ onAnnotationSaved }: AnnotationPanelProps) {
             );
           })
         )}
+      </div>
+    </div>
+  );
+}
+
+interface SegmentControlsProps {
+  speaker: string | null;
+  currentTime: number;
+  selected: { speaker: string; tier: import("../../stores/transcriptionLanesStore").LaneKind; index: number } | null;
+  record: import("../../api/types").AnnotationRecord | null;
+  onUpdateText: (speaker: string, tier: string, index: number, text: string) => void;
+  onUpdateTimes: (speaker: string, tier: string, index: number, start: number, end: number) => void;
+  onMerge: (speaker: string, tier: string, index: number) => void;
+  onSplit: (speaker: string, tier: string, index: number, splitTime: number) => void;
+  onDelete: (tier: string, index: number) => void;
+  onClearSelection: () => void;
+}
+
+/** Toolbar that operates on the lane-selected interval. Lets the user retime
+ * via numeric inputs, retext, merge with the next interval, split at the
+ * playhead, or delete. Hidden until an interval is selected. */
+function SegmentControls({
+  speaker,
+  currentTime,
+  selected,
+  record,
+  onUpdateText,
+  onUpdateTimes,
+  onMerge,
+  onSplit,
+  onDelete,
+  onClearSelection,
+}: SegmentControlsProps) {
+  const tierData = selected && record?.tiers?.[selected.tier];
+  const interval = tierData?.intervals?.[selected?.index ?? -1] ?? null;
+
+  const [startStr, setStartStr] = useState("");
+  const [endStr, setEndStr] = useState("");
+  const [textStr, setTextStr] = useState("");
+
+  useEffect(() => {
+    if (interval) {
+      setStartStr(interval.start.toFixed(3));
+      setEndStr(interval.end.toFixed(3));
+      setTextStr(interval.text);
+    }
+  }, [interval?.start, interval?.end, interval?.text]);
+
+  const canMerge = useMemo(() => {
+    if (!selected || !tierData) return false;
+    return selected.index + 1 < tierData.intervals.length;
+  }, [selected, tierData]);
+
+  const canSplit = useMemo(() => {
+    if (!interval) return false;
+    return currentTime > interval.start + 0.001 && currentTime < interval.end - 0.001;
+  }, [interval, currentTime]);
+
+  if (!selected || !speaker || !interval) return null;
+
+  const commitTimes = () => {
+    const s = parseFloat(startStr);
+    const e = parseFloat(endStr);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) {
+      // revert visually on invalid input
+      setStartStr(interval.start.toFixed(3));
+      setEndStr(interval.end.toFixed(3));
+      return;
+    }
+    if (Math.abs(s - interval.start) < 0.0001 && Math.abs(e - interval.end) < 0.0001) return;
+    onUpdateTimes(speaker, selected.tier, selected.index, s, e);
+  };
+
+  const commitText = () => {
+    const trimmed = textStr.trim();
+    if (trimmed === interval.text) return;
+    onUpdateText(speaker, selected.tier, selected.index, trimmed);
+  };
+
+  return (
+    <div
+      style={{
+        borderTop: "1px solid #d6e0ea",
+        paddingTop: "0.5rem",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.5rem",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 600 }}>
+          Selected segment
+          <span style={{ color: "#6b7280", fontWeight: 400, marginLeft: "0.5rem" }}>
+            ({LANE_LABELS[selected.tier]} #{selected.index + 1})
+          </span>
+        </div>
+        <Button variant="secondary" size="sm" onClick={onClearSelection}>
+          Deselect
+        </Button>
+      </div>
+
+      <Input
+        label="Text"
+        value={textStr}
+        onChange={(e) => setTextStr(e.target.value)}
+        onBlur={commitText}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commitText();
+          }
+        }}
+      />
+
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <Input
+          label="Start (s)"
+          type="number"
+          step="0.001"
+          min="0"
+          value={startStr}
+          onChange={(e) => setStartStr(e.target.value)}
+          onBlur={commitTimes}
+        />
+        <Input
+          label="End (s)"
+          type="number"
+          step="0.001"
+          min="0"
+          value={endStr}
+          onChange={(e) => setEndStr(e.target.value)}
+          onBlur={commitTimes}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canSplit}
+          title={
+            canSplit
+              ? `Split at playhead (${currentTime.toFixed(3)} s)`
+              : "Move the playhead inside the segment to split"
+          }
+          onClick={() => onSplit(speaker, selected.tier, selected.index, currentTime)}
+        >
+          Split at playhead
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canMerge}
+          title={canMerge ? "Merge with next segment on this tier" : "No next segment on this tier"}
+          onClick={() => onMerge(speaker, selected.tier, selected.index)}
+        >
+          Merge with next
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => onDelete(selected.tier, selected.index)}
+        >
+          Delete
+        </Button>
       </div>
     </div>
   );

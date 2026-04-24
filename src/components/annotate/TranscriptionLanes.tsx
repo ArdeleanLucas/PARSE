@@ -3,6 +3,7 @@ import type WaveSurfer from "wavesurfer.js";
 import { useAnnotationStore } from "../../stores/annotationStore";
 import {
   useTranscriptionLanesStore,
+  LANE_LABELS,
   type LaneKind,
 } from "../../stores/transcriptionLanesStore";
 import type { AnnotationInterval, SttSegment } from "../../api/types";
@@ -18,17 +19,21 @@ interface LaneStrip {
   kind: LaneKind;
   label: string;
   intervals: Array<{ start: number; end: number; text: string }>;
+  /** Index into the underlying `record.tiers[kind].intervals` array. Set when
+   * the strip is sourced from the editable tier (so inline edits / merges /
+   * splits can address the original interval). Unset for legacy STT data
+   * coming from the API cache. */
+  sourceIndices?: number[];
   status?: "idle" | "loading" | "loaded" | "error";
 }
 
-const LANE_LABELS: Record<LaneKind, string> = {
-  stt: "STT",
-  ipa: "IPA",
-  ortho: "ORTH",
-};
+// Lane order is hard-coded top-to-bottom and intentionally independent of
+// each tier's numeric display_order (which only governs Praat export sort).
+// Per the 4-lane viewer spec: phone IPA → word IPA → STT → ORTH.
+const LANE_ORDER: LaneKind[] = ["ipa_phone", "ipa", "stt", "ortho"];
 
 const LANE_HEIGHT_PX = 28;
-export const LABEL_COL_PX = 48;
+export const LABEL_COL_PX = 56;
 const MIN_LABEL_WIDTH_PX = 18;
 const VIRTUAL_BUFFER_PX = 400;
 
@@ -49,11 +54,17 @@ function firstOverlappingIdx(
 /**
  * Stacked transcription lanes rendered below the WaveSurfer waveform.
  *
- * Each visible lane scrolls horizontally in lock-step with the waveform so
- * labelled intervals stay aligned with their audio. Intervals keep their
- * native Praat/ELAN boundaries (no re-bucketing). Only intervals overlapping
- * the visible viewport (plus a small buffer) are rendered, so a 5000-segment
- * lane stays cheap.
+ * Four lanes — Phones / IPA / STT / ORTH — scroll horizontally in lock-step
+ * with the waveform. Intervals keep their native Praat/ELAN boundaries.
+ *
+ * Editing affordances:
+ *   • single-click an interval → seek to its start + select it (selection
+ *     drives the segment-controls toolbar in AnnotationPanel)
+ *   • double-click → inline contenteditable; Enter commits, Esc cancels
+ *   • right-click → context menu with Edit / Split / Merge with next / Delete
+ *
+ * Only intervals overlapping the visible viewport (plus a small buffer) are
+ * rendered, so a 5000-segment lane stays cheap.
  */
 export function TranscriptionLanes({
   speaker,
@@ -65,23 +76,58 @@ export function TranscriptionLanes({
   const sttBySpeaker = useTranscriptionLanesStore((s) => s.sttBySpeaker);
   const sttStatus = useTranscriptionLanesStore((s) => s.sttStatus);
   const ensureStt = useTranscriptionLanesStore((s) => s.ensureStt);
+  const selectedInterval = useTranscriptionLanesStore((s) => s.selectedInterval);
+  const setSelectedInterval = useTranscriptionLanesStore((s) => s.setSelectedInterval);
   const record = useAnnotationStore((s) =>
     speaker ? s.records[speaker] ?? null : null,
   );
+  const updateInterval = useAnnotationStore((s) => s.updateInterval);
+  const removeInterval = useAnnotationStore((s) => s.removeInterval);
+  const mergeIntervals = useAnnotationStore((s) => s.mergeIntervals);
+  const splitInterval = useAnnotationStore((s) => s.splitInterval);
 
   const [pxPerSec, setPxPerSec] = useState(0);
   const [duration, setDuration] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [editing, setEditing] = useState<{ kind: LaneKind; index: number } | null>(null);
+  const [menu, setMenu] = useState<
+    { kind: LaneKind; index: number; x: number; y: number } | null
+  >(null);
+  const editRef = useRef<HTMLSpanElement | null>(null);
+
   const laneScrollRefs = useRef<Record<LaneKind, HTMLDivElement | null>>({
-    stt: null,
+    ipa_phone: null,
     ipa: null,
+    stt: null,
     ortho: null,
   });
 
   useEffect(() => {
     if (speaker) void ensureStt(speaker);
   }, [speaker, ensureStt]);
+
+  // Close context menu / cancel inline edit when the user clicks elsewhere
+  // or presses Escape. Caught at the document level so a misclick anywhere
+  // dismisses the menu cleanly.
+  useEffect(() => {
+    if (!menu && !editing) return;
+    const onDocDown = () => {
+      setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMenu(null);
+        setEditing(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu, editing]);
 
   useEffect(() => {
     if (!audioReady) return;
@@ -144,35 +190,96 @@ export function TranscriptionLanes({
     }
   }, [scrollLeft]);
 
+  // Keyboard shortcut: `s` splits the currently selected interval at the
+  // WaveSurfer playhead. Suppressed while typing in any input/contenteditable
+  // (including the inline lane editor) so it doesn't hijack keystrokes.
+  useEffect(() => {
+    const sel = selectedInterval;
+    if (!sel || sel.speaker !== speaker) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "s" && e.key !== "S") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (target.isContentEditable) return;
+      }
+      const ws = wsRef.current;
+      const t = ws?.getCurrentTime() ?? 0;
+      e.preventDefault();
+      splitInterval(sel.speaker, sel.tier, sel.index, t);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedInterval, speaker, splitInterval, wsRef]);
+
+  // Focus + select-all when entering inline edit mode.
+  useEffect(() => {
+    if (!editing) return;
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }, [editing]);
+
   const strips: LaneStrip[] = useMemo(() => {
     const out: LaneStrip[] = [];
-    if (lanes.stt.visible) {
-      const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
-      out.push({
-        kind: "stt",
-        label: LANE_LABELS.stt,
-        intervals: segs.map((s) => ({
-          start: s.start,
-          end: s.end,
-          text: s.text,
-        })),
-        status: sttStatus[speaker] ?? "idle",
+    for (const kind of LANE_ORDER) {
+      if (!lanes[kind].visible) continue;
+
+      // STT migration: if record.tiers.stt has entries, that is the editable
+      // source of truth. Otherwise fall back to the API-cached sttBySpeaker
+      // for legacy records that haven't been touched since the new tier
+      // landed. Edits create the tier entry and from then on it wins.
+      if (kind === "stt") {
+        const tierIvs: AnnotationInterval[] = record?.tiers?.stt?.intervals ?? [];
+        const hasTierStt = tierIvs.length > 0;
+        if (hasTierStt) {
+          const filtered: typeof tierIvs = [];
+          const sourceIndices: number[] = [];
+          tierIvs.forEach((iv, i) => {
+            if (iv.text && iv.text.trim().length > 0) {
+              filtered.push(iv);
+              sourceIndices.push(i);
+            }
+          });
+          out.push({
+            kind: "stt",
+            label: LANE_LABELS.stt,
+            intervals: filtered,
+            sourceIndices,
+          });
+        } else {
+          const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
+          out.push({
+            kind: "stt",
+            label: LANE_LABELS.stt,
+            intervals: segs.map((s) => ({ start: s.start, end: s.end, text: s.text })),
+            status: sttStatus[speaker] ?? "idle",
+          });
+        }
+        continue;
+      }
+
+      const ivs: AnnotationInterval[] = record?.tiers?.[kind]?.intervals ?? [];
+      const filtered: typeof ivs = [];
+      const sourceIndices: number[] = [];
+      ivs.forEach((iv, i) => {
+        if (iv.text && iv.text.trim().length > 0) {
+          filtered.push(iv);
+          sourceIndices.push(i);
+        }
       });
-    }
-    if (lanes.ipa.visible) {
-      const ivs: AnnotationInterval[] = record?.tiers?.ipa?.intervals ?? [];
       out.push({
-        kind: "ipa",
-        label: LANE_LABELS.ipa,
-        intervals: ivs.filter((i) => i.text && i.text.trim().length > 0),
-      });
-    }
-    if (lanes.ortho.visible) {
-      const ivs: AnnotationInterval[] = record?.tiers?.ortho?.intervals ?? [];
-      out.push({
-        kind: "ortho",
-        label: LANE_LABELS.ortho,
-        intervals: ivs.filter((i) => i.text && i.text.trim().length > 0),
+        kind,
+        label: LANE_LABELS[kind],
+        intervals: filtered,
+        sourceIndices,
       });
     }
     return out;
@@ -186,6 +293,13 @@ export function TranscriptionLanes({
   const visibleStartSec = Math.max(0, (scrollLeft - VIRTUAL_BUFFER_PX) / pxPerSec);
   const visibleEndSec =
     (scrollLeft + viewportWidth + VIRTUAL_BUFFER_PX) / pxPerSec;
+
+  const commitEdit = (kind: LaneKind, sourceIdx: number, text: string) => {
+    const trimmed = text.trim();
+    if (!speaker) return;
+    updateInterval(speaker, kind, sourceIdx, trimmed);
+    setEditing(null);
+  };
 
   return (
     <div className="mt-2 space-y-1 px-5">
@@ -209,8 +323,10 @@ export function TranscriptionLanes({
         // Virtualized slice: only render intervals that overlap the viewport
         // (plus buffer). Intervals are sorted by start ascending.
         let visible: LaneStrip["intervals"] = strip.intervals;
+        let visibleSourceIndices: number[] | undefined = strip.sourceIndices;
+        let firstIdx = 0;
         if (!isEmpty && strip.intervals.length > 200) {
-          const firstIdx = firstOverlappingIdx(strip.intervals, visibleStartSec);
+          firstIdx = firstOverlappingIdx(strip.intervals, visibleStartSec);
           let lastIdx = firstIdx;
           while (
             lastIdx < strip.intervals.length &&
@@ -219,6 +335,9 @@ export function TranscriptionLanes({
             lastIdx += 1;
           }
           visible = strip.intervals.slice(firstIdx, lastIdx);
+          if (strip.sourceIndices) {
+            visibleSourceIndices = strip.sourceIndices.slice(firstIdx, lastIdx);
+          }
         }
 
         return (
@@ -238,24 +357,110 @@ export function TranscriptionLanes({
                 className="h-full overflow-hidden"
               >
                 <div className="relative h-full" style={{ width: innerWidth }}>
-                  {visible.map((iv, idx) => {
+                  {visible.map((iv, slotIdx) => {
+                    const sourceIdx = visibleSourceIndices?.[slotIdx];
                     const left = iv.start * pxPerSec;
                     const width = Math.max(1, (iv.end - iv.start) * pxPerSec);
                     const showLabel = width >= MIN_LABEL_WIDTH_PX;
+                    const isEditable = sourceIdx !== undefined;
+                    const isSelected =
+                      isEditable &&
+                      selectedInterval?.speaker === speaker &&
+                      selectedInterval?.tier === strip.kind &&
+                      selectedInterval?.index === sourceIdx;
+                    const isEditing =
+                      isEditable &&
+                      editing?.kind === strip.kind &&
+                      editing?.index === sourceIdx;
+
+                    const baseStyle: React.CSSProperties = {
+                      left,
+                      width,
+                      backgroundColor: withAlpha(color, isSelected ? 0.28 : 0.14),
+                      borderLeft: `2px solid ${color}`,
+                      color: "#334155",
+                      ...({ ["--tw-ring-color"]: color } as React.CSSProperties),
+                    };
+
+                    if (isEditing && sourceIdx !== undefined) {
+                      return (
+                        <span
+                          key={`${strip.kind}-edit-${sourceIdx}`}
+                          ref={editRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitEdit(
+                                strip.kind,
+                                sourceIdx,
+                                e.currentTarget.textContent ?? "",
+                              );
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              setEditing(null);
+                            }
+                          }}
+                          onBlur={(e) =>
+                            commitEdit(
+                              strip.kind,
+                              sourceIdx,
+                              e.currentTarget.textContent ?? "",
+                            )
+                          }
+                          className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded px-1 text-[10px] font-medium outline-none ring-2"
+                          style={baseStyle}
+                          aria-label={`Edit ${strip.label} text`}
+                        >
+                          {iv.text}
+                        </span>
+                      );
+                    }
+
                     return (
                       <button
-                        key={`${strip.kind}-${idx}-${iv.start}`}
+                        key={`${strip.kind}-${slotIdx}-${iv.start}`}
                         type="button"
-                        onClick={() => onSeek?.(iv.start)}
-                        className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded px-1 text-[10px] font-medium transition hover:ring-1"
-                        style={{
-                          left,
-                          width,
-                          backgroundColor: withAlpha(color, 0.14),
-                          borderLeft: `2px solid ${color}`,
-                          color: "#334155",
-                          ...({ ["--tw-ring-color"]: color } as React.CSSProperties),
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isEditable && sourceIdx !== undefined) {
+                            setSelectedInterval({
+                              speaker,
+                              tier: strip.kind,
+                              index: sourceIdx,
+                            });
+                          }
+                          onSeek?.(iv.start);
                         }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (isEditable && sourceIdx !== undefined) {
+                            setEditing({ kind: strip.kind, index: sourceIdx });
+                          }
+                        }}
+                        onContextMenu={(e) => {
+                          if (!isEditable || sourceIdx === undefined) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedInterval({
+                            speaker,
+                            tier: strip.kind,
+                            index: sourceIdx,
+                          });
+                          setMenu({
+                            kind: strip.kind,
+                            index: sourceIdx,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        }}
+                        className={
+                          "absolute top-1 bottom-1 flex items-center overflow-hidden rounded px-1 text-[10px] font-medium transition hover:ring-1" +
+                          (isSelected ? " ring-2" : "")
+                        }
+                        style={baseStyle}
                         title={`${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s · ${iv.text}`}
                         aria-label={`${strip.label} ${iv.start.toFixed(2)}s: ${iv.text}`}
                       >
@@ -274,7 +479,113 @@ export function TranscriptionLanes({
           </div>
         );
       })}
+
+      {menu && (() => {
+        const target = record?.tiers?.[menu.kind]?.intervals?.[menu.index];
+        if (!target) return null;
+        return (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            laneLabel={LANE_LABELS[menu.kind]}
+            start={target.start}
+            end={target.end}
+            onEdit={() => {
+              setEditing({ kind: menu.kind, index: menu.index });
+              setMenu(null);
+            }}
+            onSplit={() => {
+              const ws = wsRef.current;
+              const t = ws?.getCurrentTime() ?? 0;
+              splitInterval(speaker, menu.kind, menu.index, t);
+              setMenu(null);
+            }}
+            onMerge={() => {
+              mergeIntervals(speaker, menu.kind, menu.index);
+              setMenu(null);
+            }}
+            onDelete={() => {
+              removeInterval(speaker, menu.kind, menu.index);
+              setSelectedInterval(null);
+              setMenu(null);
+            }}
+          />
+        );
+      })()}
     </div>
+  );
+}
+
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  laneLabel: string;
+  start: number;
+  end: number;
+  onEdit: () => void;
+  onSplit: () => void;
+  onMerge: () => void;
+  onDelete: () => void;
+}
+
+function ContextMenu({
+  x,
+  y,
+  laneLabel,
+  start,
+  end,
+  onEdit,
+  onSplit,
+  onMerge,
+  onDelete,
+}: ContextMenuProps) {
+  return (
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      className="fixed z-50 min-w-[200px] rounded border border-slate-200 bg-white py-1 text-[12px] shadow-lg"
+      style={{ left: x, top: y }}
+      role="menu"
+    >
+      <div className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        {laneLabel}
+        <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-slate-400">
+          {start.toFixed(3)}–{end.toFixed(3)}s
+        </span>
+      </div>
+      <div className="mb-1 h-px bg-slate-100" />
+      <MenuItem label="Edit text" hint="dbl-click" onClick={onEdit} />
+      <MenuItem label="Split at playhead" hint="S" onClick={onSplit} />
+      <MenuItem label="Merge with next" onClick={onMerge} />
+      <div className="my-1 h-px bg-slate-100" />
+      <MenuItem label="Delete" danger onClick={onDelete} />
+    </div>
+  );
+}
+
+function MenuItem({
+  label,
+  hint,
+  danger,
+  onClick,
+}: {
+  label: string;
+  hint?: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={
+        "flex w-full items-center justify-between px-3 py-1 text-left hover:bg-slate-50" +
+        (danger ? " text-red-600" : " text-slate-700")
+      }
+    >
+      <span>{label}</span>
+      {hint ? <span className="ml-4 text-[10px] text-slate-400">{hint}</span> : null}
+    </button>
   );
 }
 
