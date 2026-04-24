@@ -157,6 +157,14 @@ class Aligner:
 
         resolved_device = resolve_device(device)
 
+        # On CPU, PyTorch spawns one worker thread per core for every inference
+        # call. With 3500+ sequential calls in a single server process this
+        # exhausts thread stack space and raises RuntimeError: can't start new
+        # thread. Single-threaded mode is slower per-call but stable.
+        if resolved_device == "cpu":
+            torch.set_num_threads(1)
+            torch.set_num_interop_threads(1)
+
         # Explicit tokenizer + feature_extractor load. If this path
         # raises, fall back to the legacy auto-dispatch as a last resort
         # so older environments that DO work with from_pretrained still
