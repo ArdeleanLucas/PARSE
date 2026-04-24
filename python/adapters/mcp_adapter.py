@@ -734,7 +734,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         list_active_jobs=jobs_cb,
     )
     mcp_config = _load_mcp_config(root)
-    expose_all_tools = bool(mcp_config.get("expose_all_tools", False))
+    expose_all_tools = mcp_config.get("expose_all_tools", False)
     all_mcp_tool_names = ParseChatTools.get_all_tool_names()
     selected_mcp_tool_names = _selected_mcp_tool_names(all_mcp_tool_names, expose_all_tools)
 
@@ -1789,10 +1789,10 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             return _json_tool_result("transcript_reformat", args)
         mcp.tool(name="transcript_reformat")(mcp_transcript_reformat)
 
-    logger.warning(
-        "MCP exposing %s tools (%s)",
+    logger.info(
+        "MCP exposing %s tools (expose_all_tools=%s)",
         len(selected_mcp_tool_names),
-        "expose_all_tools=true" if expose_all_tools else "default",
+        str(expose_all_tools).lower(),
     )
 
     return mcp
