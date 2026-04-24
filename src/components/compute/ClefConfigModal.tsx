@@ -73,7 +73,12 @@ export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted, ini
     if (status) {
       for (const l of status.languages) {
         if (!byCode.has(l.code)) {
-          byCode.set(l.code, { code: l.code, name: l.name, family: l.family ?? undefined });
+          byCode.set(l.code, {
+            code: l.code,
+            name: l.name,
+            family: l.family ?? undefined,
+            script: l.script ?? undefined,
+          });
         }
       }
     }
@@ -164,6 +169,10 @@ export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted, ini
         code,
         name: entry?.name || code,
         ...(entry?.family ? { family: entry.family } : {}),
+        // ISO 15924 script hint (Arab, Latn, ...) gets persisted into
+        // sil_contact_languages.json so the Reference Forms panel can
+        // route bare strings deterministically instead of guessing.
+        ...(entry?.script ? { script: entry.script } : {}),
       };
     });
     return { primary_contact_languages: primary, languages };

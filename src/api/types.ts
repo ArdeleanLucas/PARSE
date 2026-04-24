@@ -191,6 +191,11 @@ export interface ClefLanguageEntry {
   code: string;
   name: string;
   family?: string | null;
+  /** Optional ISO 15924 script code (Arab, Latn, Hebr, Cyrl, Grek, ...).
+   *  Drives deterministic script-vs-IPA routing in the Reference Forms
+   *  panel; absent values fall back to the Unicode-block heuristic in
+   *  ``classifyRawFormString``. */
+  script?: string | null;
   filled?: number;
   total?: number;
 }
@@ -208,6 +213,10 @@ export interface ClefCatalogEntry {
   code: string;
   name: string;
   family?: string;
+  /** ISO 15924 script code (e.g. "Arab", "Latn"). When present, the
+   *  Reference Forms panel uses this to route bare strings instead of
+   *  guessing from Unicode blocks. */
+  script?: string;
 }
 
 export interface ClefProviderEntry {
@@ -217,7 +226,7 @@ export interface ClefProviderEntry {
 
 export interface ClefConfigPayload {
   primary_contact_languages: string[];
-  languages: Array<{ code: string; name: string; family?: string }>;
+  languages: Array<{ code: string; name: string; family?: string; script?: string }>;
 }
 
 /** One form in the Sources Report, annotated with the provider(s) that
@@ -237,6 +246,9 @@ export interface ClefSourcesReportLanguage {
   code: string;
   name: string;
   family: string | null;
+  /** ISO 15924 script code (Arab, Latn, ...) when known. Optional
+   *  metadata, mostly informational for the Sources Report header. */
+  script?: string | null;
   total_forms: number;
   concepts_covered: number;
   concepts_total: number;

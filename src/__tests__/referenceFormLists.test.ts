@@ -52,6 +52,69 @@ describe('parseReferenceFormList', () => {
     expect(entries[0].ipa).toBe('');
   });
 
+  it('routes by ISO 15924 script hint when provided (Latn -> ipa slot)', () => {
+    // A bare-string Latin form gets the IPA slot when the language is
+    // declared Latn, regardless of what the Unicode classifier guesses.
+    const entries = parseReferenceFormList(['maːʔ'], 'Latn');
+    expect(entries[0].ipa).toBe('maːʔ');
+    expect(entries[0].script).toBe('');
+  });
+
+  it('routes by ISO 15924 script hint (non-Latn -> script slot)', () => {
+    // Even Latin-looking text routes to script when the language is
+    // declared e.g. "Cyrl" -- the hint trumps the regex.
+    const entries = parseReferenceFormList(['voda'], 'Cyrl');
+    expect(entries[0].script).toBe('voda');
+    expect(entries[0].ipa).toBe('');
+  });
+
+  it('explicit ipa/script field labels override the script hint', () => {
+    // If a provider explicitly labels its fields, trust them. The hint
+    // is a guide for *bare* strings, not a global override.
+    const entries = parseReferenceFormList(
+      [{ ipa: 'maːʔ', script: 'ماء' }],
+      'Arab',
+    );
+    expect(entries[0].ipa).toBe('maːʔ');
+    expect(entries[0].script).toBe('ماء');
+  });
+
+  it('falls back to Unicode regex when no hint is given (Cyrillic)', () => {
+    // Cyrillic is in the expanded NON_LATIN_SCRIPT_RE safety net.
+    const entries = parseReferenceFormList(['вода']);
+    expect(entries[0].script).toBe('вода');
+    expect(entries[0].ipa).toBe('');
+  });
+
+  it('falls back to Unicode regex when no hint is given (Bengali)', () => {
+    const entries = parseReferenceFormList(['জল']);
+    expect(entries[0].script).toBe('জল');
+    expect(entries[0].ipa).toBe('');
+  });
+
+  it('falls back to Unicode regex when no hint is given (Ethiopic)', () => {
+    const entries = parseReferenceFormList(['ውሃ']);
+    expect(entries[0].script).toBe('ውሃ');
+    expect(entries[0].ipa).toBe('');
+  });
+
+  it('does NOT classify Greek-block chars as script in the regex fallback (IPA overlap)', () => {
+    // β (U+03B2) is both a Greek letter and a valid IPA letter. Without
+    // a script hint, we keep it in the IPA slot to avoid breaking
+    // phonetic strings like "βaba" that use IPA's beta.
+    const entries = parseReferenceFormList(['βaba']);
+    expect(entries[0].ipa).toBe('βaba');
+    expect(entries[0].script).toBe('');
+  });
+
+  it('classifies Greek strings as script when the Grek hint is present', () => {
+    // Greek-script languages (ell, grc) get correct routing via the
+    // script-hint path even though the regex fallback can't tell.
+    const entries = parseReferenceFormList(['νερό'], 'Grek');
+    expect(entries[0].script).toBe('νερό');
+    expect(entries[0].ipa).toBe('');
+  });
+
   it('dedupes by raw text across multiple items', () => {
     const entries = parseReferenceFormList([
       { form: 'maːʔ', sources: ['asjp'] },
@@ -109,6 +172,31 @@ describe('resolveReferenceFormLists', () => {
   it('omits languages with no populated forms at all', () => {
     const lists = resolveReferenceFormLists({}, {}, concept, ['ar', 'fa']);
     expect(lists).toEqual({});
+  });
+
+  it('threads per-language script hints into the parser', () => {
+    // tgk (Tajik) is Cyrillic in the modern script. Without a hint a
+    // bare "вода" still lands in the script slot via the regex
+    // fallback, but with the hint we get the deterministic path.
+    const enrichments = {
+      reference_forms: { water: { tgk: ['вода'] } },
+    };
+    const lists = resolveReferenceFormLists(enrichments, {}, concept, ['tgk'], { tgk: 'Cyrl' });
+    expect(lists.tgk[0].script).toBe('вода');
+    expect(lists.tgk[0].ipa).toBe('');
+  });
+
+  it('uses Latn hint to route bare Latin forms into the IPA slot', () => {
+    // English (eng, Latn) bare-string form -- without any hint the
+    // regex fallback already sends Latin to IPA, but the deterministic
+    // hint makes the intent explicit and catches edge cases the regex
+    // misses (mixed strings, etc.).
+    const enrichments = {
+      reference_forms: { water: { eng: ['waːtər'] } },
+    };
+    const lists = resolveReferenceFormLists(enrichments, {}, concept, ['eng'], { eng: 'Latn' });
+    expect(lists.eng[0].ipa).toBe('waːtər');
+    expect(lists.eng[0].script).toBe('');
   });
 });
 

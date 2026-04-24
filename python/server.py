@@ -8041,6 +8041,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "code": code,
                 "name": data.get("name") or code,
                 "family": data.get("family") or None,
+                # ISO 15924 script hint -- when present, the Reference Forms
+                # panel routes bare strings deterministically to the script
+                # vs IPA slot, instead of guessing from Unicode blocks.
+                "script": data.get("script") or None,
                 "filled": sum(1 for v in concepts_dict.values() if v),
                 "total": len(concepts_dict),
             })
@@ -8095,6 +8099,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             family = item.get("family")
             if isinstance(family, str) and family.strip():
                 entry["family"] = family.strip()
+            # ISO 15924 script hint -- carried through from the configure
+            # modal so the Reference Forms panel can route bare strings
+            # without falling back to the Unicode-block heuristic.
+            script = item.get("script")
+            if isinstance(script, str) and script.strip():
+                entry["script"] = script.strip()
             clean_langs[code] = entry
 
         # Every primary code must appear in the language set. If the client
@@ -8254,6 +8264,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                         "code": code,
                         "name": str(item.get("name") or code),
                         **({"family": item["family"]} if isinstance(item.get("family"), str) and item["family"].strip() else {}),
+                        **({"script": item["script"]} if isinstance(item.get("script"), str) and item["script"].strip() else {}),
                     }
 
         languages = sorted(merged.values(), key=lambda x: x.get("name", x.get("code", "")))
@@ -8348,6 +8359,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "code": code,
                 "name": data.get("name") or code,
                 "family": data.get("family") or None,
+                "script": data.get("script") or None,
                 "total_forms": len(forms_out),
                 "concepts_covered": concepts_covered,
                 "concepts_total": all_concepts_total,
