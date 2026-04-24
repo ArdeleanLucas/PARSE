@@ -1,6 +1,6 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
-## Current State (updated 2026-04-21)
+## Current State (updated 2026-04-24)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -22,6 +22,12 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - Server endpoints:
     - `POST /api/compute/contact-lexemes`
     - `GET /api/contact-lexemes/coverage`
+- **Streaming responses shipped**:
+  - Additive WebSocket sidecar in `python/external_api/streaming.py`
+  - Dedicated port via `PARSE_WS_PORT` (default `8767`)
+  - Per-job subscription endpoint: `ws://<host>:<ws_port>/ws/jobs/{jobId}`
+  - Typed events: `job.snapshot`, `job.progress`, `job.log`, `stt.segment`, `job.complete`, `job.error`
+  - Existing HTTP polling and callback flows remain fully supported
 
 ## MCP adapter note
 
@@ -43,6 +49,10 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - `GET /openapi.json`
   - `GET /docs`
   - `GET /redoc`
+- Additive WebSocket job streaming now runs beside the HTTP server:
+  - `ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}`
+  - event envelope fields: `event`, `jobId`, `type`, `ts`, `payload`
+  - current v1 events: `job.snapshot`, `job.progress`, `job.log`, `stt.segment`, `job.complete`, `job.error`
 - Official external wrappers now live in `python/packages/parse_mcp/`.
 - Mutability meanings:
   - `read_only` — inspection only; no writes or background jobs
@@ -110,15 +120,11 @@ Use the generic tools when an agent needs transport-independent job inspection i
 Recommended agent pattern:
 1. Start a heavy job (`pipeline_run`, `stt_start`, `audio_normalize_start`, etc.)
 2. Poll `job_status` for transport-neutral state
-<<<<<<< HEAD
-3. Read `job_logs` when the human asks "what is it doing?" or when progress stalls
-4. Fall back to old per-type status tools only when a workflow needs type-specific payload shaping
-=======
 3. Inspect `locks` when coordinating speaker-scoped mutating work between humans and agents
 4. Read `job_logs` when the human asks "what is it doing?" or when progress stalls
 5. For HTTP-started jobs that need push completion, pass `callbackUrl` (absolute `http(s)` URL) on the job-start request so PARSE POSTs the final generic job payload on `complete` / `error`
-6. Fall back to old per-type status tools only when a workflow needs type-specific payload shaping
->>>>>>> 660eb33 (feat: add job completion callbacks)
+6. For realtime progress, connect to `ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}` and consume the typed event stream
+7. Fall back to old per-type status tools only when a workflow needs type-specific payload shaping
 
 ## Client/Server Contract Surface
 

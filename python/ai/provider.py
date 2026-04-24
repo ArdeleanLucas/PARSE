@@ -1018,6 +1018,7 @@ class AIProvider(abc.ABC):
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
+        segment_callback: Optional[Callable[[Segment], None]] = None,
     ) -> List[Segment]:
         """Transcribe an audio file into timestamped segments."""
         raise NotImplementedError
@@ -1275,6 +1276,7 @@ class LocalWhisperProvider(AIProvider):
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
+        segment_callback: Optional[Callable[[Segment], None]] = None,
     ) -> List[Segment]:
         """Run full-file STT with faster-whisper."""
         path = Path(audio_path).expanduser().resolve()
@@ -1326,6 +1328,8 @@ class LocalWhisperProvider(AIProvider):
                 if words_out:
                     seg_dict["words"] = words_out
                 segs_out.append(seg_dict)
+                if segment_callback is not None:
+                    segment_callback(copy.deepcopy(seg_dict))
                 if progress_callback is not None and total_duration > 0.0:
                     progress = _coerce_confidence(end / total_duration) * 100.0
                     progress_callback(progress, len(segs_out))
@@ -1491,6 +1495,7 @@ class OpenAIProvider(AIProvider):
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
+        segment_callback: Optional[Callable[[Segment], None]] = None,
     ) -> List[Segment]:
         """Transcribe audio with OpenAI STT endpoint."""
         path = Path(audio_path).expanduser().resolve()
@@ -1541,6 +1546,8 @@ class OpenAIProvider(AIProvider):
                         "confidence": confidence,
                     }
                 )
+                if segment_callback is not None:
+                    segment_callback(copy.deepcopy(segments_out[-1]))
 
                 if progress_callback is not None:
                     progress_callback(100.0, index)
@@ -1555,6 +1562,8 @@ class OpenAIProvider(AIProvider):
                     "confidence": 0.0,
                 }
             )
+            if segment_callback is not None:
+                segment_callback(copy.deepcopy(segments_out[-1]))
             if progress_callback is not None:
                 progress_callback(100.0, 1)
 
@@ -1625,12 +1634,14 @@ class XAIProvider(OpenAIProvider):
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
+        segment_callback: Optional[Callable[[Segment], None]] = None,
     ) -> List[Segment]:
         """Use local faster-whisper fallback for STT."""
         return self._stt_fallback.transcribe(
             audio_path=audio_path,
             language=language,
             progress_callback=progress_callback,
+            segment_callback=segment_callback,
         )
 
 
@@ -1659,12 +1670,14 @@ class OllamaProvider(AIProvider):
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
+        segment_callback: Optional[Callable[[Segment], None]] = None,
     ) -> List[Segment]:
         """Use local faster-whisper fallback for STT."""
         return self._stt_fallback.transcribe(
             audio_path=audio_path,
             language=language,
             progress_callback=progress_callback,
+            segment_callback=segment_callback,
         )
 
     def _generate(self, prompt: str) -> str:

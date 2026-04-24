@@ -30,6 +30,7 @@ from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.catalog import build_mcp_http_catalog, get_mcp_tool_entry, mcp_exposure_payload, resolve_catalog_mode
 from external_api.openapi import build_openapi_document, render_redoc_html, render_swagger_ui_html
+from external_api.streaming import JobStreamingSidecar
 
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -39,6 +40,7 @@ except Exception:
 
 HOST = "0.0.0.0"
 PORT = 8766
+WS_PORT = 8767
 JOB_RETENTION_SECONDS = 60 * 60
 JOB_LOG_MAX_ENTRIES = 200
 JOB_LOCK_TTL_SECONDS = 10 * 60
@@ -77,6 +79,9 @@ CHAT_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+
+_job_streaming_lock = threading.Lock()
+_job_streaming_sidecar: Optional[JobStreamingSidecar] = None
 
 _chat_sessions: Dict[str, Dict[str, Any]] = {}
 _chat_sessions_lock = threading.Lock()
@@ -2167,6 +2172,7 @@ def _start_persistent_worker() -> bool:
             on_progress=_set_job_progress,
             on_complete=_set_job_complete,
             on_error=_set_job_error,
+            on_stt_segment=_publish_stt_partial_segment,
         )
         started = handle.start(ready_timeout=180.0)
         if not started:
@@ -2601,19 +2607,27 @@ def _append_job_log_locked(
     if not isinstance(logs, list):
         logs = []
         job["logs"] = logs
-    logs.append(
-        _job_log_entry(
-            level=level,
-            event=event,
-            message=message,
-            source=source,
-            progress=progress,
-            data=data,
-        )
+    entry = _job_log_entry(
+        level=level,
+        event=event,
+        message=message,
+        source=source,
+        progress=progress,
+        data=data,
     )
+    logs.append(entry)
     log_limit = _job_log_limit()
     if len(logs) > log_limit:
         del logs[:-log_limit]
+    job_id = str(job.get("jobId") or "").strip()
+    job_type = str(job.get("type") or "").strip()
+    if job_id and job_type:
+        _publish_job_stream_event(
+            "job.log",
+            job_id=job_id,
+            job_type=job_type,
+            payload=entry,
+        )
 
 
 _MUTATING_SPEAKER_JOB_TYPES = frozenset({"normalize", "stt", "onboard:speaker"})
@@ -3011,6 +3025,8 @@ def _compute_checkpoint(label: str, **kv: Any) -> None:
         pass
 
 def _set_job_running(job_id: str, message: Optional[str] = None) -> None:
+    stream_payload: Optional[Dict[str, Any]] = None
+    job_type = ""
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None:
@@ -3031,6 +3047,16 @@ def _set_job_running(job_id: str, message: Optional[str] = None) -> None:
             message=str(job.get("message") or message or "Job started"),
             progress=_clamp_progress(job.get("progress", 0.0)),
         )
+        job_type = str(job.get("type") or "")
+        stream_payload = _job_response_payload(job)
+
+    if stream_payload is not None and job_type:
+        _publish_job_stream_event(
+            "job.progress",
+            job_id=job_id,
+            job_type=job_type,
+            payload=stream_payload,
+        )
 
 
 
@@ -3041,6 +3067,8 @@ def _set_job_progress(
     segments_processed: Optional[int] = None,
     total_segments: Optional[int] = None,
 ) -> None:
+    stream_payload: Optional[Dict[str, Any]] = None
+    job_type = ""
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None or job.get("status") != "running":
@@ -3089,6 +3117,16 @@ def _set_job_progress(
                 message="Progress updated",
                 progress=current_progress,
             )
+        job_type = str(job.get("type") or "")
+        stream_payload = _job_response_payload(job)
+
+    if stream_payload is not None and job_type:
+        _publish_job_stream_event(
+            "job.progress",
+            job_id=job_id,
+            job_type=job_type,
+            payload=stream_payload,
+        )
 
 
 
@@ -3100,6 +3138,8 @@ def _set_job_complete(
     total_segments: Optional[int] = None,
 ) -> None:
     callback_snapshot: Optional[Dict[str, Any]] = None
+    stream_payload: Optional[Dict[str, Any]] = None
+    job_type = ""
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None:
@@ -3137,7 +3177,16 @@ def _set_job_complete(
             progress=100.0,
         )
         callback_snapshot = copy.deepcopy(job)
+        job_type = str(job.get("type") or "")
+        stream_payload = _job_response_payload(job)
 
+    if stream_payload is not None and job_type:
+        _publish_job_stream_event(
+            "job.complete",
+            job_id=job_id,
+            job_type=job_type,
+            payload=stream_payload,
+        )
     if callback_snapshot is not None:
         _dispatch_job_callback_async(callback_snapshot)
 
@@ -3153,6 +3202,8 @@ def _set_job_error(
     one-line reason on top and the full Python traceback below without
     having to split-on-newline."""
     callback_snapshot: Optional[Dict[str, Any]] = None
+    stream_payload: Optional[Dict[str, Any]] = None
+    job_type = ""
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None:
@@ -3178,7 +3229,16 @@ def _set_job_error(
             progress=_clamp_progress(job.get("progress", 0.0)),
         )
         callback_snapshot = copy.deepcopy(job)
+        job_type = str(job.get("type") or "")
+        stream_payload = _job_response_payload(job)
 
+    if stream_payload is not None and job_type:
+        _publish_job_stream_event(
+            "job.error",
+            job_id=job_id,
+            job_type=job_type,
+            payload=stream_payload,
+        )
     if callback_snapshot is not None:
         _dispatch_job_callback_async(callback_snapshot)
 
@@ -3308,6 +3368,125 @@ def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _resolve_ws_port() -> int:
+    raw = str(os.environ.get("PARSE_WS_PORT") or "").strip()
+    if not raw:
+        return WS_PORT
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        return WS_PORT
+    if 0 <= port <= 65535:
+        return port
+    return WS_PORT
+
+
+
+def _job_stream_envelope(
+    event_type: str,
+    *,
+    job_id: str,
+    job_type: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "event": str(event_type),
+        "jobId": str(job_id),
+        "type": str(job_type),
+        "ts": _utc_now_iso(),
+        "payload": copy.deepcopy(payload),
+    }
+
+
+
+def _job_snapshot_stream_event(job_id: str) -> Optional[Dict[str, Any]]:
+    job = _get_job_snapshot(job_id)
+    if job is None:
+        return None
+    return _job_stream_envelope(
+        "job.snapshot",
+        job_id=str(job.get("jobId") or job_id),
+        job_type=str(job.get("type") or ""),
+        payload=_job_response_payload(job),
+    )
+
+
+
+def _job_streaming_sidecar_or_none() -> Optional[JobStreamingSidecar]:
+    with _job_streaming_lock:
+        return _job_streaming_sidecar
+
+
+
+def _start_websocket_sidecar(host: Optional[str] = None, port: Optional[int] = None) -> JobStreamingSidecar:
+    global _job_streaming_sidecar
+    requested_host = str(host or HOST).strip() or HOST
+    requested_port = _resolve_ws_port() if port is None else int(port)
+    with _job_streaming_lock:
+        sidecar = _job_streaming_sidecar
+        if sidecar is not None:
+            same_host = str(sidecar.host or "") == requested_host
+            same_port = sidecar.port == requested_port if requested_port != 0 else True
+            if sidecar.is_running() and same_host and same_port:
+                return sidecar
+            sidecar.stop()
+        sidecar = JobStreamingSidecar(
+            host=requested_host,
+            port=requested_port,
+            get_snapshot_event=_job_snapshot_stream_event,
+        ).start()
+        _job_streaming_sidecar = sidecar
+        return sidecar
+
+
+
+def _shutdown_websocket_sidecar() -> None:
+    global _job_streaming_sidecar
+    with _job_streaming_lock:
+        sidecar = _job_streaming_sidecar
+        _job_streaming_sidecar = None
+    if sidecar is not None:
+        sidecar.stop()
+
+
+
+def _publish_job_stream_event(
+    event_type: str,
+    *,
+    job_id: str,
+    job_type: str,
+    payload: Dict[str, Any],
+) -> None:
+    sidecar = _job_streaming_sidecar_or_none()
+    if sidecar is None:
+        return
+    sidecar.publish(
+        _job_stream_envelope(
+            event_type,
+            job_id=job_id,
+            job_type=job_type,
+            payload=payload,
+        )
+    )
+
+
+
+def _publish_stt_partial_segment(job_id: str, segment: Dict[str, Any]) -> None:
+    job = _get_job_snapshot(job_id)
+    if job is None:
+        return
+    _publish_job_stream_event(
+        "stt.segment",
+        job_id=str(job.get("jobId") or job_id),
+        job_type=str(job.get("type") or "stt"),
+        payload={
+            "provisional": True,
+            "segment": copy.deepcopy(segment),
+        },
+    )
+
+
+
 def _list_active_jobs_snapshots() -> List[Dict[str, Any]]:
     """Return public snapshots for all currently-running jobs.
 
@@ -3432,12 +3611,44 @@ def _run_stt_job(
             segments_processed=segments_processed,
         )
 
+    def _segment_callback(segment: Dict[str, Any]) -> None:
+        if not isinstance(segment, dict):
+            return
+        partial_segment: Dict[str, Any] = {}
+        try:
+            partial_segment["start"] = float(segment.get("start", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            partial_segment["start"] = 0.0
+        try:
+            partial_segment["end"] = float(
+                segment.get("end", partial_segment["start"]) or partial_segment["start"]
+            )
+        except (TypeError, ValueError):
+            partial_segment["end"] = partial_segment["start"]
+        partial_segment["text"] = str(segment.get("text", "") or "").strip()
+        try:
+            partial_segment["confidence"] = float(segment.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            partial_segment["confidence"] = 0.0
+        words = segment.get("words")
+        if isinstance(words, list) and words:
+            partial_segment["words"] = copy.deepcopy(words)
+        _publish_stt_partial_segment(job_id, partial_segment)
+
     try:
-        segments = provider.transcribe(
-            audio_path=audio_path,
-            language=language,
-            progress_callback=_progress_callback,
-        )
+        transcribe_kwargs = {
+            "audio_path": audio_path,
+            "language": language,
+            "progress_callback": _progress_callback,
+            "segment_callback": _segment_callback,
+        }
+        try:
+            segments = provider.transcribe(**transcribe_kwargs)
+        except TypeError as exc:
+            if "segment_callback" not in str(exc):
+                raise
+            transcribe_kwargs.pop("segment_callback", None)
+            segments = provider.transcribe(**transcribe_kwargs)
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
@@ -8357,6 +8568,7 @@ def _startup_banner_lines(
         "=" * 60,
         "  Serving: {0}".format(serve_dir),
         "  Port   : {0}".format(PORT),
+        "  WS Port: {0}".format(_resolve_ws_port()),
         "",
         "  React dev UI (current workflow; requires `npm run dev`):",
         "    Annotate: http://localhost:5173/",
@@ -8380,7 +8592,10 @@ def _startup_banner_lines(
         ])
     lines.extend([
         "",
-        "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]",
+        "  WebSocket job streaming:",
+        "    ws://localhost:{0}/ws/jobs/{{jobId}}".format(_resolve_ws_port()),
+        "",
+        "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]  WS streaming [x]",
         "  Press Ctrl+C to stop.",
         "=" * 60,
     ])
@@ -8468,6 +8683,15 @@ def main() -> None:
     server_address = (HOST, PORT)
     httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
 
+    try:
+        _start_websocket_sidecar(host=HOST, port=_resolve_ws_port())
+    except Exception as exc:
+        print(
+            "[WARN] WebSocket streaming disabled: {0}".format(exc),
+            file=sys.stderr,
+            flush=True,
+        )
+
     if _resolve_compute_mode() == "persistent":
         if not _start_persistent_worker():
             print(
@@ -8487,6 +8711,13 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nServer stopped.")
         sys.exit(0)
+    finally:
+        try:
+            httpd.server_close()
+        except Exception:
+            pass
+        _shutdown_websocket_sidecar()
+        _shutdown_persistent_worker()
 
 
 if __name__ == "__main__":

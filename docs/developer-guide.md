@@ -75,6 +75,7 @@ dist/                   -- build output
 
 - Python 3.10–3.12
 - local HTTP server in `python/server.py`
+- additive WebSocket job-streaming sidecar in `python/external_api/streaming.py` (`PARSE_WS_PORT`, default `8767`)
 - OpenAPI 3.1 generation + interactive docs (`/openapi.json`, `/docs`, `/redoc`)
 - HTTP MCP bridge for schema discovery + tool execution (`/api/mcp/*`)
 - background job orchestration for STT / normalize / compute / chat
@@ -133,6 +134,42 @@ npm run build
 ```
 
 The Python backend can then serve the built frontend from `http://localhost:8766/`.
+
+### WebSocket job streaming
+
+The backend now also exposes an additive realtime stream beside the HTTP API:
+
+- environment variable: `PARSE_WS_PORT`
+- default port: `8767`
+- endpoint shape: `ws://localhost:8767/ws/jobs/{jobId}`
+
+This sidecar is optional. Existing HTTP polling remains supported and is still the baseline compatibility path.
+
+Current v1 streamed event names:
+
+- `job.snapshot`
+- `job.progress`
+- `job.log`
+- `stt.segment`
+- `job.complete`
+- `job.error`
+
+Example Python client:
+
+```python
+import json
+from websockets.sync.client import connect
+
+job_id = "stt-abc123"
+with connect(f"ws://127.0.0.1:8767/ws/jobs/{job_id}") as ws:
+    while True:
+        event = json.loads(ws.recv())
+        print(event["event"], event["payload"])
+        if event["event"] in {"job.complete", "job.error"}:
+            break
+```
+
+For STT jobs, `stt.segment` packets are provisional progress signals for UX and agent steering. The persisted cache/result written on completion remains the canonical artifact.
 
 ### Compute runtime modes and deployment notes
 
@@ -243,6 +280,19 @@ At minimum update:
 - `docs/architecture.md` if the new route changes the data model or workflow surface
 - the root `README.md` if the change is user-visible enough to belong on the landing page
 
+## How to add a new WebSocket stream
+
+PARSE's current realtime transport is intentionally narrow: a dedicated per-job stream layered on top of the existing HTTP server rather than a framework migration.
+
+When extending it:
+
+1. Prefer reusing the existing job registry in `python/server.py` rather than inventing a parallel state store.
+2. Publish typed envelopes through `python/external_api/streaming.py`.
+3. Keep polling endpoints working; streaming must stay additive, never mandatory.
+4. Use stable event names (`job.progress`, `job.log`, `stt.segment`, etc.).
+5. Document any new event types in `docs/api-reference.md` and `AGENTS.md`.
+6. Test event presence without over-specifying incidental ordering unless ordering is part of the explicit contract.
+
 ## How to add a new chat tool
 
 The built-in assistant works through `ParseChatTools` in `python/ai/chat_tools.py`.
@@ -293,6 +343,10 @@ Task 5 adds two more extension surfaces that matter for contributors:
 3. **Publishable wrapper package** — `python/packages/parse_mcp/`
    - keep discovery/execution behavior aligned with the HTTP MCP bridge
    - framework wrappers should remain thin adapters over the discovered tool schema
+4. **WebSocket streaming sidecar** — `python/external_api/streaming.py` + `python/server.py`
+   - keep the per-job stream shape aligned with the live job registry
+   - treat polling, callbacks, and streaming as complementary transports over the same job state
+   - do not assume strict ordering between near-simultaneous events like `job.log` and `job.progress` unless the code explicitly enforces it
 
 When adding or renaming MCP-visible tools, update all three layers together:
 - stdio adapter

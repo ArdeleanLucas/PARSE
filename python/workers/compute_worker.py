@@ -65,10 +65,12 @@ class WorkerHandle:
         on_progress: Callable[..., None],
         on_complete: Callable[..., None],
         on_error: Callable[[str, str], None],
+        on_stt_segment: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> None:
         self._on_progress = on_progress
         self._on_complete = on_complete
         self._on_error = on_error
+        self._on_stt_segment = on_stt_segment
         self._ctx = multiprocessing.get_context("spawn")
         self._job_queue: Optional[Any] = None
         self._event_queue: Optional[Any] = None
@@ -226,6 +228,10 @@ class WorkerHandle:
                     except TypeError:
                         combined = err if not tb else "{0}\n{1}".format(err, tb)
                         self._on_error(job_id, combined)
+                elif kind == "stt_segment" and self._on_stt_segment is not None:
+                    segment = event.get("segment")
+                    if isinstance(segment, dict):
+                        self._on_stt_segment(job_id, segment)
             except Exception as exc:
                 print(
                     "[WORKER] monitor handler failed ({0}): {1}".format(kind, exc),
@@ -309,9 +315,20 @@ def _install_parent_emitters(event_queue: Any) -> None:
             traceback=str(traceback_str) if traceback_str else "",
         )
 
+    def _patched_stt_segment(job_id, segment):
+        if not isinstance(segment, dict):
+            return
+        _emit(
+            event_queue,
+            "stt_segment",
+            job_id=job_id,
+            segment=segment,
+        )
+
     server_mod._set_job_progress = _patched_progress
     server_mod._set_job_complete = _patched_complete
     server_mod._set_job_error = _patched_error
+    server_mod._publish_stt_partial_segment = _patched_stt_segment
 
 
 def _install_aligner_preload() -> Any:

@@ -6,10 +6,11 @@
 
 ## API overview
 
-PARSE has two programmatic surfaces:
+PARSE has three programmatic surfaces:
 
 1. **HTTP API** — used by the browser frontend and any local automation that talks to `python/server.py`
-2. **MCP server mode** — used by external agent clients through the PARSE MCP adapter
+2. **WebSocket job streaming** — additive realtime job updates from the sidecar in `python/external_api/streaming.py`
+3. **MCP server mode** — used by external agent clients through the PARSE MCP adapter
 
 ### Base URLs
 
@@ -17,6 +18,7 @@ During active development:
 
 - frontend: `http://localhost:5173`
 - API backend: `http://localhost:8766`
+- WebSocket sidecar: `ws://localhost:8767` (override with `PARSE_WS_PORT`)
 
 In practice, the React app usually calls relative `/api/...` paths through the Vite proxy.
 
@@ -33,6 +35,48 @@ A few patterns recur across the API:
 - binary export/image endpoints return files rather than JSON
 - compute endpoints normalize job handling across multiple background workflows
 - `/api/config` carries a schema-versioned payload; if the config contract changes incompatibly, update the corresponding version constants in both `python/server.py` and `src/api/client.ts`
+
+## WebSocket job streaming
+
+WebSocket streaming is additive. Clients can continue polling `/api/stt/status`, `/api/compute/{type}/status`, or `/api/jobs/{jobId}` exactly as before.
+
+### Endpoint
+
+- `ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}`
+
+### Event envelope
+
+```json
+{
+  "event": "job.progress",
+  "jobId": "stt-abc123",
+  "type": "stt",
+  "ts": "2026-04-24T22:30:00Z",
+  "payload": {
+    "progress": 42.5,
+    "message": "Transcribing (17 segments)",
+    "segmentsProcessed": 17,
+    "totalSegments": 0
+  }
+}
+```
+
+### Current v1 event types
+
+| Event | Purpose |
+|---|---|
+| `job.snapshot` | Initial job state sent immediately after subscribe |
+| `job.progress` | Current public job payload after a progress/running update |
+| `job.log` | One structured log entry from the job ring buffer |
+| `stt.segment` | Provisional partial STT segment for in-flight decoding |
+| `job.complete` | Terminal success payload |
+| `job.error` | Terminal error payload |
+
+### Notes
+
+- `stt.segment` packets are provisional and meant for UX / agent steering.
+- The persisted STT cache and final job `result` remain the canonical artifacts.
+- Closely emitted events like `job.log` and `job.progress` may arrive in either order unless a stricter ordering contract is documented for that event pair.
 
 ## GET endpoints
 
@@ -160,6 +204,12 @@ Example response:
   "jobId": "stt-abc123",
   "status": "running"
 }
+```
+
+To subscribe to realtime updates for the started job, connect to:
+
+```text
+ws://localhost:8767/ws/jobs/stt-abc123
 ```
 
 ### Poll STT status

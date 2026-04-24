@@ -105,10 +105,32 @@ These changes make long-running PARSE jobs inspectable across the UI, HTTP autom
 
 ---
 
-## 6. Future / nice-to-have
+## 6. Streaming responses (WebSocket)
+
+**Status:** ✅ Complete
+
+**Shipped:**
+- Added an additive WebSocket sidecar in `python/external_api/streaming.py` rather than migrating the custom HTTP server to a new framework.
+- The sidecar runs on `PARSE_WS_PORT` with default port `8767`.
+- Per-job subscription endpoint:
+  - `ws://<host>:<ws_port>/ws/jobs/{jobId}`
+- Current v1 event types:
+  - `job.snapshot`
+  - `job.progress`
+  - `job.log`
+  - `stt.segment`
+  - `job.complete`
+  - `job.error`
+- First supported realtime workflow is STT:
+  - live job progress updates
+  - provisional partial segment packets while decoding
+- Existing HTTP polling and callback flows remain fully supported and are still the compatibility baseline.
+
+---
+
+## 7. Future / nice-to-have
 
 | Idea | Value |
 |------|-------|
-| Streaming responses (WebSocket) | Agents get real-time waveform updates or partial results |
 | Built-in sandbox / permission system | Scope an agent to a single speaker: `"agent can only edit speaker X"` |
 | Remote / cloud mode | Run PARSE headless on a GPU server; agents connect via MCP over the internet |
