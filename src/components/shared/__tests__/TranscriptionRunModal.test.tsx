@@ -185,9 +185,10 @@ describe("TranscriptionRunModal", () => {
     expect(betaOrtho.getAttribute("data-cell-kind")).toBe("blocked");
   });
 
-  it("onConfirm returns selected speakers + steps + implicit overwrites (Test D)", async () => {
-    // Beta has ortho done=true; ticking Beta and confirming should set
-    // overwrites.ortho = true.
+  it("onConfirm defaults to keep-existing scope (no implicit overwrite) (Test D)", async () => {
+    // Beta has ortho done=true. Re-ticking ortho surfaces the scope bar; by
+    // default scope is "gaps" so confirming does NOT set overwrites.ortho —
+    // this protects finalized work from being clobbered on accident.
     vi.mocked(getPipelineState).mockImplementation(async (speaker: string) => {
       if (speaker === "Beta")
         return makeState({
@@ -210,9 +211,6 @@ describe("TranscriptionRunModal", () => {
       />,
     );
 
-    // Wait for Beta's state to resolve — after load, the default-step logic
-    // should drop ortho (Beta's only done=true step) from the default
-    // selection, leaving {normalize, stt, ipa}.
     await waitFor(() => {
       const orthoStep = screen.getByTestId(
         "transcription-run-step-ortho",
@@ -220,7 +218,6 @@ describe("TranscriptionRunModal", () => {
       expect(orthoStep.checked).toBe(false);
     });
 
-    // Tick ortho to opt in to overwrite.
     const orthoStep = screen.getByTestId(
       "transcription-run-step-ortho",
     ) as HTMLInputElement;
@@ -228,20 +225,27 @@ describe("TranscriptionRunModal", () => {
       fireEvent.click(orthoStep);
     });
 
-    // Now the ortho column should render; Beta/ortho should be `overwrite`.
+    // Collision detected → cell is `keep` (not `overwrite`) and scope bar
+    // shows the Keep/Overwrite toggle for ortho defaulted to Keep.
     await waitFor(() => {
       expect(
         screen
           .getByTestId("transcription-run-cell-Beta-ortho")
           .getAttribute("data-cell-kind"),
-      ).toBe("overwrite");
+      ).toBe("keep");
     });
+    const scopeBar = screen.getByTestId("transcription-run-scope-bar");
+    expect(scopeBar).toBeTruthy();
+    expect(
+      screen
+        .getByTestId("transcription-run-scope-ortho")
+        .getAttribute("data-step-scope"),
+    ).toBe("gaps");
 
     const confirmBtn = screen.getByTestId(
       "transcription-run-confirm",
     ) as HTMLButtonElement;
     expect(confirmBtn.disabled).toBe(false);
-
     act(() => {
       fireEvent.click(confirmBtn);
     });
@@ -250,13 +254,82 @@ describe("TranscriptionRunModal", () => {
     const arg = onConfirm.mock.calls[0][0];
     expect(arg.speakers).toEqual(["Beta"]);
     expect(arg.steps).toEqual(["normalize", "stt", "ortho", "ipa"]);
-    // Beta's ortho.done=true + Beta selected + ortho step selected →
-    // implicit overwrite.
-    expect(arg.overwrites.ortho).toBe(true);
-    // None of normalize/stt/ipa are done for Beta → no overwrites.
+    // Default scope is "gaps" for ortho → no overwrite flag is sent.
+    expect(arg.overwrites.ortho).toBeUndefined();
     expect(arg.overwrites.normalize).toBeUndefined();
     expect(arg.overwrites.stt).toBeUndefined();
     expect(arg.overwrites.ipa).toBeUndefined();
+  });
+
+  it("flipping a collision step to Overwrite sends overwrites[step]=true (Test G)", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) => {
+      if (speaker === "Beta")
+        return makeState({
+          speaker: "Beta",
+          orthoDone: true,
+          orthoIntervals: 42,
+        });
+      return makeState({ speaker });
+    });
+
+    const onConfirm = vi.fn<[TranscriptionRunConfirm], void>();
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        speakers={["Beta"]}
+        defaultSelectedSpeaker="Beta"
+        fixedSteps={["ortho"]}
+        title="Generate ORTH"
+      />,
+    );
+
+    // Wait for Beta's state to resolve, and for the collision bar to render
+    // (Beta is the default speaker, ortho is the fixed step, and Beta has
+    // ortho.done=true).
+    await waitFor(() => {
+      expect(screen.getByTestId("transcription-run-scope-bar")).toBeTruthy();
+    });
+
+    // Default scope is `gaps` → cell is `keep`.
+    expect(
+      screen
+        .getByTestId("transcription-run-cell-Beta-ortho")
+        .getAttribute("data-cell-kind"),
+    ).toBe("keep");
+
+    // Flip ortho to Overwrite.
+    const overwriteBtn = screen.getByTestId(
+      "transcription-run-scope-ortho-overwrite",
+    );
+    act(() => {
+      fireEvent.click(overwriteBtn);
+    });
+
+    // Cell flips to `overwrite` and scope attr is updated.
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("transcription-run-cell-Beta-ortho")
+          .getAttribute("data-cell-kind"),
+      ).toBe("overwrite");
+    });
+    expect(
+      screen
+        .getByTestId("transcription-run-scope-ortho")
+        .getAttribute("data-step-scope"),
+    ).toBe("overwrite");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-confirm"));
+    });
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    const arg = onConfirm.mock.calls[0][0];
+    expect(arg.speakers).toEqual(["Beta"]);
+    expect(arg.steps).toEqual(["ortho"]);
+    expect(arg.overwrites.ortho).toBe(true);
   });
 
   it("Run button disabled when nothing selected (Test E)", async () => {

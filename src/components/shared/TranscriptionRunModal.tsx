@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Loader2,
   Mic,
+  Pin,
   RotateCcw,
   SkipForward,
   Type,
@@ -14,6 +15,13 @@ import { Modal } from "./Modal";
 import { getPipelineState, type PipelineState } from "../../api/client";
 
 export type PipelineStepId = "normalize" | "stt" | "ortho" | "ipa";
+
+export type RunScope = "gaps" | "overwrite";
+
+// Default scope for collisions. "gaps" preserves existing data (IPA fills
+// empty intervals; ORTH is a no-op when the tier already has content). The
+// user must explicitly opt into "overwrite" to clobber finalized work.
+const DEFAULT_SCOPE: RunScope = "gaps";
 
 const STEP_ORDER: PipelineStepId[] = ["normalize", "stt", "ortho", "ipa"];
 
@@ -61,12 +69,32 @@ export interface TranscriptionRunModalProps {
   title: string;
 }
 
-type CellKind = "ok" | "skip" | "overwrite" | "blocked" | "loading" | "unknown";
+type CellKind =
+  | "ok"
+  | "skip"
+  | "keep"
+  | "overwrite"
+  | "blocked"
+  | "loading"
+  | "unknown";
 
 interface CellInfo {
   kind: CellKind;
   count: number;
   reason: string | null;
+}
+
+// Per-step human-readable copy for the "keep existing" scope. ORTH is a pure
+// no-op when the tier already has content (razhan's segmentation isn't stable
+// across runs), so the tooltip wording differs from IPA.
+function keepTooltip(step: PipelineStepId, count: number): string {
+  if (step === "ortho") {
+    return `Keeping existing ORTH tier (${count} intervals). This step will no-op — switch to Overwrite to redo it.`;
+  }
+  if (step === "ipa") {
+    return `Keeping existing IPA intervals (${count}). Empty intervals will still be filled; finalized text stays put.`;
+  }
+  return `Keeping existing output (${count}). Switch to Overwrite to redo.`;
 }
 
 function stepCount(step: PipelineStepId, state: PipelineState): number {
@@ -86,6 +114,7 @@ function computeCell(
   step: PipelineStepId,
   entry: SpeakerLoadEntry | undefined,
   speakerSelected: boolean,
+  scope: RunScope,
 ): CellInfo {
   if (!entry) return { kind: "unknown", count: 0, reason: null };
   if (entry.status === "loading")
@@ -101,7 +130,11 @@ function computeCell(
   }
   if (stepState.done) {
     if (speakerSelected) {
-      return { kind: "overwrite", count, reason: null };
+      return {
+        kind: scope === "overwrite" ? "overwrite" : "keep",
+        count,
+        reason: null,
+      };
     }
     return { kind: "skip", count, reason: null };
   }
@@ -114,6 +147,8 @@ function cellClasses(kind: CellKind): string {
       return "bg-emerald-50 text-emerald-800 border-emerald-200";
     case "overwrite":
       return "bg-amber-50 text-amber-800 border-amber-300";
+    case "keep":
+      return "bg-sky-50 text-sky-800 border-sky-200";
     case "skip":
       return "bg-slate-100 text-slate-600 border-slate-200";
     case "blocked":
@@ -131,6 +166,8 @@ function cellLabel(kind: CellKind): string {
       return "ok";
     case "overwrite":
       return "overwrite";
+    case "keep":
+      return "keep existing";
     case "skip":
       return "will skip";
     case "blocked":
@@ -149,6 +186,8 @@ function CellIcon({ kind }: { kind: CellKind }) {
       return <CheckCircle2 className={cls} aria-hidden="true" />;
     case "overwrite":
       return <RotateCcw className={cls} aria-hidden="true" />;
+    case "keep":
+      return <Pin className={cls} aria-hidden="true" />;
     case "skip":
       return <SkipForward className={cls} aria-hidden="true" />;
     case "blocked":
@@ -181,12 +220,29 @@ export function TranscriptionRunModal({
   // Off by default — opt-in per run. Adds ~1-2 min to each ORTH run on
   // thesis-scale audio, so surfacing it as unchecked is the safer default.
   const [refineLexemes, setRefineLexemes] = useState(false);
+  // Per-step scope — only consulted when a step has `done=true` for at least
+  // one selected speaker. "gaps" keeps existing data (safe default); the user
+  // must explicitly flip a step to "overwrite" to clobber finalized output.
+  const [scopeByStep, setScopeByStep] = useState<
+    Record<PipelineStepId, RunScope>
+  >(() => ({
+    normalize: DEFAULT_SCOPE,
+    stt: DEFAULT_SCOPE,
+    ortho: DEFAULT_SCOPE,
+    ipa: DEFAULT_SCOPE,
+  }));
 
   // Reset state when the modal opens.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setRefineLexemes(false);
+    setScopeByStep({
+      normalize: DEFAULT_SCOPE,
+      stt: DEFAULT_SCOPE,
+      ortho: DEFAULT_SCOPE,
+      ipa: DEFAULT_SCOPE,
+    });
 
     // Seed per-speaker load entries as "loading".
     const initial: Record<string, SpeakerLoadEntry> = {};
@@ -323,26 +379,54 @@ export function TranscriptionRunModal({
     setSelectedSpeakers(next);
   };
 
+  // Steps where at least one selected speaker has done=true — i.e. steps that
+  // need a scope choice. Used to drive the collisions toolbar.
+  const collisionSteps: PipelineStepId[] = useMemo(() => {
+    const out: PipelineStepId[] = [];
+    for (const step of stepsToRender) {
+      let hit = false;
+      for (const speaker of selectedSpeakers) {
+        const entry = stateBySpeaker[speaker];
+        if (
+          entry?.status === "ready" &&
+          entry.state &&
+          entry.state[step].done
+        ) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) out.push(step);
+    }
+    return out;
+  }, [stepsToRender, selectedSpeakers, stateBySpeaker]);
+
   // Summary stats over the visible grid.
   const summary = useMemo(() => {
     let ok = 0;
+    let keep = 0;
     let overwrite = 0;
     let blocked = 0;
     for (const speaker of selectedSpeakers) {
       const entry = stateBySpeaker[speaker];
       for (const step of stepsToRender) {
-        const info = computeCell(step, entry, true);
+        const info = computeCell(step, entry, true, scopeByStep[step]);
         if (info.kind === "ok") ok++;
+        else if (info.kind === "keep") keep++;
         else if (info.kind === "overwrite") overwrite++;
         else if (info.kind === "blocked") blocked++;
       }
     }
-    return { ok, overwrite, blocked };
-  }, [selectedSpeakers, stepsToRender, stateBySpeaker]);
+    return { ok, keep, overwrite, blocked };
+  }, [selectedSpeakers, stepsToRender, stateBySpeaker, scopeByStep]);
 
   const hasAnySpeaker = selectedSpeakers.size > 0;
   const hasAnyStep = stepsToRender.length > 0;
   const willOverwrite = summary.overwrite > 0;
+
+  const setStepScope = (step: PipelineStepId, scope: RunScope) => {
+    setScopeByStep((prev) => ({ ...prev, [step]: scope }));
+  };
 
   const handleConfirm = () => {
     const speakersArr = speakers.filter((s) => selectedSpeakers.has(s));
@@ -350,10 +434,14 @@ export function TranscriptionRunModal({
 
     const overwrites: Partial<Record<PipelineStepId, boolean>> = {};
     for (const step of stepsArr) {
+      if (scopeByStep[step] !== "overwrite") continue;
       for (const speaker of speakersArr) {
         const entry = stateBySpeaker[speaker];
-        const info = computeCell(step, entry, true);
-        if (info.kind === "overwrite") {
+        if (
+          entry?.status === "ready" &&
+          entry.state &&
+          entry.state[step].done
+        ) {
           overwrites[step] = true;
           break;
         }
@@ -382,8 +470,8 @@ export function TranscriptionRunModal({
       >
         <p className="text-xs text-slate-600">
           Pick speakers and steps. The grid below previews what will run — green
-          cells run fresh, amber cells overwrite existing data, grey cells are
-          skipped, and red cells are blocked by the backend.
+          cells run fresh, sky cells keep existing data, amber cells overwrite
+          it, grey cells are skipped, and red cells are blocked by the backend.
         </p>
 
         {/* Step checkboxes — hidden when fixedSteps is set. */}
@@ -436,6 +524,72 @@ export function TranscriptionRunModal({
               />
               <span>Refine lexemes (short-clip fallback)</span>
             </label>
+          </div>
+        )}
+
+        {/* Collisions toolbar — per-step scope when the selected speakers
+            already have finalized output for a step. Hidden when there are no
+            collisions so the default view stays clean. */}
+        {collisionSteps.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2"
+            data-testid="transcription-run-scope-bar"
+          >
+            <span
+              className="text-xs font-semibold text-amber-900"
+              title="Some selected speakers already have finalized output for these steps. Choose Keep to preserve existing data, or Overwrite to clobber it."
+            >
+              Existing data
+            </span>
+            {collisionSteps.map((step) => {
+              const Icon = STEP_ICONS[step];
+              const scope = scopeByStep[step];
+              return (
+                <div
+                  key={step}
+                  className="flex items-center gap-1.5 text-xs text-slate-700"
+                  data-testid={`transcription-run-scope-${step}`}
+                  data-step-scope={scope}
+                >
+                  <Icon className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="font-medium">{STEP_LABELS[step]}</span>
+                  <div
+                    role="radiogroup"
+                    aria-label={`${STEP_LABELS[step]} scope`}
+                    className="ml-0.5 inline-flex overflow-hidden rounded border border-slate-300"
+                  >
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={scope === "gaps"}
+                      onClick={() => setStepScope(step, "gaps")}
+                      data-testid={`transcription-run-scope-${step}-keep`}
+                      className={`px-2 py-0.5 text-[11px] font-medium transition ${
+                        scope === "gaps"
+                          ? "bg-sky-600 text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      Keep
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={scope === "overwrite"}
+                      onClick={() => setStepScope(step, "overwrite")}
+                      data-testid={`transcription-run-scope-${step}-overwrite`}
+                      className={`border-l border-slate-300 px-2 py-0.5 text-[11px] font-medium transition ${
+                        scope === "overwrite"
+                          ? "bg-amber-600 text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      Overwrite
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -532,12 +686,19 @@ export function TranscriptionRunModal({
                       </label>
                     </td>
                     {gridStepColumns.map((step) => {
-                      const info = computeCell(step, entry, speakerSelected);
+                      const info = computeCell(
+                        step,
+                        entry,
+                        speakerSelected,
+                        scopeByStep[step],
+                      );
                       const tooltip = (() => {
                         if (info.kind === "blocked")
                           return info.reason ?? "Blocked by backend";
                         if (info.kind === "skip")
-                          return `Already done (${info.count} items). Re-tick this row's speaker + the step to allow overwrite.`;
+                          return `Already done (${info.count} items). Tick this row's speaker to choose a scope.`;
+                        if (info.kind === "keep")
+                          return keepTooltip(step, info.count);
                         if (info.kind === "overwrite")
                           return `Will overwrite ${info.count} existing items.`;
                         if (info.kind === "unknown")
@@ -581,6 +742,10 @@ export function TranscriptionRunModal({
             step{stepsToRender.length === 1 ? "" : "s"}.{" "}
             <span className="text-emerald-700 font-medium">
               {summary.ok} ok
+            </span>
+            ,{" "}
+            <span className="text-sky-700 font-medium">
+              {summary.keep} keep existing
             </span>
             ,{" "}
             <span className="text-amber-700 font-medium">
