@@ -34,7 +34,43 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - `read_only` — inspection only; no writes or background jobs
   - `stateful_job` — starts or manages a background job that can later mutate project artifacts
   - `mutating` — can write files or otherwise change project state directly
-- Agent-facing safety reasoning should read `meta["x-parse"]["preconditions"]` / `postconditions` instead of guessing from prose. Example:
+- Agent-facing safety reasoning should read `meta["x-parse"]["preconditions"]` / `postconditions` instead of guessing from prose.
+
+### Safety Metadata Reference
+
+Example `meta["x-parse"]` payload exposed through MCP:
+
+```json
+{
+  "mutability": "mutating",
+  "supports_dry_run": true,
+  "dry_run_parameter": "dryRun",
+  "preconditions": [
+    {
+      "id": "project_loaded",
+      "description": "The PARSE project root must be available and readable.",
+      "severity": "required",
+      "kind": "project_state"
+    },
+    {
+      "id": "speaker_annotation_exists",
+      "description": "The requested speaker must already have an annotation file to export.",
+      "severity": "required",
+      "kind": "file_presence"
+    }
+  ],
+  "postconditions": [
+    {
+      "id": "export_file_written",
+      "description": "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+      "severity": "required",
+      "kind": "filesystem_write"
+    }
+  ]
+}
+```
+
+Agent-side example:
 
 ```python
 x_parse = tool.meta["x-parse"]
