@@ -33,6 +33,7 @@ import json
 import platform
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
 
@@ -375,6 +376,38 @@ _PRELOADED_ALIGNER: Optional["Aligner"] = None
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=4)
+def _get_espeak_backend(language: str) -> Optional[Any]:
+    """Memoized ``EspeakBackend`` factory — one instance per language.
+
+    ``EspeakBackend.__init__`` loads libespeak-ng via ctypes and calls
+    ``espeak_Initialize()``. That's cheap on the first call but leaks
+    process state and thread handles when repeated thousands of times
+    per speaker (the Tier 2 forced-align path calls ``_g2p_word`` once
+    per word). On Fail02 (2026-04-24) the uncached path produced
+    ~800 MB/min memory growth and ``bash: fork: Resource temporarily
+    unavailable`` before WSL crashed with E_UNEXPECTED. Caching the
+    backend collapses thousands of loads to one.
+
+    Returns ``None`` when phonemizer is unavailable or the language
+    voice is missing — callers treat that as "G2P unavailable, fall
+    back to proportional alignment." Failures are cached too, which is
+    desirable: we don't want to retry an unresolvable voice 3,300 times.
+    """
+    try:
+        from phonemizer.backend import EspeakBackend  # type: ignore
+    except ImportError:
+        return None
+    try:
+        return EspeakBackend(
+            language,
+            preserve_punctuation=False,
+            with_stress=True,
+        )
+    except Exception:
+        return None
+
+
 def _g2p_word(word: str, language: str = DEFAULT_G2P_LANGUAGE) -> List[str]:
     """Convert a single orthographic word to a list of IPA phoneme tokens.
 
@@ -384,19 +417,9 @@ def _g2p_word(word: str, language: str = DEFAULT_G2P_LANGUAGE) -> List[str]:
     Returns an empty list when phonemizer is unavailable so the caller can
     fall back to proportional subdivision.
     """
-    try:
-        from phonemizer.backend import EspeakBackend  # type: ignore
-    except ImportError:
-        return []
-
     for lang in (language, FALLBACK_G2P_LANGUAGE):
-        try:
-            backend = EspeakBackend(
-                lang,
-                preserve_punctuation=False,
-                with_stress=True,
-            )
-        except Exception:
+        backend = _get_espeak_backend(lang)
+        if backend is None:
             continue
         try:
             phonemised = backend.phonemize([word], strip=True)
