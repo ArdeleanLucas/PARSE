@@ -118,6 +118,14 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         # back to higher temperature (or drops the segment) earlier
         # when it detects repetition.
         "compression_ratio_threshold": 1.8,
+        # Optional decoder priming string for elicited word-list recordings.
+        # Empty = not passed to faster-whisper.
+        "initial_prompt": "",
+        # When True the ORTH compute runner will also do a short-clip
+        # Whisper pass per concept after Tier-2 forced alignment. Off by
+        # default — opt in per speaker via the compute payload or per
+        # machine via ai_config.json.
+        "refine_lexemes": False,
     },
     "llm": {
         "provider": "openai",
@@ -1119,6 +1127,22 @@ class LocalWhisperProvider(AIProvider):
         except (TypeError, ValueError):
             self.compression_ratio_threshold = ratio_default
 
+        # initial_prompt: optional Whisper decoder priming string. Useful for
+        # ORTH on elicited word-list recordings to bias decoding toward known
+        # concepts and spellings. Empty string = not passed to faster-whisper.
+        prompt_raw = section_config.get("initial_prompt", "")
+        self.initial_prompt: str = (
+            str(prompt_raw).strip() if isinstance(prompt_raw, str) else ""
+        )
+
+        # refine_lexemes: ORTH-only hook read by the compute runner. When True,
+        # the ORTH job runs a short-clip Whisper fallback for concepts whose
+        # forced-alignment match is weak or missing. Default False so existing
+        # users aren't surprised by the extra ~1-2 min on thesis-scale audio.
+        self.refine_lexemes: bool = _coerce_bool(
+            section_config.get("refine_lexemes", False), default=False
+        )
+
         if _stt_force_cpu_env() and self.device.lower().startswith("cuda"):
             print(
                 "[WARN] PARSE_STT_FORCE_CPU set; overriding stt.device "
@@ -1268,6 +1292,8 @@ class LocalWhisperProvider(AIProvider):
                 transcribe_kwargs["vad_parameters"] = self.vad_parameters
             if self.compression_ratio_threshold is not None:
                 transcribe_kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
+            if self.initial_prompt:
+                transcribe_kwargs["initial_prompt"] = self.initial_prompt
             segs_iter, info = m.transcribe(str(path), **transcribe_kwargs)
             total_duration = float(getattr(info, "duration", 0.0) or 0.0)
             for segment in segs_iter:
@@ -1335,6 +1361,65 @@ class LocalWhisperProvider(AIProvider):
             progress_callback(100.0, len(segments_out))
 
         return segments_out
+
+    def transcribe_clip(
+        self,
+        audio_array: Any,
+        *,
+        initial_prompt: Optional[str] = None,
+        language: Optional[str] = None,
+    ) -> Tuple[str, float]:
+        """Transcribe a preloaded mono-16kHz numpy array (not a file path).
+
+        Returns ``(text, confidence)``. ``confidence`` is derived from the
+        segment ``avg_logprob`` the same way :meth:`transcribe` does; the
+        returned text is the concatenation of all segments (usually 1 for
+        short clips). Empty input yields ``("", 0.0)``.
+
+        Used by the ORTH compute runner's short-clip fallback — the caller
+        has already sliced a ±0.8s window around a concept anchor and loaded
+        the audio once via ``ai.forced_align._load_audio_mono_16k``.
+        """
+        if audio_array is None:
+            return ("", 0.0)
+
+        model = self._load_whisper_model()
+        selected_language = (language or self.language) or None
+        prompt = initial_prompt if initial_prompt is not None else self.initial_prompt
+
+        kwargs: Dict[str, Any] = {
+            "language": selected_language,
+            "beam_size": self.beam_size,
+            "task": self.task,
+            "vad_filter": False,
+            "word_timestamps": False,
+            "condition_on_previous_text": False,
+        }
+        if self.compression_ratio_threshold is not None:
+            kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
+        if prompt:
+            kwargs["initial_prompt"] = prompt
+
+        try:
+            segs_iter, _info = model.transcribe(audio_array, **kwargs)
+        except Exception as exc:
+            print(
+                "[WARN] transcribe_clip failed: {0}".format(exc),
+                file=sys.stderr,
+            )
+            return ("", 0.0)
+
+        parts: List[str] = []
+        best_conf = 0.0
+        for seg in segs_iter:
+            text = str(_dict_or_attr(seg, "text", "") or "").strip()
+            if text:
+                parts.append(text)
+                conf = _confidence_from_logprob(_dict_or_attr(seg, "avg_logprob", None))
+                if conf and conf > best_conf:
+                    best_conf = conf
+        return (" ".join(parts).strip(), float(best_conf))
+
 
 class OpenAIProvider(AIProvider):
     """OpenAI-backed provider for STT and IPA conversion."""

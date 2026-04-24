@@ -3989,27 +3989,274 @@ def _pipeline_state_for_speaker(speaker: str) -> Dict[str, Any]:
     return result
 
 
+def _ortho_tier2_align_to_words(
+    audio_path: pathlib.Path,
+    segments: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Run Tier-2 forced alignment on ORTH segments, returning a flat word tier.
+
+    Takes the full raw segment list (with Whisper ``words[]`` per segment)
+    and returns a flat sorted list of ``{start, end, text, confidence,
+    source}`` dicts suitable for ``tiers.ortho_words.intervals``.
+
+    Any exception is logged and an empty list is returned — alignment is a
+    refinement pass, not a gate; the coarse ortho tier has already been
+    written by the caller.
+    """
+    if not segments:
+        return []
+    has_any_words = any(seg.get("words") for seg in segments)
+    if not has_any_words:
+        print(
+            "[ORTH] Tier-2 skipped: no word-level timestamps on any segment",
+            file=sys.stderr,
+        )
+        return []
+
+    try:
+        from ai.forced_align import align_segments
+    except Exception as exc:  # pragma: no cover - import failure is rare
+        print("[ORTH] Tier-2 import failed: {0}".format(exc), file=sys.stderr)
+        return []
+
+    try:
+        aligned = align_segments(audio_path=audio_path, segments=segments)
+    except Exception as exc:
+        print("[ORTH] Tier-2 alignment failed: {0}".format(exc), file=sys.stderr)
+        return []
+
+    flat: List[Dict[str, Any]] = []
+    for seg_words in aligned:
+        for word in seg_words or []:
+            text = str(word.get("word", "") or "").strip()
+            if not text:
+                continue
+            try:
+                start = float(word.get("start", 0.0) or 0.0)
+                end = float(word.get("end", start) or start)
+            except (TypeError, ValueError):
+                continue
+            if end < start:
+                continue
+            interval: Dict[str, Any] = {
+                "start": start,
+                "end": end,
+                "text": text,
+                "source": "forced_align",
+            }
+            conf = word.get("confidence")
+            if conf is not None:
+                try:
+                    interval["confidence"] = float(conf)
+                except (TypeError, ValueError):
+                    pass
+            flat.append(interval)
+
+    flat.sort(key=lambda iv: (float(iv["start"]), float(iv["end"])))
+    return flat
+
+
+def _short_clip_refine_lexemes(
+    audio_path: pathlib.Path,
+    concept_intervals: List[Dict[str, Any]],
+    ortho_words: List[Dict[str, Any]],
+    provider: Any,
+    *,
+    pad_sec: float = 0.8,
+    weak_conf: float = 0.5,
+    job_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Re-transcribe a ±``pad_sec`` window per concept whose ortho_words
+    match is missing or weak, using a Whisper ``initial_prompt`` built from
+    the concept labels themselves. Returns new ``ortho_words``-shaped
+    entries with ``source="short_clip_whisper"`` that the caller should
+    merge (upsert) into the main list.
+    """
+    if not concept_intervals:
+        return []
+
+    concept_labels = sorted({
+        str(iv.get("text") or "").strip()
+        for iv in concept_intervals
+        if isinstance(iv, dict) and str(iv.get("text") or "").strip()
+    })
+    if not concept_labels:
+        return []
+    # Whisper's prompt is capped around ~224 tokens; keep the concept list
+    # comfortably below that so the slice inference stays fast.
+    initial_prompt = ", ".join(concept_labels)[:400]
+
+    try:
+        from ai.forced_align import _load_audio_mono_16k, DEFAULT_SAMPLE_RATE
+    except Exception as exc:
+        print("[ORTH] short-clip fallback import failed: {0}".format(exc), file=sys.stderr)
+        return []
+
+    try:
+        waveform = _load_audio_mono_16k(audio_path)
+    except Exception as exc:
+        print("[ORTH] short-clip audio load failed: {0}".format(exc), file=sys.stderr)
+        return []
+
+    import numpy as np  # type: ignore
+
+    # waveform may be shape (n,) or (1, n) — normalize to 1-D numpy.
+    try:
+        tensor = waveform
+        if hasattr(tensor, "squeeze"):
+            tensor = tensor.squeeze()
+        audio_np = tensor.numpy() if hasattr(tensor, "numpy") else np.asarray(tensor)
+        audio_np = np.asarray(audio_np, dtype=np.float32).reshape(-1)
+    except Exception as exc:
+        print("[ORTH] short-clip audio conversion failed: {0}".format(exc), file=sys.stderr)
+        return []
+
+    total_samples = audio_np.shape[0]
+    duration_sec = total_samples / float(DEFAULT_SAMPLE_RATE) if total_samples else 0.0
+
+    ortho_sorted = sorted(
+        (w for w in ortho_words if isinstance(w, dict)),
+        key=lambda w: (float(w.get("start", 0.0) or 0.0), float(w.get("end", 0.0) or 0.0)),
+    )
+
+    def _best_match(concept_iv: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        c_start = float(concept_iv.get("start", 0.0) or 0.0)
+        c_end = float(concept_iv.get("end", c_start) or c_start)
+        if c_end <= c_start:
+            return None
+        best: Optional[Dict[str, Any]] = None
+        best_overlap = 0.0
+        for w in ortho_sorted:
+            w_start = float(w.get("start", 0.0) or 0.0)
+            w_end = float(w.get("end", w_start) or w_start)
+            if w_end <= c_start or w_start >= c_end:
+                continue
+            ov = min(c_end, w_end) - max(c_start, w_start)
+            if ov > best_overlap:
+                best_overlap = ov
+                best = w
+        return best
+
+    additions: List[Dict[str, Any]] = []
+    total = len(concept_intervals)
+    for idx, concept_iv in enumerate(concept_intervals):
+        if not isinstance(concept_iv, dict):
+            continue
+        try:
+            c_start = float(concept_iv.get("start", 0.0) or 0.0)
+            c_end = float(concept_iv.get("end", c_start) or c_start)
+        except (TypeError, ValueError):
+            continue
+        if c_end <= c_start or duration_sec <= 0.0:
+            continue
+
+        match = _best_match(concept_iv)
+        match_conf = 0.0
+        if match is not None:
+            try:
+                match_conf = float(match.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                match_conf = 0.0
+            if match_conf >= weak_conf and str(match.get("text") or "").strip():
+                continue  # strong forced-alignment match — don't re-transcribe.
+
+        slice_start = max(0.0, c_start - pad_sec)
+        slice_end = min(duration_sec, c_end + pad_sec)
+        if slice_end <= slice_start:
+            continue
+        s0 = int(slice_start * DEFAULT_SAMPLE_RATE)
+        s1 = int(slice_end * DEFAULT_SAMPLE_RATE)
+        clip = audio_np[s0:s1]
+        if clip.size == 0:
+            continue
+
+        text, conf = provider.transcribe_clip(
+            clip,
+            initial_prompt=initial_prompt,
+        )
+        text = (text or "").strip()
+        if not text:
+            continue
+
+        additions.append({
+            "start": c_start,
+            "end": c_end,
+            "text": text,
+            "confidence": float(conf or 0.0),
+            "source": "short_clip_whisper",
+        })
+
+        if job_id and idx and idx % 50 == 0:
+            _set_job_progress(
+                job_id,
+                98.0,
+                message="ORTH refine_lexemes ({0}/{1})".format(idx, total),
+            )
+
+    return additions
+
+
+def _merge_ortho_words(
+    aligned: List[Dict[str, Any]],
+    refined: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge short-clip refined entries into the forced-alignment list.
+
+    Refined entries replace any aligned entry whose span falls inside the
+    refined ``[start, end]`` window; aligned entries not covered by any
+    refined window are preserved.
+    """
+    if not refined:
+        return list(aligned)
+
+    def _iv_bounds(iv: Dict[str, Any]) -> Tuple[float, float]:
+        return (float(iv.get("start", 0.0) or 0.0), float(iv.get("end", 0.0) or 0.0))
+
+    kept: List[Dict[str, Any]] = []
+    for a in aligned:
+        a_start, a_end = _iv_bounds(a)
+        covered = False
+        for r in refined:
+            r_start, r_end = _iv_bounds(r)
+            if a_start >= r_start and a_end <= r_end:
+                covered = True
+                break
+        if not covered:
+            kept.append(a)
+
+    combined = kept + list(refined)
+    combined.sort(key=lambda iv: (float(iv.get("start", 0.0) or 0.0), float(iv.get("end", 0.0) or 0.0)))
+    return combined
+
+
 def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Generate an orthographic transcript for a speaker using the razhan model.
 
     Runs the ORTH provider (faster-whisper with razhan/whisper-base-sdh)
     full-file against the speaker's working WAV (normalized copy preferred,
     raw source as fallback) and writes razhan's own segments to the
-    ``ortho`` tier of the annotation.
+    ``ortho`` tier of the annotation. After the coarse tier is written, a
+    Tier-2 forced-alignment pass refines the Whisper word-level timestamps
+    into ``tiers.ortho_words`` for precise per-lexeme lookup in the UI.
 
-    Payload: ``{"speaker": "Fail02", "overwrite": false}``.
+    Payload: ``{"speaker": "Fail02", "overwrite": false, "refine_lexemes": bool?}``.
+
+    If ``refine_lexemes`` is omitted the provider's config default (from
+    ai_config.json) is used.
 
     Overwrite semantics differ from IPA: razhan's segmentation isn't stable
     across runs, so we can't pair segments by ``(start, end)`` the way IPA
     does. Rule: if the ortho tier already has any non-empty text intervals,
     the caller must set ``overwrite=True`` to replace the whole tier;
     otherwise the run is a no-op and returns ``skipped=True``. Empty tiers
-    are always populated.
+    are always populated. When overwrite runs, ``tiers.ortho_words`` is
+    always rebuilt from scratch alongside ``tiers.ortho``.
     """
     speaker = _normalize_speaker_id(payload.get("speaker"))
     overwrite = bool(payload.get("overwrite", False))
     language = payload.get("language")
     language_str = str(language).strip() if isinstance(language, str) and language.strip() else None
+    refine_payload = payload.get("refine_lexemes")
 
     canonical_path = _project_root() / _annotation_record_relative_path(speaker)
     legacy_path = _project_root() / _annotation_legacy_record_relative_path(speaker)
@@ -4047,7 +4294,7 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     provider = get_ortho_provider()
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
-        clamped = min(float(progress) if progress is not None else 0.0, 98.0)
+        clamped = min(float(progress) if progress is not None else 0.0, 94.0)
         _set_job_progress(
             job_id,
             max(2.0, clamped),
@@ -4073,9 +4320,47 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     new_intervals.sort(key=lambda iv: (float(iv["start"]), float(iv["end"])))
 
     if ortho_tier is None:
-        ortho_tier = {"type": "interval", "display_order": 2, "intervals": []}
+        ortho_tier = {"type": "interval", "display_order": 3, "intervals": []}
     ortho_tier["intervals"] = new_intervals
     tiers["ortho"] = ortho_tier
+
+    _set_job_progress(job_id, 95.0, message="ORTH Tier-2 forced alignment")
+    ortho_words = _ortho_tier2_align_to_words(audio_path, segments)
+
+    if refine_payload is None:
+        refine_lexemes = bool(getattr(provider, "refine_lexemes", False))
+    else:
+        refine_lexemes = bool(refine_payload)
+
+    refined_additions: List[Dict[str, Any]] = []
+    if refine_lexemes:
+        concept_tier = tiers.get("concept") if isinstance(tiers.get("concept"), dict) else None
+        concept_intervals = [
+            iv for iv in (concept_tier.get("intervals") or [] if concept_tier else [])
+            if isinstance(iv, dict)
+        ]
+        if concept_intervals:
+            _set_job_progress(
+                job_id,
+                97.0,
+                message="ORTH refine_lexemes (short-clip, {0} concepts)".format(len(concept_intervals)),
+            )
+            refined_additions = _short_clip_refine_lexemes(
+                audio_path=audio_path,
+                concept_intervals=concept_intervals,
+                ortho_words=ortho_words,
+                provider=provider,
+                job_id=job_id,
+            )
+
+    merged_words = _merge_ortho_words(ortho_words, refined_additions)
+
+    ortho_words_tier = tiers.get("ortho_words") if isinstance(tiers.get("ortho_words"), dict) else None
+    if ortho_words_tier is None:
+        ortho_words_tier = {"type": "interval", "display_order": 4, "intervals": []}
+    ortho_words_tier["intervals"] = merged_words
+    tiers["ortho_words"] = ortho_words_tier
+
     annotation["tiers"] = tiers
     _annotation_touch_metadata(annotation, preserve_created=True)
 
@@ -4085,11 +4370,20 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     if legacy_path != annotation_path:
         _write_json_file(legacy_path, annotation)
 
-    _set_job_progress(job_id, 99.0, message="ORTH written ({0} intervals)".format(len(new_intervals)))
+    _set_job_progress(
+        job_id,
+        99.0,
+        message="ORTH written ({0} intervals, {1} word-level, {2} refined)".format(
+            len(new_intervals), len(merged_words), len(refined_additions)
+        ),
+    )
 
     return {
         "speaker": speaker,
         "filled": len(new_intervals),
+        "ortho_words": len(merged_words),
+        "refined_lexemes": len(refined_additions),
+        "refine_lexemes_enabled": refine_lexemes,
         "skipped": False,
         "replaced_existing": has_existing_text,
         "audio_path": str(audio_path),

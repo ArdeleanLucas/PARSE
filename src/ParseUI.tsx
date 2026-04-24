@@ -134,6 +134,37 @@ function getConceptStatus(tags: StoreTag[]): ConceptTag {
   return 'untagged';
 }
 
+// Prefer word-level ortho_words (from Tier-2 forced alignment) over the
+// coarse ortho tier. When the coarse tier is one monolithic segment — as
+// razhan often produces on long elicited word-list recordings — picking
+// the whole-paragraph interval by overlap dumps the entire narrative into
+// a single lexeme field. The word-level tier yields a single clean word.
+export function pickOrthoIntervalForConcept(
+  record: AnnotationRecord,
+  conceptInterval: AnnotationInterval,
+): AnnotationInterval | null {
+  const words = record.tiers.ortho_words?.intervals ?? [];
+  if (words.length) {
+    const contained = words.find(
+      (iv) => iv.start >= conceptInterval.start && iv.end <= conceptInterval.end,
+    );
+    if (contained) return contained;
+
+    let bestOverlap = 0;
+    let bestWord: AnnotationInterval | null = null;
+    for (const iv of words) {
+      if (iv.end <= conceptInterval.start || iv.start >= conceptInterval.end) continue;
+      const ov = Math.min(iv.end, conceptInterval.end) - Math.max(iv.start, conceptInterval.start);
+      if (ov > bestOverlap) {
+        bestOverlap = ov;
+        bestWord = iv;
+      }
+    }
+    if (bestWord) return bestWord;
+  }
+  return (record.tiers.ortho?.intervals ?? []).find((iv) => overlaps(iv, conceptInterval)) ?? null;
+}
+
 function findAnnotationForConcept(record: AnnotationRecord | null | undefined, concept: Concept) {
   if (!record) {
     return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
@@ -147,7 +178,7 @@ function findAnnotationForConcept(record: AnnotationRecord | null | undefined, c
   }
 
   const ipaInterval = (record.tiers.ipa?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
-  const orthoInterval = (record.tiers.ortho?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
+  const orthoInterval = pickOrthoIntervalForConcept(record, conceptInterval);
 
   return { conceptInterval, ipaInterval, orthoInterval };
 }
@@ -196,15 +227,16 @@ function buildSpeakerForm(
   const speakerFlagged = !!(conceptFlags && conceptFlags[speaker]);
 
   const primaryConceptInterval = conceptIntervals[0] ?? null;
-  const orthoIntervals = record?.tiers.ortho?.intervals ?? [];
-  const matchingOrthoIntervals = orthoIntervals.filter((orthoInterval) =>
-    conceptIntervals.some((conceptInterval) => overlaps(orthoInterval, conceptInterval)),
-  );
+  // Prefer word-level ortho_words over the coarse ortho tier — see the
+  // rationale on pickOrthoIntervalForConcept above.
+  const orthoText = record && primaryConceptInterval
+    ? pickOrthoIntervalForConcept(record, primaryConceptInterval)?.text ?? ''
+    : '';
 
   return {
     speaker,
     ipa: matchingIpaIntervals[0]?.text ?? '',
-    ortho: matchingOrthoIntervals[0]?.text ?? '',
+    ortho: orthoText,
     utterances: matchingIpaIntervals.length,
     arabicSim,
     persianSim,

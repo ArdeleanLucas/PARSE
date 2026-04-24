@@ -72,6 +72,7 @@ def test_ortho_writes_razhan_segments_to_empty_tier(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     stub = _StubOrthoProvider()
     monkeypatch.setattr(server, "get_ortho_provider", lambda: stub)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
 
     _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
@@ -88,6 +89,10 @@ def test_ortho_writes_razhan_segments_to_empty_tier(tmp_path, monkeypatch):
     assert [iv["text"] for iv in intervals] == ["بەش", "سەرە"]
     assert intervals[0]["start"] == pytest.approx(0.5)
     assert intervals[1]["end"] == pytest.approx(2.0)
+    # ortho_words tier is always written, even when segments carry no word spans
+    assert "ortho_words" in ann["tiers"]
+    assert isinstance(ann["tiers"]["ortho_words"]["intervals"], list)
+
 
 
 def test_ortho_skips_if_tier_populated_without_overwrite(tmp_path, monkeypatch):
@@ -181,6 +186,107 @@ def test_run_compute_job_dispatches_ortho(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 # Pipeline state probe
 # --------------------------------------------------------------------------
+
+
+def test_ortho_writes_ortho_words_from_forced_alignment(tmp_path, monkeypatch):
+    """When Whisper produces word-level timestamps, Tier-2 forced alignment
+    flattens them into tiers.ortho_words — coarse ortho tier stays intact."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+
+    segments_with_words = [
+        {
+            "start": 0.0,
+            "end": 1.5,
+            "text": "بەش سەرە",
+            "words": [
+                {"word": "بەش", "start": 0.05, "end": 0.55, "prob": 0.95},
+                {"word": "سەرە", "start": 0.60, "end": 1.20, "prob": 0.90},
+            ],
+        },
+    ]
+    stub = _StubOrthoProvider(segments=segments_with_words)
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: stub)
+
+    # Stub the wav2vec2 aligner so the test doesn't pull the 1.2 GB model.
+    # Input shape matches align_segments: List[Segment] → List[List[AlignedWord]].
+    fake_aligned = [[
+        {"word": "بەش", "start": 0.08, "end": 0.52, "confidence": 0.97,
+         "method": "wav2vec2"},
+        {"word": "سەرە", "start": 0.62, "end": 1.18, "confidence": 0.93,
+         "method": "wav2vec2"},
+    ]]
+
+    def _fake_align_segments(audio_path, segments, **kwargs):
+        assert len(segments) == 1 and segments[0]["words"]
+        return fake_aligned
+
+    import ai.forced_align as fa
+    monkeypatch.setattr(fa, "align_segments", _fake_align_segments)
+
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho("j1", {"speaker": "Fail02"})
+
+    assert result["filled"] == 1  # one coarse segment
+    assert result["ortho_words"] == 2  # two word-level entries
+
+    ann = _load_canonical(tmp_path, "Fail02")
+    coarse = ann["tiers"]["ortho"]["intervals"]
+    assert [iv["text"] for iv in coarse] == ["بەش سەرە"]
+
+    words = ann["tiers"]["ortho_words"]["intervals"]
+    assert [iv["text"] for iv in words] == ["بەش", "سەرە"]
+    assert words[0]["start"] == pytest.approx(0.08)
+    assert words[0]["end"] == pytest.approx(0.52)
+    assert words[0]["source"] == "forced_align"
+    assert words[0]["confidence"] == pytest.approx(0.97)
+
+
+def test_ortho_words_empty_when_segments_have_no_word_level_data(tmp_path, monkeypatch):
+    """Tier-2 is a no-op (empty ortho_words) when segments lack words[]."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    stub = _StubOrthoProvider()  # default: no words[]
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: stub)
+
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho("j1", {"speaker": "Fail02"})
+    assert result["ortho_words"] == 0
+
+    ann = _load_canonical(tmp_path, "Fail02")
+    assert ann["tiers"]["ortho_words"]["intervals"] == []
+
+
+def test_ortho_words_survives_alignment_exception(tmp_path, monkeypatch):
+    """align_segments raising shouldn't fail the ortho job — fall through
+    with an empty ortho_words tier so the coarse pass still lands."""
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+
+    segments_with_words = [
+        {
+            "start": 0.0, "end": 1.0, "text": "hi",
+            "words": [{"word": "hi", "start": 0.0, "end": 1.0, "prob": 0.9}],
+        },
+    ]
+    stub = _StubOrthoProvider(segments=segments_with_words)
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: stub)
+
+    import ai.forced_align as fa
+    def _boom(*a, **kw):
+        raise RuntimeError("wav2vec2 unavailable")
+    monkeypatch.setattr(fa, "align_segments", _boom)
+
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho("j1", {"speaker": "Fail02"})
+    assert result["filled"] == 1
+    assert result["ortho_words"] == 0
+
+    ann = _load_canonical(tmp_path, "Fail02")
+    assert ann["tiers"]["ortho_words"]["intervals"] == []
 
 
 def test_pipeline_state_reports_all_steps_empty_for_fresh_speaker(tmp_path, monkeypatch):
