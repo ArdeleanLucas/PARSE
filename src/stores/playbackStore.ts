@@ -9,6 +9,10 @@ interface PlaybackStore {
   playbackRate: number;
   selectedRegion: { start: number; end: number } | null;
   loopEnabled: boolean;
+  // Cross-component seek signal. Components outside AnnotateView (e.g. the
+  // right-panel "Search & anchor" block) call requestSeek(); AnnotateView
+  // watches `pendingSeek.nonce` and drives its wavesurfer instance.
+  pendingSeek: { targetSec: number; nonce: number } | null;
 
   setActiveSpeaker: (speaker: string) => void;
   setCurrentTime: (t: number) => void;
@@ -18,6 +22,7 @@ interface PlaybackStore {
   setSelectedRegion: (r: { start: number; end: number } | null) => void;
   toggleLoop: () => void;
   togglePlay: () => void;
+  requestSeek: (targetSec: number) => void;
 }
 
 export const usePlaybackStore = create<PlaybackStore>()((set) => ({
@@ -29,6 +34,7 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   playbackRate: 1.0,
   selectedRegion: null,
   loopEnabled: false,
+  pendingSeek: null,
 
   setActiveSpeaker: (speaker) => set({ activeSpeaker: speaker, currentTime: 0 }),
   setCurrentTime: (t) => set({ currentTime: t }),
@@ -39,6 +45,9 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   toggleLoop: () => set((s) => ({ loopEnabled: !s.loopEnabled })),
   // togglePlay is controlled externally by useWaveSurfer — this just syncs state
   togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
+  requestSeek: (targetSec) => set((s) => ({
+    pendingSeek: { targetSec, nonce: (s.pendingSeek?.nonce ?? 0) + 1 },
+  })),
 }));
 
 // Re-export type for consumers

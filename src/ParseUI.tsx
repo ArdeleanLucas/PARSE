@@ -12,8 +12,8 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset } from './api/client';
-import type { OffsetDetectResult, OffsetPair } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme } from './api/client';
+import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
@@ -1436,6 +1436,17 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   }, [audioReady, readyAudioUrl, audioUrl, conceptInterval?.start, conceptInterval?.end, seek, addRegion, wsSetZoom, scrollToTimeAtFraction]);
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
+
+  // Cross-component seek bridge — the right-panel "Search & anchor" block
+  // calls usePlaybackStore.requestSeek(targetSec); we watch the nonce and
+  // drive our local wavesurfer seek.
+  const pendingSeek = usePlaybackStore(s => s.pendingSeek);
+  useEffect(() => {
+    if (!pendingSeek) return;
+    if (!audioReady || readyAudioUrl !== audioUrl) return;
+    seek(pendingSeek.targetSec);
+    scrollToTimeAtFraction(pendingSeek.targetSec, 0.33);
+  }, [pendingSeek?.nonce, audioReady, readyAudioUrl, audioUrl, seek, scrollToTimeAtFraction]);
 
   // fmt now lives at module scope (formatPlaybackTime) — kept as a local
   // alias so the inline JSX below stays diff-friendly with prior versions.
@@ -3678,6 +3689,10 @@ export function ParseUI() {
                     Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
                   </p>
 
+                  {selectedSpeakers[0] && (
+                    <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={concept.id}/>
+                  )}
+
                   <TranscriptionLanesControls/>
 
                   <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
@@ -4110,6 +4125,78 @@ const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
   stt: { label: 'STT segments', hint: 'Coarse transcript' },
   ortho: { label: 'Ortho tier', hint: 'Orthographic' },
 };
+
+function LexemeSearchBlock({ speaker, conceptId }: { speaker: string; conceptId: string | number }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<LexemeSearchCandidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestSeek = usePlaybackStore(s => s.requestSeek);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q || !speaker) { setResults([]); setError(null); return; }
+    const variants = q.split(/[\s,;/]+/).filter(Boolean);
+    if (variants.length === 0) { setResults([]); setError(null); return; }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await searchLexeme(speaker, variants, { conceptId: String(conceptId) });
+        setResults(res.candidates);
+      } catch (err) {
+        setResults([]);
+        setError(err instanceof Error ? err.message : 'Search failed');
+      } finally { setLoading(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, speaker, conceptId]);
+
+  return (
+    <div className="mb-3">
+      <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+        <Search className="h-3 w-3 shrink-0 text-slate-400"/>
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search & anchor lexeme…"
+          aria-label="Search lexeme variants"
+          className="min-w-0 flex-1 bg-transparent text-[11px] focus:outline-none"
+        />
+        {loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400"/>}
+        {query && !loading && (
+          <button onClick={() => setQuery('')} aria-label="Clear search" className="shrink-0 text-slate-400 hover:text-slate-600"><X className="h-3 w-3"/></button>
+        )}
+      </div>
+      {(error || (query.trim() && !loading && results.length === 0) || results.length > 0) && (
+        <div className="max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white" role="listbox">
+          {error && <div className="px-2 py-1.5 text-[10px] text-rose-600">{error}</div>}
+          {!error && !loading && results.length === 0 && query.trim() && (
+            <div className="px-2 py-1.5 text-[10px] text-slate-400">No matches</div>
+          )}
+          {results.map((r, i) => (
+            <button
+              key={`${r.tier}:${r.start}:${i}`}
+              role="option"
+              onClick={() => requestSeek(r.start)}
+              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-indigo-50"
+            >
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="truncate text-[11px] font-semibold text-slate-700">{r.matched_text}</span>
+                <span className="text-[9px] text-slate-400">
+                  {r.tier} · {r.start.toFixed(2)}s · &ldquo;{r.matched_variant}&rdquo;
+                </span>
+              </div>
+              <span className="shrink-0 rounded-full bg-indigo-50 px-1.5 py-0.5 font-mono text-[9px] text-indigo-700">
+                {Math.round(r.score * 100)}%
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TranscriptionLanesControls() {
   const lanes = useTranscriptionLanesStore(s => s.lanes);
