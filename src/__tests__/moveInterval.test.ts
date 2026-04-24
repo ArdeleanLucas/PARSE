@@ -107,4 +107,75 @@ describe("annotationStore.moveIntervalAcrossTiers", () => {
     );
     expect(moved).toBe(0);
   });
+
+  it("flags every moved interval as manuallyAdjusted so future offsets skip it", () => {
+    seedFail02();
+    useAnnotationStore.getState().moveIntervalAcrossTiers(
+      "Fail02", 100, 101, 99.5, 101.2,
+    );
+    const rec = useAnnotationStore.getState().records["Fail02"];
+    for (const tierName of ["ipa", "ortho", "concept", "speaker"]) {
+      expect(rec.tiers[tierName].intervals[0].manuallyAdjusted).toBe(true);
+    }
+  });
+});
+
+describe("annotationStore.updateIntervalTimes", () => {
+  beforeEach(() => {
+    useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
+  });
+
+  it("flags the retimed interval as manuallyAdjusted", () => {
+    seedFail02();
+    useAnnotationStore.getState().updateIntervalTimes("Fail02", "concept", 0, 101, 102);
+    const rec = useAnnotationStore.getState().records["Fail02"];
+    expect(rec.tiers.concept.intervals[0].manuallyAdjusted).toBe(true);
+    expect(rec.tiers.concept.intervals[0].start).toBeCloseTo(101);
+    // Untouched tier stays unflagged.
+    expect(rec.tiers.ipa.intervals[0].manuallyAdjusted).toBeFalsy();
+  });
+});
+
+describe("annotationStore.markLexemeManuallyAdjusted", () => {
+  beforeEach(() => {
+    useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
+  });
+
+  it("flags every matching interval across all tiers and marks the record dirty", () => {
+    seedFail02();
+    const flagged = useAnnotationStore.getState().markLexemeManuallyAdjusted(
+      "Fail02", 100, 101,
+    );
+    expect(flagged).toBe(4);
+    const rec = useAnnotationStore.getState().records["Fail02"];
+    for (const tierName of ["ipa", "ortho", "concept", "speaker"]) {
+      expect(rec.tiers[tierName].intervals[0].manuallyAdjusted).toBe(true);
+    }
+    expect(useAnnotationStore.getState().dirty["Fail02"]).toBe(true);
+  });
+
+  it("tolerates 1ms drift when matching", () => {
+    seedFail02();
+    const flagged = useAnnotationStore.getState().markLexemeManuallyAdjusted(
+      "Fail02", 100.0004, 100.9997,
+    );
+    expect(flagged).toBe(4);
+  });
+
+  it("returns 0 and leaves the record clean when nothing matches", () => {
+    seedFail02();
+    const flagged = useAnnotationStore.getState().markLexemeManuallyAdjusted(
+      "Fail02", 5, 6,
+    );
+    expect(flagged).toBe(0);
+    const rec = useAnnotationStore.getState().records["Fail02"];
+    expect(rec.tiers.concept.intervals[0].manuallyAdjusted).toBeFalsy();
+    expect(useAnnotationStore.getState().dirty["Fail02"]).toBeFalsy();
+  });
+
+  it("returns 0 for unknown speaker", () => {
+    expect(
+      useAnnotationStore.getState().markLexemeManuallyAdjusted("Ghost01", 1, 2),
+    ).toBe(0);
+  });
 });

@@ -423,6 +423,13 @@ export interface OffsetApplyResult {
   speaker: string;
   appliedOffsetSec: number;
   shiftedIntervals: number;
+  /** Count of interval *rows* (across every tier — concept/ipa/ortho/…)
+   * left untouched because they carry the ``manuallyAdjusted`` flag. */
+  protectedIntervals: number;
+  /** Count of protected *lexemes* (unique entries on the concept tier).
+   * This is what the UI surfaces — the interval-row count is typically
+   * ~4× larger because a single lexeme spans multiple tiers. */
+  protectedLexemes: number;
 }
 
 export async function detectTimestampOffset(

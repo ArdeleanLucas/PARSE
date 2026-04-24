@@ -129,6 +129,8 @@ interface AnnotationStore {
    * start/end to (newStart, newEnd), keeping the text. Intended for the
    * concept-timestamp editor in Annotate mode, where the concept interval
    * and its co-timed ipa/ortho/speaker intervals move together.
+   * Every moved interval is flagged ``manuallyAdjusted`` so future global
+   * offset passes skip it.
    */
   moveIntervalAcrossTiers: (
     speaker: string,
@@ -136,6 +138,17 @@ interface AnnotationStore {
     oldEnd: number,
     newStart: number,
     newEnd: number,
+  ) => number;
+  /** Flag every interval across every tier whose (start,end) matches the
+   * given (start,end) within 1ms as ``manuallyAdjusted``. Called after the
+   * user captures a manual-anchor offset pair for a lexeme — the capture
+   * itself is an assertion that this lexeme's timing is verified, so a
+   * subsequent global offset should not shift it. Returns the count of
+   * intervals flagged. */
+  markLexemeManuallyAdjusted: (
+    speaker: string,
+    start: number,
+    end: number,
   ) => number;
 }
 
@@ -306,7 +319,12 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
     const clone = deepClone(record);
     const target = clone.tiers[tier].intervals[index];
-    clone.tiers[tier].intervals[index] = { ...target, start, end };
+    clone.tiers[tier].intervals[index] = {
+      ...target,
+      start,
+      end,
+      manuallyAdjusted: true,
+    };
     clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
     clone.modified_at = nowIsoUtc();
 
@@ -413,7 +431,12 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
         (it) => Math.abs(it.start - oldStart) < tol && Math.abs(it.end - oldEnd) < tol,
       );
       if (idx < 0) continue;
-      tier.intervals[idx] = { ...tier.intervals[idx], start: newStart, end: newEnd };
+      tier.intervals[idx] = {
+        ...tier.intervals[idx],
+        start: newStart,
+        end: newEnd,
+        manuallyAdjusted: true,
+      };
       tier.intervals.sort((a, b) => a.start - b.start);
       moved += 1;
     }
@@ -426,5 +449,37 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     }));
     scheduleAutosave(speaker);
     return moved;
+  },
+
+  markLexemeManuallyAdjusted: (speaker, start, end) => {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+
+    const state = get();
+    const record = state.records[speaker];
+    if (!record) return 0;
+
+    const clone = deepClone(record);
+    const tol = 0.001;
+    let flagged = 0;
+    for (const tier of Object.values(clone.tiers)) {
+      for (let i = 0; i < tier.intervals.length; i += 1) {
+        const it = tier.intervals[i];
+        if (Math.abs(it.start - start) < tol && Math.abs(it.end - end) < tol) {
+          if (!it.manuallyAdjusted) {
+            tier.intervals[i] = { ...it, manuallyAdjusted: true };
+          }
+          flagged += 1;
+        }
+      }
+    }
+    if (flagged === 0) return 0;
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+    return flagged;
   },
 }));

@@ -4660,6 +4660,14 @@ class ParseChatTools:
     def _shift_annotation_intervals(
         self, record: Any, offset_sec: float
     ) -> Tuple[int, List[Dict[str, Any]]]:
+        """Shift every interval on ``record`` by ``offset_sec``.
+
+        Intervals carrying ``manuallyAdjusted: True`` are left in place —
+        the annotator has locked their timings and a global shift (whether
+        driven by the UI or an agent) must not move them. Returns the pair
+        (shifted_count, preview); the preview is limited to the first 5
+        actually-shifted rows.
+        """
         if not isinstance(record, dict):
             return 0, []
         tiers = record.get("tiers")
@@ -4676,6 +4684,8 @@ class ParseChatTools:
                 continue
             for raw in intervals:
                 if not isinstance(raw, dict):
+                    continue
+                if bool(raw.get("manuallyAdjusted")):
                     continue
                 try:
                     start_f = float(raw.get("start", raw.get("xmin")))

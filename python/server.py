@@ -776,10 +776,16 @@ def _annotation_normalize_interval(raw_interval: Any) -> Optional[Dict[str, Any]
     if end < start:
         return None
 
+    # Always emit ``manuallyAdjusted`` — true or false — so every interval
+    # has the same shape on disk. Consumers (UI, agents, Praat export) can
+    # branch on a stable boolean without having to treat "absent" and
+    # "false" as a third case. Legacy records without the key are read
+    # back as false, which matches pre-PR-197 behaviour.
     return {
         "start": float(start),
         "end": float(end),
         "text": "" if raw_interval.get("text") is None else str(raw_interval.get("text")),
+        "manuallyAdjusted": bool(raw_interval.get("manuallyAdjusted")),
     }
 
 
@@ -1050,18 +1056,25 @@ def _annotation_offset_anchor_intervals(record: Dict[str, Any]) -> List[Dict[str
     return []
 
 
-def _annotation_shift_intervals(record: Dict[str, Any], offset_sec: float) -> int:
+def _annotation_shift_intervals(
+    record: Dict[str, Any], offset_sec: float
+) -> Tuple[int, int]:
     """Add ``offset_sec`` to every interval's start/end. Negative values clamp to 0.
 
-    Mutates the record in place. Returns the count of intervals shifted.
+    Mutates the record in place. Intervals flagged ``manuallyAdjusted`` are
+    skipped — once the annotator has locked a lexeme's timing (direct edit or
+    a captured anchor pair) a later global shift must not move it again.
+
+    Returns a tuple of ``(shifted, skipped_protected)``.
     """
     if not isinstance(record, dict):
-        return 0
+        return 0, 0
     tiers = record.get("tiers")
     if not isinstance(tiers, dict):
-        return 0
+        return 0, 0
 
     shifted = 0
+    skipped_protected = 0
     for tier in tiers.values():
         if not isinstance(tier, dict):
             continue
@@ -1075,6 +1088,9 @@ def _annotation_shift_intervals(record: Dict[str, Any], offset_sec: float) -> in
             end = _coerce_finite_float(raw.get("end", raw.get("xmax")))
             if start is None or end is None:
                 continue
+            if bool(raw.get("manuallyAdjusted")):
+                skipped_protected += 1
+                continue
             new_start = max(0.0, float(start) + float(offset_sec))
             new_end = max(new_start, float(end) + float(offset_sec))
             raw["start"] = new_start
@@ -1085,7 +1101,7 @@ def _annotation_shift_intervals(record: Dict[str, Any], offset_sec: float) -> in
                 raw["xmax"] = new_end
             shifted += 1
     _annotation_sort_all_intervals(record)
-    return shifted
+    return shifted, skipped_protected
 
 
 def _stt_cache_path(speaker: str) -> pathlib.Path:
@@ -6459,13 +6475,31 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         annotation_path = _annotation_read_path_for_speaker(speaker)
         annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
 
-        shifted_count = _annotation_shift_intervals(annotation, offset_sec)
-        if shifted_count == 0:
+        shifted_count, protected_count = _annotation_shift_intervals(
+            annotation, offset_sec
+        )
+        if shifted_count == 0 and protected_count == 0:
             raise ApiError(HTTPStatus.BAD_REQUEST, "No intervals were shifted")
 
-        _annotation_touch_metadata(annotation, preserve_created=True)
-        write_path = _annotation_record_path_for_speaker(speaker)
-        _write_json_file(write_path, annotation)
+        # "Lexemes" ≈ unique (start,end) pairs on the concept tier — this is
+        # the user-facing count in the Review & apply modal. ``protected_count``
+        # above sums every interval row on every tier (ipa/ortho/speaker…)
+        # which would be ~4× larger and confusing.
+        protected_lexemes = 0
+        concept_tier = annotation.get("tiers", {}).get("concept") if isinstance(annotation, dict) else None
+        if isinstance(concept_tier, dict):
+            concept_intervals = concept_tier.get("intervals")
+            if isinstance(concept_intervals, list):
+                protected_lexemes = sum(
+                    1
+                    for iv in concept_intervals
+                    if isinstance(iv, dict) and bool(iv.get("manuallyAdjusted"))
+                )
+
+        if shifted_count > 0:
+            _annotation_touch_metadata(annotation, preserve_created=True)
+            write_path = _annotation_record_path_for_speaker(speaker)
+            _write_json_file(write_path, annotation)
 
         self._send_json(
             HTTPStatus.OK,
@@ -6473,6 +6507,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "speaker": speaker,
                 "appliedOffsetSec": offset_sec,
                 "shiftedIntervals": shifted_count,
+                "protectedIntervals": protected_count,
+                "protectedLexemes": protected_lexemes,
             },
         )
 

@@ -6,6 +6,11 @@ export interface AnnotationInterval {
   start: number; // seconds — IMMUTABLE once written
   end: number; // seconds — IMMUTABLE once written
   text: string;
+  /** True once the user has manually set this lexeme's timing — via direct
+   * start/end edit, or by capturing a manual-anchor offset pair for it.
+   * Global offset application skips flagged intervals so previously-fixed
+   * timings don't get shifted again. Persisted in the annotation JSON. */
+  manuallyAdjusted?: boolean;
 }
 
 export interface OrthoWordInterval extends AnnotationInterval {

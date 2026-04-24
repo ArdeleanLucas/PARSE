@@ -1501,9 +1501,11 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
               <ZoomIn className="h-3.5 w-3.5"/>
             </button>
             <div className="mx-2 h-5 w-px bg-slate-200"/>
-            {/* Lexical anchor align — word vs concept alignment */}
-            <div className="inline-flex items-center gap-1 rounded-md bg-slate-100 p-0.5" title="Lexical anchor align — snap regions to concept boundaries or individual word anchors">
-              <Anchor className="ml-1 h-3 w-3 text-slate-400"/>
+            {/* Concept vs word region align toggle — snaps dragged regions
+                to concept boundaries or individual word anchors. Unrelated
+                to the timestamp-offset tool (that now lives next to "Save
+                Annotation" in the lexeme editor below). */}
+            <div className="inline-flex items-center gap-1 rounded-md bg-slate-100 p-0.5" title="Region snap — concept boundaries or individual word anchors">
               <button onClick={() => setLexAnchor('concept')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='concept' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Concept</button>
               <button onClick={() => setLexAnchor('word')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='word' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Word</button>
             </div>
@@ -1731,8 +1733,29 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
             >
               <Check className="h-4 w-4"/> Mark Done
             </button>
+            {onCaptureOffsetAnchor && (
+              <div className="relative">
+                <button
+                  onClick={onCaptureOffsetAnchor}
+                  data-testid="annotate-capture-anchor"
+                  title="Anchor offset detection to this lexeme + the current playback time. Locks this lexeme against future global offset passes."
+                  className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                >
+                  <Anchor className="h-4 w-4"/> Anchor offset here
+                </button>
+                {captureToast && (
+                  <div
+                    role="status"
+                    data-testid="annotate-capture-toast"
+                    className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                  >
+                    {captureToast}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="ml-auto text-[11px] text-slate-400">
-              Region <span className="font-mono text-slate-600">{selectedRegion ? `${fmt(selectedRegion.start)}–${fmt(selectedRegion.end)}` : (activeRegion ?? '—')}</span> · Anchor: <span className="font-mono text-slate-600">{lexAnchor}</span>
+              Region <span className="font-mono text-slate-600">{selectedRegion ? `${fmt(selectedRegion.start)}–${fmt(selectedRegion.end)}` : (activeRegion ?? '—')}</span> · Snap: <span className="font-mono text-slate-600">{lexAnchor}</span>
             </div>
           </div>
         </div>
@@ -1759,27 +1782,6 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            {onCaptureOffsetAnchor && (
-              <div className="relative">
-                <button
-                  onClick={onCaptureOffsetAnchor}
-                  data-testid="annotate-capture-anchor"
-                  title="Anchor offset detection to the current lexeme + playback time"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                >
-                  <Anchor className="h-3 w-3"/> Anchor offset here
-                </button>
-                {captureToast && (
-                  <div
-                    role="status"
-                    data-testid="annotate-capture-toast"
-                    className="absolute bottom-full right-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
-                  >
-                    {captureToast}
-                  </div>
-                )}
-              </div>
-            )}
             <select defaultValue="1" onChange={e => setRate(Number(e.target.value))} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
               <option value="0.5">0.5x</option>
               <option value="0.75">0.75x</option>
@@ -2132,7 +2134,7 @@ export function ParseUI() {
     | { phase: 'detected'; result: OffsetDetectResult }
     | { phase: 'manual' }
     | { phase: 'applying'; result: OffsetDetectResult }
-    | { phase: 'applied'; result: OffsetDetectResult; shifted: number }
+    | { phase: 'applied'; result: OffsetDetectResult; shifted: number; protected: number }
     | { phase: 'error'; message: string; traceback?: string; jobId?: string }
   >({ phase: 'idle' });
 
@@ -2156,6 +2158,23 @@ export function ParseUI() {
   const [manualAnchors, setManualAnchors] = useState<ManualAnchor[]>([]);
   const [manualBusy, setManualBusy] = useState(false);
 
+  // Count of lexemes on the active speaker that the user has already
+  // locked (direct timestamp edit or anchor capture). Surfaces in the
+  // offset Review & apply modal and the header status chip so the user
+  // knows which previously-fixed lexemes will be protected before they
+  // confirm. Reactive: updates the moment the store flag flips.
+  const protectedLexemeCount = useAnnotationStore((s) => {
+    const speaker = selectedSpeakers[0] ?? null;
+    if (!speaker) return 0;
+    const record = s.records[speaker];
+    const intervals = record?.tiers?.concept?.intervals ?? [];
+    let count = 0;
+    for (const iv of intervals) {
+      if (iv.manuallyAdjusted) count += 1;
+    }
+    return count;
+  });
+
   // Briefly-flashed inline confirmation when the user captures an anchor
   // straight from the playback bar. Vanishes after a couple of seconds so
   // the chrome stays calm.
@@ -2166,21 +2185,33 @@ export function ParseUI() {
     return () => window.clearTimeout(handle);
   }, [captureToast]);
 
-  // Look up the current annotation start time for a concept on the
-  // active speaker (read directly from the store so we don't hold a
+  // Look up the current annotation interval (start + end) for a concept on
+  // the active speaker (read directly from the store so we don't hold a
   // hook subscription at parent scope).
-  const lookupCsvTimeForConcept = (speaker: string, concept: Concept): number | null => {
+  const lookupConceptInterval = (
+    speaker: string,
+    concept: Concept,
+  ): { start: number; end: number } | null => {
     const records = useAnnotationStore.getState().records;
     const record = records[speaker];
     if (!record) return null;
     const intervals = record.tiers?.concept?.intervals ?? [];
     const interval = intervals.find((iv) => conceptMatchesIntervalText(concept, iv.text));
-    return interval ? interval.start : null;
+    return interval ? { start: interval.start, end: interval.end } : null;
   };
+
+  const markLexemeManuallyAdjusted = useAnnotationStore(
+    (s) => s.markLexemeManuallyAdjusted,
+  );
 
   // Capture an anchor from the currently-selected concept + the current
   // playback time. Wired to BOTH the in-Annotate "Anchor offset here"
   // button and the modal's "Capture from current selection" button.
+  //
+  // Capturing an anchor is also an assertion that this lexeme's timing is
+  // now correct — so we flag the underlying interval as manuallyAdjusted
+  // immediately. A subsequent global offset will skip it, protecting the
+  // user's work from being shifted again.
   const captureCurrentAnchor = (): { ok: boolean; message: string } => {
     if (!activeActionSpeaker) {
       return { ok: false, message: 'Select a speaker first.' };
@@ -2189,8 +2220,8 @@ export function ParseUI() {
     if (!conc) {
       return { ok: false, message: 'Select a lexeme in the sidebar first.' };
     }
-    const csv = lookupCsvTimeForConcept(activeActionSpeaker, conc);
-    if (csv === null) {
+    const interval = lookupConceptInterval(activeActionSpeaker, conc);
+    if (interval === null) {
       return {
         ok: false,
         message: `No annotation interval for "${conc.name}" — open the lexeme in Annotate first.`,
@@ -2213,13 +2244,21 @@ export function ParseUI() {
         {
           conceptKey: conc.key,
           conceptName: conc.name,
-          csvTimeSec: csv,
+          csvTimeSec: interval.start,
           audioTimeSec: audio,
           capturedAt: Date.now(),
         },
       ];
     });
-    const offset = audio - csv;
+    // Flag this lexeme as manually-adjusted so a later global offset
+    // skips it. Scenario: the user fixes lexemes 1–5 (or captures anchors
+    // for them), then later anchors lexemes 10–20 and applies +0.5s. The
+    // flag is what keeps 1–5 from being shifted again and undoing their
+    // verified timing. Capturing an anchor here is an explicit assertion
+    // that this lexeme is correctly placed — no reason to wait for the
+    // user to press Review & apply before locking it.
+    markLexemeManuallyAdjusted(activeActionSpeaker, interval.start, interval.end);
+    const offset = audio - interval.start;
     const sign = offset >= 0 ? '+' : '';
     return {
       ok: true,
@@ -2303,7 +2342,12 @@ export function ParseUI() {
     try {
       const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
       await reloadSpeakerAnnotation(result.speaker);
-      setOffsetState({ phase: 'applied', result, shifted: apply.shiftedIntervals });
+      setOffsetState({
+        phase: 'applied',
+        result,
+        shifted: apply.shiftedIntervals,
+        protected: apply.protectedIntervals ?? 0,
+      });
     } catch (err) {
       setOffsetState({
         phase: 'error',
@@ -2770,6 +2814,16 @@ export function ParseUI() {
                     />
                   </div>
                 )}
+                {!isError && protectedLexemeCount > 0 && (
+                  <span
+                    data-testid="topbar-offset-protected-badge"
+                    title={`${protectedLexemeCount} lexeme${protectedLexemeCount === 1 ? '' : 's'} locked — will be skipped by the offset`}
+                    className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
+                  >
+                    <Anchor className="h-2.5 w-2.5"/>
+                    {protectedLexemeCount} locked
+                  </span>
+                )}
                 {isError && offsetState.jobId && (
                   <button
                     onClick={() => setJobLogsOpen(offsetState.jobId!)}
@@ -2943,25 +2997,6 @@ export function ParseUI() {
                     >
                       <Network className="h-3.5 w-3.5 text-slate-400"/>
                       {crossSpeakerJob.state.status === 'running' ? 'Matching…' : 'Run Cross-Speaker Match'}
-                    </button>
-                    <button
-                      onClick={() => { void detectOffsetForSpeaker(); }}
-                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
-                      data-testid="actions-detect-offset"
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Anchor className="h-3.5 w-3.5 text-slate-400"/>
-                      {offsetState.phase === 'detecting' ? 'Detecting offset…' : 'Detect Timestamp Offset'}
-                    </button>
-                    <button
-                      onClick={() => { setActionsMenuOpen(false); setOffsetState({ phase: 'manual' }); }}
-                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
-                      data-testid="actions-detect-offset-manual"
-                      title="Skip auto-detect and anchor the offset from captured lexeme pairs directly."
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Anchor className="h-3.5 w-3.5 text-slate-400"/>
-                      Detect offset (manual anchors)
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
@@ -3790,6 +3825,39 @@ export function ParseUI() {
               </>
             ) : (
               <>
+                {/* --- ANNOTATE: Timestamp Tools --- */}
+                <div className="border-b border-slate-100 p-4">
+                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Anchor className="h-3 w-3"/> Timestamp tools
+                  </h4>
+                  <p className="mb-3 text-[10px] leading-snug text-slate-400">
+                    Shift every lexeme on this speaker by a constant offset.
+                    Lexemes you have manually retimed or anchored are
+                    protected and stay put.
+                  </p>
+                  <div className="space-y-1.5">
+                    <button
+                      onClick={() => { void detectOffsetForSpeaker(); }}
+                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
+                      data-testid="drawer-detect-offset"
+                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Anchor className="h-3 w-3 text-slate-400"/>
+                      {offsetState.phase === 'detecting' ? 'Detecting offset…' : 'Detect Timestamp Offset'}
+                    </button>
+                    <button
+                      onClick={() => setOffsetState({ phase: 'manual' })}
+                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
+                      data-testid="drawer-detect-offset-manual"
+                      title="Skip auto-detect and anchor the offset from captured lexeme pairs directly."
+                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Anchor className="h-3 w-3 text-slate-400"/>
+                      Detect offset (manual anchors)
+                    </button>
+                  </div>
+                </div>
+
                 {/* --- ANNOTATE: Phonetic Tools --- */}
                 <div className="border-b border-slate-100 p-4">
                   <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
@@ -4123,6 +4191,17 @@ export function ParseUI() {
                         ))}
                       </ul>
                     )}
+                    {protectedLexemeCount > 0 && (
+                      <div
+                        data-testid="offset-protected-notice"
+                        className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
+                      >
+                        <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0"/>
+                        <span>
+                          <strong>{protectedLexemeCount}</strong> lexeme{protectedLexemeCount === 1 ? '' : 's'} will be protected — you have manually adjusted {protectedLexemeCount === 1 ? 'its' : 'their'} timing and the offset will skip {protectedLexemeCount === 1 ? 'it' : 'them'}.
+                        </span>
+                      </div>
+                    )}
                     {(r.matches?.length ?? 0) > 0 && (
                       <details className="text-[11px] text-slate-600">
                         <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
@@ -4190,8 +4269,19 @@ export function ParseUI() {
           {offsetState.phase === 'applied' && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-emerald-700">
-                <CheckCircle2 className="h-4 w-4"/> Shifted {offsetState.shifted} intervals by {offsetState.result.offsetSec.toFixed(3)}s
+                <CheckCircle2 className="h-4 w-4"/> Shifted {offsetState.shifted} interval{offsetState.shifted === 1 ? '' : 's'} by {offsetState.result.offsetSec.toFixed(3)}s
               </div>
+              {offsetState.protected > 0 && (
+                <div
+                  data-testid="offset-applied-protected"
+                  className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
+                >
+                  <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0"/>
+                  <span>
+                    Left <strong>{offsetState.protected}</strong> interval row{offsetState.protected === 1 ? '' : 's'} untouched — they were previously locked by manual timestamp edits or anchor captures.
+                  </span>
+                </div>
+              )}
               <div className="flex justify-end">
                 <button
                   className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
