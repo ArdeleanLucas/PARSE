@@ -1671,12 +1671,10 @@ def _chat_start_stt_job(speaker: str, source_wav: str, language: Optional[str]) 
         },
     )
 
-    thread = threading.Thread(
-        target=_run_stt_job,
-        args=(job_id, speaker, source_wav, language),
-        daemon=True,
+    _launch_compute_runner(
+        job_id, "stt",
+        {"speaker": speaker, "sourceWav": source_wav, "language": language},
     )
-    thread.start()
 
     return job_id
 
@@ -1969,6 +1967,8 @@ def _compute_subprocess_entry(
             result = _server._compute_full_pipeline("child-{0}".format(job_id), payload)
         elif normalized_type in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
             result = _server._compute_training_job("child-{0}".format(job_id), payload)
+        elif normalized_type == "stt":
+            result = _server._compute_stt("child-{0}".format(job_id), payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -2649,72 +2649,98 @@ def _load_cached_suggestions(speaker: str, concept_ids: List[str]) -> List[Dict[
     return output
 
 
-def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: Optional[str]) -> None:
+def _run_stt_job(
+    job_id: str, speaker: str, source_wav: str, language: Optional[str]
+) -> Dict[str, Any]:
+    """Run STT for ``speaker`` and return the result dict.
+
+    Raises on failure. Terminal job state (_set_job_complete /
+    _set_job_error) is now the dispatcher's responsibility — this
+    function only reports in-progress via _set_job_progress. That
+    lets the same function run cleanly under every compute mode
+    (thread, subprocess, persistent) via the unified compute
+    dispatcher, and also keeps direct callers like
+    ``_compute_full_pipeline`` simple (try/except + read return value).
+    """
+    audio_path = _resolve_project_path(source_wav)
+    if not audio_path.exists():
+        raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
+
+    # NB: the frontend normalizes backend progress values >1 as "percent"
+    # and values in [0,1] as "fraction". Sending exactly 1.0 was
+    # interpreted as 100%, so the bar flashed full before decoding even
+    # started. Use 0.5 (half a percent) for the initial splash.
+    _set_job_progress(job_id, 0.5, message="Initializing STT provider ({0})".format(language or "auto"))
     try:
-        audio_path = _resolve_project_path(source_wav)
-        if not audio_path.exists():
-            raise FileNotFoundError("Audio file not found: {0}".format(audio_path))
+        provider = get_stt_provider()
+    except Exception as exc:
+        # Capture the full traceback so downstream users see *why* the
+        # provider failed to initialize (missing model, CUDA not available,
+        # bad config), not just the generic last-message banner.
+        import traceback
+        tb = traceback.format_exc()
+        print("[stt] get_stt_provider failed for speaker={0!r}: {1}".format(speaker, tb), file=sys.stderr, flush=True)
+        raise RuntimeError("STT provider init failed: {0}".format(exc)) from exc
 
-        # NB: the frontend normalizes backend progress values >1 as "percent"
-        # and values in [0,1] as "fraction". Sending exactly 1.0 was
-        # interpreted as 100%, so the bar flashed full before decoding even
-        # started. Use 0.5 (half a percent) for the initial splash.
-        _set_job_progress(job_id, 0.5, message="Initializing STT provider ({0})".format(language or "auto"))
-        try:
-            provider = get_stt_provider()
-        except Exception as exc:
-            # Capture the full traceback so downstream users see *why* the
-            # provider failed to initialize (missing model, CUDA not available,
-            # bad config), not just the generic last-message banner.
-            import traceback
-            tb = traceback.format_exc()
-            print("[stt] get_stt_provider failed for speaker={0!r}: {1}".format(speaker, tb), file=sys.stderr, flush=True)
-            raise RuntimeError("STT provider init failed: {0}".format(exc)) from exc
+    _set_job_progress(job_id, 2.0, message="Loading model")
 
-        _set_job_progress(job_id, 2.0, message="Loading model")
-
-        # faster-whisper emits segments whose `end` can equal `total_duration`
-        # on the very first yield (VAD fuses everything into one chunk for
-        # short clips). That makes the raw per-segment progress jump to 100%
-        # while decoding is still underway. Cap mid-job progress at 98% so
-        # only `_set_job_complete` actually fills the bar.
-        def _progress_callback(progress: float, segments_processed: int) -> None:
-            clamped = min(float(progress) if progress is not None else 0.0, 98.0)
-            _set_job_progress(
-                job_id,
-                max(2.0, clamped),
-                message="Transcribing ({0} segments)".format(segments_processed),
-                segments_processed=segments_processed,
-            )
-
-        try:
-            segments = provider.transcribe(
-                audio_path=audio_path,
-                language=language,
-                progress_callback=_progress_callback,
-            )
-        except Exception as exc:
-            import traceback
-            tb = traceback.format_exc()
-            print("[stt] transcribe failed for speaker={0!r} path={1!r}: {2}".format(speaker, str(audio_path), tb), file=sys.stderr, flush=True)
-            raise RuntimeError("STT transcription failed: {0}".format(exc)) from exc
-
-        result = {
-            "speaker": speaker,
-            "sourceWav": str(audio_path),
-            "language": language,
-            "segments": segments,
-        }
-        _write_stt_cache(speaker, str(audio_path), language, segments)
-        _set_job_complete(
+    # faster-whisper emits segments whose `end` can equal `total_duration`
+    # on the very first yield (VAD fuses everything into one chunk for
+    # short clips). That makes the raw per-segment progress jump to 100%
+    # while decoding is still underway. Cap mid-job progress at 98% so
+    # only the dispatcher's _set_job_complete actually fills the bar.
+    def _progress_callback(progress: float, segments_processed: int) -> None:
+        clamped = min(float(progress) if progress is not None else 0.0, 98.0)
+        _set_job_progress(
             job_id,
-            result,
-            message="STT complete — {0} segments".format(len(segments)),
-            segments_processed=len(segments),
-            total_segments=len(segments),
+            max(2.0, clamped),
+            message="Transcribing ({0} segments)".format(segments_processed),
+            segments_processed=segments_processed,
+        )
+
+    try:
+        segments = provider.transcribe(
+            audio_path=audio_path,
+            language=language,
+            progress_callback=_progress_callback,
         )
     except Exception as exc:
-        _set_job_error(job_id, str(exc))
+        import traceback
+        tb = traceback.format_exc()
+        print("[stt] transcribe failed for speaker={0!r} path={1!r}: {2}".format(speaker, str(audio_path), tb), file=sys.stderr, flush=True)
+        raise RuntimeError("STT transcription failed: {0}".format(exc)) from exc
+
+    result = {
+        "speaker": speaker,
+        "sourceWav": str(audio_path),
+        "language": language,
+        "segments": segments,
+    }
+    _write_stt_cache(speaker, str(audio_path), language, segments)
+    return result
+
+
+def _compute_stt(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute-dispatcher adapter for STT.
+
+    Unpacks the HTTP/chat payload into ``_run_stt_job``'s positional
+    signature. The dispatcher (or persistent worker) handles the
+    terminal _set_job_complete / _set_job_error — this wrapper only
+    translates payload shapes.
+    """
+    speaker = str(payload.get("speaker") or "").strip()
+    source_wav = str(
+        payload.get("sourceWav") or payload.get("source_wav") or ""
+    ).strip()
+    language_raw = payload.get("language")
+    language = str(language_raw).strip() if language_raw is not None else None
+    if not language:
+        language = None
+    if not speaker:
+        raise ValueError("stt payload missing 'speaker'")
+    if not source_wav:
+        raise ValueError("stt payload missing 'sourceWav'")
+    return _run_stt_job(job_id, speaker, source_wav, language)
 
 
 def _parse_concepts_csv(csv_path: pathlib.Path) -> List[Dict[str, str]]:
@@ -4215,19 +4241,18 @@ def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
                     audio_path = _pipeline_audio_path_for_speaker(speaker)
                 except (RuntimeError, FileNotFoundError) as exc:
                     raise RuntimeError("Cannot run STT for {0!r}: {1}".format(speaker, exc))
-                _run_stt_job(job_id, speaker, str(audio_path), language_str)
-                snapshot = _get_job_snapshot(job_id) or {}
-                if str(snapshot.get("status") or "") == "error":
-                    raise RuntimeError(
-                        "stt step failed: {0}".format(snapshot.get("error") or "unknown error")
-                    )
-                sub_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+                try:
+                    stt_result = _run_stt_job(job_id, speaker, str(audio_path), language_str)
+                except Exception as exc:
+                    raise RuntimeError("stt step failed: {0}".format(exc)) from exc
                 results["stt"] = {
                     "status": "ok",
-                    "segments": len(sub_result.get("segments") or []) if isinstance(sub_result, dict) else 0,
+                    "segments": len(stt_result.get("segments") or []),
                     "done": True,
                 }
-                _reset_job_to_running(job_id)
+                # _run_stt_job no longer calls _set_job_complete (dispatcher
+                # owns terminal state), so we don't need _reset_job_to_running
+                # before the next pipeline step.
                 steps_run.append(step)
 
             elif step == "ortho":
@@ -4389,6 +4414,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_full_pipeline(job_id, payload)
         elif normalized_type in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
             result = _compute_training_job(job_id, payload)
+        elif normalized_type == "stt":
+            result = _compute_stt(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -5378,12 +5405,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             },
         )
 
-        thread = threading.Thread(
-            target=_run_stt_job,
-            args=(job_id, speaker, source_wav, language),
-            daemon=True,
+        _launch_compute_runner(
+            job_id, "stt",
+            {"speaker": speaker, "sourceWav": source_wav, "language": language},
         )
-        thread.start()
 
         self._send_json(
             HTTPStatus.OK,
