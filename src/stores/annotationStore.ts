@@ -11,13 +11,14 @@ import { getAnnotation, saveAnnotation } from "../api/client";
 // Adding a new tier? Update _CANONICAL_DISPLAY_ORDERS in python/textgrid_io.py
 // to match, or Praat exports will fall back to default_order=9999.
 const CANONICAL_TIER_ORDER: Record<string, number> = {
-  ipa_phone: 1, // phone-level IPA (wav2vec2 output, lane-visible)
-  ipa: 2,       // word/lexeme-level IPA (lane-visible)
-  ortho: 3,     // orthographic transcription (lane-visible)
-  stt: 4,       // speech-to-text reference (lane-visible)
-  concept: 5,   // concept tags
-  sentence: 6,  // sentence-level grouping (starts empty)
-  speaker: 7,   // speaker turn
+  ipa_phone: 1,   // phone-level IPA (wav2vec2 output, lane-visible)
+  ipa: 2,         // word/lexeme-level IPA (lane-visible)
+  ortho: 3,       // orthographic transcription, coarse Whisper segments (lane-visible)
+  ortho_words: 4, // word-level ortho from Tier-2 forced alignment (data-only, no lane)
+  stt: 5,         // speech-to-text reference (lane-visible)
+  concept: 6,     // concept tags
+  sentence: 7,    // sentence-level grouping (starts empty)
+  speaker: 8,     // speaker turn
 };
 
 function nowIsoUtc(): string {
@@ -28,13 +29,14 @@ function blankRecord(speaker: string): AnnotationRecord {
   return {
     speaker,
     tiers: {
-      ipa_phone: { name: "ipa_phone", display_order: 1, intervals: [] },
-      ipa:       { name: "ipa",       display_order: 2, intervals: [] },
-      ortho:     { name: "ortho",     display_order: 3, intervals: [] },
-      stt:       { name: "stt",       display_order: 4, intervals: [] },
-      concept:   { name: "concept",   display_order: 5, intervals: [] },
-      sentence:  { name: "sentence",  display_order: 6, intervals: [] },
-      speaker:   { name: "speaker",   display_order: 7, intervals: [] },
+      ipa_phone:   { name: "ipa_phone",   display_order: 1, intervals: [] },
+      ipa:         { name: "ipa",         display_order: 2, intervals: [] },
+      ortho:       { name: "ortho",       display_order: 3, intervals: [] },
+      ortho_words: { name: "ortho_words", display_order: 4, intervals: [] },
+      stt:         { name: "stt",         display_order: 5, intervals: [] },
+      concept:     { name: "concept",     display_order: 6, intervals: [] },
+      sentence:    { name: "sentence",    display_order: 7, intervals: [] },
+      speaker:     { name: "speaker",     display_order: 8, intervals: [] },
     },
     created_at: nowIsoUtc(),
     modified_at: nowIsoUtc(),

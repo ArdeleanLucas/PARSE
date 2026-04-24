@@ -8,6 +8,11 @@ export interface AnnotationInterval {
   text: string;
 }
 
+export interface OrthoWordInterval extends AnnotationInterval {
+  confidence?: number;
+  source?: "forced_align" | "short_clip_fallback";
+}
+
 export interface AnnotationTier {
   name: string;
   display_order: number;
@@ -16,7 +21,7 @@ export interface AnnotationTier {
 
 export interface AnnotationRecord {
   speaker: string;
-  tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, stt, concept, sentence, speaker
+  tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, ortho_words, stt, concept, sentence, speaker
   created_at?: string;
   modified_at?: string;
   source_wav?: string;

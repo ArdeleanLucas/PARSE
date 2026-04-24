@@ -15,14 +15,16 @@
     "model_only": true
   },
   "ortho": {
-    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH model. model_path may be a HuggingFace repo id (razhan/whisper-base-sdh) or a local CTranslate2 path. vad_filter defaults to false for ortho so razhan produces full-waveform coverage; leave it false unless you've tuned vad_parameters for your recordings.",
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH model. model_path may be a HuggingFace repo id (razhan/whisper-base-sdh) or a local CTranslate2 path. vad_filter defaults to false for ortho so razhan produces full-waveform coverage; leave it false unless you've tuned vad_parameters for your recordings. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds ~1-2 min on thesis-scale audio but yields clean per-lexeme text in tiers.ortho_words even when the coarse ortho tier is monolithic.",
     "provider": "faster-whisper",
     "model_path": "razhan/whisper-base-sdh",
     "language": "sd",
     "device": "cuda",
     "compute_type": "float16",
     "beam_size": 5,
-    "vad_filter": false
+    "vad_filter": false,
+    "initial_prompt": "",
+    "refine_lexemes": false
   },
   "llm": {
     "provider": "openai",

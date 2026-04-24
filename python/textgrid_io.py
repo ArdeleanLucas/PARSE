@@ -34,6 +34,7 @@ _CANONICAL_TEXTGRID_NAMES = {
     "ipa_phone": "Phones",
     "ipa": "IPA",
     "ortho": "Ortho",
+    "ortho_words": "Ortho words",
     "stt": "STT",
     "concept": "Concept",
     "sentence": "Sentence",
@@ -46,10 +47,11 @@ _CANONICAL_DISPLAY_ORDERS = {
     "ipa_phone": 1,
     "ipa": 2,
     "ortho": 3,
-    "stt": 4,
-    "concept": 5,
-    "sentence": 6,
-    "speaker": 7,
+    "ortho_words": 4,
+    "stt": 5,
+    "concept": 6,
+    "sentence": 7,
+    "speaker": 8,
 }
 
 _LONG_ITEM_HEADER_RE = re.compile(r"^item\s*\[\s*(\d+)\s*\]\s*:$")

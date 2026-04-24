@@ -46,6 +46,9 @@ export interface TranscriptionRunConfirm {
   speakers: string[];
   steps: PipelineStepId[];
   overwrites: Partial<Record<PipelineStepId, boolean>>;
+  /** Opt-in short-clip Whisper fallback for the ORTH step. Only meaningful
+   *  when `steps` includes `"ortho"`; the backend ignores it otherwise. */
+  refineLexemes?: boolean;
 }
 
 export interface TranscriptionRunModalProps {
@@ -175,11 +178,15 @@ export function TranscriptionRunModal({
   const [selectedSteps, setSelectedSteps] = useState<Set<PipelineStepId>>(
     () => new Set(),
   );
+  // Off by default — opt-in per run. Adds ~1-2 min to each ORTH run on
+  // thesis-scale audio, so surfacing it as unchecked is the safer default.
+  const [refineLexemes, setRefineLexemes] = useState(false);
 
   // Reset state when the modal opens.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setRefineLexemes(false);
 
     // Seed per-speaker load entries as "loading".
     const initial: Record<string, SpeakerLoadEntry> = {};
@@ -353,7 +360,15 @@ export function TranscriptionRunModal({
       }
     }
 
-    onConfirm({ speakers: speakersArr, steps: stepsArr, overwrites });
+    // refine_lexemes only matters when ORTH is actually scheduled; drop it
+    // otherwise so the backend falls back to its ai_config default.
+    const includesOrtho = stepsArr.includes("ortho");
+    onConfirm({
+      speakers: speakersArr,
+      steps: stepsArr,
+      overwrites,
+      refineLexemes: includesOrtho && refineLexemes ? true : undefined,
+    });
   };
 
   if (!open) return null;
@@ -398,6 +413,29 @@ export function TranscriptionRunModal({
                 </label>
               );
             })}
+          </div>
+        )}
+
+        {/* ORTH options — only relevant when ortho is scheduled. */}
+        {stepsToRender.includes("ortho") && (
+          <div
+            className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
+            data-testid="transcription-run-ortho-options"
+          >
+            <span className="text-xs font-semibold text-slate-700">ORTH</span>
+            <label
+              className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"
+              title="Re-transcribes each concept whose forced-alignment confidence is below 0.5 using a ±0.8 s audio clip. Adds ~1–2 min on thesis-scale recordings — leave off unless forced-alignment quality is poor."
+            >
+              <input
+                type="checkbox"
+                data-testid="transcription-run-refine-lexemes"
+                className="h-3.5 w-3.5 rounded border-slate-300"
+                checked={refineLexemes}
+                onChange={(e) => setRefineLexemes(e.target.checked)}
+              />
+              <span>Refine lexemes (short-clip fallback)</span>
+            </label>
           </div>
         )}
 

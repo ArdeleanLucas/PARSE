@@ -691,4 +691,53 @@ describe("Actions menu — transcription run flow", () => {
 
     confirmSpy.mockRestore();
   });
+
+  it("prefills Orthographic (Kurdish) from ortho_words word when coarse ortho is a monolithic segment", async () => {
+    // Simulates the Fail102 regression: razhan produces one giant coarse
+    // ortho interval covering minutes of narrative. Without ortho_words, the
+    // whole paragraph text would land in the lexeme field. With ortho_words
+    // (from Tier-2 forced alignment), the single-word entry wins.
+    const COARSE_TEXT = "زور جوان بووین ئاو دەگڕێ";  // monolithic paragraph
+    const WORD_TEXT = "ئاو";  // expected: just the Kurdish word for water
+
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [{ id: "1", label: "water" }, { id: "2", label: "fire" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+
+    const base = makeRecord("Fail01", [
+      { conceptText: "water", ortho: COARSE_TEXT, start: 0.0, end: 5.0 },
+    ]);
+    mockRecords = {
+      Fail01: {
+        ...base,
+        tiers: {
+          ...base.tiers,
+          // Word-level tier: single word fully inside the concept anchor
+          ortho_words: {
+            name: "ortho_words",
+            display_order: 4,
+            intervals: [
+              { start: 1.1, end: 1.4, text: WORD_TEXT },
+            ],
+          },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    // After mode switch the annotate view renders and findAnnotationForConcept
+    // preferring ortho_words populates the ortho input with the single word.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(WORD_TEXT)).toBeTruthy();
+    });
+    // The coarse paragraph must NOT appear as the pre-filled value.
+    expect(screen.queryByDisplayValue(COARSE_TEXT)).toBeNull();
+  });
 });
