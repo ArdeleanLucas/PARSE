@@ -93,9 +93,11 @@ def test_every_mcp_tool_is_allowlisted_in_parse_chat_tools(tmp_path) -> None:
     chat_names = set(ParseChatTools(project_root=tmp_path).tool_names())
 
     phantom = mcp_names - chat_names
-    assert not phantom, (
+    adapter_only = {"mcp_get_exposure_mode"}
+    assert phantom <= adapter_only, (
         "MCP tools that are NOT in ParseChatTools.tool_names() will raise "
-        "ChatToolValidationError at runtime. Phantom tools: {0}".format(sorted(phantom))
+        "ChatToolValidationError at runtime unless they are explicit adapter-only tools. "
+        "Unexpected phantom tools: {0}".format(sorted(phantom - adapter_only))
     )
 
 
@@ -105,21 +107,33 @@ def test_parse_chat_tools_get_all_tool_names_matches_instance(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_defaults_to_29_tools_without_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_defaults_to_30_tools_without_config(tmp_path, monkeypatch) -> None:
     import asyncio
+    import json
 
     from adapters.mcp_adapter import create_mcp_server
 
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
+    tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 29
+    assert len(mcp_tools) == 30
+    assert "mcp_get_exposure_mode" in tool_names
+
+    _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
+    payload = json.loads(meta["result"])
+    assert payload["ok"] is True
+    assert payload["result"]["exposeAllTools"] is False
+    assert payload["result"]["configSource"] is None
+    assert payload["result"]["mcpToolCount"] == 30
+    assert payload["result"]["parseChatToolCount"] == 47
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_48_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
     import asyncio
+    import json
 
     from adapters.mcp_adapter import create_mcp_server
 
@@ -133,13 +147,20 @@ def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_config_dir(tmp_p
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
+    assert len(mcp_tools) == 48
 
-    assert len(mcp_tools) == 47
+    _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
+    payload = json.loads(meta["result"])
+    assert payload["ok"] is True
+    assert payload["result"]["exposeAllTools"] is True
+    assert payload["result"]["mcpToolCount"] == 48
+    assert payload["result"]["parseChatToolCount"] == 47
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_48_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
     import asyncio
+    import json
 
     from adapters.mcp_adapter import create_mcp_server
 
@@ -151,8 +172,12 @@ def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_root_config(tmp_
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
+    assert len(mcp_tools) == 48
 
-    assert len(mcp_tools) == 47
+    _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
+    payload = json.loads(meta["result"])
+    assert payload["result"]["configSource"] == str(tmp_path / "mcp_config.json")
+    assert payload["result"]["exposeAllTools"] is True
 
 
 def test_load_mcp_config_rejects_non_boolean_expose_all_tools(tmp_path) -> None:

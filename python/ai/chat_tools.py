@@ -41,6 +41,37 @@ READ_ONLY_NOTICE = (
     "only specific allowlisted tools may write dedicated support files such as contact lexeme config or parse-tags, "
     "not annotations or enrichments."
 )
+DEFAULT_MCP_TOOL_NAMES = (
+    "project_context_read",
+    "annotation_read",
+    "read_csv_preview",
+    "cognate_compute_preview",
+    "cross_speaker_match_preview",
+    "spectrogram_preview",
+    "contact_lexeme_lookup",
+    "stt_start",
+    "stt_status",
+    "stt_word_level_start",
+    "stt_word_level_status",
+    "forced_align_start",
+    "forced_align_status",
+    "ipa_transcribe_acoustic_start",
+    "ipa_transcribe_acoustic_status",
+    "detect_timestamp_offset",
+    "detect_timestamp_offset_from_pair",
+    "apply_timestamp_offset",
+    "import_tag_csv",
+    "prepare_tag_import",
+    "onboard_speaker_import",
+    "import_processed_speaker",
+    "parse_memory_read",
+    "parse_memory_upsert_section",
+    "speakers_list",
+    "pipeline_state_read",
+    "pipeline_state_batch",
+    "pipeline_run",
+    "compute_status",
+)
 WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "audio_normalize_start",
     "contact_lexeme_lookup",
@@ -5553,5 +5584,6 @@ __all__ = [
     "ChatToolValidationError",
     "ChatToolExecutionError",
     "ChatToolSpec",
+    "DEFAULT_MCP_TOOL_NAMES",
     "ParseChatTools",
 ]

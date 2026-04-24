@@ -26,7 +26,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
-- Default remains the legacy 29-tool MCP surface; enabling the flag exposes all 47 `ParseChatTools` wrappers for external MCP clients.
+- Default MCP surface is **30 tools**: the legacy 29 `ParseChatTools` wrappers plus read-only `mcp_get_exposure_mode` for self-inspection.
+- Enabling `expose_all_tools` expands the MCP surface to **48 tools**: all 47 `ParseChatTools` plus `mcp_get_exposure_mode`.
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 
 ## Client/Server Contract Surface

@@ -62,37 +62,6 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("parse.mcp_adapter")
 
 MCP_CONFIG_FILENAME = "mcp_config.json"
-DEFAULT_MCP_TOOL_NAMES = (
-    "project_context_read",
-    "annotation_read",
-    "read_csv_preview",
-    "cognate_compute_preview",
-    "cross_speaker_match_preview",
-    "spectrogram_preview",
-    "contact_lexeme_lookup",
-    "stt_start",
-    "stt_status",
-    "stt_word_level_start",
-    "stt_word_level_status",
-    "forced_align_start",
-    "forced_align_status",
-    "ipa_transcribe_acoustic_start",
-    "ipa_transcribe_acoustic_status",
-    "detect_timestamp_offset",
-    "detect_timestamp_offset_from_pair",
-    "apply_timestamp_offset",
-    "import_tag_csv",
-    "prepare_tag_import",
-    "onboard_speaker_import",
-    "import_processed_speaker",
-    "parse_memory_read",
-    "parse_memory_upsert_section",
-    "speakers_list",
-    "pipeline_state_read",
-    "pipeline_state_batch",
-    "pipeline_run",
-    "compute_status",
-)
 
 # ---------------------------------------------------------------------------
 # Ensure the python/ package is importable
@@ -102,6 +71,8 @@ _ADAPTER_DIR = Path(__file__).resolve().parent
 _PYTHON_DIR = _ADAPTER_DIR.parent
 if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
+
+from ai.chat_tools import DEFAULT_MCP_TOOL_NAMES
 
 # ---------------------------------------------------------------------------
 # Lazy MCP SDK import
@@ -180,6 +151,30 @@ def _selected_mcp_tool_names(all_tool_names: List[str], expose_all_tools: bool) 
         return list(all_tool_names)
     available_names = set(all_tool_names)
     return [name for name in DEFAULT_MCP_TOOL_NAMES if name in available_names]
+
+
+def _mcp_exposure_payload(
+    *,
+    expose_all_tools: bool,
+    config_source: Optional[str],
+    parse_chat_tool_count: int,
+    mcp_tool_count: int,
+) -> Dict[str, Any]:
+    """Build a read-only MCP payload describing the active exposure mode."""
+    return {
+        "tool": "mcp_get_exposure_mode",
+        "ok": True,
+        "result": {
+            "readOnly": True,
+            "previewOnly": True,
+            "mode": "read-only",
+            "exposeAllTools": expose_all_tools,
+            "configSource": config_source,
+            "parseChatToolCount": parse_chat_tool_count,
+            "mcpToolCount": mcp_tool_count,
+            "defaultParseMcpToolCount": len(DEFAULT_MCP_TOOL_NAMES),
+        },
+    }
 
 
 def _load_repo_parse_env(project_root_path: Path) -> Dict[str, str]:
@@ -750,6 +745,17 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     def _json_tool_result(tool_name: str, args: Dict[str, Any]) -> str:
         result = tools.execute(tool_name, args)
         return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool(name="mcp_get_exposure_mode")
+    def mcp_get_exposure_mode() -> str:
+        """Read the active MCP exposure mode, config source, and tool counts."""
+        payload = _mcp_exposure_payload(
+            expose_all_tools=expose_all_tools,
+            config_source=mcp_config.get("config_path"),
+            parse_chat_tool_count=len(all_mcp_tool_names),
+            mcp_tool_count=len(selected_mcp_tool_names) + 1,
+        )
+        return json.dumps(payload, indent=2, ensure_ascii=False)
 
     # -- Register each ParseChatTools tool as an MCP tool --------------------
     # The cross-check test in python/adapters/test_mcp_adapter.py enforces
@@ -1570,7 +1576,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             return _json_tool_result("audio_normalize_status", {"jobId": jobId})
         mcp.tool(name="audio_normalize_status")(mcp_audio_normalize_status)
 
-        def mcp_enrichments_read(keys: Optional[list] = None) -> str:
+        def mcp_enrichments_read(keys: Optional[List[str]] = None) -> str:
             """Read parse-enrichments.json, optionally filtered to top-level keys."""
             args: Dict[str, Any] = {}
             if keys is not None:
@@ -1578,7 +1584,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             return _json_tool_result("enrichments_read", args)
         mcp.tool(name="enrichments_read")(mcp_enrichments_read)
 
-        def mcp_enrichments_write(enrichments: dict, merge: Optional[bool] = None) -> str:
+        def mcp_enrichments_write(enrichments: Dict[str, Any], merge: Optional[bool] = None) -> str:
             """Write or merge enrichments into parse-enrichments.json."""
             args: Dict[str, Any] = {"enrichments": enrichments}
             if merge is not None:
@@ -1709,7 +1715,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             form: str,
             mode: Optional[str] = None,
             form2: Optional[str] = None,
-            rules: Optional[list] = None,
+            rules: Optional[List[Dict[str, Any]]] = None,
         ) -> str:
             """Normalize/apply/compare IPA forms using project phonetic rules."""
             args: Dict[str, Any] = {"form": form}
@@ -1747,8 +1753,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         def mcp_source_index_validate(
             mode: Optional[str] = None,
             speakerId: Optional[str] = None,
-            speakerData: Optional[dict] = None,
-            manifest: Optional[dict] = None,
+            speakerData: Optional[Dict[str, Any]] = None,
+            manifest: Optional[Dict[str, Any]] = None,
             outputPath: Optional[str] = None,
         ) -> str:
             """Validate one source-index entry or a full source-index manifest."""

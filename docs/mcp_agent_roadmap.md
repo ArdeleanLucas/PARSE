@@ -9,17 +9,19 @@ Future improvements to make PARSE a first-class citizen in agent-driven workflow
 **Status:** ✅ Complete
 
 **Shipped:**
-- `python/adapters/mcp_adapter.py` now exposes the legacy **29-tool** surface by default.
-- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface:
+- `python/adapters/mcp_adapter.py` still exposes the legacy **29 `ParseChatTools`** surface by default.
+- MCP now also includes read-only `mcp_get_exposure_mode`, so the total adapter surface is **30 tools by default**.
+- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface, for **48 MCP tools total** including `mcp_get_exposure_mode`:
 
 ```json
 { "expose_all_tools": true }
 ```
 
 **Notes:**
-- Default behavior is unchanged for existing MCP clients.
+- Default behavior is unchanged for existing callers that rely on the legacy 29 PARSE tool wrappers.
 - The internal chat dock still uses `ParseChatTools` directly; this task only changes MCP exposure.
 - Newly exposed tools include the missing write/export/pipeline helpers such as normalize, enrichments, lexeme notes, exports, peaks, source-index validation, and transcript reformatting.
+- `mcp_get_exposure_mode` lets external agents self-inspect whether the active MCP server is running in the default or full-exposure mode.
 
 ---
 
