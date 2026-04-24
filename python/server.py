@@ -4568,6 +4568,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_auth_status()
             return
 
+        if request_path == "/api/worker/status":
+            self._api_get_worker_status()
+            return
+
         if request_path == "/api/export/lingpy":
             self._api_get_export_lingpy()
             return
@@ -5312,6 +5316,43 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         """Return a list of currently-running jobs so the UI can rehydrate
         progress after a page reload. See ``_list_active_jobs_snapshots``."""
         self._send_json(HTTPStatus.OK, {"jobs": _list_active_jobs_snapshots()})
+
+    def _api_get_worker_status(self) -> None:
+        """Health check for the persistent compute worker.
+
+        Returns 200 with ``{mode, alive, pid, jobs_in_flight}`` when the
+        worker is healthy (persistent mode + process alive) or when
+        persistent mode is not active (thread/subprocess modes always
+        report ``alive: null`` since there is no long-lived worker to
+        probe). Returns 503 when persistent mode is active but the
+        worker has exited — suitable for an external monitor (PM2,
+        uptime-robot, Grafana) to trigger a restart.
+        """
+        mode = _resolve_compute_mode()
+        payload: Dict[str, Any] = {"mode": mode}
+
+        if mode != "persistent":
+            payload["alive"] = None
+            payload["message"] = "Persistent worker mode is not active"
+            self._send_json(HTTPStatus.OK, payload)
+            return
+
+        handle = _PERSISTENT_WORKER_HANDLE
+        if handle is None:
+            payload["alive"] = False
+            payload["message"] = "Persistent worker handle not initialised"
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, payload)
+            return
+
+        alive = handle.is_alive()
+        payload["alive"] = alive
+        payload["pid"] = handle.process_pid()
+        payload["jobs_in_flight"] = handle.in_flight_count()
+        if alive:
+            self._send_json(HTTPStatus.OK, payload)
+            return
+        payload["message"] = "Persistent worker process has exited"
+        self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, payload)
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

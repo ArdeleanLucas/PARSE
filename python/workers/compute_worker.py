@@ -151,6 +151,16 @@ class WorkerHandle:
     def is_alive(self) -> bool:
         return bool(self._process is not None and self._process.is_alive())
 
+    def process_pid(self) -> Optional[int]:
+        if self._process is None:
+            return None
+        return self._process.pid
+
+    def in_flight_count(self) -> int:
+        """Number of jobs submitted to the worker that have not yet emitted
+        a terminal (complete/error) event. Cheap — plain ``len`` on a dict."""
+        return len(self._in_flight)
+
     # -- event-pump -----------------------------------------------------
 
     def _monitor_loop(self) -> None:
