@@ -49,11 +49,11 @@ def resolve_device(requested: Optional[str] = None) -> str:
     WSL2 GPU passthrough is unstable for sustained CTC workloads on RTX 5090
     (Blackwell/sm_120): repeated kernel errors from bad CTC inputs destabilise
     the Hyper-V VM host and crash WSL with E_UNEXPECTED. CPU is slower but
-    completes reliably. Pass requested="cuda" to override when needed.
+    completes reliably. WSL always wins — even if config says "cuda".
     """
     if requested == "cpu":
         return "cpu"
-    if requested != "cuda" and _is_wsl():
+    if _is_wsl():
         return "cpu"
     try:
         import torch  # type: ignore
