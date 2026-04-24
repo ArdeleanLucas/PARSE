@@ -44,6 +44,11 @@ export function AnnotateMode() {
   const toggleLoop = usePlaybackStore((s) => s.toggleLoop);
   const playbackRate = usePlaybackStore((s) => s.playbackRate);
   const setPlaybackRate = usePlaybackStore((s) => s.setPlaybackRate);
+  // Subscribe to the playhead for the numeric readout in the controls bar.
+  // The waveform has no built-in time display; annotators need to anchor
+  // exact timestamps and eyeballing the scrub bar isn't precise enough.
+  const currentTime = usePlaybackStore((s) => s.currentTime);
+  const playbackDuration = usePlaybackStore((s) => s.duration);
   const dirty = useAnnotationStore((s) => s.dirty);
   const record = useAnnotationStore((s) =>
     activeSpeaker ? s.records[activeSpeaker] ?? null : null,
@@ -225,6 +230,26 @@ export function AnnotateMode() {
             <Button size="sm" onClick={() => skip(5)}>
               +5s
             </Button>
+            {/* Numeric playhead readout — m:ss.sss / m:ss.sss. */}
+            <span
+              aria-label="Playhead time"
+              title="Current playhead / total duration"
+              style={{
+                fontFamily: "monospace",
+                fontSize: "0.75rem",
+                padding: "0.25rem 0.5rem",
+                border: "1px solid #e2e8f0",
+                borderRadius: "0.25rem",
+                background: "#f8fafc",
+                color: "#0f172a",
+                whiteSpace: "nowrap",
+                minWidth: 130,
+                textAlign: "center",
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{formatPlayhead(currentTime)}</span>
+              <span style={{ color: "#94a3b8" }}> / {formatPlayhead(playbackDuration)}</span>
+            </span>
             <Button
               size="sm"
               variant={loopEnabled ? "primary" : "secondary"}
@@ -300,7 +325,7 @@ export function AnnotateMode() {
             ))}
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {annotatePanel === "annotation" && <AnnotationPanel />}
+            {annotatePanel === "annotation" && <AnnotationPanel onSeek={handleSeekWithRegion} />}
             {annotatePanel === "transcript" && <TranscriptPanel onSeek={seek} />}
             {annotatePanel === "suggestions" && (
               <SuggestionsPanel onSeek={handleSeekWithRegion} />
@@ -313,4 +338,14 @@ export function AnnotateMode() {
       </div>
     </div>
   );
+}
+
+/** Format seconds as "m:ss.sss" for the playhead readout. Handles NaN /
+ * negative values (which can briefly appear before the waveform reports
+ * its duration) by collapsing to "0:00.000". */
+function formatPlayhead(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "0:00.000";
+  const m = Math.floor(sec / 60);
+  const s = sec - m * 60;
+  return `${m}:${s.toFixed(3).padStart(6, "0")}`;
 }

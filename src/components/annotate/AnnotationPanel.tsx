@@ -8,10 +8,14 @@ import {
 } from "../../stores/transcriptionLanesStore";
 import { Button } from "../shared/Button";
 import { Input } from "../shared/Input";
+import { LexemeSearchPanel } from "./LexemeSearchPanel";
 import type { AnnotationInterval } from "../../api/types";
 
 interface AnnotationPanelProps {
   onAnnotationSaved?: (speaker: string, tier: string, interval: AnnotationInterval) => void;
+  /** Seek the waveform to a time in seconds. Wired through to
+   * LexemeSearchPanel so clicking a candidate jumps playback there. */
+  onSeek?: (timeSec: number) => void;
 }
 
 const EPSILON = 0.0005;
@@ -26,7 +30,7 @@ function overlaps(
   );
 }
 
-export function AnnotationPanel({ onAnnotationSaved }: AnnotationPanelProps) {
+export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelProps) {
   const activeSpeaker = useUIStore((s) => s.activeSpeaker);
   const activeConcept = useUIStore((s) => s.activeConcept);
   const selectedRegion = usePlaybackStore((s) => s.selectedRegion);
@@ -124,6 +128,12 @@ export function AnnotationPanel({ onAnnotationSaved }: AnnotationPanelProps) {
           ? `Region: ${selectedRegion.start.toFixed(3)} s \u2013 ${selectedRegion.end.toFixed(3)} s`
           : "No region selected"}
       </div>
+
+      {/* Lexeme search — scaffold half of the Lexical Anchor Alignment
+          System. Jumps the waveform to ranked candidate time ranges based
+          on fuzzy matches across the loaded tiers. Highest-leverage step
+          for the first-word anchoring workflow. */}
+      <LexemeSearchPanel onSeek={onSeek} />
 
       {/* Inputs */}
       <div
