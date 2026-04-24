@@ -502,15 +502,33 @@ def _append_contact_ref(
     by_lang[language_code] = _dedupe_non_empty_strings(existing + forms)
 
 
-def load_contact_language_data(path: Path) -> Tuple[List[str], Dict[str, Dict[str, List[str]]]]:
+def load_contact_language_data(
+    path: Path,
+) -> Tuple[List[str], Dict[str, Dict[str, List[str]]], Dict[str, Dict[str, List[str]]]]:
+    """Load the SIL contact-language config.
+
+    Returns ``(selected_languages, refs_by_concept, form_selections_by_concept)``.
+
+    ``form_selections_by_concept`` mirrors ``_meta.form_selections`` --
+    the per-(concept, lang) allow-list the user set in the Reference
+    Forms panel. The inner value per concept/lang is either:
+
+        * missing key       -> no explicit selection; every populated ref
+          is used (default, preserves pre-selection compute behaviour)
+        * non-empty list    -> only those form strings contribute
+        * empty list ``[]`` -> user deliberately deselected every form;
+          similarity for that pair is skipped downstream
+
+    :func:`filter_refs_by_selection` applies the mask at scoring time.
+    """
     if not path.exists():
         _warn(f"Contact language config not found: {path}")
-        return (list(PREFERRED_CONTACT_LANGUAGES), {})
+        return (list(PREFERRED_CONTACT_LANGUAGES), {}, {})
 
     raw = _load_json(path)
     if not isinstance(raw, dict):
         _warn(f"Contact language config is not an object: {path}")
-        return (list(PREFERRED_CONTACT_LANGUAGES), {})
+        return (list(PREFERRED_CONTACT_LANGUAGES), {}, {})
 
     language_codes = [
         code for code, data in raw.items()
@@ -561,7 +579,59 @@ def load_contact_language_data(path: Path) -> Tuple[List[str], Dict[str, Dict[st
             for concept_key, raw_forms in scoped.items():
                 _append_contact_ref(refs_by_concept, concept_key, code, raw_forms)
 
-    return (selected_languages, refs_by_concept)
+    # Parse _meta.form_selections -> {concept_key: {lang: [form,...]}}.
+    # Concept keys are normalised the same way refs_by_concept keys its
+    # data so "water" and "#water:WATER" both route to the same concept.
+    form_selections_by_concept: Dict[str, Dict[str, List[str]]] = {}
+    selections_raw = meta.get("form_selections") if isinstance(meta, dict) else None
+    if isinstance(selections_raw, dict):
+        for concept_key, per_lang in selections_raw.items():
+            if not isinstance(concept_key, str) or not isinstance(per_lang, dict):
+                continue
+            normalized_concept = _normalize_concept_key(concept_key)
+            if not normalized_concept:
+                continue
+            concept_entry: Dict[str, List[str]] = {}
+            for lang_code, forms in per_lang.items():
+                if not isinstance(lang_code, str):
+                    continue
+                code_text = lang_code.strip().lower()
+                if not code_text:
+                    continue
+                if isinstance(forms, list):
+                    concept_entry[code_text] = _dedupe_non_empty_strings(forms)
+            if concept_entry:
+                form_selections_by_concept[normalized_concept] = concept_entry
+
+    return (selected_languages, refs_by_concept, form_selections_by_concept)
+
+
+def filter_refs_by_selection(
+    refs: List[str],
+    selection: Optional[List[str]],
+) -> Tuple[List[str], bool]:
+    """Apply a user form-selection mask to a list of populated refs.
+
+    Returns ``(filtered_refs, explicit_empty)``:
+
+        * ``selection is None``: no explicit selection for this pair,
+          so return ``refs`` unchanged; ``explicit_empty`` is False.
+        * ``selection == []``: user deselected every form -- return
+          empty list with ``explicit_empty`` True so callers can
+          distinguish "no refs available" from "user opted out".
+        * non-empty selection: keep only refs whose normalised string
+          appears in the allow-list. Unknown selection entries (e.g.
+          forms removed by a re-populate) are silently ignored.
+    """
+    if selection is None:
+        return (list(refs), False)
+    if not selection:
+        return ([], True)
+
+    allowed = {_normalize_space(item) for item in selection if isinstance(item, str)}
+    allowed.discard("")
+    filtered = [ref for ref in refs if _normalize_space(ref) in allowed]
+    return (filtered, False)
 
 
 def _levenshtein_distance(left: str, right: str) -> int:
@@ -752,8 +822,20 @@ def compute_similarity_scores(
     concepts: Sequence[ConceptSpec],
     contact_languages: Sequence[str],
     refs_by_concept: Mapping[str, Mapping[str, List[str]]],
+    form_selections_by_concept: Optional[Mapping[str, Mapping[str, List[str]]]] = None,
 ) -> Dict[str, Dict[str, Dict[str, SimilarityScore]]]:
+    """Compute per-(concept, speaker, lang) similarity scores.
+
+    When ``form_selections_by_concept`` is provided, the user's Reference
+    Forms selection mask is applied before taking the per-ref ``min`` --
+    i.e. only selected forms contribute to the best-match score (max
+    similarity = min edit distance). An empty selection list for a
+    (concept, lang) pair means "none selected", and similarity is
+    skipped for that pair (``has_reference_data`` stays True so the UI
+    can distinguish "user opted out" from "no refs available").
+    """
     similarity: Dict[str, Dict[str, Dict[str, SimilarityScore]]] = {}
+    selections = form_selections_by_concept or {}
 
     for concept in concepts:
         concept_id = concept.concept_id
@@ -764,16 +846,39 @@ def compute_similarity_scores(
         refs_for_concept = _resolve_contact_refs(concept, refs_by_concept)
         concept_scores: Dict[str, Dict[str, SimilarityScore]] = {}
 
+        # Selections are keyed by normalised concept id, so a key written
+        # as "water" or "#water:WATER" routes to the same concept spec.
+        concept_selection: Mapping[str, List[str]] = {}
+        for selection_key in (concept_id, concept.label):
+            normalized = _normalize_concept_key(selection_key) if selection_key else ""
+            if not normalized:
+                continue
+            candidate = selections.get(normalized)
+            if isinstance(candidate, Mapping):
+                concept_selection = candidate
+                break
+
         for record in records:
             speaker_scores: Dict[str, SimilarityScore] = {}
             for language_code in contact_languages:
                 refs = refs_for_concept.get(language_code, [])
                 has_reference_data = bool(refs)
-                if has_reference_data:
-                    distance = min(_normalized_edit_distance(record.ipa, ref) for ref in refs)
-                    score: Optional[float] = round(float(distance), 3)
+
+                selection = concept_selection.get(language_code) if concept_selection else None
+                filtered_refs, explicit_empty = filter_refs_by_selection(refs, selection)
+
+                if explicit_empty:
+                    # User deliberately deselected every form for this
+                    # (concept, lang) -- flag similarity as unavailable
+                    # so the UI can show "selection disabled" rather
+                    # than a fake score.
+                    score: Optional[float] = None
+                elif filtered_refs:
+                    distance = min(_normalized_edit_distance(record.ipa, ref) for ref in filtered_refs)
+                    score = round(float(distance), 3)
                 else:
                     score = None
+
                 speaker_scores[language_code] = {
                     "score": score,
                     "has_reference_data": has_reference_data,
@@ -1132,7 +1237,7 @@ def _parse_cli_args(parser: argparse.ArgumentParser) -> argparse.Namespace:
 
 def _run_compute_command(args: argparse.Namespace) -> int:
     try:
-        contact_languages_from_config, refs_by_concept = load_contact_language_data(args.sil_config)
+        contact_languages_from_config, refs_by_concept, form_selections_by_concept = load_contact_language_data(args.sil_config)
 
         contact_languages_override = [
             token.strip().lower()
@@ -1154,6 +1259,7 @@ def _run_compute_command(args: argparse.Namespace) -> int:
             concepts=concepts,
             contact_languages=contact_languages,
             refs_by_concept=refs_by_concept,
+            form_selections_by_concept=form_selections_by_concept,
         )
 
     except RuntimeError as exc:

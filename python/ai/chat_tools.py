@@ -4750,7 +4750,7 @@ class ParseChatTools:
         if isinstance(contact_override_raw, list):
             contact_override = [str(item).strip().lower() for item in contact_override_raw if str(item).strip()]
 
-        contact_languages_from_config, refs_by_concept = cognate_compute_module.load_contact_language_data(
+        contact_languages_from_config, refs_by_concept, form_selections_by_concept = cognate_compute_module.load_contact_language_data(
             self.sil_config_path
         )
         contact_languages = contact_override or contact_languages_from_config
@@ -4810,6 +4810,7 @@ class ParseChatTools:
                 concepts=concept_specs,
                 contact_languages=contact_languages,
                 refs_by_concept=refs_by_concept,
+                form_selections_by_concept=form_selections_by_concept,
             )
 
         if speaker_filter:

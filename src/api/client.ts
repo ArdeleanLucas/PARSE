@@ -788,6 +788,23 @@ export async function getClefSourcesReport(): Promise<ClefSourcesReport> {
   return apiFetch<ClefSourcesReport>("/api/clef/sources-report");
 }
 
+/** Persist the user's reference-form selection for one (concept, language).
+ *  The server merges into ``_meta.form_selections`` without touching any
+ *  other entries. Pass an empty ``forms`` array to mark "none selected"
+ *  for that pair (similarity is skipped downstream); omit a pair from
+ *  the config entirely by never calling this for it -- the absence of a
+ *  key is the "all populated forms selected" default. */
+export async function saveClefFormSelections(payload: {
+  concept_en: string;
+  lang_code: string;
+  forms: string[];
+}): Promise<{ success: boolean; concept_en: string; lang_code: string; forms: string[] }> {
+  return apiFetch("/api/clef/form-selections", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // Normalize
 export async function startNormalize(speaker: string, sourceWav?: string): Promise<{ job_id: string }> {
   const body: Record<string, string> = { speaker };

@@ -47,7 +47,7 @@ import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
-import { getClefConfig, getContactLexemeCoverage } from './api/client';
+import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -276,77 +276,188 @@ function buildSpeakerForm(
   };
 }
 
-interface ReferenceFormDisplay {
+// ---------------------------------------------------------------------------
+// Reference-form parsing + classification (display-only; no transliteration)
+// ---------------------------------------------------------------------------
+// The Reference Forms panel renders every form the providers wrote for a
+// (concept, language), letting the user pick which ones contribute to the
+// similarity score. The functions below are pure *display* helpers: they
+// never transliterate script to IPA. A bare string is routed to either the
+// ``script`` slot or the ``ipa`` slot based on a conservative Unicode-range
+// check, and the raw text is preserved verbatim. See ``classifyRawFormString``
+// for the allowed non-Latin scripts. No character substitution happens
+// anywhere in this pipeline.
+
+// Unicode blocks we explicitly recognise as "not IPA" for display tagging.
+// A bare string containing any char in these blocks is routed to the
+// script slot; everything else (Latin + IPA extensions + diacritics) goes
+// to the ipa slot. This is a tag, not a transformation -- the raw text is
+// preserved as-is regardless of which slot it lands in.
+const NON_LATIN_SCRIPT_RE = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u07C0-\u07FF\u0780-\u07BF\u0900-\u097F\u0A80-\u0AFF\u0B80-\u0BFF\u0E00-\u0E7F\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+/** Classify a bare reference-form string as script vs IPA for display.
+ *  This is a display hint only -- the returned object always carries the
+ *  *same* raw text in whichever slot it lands. No transliteration ever
+ *  happens here. Strings containing any recognised non-Latin script char
+ *  go into the ``script`` slot; everything else is treated as IPA
+ *  (matches the contract of providers like Grokipedia / ASJP that
+ *  promise phonetic output). */
+function classifyRawFormString(raw: string): { script: string; ipa: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { script: '', ipa: '' };
+  if (NON_LATIN_SCRIPT_RE.test(trimmed)) {
+    return { script: trimmed, ipa: '' };
+  }
+  return { script: '', ipa: trimmed };
+}
+
+export interface ReferenceFormEntry {
+  /** Exact raw source string. Used as the stable selection key so
+   *  ``_meta.form_selections`` persists verbatim across reloads. */
+  raw: string;
   script: string;
   ipa: string;
   audioUrl: string | null;
-  available: boolean;
+  /** Provenance sources when available (``wikidata``, ``asjp``, ...).
+   *  Empty for bare-string legacy entries and rolled-up non-provenance
+   *  shapes that had no explicit source list. */
+  sources: string[];
 }
 
-function parseReferenceForm(raw: unknown): ReferenceFormDisplay {
+function _parseOneEntry(raw: unknown): ReferenceFormEntry | null {
   if (typeof raw === 'string') {
-    return { script: '', ipa: raw.trim(), audioUrl: null, available: raw.trim().length > 0 };
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const { script, ipa } = classifyRawFormString(trimmed);
+    return { raw: trimmed, script, ipa, audioUrl: null, sources: [] };
   }
 
-  if (Array.isArray(raw)) {
-    return raw.length > 0 ? parseReferenceForm(raw[0]) : { script: '', ipa: '', audioUrl: null, available: false };
-  }
+  if (!isRecord(raw)) return null;
 
-  if (!isRecord(raw)) {
-    return { script: '', ipa: '', audioUrl: null, available: false };
-  }
-
-  // Provenance shape ({form, sources}) is what the CLEF populate flow
-  // now writes. The "form" string is the phonetic rendering, so route
-  // it into the ipa slot to match the bare-string legacy behaviour --
-  // the Reference Forms card renders the same text in both cases, only
-  // the stored shape differs.
+  // Provenance shape: { form: <string>, sources: [<provider>, ...] }.
+  // The ``form`` value is the verbatim provider output; we still tag it
+  // by Unicode range so e.g. an LLM response that slipped into Arabic
+  // script doesn't display in the IPA slot.
   if (typeof raw.form === 'string' && Array.isArray(raw.sources)) {
-    const trimmed = raw.form.trim();
-    return { script: '', ipa: trimmed, audioUrl: null, available: trimmed.length > 0 };
+    const trimmed = (raw.form as string).trim();
+    if (!trimmed) return null;
+    const sources = (raw.sources as unknown[]).filter((s): s is string => typeof s === 'string');
+    const { script, ipa } = classifyRawFormString(trimmed);
+    const audioUrl = typeof raw.audioUrl === 'string' && raw.audioUrl.trim() ? raw.audioUrl : null;
+    return { raw: trimmed, script, ipa, audioUrl, sources };
   }
 
-  const script = [raw.script, raw.orthography, raw.form, raw.text].find((value) => typeof value === 'string' && value.trim().length > 0);
-  const ipa = [raw.ipa, raw.phonetic, raw.transcription].find((value) => typeof value === 'string' && value.trim().length > 0);
-  const audioUrl = [raw.audioUrl, raw.audio, raw.url].find((value) => typeof value === 'string' && value.trim().length > 0);
+  // Structured provider objects with explicit field labels. Trust the
+  // label: if the provider wrote ``ipa: "foo"`` we display "foo" as IPA
+  // even if it contains script-range chars -- that's their claim.
+  const scriptVal = [raw.script, raw.orthography, raw.text].find(
+    (v) => typeof v === 'string' && (v as string).trim().length > 0,
+  ) as string | undefined;
+  const ipaVal = [raw.ipa, raw.phonetic, raw.transcription].find(
+    (v) => typeof v === 'string' && (v as string).trim().length > 0,
+  ) as string | undefined;
+  const audioUrl = [raw.audioUrl, raw.audio, raw.url].find(
+    (v) => typeof v === 'string' && (v as string).trim().length > 0,
+  ) as string | undefined;
+
+  // A bare ``form`` field with no sources array -- treat as a generic
+  // string and classify by Unicode range (matches the bare-string path).
+  if (!scriptVal && !ipaVal && typeof raw.form === 'string' && (raw.form as string).trim()) {
+    const trimmed = (raw.form as string).trim();
+    const { script, ipa } = classifyRawFormString(trimmed);
+    return {
+      raw: trimmed,
+      script,
+      ipa,
+      audioUrl: audioUrl ?? null,
+      sources: [],
+    };
+  }
+
+  if (!scriptVal && !ipaVal) return null;
+
+  // Selection keys against structured objects prefer the IPA text (it's
+  // the canonical similarity-scoring string), falling back to script.
+  const rawKey = (ipaVal ?? scriptVal ?? '').trim();
+  if (!rawKey) return null;
 
   return {
-    script: typeof script === 'string' ? script : '',
-    ipa: typeof ipa === 'string' ? ipa : '',
-    audioUrl: typeof audioUrl === 'string' ? audioUrl : null,
-    available: Boolean(script || ipa),
+    raw: rawKey,
+    script: scriptVal ?? '',
+    ipa: ipaVal ?? '',
+    audioUrl: audioUrl ?? null,
+    sources: [],
   };
 }
 
-/** Resolve reference forms for a concept across a dynamic set of language
- *  codes (driven by the user's CLEF primary_contact_languages). Checks the
- *  enrichments.reference_forms map first; falls back to the per-workspace
- *  SIL contact-language config (what `Save & populate` writes into) so the
- *  cards surface real data regardless of which store the fetcher wrote to. */
-function resolveReferenceForms(
+/** Parse any provider-shaped reference data into an ordered list of
+ *  display entries. Accepts the legacy string/array/object shapes the
+ *  Reference Forms pipeline has seen. Duplicates (by raw text) collapse
+ *  so a form fetched by multiple providers shows up once. */
+export function parseReferenceFormList(raw: unknown): ReferenceFormEntry[] {
+  const out: ReferenceFormEntry[] = [];
+  const seen = new Set<string>();
+  const push = (entry: ReferenceFormEntry | null) => {
+    if (!entry || seen.has(entry.raw)) return;
+    seen.add(entry.raw);
+    out.push(entry);
+  };
+  if (Array.isArray(raw)) {
+    for (const item of raw) push(_parseOneEntry(item));
+  } else {
+    push(_parseOneEntry(raw));
+  }
+  return out;
+}
+
+/** List-shaped resolver that preserves every
+ *  provider-returned form instead of collapsing to the first one. Drives
+ *  the Reference Forms panel's multi-form display + selection UI. Keyed
+ *  by primary contact-language code; absent codes mean no populated
+ *  forms were found (or the fallback SIL entry was empty too). */
+export function resolveReferenceFormLists(
   enrichments: Record<string, unknown>,
   silConcepts: Record<string, Record<string, unknown>>,
   concept: Concept,
-  codes: string[],
-): Record<string, ReferenceFormDisplay> {
+  codes: readonly string[],
+): Record<string, ReferenceFormEntry[]> {
   const root = isRecord(enrichments.reference_forms) ? enrichments.reference_forms as Record<string, unknown> : null;
   const conceptEntry = root ? root[concept.key] ?? root[concept.name] : null;
   const conceptRecord = isRecord(conceptEntry) ? conceptEntry : {};
 
-  const out: Record<string, ReferenceFormDisplay> = {};
+  const out: Record<string, ReferenceFormEntry[]> = {};
   for (const code of codes) {
-    const primary = parseReferenceForm(conceptRecord[code]);
-    if (primary.available) {
+    const primary = parseReferenceFormList(conceptRecord[code]);
+    if (primary.length > 0) {
       out[code] = primary;
       continue;
     }
-    // SIL config stores forms as {concept_en: [ipa, ...]} keyed by
-    // language code. parseReferenceForm already handles string / array /
-    // object shapes so we can pass the value straight through.
     const silForConcept = silConcepts[code]?.[concept.name];
-    out[code] = parseReferenceForm(silForConcept);
+    const fallback = parseReferenceFormList(silForConcept);
+    if (fallback.length > 0) out[code] = fallback;
   }
   return out;
+}
+
+/** Read the user's persisted form-selection allow-list for one
+ *  (concept, lang) out of ``clefStatus.meta.form_selections``. Returns
+ *  ``null`` when no explicit selection exists for that pair -- the
+ *  caller should treat that as "every populated form is selected"
+ *  (the default). Returns ``[]`` for explicit opt-out. */
+export function resolveFormSelection(
+  clefMeta: Record<string, unknown> | null | undefined,
+  conceptEn: string,
+  langCode: string,
+): string[] | null {
+  const selections = clefMeta && isRecord(clefMeta.form_selections)
+    ? (clefMeta.form_selections as Record<string, unknown>)
+    : null;
+  if (!selections) return null;
+  const perConcept = selections[conceptEn];
+  if (!isRecord(perConcept)) return null;
+  const entry = perConcept[langCode];
+  if (!Array.isArray(entry)) return null;
+  return entry.filter((v): v is string => typeof v === 'string');
 }
 
 /** Map a language code to a display tone + text direction for the
@@ -2069,6 +2180,39 @@ export function ParseUI() {
     void refreshClefStatus();
   }, [refreshClefStatus]);
 
+  // Optimistic overlay for Reference Forms selections. Clicks in the
+  // panel update this map immediately while the POST writes through to
+  // ``_meta.form_selections``. Keyed by ``"<concept_en>|<lang_code>"``
+  // so re-selecting across concepts doesn't clobber in-flight saves. A
+  // ``null`` value means "no explicit selection" (use every populated
+  // form); a ``string[]`` is the exact allow-list; empty array means
+  // "none selected" -- similarity will be skipped for that pair. Matches
+  // the backend contract in ``_api_post_clef_form_selections``.
+  const [localFormSelections, setLocalFormSelections] = useState<Record<string, string[] | null>>({});
+  const saveFormSelection = useCallback(
+    async (conceptEn: string, langCode: string, forms: string[]) => {
+      const key = `${conceptEn}|${langCode}`;
+      setLocalFormSelections((prev) => ({ ...prev, [key]: forms }));
+      try {
+        await saveClefFormSelections({ concept_en: conceptEn, lang_code: langCode, forms });
+        // Pull fresh meta so a reload or other consumer sees authoritative
+        // state, not just the optimistic overlay. The overlay stays in
+        // place meanwhile so there's no flash between save + refresh.
+        await refreshClefStatus();
+      } catch (err) {
+        // On error, drop the optimistic entry so the UI falls back to
+        // whatever ``clefStatus.meta.form_selections`` reports.
+        setLocalFormSelections((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        console.error('[clef] form selection save failed:', err);
+      }
+    },
+    [refreshClefStatus],
+  );
+
   const handleComputeRun = useCallback(() => {
     if (computeMode === 'contact-lexemes' && clefConfigured !== true) {
       setClefModalOpen(true);
@@ -2905,8 +3049,8 @@ export function ParseUI() {
   };
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
-  const referenceForms = useMemo(
-    () => resolveReferenceForms(enrichmentData, silConcepts, concept, primaryContactCodes),
+  const referenceFormLists = useMemo(
+    () => resolveReferenceFormLists(enrichmentData, silConcepts, concept, primaryContactCodes),
     [concept, enrichmentData, silConcepts, primaryContactCodes],
   );
   const borrowingCandidates = useMemo<unknown>(() => {
@@ -3693,41 +3837,145 @@ export function ParseUI() {
               {/* Reference forms — gated on the user's CLEF configuration.
                   Hidden entirely when no primary contact languages are
                   set; renders exactly one card per configured primary
-                  otherwise. The data source falls back from enrichments
-                  to the SIL contact-language config so forms surface as
-                  soon as "Save & populate" finishes, not only after a
-                  full enrichments recompute. */}
+                  otherwise. Each card lists every populated form with
+                  a checkbox so the user picks which forms contribute
+                  to the similarity score. Selections persist into
+                  ``_meta.form_selections`` via the backend; default is
+                  "all selected". No orthography -> IPA conversion
+                  happens -- forms are tagged by Unicode block (see
+                  ``classifyRawFormString``) and displayed verbatim. */}
               {primaryContactCodes.length > 0 && (
                 <SectionCard title="Reference forms">
                   <div className={`grid gap-4 ${primaryContactCodes.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     {primaryContactCodes.map((code, idx) => {
                       const { tone, dir } = referenceCardStyle(code, idx);
                       const label = contactLanguageNames[code] ?? code.toUpperCase();
-                      const data = referenceForms[code] ?? { script: '', ipa: '', audioUrl: null, available: false };
+                      const entries = referenceFormLists[code] ?? [];
+                      const selectionKey = `${concept.name}|${code}`;
+                      const persistedSelection = resolveFormSelection(clefStatus?.meta, concept.name, code);
+                      const localSelection = selectionKey in localFormSelections ? localFormSelections[selectionKey] : undefined;
+                      // Effective selection: local overlay takes precedence
+                      // over persisted meta; null from either means "no
+                      // explicit selection" -> all forms active by default.
+                      const effective: string[] | null = localSelection !== undefined ? localSelection : persistedSelection;
+                      const allSelected = effective === null;
+                      const selectedSet = new Set(effective ?? []);
+                      const isSelected = (rawForm: string) => allSelected || selectedSet.has(rawForm);
+                      const selectedCount = allSelected ? entries.length : entries.filter((e) => selectedSet.has(e.raw)).length;
+
+                      // Click handlers -- each call writes the next explicit
+                      // list (never null) so we always persist intent. "Select
+                      // all" writes the full list of raw strings rather than
+                      // passing null so the selection survives even if a
+                      // future populate adds new forms and the user re-opens
+                      // this concept without re-clicking.
+                      const rawAll = entries.map((e) => e.raw);
+                      const onToggle = (rawForm: string) => {
+                        const current = new Set(allSelected ? rawAll : rawAll.filter((r) => selectedSet.has(r)));
+                        if (current.has(rawForm)) current.delete(rawForm);
+                        else current.add(rawForm);
+                        // Preserve the entries' natural order in the persisted list.
+                        void saveFormSelection(concept.name, code, rawAll.filter((r) => current.has(r)));
+                      };
+                      const onSelectAll = () => { void saveFormSelection(concept.name, code, rawAll.slice()); };
+                      const onSelectNone = () => { void saveFormSelection(concept.name, code, []); };
+
                       return (
                         <div key={code} className="rounded-lg border border-slate-100 bg-slate-50/40 p-4" data-testid={`reference-form-${code}`}>
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2">
                             <span className={`text-[10px] font-semibold uppercase tracking-wider ${tone}`}>
                               {label} <span className="ml-1 font-mono text-slate-300">({code})</span>
                             </span>
-                            <button
-                              title={data.audioUrl ? `Play ${label} reference audio` : 'Reference audio not available'}
-                              onClick={() => {
-                                if (!data.audioUrl) return;
-                                void new Audio(data.audioUrl).play().catch(() => {});
-                              }}
-                              className="text-slate-300 hover:text-slate-500"
-                            >
-                              <Volume2 className="h-3.5 w-3.5"/>
-                            </button>
+                            {entries.length > 0 && (
+                              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                <span data-testid={`reference-form-${code}-count`}>{selectedCount}/{entries.length} selected</span>
+                                {entries.length > 1 && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
+                                      data-testid={`reference-form-${code}-select-all`}
+                                      onClick={onSelectAll}
+                                    >
+                                      All
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
+                                      data-testid={`reference-form-${code}-select-none`}
+                                      onClick={onSelectNone}
+                                    >
+                                      None
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          {data.available ? (
-                            <>
-                              <div className="mt-2 font-serif text-2xl text-slate-900" dir={dir}>{data.script || '—'}</div>
-                              <div className="mt-1 font-mono text-[11px] text-slate-400">/{data.ipa || '—'}/</div>
-                            </>
-                          ) : (
+                          {entries.length === 0 ? (
                             <div className="mt-2 text-sm text-slate-400">No reference data</div>
+                          ) : (
+                            <ul className="mt-2 space-y-1.5">
+                              {entries.map((entry, entryIdx) => {
+                                const selected = isSelected(entry.raw);
+                                return (
+                                  <li
+                                    key={entry.raw}
+                                    data-testid={`reference-form-${code}-entry-${entryIdx}`}
+                                    data-selected={selected}
+                                    className={
+                                      'flex items-start gap-3 rounded-md border px-2.5 py-1.5 transition-colors ' +
+                                      (selected
+                                        ? 'border-slate-300 bg-white'
+                                        : 'border-transparent bg-slate-100/50 opacity-60')
+                                    }
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selected}
+                                      onChange={() => onToggle(entry.raw)}
+                                      data-testid={`reference-form-${code}-checkbox-${entryIdx}`}
+                                      className="mt-1 h-3.5 w-3.5 cursor-pointer accent-slate-700"
+                                      aria-label={`Select ${entry.raw}`}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-baseline gap-2">
+                                        <span className="text-[10px] uppercase tracking-wider text-slate-400">Script</span>
+                                        <span className="font-serif text-lg text-slate-900" dir={entry.script ? dir : 'ltr'}>
+                                          {entry.script || '—'}
+                                        </span>
+                                      </div>
+                                      <div className="mt-0.5 flex items-baseline gap-2">
+                                        <span className="text-[10px] uppercase tracking-wider text-slate-400">IPA</span>
+                                        <span className="font-mono text-[12px] text-slate-600">
+                                          {entry.ipa ? `/${entry.ipa}/` : '—'}
+                                        </span>
+                                      </div>
+                                      {entry.sources.length > 0 && (
+                                        <div className="mt-0.5 text-[10px] font-mono text-slate-400">
+                                          {entry.sources.join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {entry.audioUrl && (
+                                      <button
+                                        type="button"
+                                        title="Play reference audio"
+                                        onClick={() => { void new Audio(entry.audioUrl!).play().catch(() => {}); }}
+                                        className="text-slate-300 hover:text-slate-500"
+                                      >
+                                        <Volume2 className="h-3.5 w-3.5"/>
+                                      </button>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                          {entries.length > 0 && effective !== null && effective.length === 0 && (
+                            <div className="mt-2 text-[11px] text-amber-600" data-testid={`reference-form-${code}-opt-out-warning`}>
+                              No forms selected — similarity for {label} will be skipped.
+                            </div>
                           )}
                         </div>
                       );
