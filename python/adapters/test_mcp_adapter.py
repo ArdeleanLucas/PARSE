@@ -343,7 +343,7 @@ def test_mcp_forwards_annotations_meta_and_strict_schema_for_dangerous_mutator(t
     )
 
 
-def test_can_list_tools_requiring_project_loaded(tmp_path) -> None:
+def test_all_tools_expose_project_loaded_precondition_when_required(tmp_path) -> None:
     tools = ParseChatTools(project_root=tmp_path)
 
     requiring_project = {
