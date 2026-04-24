@@ -152,6 +152,8 @@ The positional component applies a 45-second tolerance window (linear decay) aro
 
 The system presents ranked candidates. The annotator verifies, adjusts boundaries, and confirms. Nothing is saved without an explicit action. Candidate quality improves as the dataset grows — each verified annotation adds to the reference pool that cross-speaker matching draws on, making later speakers progressively faster to annotate than the first.
 
+**User-facing tool — "Search &amp; anchor lexeme" (Annotate mode).** The Annotation panel exposes the first half of the pipeline directly: enter the known orthographic variants of the target concept (e.g. `yek, yak, jek`), and PARSE ranks time ranges across the `ortho_words`, `ortho`, `stt`, and `ipa` tiers by fuzzy match confidence. Clicking a candidate seeks the waveform there so the annotator can verify and confirm. The control bar now also shows a numeric playhead readout (`m:ss.sss / m:ss.sss`) so anchor decisions don't require eyeballing the scrub position. A follow-up pass will wire the full two-signal scoring (phonetic Levenshtein + cross-speaker match) behind a backend endpoint and add a bulk-align CTA for the remaining concepts.
+
 ---
 
 ## AI Workflow Assistant
