@@ -141,6 +141,22 @@ class Aligner:
         2026-04-23). The explicit construction is also faster — no
         extra auto-tokenizer discovery round-trip.
         """
+        # Persistent-worker fast path: when a long-lived worker pre-loaded
+        # the default model at startup, subsequent calls for the same
+        # model reuse the cached instance instead of reloading 1.2 GB
+        # of weights (and avoid re-calling torch.set_num_interop_threads).
+        if (
+            _PRELOADED_ALIGNER is not None
+            and model_name == DEFAULT_MODEL_NAME
+            # We only reuse the preloaded instance when the caller did not
+            # explicitly request a different device (or when it matches).
+            # This is a safety net: if someone later passes device="cuda"
+            # we do NOT silently hand them the CPU version that the worker
+            # pre-loaded under WSL force-CPU rules.
+            and (device is None or resolve_device(device) == _PRELOADED_ALIGNER.device)
+        ):
+            return _PRELOADED_ALIGNER
+
         try:
             import torch  # type: ignore
             from transformers import (  # type: ignore
@@ -343,6 +359,15 @@ class Aligner:
             total_score = 0.0
 
         return spans, total_score
+
+
+# Module-level cache for long-lived worker processes that pre-load the
+# Aligner once at startup (see python/workers/compute_worker.py). Non-
+# worker callers never set this, so ``Aligner.load`` behaves exactly as
+# before. The worker assigns a concrete Aligner instance here after its
+# own ``Aligner.load()`` succeeds; every subsequent load-without-args
+# call is a constant-time dict lookup instead of a 1.2 GB model reload.
+_PRELOADED_ALIGNER: Optional["Aligner"] = None
 
 
 # ---------------------------------------------------------------------------

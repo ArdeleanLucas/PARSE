@@ -26,6 +26,15 @@ module.exports = {
     {
       name: "parse-api",
       script: "/usr/bin/python3",
+      // Compute mode:
+      //   --compute-mode=thread       legacy, default. Works on Linux native;
+      //                               wedges under heavy wav2vec2 loads on WSL2.
+      //   --compute-mode=subprocess   one fresh process per job. Stable but
+      //                               pays ~60s Aligner.load() per speaker.
+      //   --compute-mode=persistent   single long-lived worker, Aligner loaded
+      //                               once (2026-04 rollout). Flip here after
+      //                               the rollout checklist in the PR passes
+      //                               on Fail02.
       args: "-u /home/lucas/gh/ardeleanlucas/parse/python/server.py --compute-mode=thread",
       // cwd MUST be the workspace, not the repo clone — see note above
       cwd: "/home/lucas/parse-workspace",
@@ -42,6 +51,10 @@ module.exports = {
         // to CPU until the WSL/dxg stability issue is resolved.
         PARSE_STT_FORCE_CPU: "1",
         CUDA_VISIBLE_DEVICES: "",
+        // Alternative opt-in route (equivalent to --compute-mode=persistent).
+        // Leave unset while rolling out; set to "true" to opt in without
+        // editing the args line above. The CLI flag wins if both are set.
+        // PARSE_USE_PERSISTENT_WORKER: "true",
       },
     },
   ],
