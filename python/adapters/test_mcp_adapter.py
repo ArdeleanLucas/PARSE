@@ -247,3 +247,111 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
         handler_count = len(re.findall(r"^\s*def _tool_{0}\s*\(".format(re.escape(tool)), text, re.MULTILINE))
         assert spec_count == 1, "{0} has {1} ChatToolSpec entries".format(tool, spec_count)
         assert handler_count == 1, "{0} has {1} handlers".format(tool, handler_count)
+
+
+def test_first_batch_mutators_publish_machine_readable_safety_metadata(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    expected = {
+        "enrichments_write": {
+            "dry_run": True,
+            "postcondition": "enrichments_file_updated",
+        },
+        "lexeme_notes_write": {
+            "dry_run": True,
+            "postcondition": "lexeme_note_written",
+        },
+        "apply_timestamp_offset": {
+            "dry_run": True,
+            "postcondition": "annotation_timestamps_shifted",
+        },
+        "pipeline_run": {
+            "dry_run": True,
+            "postcondition": "pipeline_job_started",
+        },
+        "onboard_speaker_import": {
+            "dry_run": True,
+            "postcondition": "speaker_source_registered",
+        },
+        "import_processed_speaker": {
+            "dry_run": True,
+            "postcondition": "processed_speaker_imported",
+        },
+        "export_annotations_csv": {
+            "dry_run": True,
+            "postcondition": "export_file_written",
+        },
+        "export_annotations_elan": {
+            "dry_run": True,
+            "postcondition": "export_file_written",
+        },
+        "export_annotations_textgrid": {
+            "dry_run": True,
+            "postcondition": "export_file_written",
+        },
+        "export_lingpy_tsv": {
+            "dry_run": True,
+            "postcondition": "export_file_written",
+        },
+        "export_nexus": {
+            "dry_run": True,
+            "postcondition": "export_file_written",
+        },
+    }
+
+    for tool_name, checks in expected.items():
+        spec = tools._tool_specs[tool_name]
+        assert spec.mutability == "mutating"
+        assert spec.supports_dry_run is checks["dry_run"]
+        assert spec.dry_run_parameter == "dryRun"
+        assert spec.parameters.get("additionalProperties") is False
+        assert "dryRun" in spec.parameters.get("properties", {})
+        assert spec.parameters["properties"]["dryRun"]["description"]
+        assert any(cond.id == "project_loaded" for cond in spec.preconditions)
+        assert any(cond.id == checks["postcondition"] for cond in spec.postconditions)
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_mcp_forwards_annotations_meta_and_strict_schema_for_dangerous_mutator(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "mcp_config.json").write_text('{"expose_all_tools": true}\n', encoding="utf-8")
+
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    server = create_mcp_server(str(tmp_path))
+    mcp_tools = asyncio.run(server.list_tools())
+    by_name = {tool.name: tool for tool in mcp_tools}
+
+    enrichments_write = by_name["enrichments_write"]
+    schema = enrichments_write.inputSchema
+
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["dryRun"]["type"] == "boolean"
+    assert schema["properties"]["dryRun"]["description"]
+    assert enrichments_write.annotations.destructiveHint is True
+    assert enrichments_write.annotations.readOnlyHint is False
+    assert enrichments_write.meta["x-parse"]["mutability"] == "mutating"
+    assert enrichments_write.meta["x-parse"]["supports_dry_run"] is True
+    assert enrichments_write.meta["x-parse"]["dry_run_parameter"] == "dryRun"
+    assert any(
+        cond["id"] == "project_loaded"
+        for cond in enrichments_write.meta["x-parse"]["preconditions"]
+    )
+
+
+def test_can_list_tools_requiring_project_loaded(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    requiring_project = {
+        spec.name
+        for spec in tools.iter_tool_specs()
+        if any(cond.id == "project_loaded" for cond in spec.preconditions)
+    }
+
+    assert "enrichments_write" in requiring_project
+    assert "pipeline_run" in requiring_project
+    assert "project_context_read" not in requiring_project
