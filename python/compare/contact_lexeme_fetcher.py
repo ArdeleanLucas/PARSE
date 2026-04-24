@@ -33,11 +33,25 @@ def fetch_and_merge(
     # 1. Load concepts
     concepts = _load_concepts(concepts_path)
 
-    # 2. Load current config
-    with open(config_path, encoding="utf-8") as f:
-        config = json.load(f)
+    # 2. Load current config (create empty on first run)
+    config = _load_or_init_config(config_path)
 
-    language_meta = {k: v for k, v in config.items() if isinstance(v, dict)}
+    # Underscore-prefixed top-level keys (e.g. "_meta") are metadata, not
+    # languages -- skip them when building the provider-facing map.
+    language_meta = {
+        k: v for k, v in config.items()
+        if isinstance(v, dict) and isinstance(k, str) and not k.startswith("_")
+    }
+
+    if not language_codes:
+        raise ValueError(
+            "No contact languages configured. Open the CLEF configure modal "
+            "(Compute -> Borrowing detection (CLEF)) to pick at least one."
+        )
+    if not concepts:
+        raise ValueError(
+            "No concepts found. Import concepts.csv before running CLEF."
+        )
 
     # 3. Determine which concepts need filling
     if not overwrite:
@@ -85,6 +99,8 @@ def fetch_and_merge(
 
 
 def _load_concepts(path: Path) -> List[str]:
+    if not path.exists():
+        return []
     concepts = []
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -93,6 +109,28 @@ def _load_concepts(path: Path) -> List[str]:
             if concept_en:
                 concepts.append(concept_en)
     return concepts
+
+
+def _load_or_init_config(path: Path) -> Dict[str, Any]:
+    """Load the SIL contact-language config, creating an empty file on first
+    access. A missing file previously crashed the fetch with ``[Errno 2]``;
+    the CLEF configure flow in the UI writes a real config, but the compute
+    path must still cope with a freshly-initialised workspace where the
+    user has not yet opened the configure modal."""
+    if not path.exists():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+        except OSError:
+            return {}
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def main() -> None:

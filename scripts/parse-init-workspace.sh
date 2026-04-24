@@ -123,6 +123,26 @@ else
   log "project.json already exists — left alone"
 fi
 
+# --- config/sil_contact_languages.json ---------------------------------------
+# Seed an empty SIL contact-language config so Borrowing detection (CLEF)
+# doesn't crash with [Errno 2] on a fresh workspace. The UI's CLEF configure
+# modal (Compute -> Borrowing detection (CLEF)) is what actually fills this
+# file in; we just create the placeholder so the compute path has somewhere
+# to write.
+sil_config="${WORKSPACE}/config/sil_contact_languages.json"
+if [ ! -f "${sil_config}" ]; then
+  cat >"${sil_config}" <<'EOF'
+{
+  "_meta": {
+    "primary_contact_languages": [],
+    "configured_at": null,
+    "schema_version": 1
+  }
+}
+EOF
+  log "wrote config/sil_contact_languages.json (empty — configure via UI)"
+fi
+
 # --- concepts.csv (optional copy) --------------------------------------------
 if [ -n "${CONCEPTS_CSV}" ]; then
   if [ ! -f "${CONCEPTS_CSV}" ]; then

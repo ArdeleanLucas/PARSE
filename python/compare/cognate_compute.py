@@ -512,11 +512,27 @@ def load_contact_language_data(path: Path) -> Tuple[List[str], Dict[str, Dict[st
         _warn(f"Contact language config is not an object: {path}")
         return (list(PREFERRED_CONTACT_LANGUAGES), {})
 
-    language_codes = [code for code, data in raw.items() if isinstance(code, str) and isinstance(data, dict)]
+    language_codes = [
+        code for code, data in raw.items()
+        if isinstance(code, str) and isinstance(data, dict) and not code.startswith("_")
+    ]
     language_codes = sorted(set(language_codes))
 
-    preferred = [code for code in PREFERRED_CONTACT_LANGUAGES if code in language_codes]
-    selected_languages = preferred or language_codes or list(PREFERRED_CONTACT_LANGUAGES)
+    # When the user has configured primary contact languages through the
+    # CLEF configure modal, those take precedence over the historical
+    # hard-coded PREFERRED list. Falls back to the old behaviour for
+    # configs that don't carry _meta.
+    meta = raw.get("_meta") if isinstance(raw.get("_meta"), dict) else {}
+    primary = meta.get("primary_contact_languages") if isinstance(meta, dict) else None
+    primary_codes: List[str] = []
+    if isinstance(primary, list):
+        primary_codes = [str(c).strip().lower() for c in primary if isinstance(c, str) and c.strip()]
+
+    if primary_codes:
+        selected_languages = [c for c in primary_codes if c in language_codes] or primary_codes
+    else:
+        preferred = [code for code in PREFERRED_CONTACT_LANGUAGES if code in language_codes]
+        selected_languages = preferred or language_codes or list(PREFERRED_CONTACT_LANGUAGES)
 
     refs_by_concept: Dict[str, Dict[str, List[str]]] = {}
 
@@ -533,6 +549,8 @@ def load_contact_language_data(path: Path) -> Tuple[List[str], Dict[str, Dict[st
 
     for language_code, payload in raw.items():
         if not isinstance(language_code, str) or not isinstance(payload, dict):
+            continue
+        if language_code.startswith("_"):
             continue
 
         code = language_code.strip().lower()

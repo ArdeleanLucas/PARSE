@@ -44,6 +44,8 @@ import { ChatMarkdown } from './components/shared/ChatMarkdown';
 import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
+import { ClefConfigModal } from './components/compute/ClefConfigModal';
+import { getClefConfig } from './api/client';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type AppMode = 'annotate' | 'compare' | 'tags';
@@ -1901,6 +1903,33 @@ export function ParseUI() {
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState('cognates');
   const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
+  const [clefModalOpen, setClefModalOpen] = useState(false);
+  // Cache of CLEF "configured" state so we can route the Run button without
+  // an extra round-trip on every click. Re-fetched on mount + after save.
+  const [clefConfigured, setClefConfigured] = useState<boolean | null>(null);
+
+  const refreshClefStatus = useCallback(async () => {
+    try {
+      const s = await getClefConfig();
+      setClefConfigured(s.configured);
+    } catch {
+      setClefConfigured(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (computeMode === 'contact-lexemes' && clefConfigured === null) {
+      void refreshClefStatus();
+    }
+  }, [computeMode, clefConfigured, refreshClefStatus]);
+
+  const handleComputeRun = useCallback(() => {
+    if (computeMode === 'contact-lexemes' && clefConfigured !== true) {
+      setClefModalOpen(true);
+      return;
+    }
+    void startComputeJob();
+  }, [computeMode, clefConfigured, startComputeJob]);
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -3759,7 +3788,7 @@ export function ParseUI() {
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
                     <button
                       className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      onClick={() => { void startComputeJob(); }}
+                      onClick={handleComputeRun}
                       disabled={computeJobState.status === 'running'}
                     >
                       <Play className="h-3 w-3"/> Run
@@ -3771,6 +3800,23 @@ export function ParseUI() {
                       <RefreshCw className="h-3 w-3"/> Refresh
                     </button>
                   </div>
+                  {computeMode === 'contact-lexemes' && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px]">
+                      <span className={clefConfigured ? "text-emerald-700" : "text-amber-700"}>
+                        {clefConfigured === null
+                          ? "Checking CLEF config…"
+                          : clefConfigured
+                            ? "CLEF configured"
+                            : "CLEF not configured — Run will open setup"}
+                      </span>
+                      <button
+                        onClick={() => setClefModalOpen(true)}
+                        className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
+                      >
+                        Configure
+                      </button>
+                    </div>
+                  )}
                   {computeJobState.status === 'running' && (
                     <div className="mt-1 text-[10px] text-indigo-600">
                       Running… {Math.round(computeJobState.progress * 100)}%
@@ -4036,6 +4082,18 @@ export function ParseUI() {
         outcomes={batch.state.outcomes}
         stepsRun={reportStepsRun}
         onRerunFailed={handleRerunFailed}
+      />
+      <ClefConfigModal
+        open={clefModalOpen}
+        onClose={() => setClefModalOpen(false)}
+        onSaved={(_primary, populated) => {
+          setClefConfigured(true);
+          if (populated) {
+            void useEnrichmentStore.getState().load();
+          } else {
+            void startComputeJob();
+          }
+        }}
       />
       <Modal
         open={offsetState.phase !== 'idle'}

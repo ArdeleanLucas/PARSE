@@ -186,3 +186,36 @@ export interface ContactLexemeFetchOptions {
   languages?: string[];
   overwrite?: boolean;
 }
+
+export interface ClefLanguageEntry {
+  code: string;
+  name: string;
+  family?: string | null;
+  filled?: number;
+  total?: number;
+}
+
+export interface ClefConfigStatus {
+  configured: boolean;
+  primary_contact_languages: string[];
+  languages: ClefLanguageEntry[];
+  config_path: string;
+  concepts_csv_exists: boolean;
+  meta: Record<string, unknown>;
+}
+
+export interface ClefCatalogEntry {
+  code: string;
+  name: string;
+  family?: string;
+}
+
+export interface ClefProviderEntry {
+  id: string;
+  name: string;
+}
+
+export interface ClefConfigPayload {
+  primary_contact_languages: string[];
+  languages: Array<{ code: string; name: string; family?: string }>;
+}

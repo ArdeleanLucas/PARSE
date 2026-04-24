@@ -173,7 +173,7 @@ PARSE is designed around a real fieldwork sequence rather than a toy demo sequen
 4. **Correct timestamps and confirm segments** in Annotate mode
 5. **Search and anchor difficult lexemes** across long recordings
 6. **Compare the concept set across speakers** in the matrix view
-7. **Use CLEF evidence** when a borrowing analysis needs external lexical context
+7. **Use CLEF evidence** when a borrowing analysis needs external lexical context — the first time you run **Borrowing detection (CLEF)** from the Compute panel, PARSE opens a guided setup modal where you pick 1–2 primary contact languages (English + Spanish by default) and optionally auto-populate lexeme forms from the provider stack. The config lives in `config/sil_contact_languages.json`; extend the language picker with `config/sil_catalog_extra.json`.
 8. **Export LingPy TSV or NEXUS** for downstream comparative and phylogenetic analysis
 
 The guiding principle is simple: timestamps are central, human review stays explicit, and automation should make linguistic judgment faster rather than opaque.

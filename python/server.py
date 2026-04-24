@@ -158,6 +158,25 @@ def _sil_config_path() -> pathlib.Path:
     return _project_root() / "config" / "sil_contact_languages.json"
 
 
+def _load_sil_config_safe(path: pathlib.Path) -> Dict[str, Any]:
+    """Read the SIL contact-language config without exploding on a
+    missing/corrupt file. Returns ``{}`` in the degraded case so callers
+    (coverage endpoint, CLEF configure endpoint, compute path) can all
+    share one shape."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_sil_config(path: pathlib.Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def _default_enrichments_payload() -> Dict[str, Any]:
     return {
         "computed_at": None,
@@ -3906,10 +3925,16 @@ def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, 
     languages_raw = _coerce_string_list(payload.get("languages"))
 
     if not languages_raw:
-        import json as _json
-        with open(config_path) as f:
-            sil_config = _json.load(f)
-        languages_raw = [k for k, v in sil_config.items() if isinstance(v, dict) and "name" in v]
+        sil_config = _load_sil_config_safe(config_path)
+        meta = sil_config.get("_meta") if isinstance(sil_config.get("_meta"), dict) else {}
+        primary = meta.get("primary_contact_languages") if isinstance(meta, dict) else None
+        if isinstance(primary, list) and primary:
+            languages_raw = [str(c).strip().lower() for c in primary if isinstance(c, str) and c.strip()]
+        if not languages_raw:
+            languages_raw = [
+                k for k, v in sil_config.items()
+                if isinstance(v, dict) and "name" in v and isinstance(k, str) and not k.startswith("_")
+            ]
 
     overwrite = bool(payload.get("overwrite", False))
 
@@ -5977,6 +6002,18 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_contact_lexeme_coverage()
             return
 
+        if request_path == "/api/clef/config":
+            self._api_get_clef_config()
+            return
+
+        if request_path == "/api/clef/catalog":
+            self._api_get_clef_catalog()
+            return
+
+        if request_path == "/api/clef/providers":
+            self._api_get_clef_providers()
+            return
+
         if request_path == "/api/tags":
             self._api_get_tags()
             return
@@ -6038,6 +6075,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/config":
             self._api_update_config()
+            return
+
+        if request_path == "/api/clef/config":
+            self._api_post_clef_config()
             return
 
         if request_path == "/api/auth/key":
@@ -7697,13 +7738,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_contact_lexeme_coverage(self) -> None:
         """Return coverage stats for contact language lexeme data."""
-        import json as _json
         config_path = _sil_config_path()
-        try:
-            with open(config_path) as f:
-                config = _json.load(f)
-        except (OSError, ValueError):
-            config = {}
+        config = _load_sil_config_safe(config_path)
 
         concepts_path = _project_root() / "concepts.csv"
         try:
@@ -7716,6 +7752,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         languages = {}
         for lang_code, lang_data in config.items():
+            if not isinstance(lang_code, str) or lang_code.startswith("_"):
+                continue
             if not isinstance(lang_data, dict) or "name" not in lang_data:
                 continue
             concepts_dict = lang_data.get("concepts", {})
@@ -7730,6 +7768,167 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             }
 
         self._send_json(HTTPStatus.OK, {"languages": languages})
+
+    def _api_get_clef_config(self) -> None:
+        """Return the current CLEF configuration + readiness state. The UI's
+        configure modal reads this to decide whether to prompt the user
+        before running Borrowing detection."""
+        config_path = _sil_config_path()
+        config = _load_sil_config_safe(config_path)
+
+        meta_raw = config.get("_meta") if isinstance(config.get("_meta"), dict) else {}
+        primary_raw = meta_raw.get("primary_contact_languages") if isinstance(meta_raw, dict) else []
+        primary: List[str] = []
+        if isinstance(primary_raw, list):
+            primary = [str(c).strip().lower() for c in primary_raw if isinstance(c, str) and c.strip()]
+
+        languages = []
+        for code, data in config.items():
+            if not isinstance(code, str) or code.startswith("_"):
+                continue
+            if not isinstance(data, dict):
+                continue
+            concepts_dict = data.get("concepts", {}) if isinstance(data.get("concepts"), dict) else {}
+            languages.append({
+                "code": code,
+                "name": data.get("name") or code,
+                "family": data.get("family") or None,
+                "filled": sum(1 for v in concepts_dict.values() if v),
+                "total": len(concepts_dict),
+            })
+        languages.sort(key=lambda x: x["code"])
+
+        configured = bool(primary) and len(languages) > 0
+        concepts_exists = (_project_root() / "concepts.csv").exists()
+
+        self._send_json(HTTPStatus.OK, {
+            "configured": configured,
+            "primary_contact_languages": primary,
+            "languages": languages,
+            "config_path": str(config_path),
+            "concepts_csv_exists": concepts_exists,
+            "meta": meta_raw if isinstance(meta_raw, dict) else {},
+        })
+
+    def _api_post_clef_config(self) -> None:
+        """Create/update the SIL contact-language config. Accepts:
+            {
+              "primary_contact_languages": ["eng", "spa"],
+              "languages": [
+                {"code": "eng", "name": "English", "family": "Germanic"},
+                ...
+              ]
+            }
+        Merges with any existing per-language concepts data -- populated
+        forms are never dropped when the user re-saves the config."""
+        body = self._expect_object(self._read_json_body(), "Request body")
+
+        primary_raw = body.get("primary_contact_languages", [])
+        if not isinstance(primary_raw, list):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "primary_contact_languages must be a list")
+        primary = [str(c).strip().lower() for c in primary_raw if isinstance(c, str) and c.strip()]
+        if len(primary) > 2:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "Pick at most 2 primary contact languages")
+
+        langs_raw = body.get("languages", [])
+        if not isinstance(langs_raw, list):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "languages must be a list")
+
+        clean_langs: Dict[str, Dict[str, Any]] = {}
+        for item in langs_raw:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code", "")).strip().lower()
+            if not code or code.startswith("_"):
+                continue
+            entry: Dict[str, Any] = {
+                "name": str(item.get("name") or code),
+            }
+            family = item.get("family")
+            if isinstance(family, str) and family.strip():
+                entry["family"] = family.strip()
+            clean_langs[code] = entry
+
+        # Every primary code must appear in the language set. If the client
+        # only sent primaries, synthesize minimal entries so the compute
+        # path has somewhere to write forms.
+        for code in primary:
+            clean_langs.setdefault(code, {"name": code})
+
+        config_path = _sil_config_path()
+        existing = _load_sil_config_safe(config_path)
+
+        merged: Dict[str, Any] = {}
+        for code, entry in clean_langs.items():
+            prev = existing.get(code) if isinstance(existing.get(code), dict) else {}
+            prev_concepts = prev.get("concepts") if isinstance(prev.get("concepts"), dict) else {}
+            merged[code] = {**entry, "concepts": prev_concepts}
+
+        merged["_meta"] = {
+            "primary_contact_languages": primary,
+            "configured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "schema_version": 1,
+        }
+
+        _write_sil_config(config_path, merged)
+
+        self._send_json(HTTPStatus.OK, {
+            "success": True,
+            "config_path": str(config_path),
+            "primary_contact_languages": primary,
+            "language_count": len(clean_langs),
+        })
+
+    def _api_get_clef_catalog(self) -> None:
+        """Return the bundled SIL/ISO language catalog the configure modal
+        uses for its searchable picker. Kept server-side so we can extend
+        it without reshipping the frontend bundle.
+
+        Merges a per-workspace override file at
+        ``config/sil_catalog_extra.json`` on top of the bundled list, so
+        users can add private entries without editing the repo. The extras
+        file may be a bare list or ``{"languages": [...]}``; duplicate
+        codes in the extras replace the bundled entry."""
+        from compare.sil_catalog import SIL_CATALOG
+
+        merged: Dict[str, Dict[str, Any]] = {}
+        for entry in SIL_CATALOG:
+            code = str(entry.get("code", "")).strip().lower()
+            if not code:
+                continue
+            merged[code] = {k: v for k, v in entry.items() if v is not None}
+
+        extras_path = _project_root() / "config" / "sil_catalog_extra.json"
+        if extras_path.exists():
+            try:
+                with open(extras_path, encoding="utf-8") as f:
+                    raw = json.load(f)
+            except (OSError, ValueError):
+                raw = None
+            if isinstance(raw, dict):
+                raw = raw.get("languages", [])
+            if isinstance(raw, list):
+                for item in raw:
+                    if not isinstance(item, dict):
+                        continue
+                    code = str(item.get("code", "")).strip().lower()
+                    if not code:
+                        continue
+                    merged[code] = {
+                        "code": code,
+                        "name": str(item.get("name") or code),
+                        **({"family": item["family"]} if isinstance(item.get("family"), str) and item["family"].strip() else {}),
+                    }
+
+        languages = sorted(merged.values(), key=lambda x: x.get("name", x.get("code", "")))
+        self._send_json(HTTPStatus.OK, {"languages": languages})
+
+    def _api_get_clef_providers(self) -> None:
+        """Return the list of CLEF providers in priority order -- drives
+        the provider-selection checkboxes in the configure modal."""
+        from compare.providers.registry import PROVIDER_PRIORITY
+        providers = [{"id": p, "name": p} for p in PROVIDER_PRIORITY]
+        self._send_json(HTTPStatus.OK, {"providers": providers})
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")

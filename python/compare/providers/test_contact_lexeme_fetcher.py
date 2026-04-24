@@ -272,3 +272,62 @@ def test_fetch_and_merge_no_missing_concepts_skips_fetch_call(monkeypatch, tmp_p
 
     updated = _read_json(config_path)
     assert updated == original_config
+
+
+def test_fetch_and_merge_creates_config_when_missing(monkeypatch, tmp_path: Path) -> None:
+    """A fresh workspace has no sil_contact_languages.json; the fetcher
+    used to crash with ``[Errno 2]``. It now initialises an empty config
+    file on first access so the compute path can proceed."""
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(concepts_path, ["water"])
+
+    # Note: config_path points at a file that does NOT exist -- even its
+    # parent directory is missing, to mirror a totally empty workspace.
+    config_path = tmp_path / "newconfig" / "sil_contact_languages.json"
+
+    class StubRegistry:
+        def __init__(self, ai_config: Optional[Dict] = None) -> None:
+            del ai_config
+
+        def fetch_all(
+            self,
+            concepts: List[str],
+            language_codes: List[str],
+            language_meta: Dict,
+            priority_order=None,
+            stop_on_first_hit: bool = True,
+            progress_callback=None,
+        ) -> Dict[str, Dict[str, List[str]]]:
+            del concepts, language_meta, priority_order, stop_on_first_hit, progress_callback
+            return {"eng": {"water": ["water"]}}
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    filled = contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["eng"],
+        overwrite=False,
+    )
+
+    assert filled == {"eng": 1}
+    assert config_path.exists()
+    assert _read_json(config_path)["eng"]["concepts"]["water"] == ["water"]
+
+
+def test_fetch_and_merge_empty_languages_raises_clean_error(tmp_path: Path) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+    _write_concepts_csv(concepts_path, ["water"])
+    _write_json(config_path, {})
+
+    try:
+        contact_lexeme_fetcher.fetch_and_merge(
+            concepts_path=concepts_path,
+            config_path=config_path,
+            language_codes=[],
+        )
+    except ValueError as exc:
+        assert "No contact languages configured" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when language_codes is empty")
