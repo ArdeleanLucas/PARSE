@@ -1,18 +1,21 @@
-"""Tests for the ortho→stt model_path fallback in LocalWhisperProvider.
+"""Tests for the ortho.model_path validation in LocalWhisperProvider.
 
-Context: ``_DEFAULT_AI_CONFIG["ortho"]["model_path"]`` ships as
+Context: ``_DEFAULT_AI_CONFIG["ortho"]["model_path"]`` used to ship as
 ``razhan/whisper-base-sdh`` — a HuggingFace repo id. faster-whisper
 cannot load HF Transformers checkpoints (it wants CTranslate2 format),
-so passing the HF id straight through crashes with ``Unable to open
-file 'model.bin'``. Meanwhile users who've already set up razhan for
-STT have a local CT2 path in ``stt.model_path``. The fallback: when
-``ortho.model_path`` is empty or looks like a HF repo id, reuse
-``stt.model_path``.
+so the class previously swapped the path for ``stt.model_path`` on the
+user's behalf. That silent swap meant ORTH could run with the wrong
+model for an entire pipeline without any visible indicator in the logs
+or UI. Policy reversed: ORTH hard-fails if ``ortho.model_path`` is not
+a usable CT2 directory path, and the default is now empty so fresh
+installs get a clear setup error instead of a silent misconfiguration.
 """
 from __future__ import annotations
 
 import pathlib
 import sys
+
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -38,32 +41,45 @@ def test_hf_repo_id_classifier():
     assert _looks_like_hf_repo_id("org/with/extra") is False
 
 
-def test_ortho_with_empty_model_path_falls_back_to_stt(tmp_path):
-    """Empty ortho.model_path + non-empty stt.model_path → ortho uses stt's."""
-    provider = LocalWhisperProvider(
-        config={
-            "stt": {"model_path": "C:/local/razhan-ct2"},
-            "ortho": {"model_path": ""},
-        },
-        config_section="ortho",
-        config_path=tmp_path / "ai_config.json",
-    )
-    assert provider.model_path == "C:/local/razhan-ct2"
+def test_ortho_with_empty_model_path_raises(tmp_path):
+    """Empty ortho.model_path must hard-fail — no silent swap to stt."""
+    with pytest.raises(ValueError, match="ortho.model_path is empty"):
+        LocalWhisperProvider(
+            config={
+                "stt": {"model_path": "C:/local/razhan-ct2"},
+                "ortho": {"model_path": ""},
+            },
+            config_section="ortho",
+            config_path=tmp_path / "ai_config.json",
+        )
 
 
-def test_ortho_with_hf_repo_id_falls_back_to_stt(tmp_path):
-    """HuggingFace repo id in ortho.model_path → fall back to stt.model_path
-    (the stock default ``razhan/whisper-base-sdh`` would otherwise crash
-    at faster-whisper load time)."""
-    provider = LocalWhisperProvider(
-        config={
-            "stt": {"model_path": "C:/local/razhan-ct2"},
-            "ortho": {"model_path": "razhan/whisper-base-sdh"},
-        },
-        config_section="ortho",
-        config_path=tmp_path / "ai_config.json",
-    )
-    assert provider.model_path == "C:/local/razhan-ct2"
+def test_ortho_with_hf_repo_id_raises(tmp_path):
+    """HuggingFace repo id in ortho.model_path must hard-fail. faster-whisper
+    cannot load HF Transformers checkpoints; instead of silently swapping to
+    stt.model_path (which may be a different model entirely), we raise so the
+    misconfiguration lands as a visible job failure with an actionable
+    ct2-transformers-converter command in the error message."""
+    with pytest.raises(ValueError, match="looks like a.*HuggingFace repo id"):
+        LocalWhisperProvider(
+            config={
+                "stt": {"model_path": "C:/local/razhan-ct2"},
+                "ortho": {"model_path": "razhan/whisper-base-sdh"},
+            },
+            config_section="ortho",
+            config_path=tmp_path / "ai_config.json",
+        )
+
+
+def test_ortho_error_message_includes_converter_command(tmp_path):
+    """Regression guard — the error must tell the user HOW to fix it."""
+    with pytest.raises(ValueError) as exc_info:
+        LocalWhisperProvider(
+            config={"ortho": {"model_path": "razhan/whisper-base-sdh"}},
+            config_section="ortho",
+            config_path=tmp_path / "ai_config.json",
+        )
+    assert "ct2-transformers-converter" in str(exc_info.value)
 
 
 def test_ortho_with_local_path_keeps_its_own(tmp_path):
@@ -137,17 +153,18 @@ def test_collect_nvidia_wheel_bin_dirs_iterates_namespace_path(tmp_path, monkeyp
     assert names == {"cublas", "cudnn", "cuda_runtime"}, names
 
 
-def test_ortho_section_defaults_vad_filter_off(tmp_path):
-    """The ortho provider runs razhan full-file for full-waveform coverage.
-    Silero VAD with stock defaults was dropping coverage to ~2 intervals
-    on real recordings (vs 80+ from STT with tuned VAD params). Default
-    must be **off** for ortho so razhan sees the entire audio."""
+def test_ortho_section_default_vad_filter(tmp_path):
+    """The ortho provider ships with VAD ON + tuned Silero params (flipped
+    2026-04-23 to fix the Fail02 regression — see provider __init__ for
+    the full back-story). Regression guard against accidental flip-backs
+    to stock defaults. An explicit ortho.model_path is required now that
+    empty-string hard-errors."""
     provider = LocalWhisperProvider(
         config={"ortho": {"model_path": "C:/local/razhan-ct2"}},
         config_section="ortho",
         config_path=tmp_path / "ai_config.json",
     )
-    assert provider.vad_filter is False
+    assert provider.vad_filter is True
 
 
 def test_stt_section_still_defaults_vad_filter_on(tmp_path):

@@ -46,11 +46,20 @@ module.exports = {
         OPENBLAS_NUM_THREADS: "1",
         VECLIB_MAXIMUM_THREADS: "1",
         NUMEXPR_NUM_THREADS: "1",
-        // WSL2 GPU passthrough crashes the VM under sustained ML workloads,
-        // even on Whisper STT/ORTH (not just wav2vec2). Force everything
-        // to CPU until the WSL/dxg stability issue is resolved.
-        PARSE_STT_FORCE_CPU: "1",
-        CUDA_VISIBLE_DEVICES: "",
+        // GPU is ENABLED by default — the RTX 5090 in this rig runs ollama
+        // and other ML workloads continuously without crashing WSL, so the
+        // historical "force CPU" workaround is gone. Pipeline runs at full
+        // GPU speed (STT/ORTH/IPA all via faster-whisper/wav2vec2 on CUDA).
+        //
+        // If sustained ML crashes WSL/dxg again (the symptom the workaround
+        // was added for), add these two lines back to this env block as a
+        // temporary escape hatch and restart PM2:
+        //   PARSE_STT_FORCE_CPU: "1",
+        //   CUDA_VISIBLE_DEVICES: "",
+        // Then open an issue with the crash signature before re-committing
+        // them — silently running the whole pipeline on CPU int8 turns a
+        // 5-minute job into an hour and masks real GPU-side regressions.
+        //
         // Alternative opt-in route (equivalent to --compute-mode=persistent).
         // Leave unset while rolling out; set to "true" to opt in without
         // editing the args line above. The CLI flag wins if both are set.
