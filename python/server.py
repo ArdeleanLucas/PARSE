@@ -3319,7 +3319,12 @@ def _compute_speaker_ipa(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]
         def _word_progress(pct: float, n: int) -> None:
             _set_job_progress(job_id, 5.0 + pct * 0.9, message="IPA {0}/{1} words".format(n, total_words))
 
-        _chunk_size = int(_w2v.get("chunk_size", 150))
+        try:
+            import json as _json2
+            _ai_cfg2 = _json2.loads((_project_root() / "config" / "ai_config.json").read_text())
+            _chunk_size = int(_ai_cfg2.get("wav2vec2", {}).get("chunk_size", 150))
+        except Exception:
+            _chunk_size = 150
         word_results = transcribe_words_with_forced_align(
             audio_path,
             stt_segments,
