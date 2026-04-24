@@ -6481,6 +6481,37 @@ def _startup_banner_lines(
     return lines
 
 
+class _BoundedThreadHTTPServer(http.server.HTTPServer):
+    """HTTP server backed by a fixed-size thread pool.
+
+    ThreadingHTTPServer spawns one OS thread per request. Under sustained
+    CPU IPA loads with 2-second status polls this creates hundreds of
+    threads and eventually hits a resource limit in WSL2. A bounded pool
+    of 4 workers caps OS thread creation: the same threads are reused for
+    every request, so the count never grows beyond max_workers.
+    """
+
+    def __init__(self, server_address, RequestHandlerClass, max_workers: int = 4):
+        import concurrent.futures
+        super().__init__(server_address, RequestHandlerClass)
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+
+    def process_request(self, request, client_address):
+        self._pool.submit(self._handle_in_pool, request, client_address)
+
+    def _handle_in_pool(self, request, client_address):
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+
+    def server_close(self):
+        super().server_close()
+        self._pool.shutdown(wait=False)
+
+
 def main() -> None:
     import argparse as _argparse
     parser = _argparse.ArgumentParser(description="PARSE HTTP server")
@@ -6525,8 +6556,7 @@ def main() -> None:
     os.chdir(serve_dir)
 
     server_address = (HOST, PORT)
-    httpd = http.server.ThreadingHTTPServer(server_address, RangeRequestHandler)
-    httpd.daemon_threads = True
+    httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
     local_ips = _get_local_ips()
 
     for line in _startup_banner_lines(serve_dir, local_ips):
