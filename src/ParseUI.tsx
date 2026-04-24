@@ -69,7 +69,7 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 
 interface SpeakerForm {
   speaker: string; ipa: string; ortho: string; utterances: number;
-  arabicSim: number; persianSim: number;
+  arabicSim: number | null; persianSim: number | null;
   cognate: string; flagged: boolean;
   startSec: number | null; endSec: number | null;
 }
@@ -206,8 +206,24 @@ function buildSpeakerForm(
   const similarityRoot = isRecord(enrichments.similarity) ? enrichments.similarity : null;
   const conceptSimilarity = similarityRoot && isRecord(similarityRoot[concept.key]) ? similarityRoot[concept.key] as Record<string, unknown> : null;
   const speakerSimilarity = conceptSimilarity && isRecord(conceptSimilarity[speaker]) ? conceptSimilarity[speaker] as Record<string, unknown> : null;
-  const arabicSim = typeof speakerSimilarity?.ar === 'number' ? speakerSimilarity.ar : 0;
-  const persianSim = typeof speakerSimilarity?.tr === 'number' ? speakerSimilarity.tr : 0;
+  // The backend's compute_similarity_scores writes
+  //   similarity[concept][speaker][lang] = { score: number|null,
+  //                                          has_reference_data: bool }
+  // An earlier revision treated this inner object as if it were a bare
+  // number (and read "tr" for Persian), which made every column silently
+  // resolve to 0 regardless of compute state. Reading .score from the
+  // object -- and using the CLEF-config code "fa" for Persian, not "tr"
+  // -- is what actually surfaces the computed distances in the UI.
+  // Returns null (not 0) when the score is missing so the UI can render
+  // "—" and distinguish "not yet computed" from "computed zero".
+  const rawSim = (code: string): number | null => {
+    const cell = speakerSimilarity?.[code];
+    if (!isRecord(cell)) return null;
+    const score = (cell as Record<string, unknown>).score;
+    return typeof score === 'number' ? score : null;
+  };
+  const arabicSim = rawSim('ar');
+  const persianSim = rawSim('fa');
 
   const overrides = isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
   const overrideSets = overrides && isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : null;
@@ -270,6 +286,16 @@ function parseReferenceForm(raw: unknown): ReferenceFormDisplay {
 
   if (!isRecord(raw)) {
     return { script: '', ipa: '', audioUrl: null, available: false };
+  }
+
+  // Provenance shape ({form, sources}) is what the CLEF populate flow
+  // now writes. The "form" string is the phonetic rendering, so route
+  // it into the ipa slot to match the bare-string legacy behaviour --
+  // the Reference Forms card renders the same text in both cases, only
+  // the stored shape differs.
+  if (typeof raw.form === 'string' && Array.isArray(raw.sources)) {
+    const trimmed = raw.form.trim();
+    return { script: '', ipa: trimmed, audioUrl: null, available: trimmed.length > 0 };
   }
 
   const script = [raw.script, raw.orthography, raw.form, raw.text].find((value) => typeof value === 'string' && value.trim().length > 0);
@@ -342,14 +368,30 @@ function referenceCardStyle(code: string, idx: number): { tone: string; dir: "lt
   };
 }
 
-const SimBar: React.FC<{ value: number }> = ({ value }) => (
-  <div className="flex items-center gap-2">
-    <div className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden">
-      <div className={`h-full rounded-full ${simBar(value)}`} style={{ width: `${value * 100}%` }} />
+// null value == "no similarity score recorded for this speaker/concept/lang"
+// -- either because the cognate compute hasn't run yet, or because the
+// reference-forms dataset had no entry for this language. Rendering "—"
+// instead of "0.00" keeps those two cases distinguishable, so the user
+// knows to either run Populate or pick a different provider/language
+// instead of concluding the speaker really has zero similarity.
+const SimBar: React.FC<{ value: number | null }> = ({ value }) => {
+  if (value === null) {
+    return (
+      <div className="flex items-center gap-2" title="No similarity score yet — run Save & populate, or recompute cognate sets.">
+        <div className="h-1.5 w-14 rounded-full bg-slate-100" />
+        <span className="text-xs font-mono tabular-nums text-slate-300">—</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden">
+        <div className={`h-full rounded-full ${simBar(value)}`} style={{ width: `${value * 100}%` }} />
+      </div>
+      <span className={`text-xs font-mono tabular-nums ${simColor(value)}`}>{value.toFixed(2)}</span>
     </div>
-    <span className={`text-xs font-mono tabular-nums ${simColor(value)}`}>{value.toFixed(2)}</span>
-  </div>
-);
+  );
+};
 
 // Per-speaker cognate cell. Click cycles A → B → … → Z → — → A. A long press
 // (≥500 ms) resets to —. The button swallows the subsequent click after a
@@ -2277,6 +2319,25 @@ export function ParseUI() {
     | null
   >(null);
 
+  // Similarity follow-up: after the populate job succeeds with forms
+  // filled, the reference data on disk is fresh but the similarity block
+  // inside parse-enrichments.json is still whatever the last cognate
+  // compute wrote (often empty / all-null on first configure). Without a
+  // follow-up compute the Arabic / Persian Sim. columns stay at "—"
+  // even though the reference forms clearly exist. This hook owns that
+  // follow-up step so the user doesn't have to manually trigger
+  // "Compute cognate sets" after every populate.
+  const similarityJob = useActionJob({
+    start: () => startCompute('similarity'),
+    poll: (id) => pollCompute('similarity', id),
+    label: 'Computing similarity scores…',
+    onComplete: async () => {
+      // Only enrichments need a reload -- CLEF config/reference forms
+      // didn't change during this step.
+      await loadEnrichments();
+    },
+  });
+
   const crossSpeakerJob = useActionJob({
     start: () => startCompute('contact-lexemes'),
     poll: (id) => pollCompute('contact-lexemes', id),
@@ -2304,10 +2365,21 @@ export function ParseUI() {
         perLang,
         warning,
       });
+      // When populate actually delivered forms, chain a similarity
+      // recompute so the Sim. columns catch up to the new reference data
+      // without requiring a second manual click on the user. Skipped on
+      // the empty/zero-forms path because the refs on disk didn't
+      // change, so there's nothing new to score against.
+      if (resolvedTotal > 0) {
+        void similarityJob.run();
+      }
     },
   });
 
-  const activeJobs = crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : [];
+  const activeJobs = [
+    ...(crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : []),
+    ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
+  ];
 
   // On mount, adopt any in-flight backend jobs so progress bars survive
   // a page reload. STT (and similar) run in a background thread that
@@ -2333,6 +2405,12 @@ export function ParseUI() {
       for (const snap of snapshots) {
         if (snap.type === 'compute:contact-lexemes') {
           crossSpeakerJob.adopt(snap.jobId);
+        } else if (snap.type === 'compute:similarity' || snap.type === 'compute:cognates') {
+          // The auto-chained similarity follow-up after populate runs as
+          // a distinct job on the backend; rehydrate it too so a reload
+          // mid-compute doesn't leave the header chip blank while the
+          // worker is still busy.
+          similarityJob.adopt(snap.jobId);
         }
       }
     })();

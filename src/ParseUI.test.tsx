@@ -476,6 +476,56 @@ describe("ParseUI", () => {
     expect(screen.queryByText("رماد")).toBeNull();
   });
 
+  it("shows real Arabic + Persian similarity scores from enrichment .ar/.fa fields and renders em-dash when missing", () => {
+    // Regression for a typo where persianSim was reading speakerSimilarity.tr
+    // (Turkish) instead of .fa (Farsi/Persian). The backend writes under the
+    // primary contact-language code -- which is "fa" for Persian -- so the
+    // UI column was always 0.00 regardless of compute state.
+    // Also covers the missing-score path: a speaker with no similarity entry
+    // should render "—" so "not yet computed" reads differently from "0.00".
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kzn03"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+      Kzn03: makeRecord("Kzn03", [
+        { conceptText: "water", ipa: "awa", ortho: "ئاوا", start: 1, end: 2 },
+      ]),
+    };
+    mockEnrichmentData = {
+      similarity: {
+        "1": {
+          Fail01: {
+            ar: { score: 0.42, has_reference_data: true },
+            fa: { score: 0.81, has_reference_data: true },
+          },
+          // Kzn03 intentionally absent -- should render "—".
+        },
+      },
+    };
+
+    render(<ParseUI />);
+
+    // Sanity: both speaker rows are in the DOM.
+    expect(screen.getByText("/aw/")).toBeTruthy();
+    expect(screen.getByText("/awa/")).toBeTruthy();
+    // Fail01 row carries real values for both columns.
+    expect(screen.getByText("0.42")).toBeTruthy();
+    expect(screen.getByText("0.81")).toBeTruthy();
+    // No row should display the silent-fallback "0.00".
+    expect(screen.queryByText("0.00")).toBeNull();
+    // Kzn03 row has no similarity entry -- both columns fall back to "—".
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("renders compare speaker forms from annotation data instead of MOCK_FORMS placeholders", () => {
     mockConfig = {
       project_name: "PARSE",
