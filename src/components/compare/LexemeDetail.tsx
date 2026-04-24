@@ -14,8 +14,6 @@ interface LexemeDetailProps {
   ortho: string;
   startSec: number | null;
   endSec: number | null;
-  arabicSim?: number | null;
-  persianSim?: number | null;
   cognateGroup?: string | null;
   cognateColor?: string | null;
 }

@@ -69,7 +69,12 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 
 interface SpeakerForm {
   speaker: string; ipa: string; ortho: string; utterances: number;
-  arabicSim: number | null; persianSim: number | null;
+  // Similarity scores keyed by the configured CLEF primary contact-language
+  // code (e.g. "ar", "fa", "eng", "spa"). Null means "no score on disk" --
+  // either the cognate compute hasn't run, or there was no reference form
+  // to score against. The table headers are driven by the same key set so
+  // any pair/triple the user configured renders cleanly without a code edit.
+  similarityByLang: Record<string, number | null>;
   cognate: string; flagged: boolean;
   startSec: number | null; endSec: number | null;
 }
@@ -198,6 +203,7 @@ function buildSpeakerForm(
   speaker: string,
   enrichments: Record<string, unknown>,
   flagged: boolean,
+  primaryContactCodes: readonly string[],
 ): SpeakerForm {
   const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.text));
   const ipaIntervals = record?.tiers.ipa?.intervals ?? [];
@@ -222,8 +228,10 @@ function buildSpeakerForm(
     const score = (cell as Record<string, unknown>).score;
     return typeof score === 'number' ? score : null;
   };
-  const arabicSim = rawSim('ar');
-  const persianSim = rawSim('fa');
+  const similarityByLang: Record<string, number | null> = {};
+  for (const code of primaryContactCodes) {
+    similarityByLang[code] = rawSim(code);
+  }
 
   const overrides = isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
   const overrideSets = overrides && isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : null;
@@ -259,8 +267,7 @@ function buildSpeakerForm(
     ipa: matchingIpaIntervals[0]?.text ?? '',
     ortho: orthoText,
     utterances: matchingIpaIntervals.length,
-    arabicSim,
-    persianSim,
+    similarityByLang,
     cognate,
     flagged: speakerFlagged || flagged,
     startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
@@ -2914,8 +2921,9 @@ export function ParseUI() {
       speaker,
       enrichmentData,
       flagged,
+      primaryContactCodes,
     ));
-  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, selectedSpeakers, speakers]);
+  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, selectedSpeakers, speakers, primaryContactCodes]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
 
@@ -3731,8 +3739,15 @@ export function ParseUI() {
                       <tr className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-500">
                         <th className="px-3 py-2 text-left font-semibold">Speaker</th>
                         <th className="px-3 py-2 text-left font-semibold">IPA & utterances</th>
-                        <th className="px-3 py-2 text-left font-semibold">Arabic sim.</th>
-                        <th className="px-3 py-2 text-left font-semibold">Persian sim.</th>
+                        {primaryContactCodes.map((code) => (
+                          <th
+                            key={code}
+                            className="px-3 py-2 text-left font-semibold"
+                            data-testid={`sim-col-header-${code}`}
+                          >
+                            {(contactLanguageNames[code] ?? code.toUpperCase())} sim.
+                          </th>
+                        ))}
                         <th className="px-3 py-2 text-left font-semibold">Cognate</th>
                         <th className="px-3 py-2 text-right font-semibold">Flag</th>
                       </tr>
@@ -3768,8 +3783,15 @@ export function ParseUI() {
                             </div>
                             <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
                           </td>
-                          <td className="px-3 py-2.5"><SimBar value={f.arabicSim}/></td>
-                          <td className="px-3 py-2.5"><SimBar value={f.persianSim}/></td>
+                          {primaryContactCodes.map((code) => (
+                            <td
+                              key={code}
+                              className="px-3 py-2.5"
+                              data-testid={`sim-cell-${f.speaker}-${code}`}
+                            >
+                              <SimBar value={f.similarityByLang[code] ?? null}/>
+                            </td>
+                          ))}
                           <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                             <CognateCell
                               speaker={f.speaker}
@@ -3791,7 +3813,8 @@ export function ParseUI() {
                         </tr>
                         {isExpanded && (
                           <tr data-testid={`lexeme-detail-row-${f.speaker}`}>
-                            <td colSpan={6} className="bg-slate-50 p-2">
+                            {/* Speaker + IPA + N sim columns + Cognate + Flag. */}
+                            <td colSpan={4 + primaryContactCodes.length} className="bg-slate-50 p-2">
                               <LexemeDetail
                                 speaker={f.speaker}
                                 conceptId={concept.key}
@@ -3800,8 +3823,6 @@ export function ParseUI() {
                                 ortho={f.ortho}
                                 startSec={f.startSec}
                                 endSec={f.endSec}
-                                arabicSim={f.arabicSim}
-                                persianSim={f.persianSim}
                                 cognateGroup={f.cognate !== '—' ? f.cognate : null}
                                 cognateColor={cognateColor}
                               />

@@ -476,13 +476,26 @@ describe("ParseUI", () => {
     expect(screen.queryByText("رماد")).toBeNull();
   });
 
-  it("shows real Arabic + Persian similarity scores from enrichment .ar/.fa fields and renders em-dash when missing", () => {
+  it("shows real Arabic + Persian similarity scores from enrichment .ar/.fa fields and renders em-dash when missing", async () => {
     // Regression for a typo where persianSim was reading speakerSimilarity.tr
     // (Turkish) instead of .fa (Farsi/Persian). The backend writes under the
     // primary contact-language code -- which is "fa" for Persian -- so the
     // UI column was always 0.00 regardless of compute state.
     // Also covers the missing-score path: a speaker with no similarity entry
     // should render "—" so "not yet computed" reads differently from "0.00".
+    // The column set is driven by the CLEF primary_contact_languages config
+    // now, so this test seeds ar + fa explicitly.
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ["ar", "fa"],
+      languages: [
+        { code: "ar", name: "Arabic" },
+        { code: "fa", name: "Persian" },
+      ],
+      config_path: "",
+      concepts_csv_exists: true,
+      meta: {},
+    };
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
@@ -516,6 +529,9 @@ describe("ParseUI", () => {
     // Sanity: both speaker rows are in the DOM.
     expect(screen.getByText("/aw/")).toBeTruthy();
     expect(screen.getByText("/awa/")).toBeTruthy();
+    // CLEF config loads async; wait for the dynamic headers to mount.
+    await waitFor(() => expect(screen.getByTestId("sim-col-header-ar")).toBeTruthy());
+    expect(screen.getByTestId("sim-col-header-fa")).toBeTruthy();
     // Fail01 row carries real values for both columns.
     expect(screen.getByText("0.42")).toBeTruthy();
     expect(screen.getByText("0.81")).toBeTruthy();
@@ -524,6 +540,63 @@ describe("ParseUI", () => {
     // Kzn03 row has no similarity entry -- both columns fall back to "—".
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders dynamic similarity columns based on CLEF primary_contact_languages (not hardcoded Arabic/Persian)", async () => {
+    // Success criterion for the dynamic-primary-langs PR: when the user
+    // configures English + Spanish (or any other set), the Speaker forms
+    // table must render those as the similarity columns instead of the
+    // built-in Arabic + Persian pair. The column data binding is driven
+    // by the same primaryContactCodes list that the Reference Forms
+    // cards iterate over, so there is a single source of truth for the
+    // configured languages.
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ["eng", "spa"],
+      languages: [
+        { code: "eng", name: "English" },
+        { code: "spa", name: "Spanish" },
+      ],
+      config_path: "",
+      concepts_csv_exists: true,
+      meta: {},
+    };
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+    mockEnrichmentData = {
+      similarity: {
+        "1": {
+          Fail01: {
+            eng: { score: 0.37, has_reference_data: true },
+            spa: { score: 0.55, has_reference_data: true },
+          },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByTestId("sim-col-header-eng")).toBeTruthy());
+    expect(screen.getByTestId("sim-col-header-eng").textContent ?? "").toMatch(/english sim\./i);
+    expect(screen.getByTestId("sim-col-header-spa").textContent ?? "").toMatch(/spanish sim\./i);
+    // Old hardcoded labels are gone -- regression guard so no one
+    // accidentally reverts the headers.
+    expect(screen.queryByTestId("sim-col-header-ar")).toBeNull();
+    expect(screen.queryByTestId("sim-col-header-fa")).toBeNull();
+    // Scores render under the new column codes via the dynamic cell testid.
+    expect(screen.getByTestId("sim-cell-Fail01-eng").textContent ?? "").toContain("0.37");
+    expect(screen.getByTestId("sim-cell-Fail01-spa").textContent ?? "").toContain("0.55");
   });
 
   it("renders compare speaker forms from annotation data instead of MOCK_FORMS placeholders", () => {

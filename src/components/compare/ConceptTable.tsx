@@ -154,20 +154,6 @@ function getCognateGroup(
   return null;
 }
 
-function getSimilarity(
-  enrichmentData: Record<string, unknown>,
-  conceptId: string,
-  speaker: string,
-  lang: string,
-): number | null {
-  const block = enrichmentData?.similarity as
-    | Record<string, Record<string, Record<string, { score?: number }>>>
-    | undefined;
-  const entry = block?.[conceptId]?.[speaker]?.[lang];
-  if (entry && typeof entry.score === "number") return entry.score;
-  return null;
-}
-
 function expandKey(speaker: string, conceptId: string): string {
   return `${speaker}::${conceptId}`;
 }
@@ -430,8 +416,6 @@ export function ConceptTable({ onPlayEntry }: ConceptTableProps) {
                             ortho={entry.ortho}
                             startSec={entry.startSec}
                             endSec={entry.endSec}
-                            arabicSim={getSimilarity(enrichmentData, concept.id, sp, "ar")}
-                            persianSim={getSimilarity(enrichmentData, concept.id, sp, "fa")}
                             cognateGroup={cognate?.group ?? null}
                             cognateColor={cognate?.color ?? null}
                           />
