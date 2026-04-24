@@ -44,7 +44,8 @@ import { ChatMarkdown } from './components/shared/ChatMarkdown';
 import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
-import { ClefConfigModal } from './components/compute/ClefConfigModal';
+import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
+import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
 import { getClefConfig, getContactLexemeCoverage } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
@@ -1952,6 +1953,12 @@ export function ParseUI() {
   const [computeMode, setComputeMode] = useState('cognates');
   const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
   const [clefModalOpen, setClefModalOpen] = useState(false);
+  // Which tab ClefConfigModal should open on. Defaults to "languages"; the
+  // empty-populate banner's "Retry with different providers" action flips
+  // this to "populate" so the user lands directly on the provider picker.
+  // Reset to "languages" on close so the next gear/Run click lands on the
+  // languages tab again.
+  const [clefInitialTab, setClefInitialTab] = useState<ClefConfigModalTab>('languages');
   // Full CLEF status so the Reference Forms section can render exactly
   // the user's configured primary languages (not a hardcoded Arabic +
   // Persian pair). `null` means "not yet loaded" so the UI can render a
@@ -3582,44 +3589,14 @@ export function ParseUI() {
                   concepts outside ASJP's list, etc.) instead of silently
                   showing "complete" and an empty Reference Forms grid. */}
               {populateSummary && primaryContactCodes.length > 0 && (
-                <div
-                  className={
-                    "mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-[11px] " +
-                    (populateSummary.state === 'ok'
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-amber-200 bg-amber-50 text-amber-800")
-                  }
-                  data-testid="clef-populate-summary"
-                >
-                  {populateSummary.state === 'ok' ? (
-                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
-                  ) : (
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
-                  )}
-                  <div className="flex-1">
-                    <div className="font-semibold">
-                      {populateSummary.state === 'ok'
-                        ? `Populated ${populateSummary.totalFilled} reference form${populateSummary.totalFilled === 1 ? '' : 's'}`
-                        : 'Populate finished with 0 reference forms'}
-                    </div>
-                    {Object.keys(populateSummary.perLang).length > 0 && (
-                      <div className="mt-0.5 font-mono text-[10px] opacity-80">
-                        {Object.entries(populateSummary.perLang).map(([c, n]) => `${c}: ${n}`).join(' · ')}
-                      </div>
-                    )}
-                    {populateSummary.warning && (
-                      <div className="mt-1">{populateSummary.warning}</div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setPopulateSummary(null)}
-                    className="shrink-0 rounded p-0.5 hover:bg-black/5"
-                    title="Dismiss"
-                    aria-label="Dismiss populate summary"
-                  >
-                    <X className="h-3 w-3"/>
-                  </button>
-                </div>
+                <ClefPopulateSummaryBanner
+                  summary={populateSummary}
+                  onDismiss={() => setPopulateSummary(null)}
+                  onRetryWithProviders={() => {
+                    setClefInitialTab('populate');
+                    setClefModalOpen(true);
+                  }}
+                />
               )}
 
               {/* Reference forms — gated on the user's CLEF configuration.
@@ -4270,7 +4247,11 @@ export function ParseUI() {
       />
       <ClefConfigModal
         open={clefModalOpen}
-        onClose={() => setClefModalOpen(false)}
+        initialTab={clefInitialTab}
+        onClose={() => {
+          setClefModalOpen(false);
+          setClefInitialTab('languages');
+        }}
         onSaved={() => {
           // Save-only (no populate): just refresh our cached CLEF status
           // so the Reference Forms panel re-renders with the new primary

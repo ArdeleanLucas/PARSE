@@ -9,6 +9,8 @@ import {
 } from "../../api/client";
 import type { ClefCatalogEntry, ClefConfigStatus, ClefProviderEntry } from "../../api/types";
 
+export type ClefConfigModalTab = "languages" | "populate";
+
 interface ClefConfigModalProps {
   open: boolean;
   onClose: () => void;
@@ -23,13 +25,19 @@ interface ClefConfigModalProps {
    *  batch pipeline. The modal closes immediately after this fires; it
    *  does not poll the job itself. */
   onPopulateStarted?: (jobId: string) => void;
+  /** Tab to show when the modal opens. Defaults to "languages". The
+   *  "Retry with different providers" affordance on the empty-populate
+   *  banner sets this to "populate" so the user lands directly on the
+   *  provider checkboxes. Re-seeded on every open so a later plain-Run
+   *  click still lands on the languages tab. */
+  initialTab?: ClefConfigModalTab;
 }
 
-type Tab = "languages" | "populate";
+type Tab = ClefConfigModalTab;
 
 const MAX_PRIMARY = 2;
 
-export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted }: ClefConfigModalProps) {
+export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted, initialTab = "languages" }: ClefConfigModalProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +52,7 @@ export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted }: C
   const [customName, setCustomName] = useState("");
   const [search, setSearch] = useState("");
 
-  const [tab, setTab] = useState<Tab>("languages");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
 
@@ -85,6 +93,7 @@ export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted }: C
 
   useEffect(() => {
     if (!open) return;
+    setTab(initialTab);
     let cancelled = false;
     setLoading(true);
     setError(null);
