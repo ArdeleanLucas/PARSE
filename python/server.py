@@ -4173,10 +4173,38 @@ def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, 
     )
 
     _set_job_progress(job_id, 100.0, message="Done")
-    return {
+
+    # Rich result so the UI can distinguish "job technically succeeded
+    # but populated nothing" from "job populated N forms" -- previously
+    # the header chip turned green with 0 forms and the user had no way
+    # to tell the difference from real success.
+    total_filled = sum(filled.values())
+    result: Dict[str, Any] = {
         "filled": filled,
+        "total_filled": total_filled,
+        "languages_requested": list(languages_raw),
+        "providers_requested": providers or "all",
         "config_path": str(config_path),
     }
+    if total_filled == 0:
+        # Lead with the fix that resolves the most real-world cases
+        # (network) so users don't have to read the whole paragraph to
+        # know what to try first. Further causes are ordered by how
+        # often they bite in practice.
+        result["warning"] = (
+            "Populate finished with 0 reference forms. "
+            "Try 1: check your internet connection — wikidata, wiktionary, "
+            "asjp, cldf, and grokipedia all need network. "
+            "Try 2: open the CLEF configure modal and enable more providers "
+            "(or leave the list empty to try all built-in providers). "
+            "Other causes: grokipedia needs an xAI API key; lingpy_wordlist "
+            "and pycldf need local CLDF datasets under "
+            "config/lexibank_data/; ASJP only covers 40 Swadesh concepts, "
+            "so glosses outside that list return nothing from it. "
+            "Backend stderr has per-provider errors."
+        )
+        print("[clef] {0}".format(result["warning"]), file=sys.stderr)
+    return result
 
 
 _IPA_ALIGNER: Any = None

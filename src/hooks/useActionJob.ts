@@ -46,7 +46,12 @@ export interface ActionJobConfig {
   start: () => Promise<{ job_id: string }>;
   poll: (jobId: string) => Promise<PollResult>;
   label: string;
-  onComplete?: () => void | Promise<void>;
+  /** Called exactly once when the backend reports a terminal success
+   *  status. Receives the poll's opaque ``result`` payload so callers can
+   *  inspect what the job actually produced (e.g. CLEF populate returns
+   *  ``{filled, total_filled, warning?}``) and surface warnings that
+   *  don't warrant an error status but still matter to the user. */
+  onComplete?: (result?: unknown) => void | Promise<void>;
   pollIntervalMs?: number;
   autoDismissMs?: number;
 }
@@ -162,7 +167,10 @@ export function useActionJob(config: ActionJobConfig): ActionJobHandle {
       if (isCompleteStatus(status)) {
         stopPolling();
         try {
-          await config.onComplete?.();
+          // Pass the backend's opaque result through so callers can
+          // branch on it -- e.g. CLEF populate flags "0 forms" as a
+          // warning even though the job status itself is "complete".
+          await config.onComplete?.((poll as { result?: unknown }).result);
         } catch (error) {
           if (activeRunIdRef.current !== runId) {
             return;

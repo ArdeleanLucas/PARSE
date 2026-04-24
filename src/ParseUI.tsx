@@ -2259,13 +2259,44 @@ export function ParseUI() {
   // action flow through this hook: the modal starts the job, then ParseUI
   // calls `adopt()` so the header's running-process chip picks it up and
   // behaves exactly like STT / forced-align / the batch pipeline.
+  // Last completed-populate summary: `{ok, totalFilled, perLang, warning}`.
+  // Set by `crossSpeakerJob.onComplete` from the backend's `result` payload
+  // so Compare mode can render a contextual banner when the job technically
+  // succeeded but produced zero forms (providers offline, concepts outside
+  // ASJP's Swadesh list, etc.) -- previously that case showed as plain
+  // green "complete" with no visible signal.
+  const [populateSummary, setPopulateSummary] = useState<
+    | { state: 'ok' | 'empty' | 'error'; totalFilled: number; perLang: Record<string, number>; warning: string | null }
+    | null
+  >(null);
+
   const crossSpeakerJob = useActionJob({
     start: () => startCompute('contact-lexemes'),
     poll: (id) => pollCompute('contact-lexemes', id),
     label: 'Populating CLEF reference data…',
-    onComplete: async () => {
+    onComplete: async (result) => {
       await loadEnrichments();
       await refreshClefStatus();
+      // The backend's `_compute_contact_lexemes` returns
+      // `{filled, total_filled, warning?}`. Inspect it so we can show a
+      // non-fatal "0 forms found" banner near Reference Forms.
+      const payload = (result && typeof result === 'object') ? result as Record<string, unknown> : {};
+      const totalFilled = typeof payload.total_filled === 'number' ? payload.total_filled : NaN;
+      const rawPerLang = payload.filled && typeof payload.filled === 'object' ? payload.filled as Record<string, unknown> : {};
+      const perLang: Record<string, number> = {};
+      for (const [code, count] of Object.entries(rawPerLang)) {
+        if (typeof count === 'number' && Number.isFinite(count)) perLang[code] = count;
+      }
+      const warning = typeof payload.warning === 'string' && payload.warning.trim() ? payload.warning : null;
+      const resolvedTotal = Number.isFinite(totalFilled)
+        ? totalFilled
+        : Object.values(perLang).reduce((a, b) => a + b, 0);
+      setPopulateSummary({
+        state: resolvedTotal > 0 ? 'ok' : 'empty',
+        totalFilled: resolvedTotal,
+        perLang,
+        warning,
+      });
     },
   });
 
@@ -3543,6 +3574,53 @@ export function ParseUI() {
                   </button>
                 </div>
               </div>
+
+              {/* Populate-summary banner — appears after a Save & populate
+                  job finishes. The green variant confirms N forms landed;
+                  the amber variant surfaces the backend's explicit
+                  warning when 0 forms were fetched (offline providers,
+                  concepts outside ASJP's list, etc.) instead of silently
+                  showing "complete" and an empty Reference Forms grid. */}
+              {populateSummary && primaryContactCodes.length > 0 && (
+                <div
+                  className={
+                    "mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-[11px] " +
+                    (populateSummary.state === 'ok'
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800")
+                  }
+                  data-testid="clef-populate-summary"
+                >
+                  {populateSummary.state === 'ok' ? (
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
+                  ) : (
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
+                  )}
+                  <div className="flex-1">
+                    <div className="font-semibold">
+                      {populateSummary.state === 'ok'
+                        ? `Populated ${populateSummary.totalFilled} reference form${populateSummary.totalFilled === 1 ? '' : 's'}`
+                        : 'Populate finished with 0 reference forms'}
+                    </div>
+                    {Object.keys(populateSummary.perLang).length > 0 && (
+                      <div className="mt-0.5 font-mono text-[10px] opacity-80">
+                        {Object.entries(populateSummary.perLang).map(([c, n]) => `${c}: ${n}`).join(' · ')}
+                      </div>
+                    )}
+                    {populateSummary.warning && (
+                      <div className="mt-1">{populateSummary.warning}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setPopulateSummary(null)}
+                    className="shrink-0 rounded p-0.5 hover:bg-black/5"
+                    title="Dismiss"
+                    aria-label="Dismiss populate summary"
+                  >
+                    <X className="h-3 w-3"/>
+                  </button>
+                </div>
+              )}
 
               {/* Reference forms — gated on the user's CLEF configuration.
                   Hidden entirely when no primary contact languages are

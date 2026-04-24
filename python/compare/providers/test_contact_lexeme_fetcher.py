@@ -331,3 +331,88 @@ def test_fetch_and_merge_empty_languages_raises_clean_error(tmp_path: Path) -> N
         assert "No contact languages configured" in str(exc)
     else:
         raise AssertionError("Expected ValueError when language_codes is empty")
+
+
+def test_fetch_and_merge_preserves_meta_through_atomic_write(monkeypatch, tmp_path: Path) -> None:
+    """The CLEF configure modal seeds `_meta.primary_contact_languages`
+    before dispatching the populate job. An earlier torn-write regression
+    wiped the file down to just the language keys -- the user appeared
+    configured one moment and unconfigured the next. Atomic write +
+    post-write verification should make that impossible."""
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+    _write_concepts_csv(concepts_path, ["water"])
+    _write_json(config_path, {
+        "_meta": {"primary_contact_languages": ["ar", "fa"], "schema_version": 1},
+        "ar": {"name": "Arabic"},
+        "fa": {"name": "Persian"},
+    })
+
+    class StubRegistry:
+        def __init__(self, ai_config: Optional[Dict] = None) -> None:
+            del ai_config
+
+        def fetch_all(
+            self,
+            concepts: List[str],
+            language_codes: List[str],
+            language_meta: Dict,
+            priority_order=None,
+            stop_on_first_hit: bool = True,
+            progress_callback=None,
+        ) -> Dict[str, Dict[str, List[str]]]:
+            del concepts, language_codes, language_meta, priority_order, stop_on_first_hit, progress_callback
+            return {"ar": {"water": ["ma:ʔ"]}, "fa": {"water": ["ɒːb"]}}
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["ar", "fa"],
+        overwrite=False,
+    )
+
+    updated = _read_json(config_path)
+    assert updated["_meta"]["primary_contact_languages"] == ["ar", "fa"]
+    assert updated["ar"]["concepts"]["water"] == ["ma:ʔ"]
+    assert updated["fa"]["concepts"]["water"] == ["ɒːb"]
+    # No stray temp file left behind by the atomic write.
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != config_path.name and p.name != "concepts.csv"]
+    assert leftovers == [], "atomic write leaked tempfiles: {0}".format(leftovers)
+
+
+def test_fetch_and_merge_writes_zero_forms_without_losing_languages(monkeypatch, tmp_path: Path) -> None:
+    """When every provider returns zero forms the job must still finish
+    cleanly and leave the language keys in place -- the UI then surfaces
+    a dedicated "0 forms" warning from the richer result dict rather
+    than silently showing a green "complete" header chip."""
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+    _write_concepts_csv(concepts_path, ["water"])
+    _write_json(config_path, {
+        "_meta": {"primary_contact_languages": ["ar"]},
+        "ar": {"name": "Arabic"},
+    })
+
+    class StubRegistry:
+        def __init__(self, ai_config: Optional[Dict] = None) -> None:
+            del ai_config
+
+        def fetch_all(self, concepts, language_codes, language_meta, priority_order=None, stop_on_first_hit=True, progress_callback=None):
+            del concepts, language_codes, language_meta, priority_order, stop_on_first_hit, progress_callback
+            return {"ar": {}}
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    filled = contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["ar"],
+        overwrite=False,
+    )
+
+    assert filled == {"ar": 0}
+    updated = _read_json(config_path)
+    assert "ar" in updated
+    assert updated["_meta"]["primary_contact_languages"] == ["ar"]

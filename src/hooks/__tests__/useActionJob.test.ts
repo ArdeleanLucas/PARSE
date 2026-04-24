@@ -124,6 +124,40 @@ describe("useActionJob", () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards the poll result payload to onComplete", async () => {
+    // CLEF populate uses this to distinguish "0 forms found" (warning
+    // banner) from "N forms found" (success confirmation). Regression
+    // guard: onComplete used to be called with no arguments and the
+    // populate summary UI couldn't tell the two apart.
+    const start = vi.fn().mockResolvedValue({ job_id: "clef-job" });
+    const poll = vi.fn().mockResolvedValue({
+      status: "complete",
+      progress: 1,
+      result: { filled: { ar: 0, fa: 0 }, total_filled: 0, warning: "0 forms" },
+    });
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useActionJob({
+        start,
+        poll,
+        label: "Populating CLEF…",
+        onComplete,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run();
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(onComplete).toHaveBeenCalledWith({
+      filled: { ar: 0, fa: 0 },
+      total_filled: 0,
+      warning: "0 forms",
+    });
+  });
+
   it("normalizes progress > 1 as percentage", async () => {
     const start = vi.fn().mockResolvedValue({ job_id: "j5" });
     const poll = vi.fn().mockResolvedValue({ status: "running", progress: 68 });

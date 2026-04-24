@@ -12,7 +12,9 @@ Standalone:
 import argparse
 import csv
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -50,8 +52,15 @@ def fetch_and_merge(
         )
     if not concepts:
         raise ValueError(
-            "No concepts found. Import concepts.csv before running CLEF."
+            "No concepts found at {0}. Import concepts.csv before running CLEF.".format(concepts_path)
         )
+
+    print(
+        "[clef] fetch_and_merge start: concepts={0} langs={1} providers={2} overwrite={3} config={4}".format(
+            len(concepts), language_codes, providers or "<all>", overwrite, config_path,
+        ),
+        file=sys.stderr,
+    )
 
     # 3. Determine which concepts need filling
     if not overwrite:
@@ -82,7 +91,13 @@ def fetch_and_merge(
     filled: Dict[str, int] = {}
     for lc in language_codes:
         lang_entry = config.setdefault(lc, {"name": lc, "concepts": {}})
+        if not isinstance(lang_entry, dict):
+            lang_entry = {"name": lc, "concepts": {}}
+            config[lc] = lang_entry
         concepts_dict = lang_entry.setdefault("concepts", {})
+        if not isinstance(concepts_dict, dict):
+            concepts_dict = {}
+            lang_entry["concepts"] = concepts_dict
         count = 0
         for concept_en, forms in results.get(lc, {}).items():
             if forms:
@@ -91,11 +106,71 @@ def fetch_and_merge(
                     count += 1
         filled[lc] = count
 
-    # 6. Write back
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    # 6. Atomic write + post-write verification. A torn write (crash
+    # mid-flush) previously left the file empty and silently wiped the
+    # user's `_meta.primary_contact_languages`, so CLEF appeared
+    # "configured but unpopulated" with no recovery path. tempfile +
+    # os.replace gives us crash-safe durability; we then re-read the
+    # file and assert every requested language code is present so we
+    # fail loudly if the disk didn't accept what we wrote.
+    _atomic_write_json(config_path, config)
+    _verify_written_config(config_path, language_codes)
+
+    total_filled = sum(filled.values())
+    print(
+        "[clef] fetch_and_merge done: total_filled={0} per_lang={1} file={2}".format(
+            total_filled, filled, config_path,
+        ),
+        file=sys.stderr,
+    )
 
     return filled
+
+
+def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                # fsync is best-effort on some platforms (e.g. tmpfs);
+                # os.replace below is still atomic w.r.t. the visible
+                # filename, which is what readers care about.
+                pass
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _verify_written_config(path: Path, language_codes: List[str]) -> None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            roundtrip = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            "Wrote {0} but could not re-read it: {1}".format(path, exc)
+        )
+    if not isinstance(roundtrip, dict):
+        raise RuntimeError(
+            "Wrote {0} but its contents are not a JSON object".format(path)
+        )
+    missing = [lc for lc in language_codes if not isinstance(roundtrip.get(lc), dict)]
+    if missing:
+        raise RuntimeError(
+            "Wrote {0} but languages missing after write: {1}".format(path, missing)
+        )
 
 
 def _load_concepts(path: Path) -> List[str]:
