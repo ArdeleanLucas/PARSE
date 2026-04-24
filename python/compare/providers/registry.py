@@ -1,7 +1,7 @@
 """Provider registry — orchestrates all providers in priority order."""
 
 import sys
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .asjp import AsjpProvider
 from .cldf import CldfProvider
@@ -28,6 +28,14 @@ PROVIDER_PRIORITY = [
 ]
 
 
+# Public shape of a single populated form as emitted by the registry and
+# persisted into sil_contact_languages.json. ``sources`` is a sorted list
+# of provider names that independently contributed this exact form (dedup
+# is case-sensitive on the form string). Readers MUST also accept bare
+# strings for backward compatibility with pre-provenance data.
+FormWithSources = Dict[str, Any]  # {"form": str, "sources": List[str]}
+
+
 class ProviderRegistry:
     def __init__(self, ai_config: Dict = None):
         self._providers = {
@@ -51,14 +59,20 @@ class ProviderRegistry:
         priority_order: Optional[List[str]] = None,
         stop_on_first_hit: bool = True,
         progress_callback: Optional[Callable[[float, str], None]] = None,
-    ) -> Dict[str, Dict[str, List[str]]]:
+    ) -> Dict[str, Dict[str, List[FormWithSources]]]:
         """
-        Returns: {lang_code: {concept_en: [forms]}}
-        Runs providers in priority order. If stop_on_first_hit=True,
-        once a concept x lang has forms from any provider, skip remaining providers for it.
+        Returns: {lang_code: {concept_en: [{"form": str, "sources": [provider, ...]}, ...]}}
+
+        Runs providers in priority order. When ``stop_on_first_hit=True``
+        (the default), once a concept x lang has any forms the remaining
+        providers are skipped for that pair; the winning forms carry the
+        single provider name that produced them. When
+        ``stop_on_first_hit=False`` all providers run and we union the
+        form lists, deduping by form string and merging the ``sources``
+        list so a form emitted by two providers carries both attributions.
         """
         order = priority_order or PROVIDER_PRIORITY
-        results: Dict[str, Dict[str, List[str]]] = {lc: {} for lc in language_codes}
+        results: Dict[str, Dict[str, List[FormWithSources]]] = {lc: {} for lc in language_codes}
         total = len(concepts) * len(language_codes)
         done = 0
 
@@ -76,8 +90,27 @@ class ProviderRegistry:
                 for result in provider.fetch(remaining_concepts, language_codes, language_meta):
                     if result.forms:
                         existing = results[result.language_code].get(result.concept_en, [])
-                        if not existing or not stop_on_first_hit:
-                            results[result.language_code][result.concept_en] = result.forms
+                        source = result.source or provider_name
+                        if not existing:
+                            results[result.language_code][result.concept_en] = [
+                                {"form": f, "sources": [source]} for f in result.forms
+                            ]
+                        elif not stop_on_first_hit:
+                            # Union: preserve the existing ordering, add
+                            # new forms at the end, merge sources for
+                            # duplicates. Keeps priority-order intact so
+                            # the "primary" citation stays first.
+                            merged = list(existing)
+                            by_form = {entry["form"]: entry for entry in merged}
+                            for f in result.forms:
+                                if f in by_form:
+                                    if source not in by_form[f]["sources"]:
+                                        by_form[f]["sources"].append(source)
+                                else:
+                                    entry = {"form": f, "sources": [source]}
+                                    merged.append(entry)
+                                    by_form[f] = entry
+                            results[result.language_code][result.concept_en] = merged
                     done += 1
                     if progress_callback and done % 5 == 0:
                         progress_callback(done / total * 100, "{}: {}".format(provider_name, result.concept_en))

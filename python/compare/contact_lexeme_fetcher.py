@@ -62,10 +62,17 @@ def fetch_and_merge(
         file=sys.stderr,
     )
 
-    # 3. Determine which concepts need filling
+    # 3. Determine which concepts need filling.
+    # "Has forms" must recognise BOTH the legacy bare-list shape
+    # (``["ma:ʔ"]``) and the new provenance shape
+    # (``[{"form": "ma:ʔ", "sources": [...]}]``). A concept is filled
+    # if its list is truthy and contains at least one non-empty entry.
     if not overwrite:
         needs_fill = {
-            lc: [c for c in concepts if not config.get(lc, {}).get("concepts", {}).get(c)]
+            lc: [
+                c for c in concepts
+                if not _entry_has_forms(config.get(lc, {}).get("concepts", {}).get(c))
+            ]
             for lc in language_codes
         }
     else:
@@ -87,7 +94,12 @@ def fetch_and_merge(
         progress_callback=progress_callback,
     )
 
-    # 5. Merge results back into config
+    # 5. Merge results back into config.
+    # The registry now emits ``[{"form": str, "sources": [...]}]`` entries.
+    # We write that shape directly; any pre-existing bare-list data in
+    # untouched concepts is left exactly as it was (no forced migration,
+    # so callers can roll the feature forward without re-populating the
+    # entire corpus).
     filled: Dict[str, int] = {}
     for lc in language_codes:
         lang_entry = config.setdefault(lc, {"name": lc, "concepts": {}})
@@ -101,7 +113,7 @@ def fetch_and_merge(
         count = 0
         for concept_en, forms in results.get(lc, {}).items():
             if forms:
-                if overwrite or not concepts_dict.get(concept_en):
+                if overwrite or not _entry_has_forms(concepts_dict.get(concept_en)):
                     concepts_dict[concept_en] = forms
                     count += 1
         filled[lc] = count
@@ -125,6 +137,15 @@ def fetch_and_merge(
     )
 
     return filled
+
+
+def _entry_has_forms(entry: Any) -> bool:
+    """Return True if ``entry`` represents one or more non-empty forms
+    under EITHER the legacy bare-list shape (``["ma:ʔ"]``) OR the new
+    provenance shape (``[{"form": "ma:ʔ", "sources": [...]}]``). Thin
+    wrapper so callers don't need to reach into the providers package."""
+    from .providers.provenance import entry_has_forms
+    return entry_has_forms(entry)
 
 
 def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:

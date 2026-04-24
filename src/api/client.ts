@@ -19,6 +19,7 @@ import type {
   ClefCatalogEntry,
   ClefProviderEntry,
   ClefConfigPayload,
+  ClefSourcesReport,
   Tag,
   TagsResponse,
   SttSegmentsPayload,
@@ -776,6 +777,15 @@ export async function getClefCatalog(): Promise<{ languages: ClefCatalogEntry[] 
 
 export async function getClefProviders(): Promise<{ providers: ClefProviderEntry[] }> {
   return apiFetch<{ providers: ClefProviderEntry[] }>("/api/clef/providers");
+}
+
+/** Fetch the per-corpus provenance report. Drives the "Sources Report"
+ *  modal users open for academic citation: which providers contributed
+ *  which reference forms, per language. On a fresh workspace this
+ *  returns empty arrays rather than 404 so the modal can render a
+ *  neutral "no data yet" state. */
+export async function getClefSourcesReport(): Promise<ClefSourcesReport> {
+  return apiFetch<ClefSourcesReport>("/api/clef/sources-report");
 }
 
 // Normalize

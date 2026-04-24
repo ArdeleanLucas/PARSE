@@ -382,6 +382,97 @@ def test_fetch_and_merge_preserves_meta_through_atomic_write(monkeypatch, tmp_pa
     assert leftovers == [], "atomic write leaked tempfiles: {0}".format(leftovers)
 
 
+def test_fetch_and_merge_writes_provenance_shape_from_registry(monkeypatch, tmp_path: Path) -> None:
+    """When the registry returns forms in the new
+    ``[{"form": str, "sources": [...]}]`` shape, the fetcher must
+    persist that shape verbatim (no re-normalization, no string
+    flattening). This is what the real ProviderRegistry now emits and is
+    the contract the sources-report API depends on."""
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+
+    _write_concepts_csv(concepts_path, ["water", "fire"])
+    _write_json(config_path, {"ar": {"name": "Arabic", "concepts": {}}})
+
+    class StubRegistry:
+        def __init__(self, ai_config=None) -> None:
+            del ai_config
+
+        def fetch_all(self, concepts, language_codes, language_meta, priority_order=None, stop_on_first_hit=True, progress_callback=None):
+            del concepts, language_codes, language_meta, priority_order, stop_on_first_hit, progress_callback
+            return {
+                "ar": {
+                    "water": [{"form": "ma:ʔ", "sources": ["wikidata", "wiktionary"]}],
+                    "fire": [{"form": "naːr", "sources": ["asjp"]}],
+                }
+            }
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    filled = contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["ar"],
+        overwrite=False,
+    )
+
+    assert filled == {"ar": 2}
+    updated = _read_json(config_path)
+    assert updated["ar"]["concepts"]["water"] == [
+        {"form": "ma:ʔ", "sources": ["wikidata", "wiktionary"]}
+    ]
+    assert updated["ar"]["concepts"]["fire"] == [{"form": "naːr", "sources": ["asjp"]}]
+
+
+def test_fetch_and_merge_preserves_legacy_bare_list_without_repopulating(monkeypatch, tmp_path: Path) -> None:
+    """Pre-provenance corpora still have entries like ``["ma:ʔ"]`` --
+    the fetcher must treat those as "already filled" under the default
+    (non-overwrite) path so the user's data survives the upgrade
+    untouched. No forced migration to the new shape."""
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+
+    _write_concepts_csv(concepts_path, ["water", "fire"])
+    _write_json(config_path, {
+        "ar": {
+            "name": "Arabic",
+            "concepts": {
+                # Legacy bare-string entry -- must be left alone.
+                "water": ["legacy_form"],
+                # Empty -> should trigger fetch.
+                "fire": [],
+            },
+        }
+    })
+
+    asked_for: list = []
+
+    class StubRegistry:
+        def __init__(self, ai_config=None) -> None:
+            del ai_config
+
+        def fetch_all(self, concepts, language_codes, language_meta, priority_order=None, stop_on_first_hit=True, progress_callback=None):
+            del language_codes, language_meta, priority_order, stop_on_first_hit, progress_callback
+            asked_for.extend(concepts)
+            return {"ar": {"fire": [{"form": "naːr", "sources": ["asjp"]}]}}
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["ar"],
+        overwrite=False,
+    )
+
+    # Only the un-filled concept should have been requested from the
+    # registry; the legacy entry for "water" is preserved verbatim.
+    assert asked_for == ["fire"]
+    updated = _read_json(config_path)
+    assert updated["ar"]["concepts"]["water"] == ["legacy_form"]
+    assert updated["ar"]["concepts"]["fire"] == [{"form": "naːr", "sources": ["asjp"]}]
+
+
 def test_fetch_and_merge_writes_zero_forms_without_losing_languages(monkeypatch, tmp_path: Path) -> None:
     """When every provider returns zero forms the job must still finish
     cleanly and leave the language keys in place -- the UI then surfaces

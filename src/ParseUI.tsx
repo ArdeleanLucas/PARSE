@@ -46,6 +46,7 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
+import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { getClefConfig, getContactLexemeCoverage } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
@@ -2002,6 +2003,10 @@ export function ParseUI() {
   const [computeMode, setComputeMode] = useState('cognates');
   const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
   const [clefModalOpen, setClefModalOpen] = useState(false);
+  // Sources Report modal — shows provider attribution for every populated
+  // reference form. Opened from the Compute panel's CLEF status row; read-
+  // only so it's safe to surface even when Borrowing detection is running.
+  const [sourcesReportOpen, setSourcesReportOpen] = useState(false);
   // Which tab ClefConfigModal should open on. Defaults to "languages"; the
   // empty-populate banner's "Retry with different providers" action flips
   // this to "populate" so the user lands directly on the provider picker.
@@ -4070,12 +4075,22 @@ export function ParseUI() {
                             ? "CLEF configured"
                             : "CLEF not configured — Run will open setup"}
                       </span>
-                      <button
-                        onClick={() => setClefModalOpen(true)}
-                        className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
-                      >
-                        Configure
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setSourcesReportOpen(true)}
+                          data-testid="clef-sources-report-open"
+                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
+                          title="Show which providers contributed each reference form (for citation)"
+                        >
+                          Sources Report
+                        </button>
+                        <button
+                          onClick={() => setClefModalOpen(true)}
+                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
+                        >
+                          Configure
+                        </button>
+                      </div>
                     </div>
                   )}
                   {computeJobState.status === 'running' && (
@@ -4368,6 +4383,10 @@ export function ParseUI() {
           void refreshClefStatus();
           crossSpeakerJob.adopt(jobId);
         }}
+      />
+      <ClefSourcesReportModal
+        open={sourcesReportOpen}
+        onClose={() => setSourcesReportOpen(false)}
       />
       <Modal
         open={offsetState.phase !== 'idle'}

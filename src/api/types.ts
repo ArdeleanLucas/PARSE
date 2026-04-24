@@ -219,3 +219,34 @@ export interface ClefConfigPayload {
   primary_contact_languages: string[];
   languages: Array<{ code: string; name: string; family?: string }>;
 }
+
+/** One form in the Sources Report, annotated with the provider(s) that
+ *  contributed it. ``sources`` contains one or more provider ids
+ *  (``wikidata``, ``asjp``, ...). Legacy data predating provenance is
+ *  surfaced with the single sentinel source ``"unknown"``. */
+export interface ClefSourcesReportForm {
+  concept_en: string;
+  form: string;
+  sources: string[];
+}
+
+/** Per-language slice of the Sources Report. ``per_provider`` totals
+ *  are computed over ``forms`` for convenience so the modal can render
+ *  a summary bar without re-aggregating client-side. */
+export interface ClefSourcesReportLanguage {
+  code: string;
+  name: string;
+  family: string | null;
+  total_forms: number;
+  concepts_covered: number;
+  concepts_total: number;
+  per_provider: Record<string, number>;
+  forms: ClefSourcesReportForm[];
+}
+
+export interface ClefSourcesReport {
+  generated_at: string;
+  providers: Array<{ id: string; total_forms: number }>;
+  languages: ClefSourcesReportLanguage[];
+  concepts_total: number;
+}
