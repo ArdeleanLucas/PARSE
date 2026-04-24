@@ -1200,6 +1200,11 @@ def _annotation_empty_record(
             "concept": _annotation_empty_tier(ANNOTATION_TIER_ORDER["concept"]),
             "speaker": _annotation_empty_tier(ANNOTATION_TIER_ORDER["speaker"]),
         },
+        # Sidecar for the Lexical Anchor Alignment System — keyed by
+        # concept_id. Kept outside the tiers block so it round-trips
+        # through Praat/TextGrid cleanly (that format has no slot for
+        # confidence or user-confirmation metadata).
+        "confirmed_anchors": {},
         "metadata": {
             "language_code": _annotation_language_code(existing_record),
             "created": now_iso,
@@ -1383,6 +1388,28 @@ def _normalize_annotation_record(raw_record: Any, speaker_hint: str) -> Dict[str
     for tier_key, display_order in ANNOTATION_TIER_ORDER.items():
         if tier_key not in normalized["tiers"]:
             normalized["tiers"][tier_key] = _annotation_empty_tier(display_order)
+
+    # Pass confirmed_anchors through verbatim when it's a well-formed dict.
+    # Each entry is {start, end, source, confirmed_at, ...} keyed by concept id.
+    raw_anchors = raw_record.get("confirmed_anchors")
+    if isinstance(raw_anchors, dict):
+        clean_anchors: Dict[str, Any] = {}
+        for key, val in raw_anchors.items():
+            if not isinstance(val, dict):
+                continue
+            start = _coerce_finite_float(val.get("start"))
+            end = _coerce_finite_float(val.get("end"))
+            if start is None or end is None or end < start:
+                continue
+            entry: Dict[str, Any] = {"start": float(start), "end": float(end)}
+            for field in ("source", "confirmed_at", "matched_text", "matched_variant"):
+                if field in val and val[field] is not None:
+                    entry[field] = val[field]
+            variants_used = val.get("variants_used")
+            if isinstance(variants_used, list):
+                entry["variants_used"] = [str(x) for x in variants_used]
+            clean_anchors[str(key)] = entry
+        normalized["confirmed_anchors"] = clean_anchors
 
     metadata_in = raw_record.get("metadata")
     if not isinstance(metadata_in, dict):
@@ -4928,6 +4955,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_spectrogram()
             return
 
+        if request_path == "/api/lexeme/search":
+            self._api_get_lexeme_search()
+            return
+
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
@@ -6208,6 +6239,163 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(png_bytes)
         except BrokenPipeError:
             pass
+
+    def _api_get_lexeme_search(self) -> None:
+        """GET /api/lexeme/search — rank candidate time ranges for a concept.
+
+        Query params:
+            speaker       — required, the target speaker
+            variants      — required, comma/space-separated orthographic forms
+            concept_id    — optional, enables the cross-speaker signal + auto
+                            augmentation with contact-lexeme variants
+            language      — optional, phonemizer language code (default "ku")
+            tiers         — optional, comma-separated subset of
+                            ortho_words,ortho,stt,ipa (default all)
+            limit         — optional, max candidates to return (default 10)
+            max_distance  — optional float in (0, 1] — normalized Levenshtein
+                            threshold, anything worse is dropped (default 0.55)
+
+        Response JSON:
+            {
+              speaker, concept_id, variants, language,
+              candidates: [{ start, end, tier, matched_text, matched_variant,
+                             score, phonetic_score, cross_speaker_score,
+                             confidence_weight, source_label }],
+              signals_available: {
+                 phonemizer: bool, cross_speaker_anchors: int,
+                 contact_variants: [str]
+              }
+            }
+        """
+        try:
+            from ai import lexeme_search as lex
+        except Exception:
+            try:
+                from python.ai import lexeme_search as lex  # type: ignore[import-not-found]
+            except Exception as exc:
+                raise ApiError(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    "lexeme_search module unavailable: {0}".format(exc),
+                )
+
+        from urllib.parse import parse_qs
+
+        query = urlparse(self.path).query
+        params = {k: v[0] for k, v in parse_qs(query).items() if v}
+
+        speaker_raw = str(params.get("speaker") or "").strip()
+        if not speaker_raw:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
+        try:
+            speaker = _normalize_speaker_id(speaker_raw)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+        variants_raw = str(params.get("variants") or "").strip()
+        user_variants = [v for v in re.split(r"[\s,;/]+", variants_raw) if v]
+        if not user_variants:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "variants is required (comma or space separated)")
+
+        concept_id = str(params.get("concept_id") or "").strip() or None
+        language = str(params.get("language") or lex.DEFAULT_LANGUAGE).strip() or lex.DEFAULT_LANGUAGE
+
+        tiers_raw = str(params.get("tiers") or "").strip()
+        tiers_filter: Optional[list] = None
+        if tiers_raw:
+            tiers_filter = [t for t in re.split(r"[\s,;]+", tiers_raw) if t]
+
+        try:
+            limit = int(params.get("limit") or lex.DEFAULT_LIMIT)
+        except (TypeError, ValueError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+        if limit <= 0 or limit > 200:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "limit must be in [1, 200]")
+
+        try:
+            max_distance = float(params.get("max_distance") or lex.DEFAULT_MAX_DISTANCE)
+        except (TypeError, ValueError):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "max_distance must be a number in (0, 1]")
+        if not (0 < max_distance <= 1):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "max_distance must be in (0, 1]")
+
+        # Load the target speaker's annotation (must exist).
+        try:
+            target_path = _annotation_read_path_for_speaker(speaker)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+        if not target_path.is_file():
+            raise ApiError(HTTPStatus.NOT_FOUND, "No annotation record for speaker {0}".format(speaker))
+        target_raw = _read_json_any_file(target_path)
+        target_record = _normalize_annotation_record(target_raw, speaker)
+
+        # Cross-speaker: load every OTHER annotation file — needed only when
+        # the caller supplied a concept_id. Missing dir → empty list, not fatal.
+        cross_records: list = []
+        if concept_id:
+            annotations_dir = _project_root() / "annotations"
+            if annotations_dir.is_dir():
+                for path in sorted(annotations_dir.iterdir()):
+                    if not path.is_file():
+                        continue
+                    if path.suffix not in {".json"}:
+                        continue
+                    # Skip the target speaker's own file so we don't match ourselves.
+                    stem = path.name.removesuffix(ANNOTATION_FILENAME_SUFFIX).removesuffix(
+                        ANNOTATION_LEGACY_FILENAME_SUFFIX,
+                    )
+                    if stem == speaker:
+                        continue
+                    try:
+                        raw = _read_json_any_file(path)
+                        cross_records.append(_normalize_annotation_record(raw, stem))
+                    except Exception:
+                        # One bad file shouldn't take the whole search down.
+                        continue
+
+        # Contact-lexeme variants: auto-augment the user's variant list so
+        # they don't have to know every documented form of the concept.
+        contact_variants: list = []
+        if concept_id:
+            try:
+                contact_variants = lex.load_contact_variants(concept_id, _sil_config_path())
+            except Exception:
+                contact_variants = []
+
+        all_variants = list(user_variants)
+        seen = {v for v in all_variants}
+        for v in contact_variants:
+            if v not in seen:
+                all_variants.append(v)
+                seen.add(v)
+
+        candidates = lex.search(
+            target_record,
+            all_variants,
+            concept_id=concept_id,
+            cross_speaker_records=cross_records,
+            language=language,
+            limit=limit,
+            max_distance=max_distance,
+            tiers=tiers_filter,
+        )
+
+        phonemizer_available = bool(lex.phonemize_variant(user_variants[0], language=language))
+
+        self._send_json(HTTPStatus.OK, {
+            "speaker": speaker,
+            "concept_id": concept_id,
+            "variants": user_variants,
+            "language": language,
+            "candidates": candidates,
+            "signals_available": {
+                "phonemizer": phonemizer_available,
+                "cross_speaker_anchors": sum(
+                    1 for rec in cross_records
+                    if concept_id and str(concept_id) in ((rec or {}).get("confirmed_anchors") or {})
+                ),
+                "contact_variants": contact_variants,
+            },
+        })
 
     # ── Auth endpoints ──────────────────────────────────────────────
 

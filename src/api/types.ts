@@ -19,9 +19,27 @@ export interface AnnotationTier {
   intervals: AnnotationInterval[];
 }
 
+/** A user-confirmed time range for a specific concept on a specific speaker.
+ * Lives on AnnotationRecord.confirmed_anchors (sidecar — not inside tiers)
+ * so it round-trips Praat/TextGrid cleanly; that format has no slot for
+ * confidence or user-confirmation metadata. */
+export interface ConfirmedAnchor {
+  start: number;
+  end: number;
+  /** Human-readable provenance — e.g. "user+ortho_words", "manual". */
+  source?: string;
+  confirmed_at?: string;
+  matched_text?: string;
+  matched_variant?: string;
+  variants_used?: string[];
+}
+
 export interface AnnotationRecord {
   speaker: string;
   tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, ortho_words, stt, concept, sentence, speaker
+  /** Keyed by concept id (string). Seeded by the Search & Anchor Lexeme
+   * flow; surfaces as cross-speaker signal in other speakers' searches. */
+  confirmed_anchors?: Record<string, ConfirmedAnchor>;
   created_at?: string;
   modified_at?: string;
   source_wav?: string;

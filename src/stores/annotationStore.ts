@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AnnotationRecord, AnnotationInterval } from "../api/types";
+import type { AnnotationRecord, AnnotationInterval, ConfirmedAnchor } from "../api/types";
 import { getAnnotation, saveAnnotation } from "../api/client";
 
 /* ------------------------------------------------------------------ */
@@ -114,6 +114,14 @@ interface AnnotationStore {
     tier: string,
     index: number,
     splitTime: number,
+  ) => void;
+  /** Persist a confirmed lexical anchor for a concept on this speaker.
+   * Lives in the `confirmed_anchors` sidecar, NOT in any tier — keeps
+   * Praat round-trips clean. Pass `null` to clear an existing anchor. */
+  setConfirmedAnchor: (
+    speaker: string,
+    conceptId: string,
+    anchor: ConfirmedAnchor | null,
   ) => void;
   /**
    * Retime a lexeme across every tier. Finds the interval that matches
@@ -357,6 +365,29 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       { start: target.start, end: splitTime, text: target.text },
       { start: splitTime, end: target.end, text: "" },
     );
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  setConfirmedAnchor: (speaker, conceptId, anchor) => {
+    const state = get();
+    const record = state.records[speaker];
+    if (!record) return;
+
+    const clone = deepClone(record);
+    const existing = { ...(clone.confirmed_anchors ?? {}) };
+    const key = String(conceptId);
+    if (anchor === null) {
+      delete existing[key];
+    } else {
+      existing[key] = { ...anchor };
+    }
+    clone.confirmed_anchors = existing;
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
