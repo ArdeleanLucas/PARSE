@@ -85,7 +85,15 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     },
     "ortho": {
         "provider": "faster-whisper",
-        "model_path": "razhan/whisper-base-sdh",
+        # Intentionally empty — the ORTH pipeline hard-fails if this is not
+        # set to a local CT2 model path. Users converting razhan/whisper-base-sdh
+        # (the historical default) should run:
+        #   ct2-transformers-converter --model razhan/whisper-base-sdh \
+        #     --output_dir /path/to/razhan-ct2
+        # and point this at the output directory. A HuggingFace repo id is
+        # explicitly rejected — faster-whisper only reads CT2 format and we
+        # refuse to silently fall back to stt.model_path.
+        "model_path": "",
         "language": "sd",
         "device": "cuda",
         "compute_type": "float16",
@@ -1037,26 +1045,33 @@ class LocalWhisperProvider(AIProvider):
         section_config = self.config.get(self.config_section, {})
         self.model_path = str(section_config.get("model_path", "")).strip()
 
-        # If an ORTH provider has no explicit model_path, fall back to
-        # stt.model_path — users who configured razhan (or any local CT2)
-        # for STT almost always want the same model for ORTH, and
-        # HuggingFace-repo-id defaults like "razhan/whisper-base-sdh" don't
-        # resolve to faster-whisper's CT2 format so they fail at load time.
-        # Explicit empty/HF-id → stt.model_path (when non-empty).
+        # ORTH must not silently swap its model_path. Earlier revisions
+        # fell back to ``stt.model_path`` when ``ortho.model_path`` was
+        # empty or looked like a HuggingFace repo id (faster-whisper needs
+        # CT2, not HF transformers format). In practice that meant the
+        # ORTH pass ran with the STT model and nobody noticed — no error,
+        # no banner, just wrong tier output. Hard-fail instead so the
+        # misconfiguration lands as an error in the logs and a visible
+        # job failure in the UI.
         if self.config_section == "ortho":
-            if not self.model_path or _looks_like_hf_repo_id(self.model_path):
-                stt_fallback = str(
-                    self.config.get("stt", {}).get("model_path", "") or ""
-                ).strip()
-                if stt_fallback:
-                    if self.model_path:
-                        print(
-                            "[INFO] ortho.model_path '{0}' looks like a HuggingFace "
-                            "repo id; faster-whisper needs CT2. Falling back to "
-                            "stt.model_path '{1}'.".format(self.model_path, stt_fallback),
-                            file=sys.stderr,
-                        )
-                    self.model_path = stt_fallback
+            if not self.model_path:
+                raise ValueError(
+                    "[ORTH config error] ortho.model_path is empty in ai_config.json. "
+                    "ORTH will not fall back to stt.model_path — set an explicit CT2 "
+                    "model path under 'ortho.model_path' (convert razhan/whisper-base-sdh "
+                    "with `ct2-transformers-converter --model razhan/whisper-base-sdh "
+                    "--output_dir /path/to/razhan-ct2` if that's the model you want)."
+                )
+            if _looks_like_hf_repo_id(self.model_path):
+                raise ValueError(
+                    "[ORTH config error] ortho.model_path '{0}' looks like a "
+                    "HuggingFace repo id. faster-whisper requires CTranslate2 "
+                    "format, not HF Transformers — convert first with "
+                    "`ct2-transformers-converter --model {0} --output_dir "
+                    "/path/to/<name>-ct2` and point ortho.model_path at the "
+                    "CT2 output directory. ORTH will not fall back to "
+                    "stt.model_path silently.".format(self.model_path)
+                )
         self.language = str(language or section_config.get("language", "")).strip() or None
         self.device = str(device or section_config.get("device", "cpu")).strip() or "cpu"
         self.compute_type = (
