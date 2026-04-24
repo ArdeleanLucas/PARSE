@@ -279,6 +279,32 @@ def _build_stt_callbacks() -> tuple:
 
     base_url = _resolve_api_base()
 
+    def _get_json(path: str, timeout: float = 20.0) -> Dict[str, Any]:
+        req = urllib.request.Request(
+            url="{0}{1}".format(base_url, path),
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            body = ""
+            try:
+                body = http_err.read().decode("utf-8") or ""
+            except Exception:
+                pass
+            try:
+                parsed_err = _json.loads(body) if body else {}
+            except _json.JSONDecodeError:
+                parsed_err = {"error": body[:400] or http_err.reason}
+            if isinstance(parsed_err, dict):
+                parsed_err.setdefault("httpStatus", http_err.code)
+                return parsed_err
+            return {"error": str(parsed_err), "httpStatus": http_err.code}
+        parsed = _json.loads(body)
+        return parsed if isinstance(parsed, dict) else {}
+
     def _post_json(path: str, payload: Dict[str, Any], timeout: float = 20.0) -> Dict[str, Any]:
         """POST JSON to the PARSE API and return the parsed body.
 
@@ -337,31 +363,20 @@ def _build_stt_callbacks() -> tuple:
         return job_id
 
     def get_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
-        # First try STT-style status so existing stt_status paths work
-        # unchanged; if the server says "not an STT job", re-poll via the
-        # generic compute status so callers get the full job snapshot
-        # (result, progress, message) regardless of compute_type.
+        import urllib.parse
+
+        safe_job_id = urllib.parse.quote(str(job_id or "").strip(), safe="")
+        if not safe_job_id:
+            return None
         try:
-            response = _post_json("/api/stt/status", {"job_id": job_id})
+            response = _get_json("/api/jobs/{0}".format(safe_job_id))
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 "PARSE API unreachable at {0} — cannot poll job. "
                 "Underlying error: {1}".format(base_url, exc)
             )
-        status = str((response or {}).get("status") or "").lower()
-        is_type_mismatch = (
-            (response or {}).get("error") == "jobId is not an STT job"
-            or status == "error"
-            and "is not an stt job" in str((response or {}).get("error") or "").lower()
-        )
-        if is_type_mismatch:
-            try:
-                response = _post_json(
-                    "/api/compute/status", {"job_id": job_id}
-                )
-            except urllib.error.URLError:
-                # Swallow — return the original STT-typed error.
-                pass
+        if isinstance(response, dict) and response.get("error") == "Unknown jobId":
+            return None
         return response or None
 
     return start_stt_job, get_job_snapshot
@@ -535,6 +550,78 @@ def _build_jobs_callback():
         return list(parsed.get("jobs") or [])
 
     return list_active_jobs
+
+
+
+def _build_jobs_list_callback():
+    """Build ParseChatTools' generic jobs_list callback via GET /api/jobs."""
+    import json as _json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def list_jobs(filters: Dict[str, Any]) -> Dict[str, Any]:
+        query_parts: List[tuple[str, str]] = []
+        filters_obj = dict(filters or {})
+        for status in filters_obj.get("statuses") or []:
+            query_parts.append(("status", str(status)))
+        for job_type in filters_obj.get("types") or []:
+            query_parts.append(("type", str(job_type)))
+        speaker = str(filters_obj.get("speaker") or "").strip()
+        if speaker:
+            query_parts.append(("speaker", speaker))
+        limit = filters_obj.get("limit")
+        if limit is not None:
+            query_parts.append(("limit", str(limit)))
+        query = urllib.parse.urlencode(query_parts, doseq=True)
+        url = "{0}/api/jobs{1}".format(base_url, "?{0}".format(query) if query else "")
+        req = urllib.request.Request(url=url, headers={"Accept": "application/json"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=10.0) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            raise RuntimeError("PARSE API /api/jobs failed ({0})".format(http_err.code))
+        except urllib.error.URLError as exc:
+            raise RuntimeError("PARSE API unreachable at {0}: {1}".format(base_url, exc))
+        parsed = _json.loads(body) if body else {}
+        return parsed if isinstance(parsed, dict) else {"jobs": [], "count": 0}
+
+    return list_jobs
+
+
+
+def _build_job_logs_callback():
+    """Build ParseChatTools' job_logs callback via GET /api/jobs/<jobId>/logs."""
+    import json as _json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    base_url = _resolve_api_base()
+
+    def get_job_logs(job_id: str, offset: int, limit: int) -> Dict[str, Any]:
+        safe_job_id = urllib.parse.quote(str(job_id or "").strip(), safe="")
+        if not safe_job_id:
+            return {"jobId": "", "count": 0, "offset": offset, "limit": limit, "logs": []}
+        query = urllib.parse.urlencode({"offset": int(offset or 0), "limit": int(limit or 100)})
+        req = urllib.request.Request(
+            url="{0}/api/jobs/{1}/logs?{2}".format(base_url, safe_job_id, query),
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10.0) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as http_err:
+            raise RuntimeError("PARSE API job logs failed ({0})".format(http_err.code))
+        except urllib.error.URLError as exc:
+            raise RuntimeError("PARSE API unreachable at {0}: {1}".format(base_url, exc))
+        parsed = _json.loads(body) if body else {}
+        return parsed if isinstance(parsed, dict) else {"jobId": str(job_id or ""), "count": 0, "offset": offset, "limit": limit, "logs": []}
+
+    return get_job_logs
 
 
 def _resolve_external_read_roots() -> list:
@@ -723,10 +810,14 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     onboard_callback = _build_onboard_callback()
     normalize_cb = _build_normalize_callback()
     jobs_cb = _build_jobs_callback()
+    jobs_list_cb = _build_jobs_list_callback()
+    job_logs_cb = _build_job_logs_callback()
     tools = ParseChatTools(
         project_root=root,
         start_stt_job=start_stt,
         get_job_snapshot=get_snapshot,
+        list_jobs=jobs_list_cb,
+        get_job_logs=job_logs_cb,
         external_read_roots=external_roots,
         memory_path=memory_path,
         onboard_speaker=onboard_callback,
@@ -1602,6 +1693,43 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         if computeType is not None:
             args["computeType"] = computeType
         result = tools.execute("compute_status", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def jobs_list(
+        statuses: Optional[list] = None,
+        types: Optional[list] = None,
+        speaker: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> str:
+        """List active and recent jobs from the shared PARSE job registry."""
+        args: Dict[str, Any] = {}
+        if statuses is not None:
+            args["statuses"] = statuses
+        if types is not None:
+            args["types"] = types
+        if speaker is not None:
+            args["speaker"] = speaker
+        if limit is not None:
+            args["limit"] = limit
+        result = tools.execute("jobs_list", args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def job_status(jobId: str) -> str:
+        """Read the generic status of any PARSE background job by jobId."""
+        result = tools.execute("job_status", {"jobId": jobId})
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool()
+    def job_logs(jobId: str, offset: Optional[int] = None, limit: Optional[int] = None) -> str:
+        """Read structured log lines for a PARSE background job."""
+        args: Dict[str, Any] = {"jobId": jobId}
+        if offset is not None:
+            args["offset"] = offset
+        if limit is not None:
+            args["limit"] = limit
+        result = tools.execute("job_logs", args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     if expose_all_tools:

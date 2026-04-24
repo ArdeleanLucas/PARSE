@@ -108,6 +108,14 @@ def test_parse_chat_tools_get_all_tool_names_matches_instance(tmp_path) -> None:
     assert ParseChatTools.get_all_tool_names() == instance_names
 
 
+
+def test_job_observability_tools_are_allowlisted(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    for tool_name in ["jobs_list", "job_status", "job_logs"]:
+        assert tool_name in tools.tool_names()
+
+
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
 def test_create_mcp_server_defaults_to_33_tools_without_config(tmp_path, monkeypatch) -> None:
     import asyncio
@@ -120,7 +128,7 @@ def test_create_mcp_server_defaults_to_33_tools_without_config(tmp_path, monkeyp
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 33
+    assert len(mcp_tools) == 36
     assert "mcp_get_exposure_mode" in tool_names
     assert "run_full_annotation_pipeline" in tool_names
     assert "prepare_compare_mode" in tool_names
@@ -131,13 +139,13 @@ def test_create_mcp_server_defaults_to_33_tools_without_config(tmp_path, monkeyp
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] is None
-    assert payload["result"]["mcpToolCount"] == 33
-    assert payload["result"]["parseChatToolCount"] == 47
+    assert payload["result"]["mcpToolCount"] == 36
+    assert payload["result"]["parseChatToolCount"] == 50
     assert payload["result"]["workflowToolCount"] == 3
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_51_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -153,19 +161,19 @@ def test_create_mcp_server_exposes_all_51_tools_when_enabled_in_config_dir(tmp_p
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 51
+    assert len(mcp_tools) == 54
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is True
-    assert payload["result"]["mcpToolCount"] == 51
-    assert payload["result"]["parseChatToolCount"] == 47
+    assert payload["result"]["mcpToolCount"] == 54
+    assert payload["result"]["parseChatToolCount"] == 50
     assert payload["result"]["workflowToolCount"] == 3
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_51_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -179,7 +187,7 @@ def test_create_mcp_server_exposes_all_51_tools_when_enabled_in_root_config(tmp_
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 51
+    assert len(mcp_tools) == 54
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
@@ -433,6 +441,30 @@ def test_audio_normalize_start_supports_dry_run_preview(tmp_path) -> None:
     assert payload["status"] == "dry_run"
     assert payload["plan"]["speaker"] == "Fail02"
     assert calls == []
+
+
+def test_job_status_surfaces_speaker_lock_metadata(tmp_path) -> None:
+    snapshot = {
+        "jobId": "job-lock",
+        "type": "stt",
+        "status": "running",
+        "progress": 12.5,
+        "message": "Transcribing",
+        "meta": {"speaker": "Fail01"},
+        "locks": {
+            "active": True,
+            "ttl_seconds": 600,
+            "resources": [{"kind": "speaker", "id": "Fail01"}],
+        },
+        "logs": [{"event": "job.created"}],
+    }
+    tools = ParseChatTools(project_root=tmp_path, get_job_snapshot=lambda job_id: snapshot)
+
+    payload = tools.execute("job_status", {"jobId": "job-lock"})["result"]
+
+    assert payload["jobId"] == "job-lock"
+    assert payload["locks"]["active"] is True
+    assert payload["locks"]["resources"] == [{"kind": "speaker", "id": "Fail01"}]
 
 
 def test_source_index_validate_dry_run_does_not_write_output(tmp_path) -> None:

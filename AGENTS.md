@@ -26,8 +26,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
-- Default MCP surface is **33 tools**: the legacy 29 `ParseChatTools` wrappers, 3 high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
-- Enabling `expose_all_tools` expands the MCP surface to **51 tools**: all 47 `ParseChatTools`, the 3 `WorkflowTools` macros, plus `mcp_get_exposure_mode`.
+- Default MCP surface is **36 tools**: the legacy 29 `ParseChatTools` wrappers, 3 high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, the 3 generic observability tools (`jobs_list`, `job_status`, `job_logs`), plus read-only `mcp_get_exposure_mode` for self-inspection.
+- Enabling `expose_all_tools` expands the MCP surface to **54 tools**: all 50 `ParseChatTools`, the 3 `WorkflowTools` macros, plus `mcp_get_exposure_mode`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`
@@ -86,32 +86,29 @@ if x_parse["supports_dry_run"]:
     ...
 ```
 
-### Workflow Macro Examples
+### Generic job observability tools
 
-Use the new MCP workflow macros when an agent wants a one-call end-to-end action rather than hand-assembling low-level job chains.
+Use the generic tools when an agent needs transport-independent job inspection instead of guessing by job type.
 
-Agent example: "Run the full PARSE annotation workflow on speaker `Fail02` and report back on concepts `1`, `2`, and `3`."
+- `jobs_list(statuses=[...], types=[...], speaker="Fail01", limit=20)`
+  - lists active + recent jobs from the shared registry
+- `job_status(jobId="...")`
+  - returns the full generic snapshot: `type`, `status`, `progress`, `message`, `error`, `errorCode`, timestamps, `meta`, `logCount`
+- `job_logs(jobId="...", offset=0, limit=50)`
+  - returns structured log lines (`ts`, `level`, `event`, `message`, optional `progress`, optional `data`)
 
-```python
-run_full_annotation_pipeline(
-  speaker_id="Fail02",
-  concept_list=["1", "2", "3"],
-  dryRun=True,
-)
-
-prepare_compare_mode(
-  concept_range="1-25",
-  speakers=["Fail01", "Fail02", "Kalh01"],
-  dryRun=False,
-)
-
-export_complete_lingpy_dataset(
-  with_contact_lexemes=True,
-  dryRun=False,
-)
-```
-
-Naming note: `prepare_compare_mode` is the current stable public name. If a future cleanup wants a more action-oriented label, add a backward-compatible alias such as `build_compare_session` rather than silently renaming the macro.
+Recommended agent pattern:
+1. Start a heavy job (`pipeline_run`, `stt_start`, `audio_normalize_start`, etc.)
+2. Poll `job_status` for transport-neutral state
+<<<<<<< HEAD
+3. Read `job_logs` when the human asks "what is it doing?" or when progress stalls
+4. Fall back to old per-type status tools only when a workflow needs type-specific payload shaping
+=======
+3. Inspect `locks` when coordinating speaker-scoped mutating work between humans and agents
+4. Read `job_logs` when the human asks "what is it doing?" or when progress stalls
+5. For HTTP-started jobs that need push completion, pass `callbackUrl` (absolute `http(s)` URL) on the job-start request so PARSE POSTs the final generic job payload on `complete` / `error`
+6. Fall back to old per-type status tools only when a workflow needs type-specific payload shaping
+>>>>>>> 660eb33 (feat: add job completion callbacks)
 
 ## Client/Server Contract Surface
 

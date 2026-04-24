@@ -71,6 +71,9 @@ DEFAULT_MCP_TOOL_NAMES = (
     "pipeline_state_batch",
     "pipeline_run",
     "compute_status",
+    "jobs_list",
+    "job_status",
+    "job_logs",
 )
 WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "audio_normalize_start",
@@ -403,6 +406,8 @@ class ParseChatTools:
         docs_root: Optional[Path] = None,
         start_stt_job: Optional[Callable[[str, str, Optional[str]], str]] = None,
         get_job_snapshot: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
+        list_jobs: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        get_job_logs: Optional[Callable[[str, int, int], Dict[str, Any]]] = None,
         external_read_roots: Optional[Sequence[Path]] = None,
         memory_path: Optional[Path] = None,
         onboard_speaker: Optional[
@@ -470,6 +475,8 @@ class ParseChatTools:
 
         self._start_stt_job = start_stt_job
         self._get_job_snapshot = get_job_snapshot
+        self._list_jobs = list_jobs
+        self._get_job_logs = get_job_logs
         self._onboard_speaker = onboard_speaker
         self._start_compute_job = start_compute_job
         self._pipeline_state = pipeline_state
@@ -2004,6 +2011,63 @@ class ParseChatTools:
                     },
                 },
             ),
+            "jobs_list": ChatToolSpec(
+                name="jobs_list",
+                description=(
+                    "List jobs from the PARSE job registry, including active and recent completed jobs. "
+                    "Supports filtering by status, type, and speaker, plus a bounded result limit."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "statuses": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 32},
+                        },
+                        "types": {
+                            "type": "array",
+                            "maxItems": 20,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 128},
+                        },
+                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                    },
+                },
+            ),
+            "job_status": ChatToolSpec(
+                name="job_status",
+                description=(
+                    "Read the generic status of any PARSE background job by jobId. "
+                    "Returns type, status, progress, message, error, result, timestamps, and logCount."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                    },
+                },
+            ),
+            "job_logs": ChatToolSpec(
+                name="job_logs",
+                description=(
+                    "Read structured log lines for any PARSE background job. "
+                    "Returns timestamped entries for progress and terminal events."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["jobId"],
+                    "properties": {
+                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    },
+                },
+            ),
             "jobs_list_active": ChatToolSpec(
                 name="jobs_list_active",
                 description=(
@@ -2056,7 +2120,7 @@ class ParseChatTools:
         return TOOL_MUTABILITY_READ_ONLY
 
     def _default_preconditions_for_tool(self, tool_name: str, mutability: str) -> Tuple[ToolCondition, ...]:
-        if tool_name in {"project_context_read", "speakers_list", "jobs_list_active"}:
+        if tool_name in {"project_context_read", "speakers_list", "jobs_list", "jobs_list_active"}:
             return ()
 
         if tool_name in {
@@ -4037,6 +4101,84 @@ class ParseChatTools:
             }
 
         raise ChatToolValidationError("mode must be 'speaker' or 'full'")
+
+    def _tool_jobs_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return jobs from the PARSE job registry with optional filters."""
+        if self._list_jobs is None:
+            raise ChatToolExecutionError("list_jobs callback is unavailable")
+        try:
+            payload = self._list_jobs(
+                {
+                    "statuses": args.get("statuses") or [],
+                    "types": args.get("types") or [],
+                    "speaker": args.get("speaker"),
+                    "limit": args.get("limit"),
+                }
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("jobs_list failed: {0}".format(exc)) from exc
+        if not isinstance(payload, dict):
+            raise ChatToolExecutionError("jobs_list callback must return an object")
+        result = {"readOnly": True}
+        result.update(payload)
+        return result
+
+    def _tool_job_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._get_job_snapshot is None:
+            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+
+        job_id = str(args.get("jobId") or "").strip()
+        if not job_id:
+            raise ChatToolValidationError("jobId is required")
+
+        snapshot = self._get_job_snapshot(job_id)
+        if snapshot is None:
+            return {
+                "readOnly": True,
+                "jobId": job_id,
+                "status": "not_found",
+                "message": "Unknown jobId",
+            }
+
+        return {
+            "readOnly": True,
+            "jobId": job_id,
+            "type": snapshot.get("type"),
+            "status": snapshot.get("status"),
+            "progress": snapshot.get("progress"),
+            "message": snapshot.get("message"),
+            "error": snapshot.get("error"),
+            "errorCode": snapshot.get("error_code") or snapshot.get("errorCode"),
+            "result": snapshot.get("result"),
+            "createdAt": snapshot.get("created_at") or snapshot.get("createdAt"),
+            "updatedAt": snapshot.get("updated_at") or snapshot.get("updatedAt"),
+            "completedAt": snapshot.get("completed_at") or snapshot.get("completedAt"),
+            "meta": copy.deepcopy(snapshot.get("meta") if isinstance(snapshot.get("meta"), dict) else {}),
+            "locks": copy.deepcopy(snapshot.get("locks") if isinstance(snapshot.get("locks"), dict) else {}),
+            "logCount": len(snapshot.get("logs")) if isinstance(snapshot.get("logs"), list) else int(snapshot.get("logCount") or 0),
+        }
+
+    def _tool_job_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if self._get_job_logs is None:
+            raise ChatToolExecutionError("get_job_logs callback is unavailable")
+
+        job_id = str(args.get("jobId") or "").strip()
+        if not job_id:
+            raise ChatToolValidationError("jobId is required")
+
+        offset = int(args.get("offset") or 0)
+        limit = int(args.get("limit") or 100)
+        try:
+            payload = self._get_job_logs(job_id, offset, limit)
+        except Exception as exc:
+            raise ChatToolExecutionError("job_logs failed: {0}".format(exc)) from exc
+        if not isinstance(payload, dict):
+            raise ChatToolExecutionError("get_job_logs callback must return an object")
+        result = {"readOnly": True}
+        result.update(payload)
+        if "logs" in result and isinstance(result["logs"], list):
+            result["logCount"] = len(result["logs"])
+        return result
 
     def _tool_jobs_list_active(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Return all running jobs from the PARSE job registry for session-restart recovery."""
