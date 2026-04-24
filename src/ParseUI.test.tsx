@@ -76,9 +76,13 @@ vi.mock("./stores/annotationStore", () => {
   const useAnnotationStore = (selector: (s: unknown) => unknown) =>
     selector({
       records: mockRecords,
+      histories: {},
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
       saveSpeaker: mockSaveSpeaker,
+      moveIntervalAcrossTiers: vi.fn(),
+      undo: vi.fn(),
+      redo: vi.fn(),
     });
   (useAnnotationStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockAnnotationSetState(...args);

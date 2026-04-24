@@ -21,9 +21,15 @@ interface LaneStrip {
   intervals: Array<{ start: number; end: number; text: string }>;
   /** Index into the underlying `record.tiers[kind].intervals` array. Set when
    * the strip is sourced from the editable tier (so inline edits / merges /
-   * splits can address the original interval). Unset for legacy STT data
-   * coming from the API cache. */
+   * splits can address the original interval). For STT sourced from the API
+   * cache (pre-migration) this is the index into `sttBySpeaker[speaker]` —
+   * the same offset survives migration because `ensureSttTier` copies
+   * segments verbatim in order. */
   sourceIndices?: number[];
+  /** True for the STT strip when the record hasn't yet migrated STT into
+   * `record.tiers.stt`. Edit-path handlers must call `ensureSttTier` before
+   * opening the inline editor / context menu so the tier entry exists. */
+  needsMigration?: boolean;
   status?: "idle" | "loading" | "loaded" | "error";
 }
 
@@ -85,6 +91,7 @@ export function TranscriptionLanes({
   const removeInterval = useAnnotationStore((s) => s.removeInterval);
   const mergeIntervals = useAnnotationStore((s) => s.mergeIntervals);
   const splitInterval = useAnnotationStore((s) => s.splitInterval);
+  const ensureSttTier = useAnnotationStore((s) => s.ensureSttTier);
 
   const [pxPerSec, setPxPerSec] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -255,11 +262,18 @@ export function TranscriptionLanes({
             sourceIndices,
           });
         } else {
+          // Pre-migration: STT sourced from the API cache. Emit identity
+          // sourceIndices so the strip is treated as editable in handlers;
+          // `needsMigration` flips the double-click / right-click paths to
+          // run `ensureSttTier` before opening the editor. Single-click seek
+          // stays untouched — no migration until the user actually edits.
           const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
           out.push({
             kind: "stt",
             label: LANE_LABELS.stt,
             intervals: segs.map((s) => ({ start: s.start, end: s.end, text: s.text })),
+            sourceIndices: segs.map((_, i) => i),
+            needsMigration: true,
             status: sttStatus[speaker] ?? "idle",
           });
         }
@@ -436,14 +450,24 @@ export function TranscriptionLanes({
                         }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
-                          if (isEditable && sourceIdx !== undefined) {
-                            setEditing({ kind: strip.kind, index: sourceIdx });
+                          if (!isEditable || sourceIdx === undefined) return;
+                          // First-edit STT: migrate the API-cached segments
+                          // into record.tiers.stt before entering edit mode.
+                          // `ensureSttTier` is idempotent and batched with
+                          // setEditing so the next render sees the tier
+                          // populated and opens the inline editor directly.
+                          if (strip.needsMigration) {
+                            ensureSttTier(speaker, sttBySpeaker[speaker] ?? []);
                           }
+                          setEditing({ kind: strip.kind, index: sourceIdx });
                         }}
                         onContextMenu={(e) => {
                           if (!isEditable || sourceIdx === undefined) return;
                           e.preventDefault();
                           e.stopPropagation();
+                          if (strip.needsMigration) {
+                            ensureSttTier(speaker, sttBySpeaker[speaker] ?? []);
+                          }
                           setSelectedInterval({
                             speaker,
                             tier: strip.kind,

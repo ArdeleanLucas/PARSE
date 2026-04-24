@@ -9,7 +9,7 @@ import {
   Workflow, Network, Trash2, ChevronDown as CDown,
   Video, Scissors, Activity, SlidersHorizontal, Download,
   Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
-  Sun, Moon, XCircle
+  Sun, Moon, XCircle, Undo2, Redo2
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
 import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, OffsetJobError, getJobLogs } from './api/client';
@@ -1294,6 +1294,52 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   const setInterval = useAnnotationStore(s => s.setInterval);
   const moveIntervalAcrossTiers = useAnnotationStore(s => s.moveIntervalAcrossTiers);
   const saveSpeaker = useAnnotationStore(s => s.saveSpeaker);
+  const undoAnnotation = useAnnotationStore(s => s.undo);
+  const redoAnnotation = useAnnotationStore(s => s.redo);
+  const undoRedoHistory = useAnnotationStore(s => s.histories[speaker] ?? null);
+  const canUndo = (undoRedoHistory?.undo.length ?? 0) > 0;
+  const canRedo = (undoRedoHistory?.redo.length ?? 0) > 0;
+  const nextUndoLabel = canUndo ? undoRedoHistory!.undo[undoRedoHistory!.undo.length - 1].label : '';
+  const nextRedoLabel = canRedo ? undoRedoHistory!.redo[undoRedoHistory!.redo.length - 1].label : '';
+  const [undoToast, setUndoToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!undoToast) return;
+    const t = window.setTimeout(() => setUndoToast(null), 2200);
+    return () => window.clearTimeout(t);
+  }, [undoToast]);
+  const handleUndo = useCallback(() => {
+    const label = undoAnnotation(speaker);
+    if (label) setUndoToast(`Undid ${label}`);
+  }, [speaker, undoAnnotation]);
+  const handleRedo = useCallback(() => {
+    const label = redoAnnotation(speaker);
+    if (label) setUndoToast(`Redid ${label}`);
+  }, [speaker, redoAnnotation]);
+  // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y = redo. Suppressed while
+  // the user is typing in inputs, textareas, selects, or a contenteditable
+  // element (the inline lane editor) so their keystrokes don't get hijacked.
+  useEffect(() => {
+    if (!speaker) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (target.isContentEditable) return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [speaker, handleUndo, handleRedo]);
   const tagConcept = useTagStore(s => s.tagConcept);
 
   const { conceptInterval, ipaInterval, orthoInterval } = useMemo(
@@ -1776,11 +1822,38 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
               <option value="1.5">1.5x</option>
               <option value="2">2.0x</option>
             </select>
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              data-testid="annotate-undo"
+              title={canUndo ? `Undo ${nextUndoLabel} (⌘Z)` : 'Nothing to undo'}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Undo2 className="h-3 w-3"/> Undo
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              data-testid="annotate-redo"
+              title={canRedo ? `Redo ${nextRedoLabel} (⇧⌘Z)` : 'Nothing to redo'}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Redo2 className="h-3 w-3"/> Redo
+            </button>
             <button className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
               <MessageSquare className="h-3 w-3"/> Chat
             </button>
           </div>
         </div>
+        {undoToast && (
+          <div
+            role="status"
+            data-testid="annotate-undo-toast"
+            className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border border-indigo-200 bg-white px-3 py-1 text-[11px] text-indigo-700 shadow-md"
+          >
+            {undoToast}
+          </div>
+        )}
       </section>
     </main>
   );

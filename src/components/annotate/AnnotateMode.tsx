@@ -1,7 +1,8 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { TopBar } from "../shared/TopBar";
 import { Button } from "../shared/Button";
 import { Select } from "../shared/Select";
+import { Toast } from "../shared/Toast";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { RegionManager } from "./RegionManager";
 import { AnnotationPanel } from "./AnnotationPanel";
@@ -53,6 +54,54 @@ export function AnnotateMode() {
   const record = useAnnotationStore((s) =>
     activeSpeaker ? s.records[activeSpeaker] ?? null : null,
   );
+  const history = useAnnotationStore((s) =>
+    activeSpeaker ? s.histories[activeSpeaker] ?? null : null,
+  );
+  const undo = useAnnotationStore((s) => s.undo);
+  const redo = useAnnotationStore((s) => s.redo);
+  const canUndo = (history?.undo.length ?? 0) > 0;
+  const canRedo = (history?.redo.length ?? 0) > 0;
+  const nextUndoLabel = canUndo ? history!.undo[history!.undo.length - 1].label : "";
+  const nextRedoLabel = canRedo ? history!.redo[history!.redo.length - 1].label : "";
+  const [toast, setToast] = useState<string | null>(null);
+
+  const handleUndo = useCallback(() => {
+    if (!activeSpeaker) return;
+    const label = undo(activeSpeaker);
+    if (label) setToast(`Undid ${label}`);
+  }, [activeSpeaker, undo]);
+
+  const handleRedo = useCallback(() => {
+    if (!activeSpeaker) return;
+    const label = redo(activeSpeaker);
+    if (label) setToast(`Redid ${label}`);
+  }, [activeSpeaker, redo]);
+
+  // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y = redo. Same input-focus
+  // guard as TranscriptionLanes' S-split shortcut, so keystrokes in the inline
+  // lane editor, chat panel, etc. don't get hijacked.
+  useEffect(() => {
+    if (!activeSpeaker) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (target.isContentEditable) return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [activeSpeaker, handleUndo, handleRedo]);
 
   // Annotation sync
   useAnnotationSync();
@@ -257,6 +306,24 @@ export function AnnotateMode() {
             >
               Loop
             </Button>
+            <Button
+              size="sm"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              title={canUndo ? `Undo ${nextUndoLabel} (⌘Z)` : "Nothing to undo"}
+              data-testid="undo-btn"
+            >
+              Undo
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleRedo}
+              disabled={!canRedo}
+              title={canRedo ? `Redo ${nextRedoLabel} (⇧⌘Z)` : "Nothing to redo"}
+              data-testid="redo-btn"
+            >
+              Redo
+            </Button>
             <Select
               options={RATE_OPTIONS}
               value={String(playbackRate)}
@@ -336,6 +403,7 @@ export function AnnotateMode() {
           </div>
         </aside>
       </div>
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

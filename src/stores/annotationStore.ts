@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { AnnotationRecord, AnnotationInterval, ConfirmedAnchor } from "../api/types";
+import type {
+  AnnotationRecord,
+  AnnotationInterval,
+  ConfirmedAnchor,
+  SttSegment,
+} from "../api/types";
 import { getAnnotation, saveAnnotation } from "../api/client";
 
 /* ------------------------------------------------------------------ */
@@ -63,6 +68,78 @@ function deepClone<T>(val: T): T {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Undo/redo history (session-only, per-speaker)                      */
+/* ------------------------------------------------------------------ */
+
+// Deep-cloned pre-mutation snapshots. Session-only — never persisted, cleared
+// when a speaker record is loaded/reloaded from the backend. The `label`
+// surfaces in toasts ("Undid merge with next").
+export interface HistoryEntry {
+  snapshot: AnnotationRecord;
+  label: string;
+}
+
+export interface SpeakerHistory {
+  undo: HistoryEntry[];
+  redo: HistoryEntry[];
+}
+
+// Human-readable tier names for undo/redo labels. Surfaced verbatim in
+// toasts ("Undid text edit (IPA)"), so keep these short and matched to the
+// LANE_LABELS the user already sees in TranscriptionLanes where possible.
+// Unknown/custom tiers fall through to the raw slug, which is still readable
+// (e.g. a custom "gloss" tier shows as "Undid text edit (gloss)").
+const TIER_LABEL: Record<string, string> = {
+  ipa_phone: "Phones",
+  ipa: "IPA",
+  ortho: "ORTH",
+  ortho_words: "ORTH words",
+  stt: "STT",
+  concept: "Concept",
+  sentence: "Sentence",
+  speaker: "Speaker",
+};
+
+function tierLabel(tier: string): string {
+  return TIER_LABEL[tier] ?? tier;
+}
+
+// Max undo-stack depth per speaker. Chosen to keep snapshot memory bounded
+// for long annotation sessions on large records (a full AnnotationRecord
+// with ~5k intervals across tiers is tens of KB; 50 snapshots ≈ a few MB
+// per speaker in the worst case).
+const HISTORY_CAP = 50;
+
+function emptyHistory(): SpeakerHistory {
+  return { undo: [], redo: [] };
+}
+
+/** Build a histories delta that pushes `pre` onto the speaker's undo stack
+ * and clears redo. Called from inside every mutator with the pre-mutation
+ * record so the snapshot captures "the state we're about to leave behind".
+ * Returns a Partial<AnnotationStore> fragment ready to spread into set().
+ *
+ * Overflow behavior: when the undo stack reaches HISTORY_CAP (50), the
+ * OLDEST entry is silently dropped (FIFO eviction via `shift()`) so the
+ * most recent 50 operations stay undoable. No toast, no throw — the user
+ * simply can't Ctrl+Z past the cap. The redo stack is not capped here; it
+ * only grows via `undo()` and is naturally bounded by the undo depth. */
+function pushHistoryDelta(
+  state: { histories: Record<string, SpeakerHistory> },
+  speaker: string,
+  pre: AnnotationRecord,
+  label: string,
+): { histories: Record<string, SpeakerHistory> } {
+  const prev = state.histories[speaker] ?? emptyHistory();
+  const undo = [...prev.undo, { snapshot: deepClone(pre), label }];
+  // Drop the oldest snapshot (FIFO) once we exceed HISTORY_CAP. Only one can
+  // exceed per push since we append a single entry, so a single shift() is
+  // enough — no loop needed.
+  if (undo.length > HISTORY_CAP) undo.shift();
+  return { histories: { ...state.histories, [speaker]: { undo, redo: [] } } };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Debounced auto-save                                                */
 /* ------------------------------------------------------------------ */
 
@@ -87,6 +164,9 @@ interface AnnotationStore {
   records: Record<string, AnnotationRecord>;
   dirty: Record<string, boolean>;
   loading: Record<string, boolean>;
+  /** Per-speaker undo/redo stacks. Session-only, capped at 50 per stack.
+   * Cleared whenever a record is loaded fresh from the backend. */
+  histories: Record<string, SpeakerHistory>;
 
   loadSpeaker: (speaker: string) => Promise<void>;
   saveSpeaker: (speaker: string) => Promise<void>;
@@ -115,6 +195,11 @@ interface AnnotationStore {
     index: number,
     splitTime: number,
   ) => void;
+  /** One-time migration: copy the API-cached STT segments for `speaker`
+   * into `record.tiers.stt` so STT intervals become first-class editable
+   * entries (same affordances as IPA/ORTH). No-op if the tier already has
+   * entries. Called lazily on first STT double-click / right-click. */
+  ensureSttTier: (speaker: string, segments: SttSegment[]) => void;
   /** Persist a confirmed lexical anchor for a concept on this speaker.
    * Lives in the `confirmed_anchors` sidecar, NOT in any tier — keeps
    * Praat round-trips clean. Pass `null` to clear an existing anchor. */
@@ -150,12 +235,20 @@ interface AnnotationStore {
     start: number,
     end: number,
   ) => number;
+
+  /** Pop the most recent undo entry for `speaker`, restore that snapshot,
+   * and push the current state onto the redo stack. Returns the label of
+   * the undone op (for a toast) or `null` if nothing to undo. */
+  undo: (speaker: string) => string | null;
+  /** Symmetric to `undo`. */
+  redo: (speaker: string) => string | null;
 }
 
 export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
   records: {},
   dirty: {},
   loading: {},
+  histories: {},
 
   loadSpeaker: async (speaker: string) => {
     const state = get();
@@ -169,6 +262,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
         records: { ...s.records, [speaker]: record },
         dirty: { ...s.dirty, [speaker]: false },
         loading: { ...s.loading, [speaker]: false },
+        histories: { ...s.histories, [speaker]: emptyHistory() },
       }));
     } catch {
       // API failed — try localStorage fallback
@@ -188,6 +282,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
         records: { ...s.records, [speaker]: record },
         dirty: { ...s.dirty, [speaker]: false },
         loading: { ...s.loading, [speaker]: false },
+        histories: { ...s.histories, [speaker]: emptyHistory() },
       }));
     }
   },
@@ -213,8 +308,8 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (interval.end < interval.start) return;
 
     const state = get();
-    const record = state.records[speaker] ?? blankRecord(speaker);
-    const clone = deepClone(record);
+    const pre = state.records[speaker] ?? blankRecord(speaker);
+    const clone = deepClone(pre);
 
     if (!clone.tiers[tier]) {
       const maxOrder = Math.max(0, ...Object.values(clone.tiers).map((t) => t.display_order));
@@ -233,6 +328,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `save ${tierLabel(tier)} segment`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -241,16 +337,17 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
   updateInterval: (speaker: string, tier: string, index: number, text: string) => {
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return;
-    if (!record.tiers[tier]) return;
-    if (index < 0 || index >= record.tiers[tier].intervals.length) return;
+    const pre = state.records[speaker];
+    if (!pre) return;
+    if (!pre.tiers[tier]) return;
+    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     clone.tiers[tier].intervals[index].text = text;
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `text edit (${tierLabel(tier)})`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -262,10 +359,10 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (interval.end < interval.start) return;
 
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return;
+    const pre = state.records[speaker];
+    if (!pre) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
 
     if (!clone.tiers[tier]) {
       const maxOrder = Math.max(
@@ -284,6 +381,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `add ${tierLabel(tier)} segment`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -292,16 +390,17 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
   removeInterval: (speaker: string, tier: string, index: number) => {
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return;
-    if (!record.tiers[tier]) return;
-    if (index < 0 || index >= record.tiers[tier].intervals.length) return;
+    const pre = state.records[speaker];
+    if (!pre) return;
+    if (!pre.tiers[tier]) return;
+    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     clone.tiers[tier].intervals.splice(index, 1);
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `delete ${tierLabel(tier)} segment`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -313,11 +412,11 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (end < start) return;
 
     const state = get();
-    const record = state.records[speaker];
-    if (!record?.tiers[tier]) return;
-    if (index < 0 || index >= record.tiers[tier].intervals.length) return;
+    const pre = state.records[speaker];
+    if (!pre?.tiers[tier]) return;
+    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     const target = clone.tiers[tier].intervals[index];
     clone.tiers[tier].intervals[index] = {
       ...target,
@@ -329,6 +428,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `retime ${tierLabel(tier)} segment`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -337,9 +437,9 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
   mergeIntervals: (speaker, tier, index) => {
     const state = get();
-    const record = state.records[speaker];
-    if (!record?.tiers[tier]) return;
-    const intervals = record.tiers[tier].intervals;
+    const pre = state.records[speaker];
+    if (!pre?.tiers[tier]) return;
+    const intervals = pre.tiers[tier].intervals;
     if (index < 0 || index >= intervals.length - 1) return;
 
     const left = intervals[index];
@@ -349,7 +449,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       .filter(Boolean)
       .join(" ");
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     clone.tiers[tier].intervals.splice(index, 2, {
       start: left.start,
       end: right.end,
@@ -358,6 +458,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `merge with next (${tierLabel(tier)})`),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -367,16 +468,16 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
   splitInterval: (speaker, tier, index, splitTime) => {
     if (!Number.isFinite(splitTime)) return;
     const state = get();
-    const record = state.records[speaker];
-    if (!record?.tiers[tier]) return;
-    const intervals = record.tiers[tier].intervals;
+    const pre = state.records[speaker];
+    if (!pre?.tiers[tier]) return;
+    const intervals = pre.tiers[tier].intervals;
     if (index < 0 || index >= intervals.length) return;
 
     const target = intervals[index];
     const tol = 0.001;
     if (splitTime <= target.start + tol || splitTime >= target.end - tol) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     clone.tiers[tier].intervals.splice(
       index,
       1,
@@ -386,6 +487,42 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, `split (${tierLabel(tier)})`),
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  ensureSttTier: (speaker, segments) => {
+    const state = get();
+    const pre = state.records[speaker];
+    if (!pre) return;
+    // Idempotent: if the tier already has entries, nothing to migrate.
+    if ((pre.tiers.stt?.intervals.length ?? 0) > 0) return;
+    if (!Array.isArray(segments) || segments.length === 0) return;
+
+    const clone = deepClone(pre);
+    if (!clone.tiers.stt) {
+      clone.tiers.stt = {
+        name: "stt",
+        display_order: CANONICAL_TIER_ORDER.stt,
+        intervals: [],
+      };
+    }
+    // Preserve caller order (STT segments arrive sorted from the API). Copy
+    // all segments verbatim — empty-text segments are filtered at render
+    // time, not here, so indices stay stable for the "edit the segment I
+    // just double-clicked" flow.
+    clone.tiers.stt.intervals = segments.map((s) => ({
+      start: s.start,
+      end: s.end,
+      text: s.text,
+    }));
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, "enable STT editing"),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -394,10 +531,10 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
   setConfirmedAnchor: (speaker, conceptId, anchor) => {
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return;
+    const pre = state.records[speaker];
+    if (!pre) return;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     const existing = { ...(clone.confirmed_anchors ?? {}) };
     const key = String(conceptId);
     if (anchor === null) {
@@ -409,6 +546,12 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(
+        s,
+        speaker,
+        pre,
+        anchor === null ? "clear concept anchor" : "confirm concept anchor",
+      ),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -420,10 +563,10 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (newEnd < newStart) return 0;
 
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return 0;
+    const pre = state.records[speaker];
+    if (!pre) return 0;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     const tol = 0.001;
     let moved = 0;
     for (const tier of Object.values(clone.tiers)) {
@@ -444,6 +587,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, "retime lexeme"),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
@@ -455,10 +599,10 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
 
     const state = get();
-    const record = state.records[speaker];
-    if (!record) return 0;
+    const pre = state.records[speaker];
+    if (!pre) return 0;
 
-    const clone = deepClone(record);
+    const clone = deepClone(pre);
     const tol = 0.001;
     let flagged = 0;
     for (const tier of Object.values(clone.tiers)) {
@@ -476,10 +620,63 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, "mark lexeme manually adjusted"),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
     return flagged;
+  },
+
+  undo: (speaker) => {
+    const state = get();
+    const hist = state.histories[speaker];
+    const current = state.records[speaker];
+    if (!hist || hist.undo.length === 0 || !current) return null;
+
+    const entry = hist.undo[hist.undo.length - 1];
+    const nextUndo = hist.undo.slice(0, -1);
+    // Symmetric: pushing the pre-undo record onto redo lets redo put it back.
+    // Reuse the label so the toast reads the same action either direction.
+    const nextRedo = [
+      ...hist.redo,
+      { snapshot: deepClone(current), label: entry.label },
+    ];
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: entry.snapshot },
+      dirty: { ...s.dirty, [speaker]: true },
+      histories: {
+        ...s.histories,
+        [speaker]: { undo: nextUndo, redo: nextRedo },
+      },
+    }));
+    scheduleAutosave(speaker);
+    return entry.label;
+  },
+
+  redo: (speaker) => {
+    const state = get();
+    const hist = state.histories[speaker];
+    const current = state.records[speaker];
+    if (!hist || hist.redo.length === 0 || !current) return null;
+
+    const entry = hist.redo[hist.redo.length - 1];
+    const nextRedo = hist.redo.slice(0, -1);
+    const nextUndo = [
+      ...hist.undo,
+      { snapshot: deepClone(current), label: entry.label },
+    ];
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: entry.snapshot },
+      dirty: { ...s.dirty, [speaker]: true },
+      histories: {
+        ...s.histories,
+        [speaker]: { undo: nextUndo, redo: nextRedo },
+      },
+    }));
+    scheduleAutosave(speaker);
+    return entry.label;
   },
 }));
