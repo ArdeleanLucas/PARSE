@@ -22,6 +22,7 @@ Library API:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 from dataclasses import dataclass
@@ -185,7 +186,13 @@ def transcribe_words_with_forced_align(
     seg_list = list(segments)
     word_intervals: List[IntervalSpec] = []
 
-    # Tier 2: forced alignment in batches to bound peak GPU memory
+    # Tier 2: forced alignment in batches to bound peak GPU memory.
+    # Report progress after each batch so long Tier 2 runs (Fail02-scale
+    # speakers can be minutes per batch on CPU) don't look stuck at 0%.
+    # Tier 2 occupies the 0-50% range; Tier 3 picks up at 50%.
+    tier2_total_words = sum(len(s.get("words") or []) for s in seg_list)
+    tier2_words_done = 0
+
     for batch_start in range(0, len(seg_list), segment_batch_size):
         batch = seg_list[batch_start: batch_start + segment_batch_size]
         aligned_batch = _align_segments(
@@ -202,12 +209,27 @@ def transcribe_words_with_forced_align(
                 e = float(word.get("end", 0.0) or 0.0)
                 if e > s:
                     word_intervals.append(IntervalSpec(start=s, end=e))
+        # Count every word in the batch (aligned or not) so the progress
+        # counter advances monotonically even when some words fall through
+        # to proportional fallback.
+        tier2_words_done += sum(len(s.get("words") or []) for s in batch)
+        if progress_callback is not None:
+            try:
+                pct = (tier2_words_done / float(max(1, tier2_total_words))) * 50.0
+                progress_callback(pct, tier2_words_done)
+            except Exception:
+                pass
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
             pass
+        # Force a GC cycle between batches to reclaim the Tier 2 tensors
+        # (CTC logits, forced_align outputs, phonemizer temporaries).
+        # Python's generational GC lags significantly inside a tight
+        # tensor loop, compounding the memory pressure seen on Fail02.
+        gc.collect()
 
     if not word_intervals:
         # No words produced — fall back to segment-level coarse transcription
@@ -244,7 +266,9 @@ def transcribe_words_with_forced_align(
             out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
             if progress_callback is not None:
                 try:
-                    progress_callback((global_idx + 1) / float(total) * 100.0, global_idx + 1)
+                    # Tier 3 occupies the 50-100% range (Tier 2 took 0-50%).
+                    pct = 50.0 + (global_idx + 1) / float(total) * 50.0
+                    progress_callback(pct, global_idx + 1)
                 except Exception:
                     pass
         _gpu_cleanup()
