@@ -6,21 +6,20 @@ Future improvements to make PARSE a first-class citizen in agent-driven workflow
 
 ## 1. Expose all 47 ParseChatTools via MCP
 
-**Currently:** 47 internal tools power the chat dock; only 29 are exposed to external agents.
+**Status:** ✅ Complete
 
-**What to do:** Make the remaining ~18 tools available through the MCP server — priority: write/edit/pipeline tools.
-
-**Why it matters:** Agents (Claude, Cursor, custom Grok agents) are artificially limited today. Full exposure unlocks autonomous end-to-end workflows:
-
-```
-STT → alignment → IPA → Compare mode → LingPy export
-```
-
-**Bonus:** Add an opt-in flag in `mcp_config.json`:
+**Shipped:**
+- `python/adapters/mcp_adapter.py` now exposes the legacy **29-tool** surface by default.
+- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface:
 
 ```json
 { "expose_all_tools": true }
 ```
+
+**Notes:**
+- Default behavior is unchanged for existing MCP clients.
+- The internal chat dock still uses `ParseChatTools` directly; this task only changes MCP exposure.
+- Newly exposed tools include the missing write/export/pipeline helpers such as normalize, enrichments, lexeme notes, exports, peaks, source-index validation, and transcript reformatting.
 
 ---
 

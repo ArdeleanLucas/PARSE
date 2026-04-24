@@ -23,6 +23,12 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
     - `POST /api/compute/contact-lexemes`
     - `GET /api/contact-lexemes/coverage`
 
+## MCP adapter note
+
+- `python/adapters/mcp_adapter.py` now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
+- Default remains the legacy 29-tool MCP surface; enabling the flag exposes all 47 `ParseChatTools` wrappers for external MCP clients.
+- For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
+
 ## Client/Server Contract Surface
 
 All `src/api/client.ts` helpers have matching routes in `python/server.py`:

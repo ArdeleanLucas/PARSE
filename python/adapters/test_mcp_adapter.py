@@ -99,6 +99,76 @@ def test_every_mcp_tool_is_allowlisted_in_parse_chat_tools(tmp_path) -> None:
     )
 
 
+def test_parse_chat_tools_get_all_tool_names_matches_instance(tmp_path) -> None:
+    instance_names = ParseChatTools(project_root=tmp_path).tool_names()
+    assert ParseChatTools.get_all_tool_names() == instance_names
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_defaults_to_29_tools_without_config(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    server = create_mcp_server(str(tmp_path))
+    mcp_tools = asyncio.run(server.list_tools())
+
+    assert len(mcp_tools) == 29
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "mcp_config.json").write_text(
+        '{"expose_all_tools": true}\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    server = create_mcp_server(str(tmp_path))
+    mcp_tools = asyncio.run(server.list_tools())
+
+    assert len(mcp_tools) == 47
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_exposes_all_47_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    (tmp_path / "mcp_config.json").write_text(
+        '{"expose_all_tools": true}\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    server = create_mcp_server(str(tmp_path))
+    mcp_tools = asyncio.run(server.list_tools())
+
+    assert len(mcp_tools) == 47
+
+
+def test_load_mcp_config_rejects_non_boolean_expose_all_tools(tmp_path) -> None:
+    from adapters import mcp_adapter
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "mcp_config.json").write_text(
+        '{"expose_all_tools": "false"}\n',
+        encoding="utf-8",
+    )
+
+    config = mcp_adapter._load_mcp_config(tmp_path)
+    assert config["expose_all_tools"] is False
+
+
 def test_resolve_onboard_http_timeout_scales_for_large_files(monkeypatch) -> None:
     from adapters import mcp_adapter
 

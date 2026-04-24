@@ -1618,6 +1618,11 @@ class ParseChatTools:
         """Return sorted tool names in allowlist."""
         return sorted(self._tool_specs.keys())
 
+    @classmethod
+    def get_all_tool_names(cls) -> List[str]:
+        """Return the full built-in ParseChatTools surface without caller setup."""
+        return cls(project_root=Path.cwd()).tool_names()
+
     def _finalize_read_only_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         result = _deepcopy_jsonable(payload)
         result["mode"] = "read-only"
