@@ -45,7 +45,8 @@ import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ClefConfigModal } from './components/compute/ClefConfigModal';
-import { getClefConfig } from './api/client';
+import { getClefConfig, getContactLexemeCoverage } from './api/client';
+import type { ClefConfigStatus } from './api/types';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type AppMode = 'annotate' | 'compare' | 'tags';
@@ -282,14 +283,61 @@ function parseReferenceForm(raw: unknown): ReferenceFormDisplay {
   };
 }
 
-function resolveReferenceForms(enrichments: Record<string, unknown>, concept: Concept) {
+/** Resolve reference forms for a concept across a dynamic set of language
+ *  codes (driven by the user's CLEF primary_contact_languages). Checks the
+ *  enrichments.reference_forms map first; falls back to the per-workspace
+ *  SIL contact-language config (what `Save & populate` writes into) so the
+ *  cards surface real data regardless of which store the fetcher wrote to. */
+function resolveReferenceForms(
+  enrichments: Record<string, unknown>,
+  silConcepts: Record<string, Record<string, unknown>>,
+  concept: Concept,
+  codes: string[],
+): Record<string, ReferenceFormDisplay> {
   const root = isRecord(enrichments.reference_forms) ? enrichments.reference_forms as Record<string, unknown> : null;
   const conceptEntry = root ? root[concept.key] ?? root[concept.name] : null;
   const conceptRecord = isRecord(conceptEntry) ? conceptEntry : {};
 
+  const out: Record<string, ReferenceFormDisplay> = {};
+  for (const code of codes) {
+    const primary = parseReferenceForm(conceptRecord[code]);
+    if (primary.available) {
+      out[code] = primary;
+      continue;
+    }
+    // SIL config stores forms as {concept_en: [ipa, ...]} keyed by
+    // language code. parseReferenceForm already handles string / array /
+    // object shapes so we can pass the value straight through.
+    const silForConcept = silConcepts[code]?.[concept.name];
+    out[code] = parseReferenceForm(silForConcept);
+  }
+  return out;
+}
+
+/** Map a language code to a display tone + text direction for the
+ *  Reference Forms cards. Known RTL scripts get `dir="rtl"`; the tone
+ *  cycles over a short palette so two configured primaries always look
+ *  distinct. Falls back to a neutral tone + LTR for anything we don't
+ *  recognise -- good enough until the catalog ships script metadata. */
+const RTL_CODES = new Set([
+  "ar", "arc", "ara",
+  "fa", "pes", "prs",
+  "he", "heb",
+  "ur", "urd",
+  "ckb", "sdh", "sor",
+  "ps", "pus", "pbt",
+  "syr",
+]);
+const CARD_TONES = [
+  "text-rose-500",
+  "text-indigo-500",
+  "text-emerald-500",
+  "text-amber-600",
+];
+function referenceCardStyle(code: string, idx: number): { tone: string; dir: "ltr" | "rtl" } {
   return {
-    arabic: parseReferenceForm(conceptRecord.ar ?? conceptRecord.arabic),
-    persian: parseReferenceForm(conceptRecord.fa ?? conceptRecord.persian),
+    tone: CARD_TONES[idx % CARD_TONES.length],
+    dir: RTL_CODES.has(code.toLowerCase()) ? "rtl" : "ltr",
   };
 }
 
@@ -1904,24 +1952,61 @@ export function ParseUI() {
   const [computeMode, setComputeMode] = useState('cognates');
   const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
   const [clefModalOpen, setClefModalOpen] = useState(false);
-  // Cache of CLEF "configured" state so we can route the Run button without
-  // an extra round-trip on every click. Re-fetched on mount + after save.
-  const [clefConfigured, setClefConfigured] = useState<boolean | null>(null);
+  // Full CLEF status so the Reference Forms section can render exactly
+  // the user's configured primary languages (not a hardcoded Arabic +
+  // Persian pair). `null` means "not yet loaded" so the UI can render a
+  // neutral placeholder instead of flashing the configured branch.
+  const [clefStatus, setClefStatus] = useState<ClefConfigStatus | null>(null);
+  // Coverage cache — {[code]: {[concept_en]: string[]}} — so the
+  // Reference Forms cards can surface forms the user just populated via
+  // "Save & populate" without waiting for a full enrichments recompute.
+  const [silConcepts, setSilConcepts] = useState<Record<string, Record<string, unknown>>>({});
+
+  const clefConfigured = clefStatus
+    ? clefStatus.configured && (clefStatus.primary_contact_languages?.length ?? 0) > 0
+    : null;
+  const primaryContactCodes = useMemo(
+    () => (clefStatus?.primary_contact_languages ?? []).map((c) => c.toLowerCase()),
+    [clefStatus],
+  );
+  const contactLanguageNames = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const entry of clefStatus?.languages ?? []) {
+      out[entry.code] = entry.name;
+    }
+    return out;
+  }, [clefStatus]);
 
   const refreshClefStatus = useCallback(async () => {
     try {
-      const s = await getClefConfig();
-      setClefConfigured(s.configured);
+      const [s, coverage] = await Promise.all([
+        getClefConfig(),
+        getContactLexemeCoverage().catch(() => ({ languages: {} as Record<string, { concepts: Record<string, unknown> }> })),
+      ]);
+      setClefStatus(s);
+      const next: Record<string, Record<string, unknown>> = {};
+      for (const [code, lang] of Object.entries(coverage.languages ?? {})) {
+        next[code] = lang.concepts ?? {};
+      }
+      setSilConcepts(next);
     } catch {
-      setClefConfigured(false);
+      setClefStatus({
+        configured: false,
+        primary_contact_languages: [],
+        languages: [],
+        config_path: "",
+        concepts_csv_exists: false,
+        meta: {},
+      });
+      setSilConcepts({});
     }
   }, []);
 
+  // Load CLEF status once on mount so the Reference Forms gate decides
+  // correctly on first render (not only when the user clicks Compute).
   useEffect(() => {
-    if (computeMode === 'contact-lexemes' && clefConfigured === null) {
-      void refreshClefStatus();
-    }
-  }, [computeMode, clefConfigured, refreshClefStatus]);
+    void refreshClefStatus();
+  }, [refreshClefStatus]);
 
   const handleComputeRun = useCallback(() => {
     if (computeMode === 'contact-lexemes' && clefConfigured !== true) {
@@ -2168,11 +2253,20 @@ export function ParseUI() {
     });
   };
 
+  // Single source of truth for the contact-lexemes / CLEF populate job in
+  // the header. Both the "Run Cross-Speaker Match" button (kept for the
+  // legacy compute path) and the CLEF configure modal's Save & populate
+  // action flow through this hook: the modal starts the job, then ParseUI
+  // calls `adopt()` so the header's running-process chip picks it up and
+  // behaves exactly like STT / forced-align / the batch pipeline.
   const crossSpeakerJob = useActionJob({
     start: () => startCompute('contact-lexemes'),
     poll: (id) => pollCompute('contact-lexemes', id),
-    label: 'Matching cross-speaker…',
-    onComplete: loadEnrichments,
+    label: 'Populating CLEF reference data…',
+    onComplete: async () => {
+      await loadEnrichments();
+      await refreshClefStatus();
+    },
   });
 
   const activeJobs = crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : [];
@@ -2684,8 +2778,8 @@ export function ParseUI() {
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceForms = useMemo(
-    () => resolveReferenceForms(enrichmentData, concept),
-    [concept, enrichmentData],
+    () => resolveReferenceForms(enrichmentData, silConcepts, concept, primaryContactCodes),
+    [concept, enrichmentData, silConcepts, primaryContactCodes],
   );
   const borrowingCandidates = useMemo<unknown>(() => {
     const borrowingRoot = isRecord(enrichmentData.borrowings) ? enrichmentData.borrowings
@@ -3450,38 +3544,51 @@ export function ParseUI() {
                 </div>
               </div>
 
-              <SectionCard title="Reference forms">
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: 'Arabic', tone: 'text-rose-500', dir: 'rtl' as const, data: referenceForms.arabic },
-                    { label: 'Persian', tone: 'text-indigo-500', dir: 'rtl' as const, data: referenceForms.persian },
-                  ].map((entry) => (
-                    <div key={entry.label} className="rounded-lg border border-slate-100 bg-slate-50/40 p-4">
-                      <div className="flex items-center justify-between">
-                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${entry.tone}`}>{entry.label}</span>
-                        <button
-                          title={entry.data.audioUrl ? `Play ${entry.label} reference audio` : 'Reference audio not available'}
-                          onClick={() => {
-                            if (!entry.data.audioUrl) return;
-                            void new Audio(entry.data.audioUrl).play().catch(() => {});
-                          }}
-                          className="text-slate-300 hover:text-slate-500"
-                        >
-                          <Volume2 className="h-3.5 w-3.5"/>
-                        </button>
-                      </div>
-                      {entry.data.available ? (
-                        <>
-                          <div className="mt-2 font-serif text-2xl text-slate-900" dir={entry.dir}>{entry.data.script || '—'}</div>
-                          <div className="mt-1 font-mono text-[11px] text-slate-400">/{entry.data.ipa || '—'}/</div>
-                        </>
-                      ) : (
-                        <div className="mt-2 text-sm text-slate-400">No reference data</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </SectionCard>
+              {/* Reference forms — gated on the user's CLEF configuration.
+                  Hidden entirely when no primary contact languages are
+                  set; renders exactly one card per configured primary
+                  otherwise. The data source falls back from enrichments
+                  to the SIL contact-language config so forms surface as
+                  soon as "Save & populate" finishes, not only after a
+                  full enrichments recompute. */}
+              {primaryContactCodes.length > 0 && (
+                <SectionCard title="Reference forms">
+                  <div className={`grid gap-4 ${primaryContactCodes.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    {primaryContactCodes.map((code, idx) => {
+                      const { tone, dir } = referenceCardStyle(code, idx);
+                      const label = contactLanguageNames[code] ?? code.toUpperCase();
+                      const data = referenceForms[code] ?? { script: '', ipa: '', audioUrl: null, available: false };
+                      return (
+                        <div key={code} className="rounded-lg border border-slate-100 bg-slate-50/40 p-4" data-testid={`reference-form-${code}`}>
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[10px] font-semibold uppercase tracking-wider ${tone}`}>
+                              {label} <span className="ml-1 font-mono text-slate-300">({code})</span>
+                            </span>
+                            <button
+                              title={data.audioUrl ? `Play ${label} reference audio` : 'Reference audio not available'}
+                              onClick={() => {
+                                if (!data.audioUrl) return;
+                                void new Audio(data.audioUrl).play().catch(() => {});
+                              }}
+                              className="text-slate-300 hover:text-slate-500"
+                            >
+                              <Volume2 className="h-3.5 w-3.5"/>
+                            </button>
+                          </div>
+                          {data.available ? (
+                            <>
+                              <div className="mt-2 font-serif text-2xl text-slate-900" dir={dir}>{data.script || '—'}</div>
+                              <div className="mt-1 font-mono text-[11px] text-slate-400">/{data.ipa || '—'}/</div>
+                            </>
+                          ) : (
+                            <div className="mt-2 text-sm text-slate-400">No reference data</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </SectionCard>
+              )}
 
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
@@ -4086,13 +4193,22 @@ export function ParseUI() {
       <ClefConfigModal
         open={clefModalOpen}
         onClose={() => setClefModalOpen(false)}
-        onSaved={(_primary, populated) => {
-          setClefConfigured(true);
-          if (populated) {
-            void useEnrichmentStore.getState().load();
-          } else {
-            void startComputeJob();
-          }
+        onSaved={() => {
+          // Save-only (no populate): just refresh our cached CLEF status
+          // so the Reference Forms panel re-renders with the new primary
+          // languages. No compute job is started here — the modal's
+          // "Save & populate" button is the only path that triggers work.
+          void refreshClefStatus();
+        }}
+        onPopulateStarted={(jobId) => {
+          // Hand the running contact-lexemes job to crossSpeakerJob so it
+          // surfaces in the global header chip just like STT / IPA /
+          // forced-align / full_pipeline. The onComplete hook on
+          // crossSpeakerJob will reload enrichments + CLEF status when
+          // the backend finishes, so the Reference Forms cards populate
+          // automatically without a manual refresh.
+          void refreshClefStatus();
+          crossSpeakerJob.adopt(jobId);
         }}
       />
       <Modal

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { X, Search, Info, Check, AlertCircle, Play, Loader2 } from "lucide-react";
 import {
   getClefCatalog,
   getClefConfig,
   getClefProviders,
-  pollCompute,
   saveClefConfig,
   startContactLexemeFetch,
 } from "../../api/client";
@@ -13,16 +12,24 @@ import type { ClefCatalogEntry, ClefConfigStatus, ClefProviderEntry } from "../.
 interface ClefConfigModalProps {
   open: boolean;
   onClose: () => void;
-  /** Fired after a successful save + optional populate so the parent can
-   *  trigger the actual compute job if the user wanted "Save & Run". */
-  onSaved?: (primary: string[], populateFinished: boolean) => void;
+  /** Fired after the config is persisted. The parent uses this to refresh
+   *  its cached CLEF status so the Reference Forms panel re-renders with
+   *  the new primary languages. */
+  onSaved?: (primary: string[]) => void;
+  /** Fired when the user picks "Save & populate" and the backend has
+   *  accepted the compute job. The parent should hand the jobId to its
+   *  header-tracked action-job hook via `.adopt(jobId)` so the running
+   *  process appears in the global header exactly like STT / IPA / the
+   *  batch pipeline. The modal closes immediately after this fires; it
+   *  does not poll the job itself. */
+  onPopulateStarted?: (jobId: string) => void;
 }
 
 type Tab = "languages" | "populate";
 
 const MAX_PRIMARY = 2;
 
-export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps) {
+export function ClefConfigModal({ open, onClose, onSaved, onPopulateStarted }: ClefConfigModalProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,15 +48,15 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
 
-  const [populating, setPopulating] = useState(false);
-  const [populateProgress, setPopulateProgress] = useState(0);
-  const [populateMessage, setPopulateMessage] = useState("");
+  // The modal no longer polls the populate job locally — the global
+  // header takes over once onPopulateStarted fires. The shared `saving`
+  // flag (declared above) covers the entire save→startJob→close window,
+  // so no separate "populating" state is needed.
   /** Set when populate fails so the UI can switch the primary button from
    *  "Save & populate" to "Retry populate" without throwing away the
    *  user's language picks. Cleared on successful populate or when they
    *  plain-save without populate. */
   const [populateFailed, setPopulateFailed] = useState(false);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightIdx, setHighlightIdx] = useState(0);
 
   const allLanguages = useMemo(() => {
@@ -103,12 +110,6 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
       cancelled = true;
     };
   }, [open]);
-
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-    };
-  }, []);
 
   const togglePrimary = useCallback((code: string) => {
     setPrimary((prev) => {
@@ -170,15 +171,15 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
       setPopulateFailed(false);
       try {
         await saveClefConfig(buildPayload());
+        onSaved?.(primary);
         if (!runPopulate) {
-          onSaved?.(primary, false);
           onClose();
           return;
         }
-        // Kick off the fetcher for the selected primary languages.
-        setPopulating(true);
-        setPopulateProgress(0);
-        setPopulateMessage("Starting…");
+        // Kick off the fetcher for the selected primary languages and
+        // hand the jobId up to the parent -- the global header takes
+        // over progress display from here, matching the UX of other
+        // long-running jobs (STT, forced-align, full pipeline).
         const job = await startContactLexemeFetch({
           languages: primary,
           providers: selectedProviders.size > 0 ? Array.from(selectedProviders) : undefined,
@@ -186,30 +187,8 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
         });
         const id = job.jobId || job.job_id || "";
         if (!id) throw new Error("No job id returned");
-        const poll = async () => {
-          try {
-            const s = await pollCompute("contact-lexemes", id);
-            setPopulateProgress(s.progress ?? 0);
-            setPopulateMessage(s.message ?? "");
-            if (["done", "complete", "error", "failed"].includes(s.status)) {
-              setPopulating(false);
-              if (s.status === "error" || s.status === "failed") {
-                setError(s.error ?? s.message ?? "Populate failed");
-                setPopulateFailed(true);
-              } else {
-                onSaved?.(primary, true);
-                onClose();
-              }
-              return;
-            }
-            pollTimerRef.current = setTimeout(poll, 1500);
-          } catch (e) {
-            setPopulating(false);
-            setError(e instanceof Error ? e.message : "Polling failed");
-            setPopulateFailed(true);
-          }
-        };
-        pollTimerRef.current = setTimeout(poll, 1000);
+        onPopulateStarted?.(id);
+        onClose();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Save failed");
         if (runPopulate) setPopulateFailed(true);
@@ -217,7 +196,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
         setSaving(false);
       }
     },
-    [primary, buildPayload, selectedProviders, overwrite, onSaved, onClose],
+    [primary, buildPayload, selectedProviders, overwrite, onSaved, onPopulateStarted, onClose],
   );
 
   const applyDefaults = useCallback(() => {
@@ -253,7 +232,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
   useEffect(() => {
     if (!open) return;
     function handle(e: KeyboardEvent) {
-      if (populating) return;
+      if (saving) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
@@ -261,7 +240,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
     }
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [open, populating, onClose]);
+  }, [open, saving, onClose]);
 
   // Reset highlight when the filtered list changes size so we never land
   // on a stale out-of-range index.
@@ -274,7 +253,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-      onClick={populating ? undefined : onClose}
+      onClick={saving ? undefined : onClose}
     >
       <div
         className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl"
@@ -291,7 +270,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
           </div>
           <button
             onClick={onClose}
-            disabled={populating}
+            disabled={saving}
             className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30"
             aria-label="Close"
           >
@@ -573,19 +552,10 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
                 Overwrite existing forms
               </label>
 
-              {populating && (
-                <div className="rounded border border-indigo-200 bg-indigo-50 p-3">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold text-indigo-800">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Populating… {Math.round(populateProgress)}%
-                  </div>
-                  <div className="mt-1 text-[10px] text-indigo-700">{populateMessage}</div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded bg-indigo-100">
-                    <div
-                      className="h-full bg-indigo-600 transition-all"
-                      style={{ width: `${populateProgress}%` }}
-                    />
-                  </div>
+              {saving && (
+                <div className="flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 p-3 text-[11px] font-semibold text-indigo-800">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Dispatching job… live progress will appear in the app header.
                 </div>
               )}
             </div>
@@ -599,7 +569,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
           </span>
           <button
             onClick={applyDefaults}
-            disabled={populating || saving}
+            disabled={saving}
             className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
             title="Preselect a sensible starter pair (English + Spanish). You can still edit before saving."
           >
@@ -607,7 +577,7 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
           </button>
           <button
             onClick={onClose}
-            disabled={populating}
+            disabled={saving}
             className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
             title="Close without configuring. The Run button will reopen this modal next time."
           >
@@ -615,14 +585,14 @@ export function ClefConfigModal({ open, onClose, onSaved }: ClefConfigModalProps
           </button>
           <button
             onClick={() => handleSave(false)}
-            disabled={saving || populating || primary.length === 0}
+            disabled={saving || primary.length === 0}
             className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
           >
             Save
           </button>
           <button
             onClick={() => handleSave(true)}
-            disabled={saving || populating || primary.length === 0}
+            disabled={saving || primary.length === 0}
             className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
           >
             <Play className="h-3 w-3" /> {populateFailed ? "Retry populate" : "Save & populate"}

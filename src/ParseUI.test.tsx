@@ -159,6 +159,28 @@ vi.mock("./stores/uiStore", () => ({
     }),
 }));
 
+// Per-test overrides for the CLEF endpoints. Defaults to "not configured"
+// so the Reference Forms section stays hidden (the production gate). The
+// two reference-forms tests flip these to the configured state.
+let mockClefConfig: {
+  configured: boolean;
+  primary_contact_languages: string[];
+  languages: Array<{ code: string; name: string; family?: string | null; filled?: number; total?: number }>;
+  config_path: string;
+  concepts_csv_exists: boolean;
+  meta: Record<string, unknown>;
+} = {
+  configured: false,
+  primary_contact_languages: [],
+  languages: [],
+  config_path: "",
+  concepts_csv_exists: false,
+  meta: {},
+};
+let mockCoverage: { languages: Record<string, { name: string; total: number; filled: number; empty: number; concepts: Record<string, string[]> }> } = {
+  languages: {},
+};
+
 vi.mock("./api/client", () => ({
   getLingPyExport: vi.fn().mockResolvedValue(''),
   saveApiKey: vi.fn().mockResolvedValue(undefined),
@@ -171,6 +193,8 @@ vi.mock("./api/client", () => ({
   pollSTT: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollNormalize: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollCompute: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+  getClefConfig: vi.fn(() => Promise.resolve(mockClefConfig)),
+  getContactLexemeCoverage: vi.fn(() => Promise.resolve(mockCoverage)),
 }));
 
 import { ParseUI } from "./ParseUI";
@@ -211,6 +235,17 @@ async function switchToAnnotateMode() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // Default every test to "CLEF not configured" so the Reference Forms
+  // gate stays closed unless the test opts into the configured state.
+  mockClefConfig = {
+    configured: false,
+    primary_contact_languages: [],
+    languages: [],
+    config_path: "",
+    concepts_csv_exists: false,
+    meta: {},
+  };
+  mockCoverage = { languages: {} };
   mockConfig = {
     project_name: "PARSE",
     language_code: "ku",
@@ -408,7 +443,21 @@ describe("ParseUI", () => {
     expect(mockScrollToTimeAtFraction).toHaveBeenCalledWith(5, 0.33);
   });
 
-  it("renders compare reference forms from enrichment data", () => {
+  it("renders compare reference forms from enrichment data", async () => {
+    // Opt into CLEF-configured state so the Reference Forms section
+    // actually renders. The gate hides the whole section when
+    // primary_contact_languages is empty.
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ["ar", "fa"],
+      languages: [
+        { code: "ar", name: "Arabic" },
+        { code: "fa", name: "Persian" },
+      ],
+      config_path: "",
+      concepts_csv_exists: true,
+      meta: {},
+    };
     mockEnrichmentData = {
       reference_forms: {
         "1": {
@@ -420,7 +469,7 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    expect(screen.getByText("ماء")).toBeTruthy();
+    expect(await screen.findByText("ماء")).toBeTruthy();
     expect(screen.getByText("/maːʔ/")).toBeTruthy();
     expect(screen.getByText("آب")).toBeTruthy();
     expect(screen.getByText("/ɒːb/")).toBeTruthy();
@@ -599,9 +648,30 @@ describe("ParseUI", () => {
     expect(screen.queryByText(/\*\*Cannot import speakers/i)).toBeNull();
   });
 
-  it("shows a reference placeholder when enrichmentStore has no reference forms", () => {
+  it("shows a reference placeholder for configured languages with no data", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ["ar", "fa"],
+      languages: [
+        { code: "ar", name: "Arabic" },
+        { code: "fa", name: "Persian" },
+      ],
+      config_path: "",
+      concepts_csv_exists: true,
+      meta: {},
+    };
     render(<ParseUI />);
-    expect(screen.getAllByText("No reference data").length).toBeGreaterThanOrEqual(1);
+    const placeholders = await screen.findAllByText("No reference data");
+    expect(placeholders.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("hides the Reference Forms section entirely when CLEF is not configured", async () => {
+    render(<ParseUI />);
+    // Wait one tick for the mount effect's getClefConfig() to resolve,
+    // then assert the section's heading and placeholder never appear.
+    await screen.findByRole("button", { name: "Run" });
+    expect(screen.queryByText("Reference forms")).toBeNull();
+    expect(screen.queryByText("No reference data")).toBeNull();
   });
 
   it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
