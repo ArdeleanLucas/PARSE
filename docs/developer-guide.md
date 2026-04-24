@@ -203,6 +203,7 @@ For documentation-only work, you should still at minimum:
 The top-level docs now serve distinct audiences more cleanly:
 
 - `docs/getting-started.md` — install, launch, config, troubleshooting
+- `docs/getting-started-external-agents.md` — agent-facing MCP + HTTP automation guide
 - `docs/user-guide.md` — end-user workflow
 - `docs/ai-integration.md` — providers, models, chat tool surface
 - `docs/api-reference.md` — HTTP + MCP reference

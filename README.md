@@ -143,6 +143,7 @@ It provides:
 ## 📚 Documentation
 
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
+- [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP automation entry points, environment conventions, and agent-facing examples
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
 - [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 47-tool chat surface, and MCP workflow macros
 - [API Reference](docs/api-reference.md) — HTTP endpoints, OpenAPI docs, MCP bridge routes, examples, and the full 32-tool MCP task surface
