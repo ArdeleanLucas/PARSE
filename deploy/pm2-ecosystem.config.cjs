@@ -37,6 +37,11 @@ module.exports = {
         OPENBLAS_NUM_THREADS: "1",
         VECLIB_MAXIMUM_THREADS: "1",
         NUMEXPR_NUM_THREADS: "1",
+        // WSL2 GPU passthrough crashes the VM under sustained ML workloads,
+        // even on Whisper STT/ORTH (not just wav2vec2). Force everything
+        // to CPU until the WSL/dxg stability issue is resolved.
+        PARSE_STT_FORCE_CPU: "1",
+        CUDA_VISIBLE_DEVICES: "",
       },
     },
   ],
