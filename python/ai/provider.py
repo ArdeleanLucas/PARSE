@@ -1133,6 +1133,16 @@ class LocalWhisperProvider(AIProvider):
         self._effective_device: Optional[str] = None
         self._effective_compute_type: Optional[str] = None
 
+    def warm_up(self) -> None:
+        """Force the faster-whisper model to load now.
+
+        Call once at persistent-worker startup so the first
+        ``transcribe()`` call doesn't pay the ~1-5 s cold-load cost.
+        Safe to call from non-worker contexts — just an eager version
+        of the normal lazy load.
+        """
+        self._load_whisper_model()
+
     def _load_whisper_model(self) -> Any:
         """Lazy-load faster-whisper model.
 
@@ -1642,12 +1652,78 @@ def _resolve_provider_name(
     return default
 
 
-def get_stt_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
-    """Factory for STT providers resolved from `stt.provider`."""
+# Persistent-worker preload cache. Set by ``preload_stt_provider`` /
+# ``preload_ortho_provider`` (called once at worker startup) so the
+# factory getters below skip the model build when no custom config is
+# requested. Non-worker callers never touch these globals — the cache
+# stays None and the factories behave as before.
+_PRELOADED_STT_PROVIDER: Optional[AIProvider] = None
+_PRELOADED_ORTHO_PROVIDER: Optional[AIProvider] = None
+
+
+def preload_stt_provider(config: Optional[Dict[str, Any]] = None) -> Optional[AIProvider]:
+    """Build the STT provider, warm its Whisper model, and cache it.
+
+    Returns the cached instance, or ``None`` if anything fails (missing
+    model, CUDA runtime error, etc.). Worker startup calls this; a
+    failure is non-fatal — the factory still works on-demand.
+    """
+    global _PRELOADED_STT_PROVIDER
+    try:
+        provider = _build_stt_provider(config)
+        if isinstance(provider, LocalWhisperProvider):
+            provider.warm_up()
+        _PRELOADED_STT_PROVIDER = provider
+        return provider
+    except Exception as exc:
+        print(
+            "[provider] STT preload failed: {0}".format(exc),
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+
+
+def preload_ortho_provider(config: Optional[Dict[str, Any]] = None) -> Optional[AIProvider]:
+    """Build the ORTH provider, warm its Whisper model, and cache it."""
+    global _PRELOADED_ORTHO_PROVIDER
+    try:
+        provider = _build_ortho_provider(config)
+        provider.warm_up()
+        _PRELOADED_ORTHO_PROVIDER = provider
+        return provider
+    except Exception as exc:
+        print(
+            "[provider] ORTH preload failed: {0}".format(exc),
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+
+
+def _build_stt_provider(config: Optional[Dict[str, Any]]) -> AIProvider:
     override = config or {}
     merged = _deep_merge_dicts(load_ai_config(), override)
     provider_name = _resolve_provider_name(merged, ["stt"], override_config=override)
     return _build_provider(provider_name, merged)
+
+
+def _build_ortho_provider(config: Optional[Dict[str, Any]]) -> LocalWhisperProvider:
+    override = config or {}
+    merged = _deep_merge_dicts(load_ai_config(), override)
+    return LocalWhisperProvider(config=merged, config_section="ortho")
+
+
+def get_stt_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
+    """Factory for STT providers resolved from `stt.provider`.
+
+    Returns the preloaded singleton when available and the caller did
+    not pass a custom ``config`` override. Custom configs always get a
+    fresh build so tests and ad-hoc callers see the correct provider.
+    """
+    if _PRELOADED_STT_PROVIDER is not None and config is None:
+        return _PRELOADED_STT_PROVIDER
+    return _build_stt_provider(config)
 
 
 def get_ortho_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
@@ -1657,10 +1733,13 @@ def get_ortho_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:
     distinct from whatever general-purpose model STT uses. This goes straight
     to ``LocalWhisperProvider`` with ``config_section="ortho"`` so
     model_path / device / language come from the ortho block rather than stt.
+
+    Returns the preloaded singleton when available and no custom
+    ``config`` was passed (see ``preload_ortho_provider``).
     """
-    override = config or {}
-    merged = _deep_merge_dicts(load_ai_config(), override)
-    return LocalWhisperProvider(config=merged, config_section="ortho")
+    if _PRELOADED_ORTHO_PROVIDER is not None and config is None:
+        return _PRELOADED_ORTHO_PROVIDER
+    return _build_ortho_provider(config)
 
 
 def get_llm_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:

@@ -321,6 +321,60 @@ def _install_aligner_preload() -> Any:
     return aligner
 
 
+def _install_stt_preload() -> None:
+    """Pre-load the faster-whisper STT provider. Non-fatal on failure.
+
+    The compute worker gets one persistent process — we want the
+    Razhan (or user-configured) CT2 model loaded once at startup so
+    the first ``/api/stt`` job doesn't pay the 1-5 s cold-load cost
+    (and every subsequent one is free instead of re-loading).
+    """
+    try:
+        from ai.provider import preload_stt_provider
+    except Exception as exc:
+        print(
+            f"[WORKER] STT preload import failed: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return
+    provider = preload_stt_provider()
+    if provider is None:
+        print(
+            "[WORKER] STT provider not preloaded — first /api/stt call will load on demand",
+            file=sys.stderr, flush=True,
+        )
+        return
+    device = getattr(provider, "_effective_device", None) or getattr(provider, "device", "?")
+    print(
+        f"[WORKER] STT provider pre-loaded on {device}",
+        file=sys.stderr, flush=True,
+    )
+
+
+def _install_ortho_preload() -> None:
+    """Pre-load the ORTH (razhan) faster-whisper provider. Non-fatal on failure."""
+    try:
+        from ai.provider import preload_ortho_provider
+    except Exception as exc:
+        print(
+            f"[WORKER] ORTH preload import failed: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return
+    provider = preload_ortho_provider()
+    if provider is None:
+        print(
+            "[WORKER] ORTH provider not preloaded — first ortho job will load on demand",
+            file=sys.stderr, flush=True,
+        )
+        return
+    device = getattr(provider, "_effective_device", None) or getattr(provider, "device", "?")
+    print(
+        f"[WORKER] ORTH provider pre-loaded on {device}",
+        file=sys.stderr, flush=True,
+    )
+
+
 def _dispatch(
     server_mod: Any, compute_type: str, job_id: str, payload: Dict[str, Any]
 ) -> Any:
@@ -345,6 +399,8 @@ def _dispatch(
         return server_mod._compute_full_pipeline(job_id, payload)
     if normalized in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
         return server_mod._compute_training_job(job_id, payload)
+    if normalized == "stt":
+        return server_mod._compute_stt(job_id, payload)
     raise RuntimeError("Unsupported compute type: {0}".format(normalized))
 
 
@@ -381,6 +437,12 @@ def worker_main(job_queue: Any, event_queue: Any) -> None:
         )
         # Do NOT emit ready — parent's wait() will time out and report.
         return
+
+    # STT / ORTH preloads are best-effort: a missing Razhan model or a
+    # CUDA runtime gap shouldn't block the worker from serving wav2vec2
+    # jobs. The factory will fall back to on-demand load if we skip here.
+    _install_stt_preload()
+    _install_ortho_preload()
 
     try:
         import server as server_mod  # noqa: F401
