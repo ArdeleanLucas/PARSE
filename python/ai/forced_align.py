@@ -142,18 +142,18 @@ class Aligner:
         extra auto-tokenizer discovery round-trip.
         """
         # Persistent-worker fast path: when a long-lived worker pre-loaded
-        # the default model at startup, subsequent calls that ask for the
-        # same default model with no device override reuse the cached
-        # instance instead of reloading 1.2 GB of weights. Custom
-        # ``model_name`` or an explicit ``device`` skip the cache and take
-        # the normal load path — tests and non-worker callers are
-        # unaffected because the cache stays ``None``.
-        if (
-            _PRELOADED_ALIGNER is not None
-            and model_name == DEFAULT_MODEL_NAME
-            and device is None
-        ):
-            return _PRELOADED_ALIGNER
+        # the default model at startup, subsequent calls for the same
+        # model reuse the cached instance instead of reloading 1.2 GB
+        # of weights (and, critically, avoid re-calling
+        # ``torch.set_num_interop_threads`` which raises once parallel
+        # work has started — see PRs #162-169). Compare via
+        # ``resolve_device`` so a caller asking for ``"cuda"`` on WSL
+        # still matches the preloaded ``"cpu"`` aligner. Tests and
+        # non-worker callers are unaffected because the cache stays
+        # ``None``.
+        if _PRELOADED_ALIGNER is not None and model_name == DEFAULT_MODEL_NAME:
+            if resolve_device(device) == _PRELOADED_ALIGNER.device:
+                return _PRELOADED_ALIGNER
 
         try:
             import torch  # type: ignore
