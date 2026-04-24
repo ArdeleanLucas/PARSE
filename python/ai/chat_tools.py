@@ -12,7 +12,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -667,6 +667,10 @@ class ParseChatTools:
                         "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
                         "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
                         "language": {"type": "string", "minLength": 1, "maxLength": 32},
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, validate inputs and preview the STT job without launching it.",
+                        },
                     },
                 },
             ),
@@ -1435,6 +1439,10 @@ class ParseChatTools:
                             "maxLength": 512,
                             "description": "Project-relative or absolute path to source WAV. Omit to use primary source.",
                         },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, preview the normalize job without launching ffmpeg.",
+                        },
                     },
                 },
             ),
@@ -1989,6 +1997,10 @@ class ParseChatTools:
                             "maxLength": 512,
                             "description": "Write built source_index.json here (mode=full only, project-relative or absolute inside project).",
                         },
+                        "dryRun": {
+                            "type": "boolean",
+                            "description": "If true, never writes outputPath even when provided; returns the validated/constructed payload only.",
+                        },
                     },
                 },
             ),
@@ -2007,6 +2019,209 @@ class ParseChatTools:
                 },
             ),
         }
+        self._tool_specs = self._apply_default_metadata(self._tool_specs)
+
+    def _apply_default_metadata(self, specs: Dict[str, ChatToolSpec]) -> Dict[str, ChatToolSpec]:
+        return {name: self._with_default_metadata(spec) for name, spec in specs.items()}
+
+    def _with_default_metadata(self, spec: ChatToolSpec) -> ChatToolSpec:
+        properties = spec.parameters.get("properties") if isinstance(spec.parameters, dict) else {}
+        has_dry_run_param = isinstance(properties, dict) and "dryRun" in properties
+        mutability = self._default_mutability_for_tool(spec.name)
+        supports_dry_run = bool(spec.supports_dry_run or has_dry_run_param)
+        dry_run_parameter = spec.dry_run_parameter or ("dryRun" if has_dry_run_param else None)
+        preconditions = spec.preconditions or self._default_preconditions_for_tool(spec.name, mutability)
+        postconditions = spec.postconditions or self._default_postconditions_for_tool(spec.name, mutability)
+        return replace(
+            spec,
+            mutability=mutability,
+            supports_dry_run=supports_dry_run,
+            dry_run_parameter=dry_run_parameter,
+            preconditions=preconditions,
+            postconditions=postconditions,
+        )
+
+    def _default_mutability_for_tool(self, tool_name: str) -> str:
+        stateful_job_tools = {
+            "stt_start",
+            "stt_word_level_start",
+            "forced_align_start",
+            "ipa_transcribe_acoustic_start",
+            "audio_normalize_start",
+        }
+        if tool_name in stateful_job_tools:
+            return TOOL_MUTABILITY_STATEFUL_JOB
+        if tool_name in WRITE_ALLOWED_TOOL_NAMES:
+            return TOOL_MUTABILITY_MUTATING
+        return TOOL_MUTABILITY_READ_ONLY
+
+    def _default_preconditions_for_tool(self, tool_name: str, mutability: str) -> Tuple[ToolCondition, ...]:
+        if tool_name in {"project_context_read", "speakers_list", "jobs_list_active"}:
+            return ()
+
+        if tool_name in {
+            "stt_start",
+            "stt_word_level_start",
+            "audio_normalize_start",
+        }:
+            return (
+                _project_loaded_condition(),
+                _tool_condition(
+                    "source_audio_available",
+                    "A readable source audio path must be provided or resolvable for the requested speaker.",
+                    kind=TOOL_CONDITION_KIND_FILE_PRESENCE,
+                ),
+            )
+
+        if tool_name in {"forced_align_start", "ipa_transcribe_acoustic_start"}:
+            return (
+                _project_loaded_condition(),
+                _tool_condition(
+                    "speaker_annotations_available",
+                    "The requested speaker must already have the upstream annotation data needed for this compute job.",
+                    kind=TOOL_CONDITION_KIND_PROJECT_STATE,
+                ),
+            )
+
+        if tool_name in {
+            "stt_status",
+            "stt_word_level_status",
+            "forced_align_status",
+            "ipa_transcribe_acoustic_status",
+            "audio_normalize_status",
+            "compute_status",
+        }:
+            return (
+                _tool_condition(
+                    "job_id_known",
+                    "The caller must provide a valid jobId from a previous start call.",
+                    kind=TOOL_CONDITION_KIND_INPUT_SHAPE,
+                ),
+            )
+
+        if tool_name in {
+            "annotation_read",
+            "cognate_compute_preview",
+            "cross_speaker_match_preview",
+            "detect_timestamp_offset",
+            "detect_timestamp_offset_from_pair",
+            "enrichments_read",
+            "lexeme_notes_read",
+            "parse_memory_read",
+            "phonetic_rules_apply",
+            "pipeline_state_batch",
+            "pipeline_state_read",
+            "read_audio_info",
+            "read_csv_preview",
+            "read_text_preview",
+            "spectrogram_preview",
+        }:
+            return (_project_loaded_condition(),)
+
+        if tool_name in {
+            "contact_lexeme_lookup",
+            "import_tag_csv",
+            "parse_memory_upsert_section",
+            "peaks_generate",
+            "prepare_tag_import",
+            "source_index_validate",
+            "transcript_reformat",
+        }:
+            return (_project_loaded_condition(),)
+
+        if mutability in {TOOL_MUTABILITY_MUTATING, TOOL_MUTABILITY_STATEFUL_JOB}:
+            return (_project_loaded_condition(),)
+        return ()
+
+    def _default_postconditions_for_tool(self, tool_name: str, mutability: str) -> Tuple[ToolCondition, ...]:
+        job_start_postconditions = {
+            "stt_start": "stt_job_started",
+            "stt_word_level_start": "word_level_stt_job_started",
+            "forced_align_start": "forced_alignment_job_started",
+            "ipa_transcribe_acoustic_start": "acoustic_ipa_job_started",
+            "audio_normalize_start": "audio_normalize_job_started",
+            "pipeline_run": "pipeline_job_started",
+        }
+        if tool_name in job_start_postconditions:
+            return (
+                _tool_condition(
+                    job_start_postconditions[tool_name],
+                    "Calling this tool starts or previews a background job that can be polled later.",
+                    kind=TOOL_CONDITION_KIND_JOB_STATE,
+                ),
+            )
+
+        read_snapshot_tools = {
+            "annotation_read",
+            "audio_normalize_status",
+            "cognate_compute_preview",
+            "compute_status",
+            "cross_speaker_match_preview",
+            "detect_timestamp_offset",
+            "detect_timestamp_offset_from_pair",
+            "enrichments_read",
+            "forced_align_status",
+            "ipa_transcribe_acoustic_status",
+            "jobs_list_active",
+            "lexeme_notes_read",
+            "parse_memory_read",
+            "phonetic_rules_apply",
+            "pipeline_state_batch",
+            "pipeline_state_read",
+            "project_context_read",
+            "read_audio_info",
+            "read_csv_preview",
+            "read_text_preview",
+            "speakers_list",
+            "spectrogram_preview",
+            "stt_status",
+            "stt_word_level_status",
+        }
+        if tool_name in read_snapshot_tools:
+            return (
+                _tool_condition(
+                    "inspection_payload_returned",
+                    "The tool returns structured inspection data without mutating project state.",
+                    kind=TOOL_CONDITION_KIND_PROJECT_STATE,
+                    severity="recommended",
+                ),
+            )
+
+        mutating_file_postconditions = {
+            "contact_lexeme_lookup": "contact_lexeme_data_updated",
+            "import_tag_csv": "tag_import_written",
+            "parse_memory_upsert_section": "parse_memory_section_written",
+            "peaks_generate": "peaks_file_written",
+            "prepare_tag_import": "tag_definition_written",
+            "source_index_validate": "source_index_written",
+            "transcript_reformat": "transcript_written",
+        }
+        if tool_name in mutating_file_postconditions:
+            return (
+                _tool_condition(
+                    mutating_file_postconditions[tool_name],
+                    "When the tool is not in preview mode, it writes or updates a project artifact.",
+                    kind=TOOL_CONDITION_KIND_FILESYSTEM_WRITE,
+                ),
+            )
+
+        if mutability == TOOL_MUTABILITY_READ_ONLY:
+            return ()
+        if mutability == TOOL_MUTABILITY_STATEFUL_JOB:
+            return (
+                _tool_condition(
+                    "job_started",
+                    "The call starts or previews a background job.",
+                    kind=TOOL_CONDITION_KIND_JOB_STATE,
+                ),
+            )
+        return (
+            _tool_condition(
+                "project_artifact_updated",
+                "When not in preview mode, the tool updates project state.",
+                kind=TOOL_CONDITION_KIND_FILESYSTEM_WRITE,
+            ),
+        )
 
     def openai_tool_schemas(self) -> List[Dict[str, Any]]:
         """Return OpenAI tool schema objects for the allowlisted tools."""
@@ -2516,6 +2731,20 @@ class ParseChatTools:
         if language == "":
             language = None
 
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "stt_start",
+                "plan": {
+                    "speaker": speaker,
+                    "sourceWav": project_relative,
+                    "language": language,
+                },
+                "message": "Dry run. Would start an STT job for the requested audio file.",
+            }
+
         job_id = self._start_stt_job(speaker, project_relative, language)
 
         return {
@@ -3013,6 +3242,19 @@ class ParseChatTools:
 
         speaker = self._normalize_speaker(args.get("speaker"))
         source_wav: Optional[str] = str(args.get("sourceWav") or "").strip() or None
+
+        if bool(args.get("dryRun", False)):
+            return {
+                "readOnly": True,
+                "previewOnly": True,
+                "status": "dry_run",
+                "tool": "audio_normalize_start",
+                "plan": {
+                    "speaker": speaker,
+                    "sourceWav": source_wav,
+                },
+                "message": "Dry run. Would start an audio normalize job for this speaker.",
+            }
 
         try:
             job_id = self._start_normalize_job(speaker, source_wav)
@@ -3766,7 +4008,7 @@ class ParseChatTools:
                 for v in (source_index.get("speakers") or {}).values()
             )
 
-            if output_path_str:
+            if output_path_str and not bool(args.get("dryRun", False)):
                 out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(
@@ -3784,12 +4026,14 @@ class ParseChatTools:
 
             return {
                 "readOnly": True,
+                "previewOnly": True,
                 "mode": "full",
                 "valid": True,
                 "errors": [],
                 "speakerCount": speaker_count,
                 "wavCount": wav_count,
                 "sourceIndex": source_index,
+                "dryRun": bool(args.get("dryRun", False)),
             }
 
         raise ChatToolValidationError("mode must be 'speaker' or 'full'")

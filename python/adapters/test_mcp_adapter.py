@@ -355,3 +355,113 @@ def test_can_list_tools_requiring_project_loaded(tmp_path) -> None:
     assert "enrichments_write" in requiring_project
     assert "pipeline_run" in requiring_project
     assert "project_context_read" not in requiring_project
+
+
+def test_all_tools_publish_machine_readable_metadata(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    for spec in tools.iter_tool_specs():
+        assert spec.mutability in {"read_only", "stateful_job", "mutating"}
+        assert isinstance(spec.preconditions, tuple)
+        assert isinstance(spec.postconditions, tuple)
+        meta = spec.mcp_meta_payload()
+        assert "mutability" in meta
+        assert "supports_dry_run" in meta
+        assert "dry_run_parameter" in meta
+        assert isinstance(meta["preconditions"], list)
+        assert isinstance(meta["postconditions"], list)
+
+
+def test_stateful_job_starters_are_marked_stateful_with_project_preconditions(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+
+    for tool_name in [
+        "stt_start",
+        "stt_word_level_start",
+        "forced_align_start",
+        "ipa_transcribe_acoustic_start",
+        "audio_normalize_start",
+    ]:
+        spec = tools.tool_spec(tool_name)
+        assert spec.mutability == "stateful_job"
+        assert any(cond.id == "project_loaded" for cond in spec.preconditions)
+        assert any(cond.kind == "job_state" for cond in spec.postconditions)
+
+
+def test_stt_start_supports_dry_run_preview(tmp_path) -> None:
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "clip.wav").write_bytes(b"RIFFWAVE")
+
+    calls = []
+
+    def fake_start_stt(speaker: str, source_wav: str, language: str | None) -> str:
+        calls.append((speaker, source_wav, language))
+        return "job-stt"
+
+    tools = ParseChatTools(project_root=tmp_path, start_stt_job=fake_start_stt)
+    payload = tools.execute(
+        "stt_start",
+        {"speaker": "Fail02", "sourceWav": "audio/clip.wav", "dryRun": True},
+    )["result"]
+
+    assert payload["status"] == "dry_run"
+    assert payload["plan"]["speaker"] == "Fail02"
+    assert calls == []
+
+
+def test_audio_normalize_start_supports_dry_run_preview(tmp_path) -> None:
+    calls = []
+
+    def fake_normalize(speaker: str, source_wav: str | None) -> str:
+        calls.append((speaker, source_wav))
+        return "job-normalize"
+
+    tools = ParseChatTools(project_root=tmp_path, start_normalize_job=fake_normalize)
+    payload = tools.execute(
+        "audio_normalize_start",
+        {"speaker": "Fail02", "sourceWav": "audio/clip.wav", "dryRun": True},
+    )["result"]
+
+    assert payload["status"] == "dry_run"
+    assert payload["plan"]["speaker"] == "Fail02"
+    assert calls == []
+
+
+def test_source_index_validate_dry_run_does_not_write_output(tmp_path) -> None:
+    tools = ParseChatTools(project_root=tmp_path)
+    output_path = tmp_path / "source_index.json"
+    manifest = {
+        "speakers": {
+            "Fail01": {
+                "wav_files": [
+                    {
+                        "path": "Audio_Original/Fail01/a.wav",
+                        "duration_sec": 10.0,
+                        "file_size_bytes": 320000,
+                        "bit_depth": 16,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                        "lexicon_start_sec": 0.0,
+                        "is_primary": True,
+                    }
+                ],
+                "has_csv": False,
+            }
+        }
+    }
+
+    payload = tools.execute(
+        "source_index_validate",
+        {
+            "mode": "full",
+            "manifest": manifest,
+            "outputPath": str(output_path),
+            "dryRun": True,
+        },
+    )["result"]
+
+    assert payload["readOnly"] is True
+    assert payload["previewOnly"] is True
+    assert payload["dryRun"] is True
+    assert output_path.exists() is False
