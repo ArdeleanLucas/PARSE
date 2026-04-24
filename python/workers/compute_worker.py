@@ -401,6 +401,10 @@ def _dispatch(
         return server_mod._compute_training_job(job_id, payload)
     if normalized == "stt":
         return server_mod._compute_stt(job_id, payload)
+    if normalized in {"offset_detect", "offset-detect"}:
+        return server_mod._compute_offset_detect(job_id, payload)
+    if normalized in {"offset_detect_from_pair", "offset-detect-from-pair"}:
+        return server_mod._compute_offset_detect_from_pair(job_id, payload)
     raise RuntimeError("Unsupported compute type: {0}".format(normalized))
 
 

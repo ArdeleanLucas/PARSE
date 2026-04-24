@@ -433,8 +433,8 @@ export async function detectTimestampOffset(
     anchorDistribution?: "quantile" | "earliest";
     nAnchors?: number;
   }
-): Promise<OffsetDetectResult> {
-  return apiFetch<OffsetDetectResult>("/api/offset/detect", {
+): Promise<ComputeJob> {
+  const payload = await apiFetch<unknown>("/api/offset/detect", {
     method: "POST",
     body: JSON.stringify({
       speaker,
@@ -444,6 +444,7 @@ export async function detectTimestampOffset(
       nAnchors: options?.nAnchors,
     }),
   });
+  return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
 }
 
 export interface OffsetPair {
@@ -456,8 +457,8 @@ export async function detectTimestampOffsetFromPair(
   speaker: string,
   audioTimeSec: number,
   options: { csvTimeSec?: number; conceptId?: string }
-): Promise<OffsetDetectResult> {
-  return apiFetch<OffsetDetectResult>("/api/offset/detect-from-pair", {
+): Promise<ComputeJob> {
+  const payload = await apiFetch<unknown>("/api/offset/detect-from-pair", {
     method: "POST",
     body: JSON.stringify({
       speaker,
@@ -466,16 +467,39 @@ export async function detectTimestampOffsetFromPair(
       conceptId: options.conceptId,
     }),
   });
+  return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
 }
 
 export async function detectTimestampOffsetFromPairs(
   speaker: string,
   pairs: OffsetPair[]
-): Promise<OffsetDetectResult> {
-  return apiFetch<OffsetDetectResult>("/api/offset/detect-from-pair", {
+): Promise<ComputeJob> {
+  const payload = await apiFetch<unknown>("/api/offset/detect-from-pair", {
     method: "POST",
     body: JSON.stringify({ speaker, pairs }),
   });
+  return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
+}
+
+/** Poll until an offset detect job completes and return the OffsetDetectResult.
+ *  Throws on job error or timeout. */
+export async function pollOffsetDetectJob(
+  jobId: string,
+  computeType: "offset_detect" | "offset_detect_from_pair" = "offset_detect",
+  { intervalMs = 500, timeoutMs = 60_000 }: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<OffsetDetectResult> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise<void>((r) => setTimeout(r, intervalMs));
+    const status = await pollCompute(computeType, jobId);
+    if (status.status === "complete") {
+      return status.result as OffsetDetectResult;
+    }
+    if (status.status === "error") {
+      throw new Error(status.error ?? status.message ?? "Offset detection failed");
+    }
+  }
+  throw new Error("Offset detection timed out");
 }
 
 export async function applyTimestampOffset(

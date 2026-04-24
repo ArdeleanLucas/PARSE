@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob } from './api/client';
 import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
@@ -2261,7 +2261,9 @@ export function ParseUI() {
     }
     setOffsetState({ phase: 'detecting' });
     try {
-      const result = await detectTimestampOffset(activeActionSpeaker);
+      const { jobId } = await detectTimestampOffset(activeActionSpeaker);
+      if (!jobId) throw new Error('Server did not return a job ID for offset detection');
+      const result = await pollOffsetDetectJob(jobId, 'offset_detect');
       setOffsetState({ phase: 'detected', result });
     } catch (err) {
       setOffsetState({
@@ -2305,7 +2307,9 @@ export function ParseUI() {
         audioTimeSec: a.audioTimeSec,
         csvTimeSec: a.csvTimeSec,
       }));
-      const result = await detectTimestampOffsetFromPairs(activeActionSpeaker, pairs);
+      const { jobId } = await detectTimestampOffsetFromPairs(activeActionSpeaker, pairs);
+      if (!jobId) throw new Error('Server did not return a job ID');
+      const result = await pollOffsetDetectJob(jobId, 'offset_detect_from_pair');
       setOffsetState({ phase: 'detected', result });
     } catch (err) {
       setOffsetState({

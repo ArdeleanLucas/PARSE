@@ -1996,6 +1996,10 @@ def _compute_subprocess_entry(
             result = _server._compute_training_job("child-{0}".format(job_id), payload)
         elif normalized_type == "stt":
             result = _server._compute_stt("child-{0}".format(job_id), payload)
+        elif normalized_type in {"offset_detect", "offset-detect"}:
+            result = _server._compute_offset_detect("child-{0}".format(job_id), payload)
+        elif normalized_type in {"offset_detect_from_pair", "offset-detect-from-pair"}:
+            result = _server._compute_offset_detect_from_pair("child-{0}".format(job_id), payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -4712,6 +4716,246 @@ def _reset_job_to_running(job_id: str) -> None:
         job["completed_ts"] = None
 
 
+
+def _compute_offset_detect(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute-dispatcher adapter for timestamp offset detection.
+
+    Runs the lightweight pure-Python offset algorithm asynchronously so the
+    header progress bar appears while annotation and STT data are correlated.
+    No GPU work — intentionally CPU-only.
+    """
+    speaker = str(payload.get("speaker") or "").strip()
+    if not speaker:
+        raise ValueError("offset_detect payload missing 'speaker'")
+
+    try:
+        n_anchors = max(2, min(50, int(payload.get("nAnchors") or payload.get("n_anchors") or 12)))
+    except (TypeError, ValueError):
+        n_anchors = 12
+
+    try:
+        bucket_sec = max(0.1, float(payload.get("bucketSec") or payload.get("bucket_sec") or 1.0))
+    except (TypeError, ValueError):
+        bucket_sec = 1.0
+
+    try:
+        min_match_score = max(
+            0.0,
+            min(1.0, float(payload.get("minMatchScore") or payload.get("min_match_score") or 0.56)),
+        )
+    except (TypeError, ValueError):
+        min_match_score = 0.56
+
+    distribution_raw = str(
+        payload.get("distribution") or payload.get("anchorDistribution") or "quantile"
+    ).strip().lower()
+    if distribution_raw not in {"quantile", "earliest"}:
+        distribution_raw = "quantile"
+
+    _set_job_progress(job_id, 10, message="Loading annotation")
+    annotation_path = _annotation_read_path_for_speaker(speaker)
+    annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
+    intervals = _annotation_offset_anchor_intervals(annotation)
+    if not intervals:
+        raise ValueError(
+            "Speaker '{0}' has no annotated intervals to use as offset anchors".format(speaker)
+        )
+
+    _set_job_progress(job_id, 25, message="Resolving STT segments")
+    stt_segments_payload = payload.get("sttSegments") or payload.get("stt_segments")
+    stt_job_id = str(payload.get("sttJobId") or payload.get("stt_job_id") or "").strip()
+
+    if stt_segments_payload is None and stt_job_id:
+        stt_job = _get_job_snapshot(stt_job_id)
+        if stt_job is None:
+            raise ValueError("Unknown sttJobId: {0}".format(stt_job_id))
+        if str(stt_job.get("type") or "") != "stt":
+            raise ValueError("sttJobId is not an STT job")
+        if str(stt_job.get("status") or "") != "complete":
+            raise ValueError("STT job has not completed")
+        stt_result = stt_job.get("result") if isinstance(stt_job.get("result"), dict) else {}
+        stt_segments_payload = stt_result.get("segments")
+
+    if stt_segments_payload is None:
+        stt_segments_payload = _latest_stt_segments_for_speaker(speaker)
+
+    if not stt_segments_payload:
+        raise ValueError(
+            "No STT segments available. Run STT first or pass sttJobId / sttSegments."
+        )
+
+    from compare import (
+        anchors_from_intervals as _anchors_from_intervals,
+        detect_offset_detailed as _detect_offset_detailed,
+        load_rules_from_file as _load_rules,
+        segments_from_raw as _segments_from_raw,
+    )
+
+    _set_job_progress(job_id, 40, message="Loading phonetic rules")
+    rules_path = _project_root() / "config" / "phonetic_rules.json"
+    try:
+        rules = _load_rules(rules_path) if rules_path.exists() else []
+    except Exception:
+        rules = []
+
+    _set_job_progress(job_id, 55, message="Selecting anchors")
+    anchors = _anchors_from_intervals(intervals, n_anchors, distribution=distribution_raw)
+    if not anchors:
+        raise ValueError("No usable anchors with both timestamp and text in annotation")
+
+    _set_job_progress(job_id, 65, message="Parsing STT segments")
+    segments = _segments_from_raw(stt_segments_payload)
+    if not segments:
+        raise ValueError("STT input contained no usable segments")
+
+    _set_job_progress(job_id, 75, message="Computing timestamp offset")
+    try:
+        detailed = _detect_offset_detailed(
+            anchors=anchors,
+            segments=segments,
+            rules=rules,
+            bucket_sec=bucket_sec,
+            min_match_score=min_match_score,
+        )
+    except ValueError as exc:
+        raise ValueError("Offset detection failed: {0}".format(exc)) from exc
+
+    _set_job_progress(job_id, 92, message="Finalizing result")
+    return _offset_detect_payload(
+        speaker=speaker,
+        offset_sec=float(detailed.offset_sec),
+        confidence=float(detailed.confidence),
+        n_matched=int(detailed.n_matched),
+        total_anchors=len(anchors),
+        total_segments=len(segments),
+        method=detailed.method,
+        spread_sec=float(detailed.spread_sec),
+        matches=detailed.matches,
+        anchor_distribution=distribution_raw,
+    )
+
+
+def _compute_offset_detect_from_pair(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute-dispatcher adapter for manual-pair timestamp offset detection.
+
+    Accepts one or more (audioTimeSec, csvTimeSec/conceptId) pairs and returns
+    the median offset. Pure arithmetic — no STT or GPU work.
+    """
+    speaker = str(payload.get("speaker") or "").strip()
+    if not speaker:
+        raise ValueError("offset_detect_from_pair payload missing 'speaker'")
+
+    raw_pairs: Any = payload.get("pairs")
+    if raw_pairs is None:
+        raw_pairs = [
+            {
+                "audioTimeSec": payload.get("audioTimeSec") or payload.get("audio_time_sec"),
+                "csvTimeSec": payload.get("csvTimeSec") or payload.get("csv_time_sec"),
+                "conceptId": payload.get("conceptId") or payload.get("concept_id"),
+            }
+        ]
+    if not isinstance(raw_pairs, list) or not raw_pairs:
+        raise ValueError("pairs must be a non-empty list")
+
+    _set_job_progress(job_id, 20, message="Validating pairs")
+
+    annotation_cache: Optional[Dict[str, Any]] = None
+
+    def _get_annotation() -> Dict[str, Any]:
+        nonlocal annotation_cache
+        if annotation_cache is None:
+            annotation_cache = _normalize_annotation_record(
+                _read_json_any_file(_annotation_read_path_for_speaker(speaker)), speaker
+            )
+        return annotation_cache
+
+    matches: List[Dict[str, Any]] = []
+    offsets: List[float] = []
+
+    for raw in raw_pairs:
+        if not isinstance(raw, dict):
+            raise ValueError("Each pair must be a JSON object")
+
+        audio_raw = raw.get("audioTimeSec")
+        if audio_raw is None:
+            audio_raw = raw.get("audio_time_sec")
+        try:
+            audio_time = float(audio_raw)
+        except (TypeError, ValueError):
+            raise ValueError("Each pair needs a numeric audioTimeSec")
+        if not math.isfinite(audio_time) or audio_time < 0:
+            raise ValueError("audioTimeSec must be finite and non-negative")
+
+        csv_raw = raw.get("csvTimeSec")
+        if csv_raw is None:
+            csv_raw = raw.get("csv_time_sec")
+        concept_raw = raw.get("conceptId") or raw.get("concept_id")
+
+        anchor_csv_time: Optional[float] = None
+        anchor_label: Optional[str] = None
+
+        if csv_raw is not None and (not isinstance(csv_raw, str) or csv_raw.strip() != ""):
+            try:
+                anchor_csv_time = float(csv_raw)
+            except (TypeError, ValueError):
+                raise ValueError("csvTimeSec must be a number when provided")
+            if not math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
+                raise ValueError("csvTimeSec must be finite and non-negative")
+            anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
+        elif concept_raw is not None and str(concept_raw).strip():
+            concept_id = str(concept_raw).strip()
+            interval = _annotation_find_concept_interval(_get_annotation(), concept_id)
+            if interval is None:
+                raise ValueError(
+                    "No annotation interval found for concept '{0}'".format(concept_id)
+                )
+            anchor_csv_time = float(interval["start"])
+            anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
+        else:
+            raise ValueError("Each pair needs either csvTimeSec or conceptId")
+
+        pair_offset = round(audio_time - float(anchor_csv_time), 3)
+        offsets.append(pair_offset)
+        matches.append(
+            {
+                "anchor_index": -1,
+                "anchor_text": anchor_label or "",
+                "anchor_start": float(anchor_csv_time),
+                "segment_index": -1,
+                "segment_text": "(user-supplied audio time)",
+                "segment_start": float(audio_time),
+                "score": 1.0,
+                "offset_sec": pair_offset,
+            }
+        )
+
+    _set_job_progress(job_id, 75, message="Computing median offset")
+    import statistics as _statistics
+
+    median_offset = round(_statistics.median(offsets), 3)
+    if len(offsets) >= 2:
+        deviations = [abs(o - median_offset) for o in offsets]
+        spread = round(_statistics.median(deviations), 3)
+        max_deviation = max(deviations)
+        confidence = max(0.5, min(0.99, 0.99 - (max_deviation / 60.0)))
+    else:
+        spread = 0.0
+        confidence = 0.99
+
+    _set_job_progress(job_id, 92, message="Finalizing result")
+    return _offset_detect_payload(
+        speaker=speaker,
+        offset_sec=median_offset,
+        confidence=float(confidence),
+        n_matched=len(matches),
+        total_anchors=len(matches),
+        total_segments=0,
+        method="manual_pair",
+        spread_sec=float(spread),
+        matches=matches,
+        anchor_distribution="manual",
+    )
+
 def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) -> None:
     # Diagnostics v3: belt-and-suspenders observability.
     #   - stderr print for humans watching the log
@@ -4752,6 +4996,10 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_training_job(job_id, payload)
         elif normalized_type == "stt":
             result = _compute_stt(job_id, payload)
+        elif normalized_type in {"offset_detect", "offset-detect"}:
+            result = _compute_offset_detect(job_id, payload)
+        elif normalized_type in {"offset_detect_from_pair", "offset-detect-from-pair"}:
+            result = _compute_offset_detect_from_pair(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -5332,13 +5580,15 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         )
 
     def _api_post_offset_detect(self) -> None:
-        """Synchronously detect a constant timestamp offset for a speaker.
+        """Submit a compute job to detect a constant timestamp offset for a speaker.
 
-        Compares anchors taken from the speaker's annotation tiers against STT
-        segments (passed inline via ``sttSegments``, pulled from a completed
-        STT job by ``sttJobId``, or auto-discovered as the speaker's most
-        recent complete STT job). Returns the median offset and a confidence —
-        does not mutate any files.
+        Validates the speaker field, then queues the detection as a compute job
+        and returns the job_id immediately. The caller should poll
+        POST /api/compute/offset_detect/status with {jobId} to track progress
+        and retrieve the OffsetDetectResult from result when done.
+
+        All original options (nAnchors, bucketSec, minMatchScore, distribution,
+        sttJobId, sttSegments) are forwarded to the compute function unchanged.
         """
         body = self._expect_object(self._read_json_body(), "Request body")
 
@@ -5347,124 +5597,31 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except ValueError as exc:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
 
-        try:
-            n_anchors = max(2, min(50, int(body.get("nAnchors") or body.get("n_anchors") or 12)))
-        except (TypeError, ValueError):
-            n_anchors = 12
+        compute_payload: Dict[str, Any] = {
+            "speaker": speaker,
+            "nAnchors": body.get("nAnchors") or body.get("n_anchors"),
+            "bucketSec": body.get("bucketSec") or body.get("bucket_sec"),
+            "minMatchScore": body.get("minMatchScore") or body.get("min_match_score"),
+            "distribution": body.get("distribution") or body.get("anchorDistribution"),
+            "sttJobId": body.get("sttJobId") or body.get("stt_job_id"),
+            "sttSegments": body.get("sttSegments") or body.get("stt_segments"),
+        }
 
-        try:
-            bucket_sec = max(0.1, float(body.get("bucketSec") or body.get("bucket_sec") or 1.0))
-        except (TypeError, ValueError):
-            bucket_sec = 1.0
-
-        try:
-            min_match_score = max(
-                0.0,
-                min(1.0, float(body.get("minMatchScore") or body.get("min_match_score") or 0.56)),
-            )
-        except (TypeError, ValueError):
-            min_match_score = 0.56
-
-        annotation_path = _annotation_read_path_for_speaker(speaker)
-        annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
-        intervals = _annotation_offset_anchor_intervals(annotation)
-        if not intervals:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "Speaker '{0}' has no annotated intervals to use as offset anchors".format(speaker),
-            )
-
-        stt_segments_payload = body.get("sttSegments") or body.get("stt_segments")
-        stt_job_id = str(body.get("sttJobId") or body.get("stt_job_id") or "").strip()
-
-        if stt_segments_payload is None and stt_job_id:
-            job = _get_job_snapshot(stt_job_id)
-            if job is None:
-                raise ApiError(HTTPStatus.NOT_FOUND, "Unknown sttJobId")
-            if str(job.get("type") or "") != "stt":
-                raise ApiError(HTTPStatus.BAD_REQUEST, "sttJobId is not an STT job")
-            if str(job.get("status") or "") != "complete":
-                raise ApiError(HTTPStatus.BAD_REQUEST, "STT job has not completed")
-            result = job.get("result") if isinstance(job.get("result"), dict) else {}
-            stt_segments_payload = result.get("segments")
-
-        if stt_segments_payload is None:
-            stt_segments_payload = _latest_stt_segments_for_speaker(speaker)
-
-        if not stt_segments_payload:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "No STT segments available. Run STT first or pass sttJobId / sttSegments.",
-            )
-
-        from compare import (
-            anchors_from_intervals as _anchors_from_intervals,
-            detect_offset_detailed as _detect_offset_detailed,
-            load_rules_from_file as _load_rules,
-            segments_from_raw as _segments_from_raw,
-        )
-
-        rules_path = _project_root() / "config" / "phonetic_rules.json"
-        try:
-            rules = _load_rules(rules_path) if rules_path.exists() else []
-        except Exception:
-            rules = []
-
-        distribution_raw = str(body.get("distribution") or body.get("anchorDistribution") or "quantile").strip().lower()
-        if distribution_raw not in {"quantile", "earliest"}:
-            distribution_raw = "quantile"
-
-        anchors = _anchors_from_intervals(intervals, n_anchors, distribution=distribution_raw)
-        if not anchors:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "No usable anchors with both timestamp and text in annotation",
-            )
-        segments = _segments_from_raw(stt_segments_payload)
-        if not segments:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "STT input contained no usable segments")
-
-        try:
-            detailed = _detect_offset_detailed(
-                anchors=anchors,
-                segments=segments,
-                rules=rules,
-                bucket_sec=bucket_sec,
-                min_match_score=min_match_score,
-            )
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
-
-        self._send_json(
-            HTTPStatus.OK,
-            _offset_detect_payload(
-                speaker=speaker,
-                offset_sec=float(detailed.offset_sec),
-                confidence=float(detailed.confidence),
-                n_matched=int(detailed.n_matched),
-                total_anchors=len(anchors),
-                total_segments=len(segments),
-                method=detailed.method,
-                spread_sec=float(detailed.spread_sec),
-                matches=detailed.matches,
-                anchor_distribution=distribution_raw,
-            ),
-        )
+        job_id = _create_job("compute:offset_detect", {"speaker": speaker})
+        _launch_compute_runner(job_id, "offset_detect", compute_payload)
+        self._send_json(HTTPStatus.OK, {"jobId": job_id, "status": "running"})
 
     def _api_post_offset_detect_from_pair(self) -> None:
-        """Compute the offset from one or more trusted (csv_time, audio_time) pairs.
+        """Submit a compute job to detect offset from manual (csv_time, audio_time) pairs.
 
-        Two body shapes are accepted:
+        Accepts the same body shapes as before (single pair or pairs array),
+        queues the arithmetic as a compute job, and returns the job_id immediately.
+        Poll POST /api/compute/offset_detect_from_pair/status with {jobId} to
+        retrieve the OffsetDetectResult from result when the job completes.
 
-        * **Single pair (legacy)**:
-            ``{speaker, audioTimeSec, csvTimeSec? | conceptId?}``
-        * **Multiple pairs (preferred)**:
-            ``{speaker, pairs: [{audioTimeSec, csvTimeSec? | conceptId?}, ...]}``
-
-        With multiple pairs the offset is the median of per-pair offsets and
-        the response carries the MAD spread plus a warning if any single
-        pair disagrees with the consensus by more than ``2 s``. No STT, no
-        statistics-on-text — every input is a user-supplied ground truth.
+        Body shapes accepted:
+            Single: {speaker, audioTimeSec, csvTimeSec? | conceptId?}
+            Multi:  {speaker, pairs: [{audioTimeSec, csvTimeSec? | conceptId?}, ...]}
         """
         body = self._expect_object(self._read_json_body(), "Request body")
 
@@ -5485,116 +5642,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if not isinstance(raw_pairs, list) or not raw_pairs:
             raise ApiError(HTTPStatus.BAD_REQUEST, "pairs must be a non-empty array")
 
-        # Lazy-load the annotation only if at least one pair needs concept lookup.
-        annotation_cache: Optional[Dict[str, Any]] = None
-
-        def _annotation() -> Dict[str, Any]:
-            nonlocal annotation_cache
-            if annotation_cache is None:
-                annotation_cache = _normalize_annotation_record(
-                    _read_json_any_file(_annotation_read_path_for_speaker(speaker)), speaker
-                )
-            return annotation_cache
-
-        matches: List[Dict[str, Any]] = []
-        offsets: List[float] = []
-
-        for raw in raw_pairs:
-            if not isinstance(raw, dict):
-                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair must be a JSON object")
-
-            audio_raw = raw.get("audioTimeSec")
-            if audio_raw is None:
-                audio_raw = raw.get("audio_time_sec")
-            try:
-                audio_time = float(audio_raw)
-            except (TypeError, ValueError):
-                raise ApiError(HTTPStatus.BAD_REQUEST, "Each pair needs a numeric audioTimeSec")
-            if not math.isfinite(audio_time) or audio_time < 0:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "audioTimeSec must be finite and non-negative")
-
-            csv_raw = raw.get("csvTimeSec")
-            if csv_raw is None:
-                csv_raw = raw.get("csv_time_sec")
-            concept_raw = raw.get("conceptId") or raw.get("concept_id")
-
-            anchor_csv_time: Optional[float] = None
-            anchor_label: Optional[str] = None
-
-            if csv_raw is not None and (not isinstance(csv_raw, str) or csv_raw.strip() != ""):
-                try:
-                    anchor_csv_time = float(csv_raw)
-                except (TypeError, ValueError):
-                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be a number when provided")
-                if not math.isfinite(anchor_csv_time) or anchor_csv_time < 0:
-                    raise ApiError(HTTPStatus.BAD_REQUEST, "csvTimeSec must be finite and non-negative")
-                anchor_label = "csvTimeSec={0:.3f}s".format(anchor_csv_time)
-            elif concept_raw is not None and str(concept_raw).strip():
-                concept_id = str(concept_raw).strip()
-                interval = _annotation_find_concept_interval(_annotation(), concept_id)
-                if interval is None:
-                    raise ApiError(
-                        HTTPStatus.BAD_REQUEST,
-                        "No annotation interval found for concept '{0}'".format(concept_id),
-                    )
-                anchor_csv_time = float(interval["start"])
-                anchor_label = "concept '{0}' @ {1:.3f}s".format(concept_id, anchor_csv_time)
-            else:
-                raise ApiError(
-                    HTTPStatus.BAD_REQUEST,
-                    "Each pair needs either csvTimeSec or conceptId",
-                )
-
-            pair_offset = round(audio_time - float(anchor_csv_time), 3)
-            offsets.append(pair_offset)
-            matches.append(
-                {
-                    "anchor_index": -1,
-                    "anchor_text": anchor_label or "",
-                    "anchor_start": float(anchor_csv_time),
-                    "segment_index": -1,
-                    "segment_text": "(user-supplied audio time)",
-                    "segment_start": float(audio_time),
-                    "score": 1.0,
-                    "offset_sec": pair_offset,
-                }
-            )
-
-        # Median offset across pairs; MAD for the headline spread number;
-        # max-deviation drives confidence so a single outlier among many
-        # consistent pairs is visible (MAD alone hides it). Both numbers
-        # show up in the response — UI flags any pair whose offset
-        # diverges from the consensus by more than `spread_warn_sec`.
-        import statistics as _statistics
-
-        median_offset = round(_statistics.median(offsets), 3)
-        if len(offsets) >= 2:
-            deviations = [abs(o - median_offset) for o in offsets]
-            spread = round(_statistics.median(deviations), 3)
-            max_deviation = max(deviations)
-            # Linear drop: identical pairs → 0.99; one pair off by 30 s
-            # → 0.49 (clamped to 0.5). Big enough penalty to amber the
-            # Apply button via the existing _offset_detect_payload logic.
-            confidence = max(0.5, min(0.99, 0.99 - (max_deviation / 60.0)))
-        else:
-            spread = 0.0
-            confidence = 0.99
-
-        self._send_json(
-            HTTPStatus.OK,
-            _offset_detect_payload(
-                speaker=speaker,
-                offset_sec=median_offset,
-                confidence=float(confidence),
-                n_matched=len(matches),
-                total_anchors=len(matches),
-                total_segments=0,
-                method="manual_pair",
-                spread_sec=float(spread),
-                matches=matches,
-                anchor_distribution="manual",
-            ),
-        )
+        compute_payload: Dict[str, Any] = {"speaker": speaker, "pairs": raw_pairs}
+        job_id = _create_job("compute:offset_detect_from_pair", {"speaker": speaker})
+        _launch_compute_runner(job_id, "offset_detect_from_pair", compute_payload)
+        self._send_json(HTTPStatus.OK, {"jobId": job_id, "status": "running"})
 
     def _api_post_offset_apply(self) -> None:
         """Shift every annotation interval by ``offsetSec`` (start/end += offset).
