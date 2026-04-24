@@ -1318,8 +1318,6 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [readyAudioUrl, setReadyAudioUrl] = useState('');
-  const [activeRegion] = useState<string | null>(null);
-  const [lexAnchor, setLexAnchor] = useState<'word' | 'concept'>('concept');
   const [zoom, setZoom] = useState(10); // minPxPerSec
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1500,15 +1498,6 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
             <button onClick={() => { const z = Math.min(500, zoom + 20); setZoom(z); wsSetZoom(z); }} title="Zoom in" className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800">
               <ZoomIn className="h-3.5 w-3.5"/>
             </button>
-            <div className="mx-2 h-5 w-px bg-slate-200"/>
-            {/* Concept vs word region align toggle — snaps dragged regions
-                to concept boundaries or individual word anchors. Unrelated
-                to the timestamp-offset tool (that now lives next to "Save
-                Annotation" in the lexeme editor below). */}
-            <div className="inline-flex items-center gap-1 rounded-md bg-slate-100 p-0.5" title="Region snap — concept boundaries or individual word anchors">
-              <button onClick={() => setLexAnchor('concept')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='concept' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Concept</button>
-              <button onClick={() => setLexAnchor('word')} className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${lexAnchor==='word' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Word</button>
-            </div>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -1754,9 +1743,6 @@ const AnnotateView: React.FC<AnnotateViewProps> = ({ concept, speaker, totalConc
                 )}
               </div>
             )}
-            <div className="ml-auto text-[11px] text-slate-400">
-              Region <span className="font-mono text-slate-600">{selectedRegion ? `${fmt(selectedRegion.start)}–${fmt(selectedRegion.end)}` : (activeRegion ?? '—')}</span> · Snap: <span className="font-mono text-slate-600">{lexAnchor}</span>
-            </div>
           </div>
         </div>
       </section>
