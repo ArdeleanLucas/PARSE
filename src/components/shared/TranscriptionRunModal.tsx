@@ -425,7 +425,7 @@ export function TranscriptionRunModal({
             <span className="text-xs font-semibold text-slate-700">ORTH</span>
             <label
               className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"
-              title="Enables ~1–2 min extra compute for perfectly clean lexemes (recommended for new speakers)."
+              title="Re-transcribes each concept whose forced-alignment confidence is below 0.5 using a ±0.8 s audio clip. Adds ~1–2 min on thesis-scale recordings — leave off unless forced-alignment quality is poor."
             >
               <input
                 type="checkbox"

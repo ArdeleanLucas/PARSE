@@ -1369,18 +1369,18 @@ class LocalWhisperProvider(AIProvider):
         initial_prompt: Optional[str] = None,
         language: Optional[str] = None,
     ) -> Tuple[str, float]:
-        """Transcribe a preloaded mono-16kHz numpy array and return ``(text, confidence)``.
+        """Transcribe a preloaded mono-16kHz numpy array.
 
-        Unlike :meth:`transcribe` this takes an in-memory audio array (not a
-        file path) and returns a flat ``(text, confidence)`` tuple rather
-        than a list of segments. ``confidence`` is derived from the best
-        segment ``avg_logprob`` the same way :meth:`transcribe` does; the
-        returned text is the concatenation of all segments (usually 1 for
-        short clips). Empty input yields ``("", 0.0)``.
+        Returns ``(text: str, confidence: float)`` where ``text`` is the
+        concatenation of all decoded segments (usually one for a short clip)
+        and ``confidence`` is in ``[0, 1]`` derived from the best segment
+        ``avg_logprob`` via the same formula used by :meth:`transcribe`.
+        Empty or ``None`` input yields ``("", 0.0)``.
 
-        Used by the ORTH compute runner's short-clip fallback — the caller
-        has already sliced a ±0.8s window around a concept anchor and loaded
-        the audio once via ``ai.forced_align._load_audio_mono_16k``.
+        Unlike :meth:`transcribe` this accepts an in-memory audio array
+        rather than a file path, so the caller can reuse an already-loaded
+        waveform (e.g. from ``ai.forced_align._load_audio_mono_16k``) and
+        slice ±0.8 s windows without re-reading the file per concept.
         """
         if audio_array is None:
             return ("", 0.0)
