@@ -87,6 +87,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_VITE_PORT:=5173}"
 : "${PARSE_SKIP_PULL:=0}"
 : "${PARSE_PULL_MODE:=auto}"
+: "${PARSE_USE_PERSISTENT_WORKER:=}"
+: "${PARSE_COMPUTE_MODE:=}"
 
 API_STDOUT_LOG="/tmp/parse_api_stdout.log"
 API_STDERR_LOG="/tmp/parse_api_stderr.log"
@@ -306,6 +308,12 @@ start_api() {
   if [ -n "${PARSE_CHAT_READ_ONLY}" ]; then
     log "Chat read-only override: ${PARSE_CHAT_READ_ONLY}"
   fi
+  if [ -n "${PARSE_USE_PERSISTENT_WORKER}" ]; then
+    log "Persistent compute worker: ${PARSE_USE_PERSISTENT_WORKER}"
+  fi
+  if [ -n "${PARSE_COMPUTE_MODE}" ]; then
+    log "Compute mode (env): ${PARSE_COMPUTE_MODE}"
+  fi
   # -u = unbuffered stdout (so logs appear immediately; critical for remote debugging).
   (
     cd "${PARSE_WORKSPACE_ROOT}" || exit 1
@@ -313,6 +321,8 @@ start_api() {
       PARSE_CHAT_MEMORY_PATH="${PARSE_CHAT_MEMORY_PATH}" \
       PARSE_EXTERNAL_READ_ROOTS="${PARSE_EXTERNAL_READ_ROOTS}" \
       PARSE_CHAT_READ_ONLY="${PARSE_CHAT_READ_ONLY}" \
+      PARSE_USE_PERSISTENT_WORKER="${PARSE_USE_PERSISTENT_WORKER}" \
+      PARSE_COMPUTE_MODE="${PARSE_COMPUTE_MODE}" \
       "${PARSE_PY}" -u "${PARSE_ROOT}/python/server.py" \
       >"${API_STDOUT_LOG}" 2>"${API_STDERR_LOG}"
   ) &

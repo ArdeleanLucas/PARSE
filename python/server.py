@@ -1701,12 +1701,22 @@ _COMPUTE_MODE_OVERRIDE: Optional[str] = None
 
 
 def _resolve_compute_mode() -> str:
-    """Return the active compute mode — 'thread' (default) or 'subprocess'.
+    """Return the active compute mode — 'thread' (default), 'subprocess',
+    or 'persistent'.
 
-    Precedence: CLI override → env var → 'thread'.
+    Precedence:
+      1. ``--compute-mode`` CLI flag (most explicit, survives WSL interop).
+      2. ``PARSE_USE_PERSISTENT_WORKER=true`` (shortcut for the 2026-04
+         persistent-worker rollout flag).
+      3. ``PARSE_COMPUTE_MODE`` env var.
+      4. Default ``'thread'`` (legacy behaviour).
     """
     if _COMPUTE_MODE_OVERRIDE:
         return _COMPUTE_MODE_OVERRIDE.strip().lower() or "thread"
+    if str(os.environ.get("PARSE_USE_PERSISTENT_WORKER", "")).strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        return "persistent"
     env = os.environ.get("PARSE_COMPUTE_MODE", "").strip().lower()
     return env or "thread"
 
@@ -1743,6 +1753,12 @@ def _launch_compute_runner(job_id: str, compute_type: str, payload: Dict[str, An
             multi-hour recording on CPU).
     """
     mode = _resolve_compute_mode()
+    if mode == "persistent":
+        _compute_checkpoint(
+            "LAUNCH.persistent", job_id=job_id, compute_type=compute_type
+        )
+        _launch_compute_persistent(job_id, compute_type, payload)
+        return
     if mode == "subprocess":
         _compute_checkpoint(
             "LAUNCH.subprocess", job_id=job_id, compute_type=compute_type
@@ -1977,6 +1993,80 @@ def _compute_subprocess_entry(
             job_id=job_id,
             exc=str(exc)[:200],
         )
+
+
+# ---------------------------------------------------------------------------
+# Persistent compute worker (one long-lived process for all compute jobs)
+# ---------------------------------------------------------------------------
+#
+# Eliminates the per-job Aligner.load() that repeated ``subprocess`` mode
+# pays and the CUDA-context-in-HTTP-thread hazard that ``thread`` mode
+# pays. See ``python/workers/compute_worker.py`` for the worker body.
+#
+# Feature flag: --compute-mode=persistent  or  PARSE_USE_PERSISTENT_WORKER=true.
+# Default is ``thread`` — rollout plan is to validate on a small speaker,
+# then Fail02, then flip the PM2 default.
+
+_PERSISTENT_WORKER_HANDLE: Optional[Any] = None
+_PERSISTENT_WORKER_LOCK = threading.Lock()
+
+
+def _start_persistent_worker() -> bool:
+    """Start the single long-lived compute worker process.
+
+    Returns True on success. Called exactly once from ``main()`` when
+    the resolved compute mode is ``persistent``. On failure the caller
+    should refuse to boot rather than silently drop back to threads —
+    the operator explicitly asked for persistent.
+    """
+    global _PERSISTENT_WORKER_HANDLE
+    # Late import so non-persistent modes don't pay the package cost.
+    from workers.compute_worker import WorkerHandle
+
+    with _PERSISTENT_WORKER_LOCK:
+        if (
+            _PERSISTENT_WORKER_HANDLE is not None
+            and _PERSISTENT_WORKER_HANDLE.is_alive()
+        ):
+            return True
+        handle = WorkerHandle(
+            on_progress=_set_job_progress,
+            on_complete=_set_job_complete,
+            on_error=_set_job_error,
+        )
+        started = handle.start(ready_timeout=180.0)
+        if not started:
+            return False
+        _PERSISTENT_WORKER_HANDLE = handle
+
+    import atexit
+    atexit.register(_shutdown_persistent_worker)
+    return True
+
+
+def _shutdown_persistent_worker() -> None:
+    global _PERSISTENT_WORKER_HANDLE
+    with _PERSISTENT_WORKER_LOCK:
+        handle = _PERSISTENT_WORKER_HANDLE
+        _PERSISTENT_WORKER_HANDLE = None
+    if handle is not None:
+        try:
+            handle.shutdown(timeout=10.0)
+        except Exception:
+            pass
+
+
+def _launch_compute_persistent(
+    job_id: str, compute_type: str, payload: Dict[str, Any]
+) -> None:
+    handle = _PERSISTENT_WORKER_HANDLE
+    if handle is None or not handle.is_alive():
+        _set_job_error(
+            job_id,
+            "Persistent compute worker is not running. Restart the server.",
+        )
+        return
+    handle.submit(job_id, compute_type, payload)
 
 
 def _chat_start_compute_job(compute_type: str, payload: Dict[str, Any]) -> str:
@@ -6541,13 +6631,17 @@ def main() -> None:
     parser = _argparse.ArgumentParser(description="PARSE HTTP server")
     parser.add_argument(
         "--compute-mode",
-        choices=("thread", "subprocess"),
+        choices=("thread", "subprocess", "persistent"),
         default=None,
         help=(
             "Backing runner for compute jobs. ``thread`` (default) runs in "
             "threading.Thread inside the server process. ``subprocess`` "
             "spawns a fresh Python process per job (recommended on "
             "Windows python.exe via WSL where threaded CUDA init wedges). "
+            "``persistent`` starts one long-lived worker process that "
+            "pre-loads wav2vec2 once and serves all compute jobs — fixes "
+            "the root cause of the WSL2 stability issues that PRs #162-169 "
+            "treated symptomatically. "
             "Overrides PARSE_COMPUTE_MODE env var when both are set."
         ),
     )
@@ -6581,6 +6675,16 @@ def main() -> None:
 
     server_address = (HOST, PORT)
     httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
+
+    if _resolve_compute_mode() == "persistent":
+        if not _start_persistent_worker():
+            print(
+                "[FATAL] --compute-mode=persistent requested but worker failed to start. "
+                "See /tmp/parse-compute-worker.stderr.log for the cause.",
+                file=sys.stderr, flush=True,
+            )
+            sys.exit(1)
+
     local_ips = _get_local_ips()
 
     for line in _startup_banner_lines(serve_dir, local_ips):
