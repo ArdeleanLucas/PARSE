@@ -152,7 +152,13 @@ The positional component applies a 45-second tolerance window (linear decay) aro
 
 The system presents ranked candidates. The annotator verifies, adjusts boundaries, and confirms. Nothing is saved without an explicit action. Candidate quality improves as the dataset grows — each verified annotation adds to the reference pool that cross-speaker matching draws on, making later speakers progressively faster to annotate than the first.
 
-**User-facing tool — "Search &amp; anchor lexeme" (Annotate mode).** The Annotation panel exposes the first half of the pipeline directly: enter the known orthographic variants of the target concept (e.g. `yek, yak, jek`), and PARSE ranks time ranges across the `ortho_words`, `ortho`, `stt`, and `ipa` tiers by fuzzy match confidence. Clicking a candidate seeks the waveform there so the annotator can verify and confirm. The control bar now also shows a numeric playhead readout (`m:ss.sss / m:ss.sss`) so anchor decisions don't require eyeballing the scrub position. A follow-up pass will wire the full two-signal scoring (phonetic Levenshtein + cross-speaker match) behind a backend endpoint and add a bulk-align CTA for the remaining concepts.
+**User-facing tool — "Search &amp; anchor lexeme" (Annotate mode).** The Annotation panel exposes the full two-signal pipeline directly. Enter the known orthographic variants of the target concept (e.g. `yek, yak, jek`), and PARSE ranks time ranges across the `ortho_words`, `ortho`, `stt`, and `ipa` tiers via `GET /api/lexeme/search`, which combines:
+
+- **Within-speaker phonetic similarity** — normalized Levenshtein on both the orthographic form and the IPA sequence (the interval text is phonemized on the fly via `phonemizer`/espeak-ng). The match's `confidence_weight` carries through any `ortho_words` per-interval forced-alignment confidence from PR #178.
+- **Cross-speaker concept matching** — for the same `concept_id`, the endpoint scans every other speaker's `confirmed_anchors` sidecar and adds a small bonus when a candidate is close to an already-verified variant elsewhere.
+- **Contact-language variant augmentation** — the user-supplied variants are auto-expanded from `config/sil_contact_languages.json` so the annotator doesn't need to know every documented form.
+
+"Confirm &amp; Use" writes the chosen candidate to `AnnotationRecord.confirmed_anchors[concept_id]` (sidecar — survives Praat/TextGrid round-trips cleanly). Each confirmation strengthens the cross-speaker signal for the remaining speakers — the reference pool compounds exactly as §4.4 describes. The Annotate control bar also shows a numeric playhead readout (`m:ss.sss / m:ss.sss`) so anchor decisions don't require eyeballing the scrub position. The bulk-align CTA stays stubbed until PR C, which will use the confirmed anchors as scaffolding to align the remaining concepts for a speaker in one pass.
 
 ---
 
