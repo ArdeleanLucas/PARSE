@@ -1905,10 +1905,8 @@ def _launch_compute_subprocess(
             )
         else:
             err = str(payload_out.get("error") or "Compute subprocess reported failure")
-            tb = str(payload_out.get("traceback") or "")
-            if tb:
-                err = "{0}\n{1}".format(err, tb)
-            _set_job_error(job_id, err)
+            tb = str(payload_out.get("traceback") or "") or None
+            _set_job_error(job_id, err, traceback_str=tb)
 
     monitor = threading.Thread(
         target=_monitor,
@@ -2426,6 +2424,37 @@ _COMPUTE_CHECKPOINT_FD: Optional[int] = None
 _COMPUTE_CHECKPOINT_LOCK = threading.Lock()
 
 
+def _tail_log_file(path: str, max_lines: int = 200, max_bytes: int = 256 * 1024) -> Optional[str]:
+    """Return the last ``max_lines`` lines of ``path``, capped at ``max_bytes``.
+
+    Best-effort: returns None if the file is missing, unreadable, or empty.
+    Used by ``_api_get_job_logs`` to surface worker stderr tails without
+    pulling the whole file. Bytes cap protects against a multi-MB log
+    ending up in a JSON response body.
+    """
+    try:
+        with open(path, "rb") as fh:
+            try:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+            except OSError:
+                size = 0
+            if size <= 0:
+                return None
+            start = max(0, size - max_bytes)
+            fh.seek(start)
+            chunk = fh.read()
+    except (OSError, FileNotFoundError):
+        return None
+    if not chunk:
+        return None
+    text = chunk.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return "\n".join(lines) if lines else None
+
+
 def _compute_checkpoint_path() -> str:
     global _COMPUTE_CHECKPOINT_LOG_PATH
     if _COMPUTE_CHECKPOINT_LOG_PATH is None:
@@ -2544,7 +2573,15 @@ def _set_job_complete(
                 pass
 
 
-def _set_job_error(job_id: str, error_message: str) -> None:
+def _set_job_error(
+    job_id: str,
+    error_message: str,
+    traceback_str: Optional[str] = None,
+) -> None:
+    """Mark a job as errored. ``traceback_str`` is stored separately from
+    the short error message so the UI's crash-log modal can render the
+    one-line reason on top and the full Python traceback below without
+    having to split-on-newline."""
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None:
@@ -2553,6 +2590,8 @@ def _set_job_error(job_id: str, error_message: str) -> None:
         now_ts = time.time()
         job["status"] = "error"
         job["error"] = str(error_message)
+        if traceback_str:
+            job["traceback"] = str(traceback_str)
         job["updated_at"] = _utc_now_iso()
         job["updated_ts"] = now_ts
         job["completed_at"] = _utc_now_iso()
@@ -2591,6 +2630,8 @@ def _job_response_payload(job: Dict[str, Any]) -> Dict[str, Any]:
         payload["message"] = job.get("message")
     if job.get("error"):
         payload["error"] = str(job.get("error"))
+    if job.get("traceback"):
+        payload["traceback"] = str(job.get("traceback"))
 
     payload["segmentsProcessed"] = int(job.get("segmentsProcessed", 0) or 0)
     payload["totalSegments"] = int(job.get("totalSegments", 0) or 0)
@@ -4717,6 +4758,43 @@ def _reset_job_to_running(job_id: str) -> None:
 
 
 
+_OFFSET_DETECT_TIMEOUT_SEC_DEFAULT = 600.0
+
+
+def _offset_detect_timeout_sec() -> float:
+    """Hard cap on offset-detection runtime. Defaults to 10 minutes.
+    Override via ``PARSE_OFFSET_DETECT_TIMEOUT_SEC``. Covers both
+    ``offset_detect`` and ``offset_detect_from_pair`` — the manual path
+    is normally sub-second but shares the guard for consistency."""
+    try:
+        raw = os.environ.get("PARSE_OFFSET_DETECT_TIMEOUT_SEC", "").strip()
+        if not raw:
+            return _OFFSET_DETECT_TIMEOUT_SEC_DEFAULT
+        val = float(raw)
+        if val <= 0 or not math.isfinite(val):
+            return _OFFSET_DETECT_TIMEOUT_SEC_DEFAULT
+        return val
+    except (TypeError, ValueError):
+        return _OFFSET_DETECT_TIMEOUT_SEC_DEFAULT
+
+
+def _enforce_offset_deadline(deadline: float, label: str) -> None:
+    """Raise TimeoutError if ``deadline`` (monotonic sec) has passed.
+
+    Called at progress checkpoints inside the offset compute functions.
+    Doesn't interrupt in-flight work on its own — Python can't kill a
+    thread mid-numerics — but guarantees the UI gets a clean "timed out"
+    error with the full traceback instead of an indefinite detecting
+    modal. The compute worker survives the TimeoutError like any other
+    raised exception (worker_main's try/except captures + emits it)."""
+    if time.monotonic() > deadline:
+        raise TimeoutError(
+            "Offset detection exceeded {0:.0f}s hard timeout at stage '{1}'. "
+            "Raise PARSE_OFFSET_DETECT_TIMEOUT_SEC if your corpus legitimately "
+            "needs more time.".format(_offset_detect_timeout_sec(), label)
+        )
+
+
 def _compute_offset_detect(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Compute-dispatcher adapter for timestamp offset detection.
 
@@ -4724,6 +4802,7 @@ def _compute_offset_detect(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     header progress bar appears while annotation and STT data are correlated.
     No GPU work — intentionally CPU-only.
     """
+    deadline = time.monotonic() + _offset_detect_timeout_sec()
     speaker = str(payload.get("speaker") or "").strip()
     if not speaker:
         raise ValueError("offset_detect payload missing 'speaker'")
@@ -4808,6 +4887,7 @@ def _compute_offset_detect(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     if not segments:
         raise ValueError("STT input contained no usable segments")
 
+    _enforce_offset_deadline(deadline, "pre-match")
     _set_job_progress(job_id, 75, message="Computing timestamp offset")
     try:
         detailed = _detect_offset_detailed(
@@ -4820,6 +4900,7 @@ def _compute_offset_detect(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
     except ValueError as exc:
         raise ValueError("Offset detection failed: {0}".format(exc)) from exc
 
+    _enforce_offset_deadline(deadline, "post-match")
     _set_job_progress(job_id, 92, message="Finalizing result")
     return _offset_detect_payload(
         speaker=speaker,
@@ -4841,6 +4922,7 @@ def _compute_offset_detect_from_pair(job_id: str, payload: Dict[str, Any]) -> Di
     Accepts one or more (audioTimeSec, csvTimeSec/conceptId) pairs and returns
     the median offset. Pure arithmetic — no STT or GPU work.
     """
+    deadline = time.monotonic() + _offset_detect_timeout_sec()
     speaker = str(payload.get("speaker") or "").strip()
     if not speaker:
         raise ValueError("offset_detect_from_pair payload missing 'speaker'")
@@ -4929,6 +5011,7 @@ def _compute_offset_detect_from_pair(job_id: str, payload: Dict[str, Any]) -> Di
             }
         )
 
+    _enforce_offset_deadline(deadline, "pre-median")
     _set_job_progress(job_id, 75, message="Computing median offset")
     import statistics as _statistics
 
@@ -5165,6 +5248,15 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/jobs/active":
             self._api_get_jobs_active()
+            return
+
+        if (
+            len(parts) == 4
+            and parts[0] == "api"
+            and parts[1] == "jobs"
+            and parts[3] == "logs"
+        ):
+            self._api_get_job_logs(parts[2])
             return
 
         if request_path == "/api/enrichments":
@@ -5734,6 +5826,53 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         """Return a list of currently-running jobs so the UI can rehydrate
         progress after a page reload. See ``_list_active_jobs_snapshots``."""
         self._send_json(HTTPStatus.OK, {"jobs": _list_active_jobs_snapshots()})
+
+    def _api_get_job_logs(self, job_id: str) -> None:
+        """Return the error, traceback, and tail of any stderr log files
+        associated with a job. Powers the UI's "View crash log" modal.
+
+        Reads from two places:
+          1. The in-memory job record — ``error`` (short reason) and
+             ``traceback`` (full Python traceback), when the job failed.
+          2. The per-job stderr log written by ``_compute_subprocess_entry``
+             at ``/tmp/parse-compute-<job_id>.stderr.log`` and the shared
+             persistent-worker log at ``/tmp/parse-compute-worker.stderr.log``.
+             Only the last ~200 lines of each are returned so a runaway
+             log doesn't bloat the response.
+
+        Response shape: ``{jobId, status, type, error?, traceback?,
+        message?, stderrLog?, workerStderrLog?}``. All log fields are
+        omitted when unavailable — the UI renders whatever is present.
+        """
+        snapshot = _get_job_snapshot(job_id)
+        if snapshot is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown job_id")
+
+        payload: Dict[str, Any] = {
+            "jobId": job_id,
+            "status": str(snapshot.get("status") or ""),
+            "type": str(snapshot.get("type") or ""),
+        }
+        if snapshot.get("error"):
+            payload["error"] = str(snapshot.get("error"))
+        if snapshot.get("traceback"):
+            payload["traceback"] = str(snapshot.get("traceback"))
+        if snapshot.get("message"):
+            payload["message"] = str(snapshot.get("message"))
+
+        job_stderr = _tail_log_file(
+            "/tmp/parse-compute-{0}.stderr.log".format(job_id), max_lines=200
+        )
+        if job_stderr:
+            payload["stderrLog"] = job_stderr
+
+        worker_stderr = _tail_log_file(
+            "/tmp/parse-compute-worker.stderr.log", max_lines=200
+        )
+        if worker_stderr:
+            payload["workerStderrLog"] = worker_stderr
+
+        self._send_json(HTTPStatus.OK, payload)
 
     def _api_get_worker_status(self) -> None:
         """Health check for the persistent compute worker.

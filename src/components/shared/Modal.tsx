@@ -5,23 +5,28 @@ interface ModalProps {
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
+  /** When false, backdrop clicks and the Escape key are no-ops. Use this
+   * for phases that must run to completion (e.g. an async offset-detect
+   * job) so a stray click doesn't silently drop the user out of the flow
+   * while work continues in the background. Default: true. */
+  dismissible?: boolean;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({ open, onClose, title, children, dismissible = true }: ModalProps) {
   useEffect(() => {
-    if (!open) return;
+    if (!open || !dismissible) return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
+  }, [open, onClose, dismissible]);
 
   if (!open) return null;
 
   return (
     <div
-      onClick={onClose}
+      onClick={dismissible ? onClose : undefined}
       style={{
         position: "fixed",
         inset: 0,

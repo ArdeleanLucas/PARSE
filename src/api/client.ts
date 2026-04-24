@@ -481,25 +481,60 @@ export async function detectTimestampOffsetFromPairs(
   return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
 }
 
+/** Thrown when pollOffsetDetectJob sees the server mark the job as errored.
+ *  Carries the backend traceback so the UI can render it in a crash-log
+ *  modal instead of losing it inside a bare Error.message. */
+export class OffsetJobError extends Error {
+  readonly jobId: string;
+  readonly traceback?: string;
+  constructor(jobId: string, message: string, traceback?: string) {
+    super(message);
+    this.name = "OffsetJobError";
+    this.jobId = jobId;
+    if (traceback) this.traceback = traceback;
+  }
+}
+
 /** Poll until an offset detect job completes and return the OffsetDetectResult.
- *  Throws on job error or timeout. */
+ *  Throws ``OffsetJobError`` on job error (with backend traceback attached)
+ *  or a plain Error on client-side timeout. ``onProgress`` is invoked on
+ *  every successful poll — callers can mirror the live backend
+ *  ``message`` into a header chip so the user sees what the worker is
+ *  doing mid-flight.
+ *
+ *  The default timeout is 10 minutes, matching the backend's hard
+ *  ``PARSE_OFFSET_DETECT_TIMEOUT_SEC`` cap. The former 60 s budget was
+ *  wired for the old synchronous path; on real thesis-sized WAVs the
+ *  async job legitimately takes several minutes. */
 export async function pollOffsetDetectJob(
   jobId: string,
   computeType: "offset_detect" | "offset_detect_from_pair" = "offset_detect",
-  { intervalMs = 500, timeoutMs = 60_000 }: { intervalMs?: number; timeoutMs?: number } = {},
+  {
+    intervalMs = 500,
+    timeoutMs = 600_000,
+    onProgress,
+  }: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    onProgress?: (p: { progress: number; message?: string }) => void;
+  } = {},
 ): Promise<OffsetDetectResult> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise<void>((r) => setTimeout(r, intervalMs));
     const status = await pollCompute(computeType, jobId);
+    if (onProgress) {
+      onProgress({ progress: status.progress, message: status.message });
+    }
     if (status.status === "complete") {
       return status.result as OffsetDetectResult;
     }
     if (status.status === "error") {
-      throw new Error(status.error ?? status.message ?? "Offset detection failed");
+      const reason = status.error ?? status.message ?? "Offset detection failed";
+      throw new OffsetJobError(jobId, reason, status.traceback);
     }
   }
-  throw new Error("Offset detection timed out");
+  throw new OffsetJobError(jobId, "Offset detection timed out (client-side deadline)");
 }
 
 export async function applyTimestampOffset(
@@ -640,6 +675,10 @@ export async function pollCompute(computeType: string, jobId: string): Promise<C
           ? payload.error
           : undefined,
     error: typeof payload.error === "string" ? payload.error : undefined,
+    // Forward the backend's Python traceback when the job failed. The
+    // UI's crash-log modal renders it as a scrollable ``<pre>`` so the
+    // user can grab it for a bug report without SSH-ing into the box.
+    ...(typeof payload.traceback === "string" ? { traceback: payload.traceback } : {}),
     // Forward the backend's opaque ``result`` field. ``full_pipeline``
     // returns its per-step results here; ``useBatchPipelineJob`` reads
     // this to populate the BatchReportModal. Previously this field was
@@ -649,6 +688,38 @@ export async function pollCompute(computeType: string, jobId: string): Promise<C
     // their expected compute-specific shape.
     result: payload.result,
   };
+}
+
+// Job logs — pulls the server's error, traceback, and tail of per-job
+// and worker stderr logs for a given job id. Powers the UI's
+// "View crash log" modal.
+export interface JobLogsPayload {
+  jobId: string;
+  status: string;
+  type?: string;
+  error?: string;
+  traceback?: string;
+  message?: string;
+  stderrLog?: string;
+  workerStderrLog?: string;
+}
+
+export async function getJobLogs(jobId: string): Promise<JobLogsPayload> {
+  const payload = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(jobId)}/logs`);
+  if (!isRecord(payload)) {
+    throw new Error("Invalid job logs payload");
+  }
+  const out: JobLogsPayload = {
+    jobId: typeof payload.jobId === "string" ? payload.jobId : jobId,
+    status: typeof payload.status === "string" ? payload.status : "",
+  };
+  if (typeof payload.type === "string") out.type = payload.type;
+  if (typeof payload.error === "string") out.error = payload.error;
+  if (typeof payload.traceback === "string") out.traceback = payload.traceback;
+  if (typeof payload.message === "string") out.message = payload.message;
+  if (typeof payload.stderrLog === "string") out.stderrLog = payload.stderrLog;
+  if (typeof payload.workerStderrLog === "string") out.workerStderrLog = payload.workerStderrLog;
+  return out;
 }
 
 // Export — returns Blob (file download, not JSON)

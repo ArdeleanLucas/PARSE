@@ -216,10 +216,16 @@ class WorkerHandle:
                 elif kind == "error":
                     self._in_flight.pop(job_id, None)
                     err = str(event.get("error") or "Unknown worker error")
-                    tb = str(event.get("traceback") or "")
-                    if tb:
-                        err = "{0}\n{1}".format(err, tb)
-                    self._on_error(job_id, err)
+                    tb = str(event.get("traceback") or "") or None
+                    # Prefer the keyword form so the parent's
+                    # _set_job_error can persist the traceback separately
+                    # from the short reason. Fall back to the positional
+                    # form for older parents that don't accept it.
+                    try:
+                        self._on_error(job_id, err, traceback_str=tb)
+                    except TypeError:
+                        combined = err if not tb else "{0}\n{1}".format(err, tb)
+                        self._on_error(job_id, combined)
             except Exception as exc:
                 print(
                     "[WORKER] monitor handler failed ({0}): {1}".format(kind, exc),
@@ -294,8 +300,14 @@ def _install_parent_emitters(event_queue: Any) -> None:
             total_segments=total_segments,
         )
 
-    def _patched_error(job_id, error_message):
-        _emit(event_queue, "error", job_id=job_id, error=str(error_message))
+    def _patched_error(job_id, error_message, traceback_str=None):
+        _emit(
+            event_queue,
+            "error",
+            job_id=job_id,
+            error=str(error_message),
+            traceback=str(traceback_str) if traceback_str else "",
+        )
 
     server_mod._set_job_progress = _patched_progress
     server_mod._set_job_complete = _patched_complete

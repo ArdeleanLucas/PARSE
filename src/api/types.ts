@@ -154,6 +154,10 @@ export interface ComputeStatus {
   progress: number;
   message?: string;
   error?: string;
+  /** Full Python traceback captured by the worker when the job errored.
+   *  Present on terminal-error snapshots only; the UI renders it in the
+   *  crash-log modal alongside the short ``error`` message. */
+  traceback?: string;
   /** Opaque result payload the backend attaches when a compute job
    *  completes (e.g. full_pipeline returns its per-step results here).
    *  Callers cast this to the specific type they expect for their

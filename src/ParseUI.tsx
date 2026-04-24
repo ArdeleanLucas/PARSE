@@ -12,7 +12,8 @@ import {
   Sun, Moon, XCircle
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, OffsetJobError, getJobLogs } from './api/client';
+import type { JobLogsPayload } from './api/client';
 import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
@@ -2119,15 +2120,26 @@ export function ParseUI() {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
 
+  // The ``detecting`` / ``applying`` phases now carry the backend job id
+  // and the worker's latest progress checkpoint so the header chip can
+  // mirror what the worker is doing in real time. The ``error`` phase
+  // keeps ``jobId`` so the "View crash log" button can call
+  // ``GET /api/jobs/<id>/logs`` for the full stderr tail + Python
+  // traceback.
   const [offsetState, setOffsetState] = useState<
     | { phase: 'idle' }
-    | { phase: 'detecting' }
+    | { phase: 'detecting'; jobId: string | null; progress: number; progressMessage?: string; origin: 'auto' | 'manual' }
     | { phase: 'detected'; result: OffsetDetectResult }
     | { phase: 'manual' }
     | { phase: 'applying'; result: OffsetDetectResult }
     | { phase: 'applied'; result: OffsetDetectResult; shifted: number }
-    | { phase: 'error'; message: string }
+    | { phase: 'error'; message: string; traceback?: string; jobId?: string }
   >({ phase: 'idle' });
+
+  // Modal for viewing a failed compute job's error + traceback +
+  // worker stderr tail. Reachable from the offset header chip's "View
+  // crash log" button and from the inline error panel.
+  const [jobLogsOpen, setJobLogsOpen] = useState<string | null>(null);
 
   // Manual-pair anchors live at parent scope so the playback-bar capture
   // button (Annotate mode) and the modal share the same list. Each anchor
@@ -2259,17 +2271,28 @@ export function ParseUI() {
       setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
       return;
     }
-    setOffsetState({ phase: 'detecting' });
+    setOffsetState({ phase: 'detecting', jobId: null, progress: 0, origin: 'auto' });
+    let submittedJobId: string | null = null;
     try {
       const { jobId } = await detectTimestampOffset(activeActionSpeaker);
       if (!jobId) throw new Error('Server did not return a job ID for offset detection');
-      const result = await pollOffsetDetectJob(jobId, 'offset_detect');
+      submittedJobId = jobId;
+      setOffsetState({ phase: 'detecting', jobId, progress: 0, origin: 'auto' });
+      const result = await pollOffsetDetectJob(jobId, 'offset_detect', {
+        onProgress: ({ progress, message }) => {
+          setOffsetState((prev) =>
+            prev.phase === 'detecting'
+              ? { ...prev, progress, progressMessage: message }
+              : prev,
+          );
+        },
+      });
       setOffsetState({ phase: 'detected', result });
     } catch (err) {
-      setOffsetState({
-        phase: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      const message = err instanceof Error ? err.message : String(err);
+      const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
+      const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
+      setOffsetState({ phase: 'error', message, traceback, jobId });
     }
   };
 
@@ -2302,6 +2325,7 @@ export function ParseUI() {
       return;
     }
     setManualBusy(true);
+    let submittedJobId: string | null = null;
     try {
       const pairs: OffsetPair[] = manualAnchors.map((a) => ({
         audioTimeSec: a.audioTimeSec,
@@ -2309,13 +2333,23 @@ export function ParseUI() {
       }));
       const { jobId } = await detectTimestampOffsetFromPairs(activeActionSpeaker, pairs);
       if (!jobId) throw new Error('Server did not return a job ID');
-      const result = await pollOffsetDetectJob(jobId, 'offset_detect_from_pair');
+      submittedJobId = jobId;
+      setOffsetState({ phase: 'detecting', jobId, progress: 0, origin: 'manual' });
+      const result = await pollOffsetDetectJob(jobId, 'offset_detect_from_pair', {
+        onProgress: ({ progress, message }) => {
+          setOffsetState((prev) =>
+            prev.phase === 'detecting'
+              ? { ...prev, progress, progressMessage: message }
+              : prev,
+          );
+        },
+      });
       setOffsetState({ phase: 'detected', result });
     } catch (err) {
-      setOffsetState({
-        phase: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      const message = err instanceof Error ? err.message : String(err);
+      const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
+      const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
+      setOffsetState({ phase: 'error', message, traceback, jobId });
     } finally {
       setManualBusy(false);
     }
@@ -2696,6 +2730,68 @@ export function ParseUI() {
               )}
             </div>
           )}
+          {/* Persistent offset-job status chip. Survives modal dismissal
+              (even though we now lock the modal while the job runs, a
+              separate header indicator matters for the applying phase
+              and gives the user a single "what is PARSE doing" glance).
+              Idle state → renders nothing. Error state → click re-opens
+              the modal so the traceback + crash log are one click away. */}
+          {offsetState.phase !== 'idle' && (offsetState.phase === 'detecting' || offsetState.phase === 'applying' || offsetState.phase === 'error') && (() => {
+            const isError = offsetState.phase === 'error';
+            const isApplying = offsetState.phase === 'applying';
+            const isDetecting = offsetState.phase === 'detecting';
+            const label = isError
+              ? 'Offset failed'
+              : isApplying
+              ? 'Applying offset…'
+              : (offsetState.phase === 'detecting' && offsetState.progressMessage) || 'Detecting offset…';
+            return (
+              <div
+                className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
+                  isError
+                    ? 'border-rose-200 bg-rose-50'
+                    : 'border-indigo-200 bg-indigo-50'
+                }`}
+                data-testid="topbar-offset-status"
+              >
+                {isError ? (
+                  <AlertCircle className="h-3 w-3 shrink-0 text-rose-600"/>
+                ) : (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-indigo-600"/>
+                )}
+                <span className={`max-w-[200px] truncate text-[11px] font-medium ${isError ? 'text-rose-900' : 'text-indigo-900'}`} title={isError ? offsetState.message : label}>
+                  {label}
+                </span>
+                {isDetecting && (
+                  <div className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-indigo-100">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                      style={{ width: `${Math.max(3, Math.round(offsetState.progress))}%` }}
+                    />
+                  </div>
+                )}
+                {isError && offsetState.jobId && (
+                  <button
+                    onClick={() => setJobLogsOpen(offsetState.jobId!)}
+                    className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 underline hover:text-rose-800"
+                    data-testid="topbar-offset-view-log"
+                  >
+                    View crash log
+                  </button>
+                )}
+                {isError && (
+                  <button
+                    onClick={() => setOffsetState({ phase: 'idle' })}
+                    className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
+                    aria-label="Dismiss offset status"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {batch.state.status === 'complete' && !reportOpen && (
             <div
               className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
@@ -2856,6 +2952,16 @@ export function ParseUI() {
                     >
                       <Anchor className="h-3.5 w-3.5 text-slate-400"/>
                       {offsetState.phase === 'detecting' ? 'Detecting offset…' : 'Detect Timestamp Offset'}
+                    </button>
+                    <button
+                      onClick={() => { setActionsMenuOpen(false); setOffsetState({ phase: 'manual' }); }}
+                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
+                      data-testid="actions-detect-offset-manual"
+                      title="Skip auto-detect and anchor the offset from captured lexeme pairs directly."
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Anchor className="h-3.5 w-3.5 text-slate-400"/>
+                      Detect offset (manual anchors)
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
@@ -3808,11 +3914,35 @@ export function ParseUI() {
         open={offsetState.phase !== 'idle'}
         onClose={() => setOffsetState({ phase: 'idle' })}
         title="Timestamp Offset"
+        // While the async job is actually running, lock the modal. A
+        // stray click on the backdrop or the Escape key used to drop
+        // the user out of the flow while the worker kept computing —
+        // the progress was also invisible because nothing persisted in
+        // the header. The header chip now covers the "I want to dismiss
+        // this and come back" case, so blocking dismissal here is safe.
+        dismissible={offsetState.phase !== 'detecting' && offsetState.phase !== 'applying'}
       >
         <div className="space-y-3 text-sm" data-testid="offset-modal">
           {offsetState.phase === 'detecting' && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin"/> Detecting offset…
+            <div className="space-y-2" data-testid="offset-detecting">
+              <div className="flex items-center gap-2 text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin"/>
+                <span>{offsetState.progressMessage ?? 'Detecting offset…'}</span>
+                <span className="ml-auto font-mono text-[11px] tabular-nums text-slate-400">
+                  {Math.round(offsetState.progress)}%
+                </span>
+              </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-indigo-500 transition-all"
+                  style={{ width: `${Math.max(2, Math.round(offsetState.progress))}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                This window stays open while the worker is running — a
+                single click used to dismiss it silently and lose the
+                progress indicator. The header also mirrors the status.
+              </p>
             </div>
           )}
           {offsetState.phase === 'manual' && (() => {
@@ -4078,6 +4208,19 @@ export function ParseUI() {
                 <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0"/>
                 <span data-testid="offset-error">{offsetState.message}</span>
               </div>
+              {offsetState.jobId && (
+                <div className="text-[11px] text-slate-500">
+                  Job <span className="font-mono text-slate-700">{offsetState.jobId}</span>
+                  {' — '}
+                  <button
+                    className="font-semibold text-indigo-700 underline hover:text-indigo-800"
+                    onClick={() => setJobLogsOpen(offsetState.jobId!)}
+                    data-testid="offset-error-view-log"
+                  >
+                    View crash log
+                  </button>
+                </div>
+              )}
               <div className="flex justify-end gap-2">
                 <button
                   className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
@@ -4096,6 +4239,10 @@ export function ParseUI() {
           )}
         </div>
       </Modal>
+      <JobLogsModal
+        jobId={jobLogsOpen}
+        onClose={() => setJobLogsOpen(null)}
+      />
       <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
         <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
       </Modal>
@@ -4118,6 +4265,111 @@ export function ParseUI() {
         }}
       />
     </div>
+  );
+}
+
+// Crash-log modal. Fetches the worker error + traceback + stderr tail
+// for a given job id via /api/jobs/<id>/logs and renders it in a
+// scrollable <pre>. Rendered as null when no job id is selected so it
+// shares one mount point.
+function JobLogsModal({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
+  const [payload, setPayload] = useState<JobLogsPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!jobId) {
+      setPayload(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setPayload(null);
+    void (async () => {
+      try {
+        const data = await getJobLogs(jobId);
+        if (!cancelled) setPayload(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  return (
+    <Modal open={jobId !== null} onClose={onClose} title="Job Crash Log">
+      <div className="space-y-3 text-sm" data-testid="job-logs-modal">
+        {jobId && (
+          <div className="text-[11px] text-slate-500">
+            Job <span className="font-mono text-slate-700">{jobId}</span>
+          </div>
+        )}
+        {loading && (
+          <div className="flex items-center gap-2 text-slate-600">
+            <Loader2 className="h-4 w-4 animate-spin"/> Fetching logs…
+          </div>
+        )}
+        {error && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-800">
+            Failed to load logs: {error}
+          </div>
+        )}
+        {payload && (
+          <div className="space-y-3">
+            {payload.error && (
+              <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-rose-700">Error</div>
+                <div className="whitespace-pre-wrap break-words">{payload.error}</div>
+              </div>
+            )}
+            {payload.traceback && (
+              <details className="rounded-md border border-slate-200" open>
+                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                  Python traceback
+                </summary>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800" data-testid="job-logs-traceback">{payload.traceback}</pre>
+              </details>
+            )}
+            {payload.stderrLog && (
+              <details className="rounded-md border border-slate-200">
+                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                  Per-job stderr
+                </summary>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800">{payload.stderrLog}</pre>
+              </details>
+            )}
+            {payload.workerStderrLog && (
+              <details className="rounded-md border border-slate-200">
+                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                  Worker stderr tail
+                </summary>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800">{payload.workerStderrLog}</pre>
+              </details>
+            )}
+            {!payload.error && !payload.traceback && !payload.stderrLog && !payload.workerStderrLog && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+                No crash log captured for this job. The worker may have
+                exited cleanly, or the stderr log was not written yet.
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
