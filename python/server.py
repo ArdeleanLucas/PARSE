@@ -1951,6 +1951,8 @@ def _compute_subprocess_entry(
             )
         elif normalized_type in {"full_pipeline", "full-pipeline", "pipeline"}:
             result = _server._compute_full_pipeline("child-{0}".format(job_id), payload)
+        elif normalized_type in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
+            result = _server._compute_training_job("child-{0}".format(job_id), payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
@@ -3983,6 +3985,26 @@ def _compute_speaker_ortho(job_id: str, payload: Dict[str, Any]) -> Dict[str, An
 PIPELINE_STEPS: Tuple[str, ...] = ("normalize", "stt", "ortho", "ipa")
 
 
+def _compute_training_job(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Stub for the wav2vec2 / IPA fine-tuning training job.
+
+    Wired into the compute dispatcher so the frontend / API can already
+    POST `/api/compute/train_ipa_model`. The actual run will delegate to
+    the `ipa-phonetic-autoresearch` harness once that persistent-worker
+    integration lands.
+    """
+    _set_job_progress(
+        job_id,
+        0.0,
+        message="Training job accepted (harness integration pending)",
+    )
+    return {
+        "status": "pending",
+        "message": "train_ipa_model not yet implemented — harness integration pending.",
+        "payload_keys": sorted(list(payload.keys())) if isinstance(payload, dict) else [],
+    }
+
+
 def _compute_full_pipeline(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Run a user-selected subset of the speaker pipeline sequentially.
 
@@ -4275,6 +4297,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: Dict[str, Any]) ->
             result = _compute_speaker_forced_align(job_id, payload)
         elif normalized_type in {"full_pipeline", "full-pipeline", "pipeline"}:
             result = _compute_full_pipeline(job_id, payload)
+        elif normalized_type in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
+            result = _compute_training_job(job_id, payload)
         else:
             raise RuntimeError("Unsupported compute type: {0}".format(normalized_type))
 
