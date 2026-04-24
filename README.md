@@ -1,670 +1,163 @@
-# PARSE
+# PARSE — Phonetic Analysis & Review Source Explorer
 
-**P**honetic **A**nalysis & **R**eview **S**ource **E**xplorer  
-Browser-based dual-mode workstation for linguistic fieldwork and cross-speaker comparison.  
-Repository: [ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE)
+**Browser-based dual-mode workstation for linguistic fieldwork.**
+Annotate per-speaker recordings with tiered IPA/orthography, then compare across speakers for cognate adjudication, borrowing detection, and export-ready historical-linguistic datasets.
 
-> **Project status:** PARSE is in active development and is **not yet in beta**. Interfaces, workflows, and file contracts are still moving quickly as thesis-critical fieldwork and comparison features land on `main`.
+<!-- TODO: Add a hero GIF here showing the unified React shell: Annotate waveform + tiers, Compare concept matrix + CLEF panel, and the AI chat dock. A wide GitHub-friendly GIF or screenshot strip would work well. -->
+<!-- TODO: Add 2-3 static screenshots below the hero once the current UI settles: Annotate mode, Compare mode, and Lexeme Search / CLEF panels. -->
 
-## What is PARSE
+> **Status**: Active development. Thesis-critical features are landing frequently, interfaces and file contracts are still evolving, and PARSE should currently be treated as research software rather than beta software.
 
-PARSE is a browser-based research tool for linguists working with long field recordings, concept-based wordlists, and multi-speaker datasets. It combines audio navigation, annotation, onboarding/import, and comparative analysis in one workspace, so researchers can move from raw recordings or processed thesis artifacts to analysis-ready linguistic data without switching between disconnected tools.
+## ✨ What Makes PARSE Different
 
-PARSE has a dual-mode architecture: **Annotate** for per-speaker segmentation and transcription, and **Compare** for cross-speaker cognate review and borrowing adjudication. Both modes are hosted in a **unified React shell** (`ParseUI.tsx`) alongside the tag system, action menu, and AI chat dock, with precise time-aligned annotations and a shared tag system across workflows.
+- **Dual-mode unified React shell** for annotation and comparison in one workspace
+- **Fieldwork-first design** for long recordings, uneven metadata, and iterative review
+- **AI-native workflow surface** with a built-in chat assistant powered by **47 PARSE-specific tools**
+- **Full MCP server mode** exposing a curated **29-tool** subset for external agents and automation
+- **CLEF — Contact Lexeme Explorer Feature** for borrowing adjudication via a 10-provider contact-language lookup stack
+- **Lexical Anchor Alignment System** for locating repeated lexical items across long recordings and across speakers
+- **Export pipeline** for LingPy TSV and NEXUS outputs used in downstream comparative workflows
 
-The active frontend architecture is **React + Vite** (`index.html` + `src/`), with the preferred development routes at `http://localhost:5173/` (Annotate) and `http://localhost:5173/compare` (Compare). The legacy HTML entrypoints, old review page, and root vanilla-JS tree have been removed. For non-dev/local-server usage, run `npm run build` and the Python backend will serve the built frontend from `http://localhost:8766/` and `http://localhost:8766/compare`. LingPy export verification and full browser regression remain on a deferred to-test list until onboarding/import and end-to-end testing are ready.
-
-The Python backend continues to power AI/API routes for both architectures. PARSE is designed for real fieldwork constraints — large recordings, mixed metadata quality, iterative review — and should be treated as **research software** rather than production software.
-
----
-
-## Modes
-
-### Annotate mode (React route `/`)
-
-Per-speaker segmentation and transcription workstation.
-
-- Waveform review with WaveSurfer 7 for long recordings
-- Four annotation tiers: **IPA**, **orthography**, **concept**, and **speaker**
-- Stacked **transcription lanes** under the waveform for **STT**, **IPA**, and **ORTH**, with waveform-aligned timestamps and synchronized horizontal scrolling
-- Audio normalization job (`/api/normalize`) with in-place working-audio support
-- Speaker-level STT job (`/api/stt`) with progress/error reporting, automatic language detection from project metadata when available, tunable VAD / task / beam-size settings, and nested word-level timestamps (`segments[].words[]`)
-- Tier 2 acoustic forced alignment refines Tier 1 word windows with `torchaudio.functional.forced_align` against wav2vec2, yielding tighter per-word boundaries and optional phoneme spans
-- Speaker-level ORTH job (`computeType='ortho'`) backed by Razhan (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription; current defaults keep VAD off so the whole recording is covered unless you explicitly retune it
-- Speaker-level IPA fill job (`computeType='ipa_only'`) now runs **acoustic wav2vec2-only IPA** through the full forced-alignment path when word-level STT cache is available, yielding word-level IPA intervals; it falls back to coarse ORTH-interval slices only when no STT word cache exists
-- Batch transcription runner for one or many speakers, with preflight pipeline-state checks, overwrite cues, step-level failure isolation, rerun-failed support, and a walk-away batch report with expandable tracebacks, "empty" step detection, skip-breakdown counters, and exception samples for steps that ran but wrote no intervals
-- Preflight now distinguishes **"tier has intervals"** from **"the full WAV has been processed"** via coverage-aware fields (`duration_sec`, `coverage_start_sec`, `coverage_end_sec`, `coverage_fraction`, `full_coverage`)
-- Full pipeline execution now runs explicit ordered steps — **normalize → STT → ORTH → IPA** — with per-step skip/error reporting instead of treating the run as a single opaque job
-- Draggable lexeme timestamp editing and manual boundary correction
-- Timestamp-offset detect/apply workflow for constant CSV↔audio misalignment, now with monotonic alignment, quantile anchor sampling, and manual single-pair fallback
-- Clip-bounded playback for the selected region plus global **Space** play/pause hotkey
-- Concept display modes and sorting controls (ID order, A–Z, survey-order when present)
-- Keyboard shortcuts for mode switching and concept navigation
-- AI chat dock for in-session analysis assistance
-- Tag and filter concepts for selective annotation
-
-### Compare mode (React route `/compare`)
-
-Cross-speaker analysis workspace for cognates and phylogenetic data preparation.
-
-- Concept × speaker matrix for side-by-side lexical review
-- Cognate controls: **accept**, **split**, **merge**, and **cycle**
-- Per-row cognate-group editing, speaker flags, and long-press / secondary-action controls
-- Borrowing adjudication aided by contact-language similarity signals
-- Enrichments overlay for computed analysis metadata
-- **CLEF** (Contact Lexeme Explorer Feature) — multi-source contact-language similarity panel powered by a provider registry (see below)
-- Unified tag system (shared with Annotate mode) for scoped filtering
-- Export to LingPy-compatible TSV and NEXUS (placeholder) for downstream pipelines (LexStat, BEAST 2)
-
-### CLEF — Contact Lexeme Explorer Feature
-
-CLEF provides contact-language similarity data for borrowing adjudication in Compare mode. It fetches lexical data from multiple third-party and local sources via a **provider registry** (`python/compare/providers/`), then surfaces similarity signals in the `ContactLexemePanel` UI component.
-
-**Providers (10):**
-
-| Provider | Source type |
-|---|---|
-| `asjp` | ASJP database |
-| `cldf` | CLDF datasets |
-| `csv_override` | Local CSV overrides |
-| `grokipedia` | LLM-assisted lookup (xAI/Grok) |
-| `lingpy_wordlist` | LingPy wordlist data |
-| `literature` | Published literature references |
-| `pycldf_provider` | pycldf library |
-| `pylexibank_provider` | pylexibank library |
-| `wikidata` | Wikidata lexemes |
-| `wiktionary` | Wiktionary entries |
-
-**Endpoints:**
-- `POST /api/compute/contact-lexemes` — trigger contact-lexeme fetch job
-- `GET /api/contact-lexemes/coverage` — check coverage status across providers
-
-### Current entrypoint status
-
-- **Preferred development UI:** `http://localhost:5173/` and `http://localhost:5173/compare`
-- **Python-served built UI:** `http://localhost:8766/` and `http://localhost:8766/compare` after `npm run build`
-- **Cleanup status:** legacy vanilla-JS entrypoints have been removed from the repo; broader validation still lives on the deferred testing backlog
-
----
-
-## AI Provider System
-
-PARSE supports multiple AI backends, routed per task type:
-
-| Task | Supported providers |
-|---|---|
-| STT (speech-to-text) | faster-whisper (local, GPU-first with CPU/int8 fallback; word-level timestamps enabled), OpenAI Whisper API |
-| IPA transcription | acoustic wav2vec2 via `ipa_only` compute on audio slices (no text-to-IPA endpoint or Epitran fallback) |
-| LLM / chat | xAI (Grok), OpenAI |
-
-Provider selection is feature-specific — STT, IPA, and LLM tasks can each route to a different backend in the same project. Configuration lives in `config/ai_config.json`, which is gitignored because it contains machine-specific paths (e.g. a local Razhan CT2 model path). Copy `config/ai_config.example.json` to `config/ai_config.json` on a fresh clone and edit for your machine. If the file is missing entirely, the backend falls back to built-in defaults with a `[WARN]` on stderr.
-
-**Runtime note:** GPU STT remains the intended path, but the current faster-whisper provider now includes explicit CUDA-runtime detection, an emergency `PARSE_STT_FORCE_CPU=1` override, and a CPU/int8 fallback path when the local cuDNN / cuBLAS stack is unavailable. STT can auto-detect language from project metadata (falling back to configured defaults), STT and ORTH expose tunable decoding parameters such as `beam_size`, `task`, and VAD settings in `config/ai_config.json`, and mid-run CUDA failures rebuild the Whisper model on CPU instead of leaving the job wedged.
-
-### Models
-
-| Model | Task | Source |
-|---|---|---|
-| [`razhan/whisper-base-sdh`](https://huggingface.co/razhan/whisper-base-sdh) | ORTH transcription / Southern Kurdish speech recognition | HuggingFace (local CT2) |
-| [`facebook/wav2vec2-xlsr-53-espeak-cv-ft`](https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft) | Acoustic IPA transcription + forced alignment head | HuggingFace (local) |
-| Silero VAD | Voice activity detection — segment boundary detection in long recordings | bundled with faster-whisper |
-
-**Razhan** is the key model for the Southern Kurdish thesis project. It is a Whisper variant fine-tuned directly on Southern Kurdish (`sdh`) speech data, converted to CTranslate2 format for GPU-accelerated inference (`device=cuda, compute_type=float16`). It produces **Kurdish Arabic-script orthographic transcriptions with word-level timestamps** — not IPA. IPA is a separate stage handled by wav2vec2.
-
-Silero VAD segments each full-length recording before Razhan processes it. VAD parameters are tuned specifically for the elicitation recording format: activation threshold 0.35 (lower than default, to catch soft-spoken consultants at variable microphone distances) and minimum silence of 300 ms between segments (to prevent interviewer-prompt and speaker-response pairs from being collapsed into single units).
-
-The wav2vec2 model (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) now serves Tier 2 forced alignment and Tier 3 acoustic IPA. By default, `ipa_only` prefers the word-level STT cache (`coarse_transcripts/<speaker>.json`) and runs the full forced-align path word-by-word; if no word cache exists, PARSE falls back to coarse ORTH-interval slices. The older Epitran / text-IPA / LLM IPA paths are gone, and the synchronous `POST /api/ipa` endpoint has been removed. On WSL, the aligner now resolves to **CPU by default** to avoid GPU-driver crashes under long CTC workloads; `config/ai_config.json` also exposes `wav2vec2.force_cpu` and `wav2vec2.chunk_size` so long runs can be tuned without code changes. Recent fixes also cache `EspeakBackend` instances per language and report progress during Tier 2 forced alignment, so long CPU runs no longer sit at a misleading 0% while G2P / alignment work is underway.
-
-### Citation and external dependency links
-
-For academic integrity, the following table lists the **core external models and repositories directly referenced by the current PARSE code/config**. If PARSE results are reported in a thesis, paper, talk, or dataset release, these are the first external components that should be cited or acknowledged alongside PARSE itself.
-
-| Component | Type | Used in PARSE for | Link |
-|---|---|---|---|
-| `razhan/whisper-base-sdh` | Model | ORTH transcription of Southern Kurdish speech | https://huggingface.co/razhan/whisper-base-sdh |
-| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | Model | Acoustic IPA transcription + forced alignment | https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft |
-| Silero VAD | Model / repo | Voice activity detection during Whisper-style decoding | https://github.com/snakers4/silero-vad |
-| faster-whisper | Repository / library | Local STT + ORTH inference backend | https://github.com/SYSTRAN/faster-whisper |
-| CTranslate2 | Repository / library | Optimized local inference runtime for Whisper-family models | https://github.com/OpenNMT/CTranslate2 |
-| WaveSurfer.js | Repository / library | Long-recording waveform UI, regions, and timeline | https://github.com/katspaugh/wavesurfer.js |
-| React | Repository / library | Frontend application framework | https://github.com/facebook/react |
-| Vite | Repository / library | Frontend dev/build toolchain | https://github.com/vitejs/vite |
-| Tailwind CSS | Repository / library | Frontend styling system | https://github.com/tailwindlabs/tailwindcss |
-| Lucide | Repository / library | UI icon set (`lucide-react`) | https://github.com/lucide-icons/lucide |
-
-**Scope note:** this table intentionally covers the major external models and repositories that PARSE calls out in source/config and that materially shape runtime behaviour or outputs. Proprietary API providers used by configuration (for example OpenAI or xAI) are services rather than citeable source repositories, so they should be acknowledged separately in method sections when they are actually enabled in a given run.
-
-### Lexical Anchor Alignment System
-
-The core unique feature of PARSE. Long elicitation recordings (2.5–5 hours each) contain target lexical items embedded in conversational frames, metalinguistic commentary, and ambient noise. Manually scanning recordings to locate each concept across eleven speakers is prohibitively slow and inconsistent. PARSE solves this through a two-signal candidate scoring pipeline (thesis §4.4).
-
-**Signal A — Within-speaker repetition detection.** Each elicited item is typically produced two to four times in succession. Clusters of phonetically similar forms within a 30-second window are strong candidates for a repeated target item. Phonetic similarity is measured by normalised Levenshtein distance on IPA strings.
-
-**Signal B — Cross-speaker concept matching.** Unassigned segments are compared against verified annotations from other speakers for the same concept using a four-strategy cascade: exact orthographic → fuzzy orthographic → phonetic rule-based → positional prior. Phonetic variation rules encode documented Southern Kurdish alternations — onset voicing (k/g, t/d, p/b), nucleus variation (e/a), coda deletion — so that legitimate dialectal variants are not rejected as mismatches.
-
-**Confidence formula:**
-
-```
-confidence = 0.50 × phonetic + 0.25 × repetition + 0.15 × positional + 0.10 × cluster
-```
-
-The positional component applies a 45-second tolerance window (linear decay) around the expected timestamp derived from the cross-speaker median for each concept.
-
-The system presents ranked candidates. The annotator verifies, adjusts boundaries, and confirms. Nothing is saved without an explicit action. Candidate quality improves as the dataset grows — each verified annotation adds to the reference pool that cross-speaker matching draws on, making later speakers progressively faster to annotate than the first.
-
-**User-facing tool — "Search &amp; anchor lexeme" (Annotate mode).** The Annotation panel exposes the full two-signal pipeline directly. Enter the known orthographic variants of the target concept (e.g. `yek, yak, jek`), and PARSE ranks time ranges across the `ortho_words`, `ortho`, `stt`, and `ipa` tiers via `GET /api/lexeme/search`, which combines:
-
-- **Within-speaker phonetic similarity** — normalized Levenshtein on both the orthographic form and the IPA sequence (the interval text is phonemized on the fly via `phonemizer`/espeak-ng). The match's `confidence_weight` carries through any `ortho_words` per-interval forced-alignment confidence from PR #178.
-- **Cross-speaker concept matching** — for the same `concept_id`, the endpoint scans every other speaker's `confirmed_anchors` sidecar and adds a small bonus when a candidate is close to an already-verified variant elsewhere.
-- **Contact-language variant augmentation** — the user-supplied variants are auto-expanded from `config/sil_contact_languages.json` so the annotator doesn't need to know every documented form.
-
-"Confirm &amp; Use" writes the chosen candidate to `AnnotationRecord.confirmed_anchors[concept_id]` (sidecar — survives Praat/TextGrid round-trips cleanly). Each confirmation strengthens the cross-speaker signal for the remaining speakers — the reference pool compounds exactly as §4.4 describes. The Annotate control bar also shows a numeric playhead readout (`m:ss.sss / m:ss.sss`) so anchor decisions don't require eyeballing the scrub position. The bulk-align CTA stays stubbed until PR C, which will use the confirmed anchors as scaffolding to align the remaining concepts for a speaker in one pass.
-
----
-
-## AI Workflow Assistant
-
-Both Annotate and Compare modes include a built-in AI chat dock powered by the configured LLM provider (xAI/Grok or OpenAI). This is not a general-purpose chatbot — it is a domain-specific assistant designed to guide users through the entire PARSE workflow from start to finish.
-
-The assistant has full access to project state via the `ParseChatTools` interface (`python/ai/chat_tools.py`) and can:
-
-**Audio setup and file management**
-- Help locate and load `.wav` source files into the workspace
-- Check audio health (LUFS, format, sample rate, duration)
-- Guide the normalization pipeline for new speakers
-
-**Annotation workflow**
-- Walk through the segment annotation process tier by tier (IPA, orthography, concept, speaker)
-- Run the STT pipeline on a full recording to locate candidate segments
-- Assist with boundary correction and iterative refinement
-
-**Cross-speaker analysis**
-- Prepare and guide a Compare mode session
-- Explain cognate controls and borrowing adjudication decisions
-- Help interpret enrichment overlays and similarity scores
-
-**Export and downstream pipeline**
-- Guide LingPy-compatible TSV export
-- Explain column structure for LexStat and BEAST 2 input
-
-**Troubleshooting**
-- Diagnose pipeline failures (STT, IPA, normalization)
-- Identify missing files, mismatched metadata, or annotation gaps
-- Explain error messages from the server log
-
-Recent post-README improvements also expanded the assistant's operational surface in two practical areas: server-backed tags now sync on UI bootstrap (so imported tags appear after reload), and existing tags can be renamed directly inside PARSE's Tags mode instead of being recreate-only.
-
-The assistant operates with read and write access to the project. It can stage files, update metadata, trigger jobs, and report back — without requiring the user to leave the interface.
-
----
-
-## Speaker import and workspace hydration
-
-Recent PRs expanded PARSE beyond raw upload-only onboarding. In addition to `POST /api/onboard/speaker`, the current workstation and MCP adapter support **processed-speaker imports**: copying a timestamp-aligned working WAV plus annotation/peaks/transcript artifacts into the active workspace and registering the speaker in `project.json` and `source_index.json`.
-
-This matters for thesis workflows where the richest aligned source is not a fresh raw WAV pipeline run but an existing processed artifact set. In practice, PARSE can now be hydrated from:
-
-- a working WAV under `audio/working/<Speaker>/`
-- `annotations/<Speaker>.json` / `annotations/<Speaker>.parse.json`
-- `peaks/<Speaker>.json`
-- optional `coarse_transcripts/<Speaker>.json`
-- optional legacy transcript CSV under `imports/legacy/<Speaker>/`
-
-The active frontend speaker list comes from the live workspace behind `/api/config`, not necessarily from the bare repo checkout. When running PARSE with `PARSE_WORKSPACE_ROOT` set, imports and runtime writes must land in that workspace for the UI to see them.
-
-> **API schema version contract:** Every `/api/config` response carries `schema_version: 1`. The React client validates this on boot; a mismatch (old server code running against a new frontend) surfaces as a banner instead of a silent empty workspace. When a breaking change to the config payload shape is needed, bump `CONFIG_SCHEMA_VERSION` in `python/server.py` **and** `EXPECTED_CONFIG_SCHEMA_VERSION` in `src/api/client.ts` together in the same PR.
-
----
-
-## Quick Start
-
-### One-command launch (recommended)
-
-The `scripts/parse-run.sh` launcher (tracked in this repo) starts both servers, pulls the latest code, cleans up stale processes on both WSL and Windows sides, probes the API port before launch, and health-checks the API before printing URLs. A shell alias (`parse-run`) is typically wired to call this script.
+## 🚀 Quick Start
 
 ```bash
-scripts/parse-run.sh    # same as `parse-run` alias; run directly from repo root
+git clone https://github.com/ArdeleanLucas/PARSE.git
+cd PARSE
+./scripts/parse-run.sh
 ```
 
-The alias version lives in `~/.bash_aliases`:
+On a fresh clone, you will usually also want to:
 
-```bash
-alias parse-run='/path/to/parse/scripts/parse-run.sh'
-alias parse-stop='/path/to/parse/scripts/parse-stop.sh'
-```
+- run `npm install` once
+- copy `config/ai_config.example.json` to `config/ai_config.json`
+- review your local model/provider settings before serious speech work
 
-On success you will see:
+Open:
 
-```
-[parse-run] ════════════════════════════════════════
-[parse-run]   PARSE is running
-[parse-run]   React UI:  http://localhost:5173/
-[parse-run]   Compare:   http://localhost:5173/compare
-[parse-run]   API:       http://localhost:8766/api/config
-[parse-run] ════════════════════════════════════════
-```
+- **Annotate**: http://localhost:5173/
+- **Compare**: http://localhost:5173/compare
 
-Open **http://localhost:5173/** in your browser for the React UI.
+For full requirements, workspace setup, GPU/model configuration, and troubleshooting, see [Getting Started](docs/getting-started.md).
 
-### Runtime and deployment notes
+## 🛠️ Core Concepts
 
-- The HTTP server now runs behind a **bounded 4-worker request pool** rather than one ad-hoc OS thread per request, which keeps long polling runs stable during batch STT / ORTH / IPA jobs.
-- Compute jobs support three launcher modes: the default in-process `thread` mode, an opt-in `subprocess` mode (`python python/server.py --compute-mode=subprocess` or `PARSE_COMPUTE_MODE=subprocess`), and a **persistent** worker mode (`python python/server.py --compute-mode=persistent` or `PARSE_USE_PERSISTENT_WORKER=true`) that preloads wav2vec2 once and reuses it across compute jobs.
-- If you supervise the backend with PM2, use the tracked `deploy/pm2-ecosystem.config.cjs` file and keep `cwd` pointed at the **live workspace**, not the git checkout, so annotations and derived artifacts land in the runtime workspace rather than in the repo tree.
-- The PM2 config now also documents the current WSL safety defaults: `PARSE_STT_FORCE_CPU=1` and `CUDA_VISIBLE_DEVICES=""`, so STT / ORTH / IPA can fall back to all-CPU operation on unstable WSL GPU stacks.
-- For persistent-worker deployments, `GET /api/worker/status` provides a health check suitable for PM2 or external monitors; non-persistent modes return mode information but no worker liveness probe.
+### Annotate Mode (`/`)
 
-### Workspace-first bootstrap (recommended on a fresh machine)
+**Annotate** is the per-speaker segmentation and transcription workstation.
 
-For real fieldwork use, keep generated runtime state outside the git checkout. `scripts/parse-init-workspace.sh` scaffolds a standalone workspace for copied source audio, annotations, peaks, chat memory, and config-local runtime files.
+It combines:
 
-```bash
-# scaffold once
-scripts/parse-init-workspace.sh /path/to/parse-workspace
+- **WaveSurfer 7** waveform review for long recordings
+- **Four annotation tiers**: IPA, orthography, concept, and speaker
+- **Stacked transcription lanes** for STT, IPA, and ORTH with synchronized horizontal scrolling
+- **Audio normalization**, **speaker-level STT**, **ORTH transcription**, and **acoustic IPA fill** jobs
+- **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries
+- **Draggable timestamp correction** and clip-bounded playback for manual review
+- **Batch transcription** with preflight checks and rerun-failed support
+- **Timestamp-offset detection/apply workflows** for constant CSV↔audio misalignment
+- **Search & anchor lexeme** tooling built on the Lexical Anchor Alignment System
+- **Shared tags** and the in-session **AI chat dock**
 
-# then launch PARSE against that workspace
-PARSE_WORKSPACE_ROOT="/path/to/parse-workspace" \
-  PARSE_CHAT_MEMORY_PATH="/path/to/parse-workspace/parse-memory.md" \
-  PARSE_EXTERNAL_READ_ROOTS="/mnt/c/Users/Lucas/Thesis" \
-  scripts/parse-run.sh
-```
+Annotate mode is where PARSE turns long, messy field recordings into time-aligned annotation data without forcing the user into disconnected tools.
 
-This keeps original WAV/CSV sources untouched. Chat-assisted onboarding copies selected source files into `audio/original/<speaker>/` inside the workspace rather than mutating the source tree.
+### Compare Mode (`/compare`)
 
-Environment overrides:
+**Compare** is the cross-speaker review workspace.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `PARSE_PY` | `python3` | Python interpreter. Set to a Windows `python.exe` (e.g. `/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe`) when running from WSL against a Windows conda env. |
-| `PARSE_ROOT` | auto-detected | Repo root. |
-| `PARSE_WORKSPACE_ROOT` | `PARSE_ROOT` | Workspace/data root used by backend chat tools and runtime files. Point this outside the repo for fieldwork use. |
-| `PARSE_CHAT_DOCS_ROOT` | `PARSE_WORKSPACE_ROOT` | Optional docs/text root used by `read_text_preview`. |
-| `PARSE_CHAT_MEMORY_PATH` | `PARSE_WORKSPACE_ROOT/parse-memory.md` | Persistent markdown memory file used by the chat assistant. |
-| `PARSE_EXTERNAL_READ_ROOTS` | empty | Absolute roots the chat assistant may read outside the workspace for onboarding and file previews. Use OS path separators for multiple roots, or `*` to disable the sandbox entirely. |
-| `PARSE_CHAT_READ_ONLY` | empty | Override chat mutability: `1` forces read-only; `0` forces write-enabled. Otherwise PARSE defers to `config/ai_config.json`. |
-| `PARSE_API_PORT` | `8766` | API server port. |
-| `PARSE_VITE_PORT` | `5173` | Vite dev server port. |
-| `PARSE_SKIP_PULL` | `0` | Set to `1` to skip the `git pull` step. |
-| `PARSE_PULL_MODE` | `auto` | Git integration strategy: `auto`, `ff`, `rebase`, or `reset`. |
-
-For machine-local overrides without editing tracked files, create a gitignored `.parse-env` file in the repo root. `parse-run.sh` sources it before applying defaults, and the standalone MCP adapter now mirrors that convention when launched directly, so settings like `PARSE_PY`, `PARSE_EXTERNAL_READ_ROOTS`, or `PARSE_CHAT_MEMORY_PATH` can live there permanently. Explicit process environment variables still win over `.parse-env`.
-
-Two companion commands are also available:
-
-```bash
-scripts/parse-stop.sh   # kill both servers (WSL + Windows-side zombies)
-parse-logs api          # tail Python API stderr
-parse-logs vite         # tail Vite dev server output
-```
-
-#### WSL + Windows python.exe note
-
-When `PARSE_PY` points at a Windows `python.exe` (a conda env on `C:`), the actual server process runs on the Windows side. WSL's `pkill`/`fuser` cannot signal Windows processes, so `parse-run.sh` detects this case and additionally calls `taskkill.exe` via `/mnt/c/Windows/System32/` to clean up zombie `python.exe` instances holding port 8766. This prevents the "empty reply from server" failure mode where a broken prior process blocks the port.
-
-If `parse-run.sh` reports that it **cannot bind** `127.0.0.1:8766` with `WinError 10013` or `10048`, this is usually a Windows/WSL phantom port reservation. The launcher now detects that case before startup and prints the fix: run `wsl --shutdown` from Windows Command Prompt or PowerShell, then relaunch PARSE. You can also temporarily override the port with `PARSE_API_PORT=<other>`.
-
-#### What `scripts/parse-run.sh` does
-
-1. Integrates latest `origin/main` according to `PARSE_PULL_MODE` (skipped if `PARSE_SKIP_PULL=1`)
-2. Kills any stale Python or Vite processes on ports 8766 / 5173
-3. Probes whether the API port is actually bindable before launch
-4. Starts the **Python API server** (`python/server.py`) on `:8766`
-5. Waits for `/api/config` to return 200 (up to 12 s)
-6. Starts the **Vite dev server** (`npx vite --host`) on `:5173`
-7. Waits for Vite to respond, then prints URLs
-
-Both servers must be running. The Python backend serves the API routes;
-the Vite dev server serves the React/TypeScript frontend with Tailwind CSS
-and hot module replacement.
-
-#### Requirements
-
-- **WSL / Linux** — the alias uses Bash and `pkill`/`fuser`
-- **`kurdish_asr` conda env** — Python interpreter path is hardcoded in the
-  alias (`/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe`)
-- **Node.js 18+** and `npm install` run once per clone
-
-### Manual launch (alternative)
-
-If you prefer to start each server individually:
-
-```bash
-# One-time per clone: create your local AI config from the template
-cp config/ai_config.example.json config/ai_config.json
-# then edit config/ai_config.json — especially stt.model_path (local Razhan CT2 path)
-
-# Terminal 1 — Python API backend
-cd /path/to/parse
-/path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py
-
-# Terminal 2 — Vite frontend
-cd /path/to/parse
-npm install   # once per clone
-npm run dev
-```
-
-The backend runs on port `8766`; Vite runs on port `5173`.
-
-### Open in browser
-
-#### React UI (active dev workflow)
-
-- Annotate mode: `http://localhost:5173/`
-- Compare mode: `http://localhost:5173/compare`
-
-#### Python-served built UI (after `npm run build`)
-
-- Annotate mode: `http://localhost:8766/`
-- Compare mode: `http://localhost:8766/compare`
-
----
-
-## Project Structure
-
-```text
-index.html              -- React/Vite entry HTML
-src/
-  App.tsx               -- BrowserRouter shell → <ParseUI />
-  ParseUI.tsx           -- Unified UI shell (Annotate + Compare + Tags + AI Chat)
-  api/
-    client.ts           -- Typed API client (all fetch calls go through here)
-    types.ts            -- Shared TypeScript types
-  components/
-    annotate/           -- Annotate mode components
-    compare/            -- Compare mode (CompareMode, ConceptTable, CognateControls,
-                           BorrowingPanel, EnrichmentsPanel, ContactLexemePanel,
-                           SpeakerImport, TagManager)
-    shared/             -- Cross-mode shared components
-  hooks/                -- React hooks (useWaveSurfer, useChatSession,
-                           useAnnotationSync, useSpectrogram, useActionJob,
-                           useComputeJob, useExport, useImportExport, useSuggestions)
-  stores/               -- Zustand stores (annotationStore, configStore,
-                           enrichmentStore, playbackStore, tagStore, uiStore)
-python/
-  server.py             -- Backend API server + built-frontend static serving (port 8766)
-  adapters/
-    mcp_adapter.py      -- MCP server adapter (exposes ParseChatTools over stdio MCP)
-  ai/                   -- AI provider layer
-    chat_tools.py       -- ParseChatTools — AI assistant tool interface (47 tools)
-    chat_orchestrator.py-- Chat session management
-    stt_pipeline.py     -- Tier 1 word-level STT (faster-whisper + `word_timestamps=True`)
-    forced_align.py     -- Tier 2 acoustic forced alignment (torchaudio + wav2vec2-xlsr)
-    ipa_transcribe.py   -- Tier 3 acoustic IPA (wav2vec2 CTC on audio slices, wav2vec2-only)
-  compare/              -- Compare pipeline (cognates, offsets, matching)
-    providers/          -- CLEF provider registry and provider adapters
-  shared/               -- Shared Python utilities
-config/
-  ai_config.example.json -- Template for AI provider configuration (tracked)
-  ai_config.json          -- AI provider configuration (gitignored — copy from example)
-annotations/            -- Per-speaker annotation JSON files (runtime, untracked)
-parse-enrichments.json  -- Computed comparative overlays (runtime, untracked)
-desktop/                -- Electron shell scaffold
-docs/                   -- Documentation and plans
-dist/                   -- Vite build output (generated, gitignored)
-```
-
----
-
-## AI Chat Tools
-
-The AI chat assistant uses `ParseChatTools` (`python/ai/chat_tools.py`) as its programmatic tool layer. The built-in PARSE chat currently exposes **47 tools** in total. These tools are invoked by the LLM during chat sessions and stay bounded to PARSE-specific workflows.
-
-### Tools (47)
-
-**Read-only / preview**
-
-| Tool | Description |
-|---|---|
-| `project_context_read` | Full project metadata and speaker status |
-| `speakers_list` | Enumerate annotated speakers for batch/preflight workflows |
-| `annotation_read` | Read annotation data for a speaker (with optional tier/concept filtering) |
-| `pipeline_state_read` | Preflight one speaker's pipeline state with per-step `done` / `can_run`, coverage fields, counts, and reasons; agents should prefer `full_coverage` over bare `done` when deciding whether a rerun is needed |
-| `pipeline_state_batch` | Preflight multiple speakers and summarize blocked / partial-coverage speakers before a batch run |
-| `cognate_compute_preview` | Preview cognate computation results |
-| `cross_speaker_match_preview` | Preview cross-speaker matching candidates |
-| `spectrogram_preview` | Generate spectrogram preview for a segment |
-| `read_audio_info` | Read WAV metadata (duration, sample rate, channels, sample width, file size) |
-| `read_csv_preview` | Preview a CSV file (e.g. `concepts.csv`) |
-| `read_text_preview` | Preview Markdown/text files from the workspace or docs root |
-| `parse_memory_read` | Read persistent chat memory from `parse-memory.md` |
-| `enrichments_read` | Read computed enrichments with optional top-level key filtering |
-| `lexeme_notes_read` | Read stored lexeme notes with optional speaker / concept filtering |
-| `phonetic_rules_apply` | Apply or inspect phonetic-rule normalization / equivalence logic |
-| `jobs_list_active` | List active background jobs so agents can recover state after restarts |
-
-**Job-triggering**
-
-| Tool | Description |
-|---|---|
-| `stt_start` | Start STT pipeline on a recording. Returns job ID |
-| `stt_status` | Poll status of a running STT job |
-| `compute_status` | Generic poller for compute jobs, including full-pipeline runs and step-level results |
-| `audio_normalize_start` | Start audio normalization for one speaker |
-| `audio_normalize_status` | Poll status of a normalization job |
-| `stt_word_level_start` | Start Tier 1 word-level STT (`word_timestamps=True`, nested `segments[].words[]`) |
-| `stt_word_level_status` | Poll status/result of a Tier 1 word-level STT job |
-| `forced_align_start` | Start Tier 2 acoustic forced alignment for one speaker |
-| `forced_align_status` | Poll status/result of a Tier 2 forced-alignment job |
-| `pipeline_run` | Start a one-speaker pipeline or ORTH-only run with explicit steps/overwrites |
-| `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription for one speaker |
-| `ipa_transcribe_acoustic_status` | Poll status/result of a Tier 3 acoustic IPA job |
-
-**Alignment / correction**
-
-| Tool | Description |
-|---|---|
-| `detect_timestamp_offset` | Detect a constant timestamp offset between annotation data and audio/STT evidence |
-| `detect_timestamp_offset_from_pair` | Compute an offset from one or more manually known CSV↔audio anchor pairs when automated STT-based matching is weak or unavailable |
-| `apply_timestamp_offset` | Apply a constant offset to lexeme timestamps for one speaker (`dryRun=true` first) |
-
-**Tag operations**
-
-| Tool | Description |
-|---|---|
-| `prepare_tag_import` | Validate and preview a tag CSV before import |
-| `import_tag_csv` | Import tags from a prepared CSV file |
-
-**Write / export / merge operations**
-
-| Tool | Description |
-|---|---|
-| `contact_lexeme_lookup` | Fetch and optionally merge contact-language reference forms via the CLEF provider chain (`dryRun=true` first) |
-| `onboard_speaker_import` | Copy external audio/CSV into the workspace, scaffold speaker state, and register it in `source_index.json` (`dryRun=true` first) |
-| `import_processed_speaker` | Hydrate one speaker from existing processed artifacts (working WAV, annotations, peaks, optional transcript files) into the active workspace (`dryRun=true` first) |
-| `parse_memory_upsert_section` | Create or replace a `## Section` block in `parse-memory.md` (`dryRun=true` first) |
-| `enrichments_write` | Shallow-merge or replace computed enrichments |
-| `lexeme_notes_write` | Write or delete lexeme notes for a speaker/concept pair |
-| `export_annotations_csv` | Export annotations as CSV (`speaker="all"` supported) |
-| `export_lingpy_tsv` | Export a LingPy-compatible TSV wordlist |
-| `export_nexus` | Export a NEXUS matrix for downstream phylogenetics |
-| `export_annotations_elan` | Export annotations as ELAN XML |
-| `export_annotations_textgrid` | Export annotations as Praat TextGrid |
-| `transcript_reformat` | Reformat transcript files into PARSE-friendly structure |
-| `peaks_generate` | Generate waveform peaks for one speaker/audio source |
-| `source_index_validate` | Validate or build `source_index.json` entries / manifests |
-
-The built-in assistant operates with both read and write access to the project, but the write-capable tools are intentionally gated. In particular, onboarding is **one speaker at a time**, and multi-source speakers are flagged as requiring manual / virtual-timeline coordination because PARSE does not yet auto-align multiple WAVs into a shared annotation timeline.
-
----
-
-## MCP Server Mode
-
-### Agent Tools (MCP)
-
-PARSE can run as an **MCP (Model Context Protocol) server**, exposing a curated subset of **29 MCP tools** from its broader **47-tool** `ParseChatTools` surface. This is the agent-facing entrypoint for Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, and other MCP-compatible clients: they can call PARSE's project-aware tools programmatically without going through the browser UI. The MCP surface is intentionally narrower than the in-app chat surface; not every chat tool is exported over MCP.
-
-```bash
-python python/adapters/mcp_adapter.py                          # auto-detect project root
-python python/adapters/mcp_adapter.py --project-root /path/to  # explicit root
-python python/adapters/mcp_adapter.py --verbose                # debug logging
-```
-
-### Client Configuration
-
-Add PARSE as an MCP server in your client config. Example for Claude Desktop (`claude_desktop_config.json`):
-
-```json
-{
-    "mcpServers": {
-        "parse": {
-            "command": "python",
-            "args": ["/path/to/parse/python/adapters/mcp_adapter.py"],
-            "env": {
-                "PARSE_PROJECT_ROOT": "/path/to/your/parse/project",
-                "PARSE_EXTERNAL_READ_ROOTS": "/mnt/c/Users/Lucas/Thesis",
-                "PARSE_CHAT_MEMORY_PATH": "/path/to/parse-memory.md"
-            }
-        }
-    }
-}
-```
-
-If you launch the adapter without an explicit `env` block, it also reads repo-local overrides from `<project-root>/.parse-env` (same convention as `scripts/parse-run.sh`). Use that for machine-specific `PARSE_EXTERNAL_READ_ROOTS`, `PARSE_CHAT_MEMORY_PATH`, or `PARSE_PROJECT_ROOT`; explicit client-provided env vars still take precedence.
-
-### Exposed Tools
-
-The MCP adapter currently registers **29 tools** from `ParseChatTools` in `python/adapters/mcp_adapter.py`:
-
-For pipeline-preflight tools, note that PARSE now exposes **coverage-aware state**, not just interval presence. At the top level this includes `duration_sec`; per step (STT / ORTH / IPA) it includes `coverage_start_sec`, `coverage_end_sec`, `coverage_fraction`, and `full_coverage`. For automation, `full_coverage` is the field that answers "has the entire WAV really been processed?".
-
-| Tool | Description |
-|---|---|
-| `project_context_read` | Project metadata, source index, annotation inventory, enrichments summary |
-| `annotation_read` | Read speaker annotation data with optional concept/tier filtering |
-| `read_csv_preview` | Preview CSV files (columns, row count, sample rows) |
-| `cognate_compute_preview` | Compute cognate/similarity preview from annotations (read-only) |
-| `cross_speaker_match_preview` | Cross-speaker match candidates from STT output |
-| `spectrogram_preview` | Spectrogram preview for a time-bounded segment |
-| `contact_lexeme_lookup` | Fetch reference forms from third-party sources (CLDF, ASJP, Wikidata, etc.); **dryRun required** — pass dryRun=true to preview, dryRun=false to merge into sil_contact_languages.json |
-| `stt_start` | Start STT background job on an audio file (proxied to the running PARSE HTTP server on PARSE_API_PORT, default 8766, so job state is shared with the browser UI) |
-| `stt_status` | Poll status/progress of an STT job (same HTTP proxy) |
-| `stt_word_level_start` | Start Tier 1 word-level STT; segments include nested `words[]` spans from `word_timestamps=True` |
-| `stt_word_level_status` | Poll status/progress of a Tier 1 word-level STT job |
-| `forced_align_start` | Start Tier 2 forced alignment with torchaudio + wav2vec2 on Tier 1 word windows |
-| `forced_align_status` | Poll status/progress of a Tier 2 forced-alignment job |
-| `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription (`ipa_only`) on one speaker |
-| `ipa_transcribe_acoustic_status` | Poll status/progress of a Tier 3 acoustic IPA job |
-| `detect_timestamp_offset` | Detect a constant timestamp offset between transcript/annotation timestamps and audio evidence, with monotonic alignment and quantile anchor selection |
-| `detect_timestamp_offset_from_pair` | Detect an offset from manually supplied audio↔CSV anchor pair(s) when automated alignment is unreliable |
-| `apply_timestamp_offset` | Apply a constant offset to speaker lexeme timestamps; dry-run first |
-| `import_tag_csv` | Import a CSV file as a custom tag list (dry-run first) |
-| `prepare_tag_import` | Create/update a tag with concept IDs (dry-run first) |
-| `onboard_speaker_import` | Import one speaker from on-disk audio (and optional CSV) into the workspace; dry-run first; multi-source speakers may require manual virtual-timeline coordination |
-| `import_processed_speaker` | Import one speaker from existing processed artifacts (working WAV, annotations, peaks, optional transcript JSON/CSV) into the active workspace; dry-run first |
-| `parse_memory_read` | Read persistent PARSE chat memory from `parse-memory.md` |
-| `parse_memory_upsert_section` | Upsert a `## Section` block in `parse-memory.md`; dry-run first |
-| `speakers_list` | Enumerate annotated speakers for batch/preflight tooling |
-| `pipeline_state_read` | Preflight one speaker's pipeline state with per-step `done` / `can_run`, coverage fields, counts, and reasons; use `full_coverage` rather than bare `done` when deciding whether a tier truly covers the whole recording |
-| `pipeline_state_batch` | Preflight multiple speakers at once and summarize blocked / partial-coverage speakers before a batch run |
-| `pipeline_run` | Start a one-speaker `full_pipeline` run or an ORTH-only/step-subset run with explicit overwrites |
-| `compute_status` | Poll any compute job, including full-pipeline runs, and return the backend snapshot/result |
-
-> **Requires:** `pip install 'mcp[cli]'`
-
----
-
-## HTTP API
-
-The Python backend (`python/server.py`, port `8766`) exposes the following endpoints. The React frontend communicates exclusively through the typed client in `src/api/client.ts`.
-
-### GET
-
-| Endpoint | Description |
-|---|---|
-| `/api/config` | Project configuration |
-| `/api/enrichments` | Computed comparative enrichments |
-| `/api/auth/status` | Auth provider status |
-| `/api/export/lingpy` | LingPy-compatible TSV export |
-| `/api/export/nexus` | NEXUS export *(placeholder — not yet implemented)* |
-| `/api/contact-lexemes/coverage` | CLEF provider coverage status |
-| `/api/worker/status` | Persistent compute-worker health check (`alive`, `pid`, `jobs_in_flight`) |
-| `/api/tags` | Tag definitions and assignments |
-
-### POST
-
-| Endpoint | Description |
-|---|---|
-| `/api/onboard/speaker` | Speaker onboarding (multipart upload, background job) |
-| `/api/onboard/speaker/status` | Poll onboarding job status |
-| `/api/normalize` | Start audio normalization (ffmpeg loudnorm) |
-| `/api/normalize/status` | Poll normalization job status |
-| `/api/stt` | Start STT pipeline |
-| `/api/stt/status` | Poll STT job status |
-| `/api/suggest` | Request annotation suggestions |
-| `/api/chat/session` | Create or resume a chat session |
-| `/api/chat/run` | Send a message to the chat assistant |
-| `/api/chat/run/status` | Poll chat run status |
-| `/api/enrichments` | Save enrichments (POST overwrites) |
-| `/api/config` | Update project configuration (partial) |
-| `/api/auth/key` | Save API key for a provider |
-| `/api/auth/start` | Start OAuth flow |
-| `/api/auth/poll` | Poll OAuth status |
-| `/api/auth/logout` | Clear auth credentials |
-| `/api/tags/merge` | Merge tag definitions |
-
-### PUT
-
-| Endpoint | Description |
-|---|---|
-| `/api/config` | Full project configuration update |
-
----
-
-## Data Architecture
-
-PARSE uses a hybrid data model:
-
-- **Live annotations** — per-speaker JSON files in `annotations/<Speaker>.json` (primary source of truth; timestamps are never modified by AI)
-- **Computed enrichments** — `parse-enrichments.json`, generated by the compare pipeline for cognate sets, similarity scores, and borrowing decisions
-- **Tag store** — Zustand `tagStore` persists tag definitions to localStorage, shared across both Annotate and Compare modes under a single project-scoped key
-
-The enrichments layer stores computed structures while preserving manual adjudications. Annotations and enrichments are both excluded from version control as runtime data.
-
----
-
-## Technology
-
-- React 18 + TypeScript + Vite (current frontend architecture)
-- Zustand (state management)
-- Tailwind CSS v3 (styling)
-- Python 3.10–3.12 backend serving API routes and the built frontend (`dist/`) for non-dev usage (3.13+ is blocked by `cgi.FieldStorage` removal until `python/server.py` migrates off it)
-- WaveSurfer 7
-- faster-whisper + CTranslate2 (local STT / ORTH, with CPU fallback)
-- wav2vec2 via HuggingFace transformers (local forced alignment + IPA; CPU-first on WSL)
-- PyTorch runtime for local ML, with GPU where the host/runtime stack is stable
-
----
-
-## Context
-
-PARSE was built for a Southern Kurdish dialect phylogenetics thesis at the University of Bamberg. The working dataset covers multiple speakers of Southern Kurdish varieties with an 85-item Oxford Iranian wordlist, targeting downstream Bayesian phylogenetic analysis in BEAST 2.
-
----
-
-## Citation
-
-If you use PARSE in academic work, please cite it as research software. A machine-readable `CITATION.cff` is included in the repository root, so GitHub's **"Cite this repository"** sidebar button will produce APA/BibTeX entries automatically.
+It provides:
+
+- A **concept × speaker matrix** for side-by-side lexical comparison
+- Cognate controls for **accept**, **split**, **merge**, and **cycle**
+- Per-row editing, speaker flags, and secondary actions for review work
+- **Borrowing adjudication** aided by contact-language similarity evidence
+- **Enrichment overlays** for computed comparative metadata
+- The **CLEF** panel for multi-source contact-language lookup
+- The same shared **tag system** used in Annotate mode
+- Export to **LingPy-compatible TSV** and **NEXUS** for downstream phylogenetic analysis
+
+Together, Annotate and Compare cover the full movement from speaker-specific audio review to cross-speaker historical analysis.
+
+### AI Workflow Assistant
+
+PARSE includes a built-in **domain-specific chat dock** powered by the configured LLM provider.
+
+This assistant is not a generic chatbot. It operates through `ParseChatTools` and can inspect project state, guide annotation workflows, trigger jobs, help interpret comparative results, and support onboarding, export, and troubleshooting inside the same workstation.
+
+Supported LLM backends currently include **xAI (Grok)** and **OpenAI**. Local speech and alignment work is handled separately through faster-whisper, Razhan, Silero VAD, and wav2vec2.
+
+### MCP Server Mode
+
+PARSE can also run as an **MCP (Model Context Protocol) server**.
+
+That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
+
+The MCP adapter currently exposes **29 tools** drawn from the broader in-app PARSE tool surface.
+
+## 📚 Documentation
+
+- [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
+- [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
+- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, and the full 47-tool chat surface
+- [API Reference](docs/api-reference.md) — HTTP endpoints, compute routes, examples, and the full 29-tool MCP surface
+- [Architecture](docs/architecture.md) — unified shell, backend/data design, Lexical Anchor Alignment scoring, and CLEF provider registry
+- [Developer Guide](docs/developer-guide.md) — project structure, tech stack, local development flow, and extension points for chat tools, MCP tools, and endpoints
+- [Research Context](docs/research-context.md) — thesis background, citation guidance, and research-software framing
+
+If you are new to PARSE, start with **[Getting Started](docs/getting-started.md)** and then move to the **[User Guide](docs/user-guide.md)**.
+
+## Research Workflow in One Pass
+
+PARSE is designed around a real fieldwork sequence rather than a toy demo sequence:
+
+1. **Load or import one speaker** into the active workspace
+2. **Normalize audio** and inspect the waveform
+3. **Run STT / ORTH / IPA support jobs** to seed time-aligned review
+4. **Correct timestamps and confirm segments** in Annotate mode
+5. **Search and anchor difficult lexemes** across long recordings
+6. **Compare the concept set across speakers** in the matrix view
+7. **Use CLEF evidence** when a borrowing analysis needs external lexical context
+8. **Export LingPy TSV or NEXUS** for downstream comparative and phylogenetic analysis
+
+The guiding principle is simple: timestamps are central, human review stays explicit, and automation should make linguistic judgment faster rather than opaque.
+
+## Core Runtime Notes
+
+A few practical details matter up front:
+
+- The active frontend is **React + Vite** in `src/`
+- The Python backend in `python/server.py` powers AI routes and can also serve the built frontend
+- The preferred development URLs are:
+  - `http://localhost:5173/`
+  - `http://localhost:5173/compare`
+- After `npm run build`, the Python server can serve the built UI at:
+  - `http://localhost:8766/`
+  - `http://localhost:8766/compare`
+- `config/ai_config.json` is machine-local and gitignored; start from `config/ai_config.example.json`
+- For real fieldwork usage, PARSE is intended to run against a **workspace root outside the git checkout**
+- PARSE is still in active development; the repository has explicitly treated full browser regression and export verification as ongoing validation work rather than fully settled release guarantees
+
+Those details are expanded in [Getting Started](docs/getting-started.md) and [Developer Guide](docs/developer-guide.md).
+
+## 🔬 Research & Citation
+
+PARSE was developed for a **Southern Kurdish dialect phylogenetics thesis** at the **University of Bamberg**.
+
+The working dataset and workflow are oriented toward:
+
+- long elicitation recordings
+- concept-based wordlists
+- multiple speakers of closely related varieties
+- cognate review and borrowing adjudication
+- downstream comparative analysis in **LingPy**, **LexStat**, and **BEAST 2**
+
+If you use PARSE in academic work, please cite it as **research software** and use the repository's [`CITATION.cff`](CITATION.cff) file or GitHub's **Cite this repository** UI.
 
 Suggested citation:
 
 > Ardelean, L. M. (2026). *PARSE: Phonetic Analysis & Review Source Explorer* [Computer software]. University of Bamberg. https://github.com/ArdeleanLucas/PARSE
 
-BibTeX:
-
-```bibtex
-@software{ardelean_parse_2026,
-  author  = {Ardelean, Lucas M.},
-  title   = {{PARSE}: Phonetic Analysis \& Review Source Explorer},
-  year    = {2026},
-  url     = {https://github.com/ArdeleanLucas/PARSE},
-  note    = {Research software for Southern Kurdish dialect phylogenetics}
-}
-```
-
-PARSE is research software developed alongside a Southern Kurdish dialect phylogenetics thesis at the University of Bamberg; please also cite the associated thesis if/when it is published.
-
----
+See [Research Context](docs/research-context.md) for full citation guidance and research framing.
 
 ## License
 
-MIT
+MIT License
