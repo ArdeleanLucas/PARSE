@@ -4056,10 +4056,12 @@ export function ParseUI() {
   );
 }
 
-const LANE_ORDER: LaneKind[] = ['stt', 'ipa', 'ortho'];
+// Visual order mirrors TranscriptionLanes.tsx: phone IPA → word IPA → STT → ORTH.
+const LANE_ORDER: LaneKind[] = ['ipa_phone', 'ipa', 'stt', 'ortho'];
 const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
+  ipa_phone: { label: 'Phones tier', hint: 'Phone-level IPA' },
+  ipa: { label: 'IPA tier', hint: 'Word/lexeme IPA' },
   stt: { label: 'STT segments', hint: 'Coarse transcript' },
-  ipa: { label: 'IPA tier', hint: 'Phonemic/phonetic' },
   ortho: { label: 'Ortho tier', hint: 'Orthographic' },
 };
 

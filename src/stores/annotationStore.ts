@@ -6,11 +6,18 @@ import { getAnnotation, saveAnnotation } from "../api/client";
 /*  Helpers (module-scope, not exported)                               */
 /* ------------------------------------------------------------------ */
 
+// Canonical tier ordering. Numeric order is used for backend/Praat sort only;
+// the visual lane order in TranscriptionLanes.tsx is hard-coded separately.
+// Adding a new tier? Update _CANONICAL_DISPLAY_ORDERS in python/textgrid_io.py
+// to match, or Praat exports will fall back to default_order=9999.
 const CANONICAL_TIER_ORDER: Record<string, number> = {
-  ipa: 1,
-  ortho: 2,
-  concept: 3,
-  speaker: 4,
+  ipa_phone: 1, // phone-level IPA (wav2vec2 output, lane-visible)
+  ipa: 2,       // word/lexeme-level IPA (lane-visible)
+  ortho: 3,     // orthographic transcription (lane-visible)
+  stt: 4,       // speech-to-text reference (lane-visible)
+  concept: 5,   // concept tags
+  sentence: 6,  // sentence-level grouping (starts empty)
+  speaker: 7,   // speaker turn
 };
 
 function nowIsoUtc(): string {
@@ -21,15 +28,32 @@ function blankRecord(speaker: string): AnnotationRecord {
   return {
     speaker,
     tiers: {
-      ipa: { name: "ipa", display_order: 1, intervals: [] },
-      ortho: { name: "ortho", display_order: 2, intervals: [] },
-      concept: { name: "concept", display_order: 3, intervals: [] },
-      speaker: { name: "speaker", display_order: 4, intervals: [] },
+      ipa_phone: { name: "ipa_phone", display_order: 1, intervals: [] },
+      ipa:       { name: "ipa",       display_order: 2, intervals: [] },
+      ortho:     { name: "ortho",     display_order: 3, intervals: [] },
+      stt:       { name: "stt",       display_order: 4, intervals: [] },
+      concept:   { name: "concept",   display_order: 5, intervals: [] },
+      sentence:  { name: "sentence",  display_order: 6, intervals: [] },
+      speaker:   { name: "speaker",   display_order: 7, intervals: [] },
     },
     created_at: nowIsoUtc(),
     modified_at: nowIsoUtc(),
     source_wav: "",
   };
+}
+
+// Backfill any canonical tiers missing from a loaded record so older
+// annotations still get the new ipa_phone/stt/sentence lanes wired up.
+function ensureCanonicalTiers(record: AnnotationRecord): AnnotationRecord {
+  const tiers = { ...record.tiers };
+  let changed = false;
+  for (const [name, order] of Object.entries(CANONICAL_TIER_ORDER)) {
+    if (!tiers[name]) {
+      tiers[name] = { name, display_order: order, intervals: [] };
+      changed = true;
+    }
+  }
+  return changed ? { ...record, tiers } : record;
 }
 
 function deepClone<T>(val: T): T {
@@ -68,6 +92,27 @@ interface AnnotationStore {
   updateInterval: (speaker: string, tier: string, index: number, text: string) => void;
   addInterval: (speaker: string, tier: string, interval: AnnotationInterval) => void;
   removeInterval: (speaker: string, tier: string, index: number) => void;
+  /** Retime a single interval on one tier. Use this for drag-resize and
+   * numeric timestamp edits on a specific lane interval (the cross-tier
+   * variant is moveIntervalAcrossTiers). */
+  updateIntervalTimes: (
+    speaker: string,
+    tier: string,
+    index: number,
+    start: number,
+    end: number,
+  ) => void;
+  /** Merge interval `index` with `index + 1` on the same tier. Both must be
+   * adjacent (the gap, if any, is absorbed). Texts are joined with a space. */
+  mergeIntervals: (speaker: string, tier: string, index: number) => void;
+  /** Split interval `index` at `splitTime` (must lie strictly inside the
+   * interval). Original text stays on the left half; right half starts empty. */
+  splitInterval: (
+    speaker: string,
+    tier: string,
+    index: number,
+    splitTime: number,
+  ) => void;
   /**
    * Retime a lexeme across every tier. Finds the interval that matches
    * (oldStart, oldEnd) within a 1ms tolerance on each tier and rewrites its
@@ -96,7 +141,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     set((s) => ({ loading: { ...s.loading, [speaker]: true } }));
 
     try {
-      const record = await getAnnotation(speaker);
+      const record = ensureCanonicalTiers(await getAnnotation(speaker));
       set((s) => ({
         records: { ...s.records, [speaker]: record },
         dirty: { ...s.dirty, [speaker]: false },
@@ -109,7 +154,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       try {
         const raw = localStorage.getItem(lsKey);
         if (raw) {
-          record = JSON.parse(raw) as AnnotationRecord;
+          record = ensureCanonicalTiers(JSON.parse(raw) as AnnotationRecord);
         } else {
           record = blankRecord(speaker);
         }
@@ -231,6 +276,85 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
     const clone = deepClone(record);
     clone.tiers[tier].intervals.splice(index, 1);
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  updateIntervalTimes: (speaker, tier, index, start, end) => {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    if (end < start) return;
+
+    const state = get();
+    const record = state.records[speaker];
+    if (!record?.tiers[tier]) return;
+    if (index < 0 || index >= record.tiers[tier].intervals.length) return;
+
+    const clone = deepClone(record);
+    const target = clone.tiers[tier].intervals[index];
+    clone.tiers[tier].intervals[index] = { ...target, start, end };
+    clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  mergeIntervals: (speaker, tier, index) => {
+    const state = get();
+    const record = state.records[speaker];
+    if (!record?.tiers[tier]) return;
+    const intervals = record.tiers[tier].intervals;
+    if (index < 0 || index >= intervals.length - 1) return;
+
+    const left = intervals[index];
+    const right = intervals[index + 1];
+    const mergedText = [left.text, right.text]
+      .map((t) => (t ?? "").trim())
+      .filter(Boolean)
+      .join(" ");
+
+    const clone = deepClone(record);
+    clone.tiers[tier].intervals.splice(index, 2, {
+      start: left.start,
+      end: right.end,
+      text: mergedText,
+    });
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  splitInterval: (speaker, tier, index, splitTime) => {
+    if (!Number.isFinite(splitTime)) return;
+    const state = get();
+    const record = state.records[speaker];
+    if (!record?.tiers[tier]) return;
+    const intervals = record.tiers[tier].intervals;
+    if (index < 0 || index >= intervals.length) return;
+
+    const target = intervals[index];
+    const tol = 0.001;
+    if (splitTime <= target.start + tol || splitTime >= target.end - tol) return;
+
+    const clone = deepClone(record);
+    clone.tiers[tier].intervals.splice(
+      index,
+      1,
+      { start: target.start, end: splitTime, text: target.text },
+      { start: splitTime, end: target.end, text: "" },
+    );
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({

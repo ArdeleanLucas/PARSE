@@ -3,11 +3,21 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { SttSegment } from "../api/types";
 import { getSttSegments } from "../api/client";
 
-export type LaneKind = "stt" | "ipa" | "ortho";
+// Lane identities visible in the transcription viewer. The visual top-to-bottom
+// order is hard-coded in TranscriptionLanes.tsx (LANE_ORDER), independent of
+// the canonical numeric display_order used for Praat export.
+export type LaneKind = "ipa_phone" | "ipa" | "stt" | "ortho";
 
 export interface LaneConfig {
   visible: boolean;
   color: string;
+}
+
+/** Single-interval selection used by the inline editor / segment toolbar. */
+export interface SelectedInterval {
+  speaker: string;
+  tier: LaneKind;
+  index: number;
 }
 
 interface PersistedState {
@@ -17,18 +27,29 @@ interface PersistedState {
 interface TranscriptionLanesStore extends PersistedState {
   sttBySpeaker: Record<string, SttSegment[]>;
   sttStatus: Record<string, "idle" | "loading" | "loaded" | "error">;
+  selectedInterval: SelectedInterval | null;
 
   toggleLane: (kind: LaneKind) => void;
   setLaneColor: (kind: LaneKind, color: string) => void;
 
   ensureStt: (speaker: string) => Promise<void>;
   reloadStt: (speaker: string) => Promise<void>;
+
+  setSelectedInterval: (sel: SelectedInterval | null) => void;
 }
 
+export const LANE_LABELS: Record<LaneKind, string> = {
+  ipa_phone: "Phones",
+  ipa: "IPA",
+  stt: "STT",
+  ortho: "ORTH",
+};
+
 const DEFAULT_LANES: Record<LaneKind, LaneConfig> = {
-  stt: { visible: true, color: "#6366f1" },   // indigo
-  ipa: { visible: true, color: "#059669" },   // emerald
-  ortho: { visible: true, color: "#d97706" }, // amber
+  ipa_phone: { visible: true, color: "#8b5cf6" }, // violet — phone-level IPA
+  ipa: { visible: true, color: "#059669" },       // emerald — word/lexeme IPA
+  stt: { visible: true, color: "#6366f1" },       // indigo
+  ortho: { visible: true, color: "#d97706" },     // amber
 };
 
 async function fetchSttInto(
@@ -61,6 +82,7 @@ export const useTranscriptionLanesStore = create<TranscriptionLanesStore>()(
       lanes: DEFAULT_LANES,
       sttBySpeaker: {},
       sttStatus: {},
+      selectedInterval: null,
 
       toggleLane: (kind) =>
         set((s) => ({
@@ -86,12 +108,33 @@ export const useTranscriptionLanesStore = create<TranscriptionLanesStore>()(
         if (!speaker) return;
         await fetchSttInto(speaker, set);
       },
+
+      setSelectedInterval: (sel) => set({ selectedInterval: sel }),
     }),
     {
       name: "parse.transcription-lanes",
+      // Bumped to v2 when ipa_phone was added — old persisted lane configs lack
+      // the new key. The migrate fn fills it in with the default rather than
+      // letting the lookup return undefined and crash the renderer.
       storage: createJSONStorage(() => localStorage),
       partialize: (state): PersistedState => ({ lanes: state.lanes }),
-      version: 1,
+      version: 2,
+      migrate: (persisted: unknown, fromVersion: number): PersistedState => {
+        const fallback: PersistedState = { lanes: DEFAULT_LANES };
+        if (!persisted || typeof persisted !== "object") return fallback;
+        const raw = (persisted as { lanes?: Partial<Record<LaneKind, LaneConfig>> }).lanes ?? {};
+        if (fromVersion < 2) {
+          return {
+            lanes: {
+              ipa_phone: raw.ipa_phone ?? DEFAULT_LANES.ipa_phone,
+              ipa: raw.ipa ?? DEFAULT_LANES.ipa,
+              stt: raw.stt ?? DEFAULT_LANES.stt,
+              ortho: raw.ortho ?? DEFAULT_LANES.ortho,
+            },
+          };
+        }
+        return { lanes: { ...DEFAULT_LANES, ...raw } as Record<LaneKind, LaneConfig> };
+      },
     },
   ),
 );
