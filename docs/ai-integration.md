@@ -302,11 +302,21 @@ The current README calls out two important operational boundaries:
 
 Multi-source speakers may still require manual or virtual-timeline coordination because PARSE does not yet auto-align multiple WAVs into a single shared annotation timeline.
 
+### MCP workflow macros (3)
+
+| Tool | Description |
+|---|---|
+| `run_full_annotation_pipeline` | Run STT → forced alignment → acoustic IPA for one speaker in one call |
+| `prepare_compare_mode` | Build a compare-ready concept × speaker bundle with fresh preview data |
+| `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
+
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros that live outside the built-in 47-tool chat surface.
 
 - **Built-in chat tools**: 47
-- **MCP-exposed tools**: 29
+- **Default MCP task tools**: 32
+- **Default MCP adapter surface including `mcp_get_exposure_mode`**: 33
+- **Full MCP adapter surface with `expose_all_tools=true`**: 51
 
 For the exact MCP subset, startup instructions, and usage examples, see [API Reference](./api-reference.md).

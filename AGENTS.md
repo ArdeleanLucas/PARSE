@@ -26,8 +26,12 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
-- Default MCP surface is **30 tools**: the legacy 29 `ParseChatTools` wrappers plus read-only `mcp_get_exposure_mode` for self-inspection.
-- Enabling `expose_all_tools` expands the MCP surface to **48 tools**: all 47 `ParseChatTools` plus `mcp_get_exposure_mode`.
+- Default MCP surface is **33 tools**: the legacy 29 `ParseChatTools` wrappers, 3 high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- Enabling `expose_all_tools` expands the MCP surface to **51 tools**: all 47 `ParseChatTools`, the 3 `WorkflowTools` macros, plus `mcp_get_exposure_mode`.
+- The workflow macros are:
+  - `run_full_annotation_pipeline`
+  - `prepare_compare_mode`
+  - `export_complete_lingpy_dataset`
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 - `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
 - Mutability meanings:
@@ -81,6 +85,33 @@ if x_parse["supports_dry_run"]:
     # Prefer a preview call before a mutating call.
     ...
 ```
+
+### Workflow Macro Examples
+
+Use the new MCP workflow macros when an agent wants a one-call end-to-end action rather than hand-assembling low-level job chains.
+
+Agent example: "Run the full PARSE annotation workflow on speaker `Fail02` and report back on concepts `1`, `2`, and `3`."
+
+```python
+run_full_annotation_pipeline(
+  speaker_id="Fail02",
+  concept_list=["1", "2", "3"],
+  dryRun=True,
+)
+
+prepare_compare_mode(
+  concept_range="1-25",
+  speakers=["Fail01", "Fail02", "Kalh01"],
+  dryRun=False,
+)
+
+export_complete_lingpy_dataset(
+  with_contact_lexemes=True,
+  dryRun=False,
+)
+```
+
+Naming note: `prepare_compare_mode` is the current stable public name. If a future cleanup wants a more action-oriented label, add a backward-compatible alias such as `build_compare_session` rather than silently renaming the macro.
 
 ## Client/Server Contract Surface
 

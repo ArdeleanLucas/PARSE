@@ -10,8 +10,8 @@ Future improvements to make PARSE a first-class citizen in agent-driven workflow
 
 **Shipped:**
 - `python/adapters/mcp_adapter.py` still exposes the legacy **29 `ParseChatTools`** surface by default.
-- MCP now also includes read-only `mcp_get_exposure_mode`, so the total adapter surface is **30 tools by default**.
-- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface, for **48 MCP tools total** including `mcp_get_exposure_mode`:
+- Task 3 adds 3 workflow macros on top of that base, so the current default adapter surface is **33 tools total** including `mcp_get_exposure_mode`.
+- Opt-in config at `config/mcp_config.json` (or fallback root `mcp_config.json`) enables the full **47-tool** `ParseChatTools` surface; with the 3 workflow macros and `mcp_get_exposure_mode`, the current full adapter surface is **51 tools total**:
 
 ```json
 { "expose_all_tools": true }
@@ -36,13 +36,20 @@ Future improvements to make PARSE a first-class citizen in agent-driven workflow
 
 ## 3. High-level composite / workflow tools
 
-Instead of chaining 47 low-level calls, give agents a handful of macro tools:
+**Status:** ✅ Complete
 
-| Tool | Purpose |
-|------|---------|
-| `run_full_annotation_pipeline(speaker_id, concept_list)` | STT → alignment → IPA in one call |
-| `prepare_compare_mode(concept_range, speakers)` | Load and diff a concept set across speakers |
-| `export_complete_lingpy_dataset(with_contact_lexemes=True)` | Full phylogenetics export |
+**Shipped:**
+- Added `python/ai/workflow_tools.py` with a dedicated `WorkflowTools` class.
+- New macros are exposed via MCP with their own `ChatToolSpec` metadata:
+  - `run_full_annotation_pipeline(speaker_id, concept_list, dryRun=False)`
+  - `prepare_compare_mode(concept_range, speakers, dryRun=False)`
+  - `export_complete_lingpy_dataset(with_contact_lexemes=True, dryRun=False)`
+- The macros orchestrate existing low-level tool handlers directly rather than duplicating business logic:
+  - annotation workflow: `stt_start` → `stt_status` → `forced_align_start` → `forced_align_status` → `ipa_transcribe_acoustic_start` → `ipa_transcribe_acoustic_status`
+  - compare prep: `speakers_list`, `annotation_read`, `cognate_compute_preview`, `cross_speaker_match_preview`
+  - export bundle: `contact_lexeme_lookup`, `export_lingpy_tsv`, `export_nexus`
+- Each macro publishes machine-readable preconditions/postconditions and supports `dryRun` where appropriate.
+- MCP adapter now exposes the workflow macros in both default and full-exposure modes.
 
 Macros are easier to discover, easier to prompt, and safer to execute.
 

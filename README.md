@@ -13,7 +13,7 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 - **Dual-mode unified React shell** for annotation and comparison in one workspace
 - **Fieldwork-first design** for long recordings, uneven metadata, and iterative review
 - **AI-native workflow surface** with a built-in chat assistant powered by **47 PARSE-specific tools**
-- **Full MCP server mode** exposing a curated **29-tool** subset for external agents and automation
+- **Full MCP server mode** exposing a curated **32-tool task surface** for external agents and automation, plus `mcp_get_exposure_mode`
 - **CLEF — Contact Lexeme Explorer Feature** for borrowing adjudication via a 10-provider contact-language lookup stack
 - **Lexical Anchor Alignment System** for locating repeated lexical items across long recordings and across speakers
 - **Export pipeline** for LingPy TSV and NEXUS outputs used in downstream comparative workflows
@@ -91,14 +91,14 @@ PARSE can also run as an **MCP (Model Context Protocol) server**.
 
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
-The MCP adapter currently exposes **29 tools** drawn from the broader in-app PARSE tool surface.
+The MCP adapter currently exposes **32 task tools** drawn from the broader in-app PARSE tool surface, plus read-only `mcp_get_exposure_mode` for self-inspection.
 
 ## 📚 Documentation
 
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
-- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, and the full 47-tool chat surface
-- [API Reference](docs/api-reference.md) — HTTP endpoints, compute routes, examples, and the full 29-tool MCP surface
+- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 47-tool chat surface, and MCP workflow macros
+- [API Reference](docs/api-reference.md) — HTTP endpoints, compute routes, examples, and the full 32-tool MCP task surface
 - [Architecture](docs/architecture.md) — unified shell, backend/data design, Lexical Anchor Alignment scoring, and CLEF provider registry
 - [Developer Guide](docs/developer-guide.md) — project structure, tech stack, local development flow, and extension points for chat tools, MCP tools, and endpoints
 - [Research Context](docs/research-context.md) — thesis background, citation guidance, and research-software framing

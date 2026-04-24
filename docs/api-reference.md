@@ -340,7 +340,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Full MCP tool surface (29 tools)
+## Full MCP tool surface (32 tools)
 
 ### Inspection / preview / preflight
 
@@ -391,9 +391,17 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `import_processed_speaker` | Import one speaker from existing processed artifacts |
 | `parse_memory_upsert_section` | Upsert a `## Section` block in `parse-memory.md` |
 
+### Workflow macros
+
+| Tool | Description |
+|---|---|
+| `run_full_annotation_pipeline` | Run STT → forced alignment → acoustic IPA for one speaker in one call |
+| `prepare_compare_mode` | Resolve a concept slice across speakers and return a compare-ready preview bundle |
+| `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
+
 ## MCP usage notes
 
-The MCP surface is a **subset** of the full in-app chat tool surface.
+The MCP surface is a curated subset of the low-level chat tools plus 3 high-level workflow macros.
 
 A few operational rules remain important:
 

@@ -17,7 +17,7 @@ flowchart LR
     Server --> ChatTools[python/ai/chat_tools.py\n47 PARSE-specific tools]
     Server --> Compare[python/compare/*\ncognates + CLEF providers]
     Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
-    ChatTools --> MCP[python/adapters/mcp_adapter.py\n29-tool MCP server mode]
+    ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + workflow macros]
     Compare --> Exports[LingPy TSV + NEXUS]
 ```
 
@@ -284,7 +284,8 @@ The in-app assistant works through `python/ai/chat_tools.py`.
 Current counts:
 
 - **47** built-in PARSE chat tools
-- **29** MCP-exposed tools via `python/adapters/mcp_adapter.py`
+- **32** MCP task tools via `python/adapters/mcp_adapter.py`
+- **33** total default MCP adapter tools including `mcp_get_exposure_mode`
 
 This separation matters architecturally:
 

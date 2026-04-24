@@ -73,6 +73,7 @@ if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
 from ai.chat_tools import DEFAULT_MCP_TOOL_NAMES
+from ai.workflow_tools import DEFAULT_MCP_WORKFLOW_TOOL_NAMES
 
 # ---------------------------------------------------------------------------
 # Lazy MCP SDK import
@@ -160,6 +161,7 @@ def _mcp_exposure_payload(
     expose_all_tools: bool,
     config_source: Optional[str],
     parse_chat_tool_count: int,
+    workflow_tool_count: int,
     mcp_tool_count: int,
 ) -> Dict[str, Any]:
     """Build a read-only MCP payload describing the active exposure mode."""
@@ -173,8 +175,10 @@ def _mcp_exposure_payload(
             "exposeAllTools": expose_all_tools,
             "configSource": config_source,
             "parseChatToolCount": parse_chat_tool_count,
+            "workflowToolCount": workflow_tool_count,
             "mcpToolCount": mcp_tool_count,
             "defaultParseMcpToolCount": len(DEFAULT_MCP_TOOL_NAMES),
+            "defaultWorkflowMcpToolCount": len(DEFAULT_MCP_WORKFLOW_TOOL_NAMES),
         },
     }
 
@@ -698,6 +702,7 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         )
 
     from ai.chat_tools import ParseChatTools
+    from ai.workflow_tools import WorkflowTools
 
     root = _resolve_project_root(project_root)
     applied_env = _load_repo_parse_env(root)
@@ -730,10 +735,24 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         start_normalize_job=normalize_cb,
         list_active_jobs=jobs_cb,
     )
+    workflow_tools = WorkflowTools(
+        project_root=root,
+        start_stt_job=start_stt,
+        get_job_snapshot=get_snapshot,
+        external_read_roots=external_roots,
+        memory_path=memory_path,
+        onboard_speaker=onboard_callback,
+        pipeline_state=pipeline_state_cb,
+        start_compute_job=start_compute_cb,
+        start_normalize_job=normalize_cb,
+        list_active_jobs=jobs_cb,
+    )
     mcp_config = _load_mcp_config(root)
     expose_all_tools = mcp_config.get("expose_all_tools", False)
     all_mcp_tool_names = ParseChatTools.get_all_tool_names()
     selected_mcp_tool_names = _selected_mcp_tool_names(all_mcp_tool_names, expose_all_tools)
+    selected_workflow_tool_names = list(DEFAULT_MCP_WORKFLOW_TOOL_NAMES)
+    all_registered_tool_names = list(selected_mcp_tool_names) + list(selected_workflow_tool_names)
 
     mcp = FastMCP(
         "parse",
@@ -748,8 +767,12 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
         result = tools.execute(tool_name, args)
         return json.dumps(result, indent=2, ensure_ascii=False)
 
-    def _sync_registered_tool_metadata(tool_name: str) -> None:
-        spec = tools.tool_spec(tool_name)
+    def _json_workflow_tool_result(tool_name: str, args: Dict[str, Any]) -> str:
+        result = workflow_tools.execute(tool_name, args)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    def _sync_registered_tool_metadata(tool_name: str, spec_provider: Any) -> None:
+        spec = spec_provider.tool_spec(tool_name)
         registered = mcp._tool_manager._tools.get(tool_name)
         if registered is None:
             return
@@ -766,7 +789,8 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             expose_all_tools=expose_all_tools,
             config_source=mcp_config.get("config_path"),
             parse_chat_tool_count=len(all_mcp_tool_names),
-            mcp_tool_count=len(selected_mcp_tool_names) + 1,
+            workflow_tool_count=len(selected_workflow_tool_names),
+            mcp_tool_count=len(all_registered_tool_names) + 1,
         )
         return json.dumps(payload, indent=2, ensure_ascii=False)
 
@@ -1834,12 +1858,53 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
             return _json_tool_result("transcript_reformat", args)
         mcp.tool(name="transcript_reformat")(mcp_transcript_reformat)
 
+    @mcp.tool()
+    def run_full_annotation_pipeline(
+        speaker_id: str,
+        concept_list: list,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Run STT, forced alignment, and acoustic IPA for one speaker in one call."""
+        args: Dict[str, Any] = {"speaker_id": speaker_id, "concept_list": concept_list}
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        return _json_workflow_tool_result("run_full_annotation_pipeline", args)
+
+    @mcp.tool()
+    def prepare_compare_mode(
+        concept_range: Any,
+        speakers: list,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Prepare a compare-mode bundle for a concept slice across speakers."""
+        args: Dict[str, Any] = {"concept_range": concept_range, "speakers": speakers}
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        return _json_workflow_tool_result("prepare_compare_mode", args)
+
+    @mcp.tool()
+    def export_complete_lingpy_dataset(
+        with_contact_lexemes: Optional[bool] = None,
+        dryRun: Optional[bool] = None,
+    ) -> str:
+        """Export LingPy TSV + NEXUS, optionally hydrating contact lexeme references first."""
+        args: Dict[str, Any] = {}
+        if with_contact_lexemes is not None:
+            args["with_contact_lexemes"] = with_contact_lexemes
+        if dryRun is not None:
+            args["dryRun"] = dryRun
+        return _json_workflow_tool_result("export_complete_lingpy_dataset", args)
+
     for tool_name in selected_mcp_tool_names:
-        _sync_registered_tool_metadata(tool_name)
+        _sync_registered_tool_metadata(tool_name, tools)
+    for tool_name in selected_workflow_tool_names:
+        _sync_registered_tool_metadata(tool_name, workflow_tools)
 
     logger.info(
-        "MCP exposing %s tools (expose_all_tools=%s)",
+        "MCP exposing %s tools (parse_chat=%s, workflow=%s, expose_all_tools=%s)",
+        len(all_registered_tool_names),
         len(selected_mcp_tool_names),
+        len(selected_workflow_tool_names),
         str(expose_all_tools).lower(),
     )
 

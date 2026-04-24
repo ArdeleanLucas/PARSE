@@ -241,6 +241,8 @@ At minimum update:
 
 The built-in assistant works through `ParseChatTools` in `python/ai/chat_tools.py`.
 
+For high-level MCP-only workflow macros, use `python/ai/workflow_tools.py` instead. Those tools should stay thin orchestration layers over existing low-level tool handlers and publish their own `ChatToolSpec` metadata.
+
 A new tool should follow this pattern:
 
 1. Add the new `ChatToolSpec` entry in `python/ai/chat_tools.py`
@@ -264,12 +266,12 @@ The MCP adapter lives in `python/adapters/mcp_adapter.py`.
 
 To expose a tool over MCP:
 
-1. Ensure the underlying functionality already exists in `ParseChatTools`
+1. Ensure the underlying functionality already exists in `ParseChatTools` or `WorkflowTools`
 2. Add a matching `@mcp.tool()` wrapper in `python/adapters/mcp_adapter.py`
 3. Keep parameter naming and documentation aligned with the underlying tool
 4. Re-check the exported-tool count and update docs if the MCP subset changed
 
-The adapter is intentionally a **curated subset** of the in-app tool surface. Not every chat tool should automatically become an MCP tool.
+The adapter is intentionally a curated PARSE tool surface. Low-level browser/chat tools live in `ParseChatTools`; high-level agent workflow macros live in `WorkflowTools`.
 
 ## How to add or extend a CLEF provider
 
