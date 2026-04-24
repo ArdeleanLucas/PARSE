@@ -181,11 +181,27 @@ stop_servers() {
 # the actionable fix (wsl --shutdown) before start_api wastes time.
 
 preflight_api_port() {
-  local probe_out
-  probe_out=$(
-    "${PARSE_PY}" - <<PY 2>&1
+  # Enable SO_REUSEADDR on the probe so a TIME_WAIT / CLOSING socket left
+  # over from the PM2 stop we just ran doesn't report as a phantom
+  # reservation. The real server's socketserver.TCPServer sets
+  # allow_reuse_address=True, so the probe must match — otherwise the
+  # probe is stricter than the actual bind and emits false positives.
+  #
+  # Even with REUSEADDR there's a short window (~100 ms) where the
+  # kernel hasn't finished flushing the old listener. Retry up to 5
+  # times at 300 ms each (~1.5 s total) before giving up, so an
+  # immediate re-run after ``stop_servers`` doesn't bail out on
+  # Errno 98 every time. A true phantom reservation will still fail
+  # on every retry and hit the WinError branches below with the
+  # actionable ``wsl --shutdown`` hint.
+  local probe_out=""
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    probe_out=$(
+      "${PARSE_PY}" - <<PY 2>&1
 import socket, sys
 s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 try:
     s.bind(("127.0.0.1", ${PARSE_API_PORT}))
 except OSError as exc:
@@ -198,7 +214,14 @@ finally:
         pass
 print("BIND_OK")
 PY
-  ) || true
+    ) || true
+    case "${probe_out}" in
+      BIND_OK*) break ;;
+    esac
+    if [ "${attempt}" -lt 5 ]; then
+      sleep 0.3
+    fi
+  done
 
   case "${probe_out}" in
     BIND_OK*)
