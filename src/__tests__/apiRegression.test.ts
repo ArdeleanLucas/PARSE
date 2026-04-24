@@ -379,8 +379,17 @@ describe("Python API regression", () => {
     expect(msg.length).toBeGreaterThan(0);
   });
 
-  it("GET /api/export/nexus → 501 not implemented (route exists, optional legacy 404)", async () => {
+  it("GET /api/export/nexus → implemented export or legacy placeholder", async () => {
     const r = await fetch(`${API_BASE}/api/export/nexus`);
+
+    if (r.status === 200) {
+      const nexus = await r.text();
+      expect(nexus).toContain("#NEXUS");
+      expect(nexus).toContain("BEGIN CHARACTERS;");
+      expect(nexus).toContain("MATRIX");
+      return;
+    }
+
     if (allowExport404) {
       expect([501, 404]).toContain(r.status);
     } else {
