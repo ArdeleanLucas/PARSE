@@ -179,13 +179,7 @@ jobs:
 
       - name: Lint backend runtime modules (fatal rules only)
         run: |
-          python -m ruff check \
-            python/server.py \
-            python/ai \
-            python/compare \
-            python/shared \
-            python/workers \
-            --select E9,F63,F7,F82
+          python -m ruff check python/ --select E9,F63,F7,F82
 
       - name: Compile Python sources
         run: python -m compileall python

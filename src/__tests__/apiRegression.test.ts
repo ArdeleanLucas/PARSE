@@ -390,6 +390,8 @@ describe("Python API regression", () => {
       return;
     }
 
+    // TODO: once NEXUS export behavior is fully stabilized across all supported
+    // runtimes, remove the 501/404 legacy allowance and require the final shape.
     if (allowExport404) {
       expect([501, 404]).toContain(r.status);
     } else {
