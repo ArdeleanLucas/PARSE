@@ -23,10 +23,19 @@ from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
-from ai.chat_tools import ChatToolExecutionError, ChatToolValidationError, ParseChatTools
+from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
+from app.http.external_api_handlers import (
+    ExternalApiHandlerError as _app_ExternalApiHandlerError,
+    build_mcp_exposure_response as _app_build_mcp_exposure_response,
+    build_mcp_tool_response as _app_build_mcp_tool_response,
+    build_mcp_tools_response as _app_build_mcp_tools_response,
+    execute_mcp_http_tool as _app_execute_mcp_http_tool,
+    match_builtin_docs_response as _app_match_builtin_docs_response,
+    resolve_requested_catalog_mode as _app_resolve_requested_catalog_mode,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -47,8 +56,6 @@ from app.http.static_paths import (
 )
 from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
 from audio_pipeline_paths import build_normalized_output_path
-from external_api.catalog import build_mcp_http_catalog, get_mcp_tool_entry, mcp_exposure_payload, resolve_catalog_mode
-from external_api.openapi import build_openapi_document, render_redoc_html, render_swagger_ui_html
 from external_api.streaming import JobStreamingSidecar
 
 try:
@@ -2355,42 +2362,19 @@ def _build_workflow_runtime() -> WorkflowTools:
 
 
 def _execute_mcp_http_tool(tool_name: str, raw_args: Dict[str, Any], mode: str = "active") -> Dict[str, Any]:
-    if not isinstance(raw_args, dict):
-        raise ApiError(HTTPStatus.BAD_REQUEST, "Tool arguments must be a JSON object")
-
     parse_tools, _ = _get_chat_runtime()
     workflow_tools = _build_workflow_runtime()
-    tool_entry = get_mcp_tool_entry(
-        tool_name,
-        project_root=_project_root(),
-        mode=mode,
-        parse_tools=parse_tools,
-        workflow_tools=workflow_tools,
-    )
-    if tool_entry is None:
-        raise ApiError(HTTPStatus.NOT_FOUND, "Unknown MCP tool: {0}".format(tool_name))
-
-    family = str(tool_entry.get("family") or "chat")
     try:
-        if family == "adapter" and tool_name == "mcp_get_exposure_mode":
-            catalog = build_mcp_http_catalog(
-                project_root=_project_root(),
-                mode=mode,
-                parse_tools=parse_tools,
-                workflow_tools=workflow_tools,
-            )
-            return mcp_exposure_payload(
-                expose_all_tools=bool(catalog["exposure"].get("exposeAllTools", False)),
-                config_source=catalog["exposure"].get("configSource"),
-                parse_chat_tool_count=int(catalog["exposure"].get("parseChatToolCount", len(parse_tools.tool_names()))),
-                workflow_tool_count=int(catalog["exposure"].get("workflowToolCount", 0)),
-                mcp_tool_count=int(catalog["exposure"].get("mcpToolCount", catalog.get("count", 0))),
-            )
-        if family == "workflow":
-            return workflow_tools.execute(tool_name, raw_args)
-        return parse_tools.execute(tool_name, raw_args)
-    except (ChatToolValidationError, ChatToolExecutionError, ValueError) as exc:
-        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        return _app_execute_mcp_http_tool(
+            tool_name,
+            raw_args,
+            mode=mode,
+            project_root=_project_root(),
+            parse_tools=parse_tools,
+            workflow_tools=workflow_tools,
+        )
+    except _app_ExternalApiHandlerError as exc:
+        raise ApiError(exc.status, exc.message) from exc
 
 
 def _run_chat_job(job_id: str, session_id: str) -> None:
@@ -6035,17 +6019,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         _app_send_json_error_response(self, status, message)
 
     def _handle_builtin_docs_get(self) -> bool:
-        request_path = self._request_path()
-        if request_path == "/openapi.json":
-            self._send_json(HTTPStatus.OK, build_openapi_document(base_url=self._request_base_url()))
+        response = _app_match_builtin_docs_response(self._request_path(), base_url=self._request_base_url())
+        if response is None:
+            return False
+        if response.send_as == "json":
+            self._send_json(response.status, response.body)
             return True
-        if request_path == "/docs":
-            self._send_text(HTTPStatus.OK, render_swagger_ui_html("/openapi.json"), content_type="text/html; charset=utf-8")
-            return True
-        if request_path == "/redoc":
-            self._send_text(HTTPStatus.OK, render_redoc_html("/openapi.json"), content_type="text/html; charset=utf-8")
-            return True
-        return False
+        self._send_text(response.status, response.body, content_type=response.content_type or "text/plain; charset=utf-8")
+        return True
 
     def _handle_api(self, method: str) -> bool:
         request_path = self._request_path()
@@ -6983,41 +6964,55 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_mcp_exposure(self) -> None:
         try:
-            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
-        catalog = build_mcp_http_catalog(project_root=_project_root(), mode=mode, parse_tools=_get_chat_runtime()[0], workflow_tools=_build_workflow_runtime())
-        self._send_json(HTTPStatus.OK, catalog["exposure"])
+            parse_tools, _ = _get_chat_runtime()
+            self._send_json(
+                HTTPStatus.OK,
+                _app_build_mcp_exposure_response(
+                    query_params=self._request_query_params(),
+                    project_root=_project_root(),
+                    parse_tools=parse_tools,
+                    workflow_tools=_build_workflow_runtime(),
+                ),
+            )
+        except _app_ExternalApiHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
     def _api_get_mcp_tools(self) -> None:
         try:
-            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
-        catalog = build_mcp_http_catalog(project_root=_project_root(), mode=mode, parse_tools=_get_chat_runtime()[0], workflow_tools=_build_workflow_runtime())
-        self._send_json(HTTPStatus.OK, catalog)
+            parse_tools, _ = _get_chat_runtime()
+            self._send_json(
+                HTTPStatus.OK,
+                _app_build_mcp_tools_response(
+                    query_params=self._request_query_params(),
+                    project_root=_project_root(),
+                    parse_tools=parse_tools,
+                    workflow_tools=_build_workflow_runtime(),
+                ),
+            )
+        except _app_ExternalApiHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
     def _api_get_mcp_tool(self, tool_name: str) -> None:
         try:
-            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
-        tool_entry = get_mcp_tool_entry(
-            tool_name,
-            project_root=_project_root(),
-            mode=mode,
-            parse_tools=_get_chat_runtime()[0],
-            workflow_tools=_build_workflow_runtime(),
-        )
-        if tool_entry is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown MCP tool: {0}".format(tool_name))
-        self._send_json(HTTPStatus.OK, tool_entry)
+            parse_tools, _ = _get_chat_runtime()
+            self._send_json(
+                HTTPStatus.OK,
+                _app_build_mcp_tool_response(
+                    tool_name,
+                    query_params=self._request_query_params(),
+                    project_root=_project_root(),
+                    parse_tools=parse_tools,
+                    workflow_tools=_build_workflow_runtime(),
+                ),
+            )
+        except _app_ExternalApiHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
     def _api_post_mcp_tool(self, tool_name: str) -> None:
         try:
-            mode = resolve_catalog_mode((self._request_query_params().get("mode") or ["active"])[0])
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+            mode = _app_resolve_requested_catalog_mode(self._request_query_params())
+        except _app_ExternalApiHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
         body = self._expect_object(self._read_json_body(required=False) or {}, "Request body")
         self._send_json(HTTPStatus.OK, _execute_mcp_http_tool(tool_name, body, mode=mode))
 
