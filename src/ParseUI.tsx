@@ -2261,13 +2261,9 @@ export function ParseUI() {
     [refreshClefStatus],
   );
 
-  const handleComputeRun = useCallback(() => {
-    if (computeMode === 'contact-lexemes' && clefConfigured !== true) {
-      setClefModalOpen(true);
-      return;
-    }
-    void startComputeJob();
-  }, [computeMode, clefConfigured, startComputeJob]);
+  // ``handleComputeRun`` is defined further down (after ``crossSpeakerJob``
+  // is in scope) so it can dispatch the contact-lexemes path through the
+  // header-chip job hook instead of the drawer-tied ``startComputeJob``.
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -2584,6 +2580,28 @@ export function ParseUI() {
     ...(crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : []),
     ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
   ];
+
+  // Drawer "Run" button. ``contact-lexemes`` (Borrowing detection / CLEF)
+  // routes through ``crossSpeakerJob`` so progress / ETA / completion
+  // surface in the global header chip alongside STT / IPA / forced-align,
+  // not as a duplicate one-line indicator inside the drawer. The
+  // ``onComplete`` hook on ``crossSpeakerJob`` already handles the
+  // populate-summary banner + auto-chained similarity recompute (#208),
+  // so this dispatch keeps both paths (header click via Save & populate,
+  // drawer click via Run) on the same wiring. Other compute modes
+  // (cognates / phonetic similarity) still use the legacy drawer-tied
+  // ``startComputeJob`` since they don't have a useActionJob counterpart.
+  const handleComputeRun = useCallback(() => {
+    if (computeMode === 'contact-lexemes') {
+      if (clefConfigured !== true) {
+        setClefModalOpen(true);
+        return;
+      }
+      void crossSpeakerJob.run();
+      return;
+    }
+    void startComputeJob();
+  }, [computeMode, clefConfigured, startComputeJob, crossSpeakerJob]);
 
   // On mount, adopt any in-flight backend jobs so progress bars survive
   // a page reload. STT (and similar) run in a background thread that
@@ -4351,7 +4369,15 @@ export function ParseUI() {
                     <button
                       className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
                       onClick={handleComputeRun}
-                      disabled={computeJobState.status === 'running'}
+                      // Disable Run while *the relevant* job for the
+                      // current mode is in flight. contact-lexemes routes
+                      // through crossSpeakerJob (header chip); other modes
+                      // still flow through the legacy useComputeJob.
+                      disabled={
+                        computeMode === 'contact-lexemes'
+                          ? crossSpeakerJob.state.status === 'running'
+                          : computeJobState.status === 'running'
+                      }
                     >
                       <Play className="h-3 w-3"/> Run
                     </button>
@@ -4389,7 +4415,13 @@ export function ParseUI() {
                       </div>
                     </div>
                   )}
-                  {computeJobState.status === 'running' && (
+                  {/* For contact-lexemes, progress + errors render in the
+                      global header chip via ``crossSpeakerJob`` (matches
+                      STT / IPA / forced-align / full_pipeline). The
+                      drawer one-liner stays only for legacy compute
+                      modes (cognates / phonetic similarity) that still
+                      flow through ``useComputeJob``. */}
+                  {computeMode !== 'contact-lexemes' && computeJobState.status === 'running' && (
                     <div className="mt-1 text-[10px] text-indigo-600">
                       Running… {Math.round(computeJobState.progress * 100)}%
                       {computeJobState.etaMs !== null && computeJobState.etaMs > 0 && (
@@ -4397,7 +4429,7 @@ export function ParseUI() {
                       )}
                     </div>
                   )}
-                  {computeJobState.status === 'error' && (
+                  {computeMode !== 'contact-lexemes' && computeJobState.status === 'error' && (
                     <div className="mt-1 text-[10px] text-rose-600">{computeJobState.error}</div>
                   )}
                 </div>
