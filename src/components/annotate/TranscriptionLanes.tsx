@@ -42,8 +42,11 @@ interface LaneStrip {
 
 // Lane order is hard-coded top-to-bottom and intentionally independent of
 // each tier's numeric display_order (which only governs Praat export sort).
-// Phone IPA → word IPA → STT → ORTH → Boundaries (diagnostic overlay).
-const LANE_ORDER: LaneKind[] = ["ipa_phone", "ipa", "stt", "ortho", "boundaries"];
+// Phone IPA → word IPA → STT → ORTH → Words (Tier 1) → Boundaries (Tier 2).
+// Words sits directly above Boundaries so a researcher reading the strips
+// top-down sees the same word at both Tier 1 and Tier 2 positions and can
+// eyeball the shift without color-coding alone.
+const LANE_ORDER: LaneKind[] = ["ipa_phone", "ipa", "stt", "ortho", "stt_words", "boundaries"];
 
 /** Tier 2 forced-align ±pad window; matches forced_align.py:_slice_window
  * default. A Tier 1 word boundary off by more than this frequently means the
@@ -151,6 +154,7 @@ export function TranscriptionLanes({
     ipa: null,
     stt: null,
     ortho: null,
+    stt_words: null,
     boundaries: null,
   });
 
@@ -282,6 +286,40 @@ export function TranscriptionLanes({
     const out: LaneStrip[] = [];
     for (const kind of LANE_ORDER) {
       if (!lanes[kind].visible) continue;
+
+      if (kind === "stt_words") {
+        const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
+        const intervals: Array<{ start: number; end: number; text: string }> = [];
+        for (const seg of segs) {
+          for (const w of seg.words ?? []) {
+            const text = (w.word ?? "").trim();
+            if (!text) continue;
+            // Skip degenerate boundaries (Whisper's word_timestamps occasionally
+            // emits start==end==0 for the first word of a segment). They'd
+            // render as an invisible 1px box anyway and just clutter the lane.
+            if (w.start === 0 && w.end === 0) continue;
+            intervals.push({ start: w.start, end: w.end, text });
+          }
+        }
+        const status = sttStatus[speaker] ?? "idle";
+        const emptyHint =
+          intervals.length > 0
+            ? undefined
+            : status === "loading"
+              ? "Loading STT…"
+              : status === "error"
+                ? "Failed to load STT"
+                : `No word-level STT yet — run word-level STT for ${speaker}`;
+        out.push({
+          kind: "stt_words",
+          label: LANE_LABELS.stt_words,
+          intervals,
+          emptyHint,
+          status,
+          // No sourceIndices → strip is read-only (clicks seek, no editor).
+        });
+        continue;
+      }
 
       if (kind === "boundaries") {
         const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
