@@ -27,6 +27,14 @@ from ai.chat_tools import ChatToolExecutionError, ChatToolValidationError, Parse
 from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
+from app.http.static_paths import (
+    dist_dir as _app_dist_dir,
+    dist_index_path as _app_dist_index_path,
+    has_built_frontend as _app_has_built_frontend,
+    resolve_static_request_path as _app_resolve_static_request_path,
+    static_request_parts as _app_static_request_parts,
+)
+from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.catalog import build_mcp_http_catalog, get_mcp_tool_entry, mcp_exposure_payload, resolve_catalog_mode
 from external_api.openapi import build_openapi_document, render_redoc_html, render_swagger_ui_html
@@ -329,46 +337,26 @@ def _write_json_file(path: pathlib.Path, payload: Dict[str, Any]) -> None:
 
 
 def _dist_dir(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
-    root = (project_root or _project_root()).resolve()
-    return root / "dist"
+    return _app_dist_dir(project_root or _project_root())
 
 
 def _dist_index_path(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
-    return _dist_dir(project_root) / "index.html"
+    return _app_dist_index_path(project_root or _project_root())
 
 
 def _has_built_frontend(project_root: Optional[pathlib.Path] = None) -> bool:
-    return _dist_index_path(project_root).is_file()
+    return _app_has_built_frontend(project_root or _project_root())
 
 
 def _static_request_parts(raw_path: str) -> List[str]:
-    request_path = urlparse(raw_path).path or "/"
-    pure_path = pathlib.PurePosixPath(unquote(request_path))
-    return [part for part in pure_path.parts if part not in {"/", "", ".", ".."}]
+    return _app_static_request_parts(raw_path)
 
 
 def _resolve_static_request_path(
     raw_path: str,
     project_root: Optional[pathlib.Path] = None,
 ) -> pathlib.Path:
-    root = (project_root or _project_root()).resolve()
-    parts = _static_request_parts(raw_path)
-    root_candidate = root.joinpath(*parts) if parts else root
-
-    if not _has_built_frontend(root):
-        return root_candidate
-
-    dist_candidate = _dist_dir(root).joinpath(*parts) if parts else _dist_index_path(root)
-    if parts and dist_candidate.exists():
-        return dist_candidate
-    if parts and root_candidate.exists():
-        return root_candidate
-
-    request_suffix = pathlib.PurePosixPath("/".join(parts)).suffix if parts else ""
-    if not parts or request_suffix == "":
-        return _dist_index_path(root)
-
-    return root_candidate
+    return _app_resolve_static_request_path(raw_path, project_root or _project_root())
 
 
 def _project_json_path() -> pathlib.Path:
@@ -700,75 +688,11 @@ def _annotation_source_duration(speaker: str, source_wav: str) -> Optional[float
 
 
 def _workspace_frontend_config(base_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
-
-    project_payload = _read_json_file(_project_json_path(), {})
-    if not isinstance(project_payload, dict):
-        project_payload = {}
-    source_index_payload = _read_json_file(_source_index_path(), {})
-    if not isinstance(source_index_payload, dict):
-        source_index_payload = {}
-
-    speakers: List[str] = []
-    speakers_value = project_payload.get("speakers")
-    if isinstance(speakers_value, dict):
-        speakers.extend(str(key).strip() for key in speakers_value.keys() if str(key).strip())
-    elif isinstance(speakers_value, list):
-        speakers.extend(str(item).strip() for item in speakers_value if str(item).strip())
-
-    source_speakers = source_index_payload.get("speakers")
-    if isinstance(source_speakers, dict):
-        speakers.extend(str(key).strip() for key in source_speakers.keys() if str(key).strip())
-    speakers = sorted(dict.fromkeys(speakers))
-
-    concepts_path = _project_root() / "concepts.csv"
-    concepts: list = []
-    if concepts_path.exists():
-        import csv as _csv
-        with open(concepts_path, newline="", encoding="utf-8") as f:
-            reader = _csv.DictReader(f)
-            for row in reader:
-                cid = str(row.get("id") or "").strip()
-                label = str(row.get("concept_en") or "").strip()
-                if not (cid and label):
-                    continue
-                entry: Dict[str, Any] = {"id": cid, "label": label}
-                survey_item = str(row.get("survey_item") or "").strip()
-                if survey_item:
-                    entry["survey_item"] = survey_item
-                custom_order_raw = str(row.get("custom_order") or "").strip()
-                if custom_order_raw:
-                    try:
-                        entry["custom_order"] = int(custom_order_raw)
-                    except ValueError:
-                        try:
-                            entry["custom_order"] = float(custom_order_raw)
-                        except ValueError:
-                            pass
-                concepts.append(entry)
-
-    language_block = project_payload.get("language") if isinstance(project_payload.get("language"), dict) else {}
-    language_code = str(
-        project_payload.get("language_code")
-        or language_block.get("code")
-        or config.get("language_code")
-        or "und"
-    ).strip() or "und"
-    project_name = str(
-        project_payload.get("project_name")
-        or project_payload.get("name")
-        or config.get("project_name")
-        or "PARSE"
-    ).strip() or "PARSE"
-
-    config["project_name"] = project_name
-    config["language_code"] = language_code
-    config["speakers"] = speakers
-    config["concepts"] = concepts
-    config["audio_dir"] = str(project_payload.get("audio_dir") or config.get("audio_dir") or "audio")
-    config["annotations_dir"] = str(project_payload.get("annotations_dir") or config.get("annotations_dir") or "annotations")
-    config["schema_version"] = CONFIG_SCHEMA_VERSION
-    return config
+    return _app_build_workspace_frontend_config(
+        _project_root(),
+        base_config,
+        schema_version=CONFIG_SCHEMA_VERSION,
+    )
 
 
 def _annotation_empty_tier(display_order: int) -> Dict[str, Any]:
