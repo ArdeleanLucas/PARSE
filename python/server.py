@@ -36,6 +36,15 @@ from app.http.external_api_handlers import (
     match_builtin_docs_response as _app_match_builtin_docs_response,
     resolve_requested_catalog_mode as _app_resolve_requested_catalog_mode,
 )
+from app.http.job_observability_handlers import (
+    JobObservabilityHandlerError as _app_JobObservabilityHandlerError,
+    build_job_detail_response as _app_build_job_detail_response,
+    build_job_error_logs_response as _app_build_job_error_logs_response,
+    build_job_logs_response as _app_build_job_logs_response,
+    build_jobs_active_response as _app_build_jobs_active_response,
+    build_jobs_response as _app_build_jobs_response,
+    build_worker_status_response as _app_build_worker_status_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -6717,70 +6726,47 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.OK, _job_response_payload(job))
 
     def _api_get_jobs(self) -> None:
-        query = urlparse(self.path).query
-        params = {}
-        for piece in query.split("&"):
-            if not piece or "=" not in piece:
-                continue
-            key, value = piece.split("=", 1)
-            params.setdefault(key, []).append(unquote(value))
-
-        statuses = params.get("status") or params.get("statuses")
-        job_types = params.get("type") or params.get("types")
-        speaker = (params.get("speaker") or [None])[0]
-        limit_raw = (params.get("limit") or ["100"])[0]
         try:
-            limit = int(limit_raw)
-        except (TypeError, ValueError):
-            limit = 100
-
-        rows = _list_jobs_snapshots(
-            statuses=statuses,
-            job_types=job_types,
-            speaker=speaker,
-            limit=limit,
-        )
-        self._send_json(HTTPStatus.OK, {"jobs": rows, "count": len(rows)})
+            response = _app_build_jobs_response(
+                self.path,
+                list_jobs_snapshots=_list_jobs_snapshots,
+            )
+        except _app_JobObservabilityHandlerError as exc:
+            raise ApiError(exc.status, exc.message)
+        self._send_json(response.status, response.payload)
 
     def _api_get_job(self, job_id_part: str) -> None:
-        job_id = str(job_id_part or "").strip()
-        if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is required")
-        job = _get_job_snapshot(job_id)
-        if job is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown jobId")
-        self._send_json(HTTPStatus.OK, _job_detail_payload(job))
+        try:
+            response = _app_build_job_detail_response(
+                job_id_part,
+                get_job_snapshot=_get_job_snapshot,
+                job_detail_payload=_job_detail_payload,
+            )
+        except _app_JobObservabilityHandlerError as exc:
+            raise ApiError(exc.status, exc.message)
+        self._send_json(response.status, response.payload)
 
     def _api_get_job_logs(self, job_id_part: str) -> None:
-        job_id = str(job_id_part or "").strip()
-        if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is required")
-        job = _get_job_snapshot(job_id)
-        if job is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown jobId")
-        query = urlparse(self.path).query
-        offset = 0
-        limit = _job_log_limit()
-        for piece in query.split("&"):
-            if not piece or "=" not in piece:
-                continue
-            key, value = piece.split("=", 1)
-            if key == "offset":
-                try:
-                    offset = int(unquote(value))
-                except (TypeError, ValueError):
-                    offset = 0
-            elif key == "limit":
-                try:
-                    limit = int(unquote(value))
-                except (TypeError, ValueError):
-                    limit = JOB_LOG_MAX_ENTRIES
-        self._send_json(HTTPStatus.OK, _job_logs_payload(job, offset=offset, limit=limit))
+        try:
+            response = _app_build_job_logs_response(
+                job_id_part,
+                self.path,
+                get_job_snapshot=_get_job_snapshot,
+                job_logs_payload=_job_logs_payload,
+                job_log_limit=_job_log_limit,
+                job_log_max_entries=JOB_LOG_MAX_ENTRIES,
+            )
+        except _app_JobObservabilityHandlerError as exc:
+            raise ApiError(exc.status, exc.message)
+        self._send_json(response.status, response.payload)
 
     def _api_get_jobs_active(self) -> None:
         """Return a list of currently-running jobs so the UI can rehydrate
         progress after a page reload. See ``_list_active_jobs_snapshots``."""
-        self._send_json(HTTPStatus.OK, {"jobs": _list_active_jobs_snapshots()})
+        response = _app_build_jobs_active_response(
+            list_active_jobs_snapshots=_list_active_jobs_snapshots,
+        )
+        self._send_json(response.status, response.payload)
 
     def _api_get_job_error_logs(self, job_id: str) -> None:
         """Return the error, traceback, and tail of any stderr log files
@@ -6799,35 +6785,15 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         message?, stderrLog?, workerStderrLog?}``. All log fields are
         omitted when unavailable — the UI renders whatever is present.
         """
-        snapshot = _get_job_snapshot(job_id)
-        if snapshot is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown job_id")
-
-        payload: Dict[str, Any] = {
-            "jobId": job_id,
-            "status": str(snapshot.get("status") or ""),
-            "type": str(snapshot.get("type") or ""),
-        }
-        if snapshot.get("error"):
-            payload["error"] = str(snapshot.get("error"))
-        if snapshot.get("traceback"):
-            payload["traceback"] = str(snapshot.get("traceback"))
-        if snapshot.get("message"):
-            payload["message"] = str(snapshot.get("message"))
-
-        job_stderr = _tail_log_file(
-            "/tmp/parse-compute-{0}.stderr.log".format(job_id), max_lines=200
-        )
-        if job_stderr:
-            payload["stderrLog"] = job_stderr
-
-        worker_stderr = _tail_log_file(
-            "/tmp/parse-compute-worker.stderr.log", max_lines=200
-        )
-        if worker_stderr:
-            payload["workerStderrLog"] = worker_stderr
-
-        self._send_json(HTTPStatus.OK, payload)
+        try:
+            response = _app_build_job_error_logs_response(
+                job_id,
+                get_job_snapshot=_get_job_snapshot,
+                tail_log_file=_tail_log_file,
+            )
+        except _app_JobObservabilityHandlerError as exc:
+            raise ApiError(exc.status, exc.message)
+        self._send_json(response.status, response.payload)
 
     def _api_get_worker_status(self) -> None:
         """Health check for the persistent compute worker.
@@ -6840,31 +6806,11 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         worker has exited — suitable for an external monitor (PM2,
         uptime-robot, Grafana) to trigger a restart.
         """
-        mode = _resolve_compute_mode()
-        payload: Dict[str, Any] = {"mode": mode}
-
-        if mode != "persistent":
-            payload["alive"] = None
-            payload["message"] = "Persistent worker mode is not active"
-            self._send_json(HTTPStatus.OK, payload)
-            return
-
-        handle = _PERSISTENT_WORKER_HANDLE
-        if handle is None:
-            payload["alive"] = False
-            payload["message"] = "Persistent worker handle not initialised"
-            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, payload)
-            return
-
-        alive = handle.is_alive()
-        payload["alive"] = alive
-        payload["pid"] = handle.process_pid()
-        payload["jobs_in_flight"] = handle.in_flight_count()
-        if alive:
-            self._send_json(HTTPStatus.OK, payload)
-            return
-        payload["message"] = "Persistent worker process has exited"
-        self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, payload)
+        response = _app_build_worker_status_response(
+            resolve_compute_mode=_resolve_compute_mode,
+            persistent_worker_handle=_PERSISTENT_WORKER_HANDLE,
+        )
+        self._send_json(response.status, response.payload)
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
