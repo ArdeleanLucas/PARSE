@@ -27,6 +27,17 @@ from ai.chat_tools import ChatToolExecutionError, ChatToolValidationError, Parse
 from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
+from app.http.request_helpers import (
+    JsonBodyError as _app_JsonBodyError,
+    path_parts as _app_path_parts,
+    read_json_body as _app_read_json_body,
+    request_path as _app_request_path,
+    request_query_params as _app_request_query_params,
+)
+from app.http.response_helpers import (
+    send_json_error_response as _app_send_json_error_response,
+    send_json_response as _app_send_json_response,
+)
 from app.http.static_paths import (
     dist_dir as _app_dist_dir,
     dist_index_path as _app_dist_index_path,
@@ -5980,10 +5991,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header(key, value)
 
     def _request_path(self) -> str:
-        return urlparse(self.path).path or "/"
+        return _app_request_path(self.path)
 
     def _request_query_params(self) -> Dict[str, List[str]]:
-        return parse_qs(urlparse(self.path).query, keep_blank_values=True)
+        return _app_request_query_params(self.path)
 
     def _request_base_url(self) -> str:
         host = str(self.headers.get("Host") or "127.0.0.1:{0}".format(PORT)).strip() or "127.0.0.1:{0}".format(PORT)
@@ -5993,38 +6004,13 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         return (urlparse(raw_path).path or "").startswith("/api/")
 
     def _path_parts(self, request_path: str) -> List[str]:
-        return [unquote(part) for part in request_path.strip("/").split("/") if part]
+        return _app_path_parts(request_path)
 
     def _read_json_body(self, required: bool = True) -> Any:
-        raw_length = self.headers.get("Content-Length", "")
-        if not raw_length:
-            if required:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "JSON request body is required")
-            return {}
-
         try:
-            content_length = int(raw_length)
-        except ValueError:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
-
-        if content_length < 0:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
-
-        if content_length == 0:
-            if required:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "JSON request body is required")
-            return {}
-
-        raw_body = self.rfile.read(content_length)
-        if not raw_body:
-            if required:
-                raise ApiError(HTTPStatus.BAD_REQUEST, "JSON request body is required")
-            return {}
-
-        try:
-            return json.loads(raw_body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Invalid JSON body")
+            return _app_read_json_body(self.headers, self.rfile, required=required)
+        except _app_JsonBodyError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
 
     def _expect_object(self, payload: Any, label: str) -> Dict[str, Any]:
         if not isinstance(payload, dict):
@@ -6032,15 +6018,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         return payload
 
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
-        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        try:
-            self.wfile.write(encoded)
-        except BrokenPipeError:
-            pass
+        _app_send_json_response(self, status, payload)
 
     def _send_text(self, status: HTTPStatus, body: str, *, content_type: str) -> None:
         encoded = body.encode("utf-8")
@@ -6054,7 +6032,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             pass
 
     def _send_json_error(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"error": str(message)})
+        _app_send_json_error_response(self, status, message)
 
     def _handle_builtin_docs_get(self) -> bool:
         request_path = self._request_path()
