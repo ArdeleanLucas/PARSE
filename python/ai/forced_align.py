@@ -32,6 +32,7 @@ import argparse
 import json
 import platform
 import sys
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -61,6 +62,56 @@ def resolve_device(requested: Optional[str] = None) -> str:
         return requested or ("cuda" if torch.cuda.is_available() else "cpu")
     except ImportError:
         return "cpu"
+
+
+_CPU_THREAD_LIMITS_CONFIGURED = False
+_CPU_THREAD_LIMITS_LOCK = threading.Lock()
+
+
+def _configure_torch_cpu_thread_limits(torch_module: Any) -> None:
+    """Best-effort one-time CPU thread configuration for wav2vec2 alignment.
+
+    ``torch.set_num_interop_threads()`` is effectively a process-global
+    one-shot setting: PyTorch raises once the value has already been fixed or
+    once the process has progressed far enough that the inter-op pool can no
+    longer be reconfigured. In PARSE's long-lived server this can happen before
+    the lazy IPA loader runs, especially when WSL forces wav2vec2 onto CPU.
+
+    We still want the CPU path to prefer single-threaded inference to avoid the
+    historical thread-exhaustion issue, but a late lazy load must not crash the
+    entire IPA step merely because inter-op threads were already configured.
+    """
+    global _CPU_THREAD_LIMITS_CONFIGURED
+    if _CPU_THREAD_LIMITS_CONFIGURED:
+        return
+
+    with _CPU_THREAD_LIMITS_LOCK:
+        if _CPU_THREAD_LIMITS_CONFIGURED:
+            return
+
+        torch_module.set_num_threads(1)
+        try:
+            torch_module.set_num_interop_threads(1)
+        except RuntimeError as exc:
+            message = str(exc)
+            if "cannot set number of interop threads" not in message:
+                raise
+            current_interop = None
+            getter = getattr(torch_module, "get_num_interop_threads", None)
+            if callable(getter):
+                try:
+                    current_interop = getter()
+                except Exception:
+                    current_interop = None
+            suffix = " current={0}".format(current_interop) if current_interop is not None else ""
+            print(
+                "[ALIGN] torch interop threads already configured; continuing with existing setting.{0}".format(
+                    suffix
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        _CPU_THREAD_LIMITS_CONFIGURED = True
 
 try:
     from .provider import SegmentWithWords, WordSpan
@@ -178,9 +229,13 @@ class Aligner:
         # call. With 3500+ sequential calls in a single server process this
         # exhausts thread stack space and raises RuntimeError: can't start new
         # thread. Single-threaded mode is slower per-call but stable.
+        #
+        # ``set_num_interop_threads`` is process-global and effectively
+        # one-shot; in the long-lived PARSE server the lazy IPA load can happen
+        # after PyTorch has already frozen that setting. Treat that specific
+        # late-configuration condition as benign and keep loading the aligner.
         if resolved_device == "cpu":
-            torch.set_num_threads(1)
-            torch.set_num_interop_threads(1)
+            _configure_torch_cpu_thread_limits(torch)
 
         # Explicit tokenizer + feature_extractor load. If this path
         # raises, fall back to the legacy auto-dispatch as a last resort
