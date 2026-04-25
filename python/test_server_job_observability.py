@@ -251,3 +251,83 @@ def test_api_rejects_invalid_callback_url() -> None:
 
     assert exc_info.value.status == HTTPStatus.BAD_REQUEST
     assert "callbackUrl" in exc_info.value.message
+
+
+class _FakePersistentWorkerHandle:
+    def __init__(self, *, alive: bool, pid: int | None = 4242, jobs_in_flight: int = 0) -> None:
+        self._alive = alive
+        self._pid = pid
+        self._jobs_in_flight = jobs_in_flight
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    def process_pid(self) -> int | None:
+        return self._pid
+
+    def in_flight_count(self) -> int:
+        return self._jobs_in_flight
+
+
+
+def test_api_get_jobs_active_returns_active_job_payloads() -> None:
+    server._jobs.clear()
+    running_job = server._create_job("stt", {"speaker": "Fail08"})
+    server._set_job_progress(running_job, 50.0, message="Halfway there")
+
+    handler = _HandlerHarness("/api/jobs/active")
+    handler._api_get_jobs_active()
+
+    status, payload = handler.sent[-1]
+    assert status == HTTPStatus.OK
+    assert payload["jobs"]
+    assert payload["jobs"][0]["jobId"] == running_job
+    assert payload["jobs"][0]["status"] == "running"
+
+
+
+def test_api_get_job_error_logs_returns_traceback_and_stderr_tails(monkeypatch) -> None:
+    server._jobs.clear()
+    job_id = server._create_job("normalize", {"speaker": "Fail09"})
+    server._set_job_error(job_id, "ffmpeg failed with exit code 1", traceback_str="traceback lines")
+
+    def fake_tail_log_file(path: str, *, max_lines: int = 200):
+        if path.endswith(f"{job_id}.stderr.log"):
+            return "per-job stderr"
+        if path.endswith("worker.stderr.log"):
+            return "worker stderr"
+        return None
+
+    monkeypatch.setattr(server, "_tail_log_file", fake_tail_log_file)
+
+    handler = _HandlerHarness(f"/api/jobs/{job_id}/logs")
+    handler._api_get_job_error_logs(job_id)
+
+    status, payload = handler.sent[-1]
+    assert status == HTTPStatus.OK
+    assert payload["jobId"] == job_id
+    assert payload["status"] == "error"
+    assert payload["error"] == "ffmpeg failed with exit code 1"
+    assert payload["traceback"] == "traceback lines"
+    assert payload["stderrLog"] == "per-job stderr"
+    assert payload["workerStderrLog"] == "worker stderr"
+
+
+
+def test_api_get_worker_status_maps_persistent_worker_health(monkeypatch) -> None:
+    handler = _HandlerHarness("/api/worker/status")
+
+    monkeypatch.setattr(server, "_resolve_compute_mode", lambda: "persistent")
+    monkeypatch.setattr(server, "_PERSISTENT_WORKER_HANDLE", _FakePersistentWorkerHandle(alive=False, pid=1337, jobs_in_flight=2))
+
+    handler._api_get_worker_status()
+
+    status, payload = handler.sent[-1]
+    assert status == HTTPStatus.SERVICE_UNAVAILABLE
+    assert payload == {
+        "mode": "persistent",
+        "alive": False,
+        "pid": 1337,
+        "jobs_in_flight": 2,
+        "message": "Persistent worker process has exited",
+    }
