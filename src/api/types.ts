@@ -57,10 +57,22 @@ export interface AnnotationRecord {
   source_audio_duration_sec?: number;
 }
 
+export interface SttWord {
+  word: string;
+  start: number;
+  end: number;
+  prob?: number;
+}
+
 export interface SttSegment {
   start: number;
   end: number;
   text: string;
+  /** Optional Tier 1 word-level boundaries from faster-whisper word_timestamps.
+   * Already returned by `/api/stt-segments/<speaker>`; previously stripped from
+   * the type. Consumed by the Boundaries lane to compare Tier 1 vs Tier 2
+   * (forced-aligned) word boundaries. */
+  words?: SttWord[];
 }
 
 export interface SttSegmentsPayload {

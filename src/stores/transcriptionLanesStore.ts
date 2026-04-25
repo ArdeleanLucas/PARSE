@@ -6,7 +6,7 @@ import { getSttSegments } from "../api/client";
 // Lane identities visible in the transcription viewer. The visual top-to-bottom
 // order is hard-coded in TranscriptionLanes.tsx (LANE_ORDER), independent of
 // the canonical numeric display_order used for Praat export.
-export type LaneKind = "ipa_phone" | "ipa" | "stt" | "ortho";
+export type LaneKind = "ipa_phone" | "ipa" | "stt" | "ortho" | "boundaries";
 
 export interface LaneConfig {
   visible: boolean;
@@ -43,6 +43,7 @@ export const LANE_LABELS: Record<LaneKind, string> = {
   ipa: "IPA",
   stt: "STT",
   ortho: "ORTH",
+  boundaries: "BND",
 };
 
 const DEFAULT_LANES: Record<LaneKind, LaneConfig> = {
@@ -50,6 +51,7 @@ const DEFAULT_LANES: Record<LaneKind, LaneConfig> = {
   ipa: { visible: true, color: "#059669" },       // emerald — word/lexeme IPA
   stt: { visible: true, color: "#6366f1" },       // indigo
   ortho: { visible: true, color: "#d97706" },     // amber
+  boundaries: { visible: false, color: "#dc2626" }, // off by default; lane fill is per-interval
   // To surface the sentence tier as a lane later: add "sentence" to LaneKind,
   // LANE_LABELS above, LANE_ORDER in TranscriptionLanes.tsx, and uncomment:
   // sentence: { visible: false, color: "#0ea5e9" }, // sky — sentence grouping
@@ -116,12 +118,13 @@ export const useTranscriptionLanesStore = create<TranscriptionLanesStore>()(
     }),
     {
       name: "parse.transcription-lanes",
-      // Bumped to v2 when ipa_phone was added — old persisted lane configs lack
-      // the new key. The migrate fn fills it in with the default rather than
-      // letting the lookup return undefined and crash the renderer.
+      // Bumped to v3 when boundaries was added (v2 added ipa_phone). Old
+      // persisted lane configs lack newer keys; migrate fills them with the
+      // default rather than letting the lookup return undefined and crash
+      // the renderer.
       storage: createJSONStorage(() => localStorage),
       partialize: (state): PersistedState => ({ lanes: state.lanes }),
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, fromVersion: number): PersistedState => {
         const fallback: PersistedState = { lanes: DEFAULT_LANES };
         if (!persisted || typeof persisted !== "object") return fallback;
@@ -133,6 +136,7 @@ export const useTranscriptionLanesStore = create<TranscriptionLanesStore>()(
               ipa: raw.ipa ?? DEFAULT_LANES.ipa,
               stt: raw.stt ?? DEFAULT_LANES.stt,
               ortho: raw.ortho ?? DEFAULT_LANES.ortho,
+              boundaries: DEFAULT_LANES.boundaries,
             },
           };
         }

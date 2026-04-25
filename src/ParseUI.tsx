@@ -5202,12 +5202,13 @@ function JobLogsModal({ jobId, onClose }: { jobId: string | null; onClose: () =>
 }
 
 // Visual order mirrors TranscriptionLanes.tsx: phone IPA → word IPA → STT → ORTH.
-const LANE_ORDER: LaneKind[] = ['ipa_phone', 'ipa', 'stt', 'ortho'];
+const LANE_ORDER: LaneKind[] = ['ipa_phone', 'ipa', 'stt', 'ortho', 'boundaries'];
 const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
   ipa_phone: { label: 'Phones tier', hint: 'Phone-level IPA' },
   ipa: { label: 'IPA tier', hint: 'Word/lexeme IPA' },
   stt: { label: 'STT segments', hint: 'Coarse transcript' },
   ortho: { label: 'Ortho tier', hint: 'Orthographic' },
+  boundaries: { label: 'Boundaries', hint: 'Tier 2 word edges, colored by Tier 1 ↔ Tier 2 shift' },
 };
 
 function LexemeSearchBlock({ speaker, conceptId }: { speaker: string; conceptId: string | number }) {

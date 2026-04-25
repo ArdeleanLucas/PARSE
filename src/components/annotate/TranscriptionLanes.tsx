@@ -26,17 +26,60 @@ interface LaneStrip {
    * the same offset survives migration because `ensureSttTier` copies
    * segments verbatim in order. */
   sourceIndices?: number[];
+  /** Per-interval color override aligned to `intervals[]`. Used by the
+   * Boundaries lane to color each Tier 2 word by its shift from the matching
+   * Tier 1 word (or by Tier 2 confidence when no Tier 1 partner exists).
+   * When unset, the lane's single color from the store is used. */
+  intervalColors?: (string | undefined)[];
   /** True for the STT strip when the record hasn't yet migrated STT into
    * `record.tiers.stt`. Edit-path handlers must call `ensureSttTier` before
    * opening the inline editor / context menu so the tier entry exists. */
   needsMigration?: boolean;
   status?: "idle" | "loading" | "loaded" | "error";
+  /** Custom empty-state message; falls back to a generic per-tier hint. */
+  emptyHint?: string;
 }
 
 // Lane order is hard-coded top-to-bottom and intentionally independent of
 // each tier's numeric display_order (which only governs Praat export sort).
-// Per the 4-lane viewer spec: phone IPA → word IPA → STT → ORTH.
-const LANE_ORDER: LaneKind[] = ["ipa_phone", "ipa", "stt", "ortho"];
+// Phone IPA → word IPA → STT → ORTH → Boundaries (diagnostic overlay).
+const LANE_ORDER: LaneKind[] = ["ipa_phone", "ipa", "stt", "ortho", "boundaries"];
+
+/** Tier 2 forced-align ±pad window; matches forced_align.py:_slice_window
+ * default. A Tier 1 word boundary off by more than this frequently means the
+ * CTC slice cut the phoneme — the case the Boundaries lane flags red. */
+const BOUNDARY_PAD_MS = 100;
+const BOUNDARY_GREEN_MS = 50;
+
+const BND_COLOR_GREEN = "#059669";
+const BND_COLOR_AMBER = "#d97706";
+const BND_COLOR_RED = "#dc2626";
+const BND_COLOR_UNKNOWN = "#64748b";
+
+function boundaryColor(
+  tier2: { start: number; end: number; confidence?: number; source?: string },
+  tier1: { start: number; end: number } | undefined,
+): string {
+  if (tier2.source === "short_clip_fallback") return BND_COLOR_RED;
+  if (
+    tier1 &&
+    Number.isFinite(tier1.start) &&
+    Number.isFinite(tier1.end) &&
+    !(tier1.start === 0 && tier1.end === 0)
+  ) {
+    const onMs = Math.abs(tier2.start - tier1.start) * 1000;
+    const offMs = Math.abs(tier2.end - tier1.end) * 1000;
+    const edgeMs = Math.max(onMs, offMs);
+    if (edgeMs > BOUNDARY_PAD_MS) return BND_COLOR_RED;
+    if (edgeMs >= BOUNDARY_GREEN_MS) return BND_COLOR_AMBER;
+    return BND_COLOR_GREEN;
+  }
+  const conf = tier2.confidence;
+  if (typeof conf !== "number") return BND_COLOR_UNKNOWN;
+  if (conf < 0.4) return BND_COLOR_RED;
+  if (conf < 0.7) return BND_COLOR_AMBER;
+  return BND_COLOR_GREEN;
+}
 
 const LANE_HEIGHT_PX = 28;
 export const LABEL_COL_PX = 56;
@@ -108,6 +151,7 @@ export function TranscriptionLanes({
     ipa: null,
     stt: null,
     ortho: null,
+    boundaries: null,
   });
 
   useEffect(() => {
@@ -239,6 +283,48 @@ export function TranscriptionLanes({
     for (const kind of LANE_ORDER) {
       if (!lanes[kind].visible) continue;
 
+      if (kind === "boundaries") {
+        const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
+        const tier1Words: Array<{ start: number; end: number; text: string }> = [];
+        for (const seg of segs) {
+          for (const w of seg.words ?? []) {
+            tier1Words.push({ start: w.start, end: w.end, text: w.word });
+          }
+        }
+        const tier2Ivs = (record?.tiers?.ortho_words?.intervals ?? []) as Array<{
+          start: number;
+          end: number;
+          text: string;
+          confidence?: number;
+          source?: "forced_align" | "short_clip_fallback";
+        }>;
+
+        const intervals: Array<{ start: number; end: number; text: string }> = [];
+        const intervalColors: (string | undefined)[] = [];
+        tier2Ivs.forEach((iv, i) => {
+          if (!iv.text || !iv.text.trim()) return;
+          intervals.push({ start: iv.start, end: iv.end, text: iv.text });
+          intervalColors.push(boundaryColor(iv, tier1Words[i]));
+        });
+
+        const hasTier2 = intervals.length > 0;
+        const emptyHint = hasTier2
+          ? undefined
+          : tier1Words.length > 0
+            ? "Run ORTH alignment to populate Tier 2 boundaries"
+            : `Run Orthographic STT for ${speaker}`;
+
+        out.push({
+          kind: "boundaries",
+          label: LANE_LABELS.boundaries,
+          intervals,
+          intervalColors,
+          emptyHint,
+          // No sourceIndices → strip is read-only (clicks seek, no editor).
+        });
+        continue;
+      }
+
       // STT migration: if record.tiers.stt has entries, that is the editable
       // source of truth. Otherwise fall back to the API-cached sttBySpeaker
       // for legacy records that haven't been touched since the new tier
@@ -322,7 +408,9 @@ export function TranscriptionLanes({
         const isEmpty = strip.intervals.length === 0;
         let emptyMsg = "";
         if (isEmpty) {
-          if (strip.kind === "stt") {
+          if (strip.emptyHint) {
+            emptyMsg = strip.emptyHint;
+          } else if (strip.kind === "stt") {
             emptyMsg =
               strip.status === "loading"
                 ? "Loading STT…"
@@ -373,6 +461,7 @@ export function TranscriptionLanes({
                 <div className="relative h-full" style={{ width: innerWidth }}>
                   {visible.map((iv, slotIdx) => {
                     const sourceIdx = visibleSourceIndices?.[slotIdx];
+                    const absIdx = firstIdx + slotIdx;
                     const left = iv.start * pxPerSec;
                     const width = Math.max(1, (iv.end - iv.start) * pxPerSec);
                     const showLabel = width >= MIN_LABEL_WIDTH_PX;
@@ -386,14 +475,15 @@ export function TranscriptionLanes({
                       isEditable &&
                       editing?.kind === strip.kind &&
                       editing?.index === sourceIdx;
+                    const ivColor = strip.intervalColors?.[absIdx] ?? color;
 
                     const baseStyle: React.CSSProperties = {
                       left,
                       width,
-                      backgroundColor: withAlpha(color, isSelected ? 0.28 : 0.14),
-                      borderLeft: `2px solid ${color}`,
+                      backgroundColor: withAlpha(ivColor, isSelected ? 0.28 : 0.14),
+                      borderLeft: `2px solid ${ivColor}`,
                       color: "#334155",
-                      ...({ ["--tw-ring-color"]: color } as React.CSSProperties),
+                      ...({ ["--tw-ring-color"]: ivColor } as React.CSSProperties),
                     };
 
                     if (isEditing && sourceIdx !== undefined) {
