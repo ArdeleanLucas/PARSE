@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
-  RotateCw, Play, RefreshCw, Save, Upload,
+  RotateCw, Play, Save, Upload,
   Layers, ChevronDown, ChevronUp, Plus, X, AlertCircle,
-  CheckCircle2, ArrowUpDown, Volume2, Filter, Send,
-  Database, Users as UsersIcon, Cpu, KeyRound, Loader2, ArrowLeft, ShieldCheck, Zap, Sparkles,
-  PanelRightClose, Tag, Tags, Import, AudioLines, Type, Mic,
+  CheckCircle2, ArrowUpDown, Volume2, Send,
+  KeyRound, Loader2, ArrowLeft, ShieldCheck, Zap, Sparkles,
+  Tag, Tags, Import, AudioLines, Type, Mic,
   Workflow, Network, Trash2, ChevronDown as CDown,
-  Video, Scissors, Activity, SlidersHorizontal, Download,
+  Activity, Download,
   Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, MessageSquare, Anchor,
   Sun, Moon, XCircle, Undo2, Redo2
 } from 'lucide-react';
@@ -16,7 +16,7 @@ import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, st
 import type { JobLogsPayload } from './api/client';
 import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
-import { compareSurveyKeys, surveyBadgePrefix } from './lib/surveySort';
+import { compareSurveyKeys } from './lib/surveySort';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -47,6 +47,8 @@ import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
+import { ConceptSidebar } from './components/parse/ConceptSidebar';
+import { RightPanel } from './components/parse/RightPanel';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
@@ -3687,98 +3689,19 @@ export function ParseUI() {
       {/* ============ BODY: left sidebar / main / right panel ============ */}
       <div className="flex min-h-0 flex-1">
         {/* LEFT SIDEBAR */}
-        <aside className="w-[250px] shrink-0 border-r border-slate-200/80 bg-white flex flex-col">
-          <div className="p-4 shrink-0">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search concepts…"
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-                <button data-testid="concept-sort-az" onClick={() => setSortMode('az')} title="Sort alphabetically by label" className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='az'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>A→Z</button>
-                <button data-testid="concept-sort-1n" onClick={() => setSortMode('1n')} title="Sort by concept id" className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='1n'?'bg-white text-slate-800 shadow-sm':'text-slate-500'}`}>1→N</button>
-                <button
-                  data-testid="concept-sort-survey"
-                  onClick={() => setSortMode('survey')}
-                  disabled={!hasSurveyItems}
-                  title={hasSurveyItems ? 'Sort by original survey item (section.item)' : 'No survey_item values present in concepts.csv'}
-                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode==='survey'?'bg-white text-slate-800 shadow-sm':'text-slate-500'} ${!hasSurveyItems ? 'cursor-not-allowed opacity-40' : ''}`}
-                >Survey</button>
-              </div>
-              <span className="ml-auto text-[10px] text-slate-400">{filtered.length} concepts</span>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {/* Built-in filter pills — replace the old header tabs.
-                  Order: All (reset) · Unreviewed · Flagged · Borrowings.
-                  Each is a tag-shaped pill with a distinctive accent
-                  colour so they read as semantic filters, not as user
-                  tags. Clicking an active pill returns to "All". */}
-              <button
-                onClick={() => setTagFilter('all')}
-                data-testid="tagfilter-all"
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-              >All</button>
-              <button
-                onClick={() => setTagFilter(tagFilter === 'unreviewed' ? 'all' : 'unreviewed')}
-                title="Concepts not yet confirmed and without a cognate assignment"
-                data-testid="tagfilter-unreviewed"
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'unreviewed' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'unreviewed' ? 'bg-white' : 'bg-amber-400'}`}/>
-                Unreviewed
-              </button>
-              <button
-                onClick={() => setTagFilter(tagFilter === 'flagged' ? 'all' : 'flagged')}
-                title="Concepts tagged problematic, or with a flagged speaker utterance"
-                data-testid="tagfilter-flagged"
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'flagged' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'flagged' ? 'bg-white' : 'bg-rose-400'}`}/>
-                Flagged
-              </button>
-              <button
-                onClick={() => setTagFilter(tagFilter === 'borrowings' ? 'all' : 'borrowings')}
-                title="Concepts with at least one borrowing"
-                data-testid="tagfilter-borrowings"
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'borrowings' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'borrowings' ? 'bg-white' : 'bg-violet-400'}`}/>
-                Borrowings
-              </button>
-              {/* User-defined tags, appended after the built-ins. */}
-              {tagsList.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTagFilter(tagFilter === t.id ? 'all' : t.id)}
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === t.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  style={tagFilter === t.id ? { background: t.color } : {}}
-                >
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }}/>
-                  {t.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          <nav className="flex-1 overflow-y-auto px-2 pb-6">
-            {filtered.map(c => {
-              const active = c.id === conceptId;
-              const badge = sortMode === 'survey' && c.surveyItem ? c.surveyItem : String(c.id);
-              // Badge prefix lives in src/lib/surveySort.ts (empty in Survey
-              // mode — the survey_item already carries its source; "#" in
-              // numeric-id mode). Shared with the regression test.
-              const badgePrefix = surveyBadgePrefix(sortMode);
-              return (
-                <button key={c.id} onClick={() => setConceptId(c.id)}
-                  className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[c.tag]}`} />
-                  <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
-                  <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badgePrefix}{badge}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
+        <ConceptSidebar
+          query={query}
+          onQueryChange={setQuery}
+          sortMode={sortMode}
+          onSortModeChange={setSortMode}
+          hasSurveyItems={hasSurveyItems}
+          filteredConcepts={filtered}
+          tagFilter={tagFilter}
+          onTagFilterChange={setTagFilter}
+          tags={tagsList}
+          activeConceptId={conceptId}
+          onConceptSelect={setConceptId}
+        />
 
         {/* MAIN + AI STACK */}
         <div className="flex min-w-0 flex-1 flex-col">
@@ -4270,379 +4193,59 @@ export function ParseUI() {
         </div>
 
         {/* RIGHT PANEL */}
-        <aside
-          className={`relative shrink-0 border-l border-slate-200/80 bg-white transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${panelOpen ? 'w-[250px]' : 'w-[52px]'}`}
-        >
-          {/* Toggle */}
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/90 px-3 py-2.5 backdrop-blur">
-            <span className={`text-[10px] font-semibold uppercase tracking-wider text-slate-500 transition-opacity duration-300 ${panelOpen ? 'opacity-100' : 'opacity-0'}`}>
-              Controls
-            </span>
-            <button
-              onClick={() => setPanelOpen(v => !v)}
-              title={panelOpen ? 'Collapse' : 'Expand'}
-              className="grid h-7 w-7 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-            >
-              <PanelRightClose className={`h-3.5 w-3.5 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${panelOpen ? '' : 'rotate-180'}`}/>
-            </button>
-          </div>
-
-          {/* Collapsed icon rail */}
-          <div className={`absolute inset-x-0 top-[46px] flex flex-col items-center gap-1 py-3 transition-opacity duration-300 ${panelOpen ? 'pointer-events-none opacity-0' : 'opacity-100 delay-200'}`}>
-            {[
-              { icon: Database, label: 'Project' },
-              { icon: UsersIcon, label: 'Speakers' },
-              { icon: Cpu, label: 'Compute' },
-              { icon: Filter, label: 'Filters' },
-              { icon: Save, label: 'Decisions' },
-            ].map(({ icon: Icon, label }) => (
-              <button
-                key={label}
-                title={label}
-                onClick={() => setPanelOpen(true)}
-                className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
-              >
-                <Icon className="h-4 w-4"/>
-              </button>
-            ))}
-          </div>
-
-          {/* Expanded content */}
-          <div className={`h-[calc(100%-46px)] overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${panelOpen ? 'opacity-100 delay-200' : 'pointer-events-none opacity-0'}`} style={{ width: 250 }}>
-            {/* --- COMMON: Speakers --- */}
-            <div className="border-b border-slate-100 p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Speakers {currentMode === 'annotate' && <span className="ml-1 rounded bg-indigo-50 px-1 py-0.5 font-mono text-[8px] text-indigo-600">SINGLE</span>}
-                </h4>
-                <span className="text-[10px] text-slate-400">
-                  {currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {speakers.length}
-                </span>
-              </div>
-              <div className="mb-2 flex gap-1">
-                <select
-                  value={currentMode === 'annotate' ? (selectedSpeakers[0] ?? '') : (speakerPicker ?? '')}
-                  onChange={e => {
-                    if (currentMode === 'annotate') setSelectedSpeakers([e.target.value]);
-                    else setSpeakerPicker(e.target.value);
-                  }}
-                  className="flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
-                  {speakers.map(s => <option key={s}>{s}</option>)}
-                </select>
-                {currentMode === 'compare' && (
-                  <button onClick={addSpeaker} className="grid h-6 w-6 place-items-center rounded-md bg-slate-900 text-white hover:bg-slate-700">
-                    <Plus className="h-3 w-3"/>
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {speakers.map(s => {
-                  const active = currentMode === 'annotate' ? selectedSpeakers[0] === s : selectedSpeakers.includes(s);
-                  return (
-                    <button key={s} onClick={() => toggleSpeaker(s)}
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] transition ${active ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' : 'bg-slate-50 text-slate-400 ring-1 ring-slate-100 hover:text-slate-600'}`}>
-                      {s}{active && currentMode === 'compare' && <X className="h-2.5 w-2.5"/>}
-                      {active && currentMode === 'annotate' && <Check className="h-2.5 w-2.5"/>}
-                    </button>
-                  );
-                })}
-              </div>
-              {currentMode === 'annotate' && (
-                <p className="mt-2 text-[10px] leading-snug text-slate-400">
-                  Concept list scoped to <span className="font-mono text-slate-600">{selectedSpeakers[0]}</span>'s dataset.
-                </p>
-              )}
-            </div>
-
-            {currentMode === 'compare' ? (
-              <>
-                {/* --- COMPARE: Compute --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compute</h4>
-                  <select value={computeMode} onChange={e => setComputeMode(e.target.value)}
-                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none">
-                    <option value="cognates">Cognates</option>
-                    <option value="similarity">Phonetic similarity</option>
-                    <option value="contact-lexemes">Borrowing detection (CLEF)</option>
-                  </select>
-                  <div className="mt-2 grid grid-cols-2 gap-1.5">
-                    <button
-                      className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      onClick={handleComputeRun}
-                      // Disable Run while *the relevant* job for the
-                      // current mode is in flight. contact-lexemes routes
-                      // through crossSpeakerJob (header chip); other modes
-                      // still flow through the legacy useComputeJob.
-                      disabled={
-                        computeMode === 'contact-lexemes'
-                          ? crossSpeakerJob.state.status === 'running'
-                          : computeJobState.status === 'running'
-                      }
-                    >
-                      <Play className="h-3 w-3"/> Run
-                    </button>
-                    <button
-                      className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                      onClick={() => { void useEnrichmentStore.getState().load(); }}
-                    >
-                      <RefreshCw className="h-3 w-3"/> Refresh
-                    </button>
-                  </div>
-                  {computeMode === 'contact-lexemes' && (
-                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px]">
-                      <span className={clefConfigured ? "text-emerald-700" : "text-amber-700"}>
-                        {clefConfigured === null
-                          ? "Checking CLEF config…"
-                          : clefConfigured
-                            ? "CLEF configured"
-                            : "CLEF not configured — Run will open setup"}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setSourcesReportOpen(true)}
-                          data-testid="clef-sources-report-open"
-                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
-                          title="Show which providers contributed each reference form (for citation)"
-                        >
-                          Sources Report
-                        </button>
-                        <button
-                          onClick={() => setClefModalOpen(true)}
-                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
-                        >
-                          Configure
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {/* For contact-lexemes, progress + errors render in the
-                      global header chip via ``crossSpeakerJob`` (matches
-                      STT / IPA / forced-align / full_pipeline). The
-                      drawer one-liner stays only for legacy compute
-                      modes (cognates / phonetic similarity) that still
-                      flow through ``useComputeJob``. */}
-                  {computeMode !== 'contact-lexemes' && computeJobState.status === 'running' && (
-                    <div className="mt-1 text-[10px] text-indigo-600">
-                      Running… {Math.round(computeJobState.progress * 100)}%
-                      {computeJobState.etaMs !== null && computeJobState.etaMs > 0 && (
-                        <span className="text-slate-400"> · ~{formatEta(computeJobState.etaMs)} left</span>
-                      )}
-                    </div>
-                  )}
-                  {computeMode !== 'contact-lexemes' && computeJobState.status === 'error' && (
-                    <div className="mt-1 text-[10px] text-rose-600">{computeJobState.error}</div>
-                  )}
-                </div>
-
-                {/* --- COMPARE: Status --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Status</h4>
-                  <div className="mb-2 flex items-center gap-2">
-                    {speakers.length > 0 || concepts.length > 0 ? (
-                      <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500"/>
-                        <span className="text-[11px] font-semibold text-slate-700">project.json</span>
-                        <span className="ml-auto text-[10px] text-slate-400">loaded</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="h-3.5 w-3.5 text-amber-500"/>
-                        <span className="text-[11px] font-semibold text-slate-700">Workspace empty</span>
-                      </>
-                    )}
-                  </div>
-                  {speakers.length === 0 && concepts.length === 0 ? (
-                    <div className="rounded-md bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-                      No speakers or concepts imported yet. Use <span className="font-semibold">Import</span> to add data to this workspace.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                        <div className="font-mono text-sm font-semibold text-slate-900">{speakers.length}</div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400">speakers</div>
-                      </div>
-                      <div className="rounded-md bg-slate-50 px-2 py-1.5">
-                        <div className="font-mono text-sm font-semibold text-slate-900">{concepts.length}</div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400">concepts</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* --- COMPARE: Filter by tag --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    <Filter className="h-3 w-3"/> Filter by tag
-                  </h4>
-                  <div className="space-y-1">
-                    {([
-                      ['all','All concepts','bg-slate-400'],
-                      ['untagged','Untagged','bg-slate-300'],
-                      ['review','Review needed','bg-amber-400'],
-                      ['confirmed','Confirmed','bg-emerald-500'],
-                      ['problematic','Problematic','bg-rose-500'],
-                    ] as const).map(([key,label,dot]) => (
-                      <button key={key} onClick={() => setTagFilter(key)}
-                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter===key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`}/>{label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-4">
-                  <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Decisions</h4>
-                  <div className="space-y-1.5">
-                    <button
-                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                      onClick={() => loadDecisionsRef.current?.click()}
-                    >
-                      <Upload className="h-3 w-3"/> Load decisions
-                    </button>
-                    <button
-                      className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
-                      onClick={() => {
-                        const json = JSON.stringify(enrichmentData, null, 2);
-                        const blob = new Blob([json], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'parse-decisions.json';
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                    >
-                      <Save className="h-3 w-3"/> Save decisions
-                    </button>
-                    <button
-                      onClick={handleExportLingPy}
-                      disabled={exporting}
-                      className="flex w-full items-center gap-2 rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      <Download className="h-3 w-3"/>
-                      {exporting ? 'Exporting…' : 'Export LingPy TSV'}
-                    </button>
-                    <button
-                      data-testid="open-comments-import"
-                      onClick={() => setCommentsImportOpen(true)}
-                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      <Upload className="h-3 w-3"/> Import Audition comments
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* --- ANNOTATE: Timestamp Tools --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    <Anchor className="h-3 w-3"/> Timestamp tools
-                  </h4>
-                  <p className="mb-3 text-[10px] leading-snug text-slate-400">
-                    Shift every lexeme on this speaker by a constant offset.
-                    Lexemes you have manually retimed or anchored are
-                    protected and stay put.
-                  </p>
-                  <div className="space-y-1.5">
-                    <button
-                      onClick={() => { void detectOffsetForSpeaker(); }}
-                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
-                      data-testid="drawer-detect-offset"
-                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Anchor className="h-3 w-3 text-slate-400"/>
-                      {offsetState.phase === 'detecting' ? 'Detecting offset…' : 'Detect Timestamp Offset'}
-                    </button>
-                    <button
-                      onClick={() => setOffsetState({ phase: 'manual' })}
-                      disabled={!activeActionSpeaker || offsetState.phase === 'detecting' || offsetState.phase === 'applying'}
-                      data-testid="drawer-detect-offset-manual"
-                      title="Skip auto-detect and anchor the offset from captured lexeme pairs directly."
-                      className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Anchor className="h-3 w-3 text-slate-400"/>
-                      Detect offset (manual anchors)
-                    </button>
-                  </div>
-                </div>
-
-                {/* --- ANNOTATE: Phonetic Tools --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    <Activity className="h-3 w-3"/> Phonetic tools
-                  </h4>
-                  <p className="mb-3 text-[10px] leading-snug text-slate-400">
-                    Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
-                  </p>
-
-                  {selectedSpeakers[0] && (
-                    <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={concept.id}/>
-                  )}
-
-                  <TranscriptionLanesControls/>
-
-                  <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
-                    <Layers className="h-3.5 w-3.5"/>
-                    <span className="flex-1 text-left">Spectrogram workspace</span>
-                    <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-indigo-600">ON</span>
-                  </button>
-
-                  <div className="space-y-1">
-                    {([
-                      { icon: AudioLines, label: 'Waveform view', hint: 'Segment-aware' },
-                      { icon: Video, label: 'Video clip', hint: 'Synced to timeline' },
-                      { icon: Scissors, label: 'Segment controls', hint: 'Split · Trim · Join' },
-                      { icon: SlidersHorizontal, label: 'Formant tracker', hint: 'Praat-compatible' },
-                      { icon: Mic, label: 'Re-record utterance', hint: 'Overlay on segment' },
-                    ] as const).map(({ icon: Icon, label, hint }) => (
-                      <button key={label} className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-slate-50">
-                        <Icon className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-600"/>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
-                          <div className="text-[9px] text-slate-400 truncate">{hint}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* --- ANNOTATE: Tag filter + Save --- */}
-                <div className="border-b border-slate-100 p-4">
-                  <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    <Filter className="h-3 w-3"/> Filter concepts
-                  </h4>
-                  <div className="space-y-1">
-                    {([
-                      ['all','All concepts','bg-slate-400'],
-                      ['untagged','Untagged','bg-slate-300'],
-                      ['review','Review needed','bg-amber-400'],
-                      ['confirmed','Confirmed','bg-emerald-500'],
-                      ['problematic','Problematic','bg-rose-500'],
-                    ] as const).map(([key,label,dot]) => (
-                      <button key={key} onClick={() => setTagFilter(key)}
-                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter===key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`}/>{label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-4">
-                  <button
-                    className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
-                    onClick={() => {
-                      const speaker = selectedSpeakers[0];
-                      if (speaker) void useAnnotationStore.getState().saveSpeaker(speaker);
-                    }}
-                  >
-                    <Save className="h-3 w-3"/> Save annotations
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </aside>
+        <RightPanel
+          panelOpen={panelOpen}
+          onTogglePanel={() => setPanelOpen((v) => !v)}
+          currentMode={currentMode}
+          selectedSpeakers={selectedSpeakers}
+          speakers={speakers}
+          conceptCount={concepts.length}
+          speakerPicker={speakerPicker}
+          onSpeakerSelect={(speakerId) => {
+            if (currentMode === 'annotate') setSelectedSpeakers([speakerId]);
+            else setSpeakerPicker(speakerId);
+          }}
+          onAddSpeaker={addSpeaker}
+          onToggleSpeaker={toggleSpeaker}
+          computeMode={computeMode}
+          onComputeModeChange={setComputeMode}
+          onComputeRun={handleComputeRun}
+          crossSpeakerJobStatus={crossSpeakerJob.state.status}
+          computeJobStatus={computeJobState.status}
+          computeJobProgress={computeJobState.progress}
+          computeJobEtaMs={computeJobState.etaMs}
+          computeJobError={computeJobState.error}
+          clefConfigured={clefConfigured}
+          onOpenSourcesReport={() => setSourcesReportOpen(true)}
+          onOpenClefConfig={() => setClefModalOpen(true)}
+          onRefreshEnrichments={() => { void useEnrichmentStore.getState().load(); }}
+          tagFilter={tagFilter}
+          onTagFilterChange={setTagFilter}
+          onOpenLoadDecisions={() => loadDecisionsRef.current?.click()}
+          onSaveDecisions={() => {
+            const json = JSON.stringify(enrichmentData, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'parse-decisions.json';
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          onExportLingPy={handleExportLingPy}
+          exporting={exporting}
+          onOpenCommentsImport={() => setCommentsImportOpen(true)}
+          activeActionSpeaker={activeActionSpeaker}
+          offsetPhase={offsetState.phase}
+          onDetectOffset={() => { void detectOffsetForSpeaker(); }}
+          onOpenManualOffset={() => setOffsetState({ phase: 'manual' })}
+          annotateSpeakerTools={selectedSpeakers[0] ? <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={concept.id} /> : null}
+          annotateAuxTools={<TranscriptionLanesControls />}
+          onSaveAnnotations={() => {
+            const speaker = selectedSpeakers[0];
+            if (speaker) void useAnnotationStore.getState().saveSpeaker(speaker);
+          }}
+        />
       </div>
 
       <input

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 
@@ -13,6 +13,7 @@ let mockConfig: ProjectConfig | null = null;
 let mockTags: Tag[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
+let mockCurrentTime = 0;
 
 const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
 const mockHydrateTags = vi.fn();
@@ -20,6 +21,7 @@ const mockSyncTagsFromServer = vi.fn().mockResolvedValue(undefined);
 const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockSetInterval = vi.fn();
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
+const mockMarkLexemeManuallyAdjusted = vi.fn();
 const mockTagConcept = vi.fn();
 const mockUntagConcept = vi.fn();
 const mockUpdateTag = vi.fn();
@@ -80,12 +82,16 @@ vi.mock("./stores/annotationStore", () => {
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
       saveSpeaker: mockSaveSpeaker,
+      markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
       moveIntervalAcrossTiers: vi.fn(),
       undo: vi.fn(),
       redo: vi.fn(),
     });
   (useAnnotationStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockAnnotationSetState(...args);
+  (useAnnotationStore as unknown as { getState: () => { records: Record<string, AnnotationRecord> } }).getState = () => ({
+    records: mockRecords,
+  });
   return { useAnnotationStore };
 });
 
@@ -94,13 +100,16 @@ vi.mock("./stores/playbackStore", () => {
     selector({
       activeSpeaker: null,
       isPlaying: false,
-      currentTime: 0,
+      currentTime: mockCurrentTime,
       duration: 4,
       selectedRegion: mockSelectedRegion,
       setSelectedRegion: mockSetSelectedRegion,
     });
   (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockPlaybackSetState(...args);
+  (usePlaybackStore as unknown as { getState: () => { currentTime: number } }).getState = () => ({
+    currentTime: mockCurrentTime,
+  });
   return { usePlaybackStore };
 });
 
@@ -193,6 +202,16 @@ vi.mock("./api/client", () => ({
   pollSTT: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollNormalize: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollCompute: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+  detectTimestampOffset: vi.fn().mockResolvedValue({ job_id: 'offset-job-default', jobId: 'offset-job-default' }),
+  pollOffsetDetectJob: vi.fn().mockResolvedValue({
+    speaker: 'Fail01',
+    offsetSec: 0.75,
+    basedOn: 'automatic anchors',
+    candidateCount: 3,
+    protectedLexemeCount: 0,
+  }),
+  applyTimestampOffset: vi.fn().mockResolvedValue({ shifted: 3, protected: 0 }),
+  getJobLogs: vi.fn().mockResolvedValue({ lines: [] }),
   getClefConfig: vi.fn(() => Promise.resolve(mockClefConfig)),
   getContactLexemeCoverage: vi.fn(() => Promise.resolve(mockCoverage)),
 }));
@@ -265,6 +284,7 @@ beforeEach(() => {
   mockRecords = {};
   mockEnrichmentData = {};
   mockSelectedRegion = { start: 1.25, end: 2.5 };
+  mockCurrentTime = 0;
   mockChatMessages = [];
   mockChatSending = false;
   mockChatError = null;
@@ -277,6 +297,7 @@ beforeEach(() => {
   mockLoadSpeaker.mockClear();
   mockSetInterval.mockClear();
   mockSaveSpeaker.mockClear();
+  mockMarkLexemeManuallyAdjusted.mockClear();
   mockTagConcept.mockClear();
   mockUpdateTag.mockClear();
   mockUntagConcept.mockClear();
@@ -301,6 +322,10 @@ beforeEach(() => {
   vi.mocked(apiClient.pollSTT).mockClear();
   vi.mocked(apiClient.startCompute).mockClear();
   vi.mocked(apiClient.pollCompute).mockClear();
+  vi.mocked(apiClient.detectTimestampOffset).mockClear();
+  vi.mocked(apiClient.pollOffsetDetectJob).mockClear();
+  vi.mocked(apiClient.applyTimestampOffset).mockClear();
+  vi.mocked(apiClient.getJobLogs).mockClear();
   vi.mocked(apiClient.getLingPyExport).mockClear();
   vi.mocked(apiClient.saveApiKey).mockClear();
   mockAnnotationSetState.mockClear();
@@ -871,6 +896,102 @@ describe("Actions menu — transcription run flow", () => {
 
     // The modal renders with the title supplied by the action.
     expect(screen.getByText(/Run Audio Normalization/i)).toBeTruthy();
+  });
+
+  it("opens the comments import modal from the compare right panel", () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("open-comments-import"));
+
+    expect(screen.getByTestId("comments-import")).toBeTruthy();
+    expect(screen.getAllByText(/Import Audition Comments/i).length).toBeGreaterThan(1);
+  });
+
+  it("exports LingPy TSV from the compare right panel", async () => {
+    const createObjectURL = vi.fn(() => "blob:lingpy");
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Export LingPy TSV/i }));
+
+    await waitFor(() => expect(apiClient.getLingPyExport).toHaveBeenCalledTimes(1));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:lingpy");
+
+    clickSpy.mockRestore();
+  });
+
+  it("captures an offset anchor from annotate mode and marks the lexeme as manually adjusted", async () => {
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("annotate-capture-anchor"));
+
+    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+    expect((await screen.findByTestId("annotate-capture-toast")).textContent).toContain(
+      "Anchored water @ 00:09.50 → +1.50s offset.",
+    );
+  });
+
+  it("captures the current lexeme into the manual offset modal and shows the live consensus", async () => {
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset-manual"));
+    expect(await screen.findByTestId("offset-manual")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("offset-manual-capture"));
+
+    const anchorList = await screen.findByTestId("offset-manual-anchor-list");
+    expect(within(anchorList).getByText("water")).toBeTruthy();
+    expect(within(anchorList).getByText("1")).toBeTruthy();
+    expect(within(anchorList).getByText("+1.50s")).toBeTruthy();
+    expect(screen.getByTestId("offset-manual-consensus").textContent).toContain("+1.500 s");
+    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+  });
+
+  it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
+    vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
+    vi.mocked(apiClient.pollOffsetDetectJob).mockImplementation(
+      async (_jobId, _jobType, handlers) => {
+        handlers?.onProgress?.({ progress: 42, message: "Scanning anchors…" });
+        return new Promise(() => {});
+      },
+    );
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset"));
+
+    const statusChip = await screen.findByTestId("topbar-offset-status");
+    const offsetModal = screen.getByTestId("offset-modal");
+    expect(statusChip).toBeTruthy();
+    expect(offsetModal).toBeTruthy();
+    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
+    expect(within(statusChip).getByText(/Scanning anchors/i)).toBeTruthy();
+    expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
   });
 
   it("Reset Project resets the batch runner", () => {
