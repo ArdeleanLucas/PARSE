@@ -17,6 +17,7 @@ flowchart LR
     Server --> ChatTools[python/ai/chat_tools.py\n50 PARSE-specific tools]
     Server --> Compare[python/compare/*\ncognates + CLEF providers]
     Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
+    Server --> Stream[WebSocket sidecar\nPARSE_WS_PORT + /ws/jobs/{jobId}]
     Server --> External[OpenAPI 3.1 + HTTP MCP bridge\n/openapi.json + /api/mcp/*]
     ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + 3 workflow macros]
     External --> PyPkg[python/packages/parse_mcp\nLangChain / LlamaIndex / CrewAI wrappers]
@@ -95,6 +96,7 @@ It is responsible for:
 - serving workspace configuration
 - reading and writing annotation records
 - managing background jobs
+- publishing additive WebSocket job events through the sidecar endpoint
 - coordinating STT / normalization / compute endpoints
 - exposing chat and auth routes
 - generating exports

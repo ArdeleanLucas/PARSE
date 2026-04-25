@@ -54,7 +54,7 @@ It combines:
 - **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries
 - **Per-speaker undo/redo** for annotation edits, including merge recovery and STT-tier migration
 - **Draggable timestamp correction** and clip-bounded playback for manual review
-- **Batch transcription** with preflight checks and rerun-failed support
+- **Batch transcription** with preflight checks, per-step **Keep / Overwrite** scope controls, and rerun-failed support
 - **Timestamp-offset detection/apply workflows** for constant CSV↔audio misalignment, now with async progress, crash-log surfacing, and protection for manually adjusted / anchored lexemes
 - **Search & anchor lexeme** tooling built on the Lexical Anchor Alignment System
 - **Shared tags** and the in-session **AI chat dock**
@@ -70,9 +70,9 @@ It provides:
 - A **concept × speaker matrix** for side-by-side lexical comparison
 - Cognate controls for **accept**, **split**, **merge**, and **cycle**
 - Per-row editing, speaker flags, and secondary actions for review work
-- **Borrowing adjudication** aided by contact-language similarity evidence
+- **Borrowing adjudication** aided by contact-language similarity evidence, dynamic primary-language similarity columns, and selectable reference forms
 - **Enrichment overlays** for computed comparative metadata
-- The **CLEF** panel for multi-source contact-language lookup
+- The **CLEF** panel for multi-source contact-language lookup, provenance-aware **Sources Report**, and retryable populate workflows
 - The same shared **tag system** used in Annotate mode
 - Export to **LingPy-compatible TSV** and **NEXUS** for downstream phylogenetic analysis
 
@@ -88,11 +88,12 @@ Supported LLM backends currently include **xAI (Grok)** and **OpenAI**. Local sp
 
 ### MCP & External API
 
-PARSE exposes three machine-facing integration surfaces:
+PARSE exposes four machine-facing integration surfaces:
 
 1. **HTTP API** on `http://localhost:8766`
-2. **HTTP MCP bridge** on the same server for schema discovery + tool execution
-3. **stdio MCP adapter** in `python/adapters/mcp_adapter.py`
+2. **WebSocket job streaming** on `ws://localhost:8767/ws/jobs/{jobId}` (override with `PARSE_WS_PORT`)
+3. **HTTP MCP bridge** on the same server for schema discovery + tool execution
+4. **stdio MCP adapter** in `python/adapters/mcp_adapter.py`
 
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
@@ -110,6 +111,13 @@ Current counts:
 - `GET /api/jobs/{jobId}/logs` — read structured per-job logs (and crash-log tails when present)
 
 These endpoints back the in-app progress UI, the MCP observability tools, and callback-driven external automation.
+
+#### WebSocket job streaming
+
+- `ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}`
+- current v1 event types: `job.snapshot`, `job.progress`, `job.log`, `stt.segment`, `job.complete`, `job.error`
+
+Streaming is additive: HTTP polling, callbacks, and MCP observability still work exactly as before.
 
 #### OpenAPI and interactive docs
 
@@ -173,7 +181,7 @@ PARSE is designed around a real fieldwork sequence rather than a toy demo sequen
 4. **Correct timestamps and confirm segments** in Annotate mode
 5. **Search and anchor difficult lexemes** across long recordings
 6. **Compare the concept set across speakers** in the matrix view
-7. **Use CLEF evidence** when a borrowing analysis needs external lexical context — the first time you run **Borrowing detection (CLEF)** from the Compute panel, PARSE opens a guided setup modal where you pick 1–2 primary contact languages (English + Spanish by default) and optionally auto-populate lexeme forms from the provider stack. The config lives in `config/sil_contact_languages.json`; extend the language picker with `config/sil_catalog_extra.json`.
+7. **Use CLEF evidence** when a borrowing analysis needs external lexical context — the first time you run **Borrowing detection (CLEF)** from the Compute panel, PARSE opens a guided setup modal where you pick 1–2 primary contact languages (English + Spanish by default) and optionally auto-populate lexeme forms from the provider stack. The config lives in `config/sil_contact_languages.json`; extend the language picker with `config/sil_catalog_extra.json`. Each language now also carries an ISO 15924 `script` hint so bare Reference Forms route deterministically between IPA-like Latin text and non-Latin script text.
 8. **Export LingPy TSV or NEXUS** for downstream comparative and phylogenetic analysis
 
 The guiding principle is simple: timestamps are central, human review stays explicit, and automation should make linguistic judgment faster rather than opaque.

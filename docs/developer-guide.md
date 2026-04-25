@@ -390,8 +390,37 @@ A provider change usually touches three layers:
 When extending CLEF:
 
 - keep the provider registry explicit
+- keep the guided config surface aligned with the backend endpoints (`GET/POST /api/clef/config`, `GET /api/clef/catalog`, `GET /api/clef/providers`)
+- keep the provenance / selection endpoints aligned with the UI surfaces (`GET /api/clef/sources-report`, `POST /api/clef/form-selections`)
+- remember that fresh workspaces may start without `config/sil_contact_languages.json`; backend init and UI copy should treat that as normal, not as a crash path
+- document any new expectations around `config/sil_catalog_extra.json` if the language picker or catalog merge rules change
+- preserve per-language ISO 15924 `script` hints when touching the catalog/config flow; `ClefConfigModal` and `GET/POST /api/clef/config` now round-trip them intentionally
 - document new coverage or source assumptions
 - update the provider list in user-facing docs if the provider set changes
+
+The current CLEF UI also assumes:
+
+- similarity columns are derived dynamically from `primary_contact_languages`, not hard-coded language slots
+- the Reference Forms panel may show multiple forms per language
+- bare-string Reference Forms are routed by explicit provider label first, then language `script` hint, then Unicode-block fallback
+- per-form provenance may be available and should stay visible through the Sources Report modal
+- form-selection state persists in `sil_contact_languages.json._meta.form_selections` and affects downstream similarity scoring
+
+## Batch transcription modal semantics
+
+`src/components/shared/TranscriptionRunModal.tsx` now has explicit per-step scope controls when selected speakers already have finalized output.
+
+Current semantics:
+
+- **Keep** (`overwrite=false`) is the default when a step collides with existing output
+- **Overwrite** (`overwrite=true`) must be chosen explicitly per step
+- the collisions bar only appears when the selected speakers actually have finalized output for at least one selected step
+
+When changing this modal:
+
+- keep the user-facing **Keep / Overwrite** wording aligned with the real payload semantics
+- preserve the distinction between no-op keep behavior and destructive overwrite behavior in badges, summary text, and tooltips
+- update `docs/user-guide.md` / `README.md` if the rerun semantics change materially
 
 ## Contributing guidelines
 

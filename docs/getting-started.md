@@ -236,6 +236,7 @@ The launcher and MCP adapter both rely on a shared set of `PARSE_*` environment 
 | `PARSE_EXTERNAL_READ_ROOTS` | empty | Absolute roots that chat tools may read outside the workspace. Use OS path separators for multiple roots, or `*` to disable the sandbox entirely. |
 | `PARSE_CHAT_READ_ONLY` | empty | Override chat mutability: `1` forces read-only, `0` forces write-enabled. Otherwise PARSE defers to `config/ai_config.json`. |
 | `PARSE_API_PORT` | `8766` | Python API server port. |
+| `PARSE_WS_PORT` | `8767` | Additive WebSocket job-streaming sidecar port for `ws://<host>/ws/jobs/{jobId}` subscriptions. |
 | `PARSE_VITE_PORT` | `5173` | Vite dev server port. |
 | `PARSE_SKIP_PULL` | `0` | Skip the `git pull` step in `parse-run.sh`. |
 | `PARSE_PULL_MODE` | `auto` | Git integration strategy: `auto`, `ff`, `rebase`, or `reset`. |
@@ -274,7 +275,35 @@ npm install   # once per clone
 npm run dev
 ```
 
-The backend runs on `8766`; Vite runs on `5173`.
+The backend runs on `8766`; the optional WebSocket sidecar runs on `8767`; Vite runs on `5173`.
+
+If you want realtime STT/job updates, connect to:
+
+```text
+ws://localhost:8767/ws/jobs/{jobId}
+```
+
+or override the sidecar port with `PARSE_WS_PORT`.
+
+## CLEF configuration on a fresh workspace
+
+Borrowing detection (CLEF) no longer assumes `config/sil_contact_languages.json` already exists.
+
+On the first CLEF run, PARSE opens a guided **Configure CLEF** modal that lets you:
+
+- pick 1–2 primary contact languages
+- search the bundled SIL/ISO catalog
+- save the language config only, or **Save & populate** immediately
+
+Catalog entries now include an ISO 15924 `script` hint, and PARSE persists that hint into the CLEF config so bare Reference Forms can be routed deterministically even when providers return unlabeled raw strings.
+
+The resulting config is written to:
+
+- `config/sil_contact_languages.json`
+
+If you need to extend the picker with extra language rows, add:
+
+- `config/sil_catalog_extra.json`
 
 ## Open in browser
 
