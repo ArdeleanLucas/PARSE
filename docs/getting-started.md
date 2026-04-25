@@ -297,6 +297,8 @@ On the first CLEF run, PARSE opens a guided **Configure CLEF** modal that lets y
 
 Catalog entries now include an ISO 15924 `script` hint, and PARSE persists that hint into the CLEF config so bare Reference Forms can be routed deterministically even when providers return unlabeled raw strings.
 
+The local `lingpy_wordlist` provider also now matches doculect identifiers by exact equality instead of substring containment. If a workspace was populated before that 2026-04-25 fix, rerun CLEF populate with overwrite so any previously misbucketed forms are replaced.
+
 The resulting config is written to:
 
 - `config/sil_contact_languages.json`
@@ -412,6 +414,16 @@ When reviewing pipeline state, prefer the coverage-aware fields:
 - `full_coverage`
 
 This matters when old runs only covered a stale timestamp window rather than the entire recording.
+
+### A batch report says "Lost contact after start"
+
+This message means the backend job was created successfully, but the browser lost `/api` connectivity while polling — commonly because the Vite dev server or proxy died while the Python backend kept running.
+
+Use the preserved backend `jobId` shown in the batch report to reconcile before rerunning blindly:
+
+1. restore the frontend / proxy if needed
+2. poll the backend job directly or reopen PARSE and let the UI reattach
+3. only rerun the speaker if the backend job truly failed or never produced the expected result
 
 ### Need logs during a launch failure
 

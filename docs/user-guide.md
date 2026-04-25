@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-25
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -45,6 +45,8 @@ The current Annotate surface includes:
   - STT
   - IPA
   - ORTH
+  - optional **Words (Tier 1)** diagnostics (off by default)
+  - optional **Boundaries (Tier 2)** diagnostics (off by default)
 - **Inline lane editing** across STT, IPA, and ORTH via double-click or right-click context actions
 - **Synchronized horizontal scrolling** between waveform and lanes
 - **Clip-bounded playback** for the selected region
@@ -92,6 +94,19 @@ Tier 2 forced alignment uses `torchaudio.functional.forced_align` against wav2ve
 
 This is the step that turns coarse word timing into more reviewable alignment.
 
+Annotate mode now also includes two optional diagnostic lanes (both hidden by default) beneath the waveform:
+
+- **Words (Tier 1)** — cyan boxes from `sttBySpeaker[speaker].segments[].words[]`
+- **Boundaries (Tier 2)** — the forced-aligned word windows
+
+Each Tier 2 interval is color-coded from the delta between the Tier 1 STT word and its paired Tier 2 boundary:
+
+- green — worst edge shift under 50 ms
+- amber — 50–100 ms
+- red — over 100 ms, or a Tier 2 `short_clip_fallback`
+
+When no Tier 1 partner exists, PARSE falls back to Tier 2 `confidence` coloring instead. Stacking **Words (Tier 1)** directly above **Boundaries (Tier 2)** lets you eyeball the same lexical item in both tiers without relying on color alone. Both lanes are read-only in the current build: they are meant to expose suspicious Tier 1 windows before you decide whether to correct timestamps or rerun a step, not to replace the existing interval-editing workflow.
+
 #### Acoustic IPA fill
 
 The current IPA path is **acoustic wav2vec2-only**.
@@ -113,7 +128,9 @@ The current batch flow includes:
 - a walk-away batch report with expandable tracebacks
 - explicit **empty-step detection** for runs that technically completed but wrote no intervals
 - skip-breakdown counters and exception samples for steps that ran but still produced no usable output
+- preserved backend `jobId` + `errorPhase` metadata when a speaker started successfully but the UI later lost `/api` connectivity while polling
 
+If a batch report row says **Lost contact after start**, PARSE is telling you that the backend job was created and the browser lost transport later. Use the preserved backend job id to reattach or reconcile before treating that row as a true speaker-level pipeline failure.
 A key detail is that preflight distinguishes **"has intervals"** from **"full WAV coverage"** via fields such as:
 
 - `duration_sec`
@@ -136,6 +153,9 @@ Annotate mode supports:
 - manual boundary correction
 - constant timestamp-offset detect/apply workflows for CSV↔audio misalignment
 - manual fallback from a trusted single pair when automated offset detection is weak
+- optional boundary diagnostics through the **Words (Tier 1)** + **Boundaries (Tier 2)** lanes and the read-only corpus script `scripts/benchmark_tier1_boundaries.py`
+
+The benchmark script is useful when you want a workspace-level read on how far Tier 2 windows are shifting away from Tier 1 STT words without rerunning the pipeline. It reports confidence distributions, onset/offset/max-edge shift percentiles, the fraction of words whose worst edge exceeds the configured padding, and `alignment.methodCounts` from existing `.stt.json` + `.aligned.json` artifacts.
 
 This is one of the main places where PARSE differs from purely transcription-first tools: timestamps are not treated as disposable by-products.
 
@@ -248,6 +268,8 @@ Populate jobs now follow the same global-job pattern as other heavy PARSE workfl
 
 The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to Arabic/Persian, and the **Reference Forms** panel can render multiple forms per language.
 
+The local `lingpy_wordlist` provider now matches doculect identifiers by exact case-insensitive equality (with whitespace / dash / underscore folding), not substring containment. That prevents contact-language buckets such as Arabic from accidentally absorbing unrelated doculects like Avar, Karelian, or Hungarian simply because their identifiers contain `ar`.
+
 Each reference form row has a checkbox. Those selections persist to `sil_contact_languages.json._meta.form_selections`, and only the selected forms contribute to the similarity score.
 
 Bare-string reference forms are no longer routed by Unicode guessing alone. Each configured contact language now carries an ISO 15924 `script` hint, so PARSE can decide deterministically whether a raw form should land in the IPA-like slot or the script-text slot. Explicit provider labels (`ipa` / `script`) still win over the hint, and the Unicode-block regex remains only as a fallback for legacy or hint-less entries.
@@ -260,6 +282,8 @@ On a fresh workspace, the first run of **Borrowing detection (CLEF)** now opens 
 - save the language setup only, or **Save & populate** immediately
 
 The saved config lives at `config/sil_contact_languages.json`; optional extra catalog entries can be provided through `config/sil_catalog_extra.json`.
+
+If a workspace was populated before the 2026-04-25 exact-match fix in `lingpy_wordlist`, rerun CLEF populate with overwrite so any forms previously misbucketed by substring-matched doculect ids are replaced with the corrected provider output.
 
 ### Current provider set (10)
 
@@ -286,11 +310,21 @@ The saved config lives at `config/sil_contact_languages.json`; optional extra ca
 - `POST /api/compute/contact-lexemes` — start a contact-lexeme fetch job
 - `GET /api/contact-lexemes/coverage` — inspect current provider coverage
 
-### Sources Report and provenance
+### Sources Report, provenance, and citations
 
 The **Sources Report** modal summarizes which providers contributed the currently populated reference forms.
 
 This matters for academic use because CLEF no longer treats the populated form list as an opaque blob. New entries can carry per-form provenance such as `wikidata`, `wiktionary`, `asjp`, or other provider sources, while older bare-string entries remain readable as legacy `unknown` provenance until you explicitly repopulate them.
+
+The report now also includes an **Academic citations** section for the providers that actually contributed forms in the current corpus. For each contributing provider, PARSE can surface:
+
+- a full dataset/tool citation paragraph
+- DOI and URL links where available
+- provider caveat notes (for example, warnings around AI-generated or legacy unattributed data)
+- **Copy citation** and, where applicable, **Copy BibTeX** actions
+- an **Export BibTeX** action when at least one contributing provider has a bibliographic entry
+
+This gives thesis workflows a direct path from populated reference forms to footnotes and reference-manager imports, instead of treating provider chips as informal provenance only.
 
 ## AI Workflow Assistant in daily use
 
