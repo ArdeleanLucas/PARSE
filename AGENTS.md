@@ -1,6 +1,8 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
-## Current State (updated 2026-04-24)
+> **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle PARSE repo remains `ArdeleanLucas/PARSE` at `/home/lucas/gh/ardeleanlucas/parse`. Do not treat this repo as the currently deployed thesis runtime.
+
+## Current State (updated 2026-04-25)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -178,20 +180,23 @@ The following validation items remain important, but they are **not hard blocker
 ## Branch + Worktree Policy
 
 ### Canonical repository path
-- **Active execution repo:** `/home/lucas/gh/ardeleanlucas/parse`
+- **Active execution repo in this rebuild lane:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
+- **Live/oracle PARSE repo:** `/home/lucas/gh/ardeleanlucas/parse`
+  - Treat this oracle repo and `github.com/ArdeleanLucas/PARSE` as the behavior source of truth until parity is explicitly signed off.
+  - Refactor implementation should happen here in the rebuild repo, not on the live/oracle repo.
 - **Archive/divergent clone:** `/home/lucas/gh/ArdeleanLucas/PARSE`
   - This uppercase clone currently follows archival/worktree history and may not match `origin/main`.
   - Do not use it as branch truth without an explicit fetch/prune check.
 
 ### Historical worktrees (traceability only)
-- Integration root: `/home/lucas/gh/ArdeleanLucas/PARSE` → historical `feat/parse-react-vite` lane (merged/deleted)
-- Annotate lane: `/home/lucas/gh/worktrees/PARSE/annotate-react` → `feat/annotate-react`
-- Compare lane: `/home/lucas/gh/worktrees/PARSE/compare-react` → `feat/compare-react`
-- These worktrees describe migration history; they are not the current runtime source of truth.
+- Oracle integration root: `/home/lucas/gh/ardeleanlucas/parse`
+- Historical pivot worktrees under `/home/lucas/gh/worktrees/PARSE/` remain useful for archaeology only.
+- These worktrees describe migration history; they are not the current rebuild repo source of truth.
 
 ### Active development rule
-- **New work should branch from `origin/main` in `/home/lucas/gh/ardeleanlucas/parse` unless Lucas explicitly changes repo policy.**
-- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite` (merged/deleted), and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new work.
+- **New refactor/rebuild work should branch from `origin/main` in `/home/lucas/gh/tarahassistant/PARSE-rebuild`.**
+- Keep `ArdeleanLucas/PARSE` stable unless Lucas explicitly requests a live-repo bugfix or a controlled sync/revert PR.
+- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite` (merged/deleted), and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new rebuild work.
 - Do not assume stale track branches or archival clones reflect current `main`.
 
 ## Ownership + Coordination
@@ -210,10 +215,10 @@ However, on current `main`, coordinate shared-surface edits carefully.
 
 ## Safe Work Now (current priority)
 
-- Add provider test coverage under `python/compare/providers/test_*.py`
-- Improve Lexibank/WOLD setup docs and CKB coverage strategy
-- Expand provider metadata and scholarly-source coverage plans
-- Work other PR stages directly when Lucas asks; do not use C5/C6 as a reason to defer implementation work
+- Freeze the rebuild-repo contract: oracle SHA, parity fixtures, and Phase 0 shared-contract checklist
+- Continue behavior-preserving refactor work here instead of landing refactor slices on the live PARSE repo
+- Port live refactor PRs here first when needed, then use narrow revert/sync PRs to keep `ArdeleanLucas/PARSE` stable
+- Maintain parity artifacts under `parity/` and keep deviations explicit when rebuild behavior temporarily differs from the oracle
 
 ## Do Not Touch
 
