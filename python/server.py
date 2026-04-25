@@ -27,6 +27,14 @@ from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
 from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
+from app.http.auth_handlers import (
+    AuthHandlerError as _app_AuthHandlerError,
+    build_auth_key_response as _app_build_auth_key_response,
+    build_auth_logout_response as _app_build_auth_logout_response,
+    build_auth_poll_response as _app_build_auth_poll_response,
+    build_auth_start_response as _app_build_auth_start_response,
+    build_auth_status_response as _app_build_auth_status_response,
+)
 from app.http.external_api_handlers import (
     ExternalApiHandlerError as _app_ExternalApiHandlerError,
     build_mcp_exposure_response as _app_build_mcp_exposure_response,
@@ -7563,42 +7571,49 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_auth_key(self) -> None:
         """POST /api/auth/key — store a direct API key."""
+        from ai import openai_auth
+
         try:
-            data = self._read_json_body()
-            key = str(data.get("key") or "").strip()
-            provider = str(data.get("provider") or "xai").strip()
-            if not key:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "key is required"})
-                return
-            from ai.openai_auth import save_api_key, get_auth_status
-            save_api_key(key, provider)
-            _reset_chat_runtime_after_auth_key_save()
-            status = get_auth_status()
-            self._send_json(HTTPStatus.OK, status)
-        except Exception as exc:
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+            response = _app_build_auth_key_response(
+                self._read_json_body(),
+                save_api_key=openai_auth.save_api_key,
+                reset_chat_runtime=_reset_chat_runtime_after_auth_key_save,
+                get_auth_status=openai_auth.get_auth_status,
+            )
+        except _app_AuthHandlerError as exc:
+            self._send_json(exc.status, {"error": exc.message})
+            return
+
+        self._send_json(response.status, response.payload)
 
     def _api_auth_status(self) -> None:
-        from ai.openai_auth import get_auth_status
-        self._send_json(HTTPStatus.OK, get_auth_status())
+        from ai import openai_auth
+
+        response = _app_build_auth_status_response(get_auth_status=openai_auth.get_auth_status)
+        self._send_json(response.status, response.payload)
 
     def _api_auth_start(self) -> None:
-        from ai.openai_auth import start_device_auth
+        from ai import openai_auth
+
         try:
-            result = start_device_auth()
-            self._send_json(HTTPStatus.OK, result)
-        except RuntimeError as e:
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(e)})
+            response = _app_build_auth_start_response(start_device_auth=openai_auth.start_device_auth)
+        except _app_AuthHandlerError as exc:
+            self._send_json(exc.status, {"error": exc.message})
+            return
+
+        self._send_json(response.status, response.payload)
 
     def _api_auth_poll(self) -> None:
-        from ai.openai_auth import poll_device_auth
-        result = poll_device_auth()
-        self._send_json(HTTPStatus.OK, result)
+        from ai import openai_auth
+
+        response = _app_build_auth_poll_response(poll_device_auth=openai_auth.poll_device_auth)
+        self._send_json(response.status, response.payload)
 
     def _api_auth_logout(self) -> None:
-        from ai.openai_auth import clear_tokens
-        clear_tokens()
-        self._send_json(HTTPStatus.OK, {"success": True})
+        from ai import openai_auth
+
+        response = _app_build_auth_logout_response(clear_tokens=openai_auth.clear_tokens)
+        self._send_json(response.status, response.payload)
 
     # ── Tag endpoints ────────────────────────────────────────────
 
