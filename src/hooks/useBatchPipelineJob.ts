@@ -27,9 +27,16 @@ export interface BatchSpeakerOutcome {
   /** "cancelled" means the user cancelled the batch before this speaker ran.
    *  The speaker's pipeline never started server-side. */
   status: "pending" | "running" | "complete" | "error" | "cancelled";
-  /** Whole-speaker error (e.g. network failure before the pipeline job even started).
-   *  Step-level errors live in `result.results[step].error` instead. */
+  /** Whole-speaker error (e.g. network failure before the pipeline job even started,
+   *  or a transport disconnect after the job had already started). */
   error: string | null;
+  /** Backend job id when the speaker reached startCompute successfully. Preserved
+   *  across later poll failures so the UI/report can distinguish "never started"
+   *  from "lost contact after start". */
+  jobId?: string;
+  /** Which batch phase surfaced the top-level error. "start" = no job was
+   *  queued; "poll" = job was queued but the client lost contact while polling. */
+  errorPhase?: "start" | "poll";
   result: PipelineRunResult | null;
 }
 
@@ -287,6 +294,7 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
                 ...nextOutcomes[i],
                 status: "error",
                 error: message,
+                errorPhase: "start",
               };
               return {
                 ...prev,
@@ -300,7 +308,13 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
             continue;
           }
 
-          setStateIfMounted((prev) => ({ ...prev, currentSubJobId: jobId }));
+          setStateIfMounted((prev) => ({
+            ...prev,
+            currentSubJobId: jobId,
+            outcomes: prev.outcomes.map((outcome, index) => (
+              index === i ? { ...outcome, jobId, errorPhase: undefined } : outcome
+            )),
+          }));
 
           // Poll loop — lives for one speaker.
           let pollErrored = false;
@@ -367,6 +381,8 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
                 ...nextOutcomes[i],
                 status: "error",
                 error: pollErrorMessage,
+                errorPhase: "poll",
+                jobId,
                 // Partial per-step data where present — see the comment in
                 // the poll loop for why we forward this on the error path.
                 result: pollResult,

@@ -254,6 +254,7 @@ describe("BatchReportModal", () => {
         speaker: "Gamma03",
         status: "error",
         error: "network down",
+        errorPhase: "start",
         result: null,
       },
     ];
@@ -283,7 +284,33 @@ describe("BatchReportModal", () => {
     expect(onRerunFailed).toHaveBeenCalledWith(["Alpha01", "Gamma03"]);
   });
 
-  it("Test G: Download report produces a Blob with expected JSON", async () => {
+  it("Test G: speaker-level poll disconnect banner distinguishes lost contact after start", () => {
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker: "Gamma03",
+        status: "error",
+        error:
+          "Could not reach the PARSE API for POST /api/compute/full_pipeline/status.",
+        errorPhase: "poll",
+        jobId: "job-gamma",
+        result: null,
+      },
+    ];
+
+    render(
+      <BatchReportModal
+        open
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["stt"]}
+      />,
+    );
+
+    expect(screen.getByText(/Lost contact after start/i)).toBeTruthy();
+    expect(screen.getByText(/job-gamma/)).toBeTruthy();
+  });
+
+  it("Test H: Download report produces a Blob with expected JSON", async () => {
     const outcomes: BatchSpeakerOutcome[] = [
       {
         speaker: "Alpha01",
@@ -292,6 +319,15 @@ describe("BatchReportModal", () => {
         result: makeResult("Alpha01", {
           stt: { status: "ok", segments: 7 },
         }),
+      },
+      {
+        speaker: "Gamma03",
+        status: "error",
+        error:
+          "Could not reach the PARSE API for POST /api/compute/full_pipeline/status.",
+        errorPhase: "poll",
+        jobId: "job-gamma",
+        result: null,
       },
     ];
 
@@ -357,6 +393,11 @@ describe("BatchReportModal", () => {
     expect(parsed).toHaveProperty("outcomes");
     expect(Array.isArray(parsed.outcomes)).toBe(true);
     expect(parsed.outcomes[0].speaker).toBe("Alpha01");
+    expect(parsed.outcomes[1]).toMatchObject({
+      speaker: "Gamma03",
+      jobId: "job-gamma",
+      errorPhase: "poll",
+    });
 
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();

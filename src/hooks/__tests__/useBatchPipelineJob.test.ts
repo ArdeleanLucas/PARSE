@@ -195,6 +195,31 @@ describe("useBatchPipelineJob", () => {
     expect(result.current.state.status).toBe("complete");
   });
 
+  it("preserves the started job id when polling loses API connectivity", async () => {
+    mockStart.mockResolvedValue({ job_id: "job-A" });
+    mockPoll.mockRejectedValue(
+      new Error(
+        "Could not reach the PARSE API for POST /api/compute/full_pipeline/status.",
+      ),
+    );
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    await act(async () => {
+      await result.current.run(baseRequest(["A"]));
+    });
+
+    expect(result.current.state.status).toBe("complete");
+    expect(result.current.state.outcomes[0]).toMatchObject({
+      speaker: "A",
+      status: "error",
+      error:
+        "Could not reach the PARSE API for POST /api/compute/full_pipeline/status.",
+      jobId: "job-A",
+      errorPhase: "poll",
+    });
+  });
+
   it("final state after all complete", async () => {
     mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => ({
       job_id: `job-${String(body.speaker)}`,

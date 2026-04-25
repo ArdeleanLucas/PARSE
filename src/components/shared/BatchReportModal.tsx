@@ -20,8 +20,13 @@ export interface BatchSpeakerOutcome {
   /** "cancelled" means the user cancelled the batch before this speaker ran.
    *  The speaker's pipeline never started server-side; its result is null. */
   status: "pending" | "running" | "complete" | "error" | "cancelled";
-  /** Whole-speaker error (e.g. network failure before the pipeline job even started). */
+  /** Whole-speaker error (e.g. network failure before the pipeline job even started,
+   *  or a transport disconnect after a job was already queued). */
   error: string | null;
+  /** Backend job id when the speaker reached startCompute successfully. */
+  jobId?: string;
+  /** Which client phase surfaced the top-level error. */
+  errorPhase?: "start" | "poll";
   result: PipelineRunResult | null;
 }
 
@@ -550,6 +555,7 @@ function SpeakerErrorBanner({
   // case we just show the error message and skip the expand button.
   const hasTraceback =
     outcome.error != null && /traceback/i.test(outcome.error);
+  const lostContactAfterStart = outcome.errorPhase === "poll" && !!outcome.jobId;
 
   return (
     <tr>
@@ -560,11 +566,16 @@ function SpeakerErrorBanner({
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-amber-900">
-              Speaker-level error:
+              {lostContactAfterStart ? "Lost contact after start:" : "Speaker-level error:"}
             </span>
             <span className="font-mono text-[11px] text-amber-900/90">
               {outcome.error ?? "(no message)"}
             </span>
+            {lostContactAfterStart && outcome.jobId && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[11px] text-amber-900">
+                job {outcome.jobId}
+              </span>
+            )}
             {hasTraceback && (
               <button
                 type="button"
@@ -581,6 +592,11 @@ function SpeakerErrorBanner({
               </button>
             )}
           </div>
+          {lostContactAfterStart && (
+            <div className="text-[11px] text-amber-900/80">
+              The pipeline job was created, but the client lost `/api` connectivity while polling. Reattach or reconcile by backend job id before treating this as a true speaker failure.
+            </div>
+          )}
           {hasTraceback && isOpen && (
             <DetailsBlock
               speaker={outcome.speaker}
