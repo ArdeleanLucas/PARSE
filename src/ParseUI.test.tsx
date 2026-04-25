@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 
@@ -193,6 +193,16 @@ vi.mock("./api/client", () => ({
   pollSTT: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollNormalize: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollCompute: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
+  detectTimestampOffset: vi.fn().mockResolvedValue({ job_id: 'offset-job-default', jobId: 'offset-job-default' }),
+  pollOffsetDetectJob: vi.fn().mockResolvedValue({
+    speaker: 'Fail01',
+    offsetSec: 0.75,
+    basedOn: 'automatic anchors',
+    candidateCount: 3,
+    protectedLexemeCount: 0,
+  }),
+  applyTimestampOffset: vi.fn().mockResolvedValue({ shifted: 3, protected: 0 }),
+  getJobLogs: vi.fn().mockResolvedValue({ lines: [] }),
   getClefConfig: vi.fn(() => Promise.resolve(mockClefConfig)),
   getContactLexemeCoverage: vi.fn(() => Promise.resolve(mockCoverage)),
 }));
@@ -301,6 +311,10 @@ beforeEach(() => {
   vi.mocked(apiClient.pollSTT).mockClear();
   vi.mocked(apiClient.startCompute).mockClear();
   vi.mocked(apiClient.pollCompute).mockClear();
+  vi.mocked(apiClient.detectTimestampOffset).mockClear();
+  vi.mocked(apiClient.pollOffsetDetectJob).mockClear();
+  vi.mocked(apiClient.applyTimestampOffset).mockClear();
+  vi.mocked(apiClient.getJobLogs).mockClear();
   vi.mocked(apiClient.getLingPyExport).mockClear();
   vi.mocked(apiClient.saveApiKey).mockClear();
   mockAnnotationSetState.mockClear();
@@ -871,6 +885,59 @@ describe("Actions menu — transcription run flow", () => {
 
     // The modal renders with the title supplied by the action.
     expect(screen.getByText(/Run Audio Normalization/i)).toBeTruthy();
+  });
+
+  it("opens the comments import modal from the compare right panel", () => {
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("open-comments-import"));
+
+    expect(screen.getByTestId("comments-import")).toBeTruthy();
+    expect(screen.getAllByText(/Import Audition Comments/i).length).toBeGreaterThan(1);
+  });
+
+  it("exports LingPy TSV from the compare right panel", async () => {
+    const createObjectURL = vi.fn(() => "blob:lingpy");
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Export LingPy TSV/i }));
+
+    await waitFor(() => expect(apiClient.getLingPyExport).toHaveBeenCalledTimes(1));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:lingpy");
+
+    clickSpy.mockRestore();
+  });
+
+  it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
+    vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
+    vi.mocked(apiClient.pollOffsetDetectJob).mockImplementation(
+      async (_jobId, _jobType, handlers) => {
+        handlers?.onProgress?.({ progress: 42, message: "Scanning anchors…" });
+        return new Promise(() => {});
+      },
+    );
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset"));
+
+    const statusChip = await screen.findByTestId("topbar-offset-status");
+    const offsetModal = screen.getByTestId("offset-modal");
+    expect(statusChip).toBeTruthy();
+    expect(offsetModal).toBeTruthy();
+    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
+    expect(within(statusChip).getByText(/Scanning anchors/i)).toBeTruthy();
+    expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
   });
 
   it("Reset Project resets the batch runner", () => {
