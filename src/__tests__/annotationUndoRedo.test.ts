@@ -48,7 +48,14 @@ describe("annotationStore undo/redo", () => {
 
     const merged = useAnnotationStore.getState().records.S1.tiers.ipa.intervals;
     expect(merged).toHaveLength(2);
-    expect(merged[0]).toEqual({ start: 0, end: 2, text: "a b" });
+    // Merges flag the resulting interval as manuallyAdjusted so a future
+    // partial re-run preserves the user's grouping decision.
+    expect(merged[0]).toEqual({
+      start: 0,
+      end: 2,
+      text: "a b",
+      manuallyAdjusted: true,
+    });
 
     const label = useAnnotationStore.getState().undo("S1");
     // Label flows into the "Undid X" toast — pin the exact human text so a
@@ -68,7 +75,12 @@ describe("annotationStore undo/redo", () => {
 
     const ivs = useAnnotationStore.getState().records.S1.tiers.ipa.intervals;
     expect(ivs).toHaveLength(2);
-    expect(ivs[1]).toEqual({ start: 1, end: 3, text: "b c" });
+    expect(ivs[1]).toEqual({
+      start: 1,
+      end: 3,
+      text: "b c",
+      manuallyAdjusted: true,
+    });
   });
 
   it("updateInterval / undo swaps text back", () => {

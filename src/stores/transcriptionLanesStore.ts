@@ -13,10 +13,15 @@ export interface LaneConfig {
   color: string;
 }
 
-/** Single-interval selection used by the inline editor / segment toolbar. */
+/** Single-interval selection used by the inline editor / segment toolbar.
+ * ``tier`` is the **annotation tier name** (e.g. ``"stt"``, ``"ortho"``,
+ * ``"ortho_words"``), not the visual lane kind. For most lanes the two
+ * match; the Boundaries lane is the exception (kind ``"boundaries"`` →
+ * tier ``"ortho_words"``). Storing the annotation tier name keeps store
+ * dispatches and AnnotationPanel lookups direct, no remapping needed. */
 export interface SelectedInterval {
   speaker: string;
-  tier: LaneKind;
+  tier: string;
   index: number;
 }
 
@@ -46,6 +51,19 @@ export const LANE_LABELS: Record<LaneKind, string> = {
   stt_words: "Words",
   boundaries: "BND",
 };
+
+/** Resolve a lane label from an annotation tier name. ``selectedInterval.tier``
+ * stores the annotation tier name (e.g. ``"ortho_words"``), which doesn't
+ * always match a ``LaneKind``. This helper handles the lane-vs-tier
+ * divergence (``"ortho_words"`` → ``"BND"``) and falls back to the raw
+ * tier slug when no label exists. */
+export function labelForTier(tier: string): string {
+  if (tier === "ortho_words") return LANE_LABELS.boundaries;
+  if ((LANE_LABELS as Record<string, string>)[tier]) {
+    return (LANE_LABELS as Record<string, string>)[tier];
+  }
+  return tier;
+}
 
 const DEFAULT_LANES: Record<LaneKind, LaneConfig> = {
   ipa_phone: { visible: true, color: "#8b5cf6" },  // violet — phone-level IPA

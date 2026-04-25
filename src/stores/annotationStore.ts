@@ -200,6 +200,14 @@ interface AnnotationStore {
    * entries (same affordances as IPA/ORTH). No-op if the tier already has
    * entries. Called lazily on first STT double-click / right-click. */
   ensureSttTier: (speaker: string, segments: SttSegment[]) => void;
+  /** One-time migration: flatten Tier 1 word-level boundaries from the API
+   * STT cache into ``record.tiers.stt_words`` so the Words lane becomes
+   * editable (drag, split, merge, delete, add-in-gap). No-op if the tier
+   * already has entries. Called lazily on first edit/add interaction. */
+  ensureSttWordsTier: (
+    speaker: string,
+    segments: SttSegment[],
+  ) => void;
   /** Persist a confirmed lexical anchor for a concept on this speaker.
    * Lives in the `confirmed_anchors` sidecar, NOT in any tier — keeps
    * Praat round-trips clean. Pass `null` to clear an existing anchor. */
@@ -343,7 +351,12 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
     const clone = deepClone(pre);
-    clone.tiers[tier].intervals[index].text = text;
+    const target = clone.tiers[tier].intervals[index];
+    clone.tiers[tier].intervals[index] = {
+      ...target,
+      text,
+      manuallyAdjusted: true,
+    };
     clone.modified_at = nowIsoUtc();
 
     set((s) => ({
@@ -454,6 +467,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       start: left.start,
       end: right.end,
       text: mergedText,
+      manuallyAdjusted: true,
     });
     clone.modified_at = nowIsoUtc();
 
@@ -481,8 +495,18 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     clone.tiers[tier].intervals.splice(
       index,
       1,
-      { start: target.start, end: splitTime, text: target.text },
-      { start: splitTime, end: target.end, text: "" },
+      {
+        start: target.start,
+        end: splitTime,
+        text: target.text,
+        manuallyAdjusted: true,
+      },
+      {
+        start: splitTime,
+        end: target.end,
+        text: "",
+        manuallyAdjusted: true,
+      },
     );
     clone.modified_at = nowIsoUtc();
 
@@ -523,6 +547,53 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, "enable STT editing"),
+      records: { ...s.records, [speaker]: clone },
+      dirty: { ...s.dirty, [speaker]: true },
+    }));
+    scheduleAutosave(speaker);
+  },
+
+  ensureSttWordsTier: (speaker, segments) => {
+    const state = get();
+    const pre = state.records[speaker];
+    if (!pre) return;
+    if ((pre.tiers.stt_words?.intervals.length ?? 0) > 0) return;
+    if (!Array.isArray(segments) || segments.length === 0) return;
+
+    // Flatten segments[].words[] preserving source order. Words store
+    // empty text — boundary-only lane semantics. Skip degenerate
+    // start==end==0 placeholders (Whisper emits these for the first
+    // word of a segment when word_timestamps fails on it).
+    const flat: AnnotationInterval[] = [];
+    for (const seg of segments) {
+      const words = (seg as SttSegment).words ?? [];
+      for (const w of words) {
+        if (typeof w.start !== "number" || typeof w.end !== "number") continue;
+        if (w.start === 0 && w.end === 0) continue;
+        flat.push({ start: w.start, end: w.end, text: "" });
+      }
+    }
+    if (flat.length === 0) return;
+
+    const clone = deepClone(pre);
+    if (!clone.tiers.stt_words) {
+      // No canonical order for stt_words — append at end. Praat export
+      // falls back to default_order=9999 cleanly.
+      const maxOrder = Math.max(
+        0,
+        ...Object.values(clone.tiers).map((t) => t.display_order),
+      );
+      clone.tiers.stt_words = {
+        name: "stt_words",
+        display_order: maxOrder + 1,
+        intervals: [],
+      };
+    }
+    clone.tiers.stt_words.intervals = flat;
+    clone.modified_at = nowIsoUtc();
+
+    set((s) => ({
+      ...pushHistoryDelta(s, speaker, pre, "enable Words editing"),
       records: { ...s.records, [speaker]: clone },
       dirty: { ...s.dirty, [speaker]: true },
     }));

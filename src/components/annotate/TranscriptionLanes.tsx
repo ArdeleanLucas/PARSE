@@ -18,23 +18,35 @@ interface TranscriptionLanesProps {
 interface LaneStrip {
   kind: LaneKind;
   label: string;
-  intervals: Array<{ start: number; end: number; text: string }>;
-  /** Index into the underlying `record.tiers[kind].intervals` array. Set when
+  intervals: Array<{
+    start: number;
+    end: number;
+    text: string;
+    manuallyAdjusted?: boolean;
+  }>;
+  /** Annotation tier name to dispatch store actions against. When unset
+   * (legacy code path), the lane `kind` is used. The two diverge for the
+   * Words and BND lanes: `kind: "stt_words"` → `tier: "stt_words"`,
+   * `kind: "boundaries"` → `tier: "ortho_words"`. */
+  tier?: string;
+  /** Index into the underlying `record.tiers[tier].intervals` array. Set when
    * the strip is sourced from the editable tier (so inline edits / merges /
-   * splits can address the original interval). For STT sourced from the API
-   * cache (pre-migration) this is the index into `sttBySpeaker[speaker]` —
-   * the same offset survives migration because `ensureSttTier` copies
-   * segments verbatim in order. */
+   * splits can address the original interval). */
   sourceIndices?: number[];
   /** Per-interval color override aligned to `intervals[]`. Used by the
    * Boundaries lane to color each Tier 2 word by its shift from the matching
    * Tier 1 word (or by Tier 2 confidence when no Tier 1 partner exists).
    * When unset, the lane's single color from the store is used. */
   intervalColors?: (string | undefined)[];
-  /** True for the STT strip when the record hasn't yet migrated STT into
-   * `record.tiers.stt`. Edit-path handlers must call `ensureSttTier` before
-   * opening the inline editor / context menu so the tier entry exists. */
+  /** Boundary-only lanes (Words, BND) suppress text labels inside boxes.
+   * Text content lives in STT/ORTH/IPA — these lanes are pure timing. */
+  boundaryOnly?: boolean;
+  /** True when the editable tier hasn't been populated yet for this lane.
+   * Edit-path handlers must call the corresponding `ensure*Tier` migration
+   * before opening the editor / committing edits so the tier entry exists. */
   needsMigration?: boolean;
+  /** Migration callback to run on first edit; resolves `needsMigration`. */
+  migrate?: () => void;
   status?: "idle" | "loading" | "loaded" | "error";
   /** Custom empty-state message; falls back to a generic per-tier hint. */
   emptyHint?: string;
@@ -137,7 +149,9 @@ export function TranscriptionLanes({
   const removeInterval = useAnnotationStore((s) => s.removeInterval);
   const mergeIntervals = useAnnotationStore((s) => s.mergeIntervals);
   const splitInterval = useAnnotationStore((s) => s.splitInterval);
+  const addInterval = useAnnotationStore((s) => s.addInterval);
   const ensureSttTier = useAnnotationStore((s) => s.ensureSttTier);
+  const ensureSttWordsTier = useAnnotationStore((s) => s.ensureSttWordsTier);
 
   const [pxPerSec, setPxPerSec] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -146,6 +160,15 @@ export function TranscriptionLanes({
   const [editing, setEditing] = useState<{ kind: LaneKind; index: number } | null>(null);
   const [menu, setMenu] = useState<
     { kind: LaneKind; index: number; x: number; y: number } | null
+  >(null);
+  /** Active drag-to-create-interval on a boundary-only lane. The user
+   * presses on an empty region of the lane and drags rightward; on
+   * release we commit a new ``manuallyAdjusted`` interval to that lane's
+   * tier. ``startX`` and ``currentX`` are pixels relative to the timeline
+   * inner div (already includes scroll offset). */
+  const [pendingDrag, setPendingDrag] = useState<
+    | { kind: LaneKind; tier: string; startSec: number; endSec: number }
+    | null
   >(null);
   const editRef = useRef<HTMLSpanElement | null>(null);
 
@@ -263,6 +286,7 @@ export function TranscriptionLanes({
       const ws = wsRef.current;
       const t = ws?.getCurrentTime() ?? 0;
       e.preventDefault();
+      // ``sel.tier`` is the annotation tier name (mapped at selection time).
       splitInterval(sel.speaker, sel.tier, sel.index, t);
     };
     document.addEventListener("keydown", onKey);
@@ -288,40 +312,73 @@ export function TranscriptionLanes({
       if (!lanes[kind].visible) continue;
 
       if (kind === "stt_words") {
-        const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
-        const intervals: Array<{ start: number; end: number; text: string }> = [];
-        for (const seg of segs) {
-          for (const w of seg.words ?? []) {
-            const text = (w.word ?? "").trim();
-            if (!text) continue;
-            // Skip degenerate boundaries (Whisper's word_timestamps occasionally
-            // emits start==end==0 for the first word of a segment). They'd
-            // render as an invisible 1px box anyway and just clutter the lane.
-            if (w.start === 0 && w.end === 0) continue;
-            intervals.push({ start: w.start, end: w.end, text });
+        // Words is a boundary-only lane (no text inside boxes). The text
+        // for each word belongs in STT/ORTH segment-level tiers; Words
+        // exists purely so the user can see and adjust where Tier 1
+        // placed word boundaries (and add new ones in gaps where the
+        // model produced nothing).
+        //
+        // Source priority: ``record.tiers.stt_words`` post-migration,
+        // else fall back to the API-cached ``segments[].words[]``.
+        // ``ensureSttWordsTier`` flips us to the migrated path on first
+        // edit (drag, split, merge, delete, add-in-gap).
+        const tierIvs: AnnotationInterval[] =
+          record?.tiers?.stt_words?.intervals ?? [];
+        const hasTier = tierIvs.length > 0;
+        if (hasTier) {
+          out.push({
+            kind: "stt_words",
+            tier: "stt_words",
+            label: LANE_LABELS.stt_words,
+            intervals: tierIvs.map((iv) => ({
+              start: iv.start,
+              end: iv.end,
+              text: "",
+              manuallyAdjusted: iv.manuallyAdjusted,
+            })),
+            sourceIndices: tierIvs.map((_, i) => i),
+            boundaryOnly: true,
+          });
+        } else {
+          const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
+          const intervals: LaneStrip["intervals"] = [];
+          for (const seg of segs) {
+            for (const w of seg.words ?? []) {
+              if (w.start === 0 && w.end === 0) continue;
+              intervals.push({ start: w.start, end: w.end, text: "" });
+            }
           }
+          const status = sttStatus[speaker] ?? "idle";
+          const emptyHint =
+            intervals.length > 0
+              ? undefined
+              : status === "loading"
+                ? "Loading STT…"
+                : status === "error"
+                  ? "Failed to load STT"
+                  : `No word-level STT yet — run word-level STT for ${speaker}`;
+          out.push({
+            kind: "stt_words",
+            tier: "stt_words",
+            label: LANE_LABELS.stt_words,
+            intervals,
+            sourceIndices: intervals.map((_, i) => i),
+            boundaryOnly: true,
+            needsMigration: true,
+            migrate: () => ensureSttWordsTier(speaker, segs),
+            emptyHint,
+            status,
+          });
         }
-        const status = sttStatus[speaker] ?? "idle";
-        const emptyHint =
-          intervals.length > 0
-            ? undefined
-            : status === "loading"
-              ? "Loading STT…"
-              : status === "error"
-                ? "Failed to load STT"
-                : `No word-level STT yet — run word-level STT for ${speaker}`;
-        out.push({
-          kind: "stt_words",
-          label: LANE_LABELS.stt_words,
-          intervals,
-          emptyHint,
-          status,
-          // No sourceIndices → strip is read-only (clicks seek, no editor).
-        });
         continue;
       }
 
       if (kind === "boundaries") {
+        // BND is a boundary-only lane (no text inside boxes). It edits
+        // ``tiers.ortho_words`` directly — the persisted refined word
+        // boundaries from Tier 2 forced alignment. Color-coded by shift
+        // to the matching Tier 1 word; falls back to Tier 2 confidence
+        // when no Tier 1 partner exists.
         const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
         const tier1Words: Array<{ start: number; end: number; text: string }> = [];
         for (const seg of segs) {
@@ -335,30 +392,39 @@ export function TranscriptionLanes({
           text: string;
           confidence?: number;
           source?: "forced_align" | "short_clip_fallback";
+          manuallyAdjusted?: boolean;
         }>;
 
-        const intervals: Array<{ start: number; end: number; text: string }> = [];
+        const intervals: LaneStrip["intervals"] = [];
         const intervalColors: (string | undefined)[] = [];
+        const sourceIndices: number[] = [];
         tier2Ivs.forEach((iv, i) => {
-          if (!iv.text || !iv.text.trim()) return;
-          intervals.push({ start: iv.start, end: iv.end, text: iv.text });
+          intervals.push({
+            start: iv.start,
+            end: iv.end,
+            text: "",
+            manuallyAdjusted: iv.manuallyAdjusted,
+          });
           intervalColors.push(boundaryColor(iv, tier1Words[i]));
+          sourceIndices.push(i);
         });
 
         const hasTier2 = intervals.length > 0;
         const emptyHint = hasTier2
           ? undefined
           : tier1Words.length > 0
-            ? "Run ORTH alignment to populate Tier 2 boundaries"
-            : `Run Orthographic STT for ${speaker}`;
+            ? "Run forced-align (or drag here to add a boundary manually)"
+            : `Run Orthographic STT for ${speaker}, then forced-align`;
 
         out.push({
           kind: "boundaries",
+          tier: "ortho_words",
           label: LANE_LABELS.boundaries,
           intervals,
           intervalColors,
+          sourceIndices,
+          boundaryOnly: true,
           emptyHint,
-          // No sourceIndices → strip is read-only (clicks seek, no editor).
         });
         continue;
       }
@@ -394,10 +460,12 @@ export function TranscriptionLanes({
           const segs: SttSegment[] = sttBySpeaker[speaker] ?? [];
           out.push({
             kind: "stt",
+            tier: "stt",
             label: LANE_LABELS.stt,
             intervals: segs.map((s) => ({ start: s.start, end: s.end, text: s.text })),
             sourceIndices: segs.map((_, i) => i),
             needsMigration: true,
+            migrate: () => ensureSttTier(speaker, segs),
             status: sttStatus[speaker] ?? "idle",
           });
         }
@@ -432,12 +500,58 @@ export function TranscriptionLanes({
   const visibleEndSec =
     (scrollLeft + viewportWidth + VIRTUAL_BUFFER_PX) / pxPerSec;
 
-  const commitEdit = (kind: LaneKind, sourceIdx: number, text: string) => {
+  const commitEdit = (tier: string, sourceIdx: number, text: string) => {
     const trimmed = text.trim();
     if (!speaker) return;
-    updateInterval(speaker, kind, sourceIdx, trimmed);
+    updateInterval(speaker, tier, sourceIdx, trimmed);
     setEditing(null);
   };
+
+  // Strip lookup by kind (used by the context menu / pending-drag commit).
+  const stripByKind = (kind: LaneKind): LaneStrip | undefined =>
+    strips.find((s) => s.kind === kind);
+
+  // Drag-to-create on a boundary-only lane: while pendingDrag is active,
+  // track mouse moves anywhere on the page (the user may drag past the
+  // lane edge) and commit on mouseup. Threshold 50ms — shorter drags are
+  // treated as clicks (no interval created).
+  useEffect(() => {
+    if (!pendingDrag) return;
+    if (!speaker || pxPerSec <= 0) return;
+    const onMove = (e: MouseEvent) => {
+      const laneEl = laneScrollRefs.current[pendingDrag.kind];
+      if (!laneEl) return;
+      const rect = laneEl.getBoundingClientRect();
+      const px = e.clientX - rect.left + laneEl.scrollLeft;
+      const sec = Math.max(0, Math.min(duration, px / pxPerSec));
+      setPendingDrag((prev) => (prev ? { ...prev, endSec: sec } : prev));
+    };
+    const onUp = () => {
+      setPendingDrag((prev) => {
+        if (!prev) return null;
+        const a = Math.min(prev.startSec, prev.endSec);
+        const b = Math.max(prev.startSec, prev.endSec);
+        if (b - a >= 0.05) {
+          const strip = stripByKind(prev.kind);
+          if (strip?.needsMigration) strip.migrate?.();
+          addInterval(speaker, prev.tier, {
+            start: a,
+            end: b,
+            text: "",
+            manuallyAdjusted: true,
+          });
+        }
+        return null;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDrag, speaker, pxPerSec, duration]);
 
   return (
     <div className="mt-2 space-y-1 px-5">
@@ -496,18 +610,65 @@ export function TranscriptionLanes({
                 }}
                 className="h-full overflow-hidden"
               >
-                <div className="relative h-full" style={{ width: innerWidth }}>
+                <div
+                  className="relative h-full"
+                  style={{ width: innerWidth }}
+                  onMouseDown={(e) => {
+                    // Drag-to-create on boundary-only lanes (Words / BND).
+                    // Only fires on empty timeline space — clicks on
+                    // existing interval buttons are stopped at the button
+                    // handler (stopPropagation on those covers it).
+                    if (!strip.boundaryOnly) return;
+                    if (!speaker) return;
+                    if (pxPerSec <= 0) return;
+                    if (e.button !== 0) return;
+                    const target = e.target as HTMLElement | null;
+                    if (target?.closest("button")) return;
+                    const tier = strip.tier ?? strip.kind;
+                    const sec = Math.max(
+                      0,
+                      Math.min(
+                        duration,
+                        (e.nativeEvent as MouseEvent).offsetX / pxPerSec,
+                      ),
+                    );
+                    setPendingDrag({
+                      kind: strip.kind,
+                      tier,
+                      startSec: sec,
+                      endSec: sec,
+                    });
+                    e.preventDefault();
+                  }}
+                >
+                  {pendingDrag?.kind === strip.kind && (() => {
+                    const a = Math.min(pendingDrag.startSec, pendingDrag.endSec);
+                    const b = Math.max(pendingDrag.startSec, pendingDrag.endSec);
+                    return (
+                      <div
+                        className="pointer-events-none absolute top-1 bottom-1 rounded border-2 border-dashed"
+                        style={{
+                          left: a * pxPerSec,
+                          width: Math.max(1, (b - a) * pxPerSec),
+                          borderColor: color,
+                          backgroundColor: withAlpha(color, 0.12),
+                        }}
+                      />
+                    );
+                  })()}
                   {visible.map((iv, slotIdx) => {
                     const sourceIdx = visibleSourceIndices?.[slotIdx];
                     const absIdx = firstIdx + slotIdx;
                     const left = iv.start * pxPerSec;
                     const width = Math.max(1, (iv.end - iv.start) * pxPerSec);
-                    const showLabel = width >= MIN_LABEL_WIDTH_PX;
+                    const showLabel =
+                      !strip.boundaryOnly && width >= MIN_LABEL_WIDTH_PX;
                     const isEditable = sourceIdx !== undefined;
+                    const tierName = strip.tier ?? strip.kind;
                     const isSelected =
                       isEditable &&
                       selectedInterval?.speaker === speaker &&
-                      selectedInterval?.tier === strip.kind &&
+                      selectedInterval?.tier === tierName &&
                       selectedInterval?.index === sourceIdx;
                     const isEditing =
                       isEditable &&
@@ -536,7 +697,7 @@ export function TranscriptionLanes({
                             if (e.key === "Enter") {
                               e.preventDefault();
                               commitEdit(
-                                strip.kind,
+                                tierName,
                                 sourceIdx,
                                 e.currentTarget.textContent ?? "",
                               );
@@ -547,7 +708,7 @@ export function TranscriptionLanes({
                           }}
                           onBlur={(e) =>
                             commitEdit(
-                              strip.kind,
+                              tierName,
                               sourceIdx,
                               e.currentTarget.textContent ?? "",
                             )
@@ -565,12 +726,16 @@ export function TranscriptionLanes({
                       <button
                         key={`${strip.kind}-${slotIdx}-${iv.start}`}
                         type="button"
+                        // Stop propagation so the lane's drag-to-create
+                        // handler doesn't fire when the user clicks on an
+                        // existing interval.
+                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (isEditable && sourceIdx !== undefined) {
                             setSelectedInterval({
                               speaker,
-                              tier: strip.kind,
+                              tier: tierName,
                               index: sourceIdx,
                             });
                           }
@@ -579,26 +744,20 @@ export function TranscriptionLanes({
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           if (!isEditable || sourceIdx === undefined) return;
-                          // First-edit STT: migrate the API-cached segments
-                          // into record.tiers.stt before entering edit mode.
-                          // `ensureSttTier` is idempotent and batched with
-                          // setEditing so the next render sees the tier
-                          // populated and opens the inline editor directly.
-                          if (strip.needsMigration) {
-                            ensureSttTier(speaker, sttBySpeaker[speaker] ?? []);
-                          }
+                          // Boundary-only lanes have no text to edit;
+                          // double-click is a no-op on Words/BND.
+                          if (strip.boundaryOnly) return;
+                          if (strip.needsMigration) strip.migrate?.();
                           setEditing({ kind: strip.kind, index: sourceIdx });
                         }}
                         onContextMenu={(e) => {
                           if (!isEditable || sourceIdx === undefined) return;
                           e.preventDefault();
                           e.stopPropagation();
-                          if (strip.needsMigration) {
-                            ensureSttTier(speaker, sttBySpeaker[speaker] ?? []);
-                          }
+                          if (strip.needsMigration) strip.migrate?.();
                           setSelectedInterval({
                             speaker,
-                            tier: strip.kind,
+                            tier: tierName,
                             index: sourceIdx,
                           });
                           setMenu({
@@ -613,10 +772,26 @@ export function TranscriptionLanes({
                           (isSelected ? " ring-2" : "")
                         }
                         style={baseStyle}
-                        title={`${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s · ${iv.text}`}
-                        aria-label={`${strip.label} ${iv.start.toFixed(2)}s: ${iv.text}`}
+                        title={
+                          strip.boundaryOnly
+                            ? `${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s${
+                                iv.manuallyAdjusted ? " · manually adjusted" : ""
+                              }`
+                            : `${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s · ${iv.text}`
+                        }
+                        aria-label={`${strip.label} ${iv.start.toFixed(2)}s${
+                          iv.text ? `: ${iv.text}` : ""
+                        }`}
                       >
                         {showLabel ? <span className="truncate">{iv.text}</span> : null}
+                        {iv.manuallyAdjusted && (
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: ivColor }}
+                            title="Manually adjusted"
+                          />
+                        )}
                       </button>
                     );
                   })}
@@ -633,8 +808,11 @@ export function TranscriptionLanes({
       })}
 
       {menu && (() => {
-        const target = record?.tiers?.[menu.kind]?.intervals?.[menu.index];
+        const strip = stripByKind(menu.kind);
+        const tierName = strip?.tier ?? menu.kind;
+        const target = record?.tiers?.[tierName]?.intervals?.[menu.index];
         if (!target) return null;
+        const boundaryOnly = !!strip?.boundaryOnly;
         return (
           <ContextMenu
             x={menu.x}
@@ -642,22 +820,26 @@ export function TranscriptionLanes({
             laneLabel={LANE_LABELS[menu.kind]}
             start={target.start}
             end={target.end}
-            onEdit={() => {
-              setEditing({ kind: menu.kind, index: menu.index });
-              setMenu(null);
-            }}
+            onEdit={
+              boundaryOnly
+                ? null
+                : () => {
+                    setEditing({ kind: menu.kind, index: menu.index });
+                    setMenu(null);
+                  }
+            }
             onSplit={() => {
               const ws = wsRef.current;
               const t = ws?.getCurrentTime() ?? 0;
-              splitInterval(speaker, menu.kind, menu.index, t);
+              splitInterval(speaker, tierName, menu.index, t);
               setMenu(null);
             }}
             onMerge={() => {
-              mergeIntervals(speaker, menu.kind, menu.index);
+              mergeIntervals(speaker, tierName, menu.index);
               setMenu(null);
             }}
             onDelete={() => {
-              removeInterval(speaker, menu.kind, menu.index);
+              removeInterval(speaker, tierName, menu.index);
               setSelectedInterval(null);
               setMenu(null);
             }}
@@ -674,7 +856,9 @@ interface ContextMenuProps {
   laneLabel: string;
   start: number;
   end: number;
-  onEdit: () => void;
+  /** When null, the "Edit text" menu item is omitted — boundary-only
+   * lanes (Words / BND) have no text content to edit. */
+  onEdit: (() => void) | null;
   onSplit: () => void;
   onMerge: () => void;
   onDelete: () => void;
@@ -705,7 +889,7 @@ function ContextMenu({
         </span>
       </div>
       <div className="mb-1 h-px bg-slate-100" />
-      <MenuItem label="Edit text" hint="dbl-click" onClick={onEdit} />
+      {onEdit && <MenuItem label="Edit text" hint="dbl-click" onClick={onEdit} />}
       <MenuItem label="Split at playhead" hint="S" onClick={onSplit} />
       <MenuItem label="Merge with next" onClick={onMerge} />
       <div className="my-1 h-px bg-slate-100" />

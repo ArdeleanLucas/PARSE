@@ -4,7 +4,7 @@ import { usePlaybackStore } from "../../stores/playbackStore";
 import { useAnnotationStore } from "../../stores/annotationStore";
 import {
   useTranscriptionLanesStore,
-  LANE_LABELS,
+  labelForTier,
 } from "../../stores/transcriptionLanesStore";
 import { Button } from "../shared/Button";
 import { Input } from "../shared/Input";
@@ -248,7 +248,9 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
 interface SegmentControlsProps {
   speaker: string | null;
   currentTime: number;
-  selected: { speaker: string; tier: import("../../stores/transcriptionLanesStore").LaneKind; index: number } | null;
+  // ``tier`` is the annotation tier name (e.g. "stt", "ortho_words"), not
+  // the visual lane kind — the two diverge for the Boundaries lane.
+  selected: { speaker: string; tier: string; index: number } | null;
   record: import("../../api/types").AnnotationRecord | null;
   onUpdateText: (speaker: string, tier: string, index: number, text: string) => void;
   onUpdateTimes: (speaker: string, tier: string, index: number, start: number, end: number) => void;
@@ -333,7 +335,7 @@ function SegmentControls({
         <div style={{ fontWeight: 600 }}>
           Selected segment
           <span style={{ color: "#6b7280", fontWeight: 400, marginLeft: "0.5rem" }}>
-            ({LANE_LABELS[selected.tier]} #{selected.index + 1})
+            ({labelForTier(selected.tier)} #{selected.index + 1})
           </span>
         </div>
         <Button variant="secondary" size="sm" onClick={onClearSelection}>
