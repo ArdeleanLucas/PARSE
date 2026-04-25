@@ -13,6 +13,7 @@ let mockConfig: ProjectConfig | null = null;
 let mockTags: Tag[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
+let mockCurrentTime = 0;
 
 const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
 const mockHydrateTags = vi.fn();
@@ -20,6 +21,7 @@ const mockSyncTagsFromServer = vi.fn().mockResolvedValue(undefined);
 const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockSetInterval = vi.fn();
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
+const mockMarkLexemeManuallyAdjusted = vi.fn();
 const mockTagConcept = vi.fn();
 const mockUntagConcept = vi.fn();
 const mockUpdateTag = vi.fn();
@@ -80,12 +82,16 @@ vi.mock("./stores/annotationStore", () => {
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
       saveSpeaker: mockSaveSpeaker,
+      markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
       moveIntervalAcrossTiers: vi.fn(),
       undo: vi.fn(),
       redo: vi.fn(),
     });
   (useAnnotationStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockAnnotationSetState(...args);
+  (useAnnotationStore as unknown as { getState: () => { records: Record<string, AnnotationRecord> } }).getState = () => ({
+    records: mockRecords,
+  });
   return { useAnnotationStore };
 });
 
@@ -94,13 +100,16 @@ vi.mock("./stores/playbackStore", () => {
     selector({
       activeSpeaker: null,
       isPlaying: false,
-      currentTime: 0,
+      currentTime: mockCurrentTime,
       duration: 4,
       selectedRegion: mockSelectedRegion,
       setSelectedRegion: mockSetSelectedRegion,
     });
   (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockPlaybackSetState(...args);
+  (usePlaybackStore as unknown as { getState: () => { currentTime: number } }).getState = () => ({
+    currentTime: mockCurrentTime,
+  });
   return { usePlaybackStore };
 });
 
@@ -275,6 +284,7 @@ beforeEach(() => {
   mockRecords = {};
   mockEnrichmentData = {};
   mockSelectedRegion = { start: 1.25, end: 2.5 };
+  mockCurrentTime = 0;
   mockChatMessages = [];
   mockChatSending = false;
   mockChatError = null;
@@ -287,6 +297,7 @@ beforeEach(() => {
   mockLoadSpeaker.mockClear();
   mockSetInterval.mockClear();
   mockSaveSpeaker.mockClear();
+  mockMarkLexemeManuallyAdjusted.mockClear();
   mockTagConcept.mockClear();
   mockUpdateTag.mockClear();
   mockUntagConcept.mockClear();
@@ -915,6 +926,49 @@ describe("Actions menu — transcription run flow", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:lingpy");
 
     clickSpy.mockRestore();
+  });
+
+  it("captures an offset anchor from annotate mode and marks the lexeme as manually adjusted", async () => {
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("annotate-capture-anchor"));
+
+    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+    expect((await screen.findByTestId("annotate-capture-toast")).textContent).toContain(
+      "Anchored water @ 00:09.50 → +1.50s offset.",
+    );
+  });
+
+  it("captures the current lexeme into the manual offset modal and shows the live consensus", async () => {
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset-manual"));
+    expect(await screen.findByTestId("offset-manual")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("offset-manual-capture"));
+
+    const anchorList = await screen.findByTestId("offset-manual-anchor-list");
+    expect(within(anchorList).getByText("water")).toBeTruthy();
+    expect(within(anchorList).getByText("1")).toBeTruthy();
+    expect(within(anchorList).getByText("+1.50s")).toBeTruthy();
+    expect(screen.getByTestId("offset-manual-consensus").textContent).toContain("+1.500 s");
+    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
   });
 
   it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
