@@ -1,0 +1,11 @@
+{
+  "profile": "parse-back-end",
+  "last_run_at": null,
+  "last_status": "idle",
+  "branch": "auto/parse-back-end",
+  "worktree": "/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto",
+  "last_commit": null,
+  "tests": [],
+  "next_step": "Read .hermes/automation/handoffs/to-parse-back-end.md and implement the job observability HTTP extraction slice from current rebuild main.",
+  "blockers": []
+}
