@@ -8372,11 +8372,21 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             key=lambda x: (-x["total_forms"], x["id"]),
         )
 
+        # Attach the per-provider academic citations so the Sources Report
+        # modal can render full bibliographic references next to each
+        # provider chip without a second round-trip. Citations are
+        # dataset-level, not per-form -- a follow-up change can extend
+        # the FetchResult shape to thread per-form metadata (URL, dataset
+        # version, retrieval date, lexeme id) for true per-form citations.
+        from compare.providers.citations import get_citations, CITATION_DISPLAY_ORDER
+
         self._send_json(HTTPStatus.OK, {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "providers": providers_sorted,
             "languages": languages_out,
             "concepts_total": all_concepts_total,
+            "citations": get_citations(),
+            "citation_order": list(CITATION_DISPLAY_ORDER),
         })
 
     def _api_update_config(self) -> None:

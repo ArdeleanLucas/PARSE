@@ -268,9 +268,44 @@ export interface ClefSourcesReportLanguage {
   forms: ClefSourcesReportForm[];
 }
 
+/** Academic citation block for one provider id, surfaced by the Sources
+ *  Report endpoint so the modal can render full bibliographic references
+ *  alongside each provider chip. Citations are *dataset-level* -- per-form
+ *  metadata (URL, dataset version, retrieval date) is a follow-up change
+ *  that requires extending the FetchResult shape across all providers.
+ *
+ *  ``type`` lets the modal flag entries differently:
+ *    - "dataset" / "tool" -> standard provider, render normally
+ *    - "ai"               -> LLM, show a "must be verified" warning
+ *    - "manual"           -> user-curated, point at the workspace config
+ *    - "sentinel"         -> "unknown" legacy entry, render as caveat */
+export interface ClefSourceCitation {
+  label: string;
+  type: "dataset" | "tool" | "ai" | "manual" | "sentinel";
+  authors: string | null;
+  year: number | null;
+  title: string;
+  venue?: string;
+  doi?: string;
+  url?: string;
+  license?: string;
+  note?: string;
+  /** Free-text citation suitable for pasting into a footnote. */
+  citation: string;
+  /** BibTeX entry suitable for an ``Export BibTeX`` action. Empty
+   *  string for non-bibliographic providers (LLM, manual overrides). */
+  bibtex: string;
+}
+
 export interface ClefSourcesReport {
   generated_at: string;
   providers: Array<{ id: string; total_forms: number }>;
   languages: ClefSourcesReportLanguage[];
   concepts_total: number;
+  /** Per-provider citation blocks keyed by provider id. Includes the
+   *  ``unknown`` sentinel for legacy entries. */
+  citations: Record<string, ClefSourceCitation>;
+  /** Stable display order for the citations section -- matches
+   *  ``CITATION_DISPLAY_ORDER`` in the backend. */
+  citation_order: string[];
 }

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X, AlertCircle, Loader2, BookOpen, RefreshCw } from "lucide-react";
+import { X, AlertCircle, Loader2, BookOpen, RefreshCw, Copy, Download, ExternalLink } from "lucide-react";
 import { getClefSourcesReport } from "../../api/client";
-import type { ClefSourcesReport, ClefSourcesReportLanguage } from "../../api/types";
+import type { ClefSourceCitation, ClefSourcesReport, ClefSourcesReportLanguage } from "../../api/types";
 
-/** Human-friendly labels for the provider ids the backend emits. Keep
- *  in sync with ``compare/providers/registry.PROVIDER_PRIORITY`` plus
- *  the ``unknown`` sentinel used for legacy (pre-provenance) entries. */
-const PROVIDER_LABELS: Record<string, string> = {
+/** Fallback label map for provider ids when the backend hasn't surfaced
+ *  a citation block (e.g. an older server, or a brand-new provider that
+ *  shipped without a citation entry). The authoritative labels live in
+ *  ``compare/providers/citations.PROVIDER_CITATIONS`` and ride on the
+ *  Sources Report payload. */
+const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
   csv_override: "CSV override",
   lingpy_wordlist: "LingPy wordlist",
   pycldf: "pycldf",
@@ -20,8 +22,71 @@ const PROVIDER_LABELS: Record<string, string> = {
   unknown: "Unattributed (legacy)",
 };
 
-function providerLabel(id: string): string {
-  return PROVIDER_LABELS[id] ?? id;
+function providerLabel(id: string, citations?: Record<string, ClefSourceCitation>): string {
+  return citations?.[id]?.label ?? FALLBACK_PROVIDER_LABELS[id] ?? id;
+}
+
+/** Best-effort copy-to-clipboard. Falls back to a temporary textarea
+ *  for browsers/contexts where ``navigator.clipboard`` isn't available
+ *  (file://, sandboxed iframes, very old browsers). Returns true on
+ *  success so callers can flash a "Copied!" indicator. */
+async function copyText(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through to legacy path
+    }
+  }
+  if (typeof document !== "undefined") {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Build a single .bib file containing every provider's BibTeX entry
+ *  that actually contributed forms in this corpus. Skips providers
+ *  with empty ``bibtex`` (LLM, manual overrides, sentinel) so the
+ *  generated file only contains real bibliographic records. */
+function buildBibtex(
+  providersUsed: ReadonlyArray<{ id: string }>,
+  citations: Record<string, ClefSourceCitation>,
+): string {
+  const blocks: string[] = [];
+  for (const { id } of providersUsed) {
+    const c = citations[id];
+    if (c && c.bibtex && c.bibtex.trim()) {
+      blocks.push(c.bibtex.trim());
+    }
+  }
+  return blocks.join("\n\n") + (blocks.length > 0 ? "\n" : "");
+}
+
+function downloadBibtex(text: string, filename = "clef-sources.bib"): void {
+  if (typeof document === "undefined") return;
+  const blob = new Blob([text], { type: "application/x-bibtex;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 interface ClefSourcesReportModalProps {
@@ -150,7 +215,9 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
                         className="flex items-center justify-between rounded border border-slate-100 bg-slate-50 px-2 py-1"
                         data-testid={`sources-report-provider-${p.id}`}
                       >
-                        <span className="truncate text-slate-700">{providerLabel(p.id)}</span>
+                        <span className="truncate text-slate-700">
+                          {providerLabel(p.id, report.citations)}
+                        </span>
                         <span className="ml-2 shrink-0 font-mono text-[11px] text-slate-500">
                           {p.total_forms} form{p.total_forms === 1 ? "" : "s"}
                         </span>
@@ -159,6 +226,14 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
                   </ul>
                 )}
               </section>
+
+              {/* Academic citations -- one block per provider that
+                  actually contributed forms in this corpus. Each block
+                  shows the dataset-level citation, license, optional
+                  caveat note, and Copy / DOI / URL actions. The Export
+                  BibTeX action at the section header bundles every
+                  provider's @-entry into a single .bib download. */}
+              <CitationsSection report={report} />
 
               {/* Language tabs */}
               <section>
@@ -192,7 +267,9 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
                   })}
                 </div>
 
-                {activeLangEntry && <LanguageDetail entry={activeLangEntry} />}
+                {activeLangEntry && (
+                  <LanguageDetail entry={activeLangEntry} citations={report.citations} />
+                )}
               </section>
             </div>
           )}
@@ -212,7 +289,182 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
   );
 }
 
-function LanguageDetail({ entry }: { entry: ClefSourcesReportLanguage }) {
+/** Stable order: prefer the backend-provided ``citation_order``, then
+ *  fall back to the corpus's actual contribution-sorted provider list.
+ *  Filters to providers that *actually contributed* (so a fresh corpus
+ *  with only ``unknown`` legacy entries doesn't render a wall of every
+ *  provider's citation). */
+function orderedUsedProviders(report: ClefSourcesReport): Array<{ id: string; total_forms: number }> {
+  const used = new Map(report.providers.map((p) => [p.id, p]));
+  const out: Array<{ id: string; total_forms: number }> = [];
+  for (const id of report.citation_order ?? []) {
+    const entry = used.get(id);
+    if (entry) {
+      out.push(entry);
+      used.delete(id);
+    }
+  }
+  // Anything left didn't appear in citation_order -- append in
+  // contribution-desc order (the order the backend already sorted them).
+  for (const entry of report.providers) {
+    if (used.has(entry.id)) {
+      out.push(entry);
+      used.delete(entry.id);
+    }
+  }
+  return out;
+}
+
+function CitationsSection({ report }: { report: ClefSourcesReport }) {
+  const used = useMemo(() => orderedUsedProviders(report), [report]);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const flashCopied = useCallback((key: string) => {
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey((prev) => (prev === key ? null : prev));
+    }, 1500);
+  }, []);
+
+  const onCopyCitation = useCallback(
+    async (id: string, citation: string) => {
+      const ok = await copyText(citation);
+      if (ok) flashCopied(`cite:${id}`);
+    },
+    [flashCopied],
+  );
+
+  const onCopyBibtex = useCallback(
+    async (id: string, bibtex: string) => {
+      if (!bibtex) return;
+      const ok = await copyText(bibtex);
+      if (ok) flashCopied(`bib:${id}`);
+    },
+    [flashCopied],
+  );
+
+  const onExportBibtex = useCallback(() => {
+    downloadBibtex(buildBibtex(used, report.citations));
+  }, [used, report.citations]);
+
+  const exportable = used.some((p) => report.citations[p.id]?.bibtex);
+
+  if (used.length === 0) return null;
+
+  return (
+    <section data-testid="sources-report-citations">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Academic citations
+        </div>
+        {exportable && (
+          <button
+            onClick={onExportBibtex}
+            data-testid="sources-report-export-bibtex"
+            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            title="Download a .bib file with every provider's BibTeX entry"
+          >
+            <Download className="h-3 w-3" /> Export BibTeX
+          </button>
+        )}
+      </div>
+      <ul className="space-y-2">
+        {used.map(({ id }) => {
+          const c = report.citations[id];
+          if (!c) return null;
+          const isAi = c.type === "ai";
+          const isSentinel = c.type === "sentinel";
+          const isManual = c.type === "manual";
+          const accent = isAi
+            ? "border-rose-200 bg-rose-50"
+            : isSentinel
+              ? "border-amber-200 bg-amber-50"
+              : isManual
+                ? "border-slate-200 bg-slate-50"
+                : "border-slate-200 bg-white";
+          return (
+            <li
+              key={id}
+              data-testid={`sources-report-citation-${id}`}
+              className={`rounded-md border ${accent} px-3 py-2 text-[12px]`}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="font-semibold text-slate-800">{c.label}</div>
+                <div className="flex shrink-0 items-center gap-1 text-[10px] text-slate-500">
+                  {c.license && (
+                    <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono">
+                      {c.license}
+                    </span>
+                  )}
+                  {c.url && (
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex items-center gap-0.5 text-slate-500 hover:text-slate-800"
+                      title={c.url}
+                    >
+                      <ExternalLink className="h-3 w-3" /> URL
+                    </a>
+                  )}
+                  {c.doi && (
+                    <a
+                      href={`https://doi.org/${c.doi}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex items-center gap-0.5 text-slate-500 hover:text-slate-800"
+                      title={`DOI: ${c.doi}`}
+                    >
+                      <ExternalLink className="h-3 w-3" /> DOI
+                    </a>
+                  )}
+                </div>
+              </div>
+              <p className="mt-1 text-slate-700">{c.citation}</p>
+              {c.note && (
+                <p
+                  className={`mt-1 text-[11px] ${
+                    isAi ? "text-rose-700" : isSentinel ? "text-amber-700" : "text-slate-500"
+                  }`}
+                >
+                  {c.note}
+                </p>
+              )}
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                <button
+                  onClick={() => void onCopyCitation(id, c.citation)}
+                  data-testid={`sources-report-copy-cite-${id}`}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
+                >
+                  <Copy className="h-3 w-3" />
+                  {copiedKey === `cite:${id}` ? "Copied!" : "Copy citation"}
+                </button>
+                {c.bibtex && (
+                  <button
+                    onClick={() => void onCopyBibtex(id, c.bibtex)}
+                    data-testid={`sources-report-copy-bibtex-${id}`}
+                    className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
+                  >
+                    <Copy className="h-3 w-3" />
+                    {copiedKey === `bib:${id}` ? "Copied!" : "Copy BibTeX"}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function LanguageDetail({
+  entry,
+  citations,
+}: {
+  entry: ClefSourcesReportLanguage;
+  citations: Record<string, ClefSourceCitation>;
+}) {
   const coveragePct =
     entry.concepts_total > 0
       ? Math.round((entry.concepts_covered / entry.concepts_total) * 100)
@@ -248,8 +500,10 @@ function LanguageDetail({ entry }: { entry: ClefSourcesReportLanguage }) {
             <span
               key={id}
               className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600"
+              title={citations[id]?.citation ?? undefined}
             >
-              {providerLabel(id)} <span className="font-mono text-slate-400">· {n}</span>
+              {providerLabel(id, citations)}{" "}
+              <span className="font-mono text-slate-400">· {n}</span>
             </span>
           ))}
         </div>
@@ -287,10 +541,13 @@ function LanguageDetail({ entry }: { entry: ClefSourcesReportLanguage }) {
                           className={`rounded px-1.5 py-0.5 text-[10px] ${
                             s === "unknown"
                               ? "bg-amber-50 text-amber-700"
-                              : "bg-slate-100 text-slate-700"
+                              : citations[s]?.type === "ai"
+                                ? "bg-rose-50 text-rose-700"
+                                : "bg-slate-100 text-slate-700"
                           }`}
+                          title={citations[s]?.citation ?? undefined}
                         >
-                          {providerLabel(s)}
+                          {providerLabel(s, citations)}
                         </span>
                       ))}
                     </div>
