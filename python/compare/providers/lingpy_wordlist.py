@@ -123,18 +123,60 @@ class LingPyCldfProvider(BaseProvider):
         return []
 
     def _iso_to_lang_keys(self, iso: str) -> List[str]:
-        """
-        Return candidate lang key fragments to match against the dataset's language IDs.
-        A dataset might use 'pes', 'Persian', 'fa', 'Persian (Iran)', etc.
-        We try all reasonable fragments.
+        """Candidate lang-key identifiers for an ISO 639-1 input.
+
+        Each entry is matched **by exact case-insensitive equality** against
+        the dataset's doculect/language_name/glottocode columns -- *not*
+        substring containment. A previous version used ``frag in lang_key``
+        and got "ar" matching "avar"/"karelian"/"hungarian", dumping
+        Caucasian + Uralic forms under Arabic. Exact equality kills that
+        whole class of bugs; if a dataset uses an identifier we don't list
+        here, the right fix is to extend this map, not to relax matching.
+
+        We list multiple fragments per ISO so different conventions (ISO
+        639-3, plain language name, Glottolog ID) can all hit. A few
+        Glottolog ids for the most common contact languages are included
+        for the Lexibank-style datasets that key by Glottolog.
         """
         ISO_FRAGMENTS: Dict[str, List[str]] = {
-            "ar":  ["arb", "arabic", "ar", "ara"],
-            "fa":  ["pes", "persian", "fa", "fas", "iranian", "farsi"],
-            "ckb": ["ckb", "sorani", "central kurdish", "kurdish", "kur"],
-            "tr":  ["tur", "turkish", "tr", "turk"],
+            "ar":  ["arb", "ara", "ar", "arabic", "stan1318"],
+            "fa":  ["pes", "fas", "fa", "persian", "farsi", "west2369"],
+            "ckb": ["ckb", "sorani", "centralkurdish", "kur"],
+            "kmr": ["kmr", "kurmanji", "northernkurdish"],
+            "tr":  ["tur", "tr", "turkish", "nucl1301"],
+            "heb": ["heb", "he", "hebrew"],
+            "syr": ["syr", "syriac"],
+            "urd": ["urd", "ur", "urdu"],
         }
         return ISO_FRAGMENTS.get(iso, [iso])
+
+    @staticmethod
+    def _lang_key_matches(lang_key: str, fragments: List[str]) -> bool:
+        """Return True iff ``lang_key`` exactly equals one of ``fragments``.
+
+        Both sides are normalised (lowercased, whitespace-stripped, dashes
+        + underscores collapsed) so e.g. dataset IDs like ``"Standard Arabic"``
+        match a fragment ``"standardarabic"`` even though the raw strings
+        differ in case + spacing. This is the safe replacement for the
+        previous ``frag in lang_key`` substring containment check that
+        caused the cross-language pollution bug.
+        """
+        if not lang_key:
+            return False
+        normalised = lang_key.strip().lower()
+        compact = normalised.replace(" ", "").replace("-", "").replace("_", "")
+        for frag in fragments:
+            if not isinstance(frag, str):
+                continue
+            f = frag.strip().lower()
+            if not f:
+                continue
+            if f == normalised:
+                return True
+            f_compact = f.replace(" ", "").replace("-", "").replace("_", "")
+            if f_compact == compact:
+                return True
+        return False
 
     def fetch(
         self,
@@ -163,15 +205,15 @@ class LingPyCldfProvider(BaseProvider):
                 all_forms: List[str] = []
 
                 for index in all_indices:
-                    # Find matching language key in this dataset
+                    # Find matching language key in this dataset. Exact
+                    # equality only -- no substring containment -- so e.g.
+                    # the Arabic fragment "ar" can never collide with
+                    # "avar" / "karelian" / "hungarian".
                     matched_concept_index: Dict[str, List[str]] = {}
                     for lang_key, concept_dict in index.items():
-                        for frag in fragments:
-                            if frag in lang_key:
-                                # Merge this language's concepts in
-                                for ck, fv in concept_dict.items():
-                                    matched_concept_index.setdefault(ck, []).extend(fv)
-                                break
+                        if self._lang_key_matches(lang_key, fragments):
+                            for ck, fv in concept_dict.items():
+                                matched_concept_index.setdefault(ck, []).extend(fv)
 
                     forms = self._match_concept(concept_en, matched_concept_index)
                     for f in forms:
