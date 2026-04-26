@@ -25,6 +25,7 @@ Replace the remaining raw config fetch in `src/components/compare/BorrowingPanel
 - Current head: `5cf12ca`
 - Open PRs right now:
   - PR #23 — parse-back-end handoff only: `https://github.com/TarahAssistant/PARSE-rebuild/pull/23`
+  - PR #25 — this docs-only Builder handoff: `https://github.com/TarahAssistant/PARSE-rebuild/pull/25`
 
 ### Relevant current-main files
 - `src/components/compare/BorrowingPanel.tsx`
