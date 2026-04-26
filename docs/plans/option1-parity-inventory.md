@@ -255,13 +255,18 @@ Use only these status values:
 
 ### 10.3 Recommended artifact layout in the rebuild repo
 
-Coordinator-owned shared parity surfaces should remain under `parity/contracts/`, `parity/fixtures/`, and `parity/deviations.md`; lane-owned evidence lives under the UI/API/jobs/export subtrees.
+Coordinator-owned shared parity surfaces should remain under `parity/contracts/`, `parity/harness/`, `parity/fixtures/`, and `parity/deviations.md`; lane-owned evidence lives under the UI/API/jobs/export subtrees only when the harness cannot cover the surface directly.
 
 ```text
 parity/
   contracts/
     oracle-baseline.md
     route-inventory.md
+  harness/
+    README.md
+    fixtures/
+    tests/
+    output/        # ignored runtime reports / uploaded CI artifacts
   ui/
     checklists/
     screenshots/
@@ -320,22 +325,22 @@ The plan was originally written assuming oracle-as-immutable-spec. Dogfooding th
 
 ### Rules going forward
 
-- Every parity evidence pass MUST reference this deviation list at the top of its evidence doc.
+- Every parity harness report — and any remaining ad-hoc evidence doc that the harness cannot yet replace — MUST reference this deviation list at the top.
 - A flow that fails ONLY because oracle is broken is recorded as DEVIATION, not as rebuild parity failure.
 - Adding a new deviation requires a one-line entry above + a linked oracle issue (file one if missing).
 - Mark a deviation **RESOLVED** once the oracle fix is merged on `main` with a linked upstream PR; the next parity pass on that surface should still note the historical deviation and confirm the regression stays closed.
 
-## 12. Current evidence priority (added 2026-04-26 evening)
+## 12. Current parity-harness priority (updated 2026-04-26 late)
 
-The P0/P1/P2 tiers in §3 describe what eventually needs evidence. This section orders WHICH P0/P1 surface to do NEXT, regardless of tier. Updated by coordinator as evidence ships.
+The P0/P1/P2 tiers in §3 still describe what ultimately needs proof, but the delivery vehicle has changed: **future parity work should prefer extending `parity/harness/` over spawning one evidence doc per surface**. Updated by coordinator as harness coverage ships.
 
-| Order | Surface | Tier | Why now |
+| Order | Harness stream | Tier focus | Why now |
 |---|---|---|---|
-| 1 | Compute / report modals | P1 | Import/onboarding parity has now shipped; the next still-open P1 surface is the compute/report modal family. |
-| 2 | CLEF | P1 | Deferred. |
-| 3 | Job diagnostics | P1 | Deferred. |
-| ~~done~~ | Import / onboarding | ~~P1~~ | Completed via the 2026-04-26 import/onboarding parity evidence pass. Processed-speaker path-separator verification passed on both oracle and rebuild; the regular onboard route remains a shared deviation tracked in oracle issue #236. |
-| ~~done~~ | Tags | ~~P0~~ | Completed via PR #113 on 2026-04-26 (7/7 flows passed). |
-| ~~AI/chat~~ | ~~P1~~ | **DROPPED** 2026-04-26 — AIChat.tsx is now maintenance-mode-only per Lucas decision. The underlying chat_tools.py decomposition continues (foundation for internal tool use and MCP); only the in-app chat UI and its parity evidence are dropped. |
+| 1 | Shared oracle-vs-rebuild diff harness scaffold | P0 + P1 | Replaces ~8 future surface-specific evidence docs with one reusable runner that diffs API responses, exports, persisted JSON, and job lifecycles. |
+| 2 | Extend harness scenario coverage to Compute / report modals | P1 | This is the next still-open user-facing surface after the scaffold lands, but it should ship as additional harness coverage instead of a standalone evidence memo. |
+| 3 | Extend harness scenario coverage to CLEF and job diagnostics | P1 | Deferred until the shared harness base is stable. |
+| historical | Import / onboarding | P1 | Historical evidence remains useful, but ongoing parity should move into the shared harness rather than repeating this as a standalone doc. |
+| historical | Tags | P0 | Historical evidence remains useful, but ongoing parity should move into the shared harness rather than repeating this as a standalone doc. |
+| dropped | AI/chat | P1 | **DROPPED** 2026-04-26 — AIChat.tsx is maintenance-mode-only; no dedicated parity stream. |
 
-Coordinator updates this table after each evidence pass ships.
+Coordinator updates this table after each harness expansion ships.

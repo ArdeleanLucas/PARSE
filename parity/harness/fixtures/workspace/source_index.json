@@ -1,0 +1,13 @@
+{
+  "speakers": {
+    "Base01": {
+      "source_wavs": [
+        {
+          "filename": "audio/original/Base01/source.wav",
+          "is_primary": true,
+          "duration_sec": 0.1
+        }
+      ]
+    }
+  }
+}
