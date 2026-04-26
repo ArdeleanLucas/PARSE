@@ -13,4 +13,4 @@ Short version:
 - tighten types where safe
 - add regression coverage for Run / Refresh / CLEF Configure / Sources Report / auto-chained similarity / job rehydration
 - patch production code only where the audit proves a real drift
-- stay frontend-only and non-overlapping with PRs #36, #41, #43, #42, and #44
+- stay frontend-only and non-overlapping with PRs #36, #41, #43, #42, and #47 (with PR #46 already landed on main)

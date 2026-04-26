@@ -11,7 +11,7 @@ This is not a UI redesign task. Keep the visible React workstation behavior alig
 - **PR #36** is already the queued Builder lane for the Decisions import/export contract.
 - **PR #41** owns the `RegionManager` annotate parity slice.
 - **PR #43** owns the annotate offset-shell regression slice.
-- **PR #42** and **PR #44** are parse-back-end lanes.
+- **PR #42** remains the parse-back-end maintenance lane, and **PR #47** is now the queued backend compute+offset successor lane after merged PR #46.
 
 So the next real Builder-owned gap must be **post-PR36**, frontend-only, and outside annotate/backend overlap.
 
@@ -135,7 +135,7 @@ Create **one fresh Builder implementation PR** from the latest `origin/main` tha
 
 - PR #36 decisions-contract work
 - annotate-mode parity work owned by PRs #41 / #43
-- parse-back-end lanes PR #42 / #44
+- parse-back-end lanes PR #42 / #47 (with PR #46 already landed on main)
 - legacy compare-only components unless a tiny shared helper change truly requires it
 - UI redesign / copy refresh for the compute drawer
 
@@ -156,7 +156,7 @@ In the PR body include:
 - which compute semantics were confirmed vs changed
 - whether Refresh remained a reload-only action or required adjustment
 - any production-code changes vs test-only/type-only hardening
-- confirmation of non-overlap with PRs #36, #41, #43, #42, and #44
+- confirmation of non-overlap with PRs `#36`, `#41`, `#43`, `#42`, and `#47` (with PR `#46` already landed on main)
 - exact tests run
 
 ## Academic / fieldwork considerations
