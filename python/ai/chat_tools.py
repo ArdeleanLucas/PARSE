@@ -4487,7 +4487,7 @@ class ParseChatTools:
     def _display_readable_path(self, path: Path) -> str:
         """Return a project-relative path if possible, else the absolute path."""
         try:
-            return str(path.relative_to(self.project_root))
+            return path.relative_to(self.project_root).as_posix()
         except ValueError:
             return str(path)
 
