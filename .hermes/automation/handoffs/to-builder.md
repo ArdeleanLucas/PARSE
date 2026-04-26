@@ -1,12 +1,16 @@
-# To parse-builder
+# parse-builder handoff — post-PR36 compute contract bundle
 
-Status: pending
+Use this PR as the task source.
 
-Current instruction:
-- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-borrowing-panel-typed-client.md`.
-- Open a fresh implementation PR from current `origin/main`.
-- Keep this slice frontend-only and stay out of parse-back-end PR #23: https://github.com/TarahAssistant/PARSE-rebuild/pull/23
+Primary brief:
+- `.hermes/plans/2026-04-26-parse-builder-next-task-post-pr36-compute-contract-bundle.md`
 
-Grounded state:
-- Current rebuild `origin/main`: `5cf12ca` — `feat(compare): make compute payload semantics explicit (#24)`
-- Recommended Builder slice: replace the remaining raw `fetch("/config/sil_contact_languages.json")` in `src/components/compare/BorrowingPanel.tsx` with the existing typed CLEF client surface and update its tests accordingly.
+Short version:
+- PR #36 already owns the Decisions contract work
+- PRs #41 and #43 already own the remaining annotate slices
+- the next Builder task is now the active-shell **compare compute contract**
+- audit `ParseUI` + `RightPanel` compute-mode semantics against the live server contract
+- tighten types where safe
+- add regression coverage for Run / Refresh / CLEF Configure / Sources Report / auto-chained similarity / job rehydration
+- patch production code only where the audit proves a real drift
+- stay frontend-only and non-overlapping with PRs #36, #41, #43, #42, and #47 (with PR #46 already landed on main)
