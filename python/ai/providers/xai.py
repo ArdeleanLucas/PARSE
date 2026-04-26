@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from .local_whisper import LocalWhisperProvider
 from .openai import OpenAIProvider
+
+if TYPE_CHECKING:
+    from ai.provider import Segment
 
 class XAIProvider(OpenAIProvider):
     """xAI (Grok) provider. Uses OpenAI-compatible API at api.x.ai."""

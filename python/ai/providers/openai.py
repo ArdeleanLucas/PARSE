@@ -4,9 +4,12 @@ import copy
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import ai.provider as provider_module
+
+if TYPE_CHECKING:
+    from ai.provider import Segment
 
 class OpenAIChatRuntime:
     """Thin OpenAI chat runtime wrapper with tool-call support and reasoning fallback."""

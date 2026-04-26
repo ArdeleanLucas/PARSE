@@ -5,11 +5,14 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import ai.provider as provider_module
 
 from .local_whisper import LocalWhisperProvider
+
+if TYPE_CHECKING:
+    from ai.provider import Segment
 
 class OllamaProvider(provider_module.AIProvider):
     """Ollama-backed local LLM provider."""

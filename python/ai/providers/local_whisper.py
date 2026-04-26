@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import copy
+import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import ai.provider as provider_module
+
+if TYPE_CHECKING:
+    from ai.provider import Segment, SegmentWithWords
 
 class LocalWhisperProvider(provider_module.AIProvider):
     """Local provider backed by faster-whisper.
@@ -315,7 +319,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
                 if segment_callback is not None:
                     segment_callback(copy.deepcopy(seg_dict))
                 if progress_callback is not None and total_duration > 0.0:
-                    progress = _coerce_confidence(end / total_duration) * 100.0
+                    progress = provider_module._coerce_confidence(end / total_duration) * 100.0
                     progress_callback(progress, len(segs_out))
             return segs_out
 
