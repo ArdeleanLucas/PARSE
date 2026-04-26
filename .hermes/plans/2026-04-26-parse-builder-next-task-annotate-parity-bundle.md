@@ -1,19 +1,24 @@
-# parse-builder next task — annotate workstation parity bundle
+# parse-builder next task — post-PR41 annotate shell follow-up
 
 ## Goal
 
-Ship **one larger frontend-only follow-up PR** that audits the remaining annotate-mode workstation UI in PARSE-rebuild against the oracle/live PARSE interface and corrects visible parity drift without redesigning the workstation.
+Ship **one fresh frontend-only Builder implementation PR** from current `origin/main` that recovers the remaining valid annotate-shell work **not already consumed by PR #41**, while keeping the rebuild aligned with the oracle/live PARSE React workstation and avoiding any UI re-imagining.
 
 ## Why this is the right next task now
 
-- Lucas explicitly wants **longer tasks**, because prompt-writing overhead is now worse than the implementation slices themselves.
-- PR #38 already landed the most obvious compare-controls shell drift by removing rebuild-only explanatory copy.
-- That means the next meaningful Builder-sized task should be a **different parity surface**, not a stale re-send of the same shell-copy work.
-- The most coherent next frontend-only bundle is annotate-mode parity:
-  - transcript / annotation / suggestions / chat panel arrangement
-  - annotate control labels and affordances
-  - waveform/region management chrome where the rebuild may drift from the oracle UI
-- This is substantial enough for one real Builder pass and stays non-overlapping with the open compare-contract and backend lanes.
+- Builder now has an active narrow annotate parity slice in **PR #41**:
+  - `fix(annotate): restore oracle region decision storage`
+- That means the older broader annotate-parity handoff must be refreshed so it becomes a **genuinely new task**, not a stale re-send of work already underway.
+- There is also **local dirty Builder WIP** in:
+  - `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-auto`
+- That WIP strongly suggests there is still a meaningful remaining frontend slice after PR #41, especially around:
+  - `src/ParseUI.tsx`
+  - `src/ParseUI.test.tsx`
+  - potential decision-persistence helper work
+- The next coherent Builder task is therefore:
+  - audit the remaining non-RegionManager annotate-shell / decision-persistence follow-up
+  - recover only the valid parts on a fresh branch from current `origin/main`
+  - keep strict non-overlap with PR #41
 
 ## Hard UI constraint
 
@@ -24,113 +29,139 @@ Ship **one larger frontend-only follow-up PR** that audits the remaining annotat
 
 ## Source of truth
 
-Use the oracle/live PARSE repo as the canonical UI reference:
+Primary oracle/live repo:
 - `/home/lucas/gh/ardeleanlucas/parse`
 
-Audit against the current live frontend surfaces there, especially:
+Audit against the current live React surfaces there, especially:
 - `src/ParseUI.tsx`
-- `src/components/annotate/*`
-- relevant shared components used by annotate mode
+- relevant `src/components/annotate/*`
+- any current decision import/export behavior exposed through the unified shell
 
-If a historical cue is clearer in the archival repo, you may inspect `/home/lucas/gh/ArdeleanLucas/PARSE`, but the **primary** reference should remain the oracle/live repo above.
+Secondary local Builder-WIP reference (for salvage only, **not** truth):
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-auto`
+
+Treat `parse-builder-auto` as a source of candidate changes to inspect, **not** as automatically correct code.
 
 ## Current grounded context
 
 ### Repo / PR state
 - Repo: `TarahAssistant/PARSE-rebuild`
 - Base branch for your next implementation PR: current `origin/main`
-- Current `origin/main`: `bd226e1` (`refactor(tags): extract tag and export HTTP handlers (#39)`)
-- Recently landed parity slice:
-  - PR #38 — compare compute explainer copy removed
-- Open non-overlap lanes:
-  - PR #34 — `fix(compare): bundle frontend contract hardening`
-  - PR #37 — queued parse-back-end CLEF HTTP bundle
+- Current `origin/main`: `c5aee8b` (`fix(compare): bundle frontend contract hardening (#34)`)
+- Open related lanes:
+  - **PR #41** — active narrow annotate parity slice (`RegionManager` only)
+  - **PR #42** — parse-back-end worktree hygiene cleanup (do not overlap)
+- Current Builder docs handoff PR:
+  - **PR #36** — this PR, refreshed in place to the new remaining task
 
-### Files to focus on for this bundle
-Primary rebuild annotate surfaces:
-- `src/ParseUI.tsx` (annotate-mode sections only)
-- `src/components/annotate/AnnotateMode.tsx`
-- `src/components/annotate/AnnotationPanel.tsx`
-- `src/components/annotate/TranscriptPanel.tsx`
-- `src/components/annotate/SuggestionsPanel.tsx`
-- `src/components/annotate/ChatPanel.tsx`
+### Critical non-overlap rule
+
+**Do not overlap PR #41.**
+
+PR #41 already owns:
 - `src/components/annotate/RegionManager.tsx`
-- `src/components/annotate/TranscriptionLanes.tsx`
-- corresponding annotate tests
+- `src/components/annotate/RegionManager.test.tsx`
+- oracle parity for annotate prior-region decision storage
+
+Assume the RegionManager slice is already spoken for.
+
+### Dirty local Builder WIP worth auditing
+
+The current local Builder auto worktree contains unresolved/dirty state:
+- `docs/plans/parseui-current-state-plan.md`
+- `src/ParseUI.test.tsx`
+- `src/ParseUI.tsx` (conflicted)
+- `src/components/annotate/RegionManager.test.tsx`
+- `src/components/annotate/RegionManager.tsx`
+- `src/lib/decisionPersistence.ts`
+- `src/stores/enrichmentStore.ts`
+
+Interpretation:
+- the **RegionManager** files are now mostly superseded by PR #41
+- the **remaining potentially valuable follow-up** is likely in:
+  - `src/ParseUI.tsx`
+  - `src/ParseUI.test.tsx`
+  - possibly `src/lib/decisionPersistence.ts`
+  - possibly `src/stores/enrichmentStore.ts`
+
+But you must **re-audit those files from scratch** against oracle + current contract before keeping any of them.
 
 ## Specific task
 
-Create **one fresh Builder implementation PR** from current `origin/main` that audits and fixes remaining annotate-mode parity drift.
+Create **one fresh Builder implementation PR** from current `origin/main` that recovers the valid remaining non-RegionManager work.
 
 ### Required implementation direction
-1. **Audit annotate UI against the oracle/live UI first.**
-   - Compare current rebuild annotate behavior to `/home/lucas/gh/ardeleanlucas/parse`.
-   - Focus on actual user-visible differences, not internal refactors.
-   - Produce a concise parity checklist in the PR body.
 
-2. **Inspect the highest-risk annotate surfaces.**
-   At minimum audit:
-   - panel arrangement/order inside annotate mode
-   - waveform / region-management control placement and labels
-   - transcript / annotation / suggestions / chat section headings and affordances
-   - annotate-mode helper copy, placeholders, button labels, and empty states
-   - any rebuild-only status/explainer copy that diverges from the oracle UI
+1. **Inspect PR #41 first.**
+   - Read the live PR body and changed files.
+   - Treat that slice as already owned.
 
-3. **Correct real drift only.**
-   - Fix layout, labels, ordering, spacing/chrome, and interaction-level annotate drift where the rebuild no longer matches the canonical UI closely enough.
-   - Do not widen the task into speculative UX improvement.
+2. **Audit the remaining dirty local Builder WIP as salvage input only.**
+   - Inspect `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-auto`.
+   - Identify what is still useful after carving out the PR #41 RegionManager work.
+   - Do not just force-finish or blindly commit the dirty worktree.
 
-4. **Stay out of compare-contract and backend lanes.**
-   Unless absolutely necessary, do **not** touch:
-   - files clearly owned by PR #34’s compare-contract bundle
-   - backend files under `python/`
-   - parse-back-end PR #37 surfaces
+3. **Recover the next valid frontend-only slice on a fresh branch.**
+   Focus especially on:
+   - `src/ParseUI.tsx`
+   - `src/ParseUI.test.tsx`
+   - optionally `src/lib/decisionPersistence.ts`
+   - optionally `src/stores/enrichmentStore.ts`
 
-5. **Document any unavoidable deviation.**
-   - If a surface cannot be made identical without disproportionate risk, keep the deviation minimal and justify it explicitly in the PR body.
+4. **Be strict about the decisions story.**
+   - If the `decisionPersistence` helper is genuinely required by the current canonical shell behavior, keep it and test it.
+   - If it conflicts with oracle behavior or with the live PR #41 region-decision semantics, drop or narrow it.
+   - Do not introduce a second contradictory persistence story.
+
+5. **Stay frontend-only and non-overlapping.**
+   - no backend files under `python/`
+   - no worktree-cleanup changes (parse-back-end owns PR #42)
+   - no redoing RegionManager parity already in PR #41 unless a tiny dependency adjustment is unavoidable and explicitly justified
 
 ## In scope
 
-- annotate-mode UI files under `src/components/annotate/*`
-- annotate-mode sections of `src/ParseUI.tsx`
-- annotate-focused tests
-- narrowly adjacent shared UI pieces only if required for parity
+- `src/ParseUI.tsx`
+- `src/ParseUI.test.tsx`
+- narrow adjacent frontend helpers/stores if required by the recovered slice
+- annotate-shell / unified-shell decision behavior only if justified by current oracle + rebuild contract
+- relevant tests
 
 ## Out of scope
 
-- backend files under `python/`
-- parse-back-end PR #37
-- compare-contract/persistence files already targeted by PR #34
-- speculative redesign / visual refresh / product invention
-- changing API contracts to support cosmetic preferences
+- `python/*`
+- PR #42 worktree cleanup lane
+- redoing PR #41 RegionManager ownership
+- speculative redesign / visual refresh / UX invention
+- broad docs churn beyond what the new PR actually changes
 
 ## Validation requirements
 
 Run and report at least:
-- targeted annotate tests you update
+- targeted tests for the files you touch
 - `npm run test -- --run`
 - `./node_modules/.bin/tsc --noEmit`
 - `git diff --check`
-- a browser smoke on annotate mode in the rebuilt UI
+- browser smoke in the rebuilt UI
 
 Also include in the PR body:
-- the oracle/live reference files inspected
-- a concise checklist of drift found vs corrected
-- confirmation that no UI re-imagining was introduced
-- any unavoidable remaining deviation
+- which parts of `parse-builder-auto` were salvaged vs discarded
+- which oracle/live files were used as the reference
+- confirmation that PR #41 remained non-overlapping
+- exact tests run
 
 ## Reporting requirements
 
 Open **one fresh Builder implementation PR** from current `origin/main`.
 
 In the PR body, include:
-- what visible annotate-mode drift was found
+- what remaining non-RegionManager annotate-shell drift or decision behavior was found
+- exactly which local WIP files were reused or intentionally discarded
 - exactly which oracle/live files or runtime surfaces you used as the reference
-- confirmation that PR #34 remained non-overlapping
+- confirmation that PR #41 remained non-overlapping
 - exact tests run
 
 ## Academic / fieldwork considerations
 
 - PARSE annotate mode is a fieldwork workstation, not a UI playground.
-- Researchers depend on stable annotate panel order, predictable controls, and familiar affordances while segmenting and validating speech data.
-- An annotate-focused parity pass reduces retraining cost and keeps annotation workflows reproducible across sessions and operators.
+- Researchers depend on stable annotate shell behavior, predictable control placement, and reproducible decision persistence semantics.
+- This follow-up should reduce ambiguity, not create a second competing persistence model.
