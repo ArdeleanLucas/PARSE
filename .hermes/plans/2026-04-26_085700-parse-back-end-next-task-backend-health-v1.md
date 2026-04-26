@@ -3,7 +3,7 @@
 **Repo:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
 **Date:** 2026-04-26
 **Owner:** parse-back-end
-**Status:** queued / ready on current `origin/main`
+**Status:** queued / ready on rebuild `origin/main` — revalidate live state before execution
 
 ## Goal
 
@@ -26,23 +26,34 @@ That gives parse-back-end an immediately actionable, self-contained lane that:
 
 ---
 
-## Current grounded context
+## Grounded context for this prompt
 
-Verified before writing this prompt:
+This section is a **dated coordination snapshot**, not a permanent claim about the live PR topology.
+If parse-back-end picks this task up later, first run:
 
-- Current rebuild `origin/main` tip:
+```bash
+git fetch origin --prune
+PYTHONPATH=python python3 -m pytest -q
+```
+
+Verified at prompt-write time (2026-04-26 08:57):
+
+- Backend baseline was collected from rebuild `main` rooted at:
   - `4ed1eb7` (`refactor: extract auth HTTP handlers (#13)`)
 - PR #13 status:
   - merged
   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/13`
-- Builder’s current active implementation PR remains:
+- Builder’s active implementation PR at that time remained:
   - PR #14 — `https://github.com/TarahAssistant/PARSE-rebuild/pull/14`
-- Builder’s fresh next-task prompt is separate:
-  - PR #17 — `https://github.com/TarahAssistant/PARSE-rebuild/pull/17`
-- Coordinator PR currently open:
+- Separate coordination/prompt PRs at that time were:
   - PR #15 — `https://github.com/TarahAssistant/PARSE-rebuild/pull/15`
+  - PR #17 — `https://github.com/TarahAssistant/PARSE-rebuild/pull/17`
 
-### Live backend baseline on current main
+Merge-review note:
+- by the time PR #18 was reviewed for merge, `origin/main` had additionally absorbed docs-only PRs `#15` and `#17`
+- those docs merges do **not** change the backend failure clusters below, but they do mean the live main tip must be re-checked before execution
+
+### Live backend baseline on current main-equivalent state
 
 I re-ran the full backend suite on the current rebuild main-equivalent state with:
 
@@ -188,10 +199,12 @@ Do not spill into Builder-owned frontend work.
 
 In the final parse-back-end report, include:
 1. PR number + URL
-2. worktree path used
-3. exact root cause for the MCP bridge failure
-4. exact ORTH contract decision taken
-5. files changed
-6. tests added/updated
-7. full backend suite result
-8. anything intentionally left for another lane
+2. branch used
+3. worktree path used
+4. exact root cause for the MCP bridge failure
+5. exact ORTH contract decision taken
+6. files changed
+7. tests added/updated
+8. exact validation commands run
+9. full backend suite result
+10. anything intentionally left for another lane
