@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { getClefConfig } from "../../api/client";
 import { useConfigStore } from "../../stores/configStore";
 import { useAnnotationStore } from "../../stores/annotationStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -119,31 +120,37 @@ export function BorrowingPanel() {
     [selectedSpeakers, config],
   );
 
-  // Fetch contact languages on mount
+  // Load contact languages through the typed CLEF client surface.
   useEffect(() => {
     let cancelled = false;
-    fetch("/config/sil_contact_languages.json")
-      .then((r) => {
-        if (!r.ok) throw new Error("fetch failed");
-        return r.json();
-      })
-      .then((data: ContactLanguage[]) => {
-        if (!cancelled && Array.isArray(data)) {
-          const allowedCodes = (enrichmentData as Record<string, unknown>)?.config as
-            | { contact_languages?: string[] }
-            | undefined;
-          const allowed = allowedCodes?.contact_languages;
-          if (allowed && Array.isArray(allowed)) {
-            setContactLanguages(data.filter((l) => allowed.includes(l.code)));
-          } else {
-            setContactLanguages(data);
-          }
+    getClefConfig()
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.languages)) return;
+        const enrichmentConfig = (enrichmentData as Record<string, unknown>)?.config as
+          | { contact_languages?: string[] }
+          | undefined;
+        const allowed = Array.isArray(enrichmentConfig?.contact_languages)
+          ? enrichmentConfig.contact_languages
+          : Array.isArray(data?.primary_contact_languages)
+            ? data.primary_contact_languages
+            : undefined;
+        const languages = data.languages.map((lang) => ({
+          code: lang.code,
+          name: lang.name,
+          family: lang.family ?? undefined,
+        }));
+        if (allowed && allowed.length > 0) {
+          setContactLanguages(languages.filter((lang) => allowed.includes(lang.code)));
+        } else {
+          setContactLanguages(languages);
         }
       })
       .catch(() => {
         if (!cancelled) setContactLanguages([]);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [enrichmentData]);
 
   // Similarity data helpers
