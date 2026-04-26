@@ -161,7 +161,7 @@ def tool_stt_start(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, A
         raise ChatToolValidationError("sourceWav is required")
 
     safe_path = tools._resolve_project_path(source_wav, allowed_roots=[tools.audio_dir])
-    project_relative = str(safe_path.relative_to(tools.project_root))
+    project_relative = safe_path.relative_to(tools.project_root).as_posix()
 
     language_raw = args.get("language")
     language = str(language_raw).strip() if language_raw is not None else None

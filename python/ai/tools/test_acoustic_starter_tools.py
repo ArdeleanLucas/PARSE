@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from pathlib import PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -84,3 +85,38 @@ def test_tool_audio_normalize_start_runs_direct_bundle_handler(tmp_path) -> None
     assert payload["status"] == "running"
     assert payload["speaker"] == "Fail02"
     assert normalize_calls == [("Fail02", "audio/clip.wav")]
+
+
+def test_tool_stt_start_normalizes_source_wav_payload_to_posix_on_windows_paths() -> None:
+    class _WindowsStyleTools:
+        def __init__(self) -> None:
+            self.project_root = PureWindowsPath("C:/parse")
+            self.audio_dir = self.project_root / "audio"
+            self.calls: List[Tuple[str, str, Optional[str]]] = []
+
+            def _start_stt_job(speaker: str, source_wav: str, language: Optional[str]) -> str:
+                self.calls.append((speaker, source_wav, language))
+                return "job-stt-windows"
+
+            self._start_stt_job = _start_stt_job
+
+        def _normalize_speaker(self, raw: object) -> str:
+            return str(raw).strip()
+
+        def _resolve_project_path(self, source_wav: str, allowed_roots: List[PureWindowsPath]):
+            assert allowed_roots == [self.audio_dir]
+            return self.project_root / "audio" / "working" / "Fail02" / "speaker.wav"
+
+    tools = _WindowsStyleTools()
+
+    payload = tool_stt_start(
+        tools,
+        {
+            "speaker": "Fail02",
+            "sourceWav": r"audio\working\Fail02\speaker.wav",
+            "language": "sdh",
+        },
+    )
+
+    assert payload["sourceWav"] == "audio/working/Fail02/speaker.wav"
+    assert tools.calls == [("Fail02", "audio/working/Fail02/speaker.wav", "sdh")]
