@@ -14,6 +14,7 @@ import {
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
+import { useParseUIModals } from './hooks/useParseUIModals';
 import { compareSurveyKeys } from './lib/surveySort';
 import {
   conceptMatchesIntervalText,
@@ -70,7 +71,7 @@ import { AnnotateView } from './components/annotate/AnnotateView';
 import { JobLogsModal } from './components/annotate/JobLogsModal';
 import { LexemeSearchBlock } from './components/annotate/LexemeSearchBlock';
 import { TranscriptionLanesControls } from './components/annotate/TranscriptionLanesControls';
-import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
+import { ClefConfigModal } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar } from './components/parse/ConceptSidebar';
@@ -162,17 +163,7 @@ export function ParseUI() {
     body: compareComputePayload,
     label: computeJobLabel,
   });
-  const [clefModalOpen, setClefModalOpen] = useState(false);
-  // Sources Report modal — shows provider attribution for every populated
-  // reference form. Opened from the Compute panel's CLEF status row; read-
-  // only so it's safe to surface even when Borrowing detection is running.
-  const [sourcesReportOpen, setSourcesReportOpen] = useState(false);
-  // Which tab ClefConfigModal should open on. Defaults to "languages"; the
-  // empty-populate banner's "Retry with different providers" action flips
-  // this to "populate" so the user lands directly on the provider picker.
-  // Reset to "languages" on close so the next gear/Run click lands on the
-  // languages tab again.
-  const [clefInitialTab, setClefInitialTab] = useState<ClefConfigModalTab>('languages');
+  const modals = useParseUIModals();
   // Full CLEF status so the Reference Forms section can render exactly
   // the user's configured primary languages (not a hardcoded Arabic +
   // Persian pair). `null` means "not yet loaded" so the UI can render a
@@ -280,7 +271,6 @@ export function ParseUI() {
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
   const [expandedLexemes, setExpandedLexemes] = useState<Set<string>>(new Set());
-  const [commentsImportOpen, setCommentsImportOpen] = useState(false);
 
   const toggleLexemeExpanded = (speaker: string) => {
     setExpandedLexemes((prev) => {
@@ -415,24 +405,11 @@ export function ParseUI() {
   // Continues on per-speaker failure; the walk-away-friendly design.
   const batch = useBatchPipelineJob();
 
-  // Transcription run modal — state holds the `fixedSteps` and title
-  // that the action-menu button supplied (null when closed). When
-  // `fixedSteps` is undefined, the modal renders step checkboxes;
-  // otherwise those checkboxes are locked to the supplied steps.
-  const [runModal, setRunModal] = useState<
-    | { title: string; fixedSteps: PipelineStepId[] | undefined }
-    | null
-  >(null);
-
-  // Post-batch report modal. Opens when a batch finishes so the user
-  // sees what was done, what was skipped, and the full error traceback
-  // for each failure — the "come back from coffee, see the outcome" UX.
-  const [reportOpen, setReportOpen] = useState(false);
   const [reportStepsRun, setReportStepsRun] = useState<PipelineStepId[]>([]);
   const previousBatchStatusRef = useRef<typeof batch.state.status>('idle');
   useEffect(() => {
     if (previousBatchStatusRef.current === 'running' && batch.state.status === 'complete') {
-      setReportOpen(true);
+      modals.batchReport.open();
       void (async () => {
         // Reload stores for every speaker that actually had work done
         // so the transcription lanes / annotations refresh without a
@@ -447,14 +424,10 @@ export function ParseUI() {
       })();
     }
     previousBatchStatusRef.current = batch.state.status;
-  }, [batch.state.status, batch.state.outcomes, loadEnrichments]);
-
-  const openRunModal = (title: string, fixedSteps?: PipelineStepId[]) => {
-    setRunModal({ title, fixedSteps });
-  };
+  }, [batch.state.status, batch.state.outcomes, loadEnrichments, modals.batchReport]);
 
   const handleRunConfirm = (confirm: TranscriptionRunConfirm) => {
-    setRunModal(null);
+    modals.run.close();
     if (confirm.speakers.length === 0 || confirm.steps.length === 0) return;
     void batch.run({
       speakers: confirm.speakers,
@@ -496,7 +469,7 @@ export function ParseUI() {
     }
     if (stepsToRerun.size === 0) return;  // nothing to do
 
-    setReportOpen(false);
+    modals.batchReport.close();
     void batch.run({
       speakers,
       // The global `steps` list is a fallback for any speaker without an
@@ -606,7 +579,7 @@ export function ParseUI() {
   const handleComputeRun = useCallback(() => {
     if (computeMode === 'contact-lexemes') {
       if (clefConfigured !== true) {
-        setClefModalOpen(true);
+        modals.clef.open();
         return;
       }
       void crossSpeakerJob.run();
@@ -651,8 +624,6 @@ export function ParseUI() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
-  const [importModalOpen, setImportModalOpen] = useState(false);
 
   // Count of lexemes on the active speaker that the user has already
   // locked (direct timestamp edit or anchor capture). Surfaces in the
@@ -1026,10 +997,10 @@ export function ParseUI() {
   };
   const openImportModal = () => {
     setActionsMenuOpen(false);
-    setImportModalOpen(true);
+    modals.import.open();
   };
   const handleImportComplete = (speakerId: string) => {
-    setImportModalOpen(false);
+    modals.import.close();
     if (!speakerId) return;
     setSpeakerPicker(speakerId);
     if (currentMode === 'annotate') {
@@ -1186,7 +1157,7 @@ export function ParseUI() {
             );
           })()}
 
-          {batch.state.status === 'complete' && !reportOpen && (
+          {batch.state.status === 'complete' && !modals.batchReport.isOpen && (
             <div
               className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
                 batch.state.cancelled
@@ -1202,7 +1173,7 @@ export function ParseUI() {
                 {batch.state.outcomes.filter(o => o.status === 'cancelled').length > 0 && `, ${batch.state.outcomes.filter(o => o.status === 'cancelled').length} skip`}
               </span>
               <button
-                onClick={() => setReportOpen(true)}
+                onClick={() => modals.batchReport.open()}
                 className={`rounded px-1.5 py-0.5 text-[11px] font-semibold underline ${batch.state.cancelled ? 'text-amber-700 hover:text-amber-800' : 'text-emerald-700 hover:text-emerald-800'}`}
                 data-testid="topbar-batch-view-report"
               >
@@ -1273,7 +1244,7 @@ export function ParseUI() {
                       <Import className="h-3.5 w-3.5 text-slate-400"/> Import Speaker Data…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run Audio Normalization', ['normalize']); }}
+                      onClick={() => { setActionsMenuOpen(false); modals.run.open('Run Audio Normalization', ['normalize']); }}
                       disabled={batch.state.status === 'running'}
                       data-testid="actions-normalize"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1295,7 +1266,7 @@ export function ParseUI() {
                         title="ISO 639-1 code (e.g. en, de, ar). Whisper does not accept ISO 639-3 codes like ckb. Leave blank to auto-detect."
                       />
                       <button
-                        onClick={() => { setActionsMenuOpen(false); openRunModal('Run STT', ['stt']); }}
+                        onClick={() => { setActionsMenuOpen(false); modals.run.open('Run STT', ['stt']); }}
                         disabled={batch.state.status === 'running'}
                         data-testid="actions-stt"
                         className="ml-auto inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1304,7 +1275,7 @@ export function ParseUI() {
                       </button>
                     </div>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); openRunModal('Generate ORTH (razhan)', ['ortho']); }}
+                      onClick={() => { setActionsMenuOpen(false); modals.run.open('Generate ORTH (razhan)', ['ortho']); }}
                       disabled={batch.state.status === 'running'}
                       data-testid="actions-generate-ortho"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1313,7 +1284,7 @@ export function ParseUI() {
                       Generate ORTH (razhan)…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run IPA Transcription', ['ipa']); }}
+                      onClick={() => { setActionsMenuOpen(false); modals.run.open('Run IPA Transcription', ['ipa']); }}
                       disabled={batch.state.status === 'running'}
                       data-testid="actions-ipa"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1322,7 +1293,7 @@ export function ParseUI() {
                       Run IPA Transcription…
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); openRunModal('Run Full Pipeline'); }}
+                      onClick={() => { setActionsMenuOpen(false); modals.run.open('Run Full Pipeline'); }}
                       disabled={batch.state.status === 'running'}
                       data-testid="actions-run-full-pipeline"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1634,8 +1605,7 @@ export function ParseUI() {
                   summary={populateSummary}
                   onDismiss={() => setPopulateSummary(null)}
                   onRetryWithProviders={() => {
-                    setClefInitialTab('populate');
-                    setClefModalOpen(true);
+                    modals.clef.open('populate');
                   }}
                 />
               )}
@@ -2027,8 +1997,8 @@ export function ParseUI() {
           computeJobEtaMs={computeJobState.etaMs}
           computeJobError={computeJobState.error}
           clefConfigured={clefConfigured}
-          onOpenSourcesReport={() => setSourcesReportOpen(true)}
-          onOpenClefConfig={() => setClefModalOpen(true)}
+          onOpenSourcesReport={modals.sourcesReport.open}
+          onOpenClefConfig={modals.clef.open}
           onRefreshEnrichments={() => { void useEnrichmentStore.getState().load(); }}
           tagFilter={tagFilter}
           onTagFilterChange={setTagFilter}
@@ -2036,7 +2006,7 @@ export function ParseUI() {
           onSaveDecisions={() => handleSaveDecisions(false)}
           onExportLingPy={handleExportLingPy}
           exporting={exporting}
-          onOpenCommentsImport={() => setCommentsImportOpen(true)}
+          onOpenCommentsImport={modals.commentsImport.open}
           activeActionSpeaker={activeActionSpeaker}
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
@@ -2057,16 +2027,16 @@ export function ParseUI() {
         style={{ display: 'none' }}
         onChange={handleDecisionsImport}
       />
-      <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
+      <Modal open={modals.import.isOpen} onClose={modals.import.close} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
       </Modal>
       <TranscriptionRunModal
-        open={runModal !== null}
-        title={runModal?.title ?? 'Run transcription'}
-        fixedSteps={runModal?.fixedSteps}
+        open={modals.run.state !== null}
+        title={modals.run.state?.title ?? 'Run transcription'}
+        fixedSteps={modals.run.state?.fixedSteps}
         speakers={Object.keys(annotationRecords).sort()}
         defaultSelectedSpeaker={activeActionSpeaker}
-        onClose={() => setRunModal(null)}
+        onClose={modals.run.close}
         onConfirm={(confirm) => {
           // Capture which steps the user asked for so the batch report
           // modal knows which columns to render.
@@ -2075,19 +2045,16 @@ export function ParseUI() {
         }}
       />
       <BatchReportModal
-        open={reportOpen}
-        onClose={() => setReportOpen(false)}
+        open={modals.batchReport.isOpen}
+        onClose={modals.batchReport.close}
         outcomes={batch.state.outcomes}
         stepsRun={reportStepsRun}
         onRerunFailed={handleRerunFailed}
       />
       <ClefConfigModal
-        open={clefModalOpen}
-        initialTab={clefInitialTab}
-        onClose={() => {
-          setClefModalOpen(false);
-          setClefInitialTab('languages');
-        }}
+        open={modals.clef.isOpen}
+        initialTab={modals.clef.initialTab}
+        onClose={modals.clef.close}
         onSaved={() => {
           // Save-only (no populate): just refresh our cached CLEF status
           // so the Reference Forms panel re-renders with the new primary
@@ -2107,8 +2074,8 @@ export function ParseUI() {
         }}
       />
       <ClefSourcesReportModal
-        open={sourcesReportOpen}
-        onClose={() => setSourcesReportOpen(false)}
+        open={modals.sourcesReport.isOpen}
+        onClose={modals.sourcesReport.close}
       />
       <OffsetAdjustmentModal
         open={offsetState.phase !== 'idle'}
@@ -2134,8 +2101,8 @@ export function ParseUI() {
         jobId={jobLogsOpen}
         onClose={closeJobLogs}
       />
-      <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
-        <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
+      <Modal open={modals.commentsImport.isOpen} onClose={modals.commentsImport.close} title="Import Audition Comments">
+        <CommentsImport onImportComplete={modals.commentsImport.close} />
       </Modal>
     </div>
   );
