@@ -264,7 +264,8 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
 
     for tool in [
         "annotation_read", "audio_normalize_start", "cognate_compute_preview", "contact_lexeme_lookup",
-        "cross_speaker_match_preview", "forced_align_start", "import_processed_speaker", "import_tag_csv",
+        "cross_speaker_match_preview", "detect_timestamp_offset", "detect_timestamp_offset_from_pair",
+        "apply_timestamp_offset", "forced_align_start", "import_processed_speaker", "import_tag_csv",
         "ipa_transcribe_acoustic_start", "onboard_speaker_import", "parse_memory_read",
         "parse_memory_upsert_section", "pipeline_run", "pipeline_state_batch", "pipeline_state_read",
         "prepare_tag_import", "project_context_read", "read_csv_preview", "spectrogram_preview",
