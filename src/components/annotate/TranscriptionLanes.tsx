@@ -9,6 +9,7 @@ import {
 import type { AnnotationInterval, SttSegment } from "../../api/types";
 import { TranscriptionLaneRow, type LaneStrip } from "./TranscriptionLaneRow";
 import { TranscriptionLaneToolbar } from "./TranscriptionLaneToolbar";
+import { useTranscriptionLaneBoundaryEdit } from "./useTranscriptionLaneBoundaryEdit";
 interface TranscriptionLanesProps {
   speaker: string;
   wsRef: React.RefObject<WaveSurfer | null>;
@@ -122,15 +123,6 @@ export function TranscriptionLanes({
   const [editing, setEditing] = useState<{ kind: LaneKind; index: number } | null>(null);
   const [menu, setMenu] = useState<
     { kind: LaneKind; index: number; x: number; y: number } | null
-  >(null);
-  /** Active drag-to-create-interval on a boundary-only lane. The user
-   * presses on an empty region of the lane and drags rightward; on
-   * release we commit a new ``manuallyAdjusted`` interval to that lane's
-   * tier. ``startX`` and ``currentX`` are pixels relative to the timeline
-   * inner div (already includes scroll offset). */
-  const [pendingDrag, setPendingDrag] = useState<
-    | { kind: LaneKind; tier: string; startSec: number; endSec: number }
-    | null
   >(null);
   const editRef = useRef<HTMLSpanElement | null>(null);
 
@@ -458,46 +450,14 @@ export function TranscriptionLanes({
     [strips],
   );
 
-  // Drag-to-create on a boundary-only lane: while pendingDrag is active,
-  // track mouse moves anywhere on the page (the user may drag past the
-  // lane edge) and commit on mouseup. Threshold 50ms — shorter drags are
-  // treated as clicks (no interval created).
-  useEffect(() => {
-    if (!pendingDrag) return;
-    if (!speaker || pxPerSec <= 0) return;
-    const onMove = (e: MouseEvent) => {
-      const laneEl = laneScrollRefs.current[pendingDrag.kind];
-      if (!laneEl) return;
-      const rect = laneEl.getBoundingClientRect();
-      const px = e.clientX - rect.left + laneEl.scrollLeft;
-      const sec = Math.max(0, Math.min(duration, px / pxPerSec));
-      setPendingDrag((prev) => (prev ? { ...prev, endSec: sec } : prev));
-    };
-    const onUp = () => {
-      setPendingDrag((prev) => {
-        if (!prev) return null;
-        const a = Math.min(prev.startSec, prev.endSec);
-        const b = Math.max(prev.startSec, prev.endSec);
-        if (b - a >= 0.05) {
-          const strip = stripByKind(prev.kind);
-          if (strip?.needsMigration) strip.migrate?.();
-          addInterval(speaker, prev.tier, {
-            start: a,
-            end: b,
-            text: "",
-            manuallyAdjusted: true,
-          });
-        }
-        return null;
-      });
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [addInterval, duration, pendingDrag, pxPerSec, speaker, stripByKind]);
+  const { beginDrag, pendingDrag } = useTranscriptionLaneBoundaryEdit({
+    addInterval,
+    duration,
+    laneScrollRefs,
+    pxPerSec,
+    speaker,
+    stripByKind,
+  });
 
   if (strips.length === 0 || !audioReady || pxPerSec <= 0 || duration <= 0) {
     return null;
@@ -513,22 +473,6 @@ export function TranscriptionLanes({
     if (!speaker) return;
     updateInterval(speaker, tier, sourceIdx, trimmed);
     setEditing(null);
-  };
-
-  const beginDrag = (strip: LaneStrip, event: React.MouseEvent<HTMLDivElement>) => {
-    if (!speaker || pxPerSec <= 0) return;
-    const tier = strip.tier ?? strip.kind;
-    const sec = Math.max(
-      0,
-      Math.min(duration, (event.nativeEvent as MouseEvent).offsetX / pxPerSec),
-    );
-    setPendingDrag({
-      kind: strip.kind,
-      tier,
-      startSec: sec,
-      endSec: sec,
-    });
-    event.preventDefault();
   };
 
   const seekInterval = (
