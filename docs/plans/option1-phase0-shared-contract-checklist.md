@@ -1,7 +1,7 @@
 # PARSE Option-1 Rebuild — Phase 0 Shared Contract Checklist
 
-**Status:** Proposed coordinator gate for the separate rebuild repo  
-**Date:** 2026-04-25  
+**Status:** Coordinator baseline signed (Sections 2-3 completed; broader Phase 0 checklist remains open)
+**Date:** 2026-04-26
 **Depends on:**
 - `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
 - `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
@@ -10,6 +10,8 @@
 - current oracle files under `src/`, `python/`, and project artifacts
 
 **Primary goal:** freeze the shared contract that both main rebuild agents must obey before any parallel implementation work begins.
+
+**Coordinator note (2026-04-26):** parallel implementation already started before this baseline sign-off. This update does **not** pretend the earlier merge wave never happened; it retroactively records the real oracle baseline, fixture set, precedence order, and gate evidence the active lanes are already expected to follow.
 
 ---
 
@@ -34,22 +36,28 @@ The coordinator must freeze a precedence order so agents do not argue from diffe
 
 ### 2.1 Required source set
 
-- [ ] `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
-- [ ] `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
-- [ ] `docs/plans/option1-parity-inventory.md`
-- [ ] `docs/desktop_product_architecture.md`
-- [ ] `AGENTS.md`
-- [ ] `src/api/client.ts`
-- [ ] `package.json`
-- [ ] selected backend route/tests in `python/`
-- [ ] selected oracle project fixtures / exports / sample outputs
+- [x] `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
+- [x] `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
+- [x] `docs/plans/option1-parity-inventory.md`
+- [x] `docs/desktop_product_architecture.md`
+- [x] `AGENTS.md`
+- [x] `src/api/client.ts`
+- [x] `package.json`
+- [x] selected backend route/tests in `python/` (`python/server.py`, `python/test_external_api_surface.py`, `python/test_server_static_paths.py`, `python/ai/test_parse_memory_tool.py`)
+- [x] selected oracle project fixtures / exports / sample outputs (2026-04-26 Saha01 parity fixture seeded from `/home/lucas/parse-workspace`, plus current LingPy/export-facing workspace metadata)
 
 ### 2.2 Precedence order to record
 
-- [ ] product/architecture docs outrank implementation guesses
-- [ ] current oracle code outranks stale planning assumptions
-- [ ] coordinator decisions outrank lane-local convenience changes
-- [ ] any unresolved contradiction is escalated before implementation starts
+- [x] product/architecture docs outrank implementation guesses
+- [x] current oracle code outranks stale planning assumptions
+- [x] coordinator decisions outrank lane-local convenience changes
+- [x] any unresolved contradiction is escalated before implementation starts
+
+Recorded 2026-04-26 precedence order:
+1. Target-shape questions default to `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`, `docs/plans/option1-two-agent-parallel-rebuild-plan.md`, and `docs/desktop_product_architecture.md`.
+2. Runtime/API behavior defaults to current oracle code at `ArdeleanLucas/PARSE@0951287a812609068933ba22711a8ecd97765f38`.
+3. When docs and code disagree, coordinator-written rebuild contract docs resolve the ambiguity explicitly instead of allowing lane-local forks.
+4. If neither the docs nor the oracle code settle the question cleanly, the contradiction is logged and escalated rather than papered over in a lane PR.
 
 ---
 
@@ -59,21 +67,23 @@ The coordinator records the exact current PARSE baseline used for rebuild parity
 
 | Field | Record before parallel start |
 |---|---|
-| Oracle repo path | |
-| Oracle branch | |
-| Oracle commit SHA | |
-| Freeze date/time | |
-| Frontend validation evidence | |
-| Backend/API validation evidence | |
-| Fixture dataset version | |
-| Known accepted oracle quirks | |
+| Oracle repo path | `/home/lucas/gh/ardeleanlucas/parse` |
+| Oracle branch | `origin/main` |
+| Oracle commit SHA | `0951287a812609068933ba22711a8ecd97765f38` |
+| Freeze date/time | `2026-04-26T15:55:55Z` (UTC) |
+| Frontend validation evidence | `.hermes/reports/2026-04-26-oracle-frontend-gate.txt` — Vitest `283/283` passed, `./node_modules/.bin/tsc --noEmit` clean, `npm run build` passed |
+| Backend/API validation evidence | `.hermes/reports/2026-04-26-oracle-backend-gate.txt` — Windows conda pytest with explicit `--basetemp` produced `482 passed / 10 failed / 2 skipped / 1 warning`; rebuild comparison companion stored in `.hermes/reports/2026-04-26-rebuild-backend-gate.txt` (`658 passed / 8 failed / 2 skipped / 1 warning`) |
+| Fixture dataset version | `Saha01` single-speaker parity fixture derived 2026-04-26 from `/home/lucas/parse-workspace` (`project.json` + `source_index.json` restricted to `Saha01`, `concepts.csv`, `annotations/Saha01.parse.json`, `annotations/Saha01.json`, `peaks/Saha01.json`, `coarse_transcripts/Saha01.json`, `audio/original/working/Saha01/Sahana_F_1978.wav`) |
+| Known accepted oracle quirks | 1. Windows conda pytest under WSL requires explicit `--basetemp C:/Users/Lucas/...`. <br>2. Browser parity should use the React SPA through Vite (`5173`), not raw backend root `8766/`, which serves a directory listing. <br>3. The current oracle backend suite is red on 10 known failures; the baseline is recorded as-is rather than selecting a friendlier SHA. <br>4. On the Saha01 parity fixture, current oracle Annotate entry can crash with `Rendered more hooks than during the previous render` in `TranscriptionLanes.tsx`; this is baseline behavior for 2026-04-26 evidence, not a rebuild-only invention. |
 
 ### Required completion items
 
-- [ ] baseline SHA recorded
-- [ ] fixture set recorded
-- [ ] any known contract quirks called out explicitly
-- [ ] both main agents acknowledge the same baseline
+- [x] baseline SHA recorded
+- [x] fixture set recorded
+- [x] any known contract quirks called out explicitly
+- [x] both main agents acknowledge the same baseline
+
+Acknowledgement basis on 2026-04-26: the active lane handoff PRs already reference the same rebuild/oracle SHA pair — parse-builder `#58` and parse-back-end `#59` both queue work against rebuild `f9aa3db1aa` and oracle `0951287a81`.
 
 ---
 
@@ -347,9 +357,9 @@ Parallel rebuild work may start only when every item below is true.
 
 | Role | Name | Date | Notes |
 |---|---|---|---|
-| Coordinator | | | |
-| Agent A owner | | | |
-| Agent B owner | | | |
+| Coordinator | parse-gpt | 2026-04-26 | Baseline freeze recorded; broader Phase 0 checklist remains open. |
+| Agent A owner | parse-builder lane | 2026-04-26 | Queue-time baseline in PR #58 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
+| Agent B owner | parse-back-end lane | 2026-04-26 | Queue-time baseline in PR #59 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
 
 ---
 

@@ -1,0 +1,119 @@
+[rebuild frontend] repo=/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice
+[rebuild frontend] sha=f9aa3db1aad1d77078c9105cd8b5e5254c066338
+[rebuild frontend] started=2026-04-26T15:54:49Z
+
+> parse-react@2.0.0-alpha test
+> vitest run --run
+
+
+ RUN  v1.6.1 /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice
+
+ ✓ src/hooks/__tests__/useWaveSurfer.test.ts  (10 tests) 45ms
+ ✓ src/hooks/__tests__/useActionJob.test.ts  (17 tests) 61ms
+ ✓ src/components/compare/CognateControls.test.tsx  (6 tests) 178ms
+ ✓ src/components/compare/BorrowingPanel.test.tsx  (7 tests) 271ms
+ ✓ src/components/shared/__tests__/BatchReportModal.test.tsx  (13 tests) 300ms
+ ✓ src/components/compute/__tests__/ClefSourcesReportModal.test.tsx  (9 tests) 281ms
+ ✓ src/components/shared/__tests__/TranscriptionRunModal.test.tsx  (7 tests) 302ms
+ ✓ src/__tests__/referenceFormLists.test.ts  (24 tests) 5ms
+ ✓ src/components/parse/RightPanel.test.tsx  (5 tests) 389ms
+ ✓ src/hooks/__tests__/useSpectrogram.test.ts  (5 tests) 20ms
+ ✓ src/components/compare/ConceptTable.test.tsx  (6 tests) 107ms
+ ✓ src/components/annotate/AnnotationPanel.test.tsx  (6 tests) 200ms
+ ✓ src/components/annotate/AnnotateMode.test.tsx  (5 tests) 158ms
+stderr | src/components/annotate/AnnotateMode.test.tsx > AnnotateMode > renders OnboardingFlow when onboardingComplete is false
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ ✓ src/hooks/__tests__/useBatchPipelineJob.test.ts  (9 tests) 1571ms
+ ✓ src/hooks/__tests__/useImportExport.test.ts  (4 tests) 84ms
+ ✓ src/components/annotate/TranscriptPanel.test.tsx  (5 tests) 225ms
+ ✓ src/components/parse/modals/OffsetAdjustmentModal.test.tsx  (3 tests) 187ms
+ ✓ src/components/annotate/TranscriptionLanes.test.tsx  (1 test) 149ms
+ ✓ src/components/annotate/RegionManager.test.tsx  (7 tests) 306ms
+ ✓ src/components/compare/TagManager.test.tsx  (5 tests) 136ms
+ ✓ src/components/compare/CompareMode.test.tsx  (7 tests) 113ms
+ ✓ src/hooks/__tests__/useOffsetState.test.ts  (2 tests) 40ms
+ ✓ src/components/compare/SpeakerImport.test.tsx  (5 tests) 175ms
+ ✓ src/hooks/__tests__/useComputeJob.test.ts  (6 tests) 43ms
+ ✓ src/components/annotate/SuggestionsPanel.test.tsx  (6 tests) 158ms
+ ✓ src/hooks/__tests__/useExport.test.ts  (4 tests) 25ms
+ ✓ src/components/compare/EnrichmentsPanel.test.tsx  (5 tests) 184ms
+ ✓ src/hooks/__tests__/useChatSession.test.tsx  (3 tests) 55ms
+ ✓ src/components/compute/__tests__/ClefPopulateSummaryBanner.test.tsx  (3 tests) 265ms
+ ✓ src/__tests__/moveInterval.test.ts  (11 tests) 8ms
+ ✓ src/api/client.test.ts  (6 tests) 18ms
+ ✓ src/components/annotate/OnboardingFlow.test.tsx  (4 tests) 95ms
+ ✓ src/hooks/__tests__/useAnnotationSync.test.ts  (4 tests) 230ms
+ ✓ src/hooks/__tests__/useTagImport.test.ts  (3 tests) 43ms
+ ✓ src/components/annotate/ChatPanel.test.tsx  (4 tests) 169ms
+ ✓ src/components/shared/__tests__/ContextRing.test.tsx  (6 tests) 81ms
+ ✓ src/components/compare/ContactLexemePanel.test.tsx  (4 tests) 238ms
+ ✓ src/__tests__/annotationUndoRedo.test.ts  (10 tests) 5ms
+ ✓ src/__tests__/surveySort.test.ts  (8 tests) 5ms
+ ✓ src/components/shared/ChatMarkdown.test.tsx  (2 tests) 119ms
+stderr | src/__tests__/storePersistence.test.ts > Cross-session persistence > tagStore tags survive navigation to compare and back
+[tagStore] persist failed: ReferenceError: localStorage is not defined
+    at Object.persist (/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts:197:7)
+    at addTag (/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts:63:11)
+    at /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/__tests__/storePersistence.test.ts:60:5
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:135:14
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:60:26
+    at runTest (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:781:17)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runFiles (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:958:5)
+    at startTests (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:967:3)
+[tagStore] persist failed: ReferenceError: localStorage is not defined
+    at Object.persist (/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts:197:7)
+    at Object.tagConcept (/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts:95:11)
+    at /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/__tests__/storePersistence.test.ts:69:28
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:135:14
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:60:26
+    at runTest (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:781:17)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runFiles (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:958:5)
+    at startTests (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:967:3)
+
+ ✓ src/__tests__/storePersistence.test.ts  (4 tests) 21ms
+ ✓ src/__tests__/pollOffsetDetectJob.test.ts  (2 tests) 30ms
+ ✓ src/components/parse/ConceptSidebar.test.tsx  (2 tests) 219ms
+ ✓ src/components/parse/compareComputeContract.test.ts  (4 tests) 1ms
+ ✓ src/stores/configStore.test.ts  (2 tests) 3ms
+ ✓ scripts/apiRegressionConfig.test.mjs  (3 tests) 13ms
+ ✓ vite.config.test.ts  (3 tests) 3ms
+ ✓ src/pickOrthoIntervalForConcept.test.ts  (4 tests) 2ms
+ ✓ src/ParseUI.test.tsx  (52 tests) 5748ms
+
+ Test Files  49 passed (49)
+      Tests  333 passed (333)
+   Start at  17:54:49
+   Duration  8.13s (transform 2.38s, setup 6ms, collect 12.45s, tests 13.08s, environment 24.15s, prepare 7.25s)
+
+
+> parse-react@2.0.0-alpha build
+> vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2052 modules transformed.
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/api/client.ts is dynamically imported by /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts but also statically imported by /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/ParseUI.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compare/CommentsImport.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compare/LexemeDetail.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compare/SpeakerImport.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compute/ClefConfigModal.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compute/ClefSourcesReportModal.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/shared/TranscriptionRunModal.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useBatchPipelineJob.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useChatSession.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useComputeJob.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useExport.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useOffsetState.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useTagImport.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/annotationStore.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/configStore.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/enrichmentStore.ts, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/transcriptionLanesStore.ts, dynamic import will not move module into another chunk.
+
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/stores/tagStore.ts is dynamically imported by /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useChatSession.ts but also statically imported by /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/ParseUI.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/components/compare/LexemeDetail.tsx, /home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice/src/hooks/useTagImport.ts, dynamic import will not move module into another chunk.
+
+rendering chunks...
+computing gzip size...
+dist/index.html                               0.44 kB │ gzip:   0.30 kB
+dist/assets/spectrogram-worker-uKJ3prh1.js    2.77 kB
+dist/assets/index-CcUWcOXJ.css               52.70 kB │ gzip:   9.06 kB
+dist/assets/index-BN1vECTJ.js               680.98 kB │ gzip: 195.25 kB │ map: 2,791.57 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 3.11s
+[rebuild frontend] finished=2026-04-26T15:55:04Z
