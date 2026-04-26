@@ -14,3 +14,8 @@ Short version:
 - add regression coverage for Run / Refresh / CLEF Configure / Sources Report / auto-chained similarity / job rehydration
 - patch production code only where the audit proves a real drift
 - stay frontend-only and non-overlapping with PRs #36, #41, #43, #42, and #47 (with PR #46 already landed on main)
+
+Stale-task note:
+- docs PR #53 is no longer an actionable implementation handoff
+- its three requested frontend cleanups already landed on `origin/main` in commit `c5aee8b` (`fix(compare): bundle frontend contract hardening (#34)`)
+- see `.hermes/plans/2026-04-26-pr53-stale-audit.md` before attempting to replay that bundle
