@@ -3,24 +3,11 @@
 Status: pending
 
 Current instruction:
-- Implement the next backend-safe PARSE-rebuild slice in `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto` on `auto/parse-back-end`.
-- Follow the full prompt at `.hermes/plans/2026-04-25_234447-parse-back-end-job-observability-handoff-prompt.md`.
+- Work from `.hermes/plans/2026-04-26-parse-back-end-next-task-config-import-http-slice.md`.
+- Open a fresh implementation PR from current `origin/main`; do not resume any old auth/job-observability lane.
+- Stay strictly outside the Builder compute-mode semantics audit preserved by merged PR #22: https://github.com/TarahAssistant/PARSE-rebuild/pull/22
 
-Lane boundary:
-- This is the backend lane.
-- Stay out of `src/**` and all parse-builder-owned frontend shell work.
-- Safe ownership for this slice is `python/server.py`, `python/app/http/**`, and backend Python tests only.
-
-Short version:
-1. Extract the generic jobs/worker-status HTTP handler cluster out of `python/server.py`.
-2. Prefer a new helper such as `python/app/http/job_observability_handlers.py`.
-3. Add direct tests first, then keep thin wrappers in `server.py`.
-4. Re-run targeted Python validation plus full rebuild gates.
-
-Grounded seam locations:
-- `_api_get_jobs()` — around `python/server.py:6760`
-- `_api_get_job()` — around `python/server.py:6786`
-- `_api_get_job_logs()` — around `python/server.py:6795`
-- `_api_get_jobs_active()` — around `python/server.py:6821`
-- `_api_get_job_error_logs()` — around `python/server.py:6826`
-- `_api_get_worker_status()` — around `python/server.py:6873`
+Grounded state:
+- Current rebuild `origin/main`: `10de7f4` — `docs: add parse-builder compute-mode audit handoff (#22)`
+- Open PR set should only include this parse-back-end handoff PR once it is opened
+- Recommended backend slice: extract `/api/config`, `/api/concepts/import`, and `/api/tags/import` handlers from `python/server.py` into a dedicated `python/app/http` helper module with direct app-layer tests plus thin server-wrapper regressions
