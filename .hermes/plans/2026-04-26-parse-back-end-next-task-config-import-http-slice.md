@@ -1,60 +1,65 @@
-# parse-back-end next task — backend-only config/import extraction with zero UI drift
+# parse-back-end next prompt — preserve UI-facing contracts while extracting config/import handlers
 
 ## Goal
 
-Extract the config/import HTTP cluster from `python/server.py` into a dedicated backend handler module while preserving request/response behavior exactly and avoiding any contract drift that could force React UI changes.
+Extract the config/import HTTP cluster from `python/server.py` into a dedicated backend handler module **without changing any UI-facing API behavior**.
 
 ## Hard boundary
 
 - **Do not touch UI design.**
-- The React PARSE UI must remain identical to the original workstation.
-- Your responsibility is backend-only parity support: preserve shapes, semantics, and error behavior so the frontend can stay visually unchanged.
+- Builder owns the original-UI parity audit.
+- Your job is to keep backend behavior stable enough that the React UI can remain identical to the original workstation.
 
-## Why this is the right task now
+## Current context
 
-- Lucas explicitly locked the product direction: no React UI re-imagining.
-- Current rebuild `origin/main` is `0d78bb8` (`test(compare): harden compute semantics regressions (#28)`).
-- Builder is being redirected to audit and correct any UI drift against the original workstation.
-- The safest parallel parse-back-end lane is therefore a backend-only extraction that preserves existing API contracts exactly.
+- Current rebuild `origin/main`: `0d78bb8` (`test(compare): harden compute semantics regressions (#28)`)
+- Builder is auditing current React work for UI drift versus the original PARSE UI.
+- The safest parallel backend lane is contract-preserving extraction only.
 
 ## Specific task
 
-Extract this cluster from `python/server.py` into a dedicated `python/app/http` helper module:
+Create a backend-only implementation PR from current `origin/main` that extracts this cluster from `python/server.py` into `python/app/http`:
 - `GET /api/config`
 - `PUT /api/config`
 - `POST /api/concepts/import`
 - `POST /api/tags/import`
 
-Recommended module:
+Recommended new module:
 - `python/app/http/project_config_handlers.py`
 
 ## Non-negotiable behavior rules
 
 ### `/api/config`
-- Keep the `{ "config": ... }` response wrapper.
+- Keep the `{ "config": ... }` wrapper.
 - Preserve deep-merge semantics for `PUT /api/config`.
-- Preserve response shape: `{ "success": True, "config": merged }`.
+- Preserve the current response fields exactly.
 
 ### `/api/concepts/import`
-- Preserve multipart requirements, decoding, replace-mode behavior, matching rules, auto-add behavior, and current response field names.
+- Preserve multipart rules, decoding, replace-mode behavior, matching rules, auto-add behavior, and response field names.
 
 ### `/api/tags/import`
-- Preserve multipart requirements, filename-stem tag naming, additive merge behavior, matching rules, and current response field names.
+- Preserve multipart rules, filename-stem tag naming, additive merge behavior, matching rules, and response field names.
+
+## Required task steps
+
+1. Verify current route behavior before extraction.
+2. Extract the handlers into `python/app/http`.
+3. Add/keep direct Python tests for the extracted handlers.
+4. Keep thin server-wrapper regressions.
+5. If you find a contract issue that would force frontend/UI change, report it instead of adapting the UI.
 
 ## In scope
 
 - `python/server.py`
 - `python/app/http/*`
-- direct Python tests for the extracted handler module
-- thin server-wrapper regressions for the touched routes
+- Python tests for the extracted routes
 
 ## Out of scope
 
 - `src/ParseUI.tsx`
-- compare/annotate component changes
-- compute route semantics
-- frontend store or client redesign
-- any API shape change that would require visible UI adaptation
+- compare/annotate React components
+- UI redesign or frontend adaptation
+- compute route work
 
 ## Validation requirements
 
@@ -70,10 +75,8 @@ Run and report at least:
 
 ## Reporting requirements
 
-Open a fresh parse-back-end implementation PR from current `origin/main`.
-
-In the PR body, include:
+In your implementation PR, include:
 - exact routes extracted
 - confirmation that request/response behavior was preserved
-- confirmation that no UI-facing contract drift was introduced
+- whether any UI-facing contract risk was discovered
 - exact tests run

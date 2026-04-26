@@ -4,11 +4,12 @@ Status: ready_now
 
 Current instruction:
 - Stay **strictly backend-only**.
-- Support the original-UI parity rule by preserving API behavior exactly; do not propose or drive UI redesign.
+- While Builder audits the React UI against the original workstation, your job is to preserve backend contracts so the UI does not need to change.
 - Work from `.hermes/plans/2026-04-26-parse-back-end-next-task-config-import-http-slice.md`.
-- Open a fresh implementation PR from current `origin/main`; do not resume stale auth/job-observability lanes.
+- Before changing code, verify the current request/response behavior of the config/import routes you touch.
+- If you discover any contract drift that would require visible UI change, stop and report it instead of changing the UI.
 
 Grounded state:
 - Current rebuild `origin/main`: `0d78bb8` — `test(compare): harden compute semantics regressions (#28)`
-- Builder is being redirected to an original-UI parity audit/correction pass. Your lane should remain backend-only and avoid frontend/UI surfaces.
-- Lucas's hard rule: the React UI must match the original workstation exactly; backend work must not introduce contract drift that forces visible UI changes.
+- Builder is being explicitly redirected to an original-UI parity audit/correction pass.
+- Lucas hard rule: the React UI must match the original PARSE workstation exactly; backend work must not force UI redesign.
