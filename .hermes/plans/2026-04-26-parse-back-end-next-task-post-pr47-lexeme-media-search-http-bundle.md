@@ -1,4 +1,4 @@
-# parse-back-end next task — post-PR47 lexeme-notes + spectrogram/search HTTP bundle
+# parse-back-end next task — post-PR49 lexeme-notes + spectrogram/search HTTP bundle
 
 ## Goal
 
@@ -8,14 +8,14 @@ This is a behavior-preserving backend modularization and contract-test task.
 
 ## Why this is the right next task now
 
-- **PR #47** is the current parse-back-end queue entry for the compute + timestamp-offset HTTP contract.
+- **PR #49** is the active parse-back-end implementation follow-through for the prior compute+offset handoff.
 - **PR #48** is the queued Builder successor for Actions-menu contract cleanup.
 - **PR #42** remains a separate backend maintenance/worktree-hygiene lane.
 - **PRs #41 / #43 / #36** remain frontend/annotate/Builder lanes.
 
 So the next real parse-back-end slice should be:
 - backend-only
-- post-PR47
+- post-PR49
 - adjacent to current compare/annotate helper surfaces
 - explicitly zero-drift on route semantics
 
@@ -141,7 +141,7 @@ Create **one fresh parse-back-end implementation PR** from the latest `origin/ma
 
 ## Out of scope
 
-- PR #47 compute+offset HTTP task
+- PR #49 compute+offset HTTP task
 - PR #48 Builder Actions-menu task
 - PR #42 worktree hygiene
 - frontend TypeScript / React changes
@@ -165,7 +165,7 @@ In the PR body include:
 - which route behaviors were preserved explicitly
 - exact helper modules introduced
 - any implementation/spec drift found and corrected
-- confirmation of non-overlap with PRs `#47`, `#48`, `#42`, `#41`, `#43`, and `#36`
+- confirmation of non-overlap with PRs `#49`, `#48`, `#42`, `#41`, `#43`, and `#36`
 - exact tests run
 
 ## Academic / fieldwork considerations
