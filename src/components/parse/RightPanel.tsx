@@ -25,16 +25,17 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { formatEta } from '../../hooks/useActionJob';
+import {
+  isCompareComputeMode,
+  isCompareRunDisabled,
+  type CompareComputeJobStatus,
+  type CompareComputeMode,
+  type OffsetPhase,
+} from './compareComputeContract';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
 type CompareTagFilter = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic' | string;
-
-type ComputeMode = 'cognates' | 'similarity' | 'contact-lexemes' | string;
-
-type JobStatus = 'idle' | 'running' | 'complete' | 'error' | string;
-
-type OffsetPhase = 'idle' | 'manual' | 'detecting' | 'ready' | 'applying' | string;
 
 interface RightPanelProps {
   panelOpen: boolean;
@@ -47,11 +48,11 @@ interface RightPanelProps {
   onSpeakerSelect: (speaker: string) => void;
   onAddSpeaker: () => void;
   onToggleSpeaker: (speaker: string) => void;
-  computeMode: ComputeMode;
-  onComputeModeChange: (mode: string) => void;
+  computeMode: CompareComputeMode;
+  onComputeModeChange: (mode: CompareComputeMode) => void;
   onComputeRun: () => void;
-  crossSpeakerJobStatus: JobStatus;
-  computeJobStatus: JobStatus;
+  crossSpeakerJobStatus: CompareComputeJobStatus;
+  computeJobStatus: CompareComputeJobStatus;
   computeJobProgress: number;
   computeJobEtaMs: number | null;
   computeJobError: string | null;
@@ -208,7 +209,12 @@ export function RightPanel({
               <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compute</h4>
               <select
                 value={computeMode}
-                onChange={(e) => onComputeModeChange(e.target.value)}
+                onChange={(e) => {
+                  const nextMode = e.target.value;
+                  if (isCompareComputeMode(nextMode)) {
+                    onComputeModeChange(nextMode);
+                  }
+                }}
                 className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-indigo-300 focus:outline-none"
               >
                 <option value="cognates">Cognates</option>
@@ -219,11 +225,12 @@ export function RightPanel({
                 <button
                   className="inline-flex items-center justify-center gap-1 rounded-md bg-indigo-600 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
                   onClick={onComputeRun}
-                  disabled={
-                    computeMode === 'contact-lexemes'
-                      ? crossSpeakerJobStatus === 'running'
-                      : computeJobStatus === 'running' || selectedSpeakers.length === 0
-                  }
+                  disabled={isCompareRunDisabled({
+                    computeMode,
+                    selectedSpeakersCount: selectedSpeakers.length,
+                    crossSpeakerJobStatus,
+                    computeJobStatus,
+                  })}
                 >
                   <Play className="h-3 w-3" /> Run
                 </button>

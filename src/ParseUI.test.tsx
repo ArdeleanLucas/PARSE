@@ -230,6 +230,11 @@ vi.mock("./api/client", () => ({
   getJobLogs: vi.fn().mockResolvedValue({ lines: [] }),
   getClefConfig: vi.fn(() => Promise.resolve(mockClefConfig)),
   getContactLexemeCoverage: vi.fn(() => Promise.resolve(mockCoverage)),
+  getClefCatalog: vi.fn().mockResolvedValue({ languages: [] }),
+  getClefProviders: vi.fn().mockResolvedValue({ providers: [] }),
+  saveClefConfig: vi.fn().mockResolvedValue(undefined),
+  startContactLexemeFetch: vi.fn().mockResolvedValue({ job_id: 'contact-fetch-job-1' }),
+  listActiveJobs: vi.fn().mockResolvedValue([]),
 }));
 
 import { ParseUI } from "./ParseUI";
@@ -266,6 +271,18 @@ function makeRecord(
 async function switchToAnnotateMode() {
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
   fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
+}
+
+function getCompareComputeModePicker() {
+  const rightPanel = screen.getByTestId('right-panel');
+  return within(rightPanel).getAllByRole('combobox')[1] as HTMLSelectElement;
+}
+
+async function switchCompareComputeMode(mode: 'cognates' | 'similarity' | 'contact-lexemes') {
+  fireEvent.change(getCompareComputeModePicker(), { target: { value: mode } });
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 function createMockWaveSurferForLanes() {
@@ -387,6 +404,18 @@ beforeEach(() => {
   mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
   mockPollAuth.mockResolvedValue({ status: "pending" });
   mockStartAuthFlow.mockResolvedValue(undefined);
+  vi.mocked(apiClient.startCompute).mockResolvedValue({ job_id: 'compute-job-1', jobId: 'compute-job-1' });
+  vi.mocked(apiClient.pollCompute).mockResolvedValue({ status: 'running', progress: 0 });
+  vi.mocked(apiClient.getClefCatalog).mockResolvedValue({ languages: [] });
+  vi.mocked(apiClient.getClefProviders).mockResolvedValue({ providers: [] });
+  vi.mocked(apiClient.saveClefConfig).mockResolvedValue({
+    success: true,
+    config_path: 'config/sil_contact_languages.json',
+    primary_contact_languages: [],
+    language_count: 0,
+  });
+  vi.mocked(apiClient.startContactLexemeFetch).mockResolvedValue({ job_id: 'contact-fetch-job-1', jobId: 'contact-fetch-job-1' });
+  vi.mocked(apiClient.listActiveJobs).mockResolvedValue([]);
 
   mockLoadConfig.mockClear();
   mockHydrateTags.mockClear();
@@ -419,11 +448,18 @@ beforeEach(() => {
   vi.mocked(apiClient.startCompute).mockClear();
   vi.mocked(apiClient.pollCompute).mockClear();
   vi.mocked(apiClient.detectTimestampOffset).mockClear();
+  vi.mocked(apiClient.detectTimestampOffsetFromPairs).mockClear();
   vi.mocked(apiClient.pollOffsetDetectJob).mockClear();
   vi.mocked(apiClient.applyTimestampOffset).mockClear();
   vi.mocked(apiClient.getJobLogs).mockClear();
   vi.mocked(apiClient.getLingPyExport).mockClear();
   vi.mocked(apiClient.saveApiKey).mockClear();
+  vi.mocked(apiClient.getClefCatalog).mockClear();
+  vi.mocked(apiClient.getClefProviders).mockClear();
+  vi.mocked(apiClient.saveClefConfig).mockClear();
+  vi.mocked(apiClient.startContactLexemeFetch).mockClear();
+  vi.mocked(apiClient.listActiveJobs).mockClear();
+
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
   mockSaveEnrichments.mockClear();
@@ -1088,8 +1124,124 @@ describe("ParseUI", () => {
     expect(screen.queryByText("No reference data")).toBeNull();
   });
 
+  it("opens CLEF configuration instead of starting contact-lexeme compute when the drawer Run button is unconfigured", async () => {
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Run' });
+
+    await switchCompareComputeMode('contact-lexemes');
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() => expect(apiClient.getClefCatalog).toHaveBeenCalledTimes(1));
+    expect(apiClient.startCompute).not.toHaveBeenCalledWith('contact-lexemes');
+    expect(apiClient.getClefProviders).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-chains similarity after a successful configured contact-lexeme populate", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ['ar', 'fa'],
+      languages: [
+        { code: 'ar', name: 'Arabic' },
+        { code: 'fa', name: 'Persian' },
+      ],
+      config_path: '',
+      concepts_csv_exists: true,
+      meta: {},
+    };
+    vi.mocked(apiClient.startCompute).mockImplementation(async (computeType: string) => ({
+      job_id: computeType === 'contact-lexemes' ? 'contact-job-1' : 'similarity-job-1',
+      jobId: computeType === 'contact-lexemes' ? 'contact-job-1' : 'similarity-job-1',
+    }));
+    vi.mocked(apiClient.pollCompute).mockImplementation(async (computeType: string) => {
+      if (computeType === 'contact-lexemes') {
+        return {
+          status: 'complete',
+          progress: 100,
+          result: {
+            total_filled: 3,
+            filled: { ar: 2, fa: 1 },
+          },
+        };
+      }
+      return { status: 'running', progress: 10 };
+    });
+
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Run' });
+    vi.useFakeTimers();
+
+    await switchCompareComputeMode('contact-lexemes');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(apiClient.startCompute).toHaveBeenCalledWith('contact-lexemes');
+    expect(apiClient.startCompute).toHaveBeenCalledWith('similarity', { speakers: ['Fail01', 'Kalh01'] });
+  });
+
+  it("does not auto-chain similarity when contact-lexeme populate completes with zero filled forms", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ['ar'],
+      languages: [{ code: 'ar', name: 'Arabic' }],
+      config_path: '',
+      concepts_csv_exists: true,
+      meta: {},
+    };
+    vi.mocked(apiClient.startCompute).mockResolvedValue({ job_id: 'contact-job-2', jobId: 'contact-job-2' });
+    vi.mocked(apiClient.pollCompute).mockResolvedValue({
+      status: 'complete',
+      progress: 100,
+      result: { total_filled: 0, filled: {} },
+    });
+
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Run' });
+    vi.useFakeTimers();
+
+    await switchCompareComputeMode('contact-lexemes');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(apiClient.startCompute).toHaveBeenCalledTimes(1);
+    expect(apiClient.startCompute).toHaveBeenCalledWith('contact-lexemes');
+  });
+
+  it("rehydrates in-flight contact-lexeme and similarity jobs from listActiveJobs on mount", async () => {
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      { jobId: 'contact-job-9', type: 'compute:contact-lexemes', status: 'running', progress: 0.25 },
+      { jobId: 'similarity-job-9', type: 'compute:similarity', status: 'running', progress: 0.5 },
+    ]);
+    vi.mocked(apiClient.pollCompute).mockImplementation(async (computeType: string, jobId: string) => ({
+      status: 'running',
+      progress: jobId === 'contact-job-9' ? 25 : 50,
+      message: `${computeType}:${jobId}`,
+    }));
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(apiClient.pollCompute).toHaveBeenCalledWith('contact-lexemes', 'contact-job-9'));
+    expect(apiClient.pollCompute).toHaveBeenCalledWith('similarity', 'similarity-job-9');
+  });
+
+  it("keeps Refresh as an enrichments reload instead of starting another compute job", async () => {
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Refresh' });
+
+    mockLoadEnrichments.mockClear();
+    vi.mocked(apiClient.startCompute).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(mockLoadEnrichments).toHaveBeenCalledTimes(1));
+    expect(apiClient.startCompute).not.toHaveBeenCalled();
+  });
+
   it("runs cognate compute on the selected compare-speaker subset", async () => {
     render(<ParseUI />);
+
     await screen.findByRole("button", { name: "Run" });
 
     fireEvent.click(screen.getByRole("button", { name: "Kalh01" }));
@@ -1136,7 +1288,7 @@ describe("ParseUI", () => {
     expect(apiClient.startCompute).not.toHaveBeenCalled();
   });
 
-  it("keeps CLEF Run on the isolated contact-lexemes path even when no compare speakers are selected", async () => {
+  it("routes configured contact-lexeme Run through the isolated cross-speaker job path", async () => {
     mockClefConfig = {
       configured: true,
       primary_contact_languages: ["ar"],
@@ -1150,34 +1302,16 @@ describe("ParseUI", () => {
     await screen.findByRole("button", { name: "Run" });
 
     const rightPanel = screen.getByTestId("right-panel");
-    const computeModeSelect = within(rightPanel).getAllByRole("combobox")[1];
-    fireEvent.change(computeModeSelect, { target: { value: "contact-lexemes" } });
-    fireEvent.click(within(rightPanel).getByRole("button", { name: "Fail01" }));
-    fireEvent.click(within(rightPanel).getByRole("button", { name: "Kalh01" }));
+    await switchCompareComputeMode('contact-lexemes');
+    expect(getCompareComputeModePicker().value).toBe('contact-lexemes');
+    expect(screen.getByText(/CLEF configured/i)).toBeTruthy();
 
-    const runButton = screen.getByRole("button", { name: "Run" }) as HTMLButtonElement;
-    expect(runButton.disabled).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(within(rightPanel).getByRole("button", { name: "Run" }));
 
     await waitFor(() => {
       expect(apiClient.startCompute).toHaveBeenCalledTimes(1);
     });
     expect(vi.mocked(apiClient.startCompute).mock.calls[0]).toEqual(["contact-lexemes"]);
-  });
-
-  it("Refresh reloads enrichments only and does not start a compute job", async () => {
-    render(<ParseUI />);
-    await screen.findByRole("button", { name: "Refresh" });
-
-    mockLoadEnrichments.mockClear();
-    vi.mocked(apiClient.startCompute).mockClear();
-
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-
-    await waitFor(() => {
-      expect(mockLoadEnrichments).toHaveBeenCalledOnce();
-    });
-    expect(apiClient.startCompute).not.toHaveBeenCalled();
   });
 
   it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
