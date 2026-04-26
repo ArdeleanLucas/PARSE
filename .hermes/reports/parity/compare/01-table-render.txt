@@ -1,0 +1,14 @@
+Status: PASS
+Flow: Concept × speaker table render
+
+Oracle (0951287 / /tmp/parse-oracle-parity-current):
+- Loaded Compare on concept #1 (`hair`) with `521 concepts` and `10 selected` speaker rows visible.
+- Table headers rendered: Speaker, IPA & utterances, Arabic sim., Persian (Farsi) sim., Cognate, Flag.
+- Saha01 row was present and expandable.
+
+Rebuild (12fcc36 / /tmp/parse-rebuild-parity-current):
+- Loaded Compare on the same concept with the same `521 concepts` count and `10 selected` speaker rows.
+- Same header set and row ordering were visible.
+
+Evidence note:
+- No JS console errors were observed on either initial load.

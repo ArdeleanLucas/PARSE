@@ -1,0 +1,15 @@
+Status: PASS
+Flow: Cognate cycle through colors → assert visual state matches oracle
+
+Oracle:
+- The Saha01 cognate cell button cycled through manual group labels.
+- Observed visible state `B` with tooltip `Click cycles → C · Long-press resets to —`.
+- Clicking advanced the visible cell to `C` and persisted `manual_overrides.cognate_sets['1'] = { C: ['Saha01'] }`.
+
+Rebuild:
+- Rebuild started from the matched persisted baseline and the Saha01 cognate cell was visible.
+- Clicking advanced the visible cell from `C` to `D`, then to `E`.
+- Button text and color class changed with each click; persisted state became `manual_overrides.cognate_sets['1'] = { E: ['Saha01'] }`.
+
+Interpretation:
+- Manual per-cell cognate cycling works on both oracle and rebuild.

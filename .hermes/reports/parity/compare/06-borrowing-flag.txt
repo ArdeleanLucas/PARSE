@@ -1,0 +1,16 @@
+Status: PASS
+Flow: Borrowing mark on one form → reload → assert
+
+Operational interpretation:
+- In current React Compare, the per-speaker `Flag` column is the manual per-form adjudication surface.
+
+Oracle:
+- Toggled Saha01 from unflagged to flagged.
+- Persisted state: `manual_overrides.speaker_flags['1']['Saha01'] = true`.
+- Reload preserved the flagged state.
+
+Rebuild:
+- Rebuild started from the matched persisted baseline with `Saha01` flagged.
+- Toggled Saha01 back to unflagged.
+- Persisted state: `manual_overrides.speaker_flags['1']['Saha01'] = false`.
+- Reload preserved the cleared state and the button class reverted to the unflagged styling.

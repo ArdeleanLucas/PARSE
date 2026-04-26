@@ -1,0 +1,16 @@
+Status: PASS
+Flow: Notes persistence on one concept → reload → assert
+
+Oracle:
+- Wrote `oracle-note-2026-04-26` into the concept-level Notes textarea.
+- Storage key written: `localStorage['parseui-compare-notes-v1'] = { '1': 'oracle-note-2026-04-26' }`.
+- Reload preserved both the textarea value and the localStorage entry.
+
+Rebuild:
+- Cleared the browser-local notes key first to avoid oracle carry-over.
+- Wrote `rebuild-note-2026-04-26` into the same concept-level Notes textarea.
+- Storage key written: `localStorage['parseui-compare-notes-v1'] = { '1': 'rebuild-note-2026-04-26' }`.
+- Reload preserved both the textarea value and the localStorage entry.
+
+Important caveat:
+- This concept-level note path is browser-local (`localStorage`), not backend enrichments persistence.
