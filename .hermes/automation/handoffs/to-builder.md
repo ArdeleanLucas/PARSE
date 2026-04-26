@@ -1,12 +1,17 @@
 # To parse-builder
 
-Status: pending
+Status: queued_after_pr34
 
 Current instruction:
-- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-borrowing-panel-typed-client.md`.
-- Open a fresh implementation PR from current `origin/main`.
-- Keep this slice frontend-only and stay out of parse-back-end PR #23: https://github.com/TarahAssistant/PARSE-rebuild/pull/23
+- Lucas wants **longer tasks**, not more micro-PRs.
+- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-ui-parity-bundle.md`.
+- After PR #34, build **one larger frontend-only implementation PR** that audits and corrects any React UI drift against the oracle/live PARSE UI.
+- Use `/home/lucas/gh/ardeleanlucas/parse` as the canonical UI reference.
+- Do **not** redesign or re-imagine the UI.
+- Keep this lane strictly frontend-only and non-overlapping with parse-back-end PR #35.
 
 Grounded state:
-- Current rebuild `origin/main`: `5cf12ca` — `feat(compare): make compute payload semantics explicit (#24)`
-- Recommended Builder slice: replace the remaining raw `fetch("/config/sil_contact_languages.json")` in `src/components/compare/BorrowingPanel.tsx` with the existing typed CLEF client surface and update its tests accordingly.
+- Current rebuild `origin/main`: `70f9783` — `refactor(config): extract config and CSV import HTTP handlers (#33)`
+- Active Builder implementation PR: #34 — `fix(compare): bundle frontend contract hardening`
+- Queued parse-back-end handoff PR: #35 — `docs: add parse-back-end tags/export bundle handoff`
+- Earlier Builder docs PR #32 has been consumed by PR #34 and should no longer be treated as the next task source.
