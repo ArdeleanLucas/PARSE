@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import types
 from typing import Any, Dict, List, Tuple
 
 import pytest
@@ -63,9 +64,11 @@ def _make_provider(tmp_path: pathlib.Path, stt_config: Dict[str, Any],
         provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
     )
 
-    # Skip the real CUDA DLL dance by monkeypatching the import path.
-    import faster_whisper  # type: ignore
-    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+    monkeypatch.setitem(
+        sys.modules,
+        "faster_whisper",
+        types.SimpleNamespace(WhisperModel=_StubWhisperModel),
+    )
 
     provider = LocalWhisperProvider(
         config={"stt": stt_config},
@@ -89,8 +92,11 @@ def _make_ortho_provider(
     monkeypatch.setattr(
         provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
     )
-    import faster_whisper  # type: ignore
-    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+    monkeypatch.setitem(
+        sys.modules,
+        "faster_whisper",
+        types.SimpleNamespace(WhisperModel=_StubWhisperModel),
+    )
 
     ortho_model_dir = tmp_path / "razhan-ct2"
     ortho_model_dir.mkdir(exist_ok=True)

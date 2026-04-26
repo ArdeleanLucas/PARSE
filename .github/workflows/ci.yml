@@ -216,7 +216,9 @@ jobs:
             python/test_openai_auth_status.py \
             python/test_chat_job_result_shape.py \
             python/test_run_stt_job.py \
-            python/test_server_auth_key_refresh.py
+            python/test_server_auth_key_refresh.py \
+            python/test_stt_configurable_transcribe.py::test_ortho_section_defaults_cascade_guard \
+            python/test_stt_configurable_transcribe.py::test_ortho_explicit_override_beats_defaults
 
   parity-harness:
     name: Parity Diff Harness
