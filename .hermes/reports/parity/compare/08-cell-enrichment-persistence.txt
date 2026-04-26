@@ -1,0 +1,13 @@
+Status: PASS
+Flow: Enrichment edit on one cell → reload → assert persistence
+
+Oracle:
+- Manual cognate-cell edit on Saha01 persisted to `manual_overrides.cognate_sets['1']`.
+- Reload showed the same group letter (`C`) in the row.
+
+Rebuild:
+- Manual cognate-cell edit on Saha01 persisted to `manual_overrides.cognate_sets['1']`.
+- Reload showed the same group letter (`E`) in the row.
+
+Interpretation:
+- The per-cell enrichment save path is functioning in rebuild even though the top-level `Accept / Split / Merge` decision row diverges.

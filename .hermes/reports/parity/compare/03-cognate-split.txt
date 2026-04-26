@@ -1,0 +1,12 @@
+Status: FAIL
+Flow: Cognate split on a known-mismatch pair → reload → assert persistence
+
+Oracle:
+- Clicked `Split` for concept `#1`.
+- `GET /api/enrichments` showed `cognate_decisions['1'] = { decision: 'split', ... }`.
+- Reload preserved the `split` decision.
+
+Rebuild:
+- Clicked `Split` for the same concept.
+- `GET /api/enrichments` stayed on the prior `merge` decision.
+- No browser-side error surfaced, but the split action produced no persisted change.

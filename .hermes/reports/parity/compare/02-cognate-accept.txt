@@ -1,0 +1,16 @@
+Status: FAIL
+Flow: Cognate accept on a known-cognate pair → reload → assert persistence
+
+Oracle:
+- Clicked `Accept grouping` for concept `#1`.
+- `GET /api/enrichments` showed `cognate_decisions['1'] = { decision: 'accepted', ... }`.
+- Reload preserved the `accepted` decision.
+
+Rebuild:
+- Clicked `Accept grouping` for the same concept.
+- `GET /api/enrichments` remained at the pre-existing baseline `cognate_decisions['1'] = { decision: 'merge', ... }`.
+- No state change was observed after waiting; the action appeared inert.
+
+Interpretation:
+- Oracle persists row-level cognate decisions.
+- Rebuild current-main did not write the accept decision in browser-driven testing.

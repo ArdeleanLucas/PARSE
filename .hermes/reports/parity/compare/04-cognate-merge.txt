@@ -1,0 +1,12 @@
+Status: FAIL
+Flow: Cognate merge → reload → assert persistence
+
+Oracle:
+- After confirming `split` persisted, clicked `Merge`.
+- `GET /api/enrichments` changed to `cognate_decisions['1'] = { decision: 'merge', ... }`.
+- Reload preserved `merge`.
+
+Rebuild:
+- The rebuild run began from a baseline where `cognate_decisions['1']` was already `merge`.
+- Clicking `Merge` left the same `merge` object in place, but earlier `Accept` and `Split` clicks were inert.
+- As a result, the merge transition could not be isolated in rebuild current-main; the whole decision-button cluster appears non-functional.
