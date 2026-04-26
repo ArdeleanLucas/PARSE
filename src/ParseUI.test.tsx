@@ -1088,6 +1088,32 @@ describe("ParseUI", () => {
     expect(screen.queryByText("No reference data")).toBeNull();
   });
 
+  it("runs cognate compute on the selected compare-speaker subset", async () => {
+    render(<ParseUI />);
+    await screen.findByRole("button", { name: "Run" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Kalh01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => {
+      expect(apiClient.startCompute).toHaveBeenCalledWith("cognates", { speakers: ["Fail01"] });
+    });
+  });
+
+  it("runs similarity compute on the selected compare-speaker subset", async () => {
+    render(<ParseUI />);
+    await screen.findByRole("button", { name: "Run" });
+
+    const computeModeSelect = within(screen.getByTestId("right-panel")).getAllByRole("combobox")[1];
+    fireEvent.change(computeModeSelect, { target: { value: "similarity" } });
+    fireEvent.click(screen.getByRole("button", { name: "Kalh01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => {
+      expect(apiClient.startCompute).toHaveBeenCalledWith("similarity", { speakers: ["Fail01"] });
+    });
+  });
+
   it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
     // Regression: the mount effect used to call setProvider('openai')
     // unconditionally whenever the backend said authenticated=true, so users

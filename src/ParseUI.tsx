@@ -2170,7 +2170,20 @@ export function ParseUI() {
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState('cognates');
-  const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode);
+  const compareComputePayload = useMemo(() => {
+    const speakers = selectedSpeakers.filter((speaker) => speaker.trim().length > 0);
+    if (speakers.length === 0) return undefined;
+    return { speakers };
+  }, [selectedSpeakers]);
+  const computeJobLabel = useMemo(() => {
+    if (computeMode === 'cognates') return 'Recomputing cognates + similarity…';
+    if (computeMode === 'similarity') return 'Recomputing shared similarity path…';
+    return `Computing ${computeMode}…`;
+  }, [computeMode]);
+  const { start: startComputeJob, state: computeJobState, reset: resetComputeJob } = useComputeJob(computeMode, {
+    body: compareComputePayload,
+    label: computeJobLabel,
+  });
   const [clefModalOpen, setClefModalOpen] = useState(false);
   // Sources Report modal — shows provider attribution for every populated
   // reference form. Opened from the Compute panel's CLEF status row; read-

@@ -104,13 +104,20 @@ Implication for future work:
 - new comparative decision affordances should extend the canonical `parse-decisions/v1` payload via `manual_overrides.*`
 - annotate-local convenience state should stay clearly segregated from enrichments-backed compare decisions
 
-### 5. Verify compute-mode semantics against the server
+### 5. Compute-mode semantics against the server ✅ DONE on the current line
 
-`useComputeJob` is already mounted in ParseUI, so the remaining work is to verify:
+The Compare compute drawer is now explicit and academically honest about what it sends and what the current server does:
 
-- that each selected `computeMode` maps to a real supported server compute type
-- whether additional payload is needed (speaker subset / concept scope)
-- whether refresh semantics should reload enrichments only or also re-run compute
+- `cognates` and `similarity` both map to real supported server compute types.
+- Generic compare compute runs now send an explicit `speakers` subset payload derived from the currently selected Compare speakers.
+- Concept scope intentionally remains whole-workspace because the UI does **not** yet expose an explicit concept-scope control; no hidden single-concept narrowing is applied.
+- `contact-lexemes` / CLEF remains on its dedicated `crossSpeakerJob` + config-modal flow; it is not collapsed back into the generic compute hook.
+- The UI now states honestly that `similarity` currently uses the same shared backend recompute path as `cognates` on the current server.
+- `Refresh` semantics remain "reload saved enrichments only" rather than silently re-running compute.
+
+Implication for future work:
+- if Lucas wants true algorithmic separation between `cognates` and `similarity`, that is a backend follow-up rather than a shell-only wording fix
+- if concept-scoped compare recompute is desired later, it must be explicit in the UI and test-backed rather than inferred from the currently selected concept
 
 ### 6. Deferred validation backlog after contract reconciliation
 
@@ -130,7 +137,7 @@ Stage 3 landed in PR #58: `js/`, `parse.html`, `compare.html`, `review_tool_dev.
 2. **Do not** reopen completed annotate/compare wiring tasks from the historical TODO.
 3. Audit `src/ParseUI.tsx`, `src/api/client.ts`, and `python/server.py` together.
 4. Wire remaining Actions menu handlers to the typed client surface.
-5. Verify compute-mode semantics and payload expectations against the server.
+5. ~~Verify compute-mode semantics and payload expectations against the server.~~ ✅ Done on the current line (selected-speaker payloads + honest similarity semantics)
 6. Re-run targeted tests and full test suite.
 7. Keep the deferred validation backlog current and return to it when real-data testing is ready.
 
@@ -144,4 +151,4 @@ Stage 3 landed in PR #58: `js/`, `parse.html`, `compare.html`, `review_tool_dev.
 
 If starting the next code slice now, the brief should be:
 
-> Contract gaps are fixed, and the canonical decisions artifact is now `parse-decisions/v1` over `manual_overrides.*`. Audit remaining ParseUI Actions menu handlers against the live typed client/server contract, verify compute-mode semantics and payload expectations, keep the deferred validation backlog current, and continue broader React-shell cleanup as Lucas requests.
+> Contract gaps are fixed, canonical decisions persist through `parse-decisions/v1`, and compare compute payload semantics are now explicit for selected-speaker recomputes. Keep the deferred validation backlog current, verify remaining browser/export evidence when real-data workflows are ready, and continue broader React-shell cleanup as Lucas requests.

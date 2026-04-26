@@ -105,4 +105,16 @@ describe('RightPanel', () => {
     expect(onExportLingPy).toHaveBeenCalledOnce();
     expect(onOpenCommentsImport).toHaveBeenCalledOnce();
   });
+
+  it('explains similarity mode as a selected-speaker recompute that shares the cognate backend path', () => {
+    renderRightPanel({
+      currentMode: 'compare',
+      selectedSpeakers: ['Fail01', 'Fail02'],
+      computeMode: 'similarity',
+    });
+
+    expect(screen.getByText(/Selected speakers only: 2 of 2/i)).toBeTruthy();
+    expect(screen.getByText(/shared backend recompute path as Cognates/i)).toBeTruthy();
+    expect(screen.getByText(/Refresh reloads saved enrichments only/i)).toBeTruthy();
+  });
 });
