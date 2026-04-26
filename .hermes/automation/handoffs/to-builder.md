@@ -3,19 +3,18 @@
 Status: ready_now
 
 Current instruction:
-- Lucas wants **longer tasks**, not more micro-PRs.
-- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-ui-parity-bundle.md`.
-- Build **one larger frontend-only implementation PR** from current `origin/main` that audits and corrects the remaining shell / chrome UI parity drift against the oracle/live PARSE UI.
+- **Correction:** do not reuse the previous shell-parity framing as-is. PR #38 already consumed that visible compare-controls parity slice.
+- Lucas wants a **genuinely new longer task**, not the stale version of PR #36.
+- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-annotate-parity-bundle.md`.
+- Build **one larger frontend-only implementation PR** from current `origin/main` that audits and corrects the remaining **annotate-mode workstation parity** against the oracle/live PARSE UI.
 - Use `/home/lucas/gh/ardeleanlucas/parse` as the canonical UI reference.
 - **Do not redesign or re-imagine the UI.**
-- Stay strictly out of the compare contract files already bundled in PR #34.
-- Treat merged PR #38 as done; this next task should continue the remaining shell-parity work beyond that compare-compute copy removal.
+- Stay strictly out of the compare-contract files already bundled in PR #34 and out of backend-owned surfaces.
 
 Grounded state:
-- Current rebuild `origin/main`: `72ae7ef` — `fix(ui): remove rebuild-only compare semantics copy (#38)`
-- Open Builder implementation PR still in flight but non-overlapping:
-  - PR #34 — `fix(compare): bundle frontend contract hardening`
-- Open parse-back-end lanes to avoid overlapping with:
-  - PR #39 — `refactor(tags): extract tag and export HTTP handlers`
-  - PR #37 — `docs: add parse-back-end CLEF HTTP bundle handoff`
-- This task should focus on shell/UI parity surfaces such as `src/ParseUI.tsx`, `src/components/parse/ConceptSidebar.tsx`, `src/components/parse/RightPanel.tsx`, and their tests.
+- Current rebuild `origin/main`: `bd226e1` — `refactor(tags): extract tag and export HTTP handlers (#39)`
+- Recently landed UI parity slice: PR #38 — compare compute explainer removal
+- Open non-overlap lanes:
+  - PR #34 — compare contract hardening
+  - PR #37 — queued parse-back-end CLEF HTTP bundle
+- This next Builder task should focus on annotate-mode parity surfaces such as `src/components/annotate/*`, relevant `src/ParseUI.tsx` annotate sections, and their tests.
