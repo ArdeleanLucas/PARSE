@@ -11,16 +11,50 @@ This harness replaces the old plan of writing one evidence doc per surface. Inst
 - LingPy and NEXUS exports
 - persisted JSON artifacts in the workspace
 
-Current scope is a first-pass shared fixture that exercises:
+## Current Round 2 scope
 
-1. `GET /api/config`
-2. `POST /api/concepts/import`
-3. `POST /api/tags/import`
-4. `POST /api/onboard/speaker` + `POST /api/onboard/speaker/status`
-5. `GET /api/annotations/{speaker}`
-6. `POST /api/lexeme-notes/import`
-7. `GET /api/export/lingpy`
-8. `GET /api/export/nexus`
+The shared fixture now exercises every §6 contract group in `docs/plans/option1-parity-inventory.md` via deterministic, report-only probes. The emitted `report.json` includes a `coverage` section that maps each contract group to the concrete scenario keys used for Round 2 sign-off.
+
+1. annotation data (`GET/POST /api/annotations`, `GET /api/stt-segments`)
+2. project config + pipeline state (`GET/PUT /api/config`, `GET /api/pipeline/state/{speaker}`)
+3. enrichments / tags / notes / imports
+4. auth status + poll/logout + invalid key failure envelope
+5. STT / normalize / onboard job lifecycle coverage
+6. offset detect-from-pair + apply
+7. suggestions + lexeme search
+8. chat session surfaces + invalid chat run / unknown status failure handling
+9. generic compute (`full_pipeline`) + job observability
+10. export + media contract (`LingPy`, `NEXUS`, spectrogram URL shape)
+11. CLEF config/catalog/providers/report + contact-lexeme fetch
+
+### Round 2 operation breadth
+
+The sequential scenario also covers the explicit Round 2 user-facing surfaces:
+
+- CSV concept import
+- speaker onboard
+- CLEF config + fetch
+- batch transcription run (`full_pipeline` contract path)
+- LingPy + NEXUS export with cognate decisions saved in enrichments
+- tag merge
+- enrichment / lexeme-note save-load
+
+### Failure-mode coverage
+
+The harness asserts matching **status code + error envelope** for at least these negative paths:
+
+- invalid annotation save
+- missing speaker
+- malformed CLEF config
+- export with empty wordlist (LingPy 500, plus current NEXUS zero-character behavior)
+
+## Canonicalization + allowlist
+
+Round 2 adds:
+
+- `canonicalization.md` — float rounding, stable list sorting, UUID masking, path relativization, timestamp masking
+- `allowlist.yaml` — explicit accepted-diff rules only; permanent rules must carry a real reason + `reason_ref`
+- `SIGNOFF.md` — sign-off template with diff counts, allowlist counts, and P0/P1 coverage checkboxes
 
 ## Local run
 
@@ -51,9 +85,14 @@ Fixtures live under `parity/harness/fixtures/`:
 - `tags-import.csv`
 - `onboard-concepts.csv`
 - `lexeme-notes.csv`
-- `workspace/` seed JSON files
+- `workspace/project.json`
+- `workspace/source_index.json`
+- `workspace/concepts.csv`
+- `workspace/parse-enrichments.json`
+- `workspace/annotations/Base01.parse.json`
+- `workspace/annotations/Base02.parse.json`
 
-`prepare_fixture_bundle()` also synthesizes a deterministic silent WAV at runtime so the repo does not need to carry binary audio fixtures.
+`prepare_fixture_bundle()` also synthesizes deterministic silent WAVs at runtime so the repo does not need to carry binary audio fixtures.
 
 ## CI
 
@@ -62,4 +101,10 @@ GitHub Actions runs two parity-harness checks:
 1. fast unit coverage for the harness module
 2. a report-only end-to-end oracle-vs-rebuild run with artifacts uploaded from `parity/harness/output/ci/`
 
-The long-term plan is to extend this one harness with additional scenarios instead of creating new per-surface parity evidence documents.
+The CI summary reports:
+
+- raw diff count
+- allowlisted diff count
+- remaining unallowlisted diff count
+
+The long-term rule remains the same: extend this one harness instead of spawning new one-off parity evidence docs.

@@ -2,12 +2,20 @@
   "computed_at": null,
   "config": {
     "contact_languages": [],
-    "speakers_included": [],
-    "concepts_included": [],
+    "speakers_included": [
+      "Base01",
+      "Base02"
+    ],
+    "concepts_included": [
+      1,
+      2,
+      3
+    ],
     "lexstat_threshold": 0.6
   },
   "cognate_sets": {},
   "similarity": {},
   "borrowing_flags": {},
-  "manual_overrides": {}
+  "manual_overrides": {},
+  "lexeme_notes": {}
 }

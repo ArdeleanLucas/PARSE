@@ -257,6 +257,11 @@ Use only these status values:
 
 Coordinator-owned shared parity surfaces should remain under `parity/contracts/`, `parity/harness/`, `parity/fixtures/`, and `parity/deviations.md`; lane-owned evidence lives under the UI/API/jobs/export subtrees only when the harness cannot cover the surface directly.
 
+The harness root now also carries its own support artifacts:
+- `canonicalization.md` — volatility normalization rules
+- `allowlist.yaml` — explicit accepted-diff rules with reasons
+- `SIGNOFF.md` — coordinator sign-off template
+
 ```text
 parity/
   contracts/
@@ -264,6 +269,9 @@ parity/
     route-inventory.md
   harness/
     README.md
+    canonicalization.md
+    allowlist.yaml
+    SIGNOFF.md
     fixtures/
     tests/
     output/        # ignored runtime reports / uploaded CI artifacts

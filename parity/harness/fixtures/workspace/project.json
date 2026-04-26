@@ -1,3 +1,20 @@
 {
-  "project_id": "parse-parity-fixture"
+  "project_id": "parse-parity-fixture",
+  "name": "PARSE parity fixture",
+  "audio_dir": "audio",
+  "annotations_dir": "annotations",
+  "speakers": {
+    "Base01": {
+      "language": "sdh"
+    },
+    "Base02": {
+      "language": "sdh"
+    }
+  },
+  "concepts": {
+    "source": "concepts.csv",
+    "id_column": "id",
+    "label_column": "concept_en",
+    "total": 3
+  }
 }
