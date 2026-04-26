@@ -3,7 +3,6 @@
 import cgi
 import copy
 import http.server
-import io
 import json
 import math
 import os
@@ -52,6 +51,13 @@ from app.http.job_observability_handlers import (
     build_jobs_active_response as _app_build_jobs_active_response,
     build_jobs_response as _app_build_jobs_response,
     build_worker_status_response as _app_build_worker_status_response,
+)
+from app.http.project_config_handlers import (
+    ProjectConfigHandlerError as _app_ProjectConfigHandlerError,
+    build_concepts_import_response as _app_build_concepts_import_response,
+    build_get_config_response as _app_build_get_config_response,
+    build_tags_import_response as _app_build_tags_import_response,
+    build_update_config_response as _app_build_update_config_response,
 )
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
@@ -7689,8 +7695,11 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     # ── Config endpoints ─────────────────────────────────────────
 
     def _api_get_config(self) -> None:
-        config = _workspace_frontend_config(load_ai_config(_config_path()))
-        self._send_json(HTTPStatus.OK, {"config": config})
+        response = _app_build_get_config_response(
+            load_config=lambda: load_ai_config(_config_path()),
+            workspace_frontend_config=_workspace_frontend_config,
+        )
+        self._send_json(response.status, response.payload)
 
     def _api_get_export_lingpy(self) -> None:
         """Stream LingPy-compatible wordlist TSV as a file download."""
@@ -8252,308 +8261,48 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
-        current = load_ai_config(_config_path())
-        merged = _deep_merge_dicts(current, body)
-        _write_json_file(_config_path(), merged)
-        self._send_json(HTTPStatus.OK, {"success": True, "config": merged})
+        try:
+            response = _app_build_update_config_response(
+                body,
+                load_config=lambda: load_ai_config(_config_path()),
+                deep_merge_dicts=_deep_merge_dicts,
+                write_config=lambda merged: _write_json_file(_config_path(), merged),
+            )
+        except _app_ProjectConfigHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+
+        self._send_json(response.status, response.payload)
 
     def _api_post_concepts_import(self) -> None:
-        """Merge survey_item / custom_order from an uploaded CSV into concepts.csv.
-
-        Upload format (CSV with header):
-            - `id` or `concept_en` (at least one for matching)
-            - `survey_item` (optional string)
-            - `custom_order` (optional integer; blank/non-numeric clears the field)
-
-        Matching: `id` first, then case-insensitive `concept_en`.
-        Rows in the existing concepts.csv that aren't in the upload keep their
-        existing `survey_item` / `custom_order`. Pass `?mode=replace` to clear
-        those fields on non-matching rows instead.
-        """
-        import csv as _csv
-        content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
-
-        raw_length = self.headers.get("Content-Length", "")
+        """Merge survey_item / custom_order from an uploaded CSV into concepts.csv."""
         try:
-            content_length = int(raw_length)
-        except (ValueError, TypeError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
-        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
-            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
+            response = _app_build_concepts_import_response(
+                headers=self.headers,
+                rfile=self.rfile,
+                project_root=_project_root(),
+                normalize_concept_id=_normalize_concept_id,
+                upload_limit=ONBOARD_MAX_UPLOAD_BYTES,
+            )
+        except _app_ProjectConfigHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        environ = {
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": content_type,
-            "CONTENT_LENGTH": str(content_length),
-        }
-        form = cgi.FieldStorage(
-            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
-        )
-
-        csv_item = form["csv"] if "csv" in form else None
-        if csv_item is None or not getattr(csv_item, "filename", None):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
-
-        try:
-            csv_text = csv_item.file.read().decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
-
-        mode_field = form.getfirst("mode", "") if "mode" in form else ""
-        replace_mode = str(mode_field or "").strip().lower() == "replace"
-
-        try:
-            reader = _csv.DictReader(io.StringIO(csv_text))
-            upload_rows = list(reader)
-        except _csv.Error as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv parse error: {0}".format(exc))
-
-        if not upload_rows:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv is empty")
-
-        fieldnames = [str(n or "").strip().lower() for n in (reader.fieldnames or [])]
-        if "id" not in fieldnames and "concept_en" not in fieldnames:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must have an id or concept_en column")
-
-        # Load existing
-        concepts_path = _project_root() / "concepts.csv"
-        existing: List[Dict[str, str]] = []
-        if concepts_path.exists():
-            with open(concepts_path, newline="", encoding="utf-8") as f:
-                existing = list(_csv.DictReader(f))
-
-        by_id: Dict[str, int] = {}
-        by_label: Dict[str, int] = {}
-        for idx, row in enumerate(existing):
-            rid = _normalize_concept_id(row.get("id"))
-            lbl = str(row.get("concept_en") or "").strip().lower()
-            if rid:
-                by_id[rid] = idx
-            if lbl:
-                by_label[lbl] = idx
-
-        if replace_mode:
-            for row in existing:
-                row["survey_item"] = ""
-                row["custom_order"] = ""
-
-        matched = 0
-        added = 0
-        for up in upload_rows:
-            up_id = _normalize_concept_id(up.get("id"))
-            up_label = str(up.get("concept_en") or "").strip()
-            target_idx: Optional[int] = None
-            if up_id and up_id in by_id:
-                target_idx = by_id[up_id]
-            elif up_label and up_label.lower() in by_label:
-                target_idx = by_label[up_label.lower()]
-
-            survey_raw = str(up.get("survey_item") or "").strip() if "survey_item" in up else ""
-            custom_raw = str(up.get("custom_order") or "").strip() if "custom_order" in up else ""
-
-            if target_idx is None:
-                if not up_label:
-                    continue
-                if not up_id:
-                    # Auto-assign next numeric id so imports that only specify labels work.
-                    existing_ids = {_normalize_concept_id(r.get("id")) for r in existing}
-                    next_id = 1
-                    while str(next_id) in existing_ids:
-                        next_id += 1
-                    up_id = str(next_id)
-                row = {
-                    "id": up_id,
-                    "concept_en": up_label,
-                    "survey_item": survey_raw,
-                    "custom_order": custom_raw,
-                }
-                existing.append(row)
-                by_id[up_id] = len(existing) - 1
-                by_label[up_label.lower()] = len(existing) - 1
-                added += 1
-            else:
-                row = existing[target_idx]
-                if survey_raw:
-                    row["survey_item"] = survey_raw
-                if custom_raw:
-                    row["custom_order"] = custom_raw
-                matched += 1
-
-        fieldnames_out = ["id", "concept_en", "survey_item", "custom_order"]
-        concepts_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(concepts_path, "w", newline="", encoding="utf-8") as f:
-            writer = _csv.DictWriter(f, fieldnames=fieldnames_out)
-            writer.writeheader()
-            for row in existing:
-                writer.writerow({k: row.get(k, "") or "" for k in fieldnames_out})
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "ok": True,
-                "matched": matched,
-                "added": added,
-                "total": len(existing),
-                "mode": "replace" if replace_mode else "merge",
-            },
-        )
+        self._send_json(response.status, response.payload)
 
     def _api_post_tags_import(self) -> None:
-        """Import a custom concept list as a TAG with auto-assigned concepts.
-
-        Multipart form fields:
-            - `csv` (file, required): columns `id` and/or `concept_en`.
-            - `tagName` (text, optional): defaults to the CSV filename stem.
-            - `color` (text, optional): hex or named, default "#4461d4".
-
-        Each CSV row is matched to an existing project concept by `id` first,
-        else case-insensitive `concept_en`. Matched concept ids are added to
-        the tag (merged — never removes existing assignments). Unmatched rows
-        are reported as `missedLabels` so the caller can review.
-        """
-        import csv as _csv
-        import re as _re
-
-        content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
-
-        raw_length = self.headers.get("Content-Length", "")
+        """Import a custom concept list as a TAG with auto-assigned concepts."""
         try:
-            content_length = int(raw_length)
-        except (ValueError, TypeError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
-        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
-            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
-
-        environ = {
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": content_type,
-            "CONTENT_LENGTH": str(content_length),
-        }
-        form = cgi.FieldStorage(
-            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
-        )
-
-        csv_item = form["csv"] if "csv" in form else None
-        if csv_item is None or not getattr(csv_item, "filename", None):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
-
-        try:
-            csv_text = csv_item.file.read().decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
-
-        csv_filename = os.path.basename(csv_item.filename or "tag.csv")
-        tag_name_field = form.getfirst("tagName", "") if "tagName" in form else ""
-        color_field = form.getfirst("color", "") if "color" in form else ""
-        tag_name = str(tag_name_field or "").strip()
-        if not tag_name:
-            tag_name = pathlib.Path(csv_filename).stem or "Custom list"
-        color = str(color_field or "").strip() or "#4461d4"
-
-        try:
-            reader = _csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
-        except _csv.Error as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv parse error: {0}".format(exc))
-        if not rows:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv is empty")
-
-        fieldnames = [str(n or "").strip().lower() for n in (reader.fieldnames or [])]
-        if "id" not in fieldnames and "concept_en" not in fieldnames:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must have an id or concept_en column")
-
-        # Load project concepts for matching
-        concepts_path = _project_root() / "concepts.csv"
-        project_concepts: List[Dict[str, str]] = []
-        if concepts_path.exists():
-            with open(concepts_path, newline="", encoding="utf-8") as f:
-                project_concepts = list(_csv.DictReader(f))
-
-        by_id: Dict[str, str] = {}
-        by_label: Dict[str, str] = {}
-        for c in project_concepts:
-            cid = _normalize_concept_id(c.get("id"))
-            lbl = str(c.get("concept_en") or "").strip()
-            if cid:
-                by_id[cid] = lbl
-            if lbl:
-                by_label[lbl.casefold()] = cid
-
-        matched_ids: List[str] = []
-        missed_labels: List[str] = []
-        seen_ids: set = set()
-        for row in rows:
-            row_id = _normalize_concept_id(row.get("id"))
-            row_label = str(row.get("concept_en") or "").strip()
-            cid = ""
-            if row_id and row_id in by_id:
-                cid = row_id
-            elif row_label and row_label.casefold() in by_label:
-                cid = by_label[row_label.casefold()]
-            if cid:
-                if cid not in seen_ids:
-                    matched_ids.append(cid)
-                    seen_ids.add(cid)
-            else:
-                missed_labels.append(row_label or row_id or "")
-
-        if not matched_ids:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "No rows matched any existing concept by id or concept_en. Import concepts first.",
+            response = _app_build_tags_import_response(
+                headers=self.headers,
+                rfile=self.rfile,
+                project_root=_project_root(),
+                normalize_concept_id=_normalize_concept_id,
+                concept_sort_key=_concept_sort_key,
+                upload_limit=ONBOARD_MAX_UPLOAD_BYTES,
             )
+        except _app_ProjectConfigHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        # Upsert into parse-tags.json (additive merge)
-        tag_id = _re.sub(r"[^a-z0-9]+", "-", tag_name.lower()).strip("-") or "tag"
-        tags_path = _project_root() / "parse-tags.json"
-        existing_tags: List[Dict[str, Any]] = []
-        if tags_path.exists():
-            try:
-                with open(tags_path, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                if isinstance(raw, list):
-                    existing_tags = raw
-            except (OSError, ValueError):
-                existing_tags = []
-
-        found = False
-        for tag in existing_tags:
-            if isinstance(tag, dict) and str(tag.get("id")) == tag_id:
-                prev = set(tag.get("concepts") or [])
-                prev.update(matched_ids)
-                tag["concepts"] = sorted(prev, key=_concept_sort_key)
-                tag["label"] = tag_name
-                tag["color"] = color
-                found = True
-                break
-        if not found:
-            existing_tags.append({
-                "id": tag_id,
-                "label": tag_name,
-                "color": color,
-                "concepts": sorted(set(matched_ids), key=_concept_sort_key),
-            })
-
-        with open(tags_path, "w", encoding="utf-8") as f:
-            json.dump(existing_tags, f, indent=2, ensure_ascii=False)
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "ok": True,
-                "tagId": tag_id,
-                "tagName": tag_name,
-                "color": color,
-                "matchedCount": len(matched_ids),
-                "missedCount": len(missed_labels),
-                "missedLabels": missed_labels[:50],
-                "totalTagsInFile": len(existing_tags),
-            },
-        )
+        self._send_json(response.status, response.payload)
 
     def _parse_single_range(self, range_header: str, file_size: int) -> Tuple[int, int]:
         unit, _, ranges_spec = range_header.partition("=")
