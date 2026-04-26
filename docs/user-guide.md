@@ -84,9 +84,12 @@ This is the main starting point for locating lexical material in long recordings
 
 #### ORTH
 
-The speaker-level ORTH job (`computeType='ortho'`) is backed by **Razhan** (`razhan/whisper-base-sdh`) for full-waveform Kurdish orthographic transcription.
+The speaker-level ORTH job (`computeType='ortho'`) is backed by a **local CTranslate2 conversion** of Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription.
 
-The current defaults keep VAD off so the whole recording is covered unless you deliberately retune it.
+Current runtime truth:
+- `ortho.model_path` must be an explicit local CT2 directory
+- HuggingFace repo ids are rejected here; convert first with `ct2-transformers-converter`
+- ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=True`, `condition_on_previous_text=False`, and `compression_ratio_threshold=1.8`
 
 #### Forced alignment
 

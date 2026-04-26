@@ -68,17 +68,23 @@ Operational notes from the current README and template:
 
 This block configures the orthographic transcription path.
 
-Current template:
+Current recommended ORTH block for `ai_config.json`:
 
 ```json
 "ortho": {
   "provider": "faster-whisper",
-  "model_path": "razhan/whisper-base-sdh",
+  "model_path": "/path/to/razhan-whisper-base-sdh-ct2",
   "language": "sd",
   "device": "cuda",
   "compute_type": "float16",
   "beam_size": 5,
-  "vad_filter": false,
+  "vad_filter": true,
+  "vad_parameters": {
+    "min_silence_duration_ms": 500,
+    "threshold": 0.35
+  },
+  "condition_on_previous_text": false,
+  "compression_ratio_threshold": 1.8,
   "initial_prompt": "",
   "refine_lexemes": false
 }
@@ -86,8 +92,9 @@ Current template:
 
 Key behavior:
 
-- **Razhan** is the canonical Southern Kurdish orthographic model
-- `vad_filter` defaults to **false** for full-waveform coverage in ORTH mode
+- **Razhan** (`razhan/whisper-base-sdh`) is still the canonical Southern Kurdish source model, but `ortho.model_path` must point at a **local CTranslate2 conversion directory**
+- HuggingFace repo ids are **rejected** in `ortho.model_path`; convert first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`
+- ORTH defaults now keep the anti-cascade guard enabled: `vad_filter=true` with tuned Silero params, `condition_on_previous_text=false`, and `compression_ratio_threshold=1.8`
 - `initial_prompt` can prime the Whisper decoder for elicitation-style recordings
 - `refine_lexemes=true` adds a short-clip lexeme refinement pass after forced alignment
 
@@ -147,7 +154,7 @@ Supported provider families for chat are currently:
 | Field | Value |
 |---|---|
 | Task | ORTH transcription / Southern Kurdish speech recognition |
-| Source | HuggingFace (local CT2 path or repo id) |
+| Source | Local CTranslate2 directory converted from `razhan/whisper-base-sdh` |
 | Role in PARSE | Speaker-level orthographic transcription for Southern Kurdish recordings |
 
 The current README emphasizes that Razhan produces **Kurdish Arabic-script orthographic transcription with word-level timestamps**. It is **not** the IPA engine.
