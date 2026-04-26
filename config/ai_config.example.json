@@ -15,9 +15,9 @@
     "model_only": true
   },
   "ortho": {
-    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). ORTH now requires an explicit local CTranslate2 path. Convert razhan/whisper-base-sdh first (for example: ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /models/razhan-whisper-base-sdh-ct2) and point model_path at that local CT2 directory. HuggingFace repo ids are intentionally rejected so ORTH cannot silently fall back to the wrong model. The recommended ORTH defaults below are the current anti-cascade safety contract for long recordings: vad_filter=true with tuned Silero params, condition_on_previous_text=false, and compression_ratio_threshold=1.8. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds ~1-2 min on thesis-scale audio but yields clean per-lexeme text in tiers.ortho_words even when the coarse ortho tier is monolithic.",
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH source model, but ortho.model_path must point at a local CTranslate2 conversion directory — do NOT put a HuggingFace repo id here. Convert razhan/whisper-base-sdh first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-ct2`, then set model_path to that output directory. The defaults below keep the anti-cascade guard enabled: tuned VAD on, condition_on_previous_text=false, compression_ratio_threshold=1.8. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds extra runtime but yields cleaner per-lexeme text in tiers.ortho_words.",
     "provider": "faster-whisper",
-    "model_path": "/models/razhan-whisper-base-sdh-ct2",
+    "model_path": "",
     "language": "sd",
     "device": "cuda",
     "compute_type": "float16",

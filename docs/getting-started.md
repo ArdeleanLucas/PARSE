@@ -159,25 +159,33 @@ Important note: if `config/ai_config.json` is missing entirely, the backend can 
 
 #### `ortho`
 
-This configures the orthographic transcription path. The tracked template documents **Razhan** as the canonical Southern Kurdish model:
+This configures the orthographic transcription path. The tracked example keeps **Razhan** as the canonical Southern Kurdish source model while requiring a local CT2 runtime path:
 
 ```json
 "ortho": {
   "provider": "faster-whisper",
-  "model_path": "razhan/whisper-base-sdh",
+  "model_path": "/path/to/razhan-whisper-base-sdh-ct2",
   "language": "sd",
   "device": "cuda",
   "compute_type": "float16",
   "beam_size": 5,
-  "vad_filter": false,
+  "vad_filter": true,
+  "vad_parameters": {
+    "min_silence_duration_ms": 500,
+    "threshold": 0.35
+  },
+  "condition_on_previous_text": false,
+  "compression_ratio_threshold": 1.8,
   "initial_prompt": "",
   "refine_lexemes": false
 }
 ```
 
-The template also explains two operational details worth preserving:
+The template also explains the current ORTH runtime contract:
 
-- `vad_filter` defaults to **false** for ORTH so Razhan can cover the full waveform unless you deliberately retune VAD for your recordings.
+- `ortho.model_path` must point at a **local CT2 conversion directory**. PARSE will not accept a HuggingFace repo id here.
+- To keep using Razhan, convert `razhan/whisper-base-sdh` first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`.
+- ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=true`, `condition_on_previous_text=false`, and `compression_ratio_threshold=1.8`.
 - `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime.
 
 #### `ipa` and `wav2vec2`
