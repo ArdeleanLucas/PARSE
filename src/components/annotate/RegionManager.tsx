@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useUIStore } from "../../stores/uiStore";
 import { usePlaybackStore } from "../../stores/playbackStore";
+import { LEGACY_ANNOTATE_REGION_STORAGE_KEY } from "../../lib/decisionPersistence";
 import { Button } from "../shared/Button";
 
 /* ------------------------------------------------------------------ */
@@ -37,18 +38,21 @@ export interface RegionManagerProps {
 
 type DecisionsMap = Record<string, Record<string, Decision>>;
 
-function loadDecisions(): DecisionsMap {
+// Annotate-only convenience state: prior manually assigned regions for the
+// waveform review workflow. This is intentionally local-only and segregated
+// from the compare-mode canonical `parse-decisions/v1` artifact.
+function loadLegacyRegionAssignments(): DecisionsMap {
   try {
-    const raw = localStorage.getItem("parse-decisions");
+    const raw = localStorage.getItem(LEGACY_ANNOTATE_REGION_STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveDecisions(d: DecisionsMap) {
+function saveLegacyRegionAssignments(decisions: DecisionsMap) {
   try {
-    localStorage.setItem("parse-decisions", JSON.stringify(d));
+    localStorage.setItem(LEGACY_ANNOTATE_REGION_STORAGE_KEY, JSON.stringify(decisions));
   } catch {
     /* ignore */
   }
@@ -134,7 +138,7 @@ export function RegionManager({ onSeek, onAssigned }: RegionManagerProps) {
       return;
     }
 
-    const decisions = loadDecisions();
+    const decisions = loadLegacyRegionAssignments();
     const conceptDecisions = decisions[activeConcept];
     const prior = conceptDecisions?.[activeSpeaker] ?? null;
     setPriorDecision(prior);
@@ -151,7 +155,7 @@ export function RegionManager({ onSeek, onAssigned }: RegionManagerProps) {
   const handleAssign = useCallback(() => {
     if (!activeSpeaker || !activeConcept || !selectedRegion) return;
 
-    const decisions = loadDecisions();
+    const decisions = loadLegacyRegionAssignments();
     const start = round3(selectedRegion.start);
     const end = round3(selectedRegion.end);
 
@@ -167,7 +171,7 @@ export function RegionManager({ onSeek, onAssigned }: RegionManagerProps) {
       decisions[activeConcept] = {};
     }
     decisions[activeConcept][activeSpeaker] = newDecision;
-    saveDecisions(decisions);
+    saveLegacyRegionAssignments(decisions);
 
     setPriorDecision(newDecision);
     setFeedback(`Assigned ${formatSec(start)}\u2013${formatSec(end)} to concept #${activeConcept}.`);

@@ -17,6 +17,14 @@ import type { JobLogsPayload } from './api/client';
 import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
 import { compareSurveyKeys } from './lib/surveySort';
+import {
+  applyCanonicalDecisionImport,
+  buildCanonicalDecisionPayload,
+  buildCognateDecisionPatch,
+  getStoredCognateDecision,
+  PARSE_DECISIONS_FILE_NAME,
+  type CognateDecisionValue,
+} from './lib/decisionPersistence';
 import { useSpectrogram } from './hooks/useSpectrogram';
 import { useWaveSurfer } from './hooks/useWaveSurfer';
 import { useAnnotationStore } from './stores/annotationStore';
@@ -198,6 +206,15 @@ function findAnnotationForConcept(record: AnnotationRecord | null | undefined, c
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readTextBlob(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
 }
 
 function buildSpeakerForm(
@@ -3001,8 +3018,47 @@ export function ParseUI() {
   const [aiHeight, setAiHeight] = useState(() => Math.round(window.innerHeight * 0.4));
   const [aiMinimized, setAiMinimized] = useState(true);
   const resizingRef = useRef(false);
-  const loadDecisionsRef = useRef<HTMLInputElement>(null);
-  const loadDecisionsMenuRef = useRef<HTMLInputElement>(null);
+  const decisionsImportRef = useRef<HTMLInputElement>(null);
+
+  const openDecisionsImport = useCallback((closeActionsMenu: boolean) => {
+    if (closeActionsMenu) setActionsMenuOpen(false);
+    decisionsImportRef.current?.click();
+  }, []);
+
+  const handleSaveDecisions = useCallback((closeActionsMenu: boolean) => {
+    if (closeActionsMenu) setActionsMenuOpen(false);
+    const payload = buildCanonicalDecisionPayload(enrichmentData);
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = PARSE_DECISIONS_FILE_NAME;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [enrichmentData]);
+
+  const handleDecisionsImport = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await readTextBlob(file);
+      const parsed = JSON.parse(text) as unknown;
+      const store = useEnrichmentStore.getState();
+      const nextData = applyCanonicalDecisionImport(store.data, parsed);
+      if (nextData) {
+        await store.replace(nextData);
+      }
+    } catch {
+      // non-fatal
+    }
+    event.target.value = '';
+  }, []);
+
+  const persistCognateDecision = useCallback((conceptKey: string, decision: CognateDecisionValue) => {
+    const patch = buildCognateDecisionPatch(conceptKey, decision, Date.now());
+    void useEnrichmentStore.getState().save(patch);
+  }, []);
 
   useEffect(() => {
     if (currentMode === 'annotate') {
@@ -3530,12 +3586,12 @@ export function ParseUI() {
                       <Upload className="h-3.5 w-3.5 text-slate-400"/> Import Custom Tags
                     </button>
                     <button
-                      onClick={() => { setActionsMenuOpen(false); loadDecisionsMenuRef.current?.click(); }}
+                      onClick={() => openDecisionsImport(true)}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
                     >
                       <Upload className="h-3.5 w-3.5 text-slate-400"/> Load Decisions
                     </button>
-                    <button onClick={() => setActionsMenuOpen(false)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+                    <button onClick={() => handleSaveDecisions(true)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
                       <Save className="h-3.5 w-3.5 text-slate-400"/> Save Decisions
                     </button>
                     <button
@@ -4083,38 +4139,32 @@ export function ParseUI() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-                    onClick={() => {
-                      const patch = { cognate_decisions: { [concept.key]: { decision: 'accepted', ts: Date.now() } } };
-                      void useEnrichmentStore.getState().save(patch);
-                    }}
+                    onClick={() => persistCognateDecision(concept.key, 'accepted')}
                   >
                     <Check className="h-3.5 w-3.5"/> Accept grouping
                   </button>
                   <button
                     className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    onClick={() => {
-                      const patch = { cognate_decisions: { [concept.key]: { decision: 'split', ts: Date.now() } } };
-                      void useEnrichmentStore.getState().save(patch);
-                    }}
+                    onClick={() => persistCognateDecision(concept.key, 'split')}
                   >
                     <Split className="h-3.5 w-3.5"/> Split
                   </button>
                   <button
                     className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    onClick={() => {
-                      const patch = { cognate_decisions: { [concept.key]: { decision: 'merge', ts: Date.now() } } };
-                      void useEnrichmentStore.getState().save(patch);
-                    }}
+                    onClick={() => persistCognateDecision(concept.key, 'merge')}
                   >
                     <GitMerge className="h-3.5 w-3.5"/> Merge
                   </button>
                   <button
                     className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     onClick={() => {
-                      const current = (enrichmentData?.cognate_decisions as Record<string,{decision:string}>)?.[concept.key]?.decision ?? 'accepted';
-                      const next = current === 'accepted' ? 'split' : current === 'split' ? 'merge' : 'accepted';
-                      const patch = { cognate_decisions: { [concept.key]: { decision: next, ts: Date.now() } } };
-                      void useEnrichmentStore.getState().save(patch);
+                      const current = getStoredCognateDecision(enrichmentData, concept.key)?.decision ?? 'accepted';
+                      const next: CognateDecisionValue = current === 'accepted'
+                        ? 'split'
+                        : current === 'split'
+                          ? 'merge'
+                          : 'accepted';
+                      persistCognateDecision(concept.key, next);
                     }}
                   >
                     <RotateCw className="h-3.5 w-3.5"/> Cycle
@@ -4221,17 +4271,8 @@ export function ParseUI() {
           onRefreshEnrichments={() => { void useEnrichmentStore.getState().load(); }}
           tagFilter={tagFilter}
           onTagFilterChange={setTagFilter}
-          onOpenLoadDecisions={() => loadDecisionsRef.current?.click()}
-          onSaveDecisions={() => {
-            const json = JSON.stringify(enrichmentData, null, 2);
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'parse-decisions.json';
-            a.click();
-            URL.revokeObjectURL(url);
-          }}
+          onOpenLoadDecisions={() => openDecisionsImport(false)}
+          onSaveDecisions={() => handleSaveDecisions(false)}
           onExportLingPy={handleExportLingPy}
           exporting={exporting}
           onOpenCommentsImport={() => setCommentsImportOpen(true)}
@@ -4251,20 +4292,9 @@ export function ParseUI() {
       <input
         type="file"
         accept=".json"
-        ref={loadDecisionsMenuRef}
+        ref={decisionsImportRef}
         style={{ display: 'none' }}
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          try {
-            const text = await file.text();
-            const data = JSON.parse(text) as Record<string, unknown>;
-            await useEnrichmentStore.getState().save(data);
-          } catch {
-            // non-fatal
-          }
-          e.target.value = '';
-        }}
+        onChange={handleDecisionsImport}
       />
       <Modal open={importModalOpen} onClose={() => setImportModalOpen(false)} title="Import Speaker">
         <SpeakerImport onImportComplete={handleImportComplete} />
@@ -4677,24 +4707,6 @@ export function ParseUI() {
       <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
         <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
       </Modal>
-      <input
-        type="file"
-        accept=".json"
-        ref={loadDecisionsRef}
-        style={{ display: 'none' }}
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          try {
-            const text = await file.text();
-            const data = JSON.parse(text) as Record<string, unknown>;
-            await useEnrichmentStore.getState().save(data);
-          } catch {
-            // non-fatal
-          }
-          e.target.value = '';
-        }}
-      />
     </div>
   );
 }
