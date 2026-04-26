@@ -1,17 +1,21 @@
 # To parse-builder
 
-Status: queued_after_pr34
+Status: ready_now
 
 Current instruction:
 - Lucas wants **longer tasks**, not more micro-PRs.
 - Work from `.hermes/plans/2026-04-26-parse-builder-next-task-ui-parity-bundle.md`.
-- After PR #34, build **one larger frontend-only implementation PR** that audits and corrects any React UI drift against the oracle/live PARSE UI.
+- Build **one larger frontend-only implementation PR** from current `origin/main` that audits and corrects the remaining shell / chrome UI parity drift against the oracle/live PARSE UI.
 - Use `/home/lucas/gh/ardeleanlucas/parse` as the canonical UI reference.
-- Do **not** redesign or re-imagine the UI.
-- Keep this lane strictly frontend-only and non-overlapping with parse-back-end PR #35.
+- **Do not redesign or re-imagine the UI.**
+- Stay strictly out of the compare contract files already bundled in PR #34.
+- Treat merged PR #38 as done; this next task should continue the remaining shell-parity work beyond that compare-compute copy removal.
 
 Grounded state:
-- Current rebuild `origin/main`: `70f9783` — `refactor(config): extract config and CSV import HTTP handlers (#33)`
-- Active Builder implementation PR: #34 — `fix(compare): bundle frontend contract hardening`
-- Queued parse-back-end handoff PR: #35 — `docs: add parse-back-end tags/export bundle handoff`
-- Earlier Builder docs PR #32 has been consumed by PR #34 and should no longer be treated as the next task source.
+- Current rebuild `origin/main`: `72ae7ef` — `fix(ui): remove rebuild-only compare semantics copy (#38)`
+- Open Builder implementation PR still in flight but non-overlapping:
+  - PR #34 — `fix(compare): bundle frontend contract hardening`
+- Open parse-back-end lanes to avoid overlapping with:
+  - PR #39 — `refactor(tags): extract tag and export HTTP handlers`
+  - PR #37 — `docs: add parse-back-end CLEF HTTP bundle handoff`
+- This task should focus on shell/UI parity surfaces such as `src/ParseUI.tsx`, `src/components/parse/ConceptSidebar.tsx`, `src/components/parse/RightPanel.tsx`, and their tests.
