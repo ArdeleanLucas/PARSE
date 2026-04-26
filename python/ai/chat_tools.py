@@ -396,6 +396,34 @@ def _wsl_to_windows_path(raw: str) -> Optional[str]:
     return f"{drive}:/{rest}" if rest else f"{drive}:/"
 
 
+from ai.tools.job_status_tools import (
+    JOB_STATUS_TOOL_SPECS,
+    tool_audio_normalize_status,
+    tool_compute_status,
+    tool_forced_align_status,
+    tool_ipa_transcribe_acoustic_status,
+    tool_job_logs,
+    tool_job_status,
+    tool_jobs_list,
+    tool_jobs_list_active,
+    tool_stt_status,
+    tool_stt_word_level_status,
+)
+from ai.tools.preview_tools import (
+    PREVIEW_TOOL_SPECS,
+    tool_read_audio_info,
+    tool_read_csv_preview,
+    tool_read_text_preview,
+    tool_spectrogram_preview,
+)
+from ai.tools.project_read_tools import (
+    PROJECT_READ_TOOL_SPECS,
+    tool_annotation_read,
+    tool_project_context_read,
+    tool_speakers_list,
+)
+
+
 class ParseChatTools:
     """Strict read-only tool allowlist for PARSE chat."""
 
@@ -484,64 +512,9 @@ class ParseChatTools:
         self._list_active_jobs = list_active_jobs
 
         self._tool_specs: Dict[str, ChatToolSpec] = {
-            "project_context_read": ChatToolSpec(
-                name="project_context_read",
-                description=(
-                    "Read high-level PARSE project context (project metadata, source index summary, "
-                    "annotation inventory, and enrichment summary). Read-only."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "include": {
-                            "type": "array",
-                            "maxItems": 8,
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "project",
-                                    "source_index",
-                                    "annotation_inventory",
-                                    "enrichments_summary",
-                                    "ai_config",
-                                    "constraints",
-                                ],
-                            },
-                        },
-                        "maxSpeakers": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "annotation_read": ChatToolSpec(
-                name="annotation_read",
-                description=(
-                    "Read one speaker annotation JSON safely from annotations/<speaker>.parse.json "
-                    "with optional concept filtering. Read-only."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "conceptIds": {
-                            "type": "array",
-                            "maxItems": 250,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
-                        },
-                        "includeTiers": {
-                            "type": "array",
-                            "maxItems": 8,
-                            "items": {
-                                "type": "string",
-                                "enum": ["ipa", "ortho", "concept", "speaker"],
-                            },
-                        },
-                        "maxIntervals": {"type": "integer", "minimum": 1, "maximum": 5000},
-                    },
-                },
-            ),
+            **PROJECT_READ_TOOL_SPECS,
+            **PREVIEW_TOOL_SPECS,
+            **JOB_STATUS_TOOL_SPECS,
             "detect_timestamp_offset": ChatToolSpec(
                 name="detect_timestamp_offset",
                 description=(
@@ -681,20 +654,6 @@ class ParseChatTools:
                     },
                 },
             ),
-            "stt_status": ChatToolSpec(
-                name="stt_status",
-                description="Read status/progress of an existing STT job.",
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "includeSegments": {"type": "boolean"},
-                        "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
-                    },
-                },
-            ),
             # ── Tier 1 acoustic alignment: word-level STT ──────────────
             "stt_word_level_start": ChatToolSpec(
                 name="stt_word_level_start",
@@ -716,25 +675,6 @@ class ParseChatTools:
                         "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
                         "language": {"type": "string", "minLength": 1, "maxLength": 32},
                         "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
-            "stt_word_level_status": ChatToolSpec(
-                name="stt_word_level_status",
-                description=(
-                    "Read status of a Tier 1 word-level STT job. When "
-                    "includeSegments=true the returned segments include the "
-                    "nested words[] payload produced by word_timestamps=True."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "includeSegments": {"type": "boolean"},
-                        "includeWords": {"type": "boolean"},
-                        "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
                     },
                 },
             ),
@@ -773,18 +713,6 @@ class ParseChatTools:
                     },
                 },
             ),
-            "forced_align_status": ChatToolSpec(
-                name="forced_align_status",
-                description="Read status/progress of an existing Tier 2 forced-alignment job.",
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                },
-            ),
             # ── Tier 3 acoustic alignment: wav2vec2-only IPA ──────────
             "ipa_transcribe_acoustic_start": ChatToolSpec(
                 name="ipa_transcribe_acoustic_start",
@@ -809,18 +737,6 @@ class ParseChatTools:
                             "description": "When true, replaces existing non-empty IPA cells (default: false).",
                         },
                         "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
-            "ipa_transcribe_acoustic_status": ChatToolSpec(
-                name="ipa_transcribe_acoustic_status",
-                description="Read status/progress of an existing Tier 3 acoustic IPA job.",
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                     },
                 },
             ),
@@ -887,77 +803,6 @@ class ParseChatTools:
                         "topK": {"type": "integer", "minimum": 1, "maximum": 20},
                         "minConfidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                         "maxConcepts": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "spectrogram_preview": ChatToolSpec(
-                name="spectrogram_preview",
-                description=(
-                    "Read-only placeholder/backend hook for spectrogram preview requests. "
-                    "Validates bounds and reports capability status."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["sourceWav", "startSec", "endSec"],
-                    "properties": {
-                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
-                        "startSec": {"type": "number", "minimum": 0.0},
-                        "endSec": {"type": "number", "minimum": 0.0},
-                        "windowSize": {
-                            "type": "integer",
-                            "enum": [256, 512, 1024, 2048, 4096],
-                        },
-                    },
-                },
-            ),
-            "read_audio_info": ChatToolSpec(
-                name="read_audio_info",
-                description=(
-                    "Read metadata for a WAV file in the project audio directory: duration, "
-                    "sample rate, channels, sample width, frame count, and file size. "
-                    "Read-only; does not return audio samples."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["sourceWav"],
-                    "properties": {
-                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
-                    },
-                },
-            ),
-            "read_csv_preview": ChatToolSpec(
-                name="read_csv_preview",
-                description=(
-                    "Read first N rows of any CSV file and return column names, delimiter, "
-                    "total row count, and a sample. Defaults to concepts.csv in project root "
-                    "if no path given. Path must stay within the project root. Read-only."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "csvPath": {"type": "string", "maxLength": 512},
-                        "maxRows": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
-                    },
-                },
-            ),
-            "read_text_preview": ChatToolSpec(
-                name="read_text_preview",
-                description=(
-                    "Read a Markdown/text file preview from workspace or docs root. "
-                    "Allowed extensions: .md, .markdown, .txt, .rst. Read-only."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["path"],
-                    "properties": {
-                        "path": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "startLine": {"type": "integer", "minimum": 1, "maximum": 200000, "default": 1},
-                        "maxLines": {"type": "integer", "minimum": 1, "maximum": 400, "default": 120},
-                        "maxChars": {"type": "integer", "minimum": 200, "maximum": 50000, "default": 12000},
                     },
                 },
             ),
@@ -1248,17 +1093,6 @@ class ParseChatTools:
                     },
                 },
             ),
-            "speakers_list": ChatToolSpec(
-                name="speakers_list",
-                description=(
-                    "List every speaker with an annotation file under ``annotations/``. "
-                    "Read-only. Use as the starting point for a batch pipeline run — pair "
-                    "with ``pipeline_state_batch`` to see which speakers are ready to "
-                    "process. Filters out non-annotation entries (e.g. a ``backups/`` "
-                    "directory) so the list is directly usable as input to ``pipeline_run``."
-                ),
-                parameters={"type": "object", "additionalProperties": False, "properties": {}},
-            ),
             "pipeline_state_read": ChatToolSpec(
                 name="pipeline_state_read",
                 description=(
@@ -1399,34 +1233,6 @@ class ParseChatTools:
                     ),
                 ),
             ),
-            "compute_status": ChatToolSpec(
-                name="compute_status",
-                description=(
-                    "Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) "
-                    "by jobId. Read-only. Returns the job snapshot with status, progress, "
-                    "message, and — for completed jobs — the full ``result`` payload. "
-                    "For pipeline jobs the result includes per-step status and summary "
-                    "counts so the agent can reason about success/skip/error cells."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "computeType": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64,
-                            "description": (
-                                "Optional expected compute type (e.g. "
-                                "\"full_pipeline\"). If provided, the tool validates "
-                                "the job's type matches before returning the snapshot."
-                            ),
-                        },
-                    },
-                },
-            ),
             "audio_normalize_start": ChatToolSpec(
                 name="audio_normalize_start",
                 description=(
@@ -1450,21 +1256,6 @@ class ParseChatTools:
                             "type": "boolean",
                             "description": "If true, preview the normalize job without launching ffmpeg.",
                         },
-                    },
-                },
-            ),
-            "audio_normalize_status": ChatToolSpec(
-                name="audio_normalize_status",
-                description=(
-                    "Poll status of a normalize job started with audio_normalize_start. "
-                    "Returns status, progress, error, and result when complete."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                     },
                 },
             ),
@@ -2011,77 +1802,6 @@ class ParseChatTools:
                     },
                 },
             ),
-            "jobs_list": ChatToolSpec(
-                name="jobs_list",
-                description=(
-                    "List jobs from the PARSE job registry, including active and recent completed jobs. "
-                    "Supports filtering by status, type, and speaker, plus a bounded result limit."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "statuses": {
-                            "type": "array",
-                            "maxItems": 10,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 32},
-                        },
-                        "types": {
-                            "type": "array",
-                            "maxItems": 20,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 128},
-                        },
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "job_status": ChatToolSpec(
-                name="job_status",
-                description=(
-                    "Read the generic status of any PARSE background job by jobId. "
-                    "Returns type, status, progress, message, error, result, timestamps, and logCount."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                },
-            ),
-            "job_logs": ChatToolSpec(
-                name="job_logs",
-                description=(
-                    "Read structured log lines for any PARSE background job. "
-                    "Returns timestamped entries for progress and terminal events."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["jobId"],
-                    "properties": {
-                        "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-                    },
-                },
-            ),
-            "jobs_list_active": ChatToolSpec(
-                name="jobs_list_active",
-                description=(
-                    "List all currently-running jobs in the PARSE job registry "
-                    "(STT, normalize, compute, onboard, etc.). "
-                    "Returns type, status, progress, speaker, and message for each active job. "
-                    "Useful for recovering jobIds after a session restart."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {},
-                },
-            ),
         }
         self._tool_specs = self._apply_default_metadata(self._tool_specs)
 
@@ -2530,253 +2250,13 @@ class ParseChatTools:
         return None
 
     def _tool_project_context_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        include_values = args.get("include")
-        if not isinstance(include_values, list) or not include_values:
-            include = [
-                "project",
-                "source_index",
-                "annotation_inventory",
-                "enrichments_summary",
-                "constraints",
-            ]
-        else:
-            include = [str(value) for value in include_values]
+        return tool_project_context_read(self, args)
 
-        max_speakers = int(args.get("maxSpeakers", 50) or 50)
 
-        out: Dict[str, Any] = {
-            "readOnly": True,
-            "previewOnly": True,
-            "fetchedAt": _utc_now_iso(),
-        }
-
-        if "project" in include:
-            out["project"] = _read_json_file(self.project_json_path, {})
-
-        if "source_index" in include:
-            source_index = _read_json_file(self.source_index_path, {})
-            speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
-            speaker_summary: Dict[str, Any] = {}
-            if isinstance(speakers_block, dict):
-                speaker_names = sorted(speakers_block.keys())
-                truncated = len(speaker_names) > max_speakers
-                for speaker in speaker_names[:max_speakers]:
-                    payload = speakers_block.get(speaker)
-                    if not isinstance(payload, dict):
-                        continue
-
-                    source_wavs = payload.get("source_wavs")
-                    if not isinstance(source_wavs, list):
-                        source_wavs = []
-
-                    primary_filename = ""
-                    for source_entry in source_wavs:
-                        if isinstance(source_entry, dict) and source_entry.get("is_primary"):
-                            primary_filename = _normalize_space(source_entry.get("filename"))
-                            break
-                    if not primary_filename and source_wavs:
-                        first = source_wavs[0]
-                        if isinstance(first, dict):
-                            primary_filename = _normalize_space(first.get("filename"))
-
-                    speaker_summary[speaker] = {
-                        "sourceCount": len(source_wavs),
-                        "primarySource": primary_filename,
-                        "hasCsv": bool(payload.get("has_csv")),
-                    }
-
-                out["source_index"] = {
-                    "speakerCount": len(speaker_names),
-                    "speakers": speaker_summary,
-                    "truncated": truncated,
-                    "maxSpeakers": max_speakers,
-                }
-            else:
-                out["source_index"] = {
-                    "speakerCount": 0,
-                    "speakers": {},
-                    "truncated": False,
-                    "maxSpeakers": max_speakers,
-                }
-
-        if "annotation_inventory" in include:
-            inventory = {
-                "directory": str(self.annotations_dir),
-                "exists": self.annotations_dir.exists(),
-                "fileCount": 0,
-                "sample": [],
-            }
-            if self.annotations_dir.exists() and self.annotations_dir.is_dir():
-                files = sorted([path.name for path in self.annotations_dir.glob("*.json")])
-                inventory["fileCount"] = len(files)
-                inventory["sample"] = files[:20]
-            out["annotation_inventory"] = inventory
-
-        if "enrichments_summary" in include:
-            enrichments = _read_json_file(self.enrichments_path, {})
-            config = enrichments.get("config") if isinstance(enrichments, dict) else {}
-            cognate_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else {}
-            similarity = enrichments.get("similarity") if isinstance(enrichments, dict) else {}
-            out["enrichments_summary"] = {
-                "computedAt": (enrichments.get("computed_at") if isinstance(enrichments, dict) else None),
-                "conceptCount": len(cognate_sets) if isinstance(cognate_sets, dict) else 0,
-                "similarityConceptCount": len(similarity) if isinstance(similarity, dict) else 0,
-                "speakersIncluded": (
-                    list(config.get("speakers_included", []))
-                    if isinstance(config, dict)
-                    else []
-                ),
-            }
-
-        if "ai_config" in include:
-            ai_config = _read_json_file(self.config_path, {})
-            chat_config = ai_config.get("chat") if isinstance(ai_config, dict) else {}
-            llm_config = ai_config.get("llm") if isinstance(ai_config, dict) else {}
-            out["ai_config"] = {
-                "llm": {
-                    "provider": _normalize_space(llm_config.get("provider")) if isinstance(llm_config, dict) else "",
-                    "model": _normalize_space(llm_config.get("model")) if isinstance(llm_config, dict) else "",
-                    "api_key_env": _normalize_space(llm_config.get("api_key_env")) if isinstance(llm_config, dict) else "",
-                },
-                "chat": {
-                    "provider": _normalize_space(chat_config.get("provider")) if isinstance(chat_config, dict) else "",
-                    "model": _normalize_space(chat_config.get("model")) if isinstance(chat_config, dict) else "",
-                    "reasoning_effort": _normalize_space(chat_config.get("reasoning_effort")) if isinstance(chat_config, dict) else "",
-                    "read_only": bool(chat_config.get("read_only", True)) if isinstance(chat_config, dict) else True,
-                    "attachments_supported": bool(chat_config.get("attachments_supported", False)) if isinstance(chat_config, dict) else False,
-                    "max_user_message_chars": _coerce_int(chat_config.get("max_user_message_chars", 8000), 8000) if isinstance(chat_config, dict) else 8000,
-                    "max_session_messages": _coerce_int(chat_config.get("max_session_messages", 200), 200) if isinstance(chat_config, dict) else 200,
-                },
-            }
-
-        if "constraints" in include:
-            out["constraints"] = {
-                "mode": "mostly-read-only",
-                "writesAllowed": False,
-                "writeAllowedTools": sorted(WRITE_ALLOWED_TOOL_NAMES),
-                "attachmentsSupported": False,
-                "readOnlyNotice": READ_ONLY_NOTICE,
-                "toolAllowlist": self.tool_names(),
-                "safeRoots": [str(self.project_root / "annotations"), str(self.project_root / "audio"), str(self.project_root / "config")],
-            }
-
-        return out
-
-    def _tier_intervals(self, annotation: Mapping[str, Any], tier_name: str) -> List[Dict[str, Any]]:
-        tiers = annotation.get("tiers") if isinstance(annotation, Mapping) else None
-        if not isinstance(tiers, Mapping):
-            return []
-
-        target = None
-        if tier_name in tiers and isinstance(tiers.get(tier_name), Mapping):
-            target = tiers.get(tier_name)
-        else:
-            for key, value in tiers.items():
-                if isinstance(key, str) and key.lower() == tier_name.lower() and isinstance(value, Mapping):
-                    target = value
-                    break
-
-        if not isinstance(target, Mapping):
-            return []
-
-        intervals = target.get("intervals")
-        if not isinstance(intervals, list):
-            return []
-
-        out: List[Dict[str, Any]] = []
-        for item in intervals:
-            if isinstance(item, dict):
-                start = _coerce_float(item.get("start"), 0.0)
-                end = _coerce_float(item.get("end"), start)
-                text = str(item.get("text") or "")
-                if end < start:
-                    continue
-                out.append(
-                    {
-                        "start": start,
-                        "end": end,
-                        "text": text,
-                    }
-                )
-
-        out.sort(key=lambda row: (float(row.get("start", 0.0)), float(row.get("end", 0.0))))
-        return out
 
     def _tool_annotation_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        speaker = self._normalize_speaker(args.get("speaker"))
-        include_tiers = args.get("includeTiers")
-        if isinstance(include_tiers, list) and include_tiers:
-            tiers = [str(item).strip().lower() for item in include_tiers if str(item).strip()]
-        else:
-            tiers = ["ipa", "ortho", "concept", "speaker"]
+        return tool_annotation_read(self, args)
 
-        max_intervals = int(args.get("maxIntervals", 500) or 500)
-
-        concept_ids_raw = args.get("conceptIds")
-        concept_filter: List[str] = []
-        if isinstance(concept_ids_raw, list):
-            seen: Dict[str, bool] = {}
-            for value in concept_ids_raw:
-                concept_id = _normalize_concept_id(value)
-                if concept_id and concept_id not in seen:
-                    seen[concept_id] = True
-                    concept_filter.append(concept_id)
-
-        path = self._annotation_path_for_speaker(speaker)
-        if path is None:
-            return {
-                "readOnly": True,
-                "speaker": speaker,
-                "status": "not_found",
-                "message": "Annotation file not found for speaker",
-            }
-
-        annotation = _read_json_file(path, {})
-        if not isinstance(annotation, dict):
-            raise ChatToolExecutionError("Annotation file is not a JSON object")
-
-        concept_intervals = self._tier_intervals(annotation, "concept")
-
-        selected_ranges: List[Tuple[float, float]] = []
-        if concept_filter:
-            for interval in concept_intervals:
-                concept_id = _normalize_concept_id(interval.get("text"))
-                if concept_id in concept_filter:
-                    selected_ranges.append((float(interval["start"]), float(interval["end"])))
-
-        def interval_selected(interval: Mapping[str, Any]) -> bool:
-            if not selected_ranges:
-                return True
-
-            start = _coerce_float(interval.get("start"), 0.0)
-            end = _coerce_float(interval.get("end"), start)
-            for range_start, range_end in selected_ranges:
-                if (min(end, range_end) - max(start, range_start)) > 0:
-                    return True
-                if abs(start - range_start) <= 0.0005 and abs(end - range_end) <= 0.0005:
-                    return True
-            return False
-
-        tier_payload: Dict[str, Any] = {}
-        truncation: Dict[str, bool] = {}
-
-        for tier_name in tiers:
-            intervals = self._tier_intervals(annotation, tier_name)
-            filtered = [interval for interval in intervals if interval_selected(interval)]
-            truncated = len(filtered) > max_intervals
-            tier_payload[tier_name] = filtered[:max_intervals]
-            truncation[tier_name] = truncated
-
-        return {
-            "readOnly": True,
-            "speaker": speaker,
-            "source": str(path),
-            "conceptFilter": concept_filter,
-            "tiers": tier_payload,
-            "truncated": truncation,
-            "maxIntervals": max_intervals,
-            "metadata": annotation.get("metadata") if isinstance(annotation.get("metadata"), dict) else {},
-        }
 
     def _tool_stt_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if self._start_stt_job is None:
@@ -2822,54 +2302,8 @@ class ParseChatTools:
         }
 
     def _tool_stt_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._get_job_snapshot is None:
-            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+        return tool_stt_status(self, args)
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-
-        include_segments = bool(args.get("includeSegments", False))
-        max_segments = int(args.get("maxSegments", 30) or 30)
-
-        snapshot = self._get_job_snapshot(job_id)
-        if snapshot is None:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "not_found",
-                "message": "Unknown jobId",
-            }
-
-        if snapshot.get("type") != "stt":
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "invalid_job_type",
-                "expected": "stt",
-                "actual": snapshot.get("type"),
-            }
-
-        result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
-        payload: Dict[str, Any] = {
-            "readOnly": True,
-            "jobId": job_id,
-            "status": snapshot.get("status"),
-            "progress": snapshot.get("progress"),
-            "segmentsProcessed": snapshot.get("segmentsProcessed"),
-            "totalSegments": snapshot.get("totalSegments"),
-            "error": snapshot.get("error"),
-            "speaker": result.get("speaker"),
-            "sourceWav": result.get("sourceWav"),
-        }
-
-        if include_segments and isinstance(result.get("segments"), list):
-            segments = result.get("segments", [])
-            payload["segments"] = segments[:max_segments]
-            payload["segmentsTruncated"] = len(segments) > max_segments
-            payload["segmentCount"] = len(segments)
-
-        return payload
 
     # ------------------------------------------------------------------
     # Tier 1/2/3 acoustic alignment tools (from feat/acoustic-alignment-ipa)
@@ -2904,19 +2338,8 @@ class ParseChatTools:
         return payload
 
     def _tool_stt_word_level_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read status of a Tier 1 job. includeWords defaults to True."""
-        include_words = bool(args.get("includeWords", True))
-        # Reuse the base handler; it already returns segments whose items
-        # carry the nested words[] key when word_timestamps was enabled.
-        delegated = self._tool_stt_status(args)
-        delegated["tier"] = "tier1_word_level"
-        # Strip nested words[] only if the caller explicitly opted out.
-        if not include_words and isinstance(delegated.get("segments"), list):
-            for seg in delegated["segments"]:
-                if isinstance(seg, dict) and "words" in seg:
-                    seg.pop("words", None)
-            delegated["wordsOmitted"] = True
-        return delegated
+        return tool_stt_word_level_status(self, args)
+
 
     def _tool_forced_align_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Start a Tier 2 forced-alignment compute job."""
@@ -2978,12 +2401,8 @@ class ParseChatTools:
         }
 
     def _tool_forced_align_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read status of a Tier 2 forced-alignment compute job."""
-        return self._generic_compute_status(
-            args,
-            expected_type="forced_align",
-            tier_label="tier2_forced_align",
-        )
+        return tool_forced_align_status(self, args)
+
 
     def _tool_ipa_transcribe_acoustic_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Start a Tier 3 acoustic IPA job (wav2vec2 on audio slices)."""
@@ -3032,92 +2451,17 @@ class ParseChatTools:
         }
 
     def _tool_ipa_transcribe_acoustic_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read status of a Tier 3 acoustic IPA compute job."""
-        return self._generic_compute_status(
-            args,
-            expected_type="ipa_only",
-            tier_label="tier3_acoustic_ipa",
-        )
+        return tool_ipa_transcribe_acoustic_status(self, args)
 
-    def _generic_compute_status(
-        self,
-        args: Dict[str, Any],
-        *,
-        expected_type: str,
-        tier_label: str,
-    ) -> Dict[str, Any]:
-        """Shared status reader for Tier 2/3 compute jobs."""
-        if self._get_job_snapshot is None:
-            raise ChatToolExecutionError("Job snapshot callback is unavailable")
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-
-        snapshot = self._get_job_snapshot(job_id)
-        if snapshot is None:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "not_found",
-                "tier": tier_label,
-                "message": "Unknown jobId",
-            }
-
-        actual_type = str(snapshot.get("type") or snapshot.get("computeType") or "").strip().lower()
-        if actual_type and actual_type not in {
-            expected_type,
-            expected_type.replace("_", "-"),
-            "compute:{0}".format(expected_type),
-        }:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "invalid_job_type",
-                "tier": tier_label,
-                "expected": expected_type,
-                "actual": actual_type,
-            }
-
-        return {
-            "readOnly": True,
-            "jobId": job_id,
-            "tier": tier_label,
-            "status": snapshot.get("status"),
-            "progress": snapshot.get("progress"),
-            "message": snapshot.get("message"),
-            "error": snapshot.get("error"),
-            "result": snapshot.get("result"),
-        }
 
     # ------------------------------------------------------------------
     # Pipeline preflight + run + status tools (from feat/mcp-pipeline-tools)
     # ------------------------------------------------------------------
 
     def _tool_speakers_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """List all annotated speakers under ``annotations/``.
+        return tool_speakers_list(self, args)
 
-        Filters to entries that look like real annotation records — either
-        ``<speaker>.parse.json`` or ``<speaker>.json`` — so accidental
-        sibling directories (e.g. ``backups/``) don't pollute the list.
-        """
-        speakers: set[str] = set()
-        if self.annotations_dir.is_dir():
-            for entry in self.annotations_dir.iterdir():
-                if not entry.is_file():
-                    continue
-                name = entry.name
-                if name.endswith(".parse.json"):
-                    speakers.add(name[: -len(".parse.json")])
-                elif name.endswith(".json") and not name.endswith(".parse.json"):
-                    speakers.add(name[: -len(".json")])
-
-        ordered = sorted(speakers)
-        return {
-            "readOnly": True,
-            "speakers": ordered,
-            "count": len(ordered),
-        }
 
     def _tool_pipeline_state_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if self._pipeline_state is None:
@@ -3256,44 +2600,8 @@ class ParseChatTools:
         }
 
     def _tool_compute_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._get_job_snapshot is None:
-            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+        return tool_compute_status(self, args)
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-        expected = str(args.get("computeType") or "").strip().lower()
-
-        snapshot = self._get_job_snapshot(job_id)
-        if snapshot is None:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "not_found",
-                "message": "Unknown jobId",
-            }
-
-        job_type = str(snapshot.get("type") or "")
-        if expected and job_type != "compute:{0}".format(expected):
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "invalid_job_type",
-                "expected": "compute:{0}".format(expected),
-                "actual": job_type,
-            }
-
-        payload: Dict[str, Any] = {
-            "readOnly": True,
-            "jobId": job_id,
-            "type": job_type,
-            "status": snapshot.get("status"),
-            "progress": snapshot.get("progress"),
-            "message": snapshot.get("message"),
-            "error": snapshot.get("error"),
-            "result": snapshot.get("result"),
-        }
-        return payload
 
     # ------------------------------------------------------------------
     # Tier 1 — audio normalize
@@ -3333,42 +2641,8 @@ class ParseChatTools:
         }
 
     def _tool_audio_normalize_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Poll a normalize job; validates job type == 'normalize' before returning."""
-        if self._get_job_snapshot is None:
-            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+        return tool_audio_normalize_status(self, args)
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-
-        snapshot = self._get_job_snapshot(job_id)
-        if snapshot is None:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "not_found",
-                "message": "Unknown jobId",
-            }
-
-        if snapshot.get("type") != "normalize":
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "invalid_job_type",
-                "expected": "normalize",
-                "actual": snapshot.get("type"),
-            }
-
-        return {
-            "readOnly": True,
-            "jobId": job_id,
-            "type": "normalize",
-            "status": snapshot.get("status"),
-            "progress": snapshot.get("progress"),
-            "message": snapshot.get("message"),
-            "error": snapshot.get("error"),
-            "result": snapshot.get("result"),
-        }
 
     # ------------------------------------------------------------------
     # Tier 1 — enrichments read / write
@@ -4103,92 +3377,20 @@ class ParseChatTools:
         raise ChatToolValidationError("mode must be 'speaker' or 'full'")
 
     def _tool_jobs_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Return jobs from the PARSE job registry with optional filters."""
-        if self._list_jobs is None:
-            raise ChatToolExecutionError("list_jobs callback is unavailable")
-        try:
-            payload = self._list_jobs(
-                {
-                    "statuses": args.get("statuses") or [],
-                    "types": args.get("types") or [],
-                    "speaker": args.get("speaker"),
-                    "limit": args.get("limit"),
-                }
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("jobs_list failed: {0}".format(exc)) from exc
-        if not isinstance(payload, dict):
-            raise ChatToolExecutionError("jobs_list callback must return an object")
-        result = {"readOnly": True}
-        result.update(payload)
-        return result
+        return tool_jobs_list(self, args)
+
 
     def _tool_job_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._get_job_snapshot is None:
-            raise ChatToolExecutionError("Job snapshot callback is unavailable")
+        return tool_job_status(self, args)
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-
-        snapshot = self._get_job_snapshot(job_id)
-        if snapshot is None:
-            return {
-                "readOnly": True,
-                "jobId": job_id,
-                "status": "not_found",
-                "message": "Unknown jobId",
-            }
-
-        return {
-            "readOnly": True,
-            "jobId": job_id,
-            "type": snapshot.get("type"),
-            "status": snapshot.get("status"),
-            "progress": snapshot.get("progress"),
-            "message": snapshot.get("message"),
-            "error": snapshot.get("error"),
-            "errorCode": snapshot.get("error_code") or snapshot.get("errorCode"),
-            "result": snapshot.get("result"),
-            "createdAt": snapshot.get("created_at") or snapshot.get("createdAt"),
-            "updatedAt": snapshot.get("updated_at") or snapshot.get("updatedAt"),
-            "completedAt": snapshot.get("completed_at") or snapshot.get("completedAt"),
-            "meta": copy.deepcopy(snapshot.get("meta") if isinstance(snapshot.get("meta"), dict) else {}),
-            "locks": copy.deepcopy(snapshot.get("locks") if isinstance(snapshot.get("locks"), dict) else {}),
-            "logCount": len(snapshot.get("logs")) if isinstance(snapshot.get("logs"), list) else int(snapshot.get("logCount") or 0),
-        }
 
     def _tool_job_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._get_job_logs is None:
-            raise ChatToolExecutionError("get_job_logs callback is unavailable")
+        return tool_job_logs(self, args)
 
-        job_id = str(args.get("jobId") or "").strip()
-        if not job_id:
-            raise ChatToolValidationError("jobId is required")
-
-        offset = int(args.get("offset") or 0)
-        limit = int(args.get("limit") or 100)
-        try:
-            payload = self._get_job_logs(job_id, offset, limit)
-        except Exception as exc:
-            raise ChatToolExecutionError("job_logs failed: {0}".format(exc)) from exc
-        if not isinstance(payload, dict):
-            raise ChatToolExecutionError("get_job_logs callback must return an object")
-        result = {"readOnly": True}
-        result.update(payload)
-        if "logs" in result and isinstance(result["logs"], list):
-            result["logCount"] = len(result["logs"])
-        return result
 
     def _tool_jobs_list_active(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Return all running jobs from the PARSE job registry for session-restart recovery."""
-        if self._list_active_jobs is None:
-            raise ChatToolExecutionError("list_active_jobs callback is unavailable")
-        try:
-            jobs = self._list_active_jobs()
-        except Exception as exc:
-            raise ChatToolExecutionError("jobs_list_active failed: {0}".format(exc)) from exc
-        return {"readOnly": True, "jobs": jobs, "count": len(jobs)}
+        return tool_jobs_list_active(self, args)
+
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Proxy detect_offset_detailed against the speaker's annotation + STT job.
@@ -4998,39 +4200,8 @@ class ParseChatTools:
         }
 
     def _tool_spectrogram_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        source_wav = str(args.get("sourceWav") or "").strip()
-        if not source_wav:
-            raise ChatToolValidationError("sourceWav is required")
+        return tool_spectrogram_preview(self, args)
 
-        start_sec = _coerce_float(args.get("startSec"), 0.0)
-        end_sec = _coerce_float(args.get("endSec"), 0.0)
-        if end_sec <= start_sec:
-            raise ChatToolValidationError("endSec must be greater than startSec")
-
-        window_size = int(args.get("windowSize", 2048) or 2048)
-
-        safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "status": "placeholder",
-            "message": (
-                "Spectrogram preview backend hook acknowledged, but binary/image generation "
-                "is not wired in this MVP."
-            ),
-            "request": {
-                "sourceWav": str(safe_audio.relative_to(self.project_root)),
-                "startSec": round(start_sec, 3),
-                "endSec": round(end_sec, 3),
-                "windowSize": window_size,
-            },
-            "backendHook": {
-                "implemented": False,
-                "plannedEndpoint": "/api/compute/spectrograms",
-                "notes": "Client-side spectrogram worker remains the active rendering path.",
-            },
-        }
 
     # ------------------------------------------------------------------
     # Contact lexeme / reference form lookup
@@ -5321,167 +4492,16 @@ class ParseChatTools:
             return str(path)
 
     def _tool_read_audio_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Return WAV metadata (duration, sample rate, channels) via stdlib wave."""
-        import wave as _wave
+        return tool_read_audio_info(self, args)
 
-        source_wav = str(args.get("sourceWav") or "").strip()
-        if not source_wav:
-            raise ChatToolValidationError("sourceWav is required")
-
-        # Relative paths are anchored at audio/ for continuity with earlier
-        # behavior. Absolute paths go through the broader readable-path
-        # resolver so PARSE_EXTERNAL_READ_ROOTS (including "*") applies.
-        candidate = Path(source_wav).expanduser()
-        if candidate.is_absolute():
-            safe_audio = self._resolve_readable_path(source_wav)
-        else:
-            safe_audio = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
-
-        if not safe_audio.exists() or not safe_audio.is_file():
-            return {"ok": False, "error": "File not found: {0}".format(safe_audio)}
-
-        if safe_audio.suffix.lower() != ".wav":
-            return {"ok": False, "error": "Not a .wav file: {0}".format(safe_audio.name)}
-
-        try:
-            with _wave.open(str(safe_audio), "rb") as wav:
-                channels = wav.getnchannels()
-                sample_width = wav.getsampwidth()
-                frame_rate = wav.getframerate()
-                n_frames = wav.getnframes()
-        except _wave.Error as exc:
-            return {"ok": False, "error": "Invalid WAV file: {0}".format(exc)}
-        except Exception as exc:
-            return {"ok": False, "error": "Failed to read audio file: {0}".format(exc)}
-
-        duration_sec = (n_frames / frame_rate) if frame_rate > 0 else 0.0
-
-        return {
-            "ok": True,
-            "path": self._display_readable_path(safe_audio),
-            "channels": channels,
-            "sampleWidthBytes": sample_width,
-            "sampleRateHz": frame_rate,
-            "numFrames": n_frames,
-            "durationSec": round(duration_sec, 3),
-            "fileSizeBytes": safe_audio.stat().st_size,
-        }
 
     def _tool_read_csv_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read first N rows of a CSV file, sandboxed to project + external read roots."""
-        import csv as _csv
-        raw_path = str(args.get("csvPath") or "").strip()
-        max_rows = int(args.get("maxRows") or 20)
+        return tool_read_csv_preview(self, args)
 
-        if raw_path:
-            csv_path = self._resolve_readable_path(raw_path)
-        else:
-            csv_path = self.project_root / "concepts.csv"
-
-        if not csv_path.exists():
-            return {"ok": False, "error": "File not found: {0}".format(csv_path)}
-
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                sample = f.read(8192)
-
-            delimiter = ","
-            try:
-                dialect = _csv.Sniffer().sniff(sample, delimiters=",\t;")
-                delimiter = dialect.delimiter
-            except Exception:
-                pass
-
-            rows: list = []
-            total = 0
-            columns: list = []
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                reader = _csv.DictReader(f, delimiter=delimiter)
-                columns = list(reader.fieldnames or [])
-                for row in reader:
-                    total += 1
-                    if len(rows) < max_rows:
-                        rows.append(dict(row))
-
-            return {
-                "ok": True,
-                "path": str(csv_path),
-                "delimiter": delimiter,
-                "columns": columns,
-                "totalRows": total,
-                "sampleRows": rows,
-                "maxRowsShown": min(max_rows, total),
-            }
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
 
     def _tool_read_text_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read a bounded Markdown/text preview from workspace/docs root."""
-        raw_path = str(args.get("path") or "").strip()
-        start_line = int(args.get("startLine") or 1)
-        max_lines = int(args.get("maxLines") or 120)
-        max_chars = int(args.get("maxChars") or 12000)
+        return tool_read_text_preview(self, args)
 
-        extra_roots: List[Path] = []
-        if self.docs_root is not None:
-            extra_roots.append(self.docs_root)
-
-        try:
-            text_path = self._resolve_readable_path(raw_path, extra_roots=extra_roots)
-        except ChatToolValidationError as exc:
-            return {"ok": False, "error": str(exc)}
-
-        extension = text_path.suffix.lower()
-        if extension not in TEXT_PREVIEW_EXTENSIONS:
-            return {
-                "ok": False,
-                "error": "Unsupported file type: {0}. Allowed: {1}".format(
-                    extension or "(none)", ", ".join(sorted(TEXT_PREVIEW_EXTENSIONS))
-                ),
-            }
-
-        if not text_path.exists() or not text_path.is_file():
-            return {"ok": False, "error": "File not found: {0}".format(text_path)}
-
-        try:
-            lines = text_path.read_text(encoding="utf-8").splitlines()
-        except Exception as exc:
-            return {"ok": False, "error": "Failed to read text file: {0}".format(exc)}
-
-        if start_line < 1:
-            start_line = 1
-
-        start_idx = start_line - 1
-        if start_idx >= len(lines):
-            return {
-                "ok": True,
-                "path": str(text_path),
-                "lineStart": start_line,
-                "lineEnd": start_line,
-                "totalLines": len(lines),
-                "truncated": False,
-                "content": "",
-                "message": "startLine is beyond end-of-file",
-            }
-
-        selected = lines[start_idx:start_idx + max_lines]
-        content = "\n".join(selected)
-        truncated = False
-        if len(content) > max_chars:
-            content = content[:max_chars]
-            truncated = True
-        if (start_idx + max_lines) < len(lines):
-            truncated = True
-
-        return {
-            "ok": True,
-            "path": str(text_path),
-            "lineStart": start_line,
-            "lineEnd": start_line + max(0, len(selected) - 1),
-            "totalLines": len(lines),
-            "truncated": truncated,
-            "content": content,
-        }
 
     def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Match CSV rows to project concept IDs and optionally create a tag."""
