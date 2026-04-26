@@ -127,4 +127,124 @@ describe("AIChat", () => {
 
     expect(chatSession.send).toHaveBeenCalledWith("Analyze cognates");
   });
+
+  it("switches from xAI to OpenAI and saves the new provider key", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: true, provider: 'xai', flow_active: false });
+    mockSaveApiKey.mockResolvedValue({ authenticated: true });
+
+    render(
+      <AIChat
+        height={320}
+        minimized={false}
+        onResizeStart={vi.fn()}
+        onMinimize={vi.fn()}
+        conceptName="water"
+        conceptId={1}
+        speakerCount={3}
+        chatSession={makeChatSession()}
+      />,
+    );
+
+    expect(await screen.findByText('Connected to xAI')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /switch provider/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /openai api/i }));
+    fireEvent.change(screen.getByPlaceholderText('sk-...'), { target: { value: 'sk-live-openai' } });
+    fireEvent.click(screen.getByRole('button', { name: /save key/i }));
+
+    expect(await screen.findByText('Connected to OpenAI')).toBeTruthy();
+    expect(screen.getByText(/gpt-5\.4/i)).toBeTruthy();
+    expect(mockSaveApiKey).toHaveBeenCalledWith('sk-live-openai', 'openai');
+  });
+
+  it("fires onMinimize and renders the collapsed bar without the resize handle when minimized", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: true, provider: 'xai', flow_active: false });
+    const onMinimize = vi.fn();
+
+    const { rerender, container } = render(
+      <AIChat
+        height={320}
+        minimized={false}
+        onResizeStart={vi.fn()}
+        onMinimize={onMinimize}
+        conceptName="water"
+        conceptId={1}
+        speakerCount={3}
+        chatSession={makeChatSession()}
+      />,
+    );
+
+    expect(await screen.findByText('Connected to xAI')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /minimize/i }));
+    expect(onMinimize).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.cursor-ns-resize')).not.toBeNull();
+
+    rerender(
+      <AIChat
+        height={320}
+        minimized
+        onResizeStart={vi.fn()}
+        onMinimize={onMinimize}
+        conceptName="water"
+        conceptId={1}
+        speakerCount={3}
+        chatSession={makeChatSession()}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about water \(#1\)/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /minimize/i })).toBeNull();
+    expect(container.querySelector('.cursor-ns-resize')).toBeNull();
+  });
+
+  it("shows concept-specific header copy with the concept name and speaker count", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: true, provider: 'openai', flow_active: false });
+
+    render(
+      <AIChat
+        height={320}
+        minimized={false}
+        onResizeStart={vi.fn()}
+        onMinimize={vi.fn()}
+        conceptName="Foo"
+        conceptId={99}
+        speakerCount={3}
+        chatSession={makeChatSession()}
+      />,
+    );
+
+    expect(await screen.findByText('Connected to OpenAI')).toBeTruthy();
+    expect(screen.getByText(/asking about/i).textContent).toContain('Foo');
+    expect(screen.getByText(/asking about/i).textContent).toContain('3 speakers');
+    expect(screen.getByText(/hi, i'm parse ai/i).textContent).toContain('concept "Foo" across 3 speakers');
+  });
+
+  it("submits on Enter and preserves a newline on Shift+Enter", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: true, provider: 'openai', flow_active: false });
+    const chatSession = makeChatSession();
+
+    render(
+      <AIChat
+        height={320}
+        minimized={false}
+        onResizeStart={vi.fn()}
+        onMinimize={vi.fn()}
+        conceptName="water"
+        conceptId={1}
+        speakerCount={3}
+        chatSession={chatSession}
+      />,
+    );
+
+    expect(await screen.findByText('Connected to OpenAI')).toBeTruthy();
+    const composer = screen.getByPlaceholderText(/Ask PARSE AI about water/i);
+
+    fireEvent.change(composer, { target: { value: 'line one' } });
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' });
+    expect(chatSession.send).toHaveBeenCalledWith('line one');
+
+    fireEvent.change(composer, { target: { value: 'line one' } });
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter', shiftKey: true });
+    expect((composer as HTMLInputElement | HTMLTextAreaElement).value).toContain('\n');
+    expect(chatSession.send).toHaveBeenCalledTimes(1);
+  });
 });

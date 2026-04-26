@@ -234,6 +234,17 @@ export const AIChat: React.FC<AIChatProps> = ({
     void chatSession.send(q);
   };
 
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter') return;
+    if (e.shiftKey) {
+      e.preventDefault();
+      setInput((prev) => `${prev}\n`);
+      return;
+    }
+    e.preventDefault();
+    send(input);
+  };
+
   if (minimized) {
     return (
       <div className="relative flex h-14 shrink-0 items-center border-t border-slate-200 bg-slate-50/80 backdrop-blur-sm transition-all duration-300 shadow-[0_-1px_0_rgba(15,23,42,0.02)]">
@@ -620,14 +631,16 @@ export const AIChat: React.FC<AIChatProps> = ({
                   e.preventDefault();
                   send(input);
                 }}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-100"
+                className="flex items-end gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-100"
               >
-                <input
+                <textarea
                   value={input}
                   onChange={e => setInput(e.target.value)}
+                  onKeyDown={handleComposerKeyDown}
                   placeholder={hasData ? `Ask PARSE AI about ${conceptName}…` : 'Ask PARSE AI anything to get started…'}
-                  className="flex-1 bg-transparent text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none"
+                  className="max-h-28 min-h-[2.25rem] flex-1 resize-none bg-transparent py-1 text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none"
                   autoFocus
+                  rows={1}
                 />
                 <button
                   type="submit"
