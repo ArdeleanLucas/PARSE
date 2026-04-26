@@ -1,26 +1,13 @@
-# To parse-back-end
+# parse-back-end handoff — ORTH runtime contract reconciliation
 
-Status: pending
+Use this PR as the task source.
 
-Current instruction:
-- Implement the next backend-safe PARSE-rebuild slice in `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto` on `auto/parse-back-end`.
-- Follow the full prompt at `.hermes/plans/2026-04-25_234447-parse-back-end-job-observability-handoff-prompt.md`.
-
-Lane boundary:
-- This is the backend lane.
-- Stay out of `src/**` and all parse-builder-owned frontend shell work.
-- Safe ownership for this slice is `python/server.py`, `python/app/http/**`, and backend Python tests only.
+Primary brief:
+- `.hermes/plans/2026-04-26-parse-back-end-next-task-ortho-contract.md`
 
 Short version:
-1. Extract the generic jobs/worker-status HTTP handler cluster out of `python/server.py`.
-2. Prefer a new helper such as `python/app/http/job_observability_handlers.py`.
-3. Add direct tests first, then keep thin wrappers in `server.py`.
-4. Re-run targeted Python validation plus full rebuild gates.
-
-Grounded seam locations:
-- `_api_get_jobs()` — around `python/server.py:6760`
-- `_api_get_job()` — around `python/server.py:6786`
-- `_api_get_job_logs()` — around `python/server.py:6795`
-- `_api_get_jobs_active()` — around `python/server.py:6821`
-- `_api_get_job_error_logs()` — around `python/server.py:6826`
-- `_api_get_worker_status()` — around `python/server.py:6873`
+- current runtime already hard-requires a local CT2 `ortho.model_path`
+- tracked config/docs/script surfaces still describe the old HF-repo-id / VAD-off behavior
+- preserve the current runtime policy
+- reconcile `config/ai_config.example.json`, ORTH docs, and `scripts/generate_ortho.py`
+- stay non-overlapping with PR #42 worktree cleanup and Builder PRs #41 / #43
