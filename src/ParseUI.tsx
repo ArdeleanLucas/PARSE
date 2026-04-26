@@ -11,16 +11,26 @@ import {
   Anchor,
   Sun, Moon, XCircle,
 } from 'lucide-react';
-import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { compareSurveyKeys } from './lib/surveySort';
 import {
+  conceptMatchesIntervalText,
+  deriveAudioUrl,
+  getConceptStatus,
+  isInteractiveHotkeyTarget,
+  isRecord,
+  readTextBlob,
+} from './lib/parseUIUtils';
+import type { ConceptTag } from './lib/parseUIUtils';
+import {
   referenceCardStyle,
   resolveFormSelection,
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
+import { buildSpeakerForm } from './lib/speakerForm';
+import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
   applyCanonicalDecisionImport,
   buildCanonicalDecisionPayload,
@@ -73,206 +83,19 @@ import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
-type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type AppMode = 'annotate' | 'compare' | 'tags';
 
 interface LingTag {
   id: string; name: string; color: string; dotClass: string; count: number;
 }
 
-interface Concept {
-  id: number;
-  key: string;
-  name: string;
-  tag: ConceptTag;
-  surveyItem?: string;
-  customOrder?: number;
-}
-
 type ConceptSortMode = 'az' | '1n' | 'survey';
-
-interface SpeakerForm {
-  speaker: string; ipa: string; ortho: string; utterances: number;
-  // Similarity scores keyed by the configured CLEF primary contact-language
-  // code (e.g. "ar", "fa", "eng", "spa"). Null means "no score on disk" --
-  // either the cognate compute hasn't run, or there was no reference form
-  // to score against. The table headers are driven by the same key set so
-  // any pair/triple the user configured renders cleanly without a code edit.
-  similarityByLang: Record<string, number | null>;
-  cognate: string; flagged: boolean;
-  startSec: number | null; endSec: number | null;
-}
 
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
 
-const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 
-/** Render a number of seconds as ``MM:SS.cs`` — the same format the
- *  Annotate playback bar shows under the waveform. Lifted to module
- *  scope so the offset-capture toast + manual-anchor chips can mirror
- *  it exactly (so users can verify what was captured against the
- *  readout they were just looking at). */
-function isInteractiveHotkeyTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  const tag = target.tagName.toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
-  return (target as HTMLElement).isContentEditable;
-}
-
-function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean {
-  return a.start <= b.end && b.start <= a.end;
-}
-
-// Build a workspace-relative audio URL from an annotation record. Server serves
-// static files from the project root, so "audio/working/X/foo.wav" → "/audio/working/X/foo.wav".
-function deriveAudioUrl(record: AnnotationRecord | null | undefined): string {
-  const raw = (record?.source_audio ?? record?.source_wav ?? '').trim();
-  if (!raw) return '';
-  const cleaned = raw.replace(/\\/g, '/').replace(/^\/+/, '');
-  return '/' + cleaned;
-}
-
-
-function conceptMatchesIntervalText(concept: { name: string; key: string }, text: string): boolean {
-  const normalizedText = text.trim().toLowerCase();
-  const normalizedName = concept.name.trim().toLowerCase();
-  const normalizedKey = concept.key.trim().toLowerCase();
-
-  return normalizedText === normalizedName
-    || normalizedText === normalizedKey
-    || normalizedText.includes(normalizedName);
-}
-
-function getConceptStatus(tags: StoreTag[]): ConceptTag {
-  if (tags.some((tag) => tag.id === 'problematic')) return 'problematic';
-  if (tags.some((tag) => tag.id === 'confirmed')) return 'confirmed';
-  if (tags.some((tag) => REVIEW_TAG_IDS.has(tag.id))) return 'review';
-  return 'untagged';
-}
-
-// Prefer word-level ortho_words (from Tier-2 forced alignment) over the
-// coarse ortho tier. When the coarse tier is one monolithic segment — as
-// razhan often produces on long elicited word-list recordings — picking
-// the whole-paragraph interval by overlap dumps the entire narrative into
-// a single lexeme field. The word-level tier yields a single clean word.
-export function pickOrthoIntervalForConcept(
-  record: AnnotationRecord,
-  conceptInterval: AnnotationInterval,
-): AnnotationInterval | null {
-  const words = record.tiers.ortho_words?.intervals ?? [];
-  if (words.length) {
-    const contained = words.find(
-      (iv) => iv.start >= conceptInterval.start && iv.end <= conceptInterval.end,
-    );
-    if (contained) return contained;
-
-    let bestOverlap = 0;
-    let bestWord: AnnotationInterval | null = null;
-    for (const iv of words) {
-      if (iv.end <= conceptInterval.start || iv.start >= conceptInterval.end) continue;
-      const ov = Math.min(iv.end, conceptInterval.end) - Math.max(iv.start, conceptInterval.start);
-      if (ov > bestOverlap) {
-        bestOverlap = ov;
-        bestWord = iv;
-      }
-    }
-    if (bestWord) return bestWord;
-  }
-  return (record.tiers.ortho?.intervals ?? []).find((iv) => overlaps(iv, conceptInterval)) ?? null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readTextBlob(blob: Blob): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(blob);
-  });
-}
-
-function buildSpeakerForm(
-  record: AnnotationRecord | null | undefined,
-  concept: Concept,
-  speaker: string,
-  enrichments: Record<string, unknown>,
-  flagged: boolean,
-  primaryContactCodes: readonly string[],
-): SpeakerForm {
-  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.text));
-  const ipaIntervals = record?.tiers.ipa?.intervals ?? [];
-  const matchingIpaIntervals = ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval)));
-
-  const similarityRoot = isRecord(enrichments.similarity) ? enrichments.similarity : null;
-  const conceptSimilarity = similarityRoot && isRecord(similarityRoot[concept.key]) ? similarityRoot[concept.key] as Record<string, unknown> : null;
-  const speakerSimilarity = conceptSimilarity && isRecord(conceptSimilarity[speaker]) ? conceptSimilarity[speaker] as Record<string, unknown> : null;
-  // The backend's compute_similarity_scores writes
-  //   similarity[concept][speaker][lang] = { score: number|null,
-  //                                          has_reference_data: bool }
-  // An earlier revision treated this inner object as if it were a bare
-  // number (and read "tr" for Persian), which made every column silently
-  // resolve to 0 regardless of compute state. Reading .score from the
-  // object -- and using the CLEF-config code "fa" for Persian, not "tr"
-  // -- is what actually surfaces the computed distances in the UI.
-  // Returns null (not 0) when the score is missing so the UI can render
-  // "—" and distinguish "not yet computed" from "computed zero".
-  const rawSim = (code: string): number | null => {
-    const cell = speakerSimilarity?.[code];
-    if (!isRecord(cell)) return null;
-    const score = (cell as Record<string, unknown>).score;
-    return typeof score === 'number' ? score : null;
-  };
-  const similarityByLang: Record<string, number | null> = {};
-  for (const code of primaryContactCodes) {
-    similarityByLang[code] = rawSim(code);
-  }
-
-  const overrides = isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
-  const overrideSets = overrides && isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : null;
-  const autoSets = isRecord(enrichments.cognate_sets) ? enrichments.cognate_sets as Record<string, unknown> : null;
-  // Manual overrides win over auto-computed cognate sets.
-  const conceptCognates = (overrideSets && isRecord(overrideSets[concept.key]) ? overrideSets[concept.key] : null)
-    ?? (autoSets && isRecord(autoSets[concept.key]) ? autoSets[concept.key] : null);
-  let cognate: SpeakerForm['cognate'] = '—';
-  if (conceptCognates && isRecord(conceptCognates)) {
-    // Accept any single-letter group A–Z; first match wins.
-    for (const [group, members] of Object.entries(conceptCognates)) {
-      if (Array.isArray(members) && members.includes(speaker) && /^[A-Z]$/.test(group)) {
-        cognate = group;
-        break;
-      }
-    }
-  }
-
-  // Per-speaker flag: overrides.speaker_flags[conceptKey][speaker] = true.
-  const flagsBlock = overrides && isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : null;
-  const conceptFlags = flagsBlock && isRecord(flagsBlock[concept.key]) ? flagsBlock[concept.key] as Record<string, unknown> : null;
-  const speakerFlagged = !!(conceptFlags && conceptFlags[speaker]);
-
-  const primaryConceptInterval = conceptIntervals[0] ?? null;
-  // Prefer word-level ortho_words over the coarse ortho tier — see the
-  // rationale on pickOrthoIntervalForConcept above.
-  const orthoText = record && primaryConceptInterval
-    ? pickOrthoIntervalForConcept(record, primaryConceptInterval)?.text ?? ''
-    : '';
-
-  return {
-    speaker,
-    ipa: matchingIpaIntervals[0]?.text ?? '',
-    ortho: orthoText,
-    utterances: matchingIpaIntervals.length,
-    similarityByLang,
-    cognate,
-    flagged: speakerFlagged || flagged,
-    startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
-    endSec: primaryConceptInterval ? primaryConceptInterval.end : null,
-  };
-}
-
+export { pickOrthoIntervalForConcept } from './lib/parseUIUtils';
 export {
   parseReferenceFormList,
   resolveReferenceFormLists,
