@@ -1,5 +1,13 @@
 """HTTP-focused helpers for the PARSE application layer."""
 
+from .auth_handlers import (
+    AuthHandlerError,
+    build_auth_key_response,
+    build_auth_logout_response,
+    build_auth_poll_response,
+    build_auth_start_response,
+    build_auth_status_response,
+)
 from .external_api_handlers import (
     ExternalApiHandlerError,
     HttpResponseSpec,
@@ -24,11 +32,17 @@ from .request_helpers import JsonBodyError, path_parts, read_json_body, request_
 from .response_helpers import encode_json_body, send_json_error_response, send_json_response
 
 __all__ = [
+    "AuthHandlerError",
     "ExternalApiHandlerError",
     "HttpResponseSpec",
     "JobObservabilityHandlerError",
     "JsonBodyError",
     "JsonResponseSpec",
+    "build_auth_key_response",
+    "build_auth_logout_response",
+    "build_auth_poll_response",
+    "build_auth_start_response",
+    "build_auth_status_response",
     "build_job_detail_response",
     "build_job_error_logs_response",
     "build_job_logs_response",
