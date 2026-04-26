@@ -1,0 +1,3 @@
+Flow: filter tag search
+Oracle result: PASS — typing 'renamed' produced Tags · 1 and isolated tags-parity-renamed.
+Rebuild result: PASS — same Tags · 1 filtered state.

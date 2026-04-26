@@ -1,0 +1,3 @@
+Flow: select tag panel
+Oracle result: PASS — clicking tags-parity-renamed opened right-hand panel with heading tags-parity-renamed and concept search field.
+Rebuild result: PASS — same selected-tag heading and concept search field.
