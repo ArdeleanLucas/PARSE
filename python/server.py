@@ -76,6 +76,14 @@ from app.http.clef_http_handlers import (
     build_post_clef_config_response as _app_build_post_clef_config_response,
     build_post_clef_form_selections_response as _app_build_post_clef_form_selections_response,
 )
+from app.http.compute_offset_handlers import (
+    ComputeOffsetHandlerError as _app_ComputeOffsetHandlerError,
+    build_post_compute_start_response as _app_build_post_compute_start_response,
+    build_post_compute_status_response as _app_build_post_compute_status_response,
+    build_post_offset_apply_response as _app_build_post_offset_apply_response,
+    build_post_offset_detect_from_pair_response as _app_build_post_offset_detect_from_pair_response,
+    build_post_offset_detect_response as _app_build_post_offset_detect_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -6597,25 +6605,16 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         sttJobId, sttSegments) are forwarded to the compute function unchanged.
         """
         body = self._expect_object(self._read_json_body(), "Request body")
-
         try:
-            speaker = _normalize_speaker_id(body.get("speaker"))
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        compute_payload: Dict[str, Any] = {
-            "speaker": speaker,
-            "nAnchors": body.get("nAnchors") or body.get("n_anchors"),
-            "bucketSec": body.get("bucketSec") or body.get("bucket_sec"),
-            "minMatchScore": body.get("minMatchScore") or body.get("min_match_score"),
-            "distribution": body.get("distribution") or body.get("anchorDistribution"),
-            "sttJobId": body.get("sttJobId") or body.get("stt_job_id"),
-            "sttSegments": body.get("sttSegments") or body.get("stt_segments"),
-        }
-
-        job_id = _create_job("compute:offset_detect", {"speaker": speaker})
-        _launch_compute_runner(job_id, "offset_detect", compute_payload)
-        self._send_json(HTTPStatus.OK, {"jobId": job_id, "status": "running"})
+            response = _app_build_post_offset_detect_response(
+                body,
+                normalize_speaker_id=_normalize_speaker_id,
+                create_job=_create_job,
+                launch_compute_runner=_launch_compute_runner,
+            )
+        except _app_ComputeOffsetHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_offset_detect_from_pair(self) -> None:
         """Submit a compute job to detect offset from manual (csv_time, audio_time) pairs.
@@ -6630,28 +6629,16 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             Multi:  {speaker, pairs: [{audioTimeSec, csvTimeSec? | conceptId?}, ...]}
         """
         body = self._expect_object(self._read_json_body(), "Request body")
-
         try:
-            speaker = _normalize_speaker_id(body.get("speaker"))
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        raw_pairs = body.get("pairs")
-        if raw_pairs is None:
-            raw_pairs = [
-                {
-                    "audioTimeSec": body.get("audioTimeSec") or body.get("audio_time_sec"),
-                    "csvTimeSec": body.get("csvTimeSec") or body.get("csv_time_sec"),
-                    "conceptId": body.get("conceptId") or body.get("concept_id"),
-                }
-            ]
-        if not isinstance(raw_pairs, list) or not raw_pairs:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "pairs must be a non-empty array")
-
-        compute_payload: Dict[str, Any] = {"speaker": speaker, "pairs": raw_pairs}
-        job_id = _create_job("compute:offset_detect_from_pair", {"speaker": speaker})
-        _launch_compute_runner(job_id, "offset_detect_from_pair", compute_payload)
-        self._send_json(HTTPStatus.OK, {"jobId": job_id, "status": "running"})
+            response = _app_build_post_offset_detect_from_pair_response(
+                body,
+                normalize_speaker_id=_normalize_speaker_id,
+                create_job=_create_job,
+                launch_compute_runner=_launch_compute_runner,
+            )
+        except _app_ComputeOffsetHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_offset_apply(self) -> None:
         """Shift every annotation interval by ``offsetSec`` (start/end += offset).
@@ -6661,68 +6648,21 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         the lexemes line up with the truncated recording.
         """
         body = self._expect_object(self._read_json_body(), "Request body")
-
         try:
-            speaker = _normalize_speaker_id(body.get("speaker"))
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        offset_raw = body.get("offsetSec")
-        if offset_raw is None:
-            offset_raw = body.get("offset_sec")
-        if offset_raw is None:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec is required")
-
-        try:
-            offset_sec = float(offset_raw)
-        except (TypeError, ValueError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec must be a number")
-
-        if not math.isfinite(offset_sec):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec must be a finite number")
-
-        if abs(offset_sec) < 1e-6:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "offsetSec is effectively zero — nothing to apply")
-
-        annotation_path = _annotation_read_path_for_speaker(speaker)
-        annotation = _normalize_annotation_record(_read_json_any_file(annotation_path), speaker)
-
-        shifted_count, protected_count = _annotation_shift_intervals(
-            annotation, offset_sec
-        )
-        if shifted_count == 0 and protected_count == 0:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "No intervals were shifted")
-
-        # "Lexemes" ≈ unique (start,end) pairs on the concept tier — this is
-        # the user-facing count in the Review & apply modal. ``protected_count``
-        # above sums every interval row on every tier (ipa/ortho/speaker…)
-        # which would be ~4× larger and confusing.
-        protected_lexemes = 0
-        concept_tier = annotation.get("tiers", {}).get("concept") if isinstance(annotation, dict) else None
-        if isinstance(concept_tier, dict):
-            concept_intervals = concept_tier.get("intervals")
-            if isinstance(concept_intervals, list):
-                protected_lexemes = sum(
-                    1
-                    for iv in concept_intervals
-                    if isinstance(iv, dict) and bool(iv.get("manuallyAdjusted"))
-                )
-
-        if shifted_count > 0:
-            _annotation_touch_metadata(annotation, preserve_created=True)
-            write_path = _annotation_record_path_for_speaker(speaker)
-            _write_json_file(write_path, annotation)
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "speaker": speaker,
-                "appliedOffsetSec": offset_sec,
-                "shiftedIntervals": shifted_count,
-                "protectedIntervals": protected_count,
-                "protectedLexemes": protected_lexemes,
-            },
-        )
+            response = _app_build_post_offset_apply_response(
+                body,
+                normalize_speaker_id=_normalize_speaker_id,
+                annotation_read_path_for_speaker=_annotation_read_path_for_speaker,
+                read_json_any_file=_read_json_any_file,
+                normalize_annotation_record=_normalize_annotation_record,
+                annotation_shift_intervals=_annotation_shift_intervals,
+                annotation_touch_metadata=_annotation_touch_metadata,
+                annotation_record_path_for_speaker=_annotation_record_path_for_speaker,
+                write_json_file=_write_json_file,
+            )
+        except _app_ComputeOffsetHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_onboard_speaker_status(self) -> None:
         """Poll status for an onboard:speaker job."""
@@ -7085,53 +7025,31 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         body_obj = self._expect_object(body or {}, "Request body")
         callback_url = _job_callback_url_from_mapping(body_obj)
 
-        speaker = str(body_obj.get("speaker") or "").strip() or None
-        job_metadata = {
-            "computeType": normalized_type,
-            "payload": body_obj,
-            "callbackUrl": callback_url,
-        }
-        if speaker:
-            job_metadata["speaker"] = speaker
-
         try:
-            job_id = _create_job(
-                "compute:{0}".format(normalized_type),
-                job_metadata,
+            response = _app_build_post_compute_start_response(
+                compute_type,
+                body_obj,
+                callback_url=callback_url,
+                create_job=_create_job,
+                launch_compute_runner=_launch_compute_runner,
+                job_conflict_error_cls=JobResourceConflictError,
             )
-        except JobResourceConflictError as exc:
-            raise ApiError(HTTPStatus.CONFLICT, str(exc))
-
-        _launch_compute_runner(job_id, normalized_type, body_obj)
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "jobId": job_id,
-                "status": "running",
-            },
-        )
+        except _app_ComputeOffsetHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_compute_status(self, compute_type: Optional[str]) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
-        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
-        if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is required")
-
-        job = _get_job_snapshot(job_id)
-        if job is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown jobId")
-
-        job_type = str(job.get("type") or "")
-        if not job_type.startswith("compute:"):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is not a compute job")
-
-        if compute_type:
-            expected_type = str(compute_type).strip().lower()
-            if job_type != "compute:{0}".format(expected_type):
-                raise ApiError(HTTPStatus.BAD_REQUEST, "jobId does not match compute type")
-
-        self._send_json(HTTPStatus.OK, _job_response_payload(job))
+        try:
+            response = _app_build_post_compute_status_response(
+                compute_type,
+                body,
+                get_job_snapshot=_get_job_snapshot,
+                job_response_payload=_job_response_payload,
+            )
+        except _app_ComputeOffsetHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_get_annotation(self, speaker: str) -> None:
         """Return annotation JSON for a single speaker.
