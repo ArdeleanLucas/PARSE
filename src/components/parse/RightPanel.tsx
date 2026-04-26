@@ -234,20 +234,6 @@ export function RightPanel({
                   <RefreshCw className="h-3 w-3" /> Refresh
                 </button>
               </div>
-              {computeMode !== 'contact-lexemes' && (
-                <div
-                  className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px] leading-snug text-slate-500"
-                  data-testid="compare-compute-semantics"
-                >
-                  <div>Selected speakers only: {selectedSpeakers.length} of {speakers.length}.</div>
-                  {computeMode === 'similarity' ? (
-                    <div>Similarity currently uses the same shared backend recompute path as Cognates.</div>
-                  ) : (
-                    <div>Cognates recomputes cognate sets and similarity scores for the selected speaker subset.</div>
-                  )}
-                  <div>Refresh reloads saved enrichments only.</div>
-                </div>
-              )}
               {computeMode === 'contact-lexemes' && (
                 <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px]">
                   <span className={clefConfigured ? 'text-emerald-700' : 'text-amber-700'}>

@@ -106,19 +106,20 @@ describe('RightPanel', () => {
     expect(onOpenCommentsImport).toHaveBeenCalledOnce();
   });
 
-  it('explains similarity mode as a selected-speaker recompute that shares the cognate backend path', () => {
+  it('does not render the extra compare compute semantics explainer from the rebuild-only parity drift', () => {
     renderRightPanel({
       currentMode: 'compare',
       selectedSpeakers: ['Fail01', 'Fail02'],
       computeMode: 'similarity',
     });
 
-    expect(screen.getByText(/Selected speakers only: 2 of 2/i)).toBeTruthy();
-    expect(screen.getByText(/shared backend recompute path as Cognates/i)).toBeTruthy();
-    expect(screen.getByText(/Refresh reloads saved enrichments only/i)).toBeTruthy();
+    expect(screen.queryByTestId('compare-compute-semantics')).toBeNull();
+    expect(screen.queryByText(/Selected speakers only:/i)).toBeNull();
+    expect(screen.queryByText(/shared backend recompute path as Cognates/i)).toBeNull();
+    expect(screen.queryByText(/Refresh reloads saved enrichments only/i)).toBeNull();
   });
 
-  it('disables generic compare Run when no speakers are selected', () => {
+  it('still disables generic compare Run when no speakers are selected without adding an extra explainer block', () => {
     renderRightPanel({
       currentMode: 'compare',
       selectedSpeakers: [],
@@ -127,6 +128,7 @@ describe('RightPanel', () => {
 
     const runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement;
     expect(runButton.disabled).toBe(true);
-    expect(screen.getByText(/Selected speakers only: 0 of 2/i)).toBeTruthy();
+    expect(screen.queryByTestId('compare-compute-semantics')).toBeNull();
+    expect(screen.queryByText(/Selected speakers only:/i)).toBeNull();
   });
 });
