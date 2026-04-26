@@ -10,6 +10,7 @@ import type { AnnotationInterval, SttSegment } from "../../api/types";
 import { TranscriptionLaneRow, type LaneStrip } from "./TranscriptionLaneRow";
 import { TranscriptionLaneToolbar } from "./TranscriptionLaneToolbar";
 import { useTranscriptionLaneBoundaryEdit } from "./useTranscriptionLaneBoundaryEdit";
+import { useTranscriptionLaneInlineEdit } from "./useTranscriptionLaneInlineEdit";
 interface TranscriptionLanesProps {
   speaker: string;
   wsRef: React.RefObject<WaveSurfer | null>;
@@ -120,11 +121,15 @@ export function TranscriptionLanes({
   const [duration, setDuration] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [editing, setEditing] = useState<{ kind: LaneKind; index: number } | null>(null);
   const [menu, setMenu] = useState<
     { kind: LaneKind; index: number; x: number; y: number } | null
   >(null);
   const editRef = useRef<HTMLSpanElement | null>(null);
+  const { beginIntervalEdit, commitEdit, editing, setEditing } = useTranscriptionLaneInlineEdit({
+    editRef,
+    speaker,
+    updateInterval,
+  });
 
   const laneScrollRefs = useRef<Record<LaneKind, HTMLDivElement | null>>({
     ipa_phone: null,
@@ -246,19 +251,6 @@ export function TranscriptionLanes({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [selectedInterval, speaker, splitInterval, wsRef]);
-
-  // Focus + select-all when entering inline edit mode.
-  useEffect(() => {
-    if (!editing) return;
-    const el = editRef.current;
-    if (!el) return;
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
-  }, [editing]);
 
   const strips: LaneStrip[] = useMemo(() => {
     const out: LaneStrip[] = [];
@@ -468,13 +460,6 @@ export function TranscriptionLanes({
   const visibleEndSec =
     (scrollLeft + viewportWidth + VIRTUAL_BUFFER_PX) / pxPerSec;
 
-  const commitEdit = (tier: string, sourceIdx: number, text: string) => {
-    const trimmed = text.trim();
-    if (!speaker) return;
-    updateInterval(speaker, tier, sourceIdx, trimmed);
-    setEditing(null);
-  };
-
   const seekInterval = (
     iv: LaneStrip["intervals"][number],
     sourceIdx: number | undefined,
@@ -488,12 +473,6 @@ export function TranscriptionLanes({
       });
     }
     onSeek?.(iv.start);
-  };
-
-  const beginIntervalEdit = (strip: LaneStrip, sourceIdx: number) => {
-    if (strip.boundaryOnly) return;
-    if (strip.needsMigration) strip.migrate?.();
-    setEditing({ kind: strip.kind, index: sourceIdx });
   };
 
   const openContextMenu = (
