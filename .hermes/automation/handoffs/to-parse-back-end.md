@@ -1,26 +1,25 @@
 # To parse-back-end
 
-Status: pending
+Status: queued_after_pr35
 
 Current instruction:
-- Implement the next backend-safe PARSE-rebuild slice in `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto` on `auto/parse-back-end`.
-- Follow the full prompt at `.hermes/plans/2026-04-25_234447-parse-back-end-job-observability-handoff-prompt.md`.
+- Lucas wants **longer tasks**, not more micro-PRs.
+- Work from `.hermes/plans/2026-04-26-parse-back-end-next-task-clef-http-bundle.md`.
+- After PR #35, build **one larger backend-only implementation PR** from current `origin/main` that extracts the remaining CLEF/contact-config HTTP cluster while preserving UI-facing contracts exactly.
+- Keep this strictly backend-only and do not introduce any contract drift that would force visible UI change.
+- Treat PR #35 as the immediate backend task and this new prompt as the queued follow-up behind it.
 
-Lane boundary:
-- This is the backend lane.
-- Stay out of `src/**` and all parse-builder-owned frontend shell work.
-- Safe ownership for this slice is `python/server.py`, `python/app/http/**`, and backend Python tests only.
-
-Short version:
-1. Extract the generic jobs/worker-status HTTP handler cluster out of `python/server.py`.
-2. Prefer a new helper such as `python/app/http/job_observability_handlers.py`.
-3. Add direct tests first, then keep thin wrappers in `server.py`.
-4. Re-run targeted Python validation plus full rebuild gates.
-
-Grounded seam locations:
-- `_api_get_jobs()` — around `python/server.py:6760`
-- `_api_get_job()` — around `python/server.py:6786`
-- `_api_get_job_logs()` — around `python/server.py:6795`
-- `_api_get_jobs_active()` — around `python/server.py:6821`
-- `_api_get_job_error_logs()` — around `python/server.py:6826`
-- `_api_get_worker_status()` — around `python/server.py:6873`
+Grounded state:
+- Current rebuild `origin/main`: `70f9783` — `refactor(config): extract config and CSV import HTTP handlers (#33)`
+- Current queued parse-back-end handoff: PR #35 — tags/export bundle
+- Builder lanes to avoid overlapping with:
+  - PR #34 — frontend compare contract hardening
+  - PR #36 — queued Builder UI parity bundle
+- The next coherent inline backend cluster in `python/server.py` is:
+  - `GET /api/contact-lexemes/coverage`
+  - `GET /api/clef/config`
+  - `POST /api/clef/config`
+  - `POST /api/clef/form-selections`
+  - `GET /api/clef/catalog`
+  - `GET /api/clef/providers`
+  - `GET /api/clef/sources-report`
