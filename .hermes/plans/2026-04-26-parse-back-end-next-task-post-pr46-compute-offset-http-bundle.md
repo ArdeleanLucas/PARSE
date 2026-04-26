@@ -8,10 +8,10 @@ This is a contract-preservation task, not a product redesign task.
 
 ## Why this is the right next task now
 
-- **PR #46** is the current parse-back-end implementation lane for ORTH runtime/docs/script reconciliation.
-- **PR #45** is the queued Builder-next task for the active-shell compare compute contract.
-- **PR #42** is a separate local-maintenance/worktree-hygiene lane.
-- **PRs #41 / #43 / #36** are frontend/annotate/Builder lanes.
+- **PR #46** has already landed on `origin/main` as the ORTH runtime/docs/script reconciliation slice.
+- **PR #45** has also landed as the queued Builder compute-contract handoff.
+- **PR #42** remains a separate local-maintenance/worktree-hygiene lane.
+- **PRs #41 / #43 / #36** remain frontend/annotate/Builder lanes.
 
 So the next real parse-back-end slice should be:
 - backend-only
