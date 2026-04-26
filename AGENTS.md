@@ -44,6 +44,33 @@ Exceptions to this rule (cases where landing on oracle IS correct):
 
 Both exceptions require Lucas's explicit approval per task. Do not assume.
 
+## Screenshot convention (private-repo constraint)
+
+**Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.
+
+**Working pattern:**
+
+```markdown
+## Screenshot
+
+[Screenshot: AnnotateView post-extraction](docs/pr-assets/foo.png)
+```
+
+**Failing patterns to avoid:**
+
+```markdown
+![alt](https://raw.githubusercontent.com/TarahAssistant/PARSE-rebuild/<branch>/docs/pr-assets/foo.png)
+![alt](https://github.com/TarahAssistant/PARSE-rebuild/blob/<branch>/docs/pr-assets/foo.png?raw=1)
+```
+
+Both 404 in browsers. Verified 2026-04-26 — every screenshot embed in PRs #62, #63, #73, #79, #86 was failing silently. The screenshot rule had been doing nothing.
+
+Why the link works: clicking the markdown link navigates to GitHub's blob view, which respects the viewer's auth session. Reviewers see the image one click away. Agents can do this trivially with no API changes.
+
+**File location convention** unchanged: commit screenshots as binary files under `docs/pr-assets/<pr-number-or-slug>-<descriptor>.png`.
+
+**Sanity-check your screenshot is real**: capture distinct browser states for each PR. If your screenshot tool keeps producing byte-identical PNGs across different PRs (compare blob SHAs), the tool is capturing a blank/error state, not real UI. Investigate before adding more screenshot evidence.
+
 ## Current State (updated 2026-04-25)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
