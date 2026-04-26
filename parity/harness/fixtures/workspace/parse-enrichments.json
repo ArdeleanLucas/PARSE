@@ -1,0 +1,13 @@
+{
+  "computed_at": null,
+  "config": {
+    "contact_languages": [],
+    "speakers_included": [],
+    "concepts_included": [],
+    "lexstat_threshold": 0.6
+  },
+  "cognate_sets": {},
+  "similarity": {},
+  "borrowing_flags": {},
+  "manual_overrides": {}
+}

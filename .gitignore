@@ -14,6 +14,7 @@ config/ai_config.json
 node_modules/
 dist/
 .vite/
+parity/harness/output/
 
 # Claude Code agent state
 .claude/
@@ -28,4 +29,9 @@ audio
 concepts.csv
 source_index.json
 project.json
+# Allow committed harness fixtures that intentionally mirror runtime artifact names.
+!parity/harness/fixtures/workspace/project.json
+!parity/harness/fixtures/workspace/source_index.json
+!parity/harness/fixtures/workspace/annotations/
+!parity/harness/fixtures/workspace/annotations/Base01.parse.json
 docs/bugs.md

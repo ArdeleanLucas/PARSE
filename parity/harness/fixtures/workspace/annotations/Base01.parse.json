@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "project_id": "parse-parity-fixture",
+  "speaker": "Base01",
+  "source_audio": "audio/original/Base01/source.wav",
+  "source_audio_duration_sec": 0.1,
+  "tiers": {
+    "ipa": {
+      "display_order": 1,
+      "type": "interval",
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.1,
+          "text": "aʃ"
+        }
+      ]
+    },
+    "ortho": {
+      "display_order": 2,
+      "type": "interval",
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.1,
+          "text": "ash"
+        }
+      ]
+    },
+    "concept": {
+      "display_order": 3,
+      "type": "interval",
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.1,
+          "text": "1"
+        }
+      ]
+    },
+    "speaker": {
+      "display_order": 4,
+      "type": "interval",
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.1,
+          "text": "Base01"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "language_code": "und",
+    "created": "2026-01-01T00:00:00Z",
+    "modified": "2026-01-01T00:00:00Z"
+  }
+}

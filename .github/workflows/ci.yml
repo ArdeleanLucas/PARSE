@@ -217,3 +217,65 @@ jobs:
             python/test_chat_job_result_shape.py \
             python/test_run_stt_job.py \
             python/test_server_auth_key_refresh.py
+
+  parity-harness:
+    name: Parity Diff Harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout rebuild repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install parity-harness test dependency
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Run parity-harness unit tests
+        env:
+          PYTHONPATH: .
+        run: python -m pytest parity/harness/tests -q
+
+      - name: Clone oracle repository
+        run: git clone --depth 1 https://github.com/ArdeleanLucas/PARSE.git /tmp/parse-oracle
+
+      - name: Run report-only oracle vs rebuild harness
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m parity.harness.runner \
+            --oracle-repo /tmp/parse-oracle \
+            --rebuild-repo "$GITHUB_WORKSPACE" \
+            --output-dir "$GITHUB_WORKSPACE/parity/harness/output/ci" \
+            --keep-temp
+
+      - name: Publish parity-harness summary
+        env:
+          REPORT_JSON: ${{ github.workspace }}/parity/harness/output/ci/report.json
+          REPORT_MD: ${{ github.workspace }}/parity/harness/output/ci/report.md
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["REPORT_JSON"]).read_text(encoding="utf-8"))
+          print("# Parity diff harness")
+          print()
+          print(f"Current diff count: **{report['diff_count']}**")
+          print()
+          print(f"Markdown report: `{os.environ['REPORT_MD']}`")
+          PY
+
+      - name: Upload parity-harness artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-harness-report
+          path: parity/harness/output/ci/
+          if-no-files-found: error
