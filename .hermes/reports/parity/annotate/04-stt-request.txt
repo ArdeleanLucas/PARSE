@@ -1,0 +1,14 @@
+Flow: STT request
+Fixture: Saha01 single-speaker parity workspace
+
+Oracle result
+- Not executable. Oracle crashed before STT-assisted annotate review could be exercised.
+
+Rebuild result
+- STT lane rendered on the Saha01 annotate screen, but no parity request was attempted because the oracle baseline was already broken.
+
+Status
+FAIL
+
+Why
+Flow 01 blocks all downstream annotate interactions on the oracle baseline.

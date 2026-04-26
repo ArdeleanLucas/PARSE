@@ -1,0 +1,12 @@
+Environment
+- Oracle temp worktree: /tmp/parse-oracle-parity
+- Oracle SHA: 0951287a812609068933ba22711a8ecd97765f38
+- Entry route: http://127.0.0.1:5173/ via Vite
+
+Observed error
+- ErrorBoundary banner: "PARSE hit an unhandled error"
+- React exception: "Rendered more hooks than during the previous render"
+- Trace references: `TranscriptionLanes.tsx:348:3`, `TranscriptionLanes.tsx:63:3`, `AnnotateView` in `ParseUI.tsx`
+
+Artifact
+- oracle-annotate-hook-order-crash.png

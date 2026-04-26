@@ -1,0 +1,15 @@
+Flow: Save annotation
+Fixture: Saha01 single-speaker parity workspace
+
+Oracle result
+- Not executable. Oracle crashed before a stable Annotate screen existed.
+
+Rebuild result
+- `Save Annotation` control was visible on the loaded Saha01 annotate screen.
+- Cross-repo parity could not be exercised because oracle never reached the same state.
+
+Status
+FAIL
+
+Why
+Flow 01 blocks all downstream annotate interactions on the oracle baseline.
