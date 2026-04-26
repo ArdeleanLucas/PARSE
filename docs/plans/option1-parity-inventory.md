@@ -300,3 +300,37 @@ The Option-1 rebuild is ready for sign-off only if:
 2. Convert this inventory into actual parity rows inside the rebuild repo.
 3. Use `docs/plans/option1-phase0-shared-contract-checklist.md` to block Agent A / Agent B divergence until shared contracts are frozen.
 4. Require each phase checkpoint in `docs/plans/option1-two-agent-parallel-rebuild-plan.md` to reference this inventory when claiming parity progress.
+
+---
+
+## 11. Accepted oracle deviations (added 2026-04-26 evening)
+
+The plan was originally written assuming oracle-as-immutable-spec. Dogfooding the rebuild revealed oracle has its own bugs that parity evidence has been recording as deviations rather than rebuild failures. This section is the durable list of those deviations so future parity passes can reference it.
+
+| Deviation | Oracle issue | Status | Affects parity evidence |
+|---|---|---|---|
+| TranscriptionLanes hook-order crash on Annotate entry (Saha01 fixture) | #230 | Open on oracle; fixed in rebuild via PR #19 | PR #66 (Annotate parity) records this — rebuild PASSES the flow, oracle CRASHES; documented as deviation |
+| `_display_readable_path` leaks Windows path separators into `source_index.json` and `annotation.source_audio` | #231, #232 | Open on oracle; fixed in rebuild via PR #77 (MC-323) | Affected `test_import_processed_speaker_*` failures (2 of 8 in rebuild backend gate evidence per PR #64); fix is sync-pending to oracle |
+| 10 oracle backend tests failing in unclassified state | none yet | Deferred audit | Parity claims for backend surfaces have caveats until classified |
+
+### Rules going forward
+
+- Every parity evidence pass MUST reference this deviation list at the top of its evidence doc.
+- A flow that fails ONLY because oracle is broken is recorded as DEVIATION, not as rebuild parity failure.
+- Adding a new deviation requires a one-line entry above + a linked oracle issue (file one if missing).
+- Removing a deviation requires the oracle bug to be fixed AND verified in a follow-up parity pass.
+
+## 12. Current evidence priority (added 2026-04-26 evening)
+
+The P0/P1/P2 tiers in §3 describe what eventually needs evidence. This section orders WHICH P0/P1 surface to do NEXT, regardless of tier. Updated by coordinator as evidence ships.
+
+| Order | Surface | Tier | Why now |
+|---|---|---|---|
+| 1 | Tags | P0 | Twice-deferred (PR #78 task 3, PR #84 task 2). Cannot be deferred a third time without coordinator-level escalation. |
+| 2 | AI/chat | P1 | Most likely to expose contract drift after chat_tools.py decomposition (PRs 2-4 in flight). |
+| 3 | Import / onboarding | P1 | Path-separator bug fix (#77) needs forward-looking parity verification. |
+| 4 | Compute / report modals | P1 | Less drift risk, deferred. |
+| 5 | CLEF | P1 | Deferred. |
+| 6 | Job diagnostics | P1 | Deferred. |
+
+Coordinator updates this table after each evidence pass ships.
