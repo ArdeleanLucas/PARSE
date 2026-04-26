@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This coordinator-owned note freezes the **current three-agent split** for PARSE-rebuild health work so Builder, parse-back-end, and parse-gpt can move in parallel **without file or PR collisions**.
+This coordinator-owned note freezes the current three-agent split for PARSE-rebuild health work so Builder, parse-back-end, and parse-gpt can move in parallel without file or PR collisions.
 
-This file is intentionally **coordination-only**. It does not redefine product architecture or claim parity. It records the live rebuild topology as of 2026-04-26 and names the current execution lanes.
+This file is intentionally coordination-only. It does not redefine product architecture or claim parity. It records the live rebuild topology **after merged PR #13 and closed PR #16**.
 
 ---
 
@@ -13,64 +13,87 @@ This file is intentionally **coordination-only**. It does not redefine product a
 - **Repo:** `TarahAssistant/PARSE-rebuild`
 - **Canonical local path:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
 - **Remote default branch:** `origin/main`
-- **Current `origin/main` head used for this note:** `2cd216c` (`refactor: extract job observability HTTP handlers (#12)`)
+- **Current `origin/main` head used for this note:** `4ed1eb7` (`refactor: extract auth HTTP handlers (#13)`)
 
 ### Important local warning
 
-The root checkout at `/home/lucas/gh/tarahassistant/PARSE-rebuild` is currently on a **stale local branch**:
-
+The root checkout at `/home/lucas/gh/tarahassistant/PARSE-rebuild` is still on a stale local branch:
 - branch: `feat/parseui-shell-stage0-rebuild`
-- remote tracking branch: **gone**
+- remote tracking branch: gone
 
 No new lane should branch from that root checkout. All new work should start from a clean `origin/main` worktree.
 
 ---
 
-## Current open PRs
+## Current PR topology
 
-### Active implementation lanes
+### Open implementation PRs
 
-1. **Builder active lane**
+1. **Builder implementation lane**
    - PR #14
    - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/14`
    - head: `auto/parse-builder`
-   - state at audit time: `DIRTY`
    - title: `feat: unify decisions persistence flows`
+   - note: active implementation PR; Builder should not widen it with unrelated crash-fix work
 
-2. **parse-back-end active lane**
-   - PR #13
-   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/13`
-   - head: `auto/parse-back-end`
-   - state at audit time: `CLEAN`
-   - CI at audit time: green
-   - title: `refactor: extract auth HTTP handlers`
-
-3. **Older but still open Builder-adjacent implementation lane**
+2. **Older Builder-adjacent implementation lane**
    - PR #11
    - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/11`
    - head: `refactor/parseui-stage2-offset-workflow`
-   - state at audit time: `CLEAN`
-   - CI at audit time: green
    - title: `refactor(parseui): extract stage2 offset workflow`
+   - note: still open; treat as historical/adjacent implementation context until explicitly merged or closed
 
-### Prompt / coordination PRs still open
+### Open prompt / coordination PRs
 
-4. **Builder prompt PR**
-   - PR #5
-   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/5`
-   - title: `docs: add parse-builder stage1 handoff prompt`
+3. **parse-gpt coordination PR**
+   - PR #15
+   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/15`
+   - head: `docs/parsegpt-three-lane-health-coordination`
+   - title: `docs: add three-lane health coordination note`
 
-5. **parse-gpt prompt PR**
+4. **Builder next-task prompt**
+   - PR #17
+   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/17`
+   - head: `docs/parse-builder-next-task-transcription-lanes-crash-v2`
+   - title: `docs: refresh parse-builder next task prompt`
+   - note: current Builder handoff prompt; supersedes stale PR #16
+
+5. **parse-back-end next-task prompt**
+   - PR #18
+   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/18`
+   - head: `docs/parse-back-end-next-task-backend-health-v1`
+   - title: `docs: add parse-back-end next task prompt`
+   - note: current backend handoff prompt after PR #13 merged
+
+6. **Older parse-gpt prompt PR**
    - PR #6
    - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/6`
    - title: `docs: add ParseGPT next external API slice prompt`
 
+7. **Older test prompt/implementation PR**
+   - PR #2
+   - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/2`
+   - title: `test(parseui): add stage0 shell regression coverage`
+
+### Closed or merged context that matters right now
+
+- **PR #13** — merged
+  - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/13`
+  - merge commit now on `main`: `4ed1eb7`
+- **PR #16** — closed as stale
+  - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/16`
+  - reason: it described live topology incorrectly once PR #13 merged
+- **PR #5** — stale Builder prompt context
+  - URL: `https://github.com/TarahAssistant/PARSE-rebuild/pull/5`
+  - no longer safe as live Builder guidance
+
 ### Coordination interpretation
 
-- PR #5 and PR #6 are **prompt/context artifacts**, not runtime health fixes.
-- They may still be useful as briefing material for agents, but they should not be mistaken for the current implementation truth.
-- PR #14 and PR #13 are the primary active lanes.
-- PR #11 is relevant historical/adjacent implementation context for Builder, especially if PR #14 needs cleanup or re-basing.
+- PR #14 is the only clearly active Builder implementation PR.
+- parse-back-end currently has **no open implementation PR**; its next move is defined by prompt PR #18.
+- PR #17 and PR #18 are handoff/context PRs, not implementation results.
+- PR #6 and PR #5 are historical prompt artifacts.
+- PR #11 remains an open implementation-context artifact that must be considered in merge/resequence decisions.
 
 ---
 
@@ -84,38 +107,49 @@ No new lane should branch from that root checkout. All new work should start fro
 
 - `/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice`
   - branch: `main`
-  - purpose: clean main worktree
+  - note: local `main` worktree exists but is behind remote by one merged commit unless refreshed
 
 ### Agent / lane worktrees
 
-- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto`
-  - branch: `auto/parse-back-end`
-  - active backend lane
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-auto`
+  - detached at old `origin/main` snapshot
+  - reusable only after explicit refresh/reset
 
 - `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-stage2-prompt`
   - branch: `refactor/parseui-stage2-offset-workflow`
-  - Builder-adjacent implementation context
+  - ties to PR #11
 
-- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-builder-auto`
-  - detached at `origin/main`
-  - reusable if Builder wants a fresh clean worktree
-
-- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-gpt-auto`
-  - branch: `auto/parse-gpt`
-  - parse-gpt lane, currently behind `origin/main`
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-auto`
+  - detached at merged PR #13 commit `4ed1eb7`
+  - previous backend implementation worktree; no active backend feature branch attached now
 
 - `/home/lucas/gh/worktrees/PARSE-rebuild/parse-gpt-three-lane-health`
   - branch: `docs/parsegpt-three-lane-health-coordination`
-  - **this coordinator lane**
+  - this coordinator lane / PR #15
 
-### Older prompt / slice worktrees still present
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-gpt-builder-next-task-v2`
+  - branch: `docs/parse-builder-next-task-transcription-lanes-crash-v2`
+  - Builder handoff PR #17
+
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-gpt-backend-next-task`
+  - branch: `docs/parse-back-end-next-task-backend-health-v1`
+  - parse-back-end handoff PR #18
+
+- `/home/lucas/gh/worktrees/PARSE-rebuild/parse-gpt-auto`
+  - branch: `auto/parse-gpt`
+  - behind current `origin/main`
+
+### Older prompt / review worktrees still present
 
 - `/home/lucas/gh/worktrees/PARSE-rebuild/parse-back-end-prompt`
 - `/home/lucas/gh/worktrees/PARSE-rebuild/parsegpt-next-external-api-prompt`
 - `/home/lucas/gh/worktrees/PARSE-rebuild/refactor-external-api-http-slice`
 - `/tmp/parse-rebuild-audit-main`
+- `/tmp/parse-rebuild-pr16-review`
+- `/tmp/parse-rebuild-pr3-review`
+- `/tmp/parse-rebuild-pr5-review`
 
-These are context-bearing, but they are not the authoritative active lanes unless explicitly reactivated.
+These are context-bearing only. They are not authoritative active lanes unless explicitly reactivated.
 
 ---
 
@@ -123,106 +157,103 @@ These are context-bearing, but they are not the authoritative active lanes unles
 
 ## Lane A — Builder
 
-### Primary PR
+### Primary implementation PR
 - `https://github.com/TarahAssistant/PARSE-rebuild/pull/14`
+
+### Current handoff PR
+- `https://github.com/TarahAssistant/PARSE-rebuild/pull/17`
 
 ### Secondary context
 - `https://github.com/TarahAssistant/PARSE-rebuild/pull/11`
 - `https://github.com/TarahAssistant/PARSE-rebuild/pull/5`
 
 ### Scope
-Builder owns **frontend/shared-shell/docs-adjacent** health work that does **not** collide with backend runtime repairs. Examples:
-- decisions persistence unification
-- ParseUI / shell / state coherence
-- built-app UI smoke issues that are frontend-owned
-- rebuild docs/process cleanup only where directly tied to Builder-owned surfaces
+Builder owns frontend/shared-shell health work that does not collide with backend runtime repairs. Current queued Builder bugfix work is the Compare → Annotate `TranscriptionLanes` hook-order crash, explicitly separated from PR #14.
 
 ### Builder must not touch
-- backend auth/MCP/ORTH runtime logic
-- backend pytest root-cause repairs assigned to parse-back-end
-- coordinator-owned merge sequencing / PR triage docs in this lane without explicit handoff
+- backend MCP/ORTH/runtime fixes
+- backend full-suite pytest repairs
+- coordinator-only PR topology docs unless explicitly asked
 
 ---
 
 ## Lane B — parse-back-end
 
-### Primary PR
-- `https://github.com/TarahAssistant/PARSE-rebuild/pull/13`
+### Current handoff PR
+- `https://github.com/TarahAssistant/PARSE-rebuild/pull/18`
 
 ### Scope
-parse-back-end owns **backend repo health** and server-side repairs, including the issues surfaced by the health audit:
-- full backend pytest failures
-- singleton/test contamination affecting MCP HTTP bridge tests
-- ORTH config/runtime/test/docs contract alignment where runtime truth is backend-owned
-- backend-side fixes needed to make the health audit pass cleanly
+parse-back-end owns backend repo health and server-side repairs. Current queued backend work is:
+- make the full backend suite green on current `main`
+- fix MCP HTTP bridge singleton/test contamination in the full run
+- reconcile ORTH runtime/test/config/example-config contract drift
 
 ### parse-back-end must not touch
-- Builder-owned decisions/shell/UI refactors
-- coordinator-only PR triage / lane-mapping artifacts unless explicitly asked
+- Builder’s `TranscriptionLanes` hook-order crash
+- decisions persistence UI work in PR #14
+- coordinator-only PR topology docs unless explicitly asked
 
 ---
 
 ## Lane C — parse-gpt / coordinator
 
 ### Primary PR
-- **this PR** (coordination-only lane)
+- `https://github.com/TarahAssistant/PARSE-rebuild/pull/15`
 
 ### Scope
 parse-gpt owns:
 - lane mapping
-- merge sequencing recommendations
-- stale prompt PR interpretation / close-later guidance
+- resequencing after merges/closures
+- stale prompt replacement
 - integration verification planning after Builder + parse-back-end move
-- any follow-up audit notes that help prevent overlap
+- keeping the PR/worktree map current enough that future handoffs do not immediately stale out
 
 ### parse-gpt must not touch in this lane
 - Builder implementation files
 - backend implementation files
-- shared runtime code unless a separate, explicitly scoped implementation PR is opened
+- shared runtime code unless a separate implementation PR is intentionally opened
 
 ---
 
 ## Immediate non-overlap rules
 
-1. **No lane branches from the stale root checkout.**
-2. **Builder and parse-back-end do not both edit the same functional surface in the same cycle.**
-3. **Prompt PRs (#5, #6) are context only unless promoted by explicit merge/close decisions.**
-4. **If Builder needs a fresh base, prefer a new branch from clean `origin/main` rather than mutating the stale root lane.**
-5. **If parse-back-end lands health fixes that affect Builder assumptions, coordinator records the contract shift before Builder rebases.**
+1. No lane branches from the stale root checkout.
+2. Builder and parse-back-end do not both edit the same functional surface in the same cycle.
+3. Prompt PRs are not implementation and should not be merged as runtime truth without checking freshness.
+4. If Builder needs a fresh execution base, start from current `origin/main`, not the stale root or old detached builder worktree.
+5. If parse-back-end opens a new implementation PR from handoff PR #18, coordinator should record the new URL before issuing any further cross-lane handoffs.
 
 ---
 
-## Recommended near-term merge/decision order
+## Recommended near-term sequence
 
-This is not a final merge order, only the current health-oriented recommendation.
+This is not a final merge order; it is the current coordination recommendation.
 
-1. **parse-back-end / PR #13**
-   - cleaner lane
-   - green CI at audit time
-   - backend health work is a prerequisite for a trustworthy rebuild baseline
+1. **Builder acts on PR #17 guidance**
+   - open a fresh implementation PR for the Compare → Annotate `TranscriptionLanes` hook-order crash
+   - keep PR #14 separate
 
-2. **Builder / PR #14**
-   - only after either:
-     - it becomes clean/mergeable on its own, or
-     - Builder rebases/repairs it based on current `main`
+2. **parse-back-end acts on PR #18 guidance**
+   - open a fresh implementation PR for the current backend suite failures
+   - do not reopen PR #13
 
-3. **Reassess PR #11**
-   - merge only if it still carries unique value not subsumed by PR #14 or later Builder work
+3. **Reassess PR #14 and PR #11 once the crash fix and backend suite fix are underway or landed**
+   - decide whether #11 still carries unique value
+   - decide whether #14 needs rebase/cleanup before merge
 
-4. **Close or archive prompt PRs #5 and #6 later**
-   - after the active implementation lanes no longer depend on them as human briefing context
+4. **Close stale prompt artifacts later**
+   - PR #5 and PR #6 are historical prompt context, not active runtime truth
 
 ---
 
 ## Stop / escalate conditions
 
 Escalate to coordinator before continuing if any lane hits one of these:
-
 - Builder needs to change backend route semantics
 - parse-back-end needs to change frontend store/client assumptions
-- PR #14 and PR #11 are discovered to overlap in a way that makes both merge targets incoherent
-- a lane wants to merge a prompt-only PR as if it were implementation work
-- a lane discovers that the worktree/PR mapping above is stale
+- PR #14 and PR #11 are found to overlap in a way that makes both merge targets incoherent
+- a prompt PR is about to be treated as durable implementation state without freshness verification
+- the worktree/PR mapping above becomes stale again because a new PR merged or closed
 
 ---
 
@@ -236,4 +267,4 @@ Every lane should report:
 5. validations run
 6. what was intentionally left for another lane
 
-That report format is mandatory because the human coordination model here is **copy/paste PR URLs**, not free-form local summaries.
+That reporting format is mandatory because the human coordination model here is copy/paste PR URLs, not free-form local summaries.
