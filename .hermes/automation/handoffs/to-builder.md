@@ -1,14 +1,13 @@
 # To parse-builder
 
-Status: pending
+Status: queued_next
 
 Current instruction:
-- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-compute-mode-semantics-audit.md`.
-- Open a fresh implementation PR from current `origin/main`; do not reuse the old crash-fix or decisions branches.
-- Keep the slice frontend/shared-shell focused. If you find a real backend contract gap, stop at the boundary and report the exact follow-up instead of widening into `python/server.py` casually.
+- Finish the current Builder slice in PR #25 first unless Lucas explicitly resequences you.
+- Then work from `.hermes/plans/2026-04-26-parse-builder-next-task-configstore-update.md`.
+- Keep this next slice frontend-only and stay out of parse-back-end PR #23: https://github.com/TarahAssistant/PARSE-rebuild/pull/23
 
 Grounded state:
-- Current rebuild `origin/main`: `7b33696` — `fix(annotate): prevent TranscriptionLanes hook-order crash (#19)`
-- Implementation PRs from current rebuild `origin/main`: none after PR #19; this handoff PR is docs-only
-- Prior PR #14 / #19 blockers are resolved on main
-- Next builder-visible slice: `docs/plans/parseui-current-state-plan.md §5` compute-mode semantics / payload audit
+- Current rebuild `origin/main`: `5cf12ca` — `feat(compare): make compute payload semantics explicit (#24)`
+- Current Builder task PR: https://github.com/TarahAssistant/PARSE-rebuild/pull/25
+- Next queued Builder slice: implement `src/stores/configStore.ts::update()` using the existing typed `updateConfig()` client helper, remove the stale stub/TODO, and add regression tests.
