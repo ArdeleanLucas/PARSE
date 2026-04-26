@@ -1122,7 +1122,8 @@ describe("ParseUI", () => {
     fireEvent.click(within(rightPanel).getByRole("button", { name: "Fail01" }));
     fireEvent.click(within(rightPanel).getByRole("button", { name: "Kalh01" }));
 
-    expect(screen.getByText(/Selected speakers only: 0 of 2/i)).toBeTruthy();
+    expect(screen.queryByTestId('compare-compute-semantics')).toBeNull();
+    expect(screen.queryByText(/Selected speakers only:/i)).toBeNull();
 
     const runButton = screen.getByRole("button", { name: "Run" }) as HTMLButtonElement;
     expect(runButton.disabled).toBe(true);
