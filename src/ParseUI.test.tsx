@@ -50,6 +50,7 @@ let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; times
 let mockChatSending = false;
 let mockChatError: string | null = null;
 let mockWaveOptions: Array<{ audioUrl?: string; onReady?: (duration: number) => void }> = [];
+let mockWaveSurferInstance: unknown = null;
 
 vi.mock("./stores/configStore", () => {
   const useConfigStore = (selector: (s: unknown) => unknown) =>
@@ -136,7 +137,7 @@ vi.mock("./hooks/useWaveSurfer", () => ({
       addRegion: mockAddRegion,
       setZoom: mockSetWaveZoom,
       setRate: mockSetRate,
-      wsRef: { current: null },
+      wsRef: { current: mockWaveSurferInstance },
     };
   },
 }));
@@ -265,6 +266,29 @@ function makeRecord(
 async function switchToAnnotateMode() {
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
   fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
+}
+
+function createMockWaveSurferForLanes() {
+  const viewport = document.createElement("div");
+  Object.defineProperty(viewport, "clientWidth", { value: 640, configurable: true });
+  const wrapper = document.createElement("div");
+  Object.defineProperty(wrapper, "clientWidth", { value: 640, configurable: true });
+  viewport.appendChild(wrapper);
+
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  return {
+    options: { minPxPerSec: 120 },
+    getDuration: () => 10,
+    getWrapper: () => wrapper,
+    on: (event: string, handler: (...args: unknown[]) => void) => {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)?.add(handler);
+    },
+    un: (event: string, handler: (...args: unknown[]) => void) => {
+      listeners.get(event)?.delete(handler);
+    },
+    getCurrentTime: () => 0,
+  };
 }
 
 function installBlobDownloadCapture() {
@@ -408,6 +432,7 @@ beforeEach(() => {
   mockPlaybackSetState.mockClear();
   mockConfigSetState.mockClear();
   mockWaveOptions = [];
+  mockWaveSurferInstance = null;
 });
 
 afterEach(() => {
@@ -435,13 +460,37 @@ describe("ParseUI", () => {
         { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
       ]),
     };
+    mockTags = mockTags.map((tag) =>
+      tag.id === "confirmed" ? { ...tag, concepts: ["1"] } : tag,
+    );
 
     render(<ParseUI />);
+
     await switchToAnnotateMode();
 
     expect(await screen.findByDisplayValue("aw")).toBeTruthy();
     expect(screen.getByDisplayValue("ئاو")).toBeTruthy();
     expect(screen.getByText("Annotated")).toBeTruthy();
+  });
+
+  it("switches Compare → Annotate without crashing when TranscriptionLanes initializes waveform metrics", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+    mockWaveSurferInstance = createMockWaveSurferForLanes();
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const latestWaveOptions = () => mockWaveOptions[mockWaveOptions.length - 1];
+    await act(async () => {
+      latestWaveOptions()?.onReady?.(10);
+    });
+
+    expect(await screen.findByTitle("IPA lane")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Enter IPA…")).toBeTruthy();
   });
 
   it("saves annotation tiers for the selected region and persists the speaker record", async () => {
