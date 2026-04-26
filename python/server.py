@@ -59,6 +59,13 @@ from app.http.project_config_handlers import (
     build_tags_import_response as _app_build_tags_import_response,
     build_update_config_response as _app_build_update_config_response,
 )
+from app.http.project_artifact_handlers import (
+    ProjectArtifactHandlerError as _app_ProjectArtifactHandlerError,
+    build_get_export_lingpy_response as _app_build_get_export_lingpy_response,
+    build_get_export_nexus_response as _app_build_get_export_nexus_response,
+    build_get_tags_response as _app_build_get_tags_response,
+    build_post_tags_merge_response as _app_build_post_tags_merge_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -7628,69 +7635,22 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_tags(self) -> None:
         """GET /api/tags — return parse-tags.json as tag array."""
-        tags_path = _project_root() / "parse-tags.json"
-        if not tags_path.exists():
-            self._send_json(HTTPStatus.OK, {"tags": []})
-            return
         try:
-            with open(tags_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                self._send_json(HTTPStatus.OK, {"tags": data})
-            else:
-                self._send_json(HTTPStatus.OK, {"tags": []})
-        except Exception as exc:
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+            response = _app_build_get_tags_response(project_root=_project_root())
+        except _app_ProjectArtifactHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+
+        self._send_json(response.status, response.payload)
 
     def _api_post_tags_merge(self) -> None:
         """POST /api/tags/merge — additive merge of incoming tags into parse-tags.json."""
+        data = self._expect_object(self._read_json_body(required=True), "Request body")
         try:
-            data = self._expect_object(self._read_json_body(required=True), "Request body")
-            incoming = data.get("tags")
-            if not isinstance(incoming, list):
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "tags must be an array"})
-                return
+            response = _app_build_post_tags_merge_response(data, project_root=_project_root())
+        except _app_ProjectArtifactHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-            tags_path = _project_root() / "parse-tags.json"
-            existing: list = []
-            if tags_path.exists():
-                try:
-                    with open(tags_path, "r", encoding="utf-8") as f:
-                        raw = json.load(f)
-                    if isinstance(raw, list):
-                        existing = raw
-                except Exception:
-                    existing = []
-
-            existing_by_id = {t["id"]: t for t in existing if isinstance(t, dict) and "id" in t}
-            for tag in incoming:
-                if not isinstance(tag, dict) or "id" not in tag:
-                    continue
-                tid = str(tag["id"])
-                if tid in existing_by_id:
-                    prev = existing_by_id[tid]
-                    merged = set(prev.get("concepts") or [])
-                    merged.update(tag.get("concepts") or [])
-                    prev["concepts"] = sorted(merged)
-                    prev["label"] = tag.get("label", prev.get("label", ""))
-                    prev["color"] = tag.get("color", prev.get("color", "#6b7280"))
-                else:
-                    existing_by_id[tid] = {
-                        "id": tid,
-                        "label": str(tag.get("label") or ""),
-                        "color": str(tag.get("color") or "#6b7280"),
-                        "concepts": sorted(set(tag.get("concepts") or [])),
-                    }
-
-            merged_list = list(existing_by_id.values())
-            with open(tags_path, "w", encoding="utf-8") as f:
-                json.dump(merged_list, f, indent=2, ensure_ascii=False)
-
-            self._send_json(HTTPStatus.OK, {"ok": True, "tagCount": len(merged_list)})
-        except ApiError:
-            raise
-        except Exception as exc:
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        self._send_json(response.status, response.payload)
 
     # ── Config endpoints ─────────────────────────────────────────
 
@@ -7703,29 +7663,17 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_export_lingpy(self) -> None:
         """Stream LingPy-compatible wordlist TSV as a file download."""
-        import tempfile
-        tmp_fd, tmp_str = tempfile.mkstemp(suffix=".tsv")
-        import os as _os
-        _os.close(tmp_fd)
-        tmp_path = pathlib.Path(tmp_str)
-        try:
-            cognate_compute_module.export_wordlist_tsv(
-                _enrichments_path(),
-                _project_root() / "annotations",
-                tmp_path,
-            )
-            content = tmp_path.read_bytes()
-        finally:
-            try:
-                _os.unlink(tmp_str)
-            except OSError:
-                pass
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/tab-separated-values; charset=utf-8")
-        self.send_header("Content-Disposition", 'attachment; filename="parse-wordlist.tsv"')
-        self.send_header("Content-Length", str(len(content)))
+        response = _app_build_get_export_lingpy_response(
+            export_wordlist_tsv=cognate_compute_module.export_wordlist_tsv,
+            enrichments_path=_enrichments_path(),
+            annotations_dir=_project_root() / "annotations",
+        )
+        self.send_response(response.status)
+        self.send_header("Content-Type", response.content_type)
+        self.send_header("Content-Disposition", response.content_disposition)
+        self.send_header("Content-Length", str(len(response.body)))
         self.end_headers()
-        self.wfile.write(content)
+        self.wfile.write(response.body)
 
     def _api_get_export_nexus(self) -> None:
         """Emit a NEXUS character matrix compatible with BEAST2.
@@ -7737,120 +7685,21 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         Manual overrides in ``manual_overrides.cognate_sets`` take precedence
         over the auto-computed ``cognate_sets`` block.
         """
-        enrichments = _read_json_file(_enrichments_path(), _default_enrichments_payload())
-        overrides = enrichments.get("manual_overrides") or {}
-        override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
-        auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None
-        override_sets = override_sets if isinstance(override_sets, dict) else {}
-        auto_sets = auto_sets if isinstance(auto_sets, dict) else {}
+        response = _app_build_get_export_nexus_response(
+            enrichments_path=_enrichments_path(),
+            project_json_path=_project_json_path(),
+            read_json_file=_read_json_file,
+            default_enrichments_payload=_default_enrichments_payload,
+            concept_sort_key=_concept_sort_key,
+        )
 
-        # Speakers from project.json (falls back to any found in cognate sets).
-        speakers_set: set = set()
-        project_payload = _read_json_file(_project_json_path(), {})
-        speakers_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None
-        if isinstance(speakers_block, dict):
-            speakers_set.update(str(s) for s in speakers_block.keys() if str(s).strip())
-        elif isinstance(speakers_block, list):
-            speakers_set.update(str(s) for s in speakers_block if str(s).strip())
-
-        # Determine which concepts have any cognate membership anywhere.
-        concept_keys: List[str] = []
-        concept_group_members: Dict[str, Dict[str, List[str]]] = {}
-        union_keys: List[str] = []
-        seen_keys: set = set()
-        for key in list(override_sets.keys()) + list(auto_sets.keys()):
-            if key not in seen_keys:
-                seen_keys.add(key)
-                union_keys.append(key)
-
-        for key in union_keys:
-            override_block = override_sets.get(key)
-            auto_block = auto_sets.get(key)
-            block = override_block if isinstance(override_block, dict) else auto_block
-            if not isinstance(block, dict):
-                continue
-            groups: Dict[str, List[str]] = {}
-            for group, members in block.items():
-                if not isinstance(members, list):
-                    continue
-                cleaned = [str(m) for m in members if str(m).strip()]
-                if cleaned:
-                    groups[str(group)] = cleaned
-                    speakers_set.update(cleaned)
-            if groups:
-                concept_group_members[key] = groups
-                concept_keys.append(key)
-
-        speakers = sorted(speakers_set)
-
-        # Presence-of-form per (concept, speaker) — used to distinguish 0 from ?.
-        # A speaker is considered "has form" if they appear in any cognate group
-        # for the concept. (Future refinement: consult annotation tiers directly.)
-        has_form: Dict[str, set] = {}
-        for key in concept_keys:
-            present: set = set()
-            for members in concept_group_members[key].values():
-                present.update(members)
-            has_form[key] = present
-
-        # Build characters in deterministic order.
-        characters: List[Tuple[str, str, str]] = []  # (concept_key, group, label)
-        for key in sorted(concept_keys, key=_concept_sort_key):
-            for group in sorted(concept_group_members[key].keys()):
-                label = "{0}_{1}".format(str(key).replace(" ", "_"), group)
-                characters.append((key, group, label))
-
-        # Build the per-speaker binary string.
-        def row_for(speaker: str) -> str:
-            chars: List[str] = []
-            for key, group, _lbl in characters:
-                members = concept_group_members[key].get(group, [])
-                if speaker in members:
-                    chars.append("1")
-                elif speaker in has_form.get(key, set()):
-                    chars.append("0")
-                else:
-                    chars.append("?")
-            return "".join(chars)
-
-        lines: List[str] = []
-        lines.append("#NEXUS")
-        lines.append("")
-        lines.append("BEGIN TAXA;")
-        lines.append("    DIMENSIONS NTAX={0};".format(len(speakers)))
-        if speakers:
-            lines.append("    TAXLABELS")
-            for sp in speakers:
-                lines.append("        {0}".format(sp))
-            lines.append("    ;")
-        lines.append("END;")
-        lines.append("")
-        lines.append("BEGIN CHARACTERS;")
-        lines.append("    DIMENSIONS NCHAR={0};".format(len(characters)))
-        lines.append("    FORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"01\";")
-        if characters:
-            lines.append("    CHARSTATELABELS")
-            label_rows = []
-            for idx, (_key, _group, label) in enumerate(characters, start=1):
-                label_rows.append("        {0} {1}".format(idx, label))
-            lines.append(",\n".join(label_rows))
-            lines.append("    ;")
-        lines.append("    MATRIX")
-        for sp in speakers:
-            lines.append("        {0}    {1}".format(sp, row_for(sp)))
-        lines.append("    ;")
-        lines.append("END;")
-        lines.append("")
-
-        nexus_text = "\n".join(lines).encode("utf-8")
-
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Disposition", 'attachment; filename="parse-cognates.nex"')
-        self.send_header("Content-Length", str(len(nexus_text)))
+        self.send_response(response.status)
+        self.send_header("Content-Type", response.content_type)
+        self.send_header("Content-Disposition", response.content_disposition)
+        self.send_header("Content-Length", str(len(response.body)))
         self.end_headers()
         try:
-            self.wfile.write(nexus_text)
+            self.wfile.write(response.body)
         except BrokenPipeError:
             pass
 
