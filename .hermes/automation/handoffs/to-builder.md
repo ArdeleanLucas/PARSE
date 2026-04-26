@@ -3,13 +3,22 @@
 Status: ready_now
 
 Current instruction:
-- **Parity first.** The React PARSE UI must remain visually and behaviorally identical to the original workstation.
-- **Do not re-imagine the UI.** No redesign, no modernization pass, no layout experimentation.
-- Source of truth: `/home/lucas/gh/ardeleanlucas/parse` — especially `parse.html`, `compare.html`, `js/annotate/*`, `js/compare/*`, and the original labels / control ordering / panel structure.
-- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-cognate-controls-save-hardening.md`.
-- Treat older queued Builder handoffs as superseded if they conflict with this parity-first instruction.
+- **Before any more frontend work, audit the current React UI against the original PARSE UI.**
+- **No UI re-imagining is allowed.** The React workstation must stay visually and behaviorally identical to the original.
+- Use `/home/lucas/gh/ardeleanlucas/parse` as the source of truth.
+- Check at minimum:
+  - `parse.html`
+  - `compare.html`
+  - `js/annotate/*`
+  - `js/compare/*`
+- Specifically inspect current frontend work, including PR #27 and PR #29, for any visible/layout/interaction drift from the original.
+- If drift exists, fix it in a fresh implementation PR from current `origin/main`.
+- If PR #27 or PR #29 are clean and purely under-the-hood, say so explicitly in your report.
+- Do **not** widen this into redesign or modernization.
 
 Grounded state:
 - Current rebuild `origin/main`: `0d78bb8` — `test(compare): harden compute semantics regressions (#28)`
-- Open implementation PRs `#27` and `#29` are narrow cleanup lanes; do **not** widen them into UI redesign. If parity corrections are needed, open a separate implementation PR from current `origin/main`.
-- Lucas's hard rule: if anything in the React shell drifted from the original UI, correct it against the original before introducing further visual changes.
+- Current frontend implementation PRs visible in the queue:
+  - PR #27 — `fix(compare): use typed CLEF client in BorrowingPanel`
+  - PR #29 — `fix(config): wire configStore update to typed client`
+- Lucas hard rule: original UI parity is the spec.
