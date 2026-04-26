@@ -7,49 +7,12 @@ import {
   type LaneKind,
 } from "../../stores/transcriptionLanesStore";
 import type { AnnotationInterval, SttSegment } from "../../api/types";
-
+import { TranscriptionLaneRow, type LaneStrip } from "./TranscriptionLaneRow";
 interface TranscriptionLanesProps {
   speaker: string;
   wsRef: React.RefObject<WaveSurfer | null>;
   audioReady: boolean;
   onSeek?: (timeSec: number) => void;
-}
-
-interface LaneStrip {
-  kind: LaneKind;
-  label: string;
-  intervals: Array<{
-    start: number;
-    end: number;
-    text: string;
-    manuallyAdjusted?: boolean;
-  }>;
-  /** Annotation tier name to dispatch store actions against. When unset
-   * (legacy code path), the lane `kind` is used. The two diverge for the
-   * Words and BND lanes: `kind: "stt_words"` → `tier: "stt_words"`,
-   * `kind: "boundaries"` → `tier: "ortho_words"`. */
-  tier?: string;
-  /** Index into the underlying `record.tiers[tier].intervals` array. Set when
-   * the strip is sourced from the editable tier (so inline edits / merges /
-   * splits can address the original interval). */
-  sourceIndices?: number[];
-  /** Per-interval color override aligned to `intervals[]`. Used by the
-   * Boundaries lane to color each Tier 2 word by its shift from the matching
-   * Tier 1 word (or by Tier 2 confidence when no Tier 1 partner exists).
-   * When unset, the lane's single color from the store is used. */
-  intervalColors?: (string | undefined)[];
-  /** Boundary-only lanes (Words, BND) suppress text labels inside boxes.
-   * Text content lives in STT/ORTH/IPA — these lanes are pure timing. */
-  boundaryOnly?: boolean;
-  /** True when the editable tier hasn't been populated yet for this lane.
-   * Edit-path handlers must call the corresponding `ensure*Tier` migration
-   * before opening the editor / committing edits so the tier entry exists. */
-  needsMigration?: boolean;
-  /** Migration callback to run on first edit; resolves `needsMigration`. */
-  migrate?: () => void;
-  status?: "idle" | "loading" | "loaded" | "error";
-  /** Custom empty-state message; falls back to a generic per-tier hint. */
-  emptyHint?: string;
 }
 
 // Lane order is hard-coded top-to-bottom and intentionally independent of
@@ -96,9 +59,7 @@ function boundaryColor(
   return BND_COLOR_GREEN;
 }
 
-const LANE_HEIGHT_PX = 28;
 export const LABEL_COL_PX = 56;
-const MIN_LABEL_WIDTH_PX = 18;
 const VIRTUAL_BUFFER_PX = 400;
 
 function firstOverlappingIdx(
@@ -553,6 +514,63 @@ export function TranscriptionLanes({
     setEditing(null);
   };
 
+  const beginDrag = (strip: LaneStrip, event: React.MouseEvent<HTMLDivElement>) => {
+    if (!speaker || pxPerSec <= 0) return;
+    const tier = strip.tier ?? strip.kind;
+    const sec = Math.max(
+      0,
+      Math.min(duration, (event.nativeEvent as MouseEvent).offsetX / pxPerSec),
+    );
+    setPendingDrag({
+      kind: strip.kind,
+      tier,
+      startSec: sec,
+      endSec: sec,
+    });
+    event.preventDefault();
+  };
+
+  const seekInterval = (
+    iv: LaneStrip["intervals"][number],
+    sourceIdx: number | undefined,
+    tierName: string,
+  ) => {
+    if (sourceIdx !== undefined) {
+      setSelectedInterval({
+        speaker,
+        tier: tierName,
+        index: sourceIdx,
+      });
+    }
+    onSeek?.(iv.start);
+  };
+
+  const beginIntervalEdit = (strip: LaneStrip, sourceIdx: number) => {
+    if (strip.boundaryOnly) return;
+    if (strip.needsMigration) strip.migrate?.();
+    setEditing({ kind: strip.kind, index: sourceIdx });
+  };
+
+  const openContextMenu = (
+    strip: LaneStrip,
+    sourceIdx: number,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    if (strip.needsMigration) strip.migrate?.();
+    const tierName = strip.tier ?? strip.kind;
+    setSelectedInterval({
+      speaker,
+      tier: tierName,
+      index: sourceIdx,
+    });
+    setMenu({
+      kind: strip.kind,
+      index: sourceIdx,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  };
+
   return (
     <div className="mt-2 space-y-1 px-5">
       {strips.map((strip) => {
@@ -595,215 +613,35 @@ export function TranscriptionLanes({
         }
 
         return (
-          <div key={strip.kind} className="relative flex items-stretch">
-            <div
-              className="flex shrink-0 items-center justify-center border-r border-slate-100 text-[9px] font-semibold uppercase tracking-wider"
-              style={{ width: LABEL_COL_PX, color }}
-              title={`${strip.label} lane`}
-            >
-              {strip.label}
-            </div>
-            <div className="relative flex-1 overflow-hidden" style={{ height: LANE_HEIGHT_PX }}>
-              <div
-                ref={(el) => {
-                  laneScrollRefs.current[strip.kind] = el;
-                }}
-                className="h-full overflow-hidden"
-              >
-                <div
-                  className="relative h-full"
-                  style={{ width: innerWidth }}
-                  onMouseDown={(e) => {
-                    // Drag-to-create on boundary-only lanes (Words / BND).
-                    // Only fires on empty timeline space — clicks on
-                    // existing interval buttons are stopped at the button
-                    // handler (stopPropagation on those covers it).
-                    if (!strip.boundaryOnly) return;
-                    if (!speaker) return;
-                    if (pxPerSec <= 0) return;
-                    if (e.button !== 0) return;
-                    const target = e.target as HTMLElement | null;
-                    if (target?.closest("button")) return;
-                    const tier = strip.tier ?? strip.kind;
-                    const sec = Math.max(
-                      0,
-                      Math.min(
-                        duration,
-                        (e.nativeEvent as MouseEvent).offsetX / pxPerSec,
-                      ),
-                    );
-                    setPendingDrag({
-                      kind: strip.kind,
-                      tier,
-                      startSec: sec,
-                      endSec: sec,
-                    });
-                    e.preventDefault();
-                  }}
-                >
-                  {pendingDrag?.kind === strip.kind && (() => {
-                    const a = Math.min(pendingDrag.startSec, pendingDrag.endSec);
-                    const b = Math.max(pendingDrag.startSec, pendingDrag.endSec);
-                    return (
-                      <div
-                        className="pointer-events-none absolute top-1 bottom-1 rounded border-2 border-dashed"
-                        style={{
-                          left: a * pxPerSec,
-                          width: Math.max(1, (b - a) * pxPerSec),
-                          borderColor: color,
-                          backgroundColor: withAlpha(color, 0.12),
-                        }}
-                      />
-                    );
-                  })()}
-                  {visible.map((iv, slotIdx) => {
-                    const sourceIdx = visibleSourceIndices?.[slotIdx];
-                    const absIdx = firstIdx + slotIdx;
-                    const left = iv.start * pxPerSec;
-                    const width = Math.max(1, (iv.end - iv.start) * pxPerSec);
-                    const showLabel =
-                      !strip.boundaryOnly && width >= MIN_LABEL_WIDTH_PX;
-                    const isEditable = sourceIdx !== undefined;
-                    const tierName = strip.tier ?? strip.kind;
-                    const isSelected =
-                      isEditable &&
-                      selectedInterval?.speaker === speaker &&
-                      selectedInterval?.tier === tierName &&
-                      selectedInterval?.index === sourceIdx;
-                    const isEditing =
-                      isEditable &&
-                      editing?.kind === strip.kind &&
-                      editing?.index === sourceIdx;
-                    const ivColor = strip.intervalColors?.[absIdx] ?? color;
-
-                    const baseStyle: React.CSSProperties = {
-                      left,
-                      width,
-                      backgroundColor: withAlpha(ivColor, isSelected ? 0.28 : 0.14),
-                      borderLeft: `2px solid ${ivColor}`,
-                      color: "#334155",
-                      ...({ ["--tw-ring-color"]: ivColor } as React.CSSProperties),
-                    };
-
-                    if (isEditing && sourceIdx !== undefined) {
-                      return (
-                        <span
-                          key={`${strip.kind}-edit-${sourceIdx}`}
-                          ref={editRef}
-                          contentEditable
-                          suppressContentEditableWarning
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              commitEdit(
-                                tierName,
-                                sourceIdx,
-                                e.currentTarget.textContent ?? "",
-                              );
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              setEditing(null);
-                            }
-                          }}
-                          onBlur={(e) =>
-                            commitEdit(
-                              tierName,
-                              sourceIdx,
-                              e.currentTarget.textContent ?? "",
-                            )
-                          }
-                          className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded px-1 text-[10px] font-medium outline-none ring-2"
-                          style={baseStyle}
-                          aria-label={`Edit ${strip.label} text`}
-                        >
-                          {iv.text}
-                        </span>
-                      );
-                    }
-
-                    return (
-                      <button
-                        key={`${strip.kind}-${slotIdx}-${iv.start}`}
-                        type="button"
-                        // Stop propagation so the lane's drag-to-create
-                        // handler doesn't fire when the user clicks on an
-                        // existing interval.
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isEditable && sourceIdx !== undefined) {
-                            setSelectedInterval({
-                              speaker,
-                              tier: tierName,
-                              index: sourceIdx,
-                            });
-                          }
-                          onSeek?.(iv.start);
-                        }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          if (!isEditable || sourceIdx === undefined) return;
-                          // Boundary-only lanes have no text to edit;
-                          // double-click is a no-op on Words/BND.
-                          if (strip.boundaryOnly) return;
-                          if (strip.needsMigration) strip.migrate?.();
-                          setEditing({ kind: strip.kind, index: sourceIdx });
-                        }}
-                        onContextMenu={(e) => {
-                          if (!isEditable || sourceIdx === undefined) return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (strip.needsMigration) strip.migrate?.();
-                          setSelectedInterval({
-                            speaker,
-                            tier: tierName,
-                            index: sourceIdx,
-                          });
-                          setMenu({
-                            kind: strip.kind,
-                            index: sourceIdx,
-                            x: e.clientX,
-                            y: e.clientY,
-                          });
-                        }}
-                        className={
-                          "absolute top-1 bottom-1 flex items-center overflow-hidden rounded px-1 text-[10px] font-medium transition hover:ring-1" +
-                          (isSelected ? " ring-2" : "")
-                        }
-                        style={baseStyle}
-                        title={
-                          strip.boundaryOnly
-                            ? `${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s${
-                                iv.manuallyAdjusted ? " · manually adjusted" : ""
-                              }`
-                            : `${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s · ${iv.text}`
-                        }
-                        aria-label={`${strip.label} ${iv.start.toFixed(2)}s${
-                          iv.text ? `: ${iv.text}` : ""
-                        }`}
-                      >
-                        {showLabel ? <span className="truncate">{iv.text}</span> : null}
-                        {iv.manuallyAdjusted && (
-                          <span
-                            aria-hidden
-                            className="pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full"
-                            style={{ backgroundColor: ivColor }}
-                            title="Manually adjusted"
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              {isEmpty && (
-                <div className="pointer-events-none absolute inset-0 flex items-center pl-2 text-[10px] italic text-slate-400">
-                  {emptyMsg}
-                </div>
-              )}
-            </div>
-          </div>
+          <TranscriptionLaneRow
+            key={strip.kind}
+            color={color}
+            editing={editing}
+            emptyMsg={emptyMsg}
+            firstIdx={firstIdx}
+            innerWidth={innerWidth}
+            isEmpty={isEmpty}
+            pendingDrag={pendingDrag}
+            pxPerSec={pxPerSec}
+            selectedInterval={selectedInterval}
+            setEditing={setEditing}
+            setEditRef={(element) => {
+              editRef.current = element;
+            }}
+            setLaneScrollRef={(kind, element) => {
+              laneScrollRefs.current[kind] = element;
+            }}
+            showEmptyHint={isEmpty}
+            speaker={speaker}
+            strip={strip}
+            visible={visible}
+            visibleSourceIndices={visibleSourceIndices}
+            onBeginDrag={beginDrag}
+            onCommitEdit={commitEdit}
+            onContextMenu={openContextMenu}
+            onDoubleClickInterval={beginIntervalEdit}
+            onSeekInterval={seekInterval}
+          />
         );
       })}
 
@@ -923,21 +761,4 @@ function MenuItem({
       {hint ? <span className="ml-4 text-[10px] text-slate-400">{hint}</span> : null}
     </button>
   );
-}
-
-/**
- * Mix hex `#rrggbb` with a white background at the given alpha. Produces a
- * pastel fill that stays visible on a white background even for bright source
- * colors (unlike `#rrggbb + "22"` alpha stacking, which vanishes on yellows).
- */
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return hex;
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 0xff;
-  const g = (n >> 8) & 0xff;
-  const b = n & 0xff;
-  const a = Math.max(0, Math.min(1, alpha));
-  const mix = (c: number) => Math.round(c * a + 255 * (1 - a));
-  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
 }
