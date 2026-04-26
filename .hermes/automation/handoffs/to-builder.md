@@ -1,13 +1,15 @@
 # To parse-builder
 
-Status: queued_after_pr26
+Status: ready_now
 
 Current instruction:
-- Finish PR #27 first unless Lucas explicitly resequences you: https://github.com/TarahAssistant/PARSE-rebuild/pull/27
-- Then do PR #26: https://github.com/TarahAssistant/PARSE-rebuild/pull/26
-- After that, work from `.hermes/plans/2026-04-26-parse-builder-next-task-cognate-controls-save-hardening.md`.
-- Keep this slice frontend-only and stay out of parse-back-end PR #23: https://github.com/TarahAssistant/PARSE-rebuild/pull/23
+- **Parity first.** The React PARSE UI must remain visually and behaviorally identical to the original workstation.
+- **Do not re-imagine the UI.** No redesign, no modernization pass, no layout experimentation.
+- Source of truth: `/home/lucas/gh/ardeleanlucas/parse` — especially `parse.html`, `compare.html`, `js/annotate/*`, `js/compare/*`, and the original labels / control ordering / panel structure.
+- Work from `.hermes/plans/2026-04-26-parse-builder-next-task-cognate-controls-save-hardening.md`.
+- Treat older queued Builder handoffs as superseded if they conflict with this parity-first instruction.
 
 Grounded state:
 - Current rebuild `origin/main`: `0d78bb8` — `test(compare): harden compute semantics regressions (#28)`
-- Next queued Builder slice after PR #26: harden `src/components/compare/CognateControls.tsx` save semantics, remove the obsolete `enrichmentStore.save not yet implemented` fallback assumption, add regression tests, and keep the UI visually identical to the original (no UI re-imagining).
+- Open implementation PRs `#27` and `#29` are narrow cleanup lanes; do **not** widen them into UI redesign. If parity corrections are needed, open a separate implementation PR from current `origin/main`.
+- Lucas's hard rule: if anything in the React shell drifted from the original UI, correct it against the original before introducing further visual changes.

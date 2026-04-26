@@ -1,92 +1,94 @@
-# parse-builder next queued task — CognateControls save-path hardening
+# parse-builder next task — original UI parity audit and correction pass
 
 ## Goal
 
-Harden `src/components/compare/CognateControls.tsx` so its cognate-set persistence path matches the current React store reality, while keeping the React UI visually identical to the original and avoiding any UI re-imagining.
+Audit the React PARSE frontend against the original workstation and correct any visual, structural, or interaction drift so the React UI stays **identical to the original**, not a re-imagined redesign.
 
-## Why this is the right next task now
+## Hard product rule
 
+- **No UI re-imagining.**
+- The original UI is the spec.
+- Match the original layout, labels, ordering, panel structure, control grouping, and interaction flow unless a deviation is strictly required for a proven technical reason.
+- If you believe a deviation is necessary, keep it minimal, justify it in the PR body, and prefer behavior-preserving implementation under the hood over visible change.
+
+## Source of truth
+
+Use the original PARSE implementation at:
+- `/home/lucas/gh/ardeleanlucas/parse`
+
+Check at minimum:
+- `parse.html`
+- `compare.html`
+- `js/annotate/*`
+- `js/compare/*`
+- relevant shared CSS / structural markup / control labels
+
+## Why this is the right task now
+
+- Lucas explicitly clarified that the React PARSE UI should be identical to the original and that any UI reinvention is unacceptable.
 - Current rebuild `origin/main` is `0d78bb8` (`test(compare): harden compute semantics regressions (#28)`).
-- PR #27 is the active Builder implementation lane (`https://github.com/TarahAssistant/PARSE-rebuild/pull/27`) implementing the typed-client cleanup for `BorrowingPanel`.
-- PR #26 is already the next queued Builder handoff (`https://github.com/TarahAssistant/PARSE-rebuild/pull/26`) for `configStore.update()` parity.
-- parse-back-end remains on PR #23 (`https://github.com/TarahAssistant/PARSE-rebuild/pull/23`), so the next Builder slice should remain frontend-only.
-- On current main, `src/components/compare/CognateControls.tsx` still contains a stale fallback path:
-  - `catch { /* enrichmentStore.save not yet implemented — store locally */ }`
-- That comment and fallback are now wrong because `src/stores/enrichmentStore.ts::save()` is implemented and persists immediately.
-
-## Hard UI constraint
-
-- **Do not re-imagine the UI.**
-- React PARSE UI should remain visually identical to the original UI.
-- This slice is about save-path correctness and regression coverage, not a redesign.
-- Keep any visible UI changes at zero unless a tiny, necessary error surface is unavoidable; if you think one is needed, keep it minimal and explain why in the PR.
-
-## Current grounded context
-
-### Repo / PR state
-- Repo: `TarahAssistant/PARSE-rebuild`
-- Base branch: `origin/main`
-- Current head: `0d78bb8`
-- Current Builder chain:
-  - PR #27 — active implementation: `https://github.com/TarahAssistant/PARSE-rebuild/pull/27`
-  - PR #26 — queued next: `https://github.com/TarahAssistant/PARSE-rebuild/pull/26`
-- parse-back-end queue:
-  - PR #23 — `https://github.com/TarahAssistant/PARSE-rebuild/pull/23`
-
-### Relevant current-main files
-- `src/components/compare/CognateControls.tsx`
-  - saves `manual_overrides.cognate_sets`
-  - still swallows save errors with an obsolete comment implying store persistence is missing
-  - still calls `onGroupsChanged?.(...)` after the swallowed failure path
-- `src/stores/enrichmentStore.ts`
-  - `save()` is implemented and persists through `saveEnrichments(...)`
-- `src/components/compare/CognateControls.test.tsx`
-  - currently covers placeholder/render/merge/split/cycle basics
-  - does **not** cover persistence-success or persistence-failure semantics
+- There are already narrow implementation PRs open for non-visual cleanup:
+  - PR `#27` — `fix(compare): use typed CLEF client in BorrowingPanel`
+  - PR `#29` — `fix(config): wire configStore update to typed client`
+- Those lanes should stay narrow. The parity audit / correction pass should be a separate Builder implementation PR if any actual drift is found.
 
 ## Specific task
 
-Make `CognateControls` truthful and robust about persistence without redesigning the UI.
+Perform a parity audit of the React shell and correct only real drift from the original.
 
-### Required implementation direction
-1. Remove the obsolete `enrichmentStore.save not yet implemented` fallback assumption.
-2. Decide and implement the correct persistence semantics for save failure, for example:
-   - do not falsely treat a failed save as persisted success
-   - do not leave misleading dead code/comments that imply local fallback exists when it does not
-3. Add regression tests for:
-   - successful save path updates `manual_overrides.cognate_sets`
-   - failure path behavior is explicit and deterministic
-4. Preserve the existing visual UI and interaction model unless a minimal error signal is strictly necessary.
+### Required audit surfaces
+1. `src/ParseUI.tsx`
+2. annotate-mode layout/components
+3. compare-mode layout/components
+4. shared shell chrome, panel ordering, labels, and control affordances
+5. any recently touched UI surfaces that may have drifted from the original workstation
+
+### Required implementation behavior
+1. Compare current React UI against the original workstation files listed above.
+2. Identify any visible or interaction-level drift.
+3. Revert or correct that drift.
+4. Keep non-visual refactors and typed-client cleanup separate from this parity pass.
+5. Do **not** add new chrome, restyle panels, rename controls, reshape workflows, or otherwise modernize the UI.
 
 ## In scope
-- `src/components/compare/CognateControls.tsx`
-- `src/components/compare/CognateControls.test.tsx`
-- adjacent compare/store typings only if narrowly required
+
+- `src/ParseUI.tsx`
+- relevant `src/components/annotate/*`
+- relevant `src/components/compare/*`
+- relevant shared UI components if needed for strict parity
+- parity-focused tests / snapshots / browser verification notes
 
 ## Out of scope
-- `python/server.py`
-- parse-back-end PR #23
-- Builder PR #27 BorrowingPanel typed-client work
-- Builder PR #26 configStore parity work
-- any compare-panel redesign or chrome reshaping
+
+- backend route changes unless required for a proven parity bug and separately justified
+- `python/server.py` backend refactors
+- expanding PR `#27` or `#29` into UI redesign work
+- product redesign, visual refresh, or speculative UX improvement
 
 ## Validation requirements
+
 Run and report at least:
-- `npm run test -- --run src/components/compare/CognateControls.test.tsx`
 - `npm run test -- --run`
 - `./node_modules/.bin/tsc --noEmit`
 - `git diff --check`
 
-## Academic / UX considerations
-- Cognate adjudication is core comparative data, not auxiliary UI state.
-- A silent failed save risks misleading downstream linguistic interpretation.
-- The workstation should stay visually stable while the persistence semantics become more honest.
+Also include in the implementation PR:
+- a concise original-vs-React parity checklist
+- confirmation that the UI stayed aligned with the original
+- explicit note of any unavoidable deviation and why
+
+## Academic / fieldwork considerations
+
+- PARSE is a fieldwork workstation; interface stability matters for annotation speed, reviewer trust, and cross-session reproducibility.
+- Linguistic users depend on consistent panel structure and control placement while working through timestamped speech data and cognate adjudication.
+- A visual redesign creates unnecessary cognitive cost without improving the data pipeline.
 
 ## Reporting requirements
-Open a fresh implementation PR from current `origin/main` **after** PR #27 and PR #26 unless Lucas explicitly resequences the queue.
+
+Open a fresh Builder implementation PR from current `origin/main` if drift is found.
 
 In the PR body, include:
-- the obsolete fallback removed
-- the chosen failure semantics
-- confirmation that UI appearance stayed aligned with the original / no re-imagining
+- which original files were used as the parity reference
+- exact UI drift corrected
+- confirmation that no UI re-imagining was introduced
 - exact tests run
