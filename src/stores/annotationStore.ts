@@ -6,66 +6,23 @@ import type {
   SttSegment,
 } from "../api/types";
 import { getAnnotation, saveAnnotation } from "../api/client";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers (module-scope, not exported)                               */
-/* ------------------------------------------------------------------ */
-
-// Canonical tier ordering. Numeric order is used for backend/Praat sort only;
-// the visual lane order in TranscriptionLanes.tsx is hard-coded separately.
-// Adding a new tier? Update _CANONICAL_DISPLAY_ORDERS in python/textgrid_io.py
-// to match, or Praat exports will fall back to default_order=9999.
-const CANONICAL_TIER_ORDER: Record<string, number> = {
-  ipa_phone: 1,   // phone-level IPA (wav2vec2 output, lane-visible)
-  ipa: 2,         // word/lexeme-level IPA (lane-visible)
-  ortho: 3,       // orthographic transcription, coarse Whisper segments (lane-visible)
-  ortho_words: 4, // word-level ortho from Tier-2 forced alignment (data-only, no lane)
-  stt: 5,         // speech-to-text reference (lane-visible)
-  concept: 6,     // concept tags
-  sentence: 7,    // sentence-level grouping (starts empty)
-  speaker: 8,     // speaker turn
-};
-
-function nowIsoUtc(): string {
-  return new Date().toISOString();
-}
-
-function blankRecord(speaker: string): AnnotationRecord {
-  return {
-    speaker,
-    tiers: {
-      ipa_phone:   { name: "ipa_phone",   display_order: 1, intervals: [] },
-      ipa:         { name: "ipa",         display_order: 2, intervals: [] },
-      ortho:       { name: "ortho",       display_order: 3, intervals: [] },
-      ortho_words: { name: "ortho_words", display_order: 4, intervals: [] },
-      stt:         { name: "stt",         display_order: 5, intervals: [] },
-      concept:     { name: "concept",     display_order: 6, intervals: [] },
-      sentence:    { name: "sentence",    display_order: 7, intervals: [] },
-      speaker:     { name: "speaker",     display_order: 8, intervals: [] },
-    },
-    created_at: nowIsoUtc(),
-    modified_at: nowIsoUtc(),
-    source_wav: "",
-  };
-}
-
-// Backfill any canonical tiers missing from a loaded record so older
-// annotations still get the new ipa_phone/stt/sentence lanes wired up.
-function ensureCanonicalTiers(record: AnnotationRecord): AnnotationRecord {
-  const tiers = { ...record.tiers };
-  let changed = false;
-  for (const [name, order] of Object.entries(CANONICAL_TIER_ORDER)) {
-    if (!tiers[name]) {
-      tiers[name] = { name, display_order: order, intervals: [] };
-      changed = true;
-    }
-  }
-  return changed ? { ...record, tiers } : record;
-}
-
-function deepClone<T>(val: T): T {
-  return JSON.parse(JSON.stringify(val));
-}
+import {
+  applyAddInterval,
+  applyMergeIntervals,
+  applyRemoveInterval,
+  applySetInterval,
+  applySplitInterval,
+  applyUpdateInterval,
+  applyUpdateIntervalTimes,
+} from "./annotationStoreIntervals";
+import {
+  blankRecord,
+  CANONICAL_TIER_ORDER,
+  deepClone,
+  ensureCanonicalTiers,
+  nowIsoUtc,
+  tierLabel,
+} from "./annotationStoreShared";
 
 /* ------------------------------------------------------------------ */
 /*  Undo/redo history (session-only, per-speaker)                      */
@@ -82,26 +39,6 @@ export interface HistoryEntry {
 export interface SpeakerHistory {
   undo: HistoryEntry[];
   redo: HistoryEntry[];
-}
-
-// Human-readable tier names for undo/redo labels. Surfaced verbatim in
-// toasts ("Undid text edit (IPA)"), so keep these short and matched to the
-// LANE_LABELS the user already sees in TranscriptionLanes where possible.
-// Unknown/custom tiers fall through to the raw slug, which is still readable
-// (e.g. a custom "gloss" tier shows as "Undid text edit (gloss)").
-const TIER_LABEL: Record<string, string> = {
-  ipa_phone: "Phones",
-  ipa: "IPA",
-  ortho: "ORTH",
-  ortho_words: "ORTH words",
-  stt: "STT",
-  concept: "Concept",
-  sentence: "Sentence",
-  speaker: "Speaker",
-};
-
-function tierLabel(tier: string): string {
-  return TIER_LABEL[tier] ?? tier;
 }
 
 // Max undo-stack depth per speaker. Chosen to keep snapshot memory bounded
@@ -312,32 +249,14 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
   },
 
   setInterval: (speaker: string, tier: string, interval: AnnotationInterval) => {
-    if (!Number.isFinite(interval.start) || !Number.isFinite(interval.end)) return;
-    if (interval.end < interval.start) return;
-
     const state = get();
     const pre = state.records[speaker] ?? blankRecord(speaker);
-    const clone = deepClone(pre);
-
-    if (!clone.tiers[tier]) {
-      const maxOrder = Math.max(0, ...Object.values(clone.tiers).map((t) => t.display_order));
-      clone.tiers[tier] = {
-        name: tier,
-        display_order: CANONICAL_TIER_ORDER[tier] ?? maxOrder + 1,
-        intervals: [],
-      };
-    }
-
-    clone.tiers[tier].intervals = clone.tiers[tier].intervals.filter(
-      (candidate) => !(Math.abs(candidate.start - interval.start) < 0.001 && Math.abs(candidate.end - interval.end) < 0.001),
-    );
-    clone.tiers[tier].intervals.push(interval);
-    clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
-    clone.modified_at = nowIsoUtc();
+    const next = applySetInterval(pre, tier, interval);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `save ${tierLabel(tier)} segment`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
@@ -347,55 +266,29 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     const state = get();
     const pre = state.records[speaker];
     if (!pre) return;
-    if (!pre.tiers[tier]) return;
-    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
-    const clone = deepClone(pre);
-    const target = clone.tiers[tier].intervals[index];
-    clone.tiers[tier].intervals[index] = {
-      ...target,
-      text,
-      manuallyAdjusted: true,
-    };
-    clone.modified_at = nowIsoUtc();
+    const next = applyUpdateInterval(pre, tier, index, text);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `text edit (${tierLabel(tier)})`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
   },
 
   addInterval: (speaker: string, tier: string, interval: AnnotationInterval) => {
-    if (!Number.isFinite(interval.start) || !Number.isFinite(interval.end)) return;
-    if (interval.end < interval.start) return;
-
     const state = get();
     const pre = state.records[speaker];
     if (!pre) return;
 
-    const clone = deepClone(pre);
-
-    if (!clone.tiers[tier]) {
-      const maxOrder = Math.max(
-        0,
-        ...Object.values(clone.tiers).map((t) => t.display_order),
-      );
-      clone.tiers[tier] = {
-        name: tier,
-        display_order: CANONICAL_TIER_ORDER[tier] ?? maxOrder + 1,
-        intervals: [],
-      };
-    }
-
-    clone.tiers[tier].intervals.push(interval);
-    clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
-    clone.modified_at = nowIsoUtc();
+    const next = applyAddInterval(pre, tier, interval);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `add ${tierLabel(tier)} segment`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
@@ -405,44 +298,29 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
     const state = get();
     const pre = state.records[speaker];
     if (!pre) return;
-    if (!pre.tiers[tier]) return;
-    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
 
-    const clone = deepClone(pre);
-    clone.tiers[tier].intervals.splice(index, 1);
-    clone.modified_at = nowIsoUtc();
+    const next = applyRemoveInterval(pre, tier, index);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `delete ${tierLabel(tier)} segment`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
   },
 
   updateIntervalTimes: (speaker, tier, index, start, end) => {
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-    if (end < start) return;
-
     const state = get();
     const pre = state.records[speaker];
-    if (!pre?.tiers[tier]) return;
-    if (index < 0 || index >= pre.tiers[tier].intervals.length) return;
+    if (!pre) return;
 
-    const clone = deepClone(pre);
-    const target = clone.tiers[tier].intervals[index];
-    clone.tiers[tier].intervals[index] = {
-      ...target,
-      start,
-      end,
-      manuallyAdjusted: true,
-    };
-    clone.tiers[tier].intervals.sort((a, b) => a.start - b.start);
-    clone.modified_at = nowIsoUtc();
+    const next = applyUpdateIntervalTimes(pre, tier, index, start, end);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `retime ${tierLabel(tier)} segment`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
@@ -451,68 +329,30 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
   mergeIntervals: (speaker, tier, index) => {
     const state = get();
     const pre = state.records[speaker];
-    if (!pre?.tiers[tier]) return;
-    const intervals = pre.tiers[tier].intervals;
-    if (index < 0 || index >= intervals.length - 1) return;
+    if (!pre) return;
 
-    const left = intervals[index];
-    const right = intervals[index + 1];
-    const mergedText = [left.text, right.text]
-      .map((t) => (t ?? "").trim())
-      .filter(Boolean)
-      .join(" ");
-
-    const clone = deepClone(pre);
-    clone.tiers[tier].intervals.splice(index, 2, {
-      start: left.start,
-      end: right.end,
-      text: mergedText,
-      manuallyAdjusted: true,
-    });
-    clone.modified_at = nowIsoUtc();
+    const next = applyMergeIntervals(pre, tier, index);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `merge with next (${tierLabel(tier)})`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
   },
 
   splitInterval: (speaker, tier, index, splitTime) => {
-    if (!Number.isFinite(splitTime)) return;
     const state = get();
     const pre = state.records[speaker];
-    if (!pre?.tiers[tier]) return;
-    const intervals = pre.tiers[tier].intervals;
-    if (index < 0 || index >= intervals.length) return;
+    if (!pre) return;
 
-    const target = intervals[index];
-    const tol = 0.001;
-    if (splitTime <= target.start + tol || splitTime >= target.end - tol) return;
-
-    const clone = deepClone(pre);
-    clone.tiers[tier].intervals.splice(
-      index,
-      1,
-      {
-        start: target.start,
-        end: splitTime,
-        text: target.text,
-        manuallyAdjusted: true,
-      },
-      {
-        start: splitTime,
-        end: target.end,
-        text: "",
-        manuallyAdjusted: true,
-      },
-    );
-    clone.modified_at = nowIsoUtc();
+    const next = applySplitInterval(pre, tier, index, splitTime);
+    if (!next) return;
 
     set((s) => ({
       ...pushHistoryDelta(s, speaker, pre, `split (${tierLabel(tier)})`),
-      records: { ...s.records, [speaker]: clone },
+      records: { ...s.records, [speaker]: next },
       dirty: { ...s.dirty, [speaker]: true },
     }));
     scheduleAutosave(speaker);
