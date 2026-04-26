@@ -1,7 +1,7 @@
 # PARSE Option-1 Rebuild — Phase 0 Shared Contract Checklist
 
-**Status:** Proposed coordinator gate for the separate rebuild repo  
-**Date:** 2026-04-25  
+**Status:** Phase 0 baseline gate signed (source set, precedence order, oracle baseline, and evidence frozen for the current rebuild wave; broader Phase 0 checklist remains open)
+**Date:** 2026-04-26
 **Depends on:**
 - `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
 - `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
@@ -10,6 +10,8 @@
 - current oracle files under `src/`, `python/`, and project artifacts
 
 **Primary goal:** freeze the shared contract that both main rebuild agents must obey before any parallel implementation work begins.
+
+**Coordinator note (2026-04-26):** parallel implementation already started before this baseline sign-off. This update does **not** pretend the earlier merge wave never happened; it retroactively records the real oracle baseline, fixture set, precedence order, and gate evidence the active lanes are already expected to follow.
 
 ---
 
@@ -34,22 +36,28 @@ The coordinator must freeze a precedence order so agents do not argue from diffe
 
 ### 2.1 Required source set
 
-- [ ] `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
-- [ ] `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
-- [ ] `docs/plans/option1-parity-inventory.md`
-- [ ] `docs/desktop_product_architecture.md`
-- [ ] `AGENTS.md`
-- [ ] `src/api/client.ts`
-- [ ] `package.json`
-- [ ] selected backend route/tests in `python/`
-- [ ] selected oracle project fixtures / exports / sample outputs
+- [x] `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
+- [x] `docs/plans/option1-two-agent-parallel-rebuild-plan.md`
+- [x] `docs/plans/option1-parity-inventory.md`
+- [x] `docs/desktop_product_architecture.md`
+- [x] `AGENTS.md`
+- [x] `src/api/client.ts`
+- [x] `package.json`
+- [x] selected backend route/tests in `python/` (`python/server.py`, `python/test_external_api_surface.py`, `python/test_server_static_paths.py`, `python/ai/test_parse_memory_tool.py`)
+- [x] selected oracle project fixtures / exports / sample outputs (2026-04-26 Saha01 parity fixture seeded from `/home/lucas/parse-workspace`, plus current LingPy/export-facing workspace metadata)
 
 ### 2.2 Precedence order to record
 
-- [ ] product/architecture docs outrank implementation guesses
-- [ ] current oracle code outranks stale planning assumptions
-- [ ] coordinator decisions outrank lane-local convenience changes
-- [ ] any unresolved contradiction is escalated before implementation starts
+- [x] product/architecture docs outrank implementation guesses
+- [x] current oracle code outranks stale planning assumptions
+- [x] coordinator decisions outrank lane-local convenience changes
+- [x] any unresolved contradiction is escalated before implementation starts
+
+Recorded 2026-04-26 precedence order:
+1. Target-shape questions default to `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`, `docs/plans/option1-two-agent-parallel-rebuild-plan.md`, and `docs/desktop_product_architecture.md`.
+2. Runtime/API behavior defaults to current oracle code at `ArdeleanLucas/PARSE@0951287a812609068933ba22711a8ecd97765f38`.
+3. When docs and code disagree, coordinator-written rebuild contract docs resolve the ambiguity explicitly instead of allowing lane-local forks.
+4. If neither the docs nor the oracle code settle the question cleanly, the contradiction is logged and escalated rather than papered over in a lane PR.
 
 ---
 
@@ -59,21 +67,60 @@ The coordinator records the exact current PARSE baseline used for rebuild parity
 
 | Field | Record before parallel start |
 |---|---|
-| Oracle repo path | |
-| Oracle branch | |
-| Oracle commit SHA | |
-| Freeze date/time | |
-| Frontend validation evidence | |
-| Backend/API validation evidence | |
-| Fixture dataset version | |
-| Known accepted oracle quirks | |
+| Oracle repo path | `/home/lucas/gh/ardeleanlucas/parse` |
+| Oracle branch | `origin/main` |
+| Oracle commit SHA | `0951287a812609068933ba22711a8ecd97765f38` |
+| Freeze date/time | `2026-04-26T15:55:55Z` (UTC) |
+| Frontend validation evidence | `.hermes/reports/2026-04-26-oracle-frontend-gate.txt` — Vitest `283/283` passed, `./node_modules/.bin/tsc --noEmit` clean, `npm run build` passed |
+| Backend/API validation evidence | `.hermes/reports/2026-04-26-oracle-backend-gate.txt` — Windows conda pytest with explicit `--basetemp` produced `482 passed / 10 failed / 2 skipped / 1 warning`; rebuild comparison companion stored in `.hermes/reports/2026-04-26-rebuild-backend-gate.txt` (`658 passed / 8 failed / 2 skipped / 1 warning`) |
+| Fixture dataset version | `Saha01` single-speaker parity fixture derived 2026-04-26 from `/home/lucas/parse-workspace` (`project.json` + `source_index.json` restricted to `Saha01`, `concepts.csv`, `annotations/Saha01.parse.json`, `annotations/Saha01.json`, `peaks/Saha01.json`, `coarse_transcripts/Saha01.json`, `audio/original/working/Saha01/Sahana_F_1978.wav`) |
+| Known accepted oracle quirks | 1. Windows conda pytest under WSL requires explicit `--basetemp C:/Users/Lucas/...`. <br>2. Browser parity should use the React SPA through Vite (`5173`), not raw backend root `8766/`, which serves a directory listing. <br>3. The current oracle backend suite is red on 10 known failures; the baseline is recorded as-is rather than selecting a friendlier SHA. <br>4. On the Saha01 parity fixture, current oracle Annotate entry can crash with `Rendered more hooks than during the previous render` in `TranscriptionLanes.tsx`; this is baseline behavior for 2026-04-26 evidence, not a rebuild-only invention. |
 
 ### Required completion items
 
-- [ ] baseline SHA recorded
-- [ ] fixture set recorded
-- [ ] any known contract quirks called out explicitly
-- [ ] both main agents acknowledge the same baseline
+- [x] baseline SHA recorded
+- [x] fixture set recorded
+- [x] any known contract quirks called out explicitly
+- [x] both main agents acknowledge the same baseline
+
+### 3.1 Baseline gate sign-off
+
+The **Phase 0 baseline gate** is the minimum coordinator sign-off required before parity evidence can be treated as grounded rather than anecdotal.
+
+The baseline gate is considered signed on 2026-04-26 because all of the following are now true:
+
+- [x] the required source set in §2.1 is frozen for the active rebuild wave
+- [x] the precedence order in §2.2 is written down explicitly
+- [x] the oracle SHA, fixture set, and gate evidence in §3 are recorded concretely
+- [x] both active implementation lanes were already queueing work against the same rebuild/oracle SHA pair
+- [x] coordinator sign-off explicitly acknowledges that parity evidence after this point should cite this frozen baseline
+
+Acknowledgement basis on 2026-04-26: the active lane handoff PRs already reference the same rebuild/oracle SHA pair — parse-builder `#58` and parse-back-end `#59` both queue work against rebuild `f9aa3db1aa` and oracle `0951287a81`.
+
+This signs the **baseline gate**, not the entire broader Phase 0 checklist. Later sections (skeleton freeze, runtime handshake, route inventory, API inventory, etc.) still remain open contract work, but they no longer block the coordinator from recording parity evidence against the frozen oracle baseline.
+
+### 3.2 Backend baseline failure classification
+
+The baseline also needs a caveat table because current oracle and rebuild backend suites are both red under the 2026-04-26 Windows conda run.
+
+| Test | Oracle | Rebuild | Class | Rationale |
+|---|---|---|---|---|
+| `test_onboard_speaker_dry_run_reports_plan_without_callback` | fail | fail | fixture-issue | Dry-run plan payload uses OS-native path separators (`\\` on Windows) in display strings; assertion is POSIX-only. |
+| `test_import_processed_speaker_dry_run_reports_plan` | fail | fail | fixture-issue | Same dry-run display-path separator mismatch as above. |
+| `test_import_processed_speaker_write_copies_assets_and_builds_workspace_files` | fail | fail | real-bug | Persisted `source_index.json` paths leak Windows separators into project metadata; this is a portability / contract bug, not just a display artifact. See oracle issue [#231](https://github.com/ArdeleanLucas/PARSE/issues/231). |
+| `test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata` | fail | fail | real-bug | Same persisted mixed-separator metadata bug as above when preserving existing metadata and appending the new working-audio entry. See oracle issue [#232](https://github.com/ArdeleanLucas/PARSE/issues/232). |
+| `test_read_audio_info_returns_metadata` | fail | fail | fixture-issue | Read-only metadata path string uses OS-native separators; assertion is POSIX-only. |
+| `test_run_full_annotation_pipeline_orchestrates_low_level_jobs` | fail | fail | fixture-issue | Workflow path argument is OS-native under Windows; orchestration logic is intact but the test is separator-strict. |
+| `test_run_normalize_job_forces_wav_output_for_non_wav_input_without_guard` | fail | fail | fixture-issue | `normalizedPath` result uses OS-native separators in the Windows run; behavior otherwise matches the intended output-path rule. |
+| `test_http_mcp_bridge_lists_and_executes_tools` | fail | pass | real-bug | Oracle log showed HTTP 500 from `GET /api/mcp/tools?mode=all`; this is a true API-boundary failure even though it did not reproduce on Linux. |
+| `test_ortho_section_defaults_cascade_guard` | fail | pass | fixture-issue | Oracle constructor now intentionally requires explicit `ortho.model_path`; the tmp test fixture does not satisfy that contract. |
+| `test_ortho_explicit_override_beats_defaults` | fail | pass | fixture-issue | Same missing `ortho.model_path` fixture precondition as above; failure occurs before the override behavior is actually exercised. |
+| `test_build_get_export_lingpy_response_preserves_headers_and_cleans_up_tempfile` | pass | fail | fixture-issue | Rebuild-only failure is a strict LF-vs-CRLF byte assertion under Windows; handler preserves bytes correctly and real export path writes LF-stable TSVs. |
+
+Implication for parity work on this baseline:
+- parity claims should treat the two persisted-path metadata failures as **shared real bugs** in the current baseline
+- the remaining red tests are **environment/fixture caveats** unless future evidence proves user-visible regressions
+- Annotate/Compare/Tags parity evidence after this point should cite which observed differences are baseline bugs versus rebuild drift
 
 ---
 
@@ -347,9 +394,9 @@ Parallel rebuild work may start only when every item below is true.
 
 | Role | Name | Date | Notes |
 |---|---|---|---|
-| Coordinator | | | |
-| Agent A owner | | | |
-| Agent B owner | | | |
+| Coordinator | parse-gpt | 2026-04-26 | **Baseline gate signed.** This is sufficient to ground parity evidence; the rest of Phase 0 remains open follow-on contract work. |
+| Agent A owner | parse-builder lane | 2026-04-26 | Queue-time baseline in PR #58 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
+| Agent B owner | parse-back-end lane | 2026-04-26 | Queue-time baseline in PR #59 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
 
 ---
 

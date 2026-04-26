@@ -1,0 +1,402 @@
+[rebuild backend] repo=/home/lucas/gh/worktrees/PARSE-rebuild/job-observability-http-slice
+[rebuild backend] sha=f9aa3db1aad1d77078c9105cd8b5e5254c066338
+[rebuild backend] started=2026-04-26T15:55:05Z
+........................................................................ [ 10%]
+................s.............................F....FF..F..............F. [ 21%]
+.........F.............................................................. [ 32%]
+........................................................................ [ 43%]
+........................................................................ [ 53%]
+...................F.................................................... [ 64%]
+........................................................................ [ 75%]
+........................................................................ [ 86%]
+..................................F..................................... [ 97%]
+...................                                                      [100%]
+================================== FAILURES ===================================
+_________ test_onboard_speaker_dry_run_reports_plan_without_callback __________
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_onboard_speaker_dry_run_r0')
+
+    def test_onboard_speaker_dry_run_reports_plan_without_callback(tmp_path) -> None:
+        import wave
+    
+        external_root = tmp_path / "external"
+        external_root.mkdir()
+        wav = external_root / "spk1.wav"
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(b"\x00\x00" * 8000)
+    
+        project_root = tmp_path / "proj"
+        project_root.mkdir()
+    
+        tools = ParseChatTools(
+            project_root=project_root,
+            external_read_roots=[external_root],
+        )
+    
+        result = tools.execute(
+            "onboard_speaker_import",
+            {"speaker": "Speaker01", "sourceWav": str(wav), "dryRun": True},
+        )["result"]
+        assert result["ok"] is True
+        assert result["plan"]["speaker"] == "Speaker01"
+        assert result["plan"]["isPrimary"] is True
+>       assert result["plan"]["wavDest"].endswith("Speaker01/spk1.wav")
+E       AssertionError: assert False
+E        +  where False = <built-in method endswith of str object at 0x0000022118953550>('Speaker01/spk1.wav')
+E        +    where <built-in method endswith of str object at 0x0000022118953550> = 'audio\\original\\Speaker01\\spk1.wav'.endswith
+
+python\ai\test_parse_memory_tool.py:132: AssertionError
+_____________ test_import_processed_speaker_dry_run_reports_plan ______________
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_import_processed_speaker_0')
+
+    def test_import_processed_speaker_dry_run_reports_plan(tmp_path) -> None:
+        external_root = tmp_path / "Thesis"
+        wav, annotation, peaks = _write_processed_fixture(external_root)
+        project_root = tmp_path / "proj"
+        project_root.mkdir()
+    
+        tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+        result = tools.execute(
+            "import_processed_speaker",
+            {
+                "speaker": "Fail02",
+                "workingWav": str(wav),
+                "annotationJson": str(annotation),
+                "peaksJson": str(peaks),
+                "dryRun": True,
+            },
+        )["result"]
+    
+        assert result["ok"] is True
+        assert result["plan"]["speaker"] == "Fail02"
+        assert result["plan"]["conceptCount"] == 2
+>       assert result["plan"]["audioDest"].endswith("audio/working/Fail02/speaker.wav")
+E       AssertionError: assert False
+E        +  where False = <built-in method endswith of str object at 0x0000022118A9AAB0>('audio/working/Fail02/speaker.wav')
+E        +    where <built-in method endswith of str object at 0x0000022118A9AAB0> = 'audio\\working\\Fail02\\speaker.wav'.endswith
+
+python\ai\test_parse_memory_tool.py:326: AssertionError
+_ test_import_processed_speaker_write_copies_assets_and_builds_workspace_files _
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_import_processed_speaker_1')
+
+    def test_import_processed_speaker_write_copies_assets_and_builds_workspace_files(tmp_path) -> None:
+        import csv
+        import json
+    
+        external_root = tmp_path / "Thesis"
+        wav, annotation, peaks = _write_processed_fixture(external_root)
+        project_root = tmp_path / "proj"
+        project_root.mkdir()
+    
+        tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+        result = tools.execute(
+            "import_processed_speaker",
+            {
+                "speaker": "Fail02",
+                "workingWav": str(wav),
+                "annotationJson": str(annotation),
+                "peaksJson": str(peaks),
+                "dryRun": False,
+            },
+        )["result"]
+    
+        assert result["ok"] is True
+        assert (project_root / "audio" / "working" / "Fail02" / "speaker.wav").is_file()
+        assert (project_root / "annotations" / "Fail02.json").is_file()
+        assert (project_root / "peaks" / "Fail02.json").is_file()
+    
+        source_index = json.loads((project_root / "source_index.json").read_text(encoding="utf-8"))
+>       assert source_index["speakers"]["Fail02"]["source_wavs"][0]["path"] == "audio/working/Fail02/speaker.wav"
+E       AssertionError: assert 'audio\\worki...\\speaker.wav' == 'audio/workin...2/speaker.wav'
+E         
+E         - audio/working/Fail02/speaker.wav
+E         ?      ^       ^      ^
+E         + audio\working\Fail02\speaker.wav
+E         ?      ^       ^      ^
+
+python\ai\test_parse_memory_tool.py:359: AssertionError
+_ test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata _
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_import_processed_speaker_4')
+
+    def test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata(tmp_path) -> None:
+        import json
+    
+        external_root = tmp_path / "Thesis"
+        wav, annotation, _ = _write_processed_fixture(external_root)
+        project_root = tmp_path / "proj"
+        project_root.mkdir()
+        (project_root / "source_index.json").write_text(
+            json.dumps(
+                {
+                    "speakers": {
+                        "Fail02": {
+                            "source_wavs": [
+                                {
+                                    "filename": "speaker.wav",
+                                    "path": "audio/original/Fail02/speaker.wav",
+                                    "is_primary": True,
+                                }
+                            ],
+                            "peaks_file": "peaks/stale.json",
+                            "legacy_transcript_csv": "imports/legacy/Fail02/stale.csv",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+    
+        tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+        result = tools.execute(
+            "import_processed_speaker",
+            {
+                "speaker": "Fail02",
+                "workingWav": str(wav),
+                "annotationJson": str(annotation),
+                "dryRun": False,
+            },
+        )["result"]
+    
+        assert result["ok"] is True
+        source_index = json.loads((project_root / "source_index.json").read_text(encoding="utf-8"))
+        source_paths = [entry["path"] for entry in source_index["speakers"]["Fail02"]["source_wavs"]]
+        primary_paths = [
+            entry["path"]
+            for entry in source_index["speakers"]["Fail02"]["source_wavs"]
+            if entry.get("is_primary") is True
+        ]
+        assert "audio/original/Fail02/speaker.wav" in source_paths
+>       assert "audio/working/Fail02/speaker.wav" in source_paths
+E       AssertionError: assert 'audio/working/Fail02/speaker.wav' in ['audio/original/Fail02/speaker.wav', 'audio\\working\\Fail02\\speaker.wav']
+
+python\ai\test_parse_memory_tool.py:506: AssertionError
+____________________ test_read_audio_info_returns_metadata ____________________
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_read_audio_info_returns_m0')
+
+    def test_read_audio_info_returns_metadata(tmp_path: Path) -> None:
+        project = _build_project(tmp_path)
+        wav_path = project / "audio" / "clip.wav"
+        _write_wav(wav_path, frame_rate=22050, channels=2, duration_sec=1.25)
+    
+        tools = ParseChatTools(project_root=project)
+        result = tools.execute("read_audio_info", {"sourceWav": "audio/clip.wav"})
+    
+        assert result["ok"] is True
+        inner = result["result"]
+        assert inner["ok"] is True
+        assert inner["channels"] == 2
+        assert inner["sampleRateHz"] == 22050
+        assert inner["durationSec"] == 1.25
+        assert inner["numFrames"] == int(22050 * 1.25)
+>       assert inner["path"] == "audio/clip.wav"
+E       AssertionError: assert 'audio\\clip.wav' == 'audio/clip.wav'
+E         
+E         - audio/clip.wav
+E         ?      ^
+E         + audio\clip.wav
+E         ?      ^
+
+python\ai\test_read_audio_info_tool.py:47: AssertionError
+________ test_run_full_annotation_pipeline_orchestrates_low_level_jobs ________
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_run_full_annotation_pipel0')
+
+    def test_run_full_annotation_pipeline_orchestrates_low_level_jobs(tmp_path: pathlib.Path) -> None:
+        _seed_annotation(tmp_path, "Fail02")
+    
+        start_calls: List[Tuple[str, Dict[str, Any]]] = []
+        stt_calls: List[Tuple[str, str, str | None]] = []
+    
+        def fake_start_stt(speaker: str, source_wav: str, language: str | None) -> str:
+            stt_calls.append((speaker, source_wav, language))
+            return "job-stt"
+    
+        def fake_start_compute(compute_type: str, payload: Dict[str, Any]) -> str:
+            start_calls.append((compute_type, dict(payload)))
+            if compute_type == "forced_align":
+                return "job-align"
+            if compute_type == "ipa_only":
+                return "job-ipa"
+            raise AssertionError(f"Unexpected compute type: {compute_type}")
+    
+        snapshots = {
+            "job-stt": {
+                "type": "stt",
+                "status": "complete",
+                "progress": 100.0,
+                "result": {
+                    "speaker": "Fail02",
+                    "sourceWav": "audio/original/Fail02.wav",
+                    "segments": [{"start": 0.0, "end": 1.0, "text": "alpha"}],
+                },
+            },
+            "job-align": {
+                "type": "compute:forced_align",
+                "status": "complete",
+                "progress": 100.0,
+                "result": {"aligned": 2},
+            },
+            "job-ipa": {
+                "type": "compute:ipa_only",
+                "status": "complete",
+                "progress": 100.0,
+                "result": {"filled": 2},
+            },
+        }
+    
+        workflow = WorkflowTools(
+            project_root=tmp_path,
+            start_stt_job=fake_start_stt,
+            start_compute_job=fake_start_compute,
+            get_job_snapshot=lambda job_id: snapshots.get(job_id),
+        )
+    
+        result = workflow.execute(
+            "run_full_annotation_pipeline",
+            {"speaker_id": "Fail02", "concept_list": ["1", "2"]},
+        )
+        payload = result["result"]
+    
+        assert payload["speaker_id"] == "Fail02"
+        assert payload["concept_list"] == ["1", "2"]
+        assert payload["final_status"] == "complete"
+        assert [stage["stage"] for stage in payload["stages"]] == ["stt", "forced_align", "ipa"]
+        assert payload["job_ids"] == {
+            "stt": "job-stt",
+            "forced_align": "job-align",
+            "ipa": "job-ipa",
+        }
+        assert payload["progress"]["completedStages"] == 3
+        assert payload["progress"]["totalStages"] == 3
+        assert payload["progress"]["percent"] == 100.0
+        assert payload["progress"]["done"] is True
+        assert [event["event"] for event in payload["events"]] == [
+            "stage_started",
+            "stage_completed",
+            "stage_started",
+            "stage_completed",
+            "stage_started",
+            "stage_completed",
+        ]
+>       assert stt_calls == [("Fail02", "audio/original/Fail02.wav", None)]
+E       AssertionError: assert [('Fail02', '...2.wav', None)] == [('Fail02', '...2.wav', None)]
+E         
+E         At index 0 diff: ('Fail02', 'audio\\original\\Fail02.wav', None) != ('Fail02', 'audio/original/Fail02.wav', None)
+E         Use -v to get more diff
+
+python\ai\test_workflow_tools.py:149: AssertionError
+_ test_build_get_export_lingpy_response_preserves_headers_and_cleans_up_tempfile _
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_build_get_export_lingpy_r0')
+
+    def test_build_get_export_lingpy_response_preserves_headers_and_cleans_up_tempfile(tmp_path: pathlib.Path) -> None:
+        removed: list[str] = []
+        temp_path = tmp_path / "export.tsv"
+        temp_path.write_text("", encoding="utf-8")
+    
+        def fake_mkstemp(*, suffix: str):
+            assert suffix == ".tsv"
+            fd = os.open(temp_path, os.O_RDWR)
+            return fd, str(temp_path)
+    
+        def fake_export_wordlist_tsv(enrichments_path: pathlib.Path, annotations_dir: pathlib.Path, out_path: pathlib.Path) -> None:
+            assert enrichments_path == tmp_path / "parse-enrichments.json"
+            assert annotations_dir == tmp_path / "annotations"
+            out_path.write_text("COGID\tDOCULECT\n1\tFail01\n", encoding="utf-8")
+    
+        def fake_unlink(path: str) -> None:
+            removed.append(path)
+            os.unlink(path)
+    
+        response = build_get_export_lingpy_response(
+            export_wordlist_tsv=fake_export_wordlist_tsv,
+            enrichments_path=tmp_path / "parse-enrichments.json",
+            annotations_dir=tmp_path / "annotations",
+            mkstemp=fake_mkstemp,
+            close_fd=os.close,
+            unlink=fake_unlink,
+        )
+    
+        assert isinstance(response, BinaryResponseSpec)
+        assert response.status == HTTPStatus.OK
+        assert response.content_type == "text/tab-separated-values; charset=utf-8"
+        assert response.content_disposition == 'attachment; filename="parse-wordlist.tsv"'
+>       assert response.body == b"COGID\tDOCULECT\n1\tFail01\n"
+E       AssertionError: assert b'COGID\tDOCU...1\tFail01\r\n' == b'COGID\tDOCU...\n1\tFail01\n'
+E         
+E         At index 14 diff: b'\r' != b'\n'
+E         Use -v to get more diff
+
+python\test_app_http_project_artifact_handlers.py:131: AssertionError
+__ test_run_normalize_job_forces_wav_output_for_non_wav_input_without_guard ___
+
+tmp_path = WindowsPath('C:/Users/Lucas/parse-pytest-rebuild-full/test_run_normalize_job_forces_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000022118B15D30>
+
+    def test_run_normalize_job_forces_wav_output_for_non_wav_input_without_guard(tmp_path: pathlib.Path, monkeypatch) -> None:
+        project_root = tmp_path / "project"
+        original_dir = project_root / "audio" / "original" / "Fail01"
+        working_root = project_root / "audio" / "working"
+        original_dir.mkdir(parents=True)
+        working_root.mkdir(parents=True)
+        source_path = original_dir / "recording.mp3"
+        source_path.write_bytes(b"fake")
+    
+        completions = []
+        progress_updates = []
+    
+        def fake_run(cmd, capture_output=False, text=False, timeout=None):
+            if cmd[:2] == ["ffmpeg", "-version"]:
+                return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+            if any("print_format=json" in str(part) for part in cmd):
+                stderr = '{"input_i":"-20.4","input_tp":"-1.1","input_lra":"5.2","input_thresh":"-31.2"}'
+                return type("Result", (), {"returncode": 0, "stderr": stderr, "stdout": ""})()
+    
+            output_path = pathlib.Path(cmd[-1])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"wav")
+            return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+    
+        monkeypatch.setattr(server, "_resolve_project_path", lambda raw_path: source_path)
+        monkeypatch.setattr(server, "_ensure_safe_working_root", lambda project_root=None: (_ for _ in ()).throw(AssertionError("working-root guard should not run inside normalize job")), raising=False)
+        monkeypatch.setattr(server, "_project_root", lambda: project_root)
+        monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: progress_updates.append((args, kwargs)))
+        monkeypatch.setattr(server, "_set_job_complete", lambda *args, **kwargs: completions.append((args, kwargs)))
+        monkeypatch.setattr(server, "_set_job_error", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError(f"unexpected error: {args}, {kwargs}")))
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+    
+        server._run_normalize_job("job-1", "Fail01", "audio/original/Fail01/recording.mp3")
+    
+        assert progress_updates
+        assert completions
+        result = completions[0][0][1]
+>       assert result["normalizedPath"].endswith("audio/working/Fail01/recording.wav")
+E       AssertionError: assert False
+E        +  where False = <built-in method endswith of str object at 0x0000022118BE31E0>('audio/working/Fail01/recording.wav')
+E        +    where <built-in method endswith of str object at 0x0000022118BE31E0> = 'audio\\working\\Fail01\\recording.wav'.endswith
+
+python\test_server_normalize_safety.py:110: AssertionError
+============================== warnings summary ===============================
+python\server.py:3
+  \\wsl.localhost\Ubuntu\home\lucas\gh\worktrees\PARSE-rebuild\job-observability-http-slice\python\server.py:3: DeprecationWarning: 'cgi' is deprecated and slated for removal in Python 3.13
+    import cgi
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED python/ai/test_parse_memory_tool.py::test_onboard_speaker_dry_run_reports_plan_without_callback
+FAILED python/ai/test_parse_memory_tool.py::test_import_processed_speaker_dry_run_reports_plan
+FAILED python/ai/test_parse_memory_tool.py::test_import_processed_speaker_write_copies_assets_and_builds_workspace_files
+FAILED python/ai/test_parse_memory_tool.py::test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata
+FAILED python/ai/test_read_audio_info_tool.py::test_read_audio_info_returns_metadata
+FAILED python/ai/test_workflow_tools.py::test_run_full_annotation_pipeline_orchestrates_low_level_jobs
+FAILED python/test_app_http_project_artifact_handlers.py::test_build_get_export_lingpy_response_preserves_headers_and_cleans_up_tempfile
+FAILED python/test_server_normalize_safety.py::test_run_normalize_job_forces_wav_output_for_non_wav_input_without_guard
+8 failed, 658 passed, 2 skipped, 1 warning in 48.25s
+[rebuild backend] finished=2026-04-26T15:55:55Z

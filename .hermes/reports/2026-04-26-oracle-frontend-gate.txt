@@ -1,0 +1,111 @@
+[oracle frontend] repo=/home/lucas/gh/ardeleanlucas/parse
+[oracle frontend] sha=0951287a812609068933ba22711a8ecd97765f38
+[oracle frontend] started=2026-04-26T15:53:49Z
+
+> parse-react@2.0.0-alpha test
+> vitest run --run
+
+
+ RUN  v1.6.1 /home/lucas/gh/ardeleanlucas/parse
+
+ ✓ src/hooks/__tests__/useWaveSurfer.test.ts  (10 tests) 34ms
+ ✓ src/hooks/__tests__/useActionJob.test.ts  (17 tests) 63ms
+ ✓ src/components/annotate/AnnotateMode.test.tsx  (5 tests) 179ms
+stderr | src/components/annotate/AnnotateMode.test.tsx > AnnotateMode > renders OnboardingFlow when onboardingComplete is false
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ ✓ src/components/compare/BorrowingPanel.test.tsx  (6 tests) 224ms
+ ✓ src/components/annotate/AnnotationPanel.test.tsx  (6 tests) 251ms
+ ✓ src/components/shared/__tests__/BatchReportModal.test.tsx  (13 tests) 332ms
+ ✓ src/__tests__/referenceFormLists.test.ts  (24 tests) 14ms
+ ✓ src/components/compute/__tests__/ClefSourcesReportModal.test.tsx  (9 tests) 271ms
+ ✓ src/components/shared/__tests__/TranscriptionRunModal.test.tsx  (7 tests) 340ms
+ ✓ src/hooks/__tests__/useSpectrogram.test.ts  (5 tests) 33ms
+ ✓ src/components/compare/ConceptTable.test.tsx  (6 tests) 100ms
+ ✓ src/hooks/__tests__/useImportExport.test.ts  (4 tests) 38ms
+ ✓ src/components/compare/CognateControls.test.tsx  (5 tests) 135ms
+ ✓ src/components/annotate/TranscriptPanel.test.tsx  (5 tests) 147ms
+ ✓ src/hooks/__tests__/useBatchPipelineJob.test.ts  (9 tests) 1587ms
+ ✓ src/components/compare/TagManager.test.tsx  (5 tests) 240ms
+ ✓ src/components/compare/CompareMode.test.tsx  (7 tests) 148ms
+ ✓ src/components/compare/SpeakerImport.test.tsx  (5 tests) 202ms
+ ✓ src/components/compare/EnrichmentsPanel.test.tsx  (5 tests) 197ms
+ ✓ src/components/annotate/RegionManager.test.tsx  (5 tests) 151ms
+ ✓ src/hooks/__tests__/useExport.test.ts  (4 tests) 28ms
+ ✓ src/components/annotate/SuggestionsPanel.test.tsx  (6 tests) 111ms
+ ✓ src/hooks/__tests__/useChatSession.test.tsx  (3 tests) 93ms
+ ✓ src/hooks/__tests__/useComputeJob.test.ts  (5 tests) 29ms
+ ✓ src/components/compute/__tests__/ClefPopulateSummaryBanner.test.tsx  (3 tests) 209ms
+ ✓ src/__tests__/moveInterval.test.ts  (11 tests) 7ms
+ ✓ src/__tests__/annotationUndoRedo.test.ts  (10 tests) 11ms
+ ✓ src/components/annotate/OnboardingFlow.test.tsx  (4 tests) 123ms
+ ✓ src/components/annotate/ChatPanel.test.tsx  (4 tests) 91ms
+ ✓ src/hooks/__tests__/useAnnotationSync.test.ts  (4 tests) 213ms
+ ✓ src/components/compare/ContactLexemePanel.test.tsx  (4 tests) 205ms
+ ✓ src/__tests__/pollOffsetDetectJob.test.ts  (2 tests) 6ms
+ ✓ src/__tests__/surveySort.test.ts  (8 tests) 6ms
+ ✓ src/__tests__/storePersistence.test.ts  (4 tests) 20ms
+stderr | src/__tests__/storePersistence.test.ts > Cross-session persistence > tagStore tags survive navigation to compare and back
+[tagStore] persist failed: ReferenceError: localStorage is not defined
+    at Object.persist (/home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts:197:7)
+    at addTag (/home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts:63:11)
+    at /home/lucas/gh/ardeleanlucas/parse/src/__tests__/storePersistence.test.ts:60:5
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:135:14
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:60:26
+    at runTest (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:781:17)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runFiles (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:958:5)
+    at startTests (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:967:3)
+[tagStore] persist failed: ReferenceError: localStorage is not defined
+    at Object.persist (/home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts:197:7)
+    at Object.tagConcept (/home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts:95:11)
+    at /home/lucas/gh/ardeleanlucas/parse/src/__tests__/storePersistence.test.ts:69:28
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:135:14
+    at file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:60:26
+    at runTest (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:781:17)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runSuite (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:909:15)
+    at runFiles (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:958:5)
+    at startTests (file:///home/lucas/gh/ardeleanlucas/parse/node_modules/@vitest/runner/dist/index.js:967:3)
+
+ ✓ src/api/client.test.ts  (6 tests) 20ms
+ ✓ scripts/apiRegressionConfig.test.mjs  (3 tests) 27ms
+ ✓ src/components/shared/__tests__/ContextRing.test.tsx  (6 tests) 28ms
+ ✓ vite.config.test.ts  (3 tests) 3ms
+ ✓ src/components/shared/ChatMarkdown.test.tsx  (2 tests) 48ms
+ ✓ src/pickOrthoIntervalForConcept.test.ts  (4 tests) 1ms
+ ✓ src/ParseUI.test.tsx  (29 tests) 3867ms
+
+ Test Files  41 passed (41)
+      Tests  283 passed (283)
+   Start at  17:53:49
+   Duration  6.40s (transform 2.14s, setup 4ms, collect 11.01s, tests 9.83s, environment 22.86s, prepare 5.52s)
+
+
+> parse-react@2.0.0-alpha build
+> vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2044 modules transformed.
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) /home/lucas/gh/ardeleanlucas/parse/src/api/client.ts is dynamically imported by /home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts but also statically imported by /home/lucas/gh/ardeleanlucas/parse/src/ParseUI.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compare/CommentsImport.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compare/LexemeDetail.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compare/SpeakerImport.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compute/ClefConfigModal.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compute/ClefSourcesReportModal.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/shared/TranscriptionRunModal.tsx, /home/lucas/gh/ardeleanlucas/parse/src/hooks/useBatchPipelineJob.ts, /home/lucas/gh/ardeleanlucas/parse/src/hooks/useChatSession.ts, /home/lucas/gh/ardeleanlucas/parse/src/hooks/useComputeJob.ts, /home/lucas/gh/ardeleanlucas/parse/src/stores/annotationStore.ts, /home/lucas/gh/ardeleanlucas/parse/src/stores/configStore.ts, /home/lucas/gh/ardeleanlucas/parse/src/stores/enrichmentStore.ts, /home/lucas/gh/ardeleanlucas/parse/src/stores/transcriptionLanesStore.ts, dynamic import will not move module into another chunk.
+
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) /home/lucas/gh/ardeleanlucas/parse/src/stores/tagStore.ts is dynamically imported by /home/lucas/gh/ardeleanlucas/parse/src/hooks/useChatSession.ts but also statically imported by /home/lucas/gh/ardeleanlucas/parse/src/ParseUI.tsx, /home/lucas/gh/ardeleanlucas/parse/src/components/compare/LexemeDetail.tsx, dynamic import will not move module into another chunk.
+
+rendering chunks...
+computing gzip size...
+dist/index.html                               0.44 kB │ gzip:   0.31 kB
+dist/assets/spectrogram-worker-uKJ3prh1.js    2.77 kB
+dist/assets/index-B5G0zH_Z.css               52.93 kB │ gzip:   9.12 kB
+dist/assets/index-_BTAVUoP.js               673.35 kB │ gzip: 191.95 kB │ map: 2,749.47 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 3.16s
+[oracle frontend] finished=2026-04-26T15:54:02Z
