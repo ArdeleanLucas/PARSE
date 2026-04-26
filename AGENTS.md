@@ -82,6 +82,33 @@ Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/
 - If a parity evidence pass against another P0/P1 surface reveals a chat-related bug, file an issue and triage; do NOT add it to active work.
 - Re-adding AIChat features later is cheap because the component is fully extracted (PR #61) and the tools are decomposed. ~1 day of work to re-enable a feature lane if Lucas reverses this decision.
 
+## Refetch before reporting PR status (added 2026-04-26)
+
+**Always run `git fetch origin --quiet --prune` immediately before reporting any PR's mergeable/conflict status to coordinator or Lucas.**
+
+Failure mode observed multiple times tonight: agent reports a PR as `MERGEABLE/CLEAN` based on the local clone's stale state, but `gh pr view <N> --json mergeable,mergeStateStatus` against current GitHub state returns `CONFLICTING/DIRTY` because main has moved since the agent last fetched.
+
+**Why it happens:** `gh pr view` reads the most recent state GitHub has computed. GitHub's mergeable computation runs whenever main changes. If your local clone hasn't fetched the latest origin/main, your mental model of the PR's state is stale even though `gh` returns fresh data — you're comparing your branch against an old base in your head.
+
+**Concrete check before any status report:**
+
+```
+$ git fetch origin --quiet --prune
+$ gh pr view <N> --repo TarahAssistant/PARSE-rebuild --json mergeable,mergeStateStatus,baseRefOid,headRefOid
+```
+
+Report what `gh` returned, not what you remember from earlier. If the result surprises you (e.g., you just rebased and now it says CONFLICTING), check whether main moved between your rebase and this query.
+
+**Why this matters for the merge tail:** the merge wave tonight processed ~30 PRs in ~3 hours. Branches created during the wave go stale within minutes. Coordinator (parse-gpt) and Lucas need accurate mergeable status to decide what to merge next. False-positive CLEAN reports cause Lucas to attempt merges that fail, then chase phantom rebase requests.
+
+**Applies to:**
+
+- Implementation lanes (parse-builder, parse-back-end) reporting their own PR status after shipping
+- Coordinator (parse-gpt) reporting on PRs queued for merge
+- Any handoff or task-log entry that includes a PR mergeable claim
+
+Skip the refetch only if you are ABSOLUTELY certain main hasn't moved since your last fetch in the same session. If in doubt, refetch — it's a 1-second operation.
+
 ## Screenshot convention (private-repo constraint)
 
 **Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.
