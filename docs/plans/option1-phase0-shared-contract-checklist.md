@@ -427,3 +427,22 @@ If a shared contract must change mid-rebuild, record:
 2. Convert the parity inventory into concrete rows/artifacts in the rebuild repo.
 3. Bootstrap the separate rebuild repo using the frozen skeleton and gate commands.
 4. Start Agent A and Agent B only after the coordinator signs the Ready-to-Parallelize section.
+
+---
+
+## 15. Baseline status note (added 2026-04-26 evening coordinator sync)
+
+The checkboxes in §2.1, §2.2, §3 above were ticked at signing time. Both rebuild and oracle SHAs have moved since (or stayed pinned, in oracle's case). Clarification:
+
+| Repo | Frozen baseline SHA | Current SHA (2026-04-26 evening) |
+|---|---|---|
+| Oracle (`ArdeleanLucas/PARSE`) | `0951287a81` | `0951287a81` (unchanged) |
+| Rebuild (`TarahAssistant/PARSE-rebuild`) | `f9aa3db1aa` | `26291dc027` (61 PRs ahead) |
+
+**Frozen baseline assertions remain valid** — the gate evidence committed in PR #64 (`.hermes/reports/2026-04-26-{oracle,rebuild}-{frontend,backend}-gate.txt`) reflects the state at signing and is the reference for parity claims.
+
+**Current state is tracked separately** via the rolling scorecard (PR #65, refresh planned per coordinator handoffs). When the scorecard's numbers diverge meaningfully from the frozen baseline, parity claims should reference the frozen baseline, not current state.
+
+**Re-signing the baseline** would be appropriate after Option 1 monolith decomposition completes (3-5 days at current pace). At that point the rebuild's behavior surface should match oracle's (modulo accepted deviations from §11 of `option1-parity-inventory.md`), and a fresh baseline can anchor Option 3 desktop platform work.
+
+Until then: baseline frozen, current state monitored, deviations explicit.
