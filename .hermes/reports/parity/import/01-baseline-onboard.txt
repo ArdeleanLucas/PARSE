@@ -1,0 +1,9 @@
+Flow 01 — Onboard speaker import
+Oracle: DEVIATION
+Rebuild: DEVIATION
+
+Both sides completed `/api/onboard/speaker` for `Imp01` and loaded 2 concepts, but both persisted Windows-style backslashes in the onboarding result payload and `source_index.json`:
+- oracle path: audio\original\Imp01\Imp01.wav
+- rebuild path: audio\original\Imp01\Imp01.wav
+
+This is a shared import-route deviation, not rebuild-only drift.

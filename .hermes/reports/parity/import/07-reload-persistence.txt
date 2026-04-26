@@ -1,0 +1,12 @@
+Flow 07 — Persistence after reload
+Oracle: PASS
+Rebuild: PASS
+
+After reload, both UIs showed:
+- 3 concepts
+- 3 speakers
+- visible `Import Parity Tag` with count 2 in Tags mode
+
+Screenshots:
+- oracle: docs/pr-assets/pr-import-parity-oracle-final.png
+- rebuild: docs/pr-assets/pr-import-parity-rebuild-final.png

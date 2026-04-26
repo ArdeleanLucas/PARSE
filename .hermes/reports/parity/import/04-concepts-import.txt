@@ -1,0 +1,10 @@
+Flow 04 — Pure CSV concept import (current shipped CSV-import helper)
+Oracle: PASS
+Rebuild: PASS
+
+Both sides merged the same `concepts-import.csv` and ended with:
+- matched: 2
+- added: 1
+- total: 3
+
+Resulting concept rows on both sides: hair, forehead, eyelid.

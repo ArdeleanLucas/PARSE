@@ -1,0 +1,6 @@
+Supplemental — CommentsImport / lexeme-notes CSV surface
+Oracle: PASS
+Rebuild: PASS
+
+This is the closest shipped Audition-only CSV import surface on current main.
+Both sides imported 2 notes for `ProcWrite01` and matched 2 existing lexeme intervals.

@@ -1,0 +1,5 @@
+Flow 05 — Tag CSV import
+Oracle: PASS
+Rebuild: PASS
+
+Both sides created `Import Parity Tag` with color `#10b981` and assigned concept IDs `1` and `3`.

@@ -315,6 +315,7 @@ The plan was originally written assuming oracle-as-immutable-spec. Dogfooding th
 |---|---|---|---|
 | TranscriptionLanes hook-order crash on Annotate entry (Saha01 fixture) | [ArdeleanLucas/PARSE#230](https://github.com/ArdeleanLucas/PARSE/issues/230) | **RESOLVED via oracle sync** in [ArdeleanLucas/PARSE#234](https://github.com/ArdeleanLucas/PARSE/pull/234) (merged 2026-04-26) | PR #66 (Annotate parity) remains the historical evidence for the old oracle crash; future Annotate parity passes should treat this as closed unless the regression reappears |
 | `_display_readable_path` leaks Windows path separators into `source_index.json` and `annotation.source_audio` | [ArdeleanLucas/PARSE#231](https://github.com/ArdeleanLucas/PARSE/issues/231), [ArdeleanLucas/PARSE#232](https://github.com/ArdeleanLucas/PARSE/issues/232) | **RESOLVED via oracle sync** in [ArdeleanLucas/PARSE#233](https://github.com/ArdeleanLucas/PARSE/pull/233) (merged 2026-04-26) | Historical caveat for the backend gate evidence in PR #64 only; future import/onboarding parity should assume the oracle now preserves POSIX project-relative paths unless new evidence contradicts that |
+| Regular `/api/onboard/speaker` import still writes Windows path separators into `source_index.json` and the job result payload | [ArdeleanLucas/PARSE#236](https://github.com/ArdeleanLucas/PARSE/issues/236) | Open on oracle; reproduced in rebuild during import parity pass | The import/onboarding parity evidence report records this as a **shared deviation**: both oracle and rebuild still emit backslashes on the regular onboard route even though processed-speaker imports are fixed |
 | 10 oracle backend tests failing in unclassified state | none yet | Deferred audit | Parity claims for backend surfaces have caveats until classified |
 
 ### Rules going forward
@@ -330,10 +331,10 @@ The P0/P1/P2 tiers in §3 describe what eventually needs evidence. This section 
 
 | Order | Surface | Tier | Why now |
 |---|---|---|---|
-| 1 | Import / onboarding | P1 | Tags parity shipped in PR #113, and the oracle path-separator sync in ArdeleanLucas/PARSE#233 means the next forward-looking parity surface is end-to-end import/onboarding behavior. |
-| 2 | Compute / report modals | P1 | Still important, but can follow import/onboarding once the current modal extraction wave settles. |
-| 3 | CLEF | P1 | Deferred. |
-| 4 | Job diagnostics | P1 | Deferred. |
+| 1 | Compute / report modals | P1 | Import/onboarding parity has now shipped; the next still-open P1 surface is the compute/report modal family. |
+| 2 | CLEF | P1 | Deferred. |
+| 3 | Job diagnostics | P1 | Deferred. |
+| ~~done~~ | Import / onboarding | ~~P1~~ | Completed via the 2026-04-26 import/onboarding parity evidence pass. Processed-speaker path-separator verification passed on both oracle and rebuild; the regular onboard route remains a shared deviation tracked in oracle issue #236. |
 | ~~done~~ | Tags | ~~P0~~ | Completed via PR #113 on 2026-04-26 (7/7 flows passed). |
 | ~~AI/chat~~ | ~~P1~~ | **DROPPED** 2026-04-26 — AIChat.tsx is now maintenance-mode-only per Lucas decision. The underlying chat_tools.py decomposition continues (foundation for internal tool use and MCP); only the in-app chat UI and its parity evidence are dropped. |
 
