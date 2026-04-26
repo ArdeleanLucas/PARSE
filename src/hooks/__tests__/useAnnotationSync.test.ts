@@ -10,6 +10,11 @@ vi.mock("../../api/client", () => ({
   saveAnnotation: vi.fn(),
 }));
 
+vi.mock("@/api/client", () => ({
+  getAnnotation: (...args: unknown[]) => mockGetAnnotation(...args),
+  saveAnnotation: vi.fn(),
+}));
+
 let mockActiveSpeaker: string | null = null;
 
 vi.mock("../../stores/uiStore", () => ({
