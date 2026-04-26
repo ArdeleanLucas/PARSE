@@ -396,6 +396,14 @@ def _wsl_to_windows_path(raw: str) -> Optional[str]:
     return f"{drive}:/{rest}" if rest else f"{drive}:/"
 
 
+from ai.tools.acoustic_starter_tools import (
+    ACOUSTIC_STARTER_TOOL_SPECS,
+    tool_audio_normalize_start,
+    tool_forced_align_start,
+    tool_ipa_transcribe_acoustic_start,
+    tool_stt_start,
+    tool_stt_word_level_start,
+)
 from ai.tools.job_status_tools import (
     JOB_STATUS_TOOL_SPECS,
     tool_audio_normalize_status,
@@ -408,6 +416,12 @@ from ai.tools.job_status_tools import (
     tool_jobs_list_active,
     tool_stt_status,
     tool_stt_word_level_status,
+)
+from ai.tools.pipeline_orchestration_tools import (
+    PIPELINE_ORCHESTRATION_TOOL_SPECS,
+    tool_pipeline_run,
+    tool_pipeline_state_batch,
+    tool_pipeline_state_read,
 )
 from ai.tools.preview_tools import (
     PREVIEW_TOOL_SPECS,
@@ -633,113 +647,7 @@ class ParseChatTools:
                     ),
                 ),
             ),
-            "stt_start": ChatToolSpec(
-                name="stt_start",
-                description=(
-                    "Start a bounded STT background job for a project audio file. "
-                    "Returns a jobId for polling with stt_status."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker", "sourceWav"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
-                        "language": {"type": "string", "minLength": 1, "maxLength": 32},
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, validate inputs and preview the STT job without launching it.",
-                        },
-                    },
-                },
-            ),
-            # ── Tier 1 acoustic alignment: word-level STT ──────────────
-            "stt_word_level_start": ChatToolSpec(
-                name="stt_word_level_start",
-                description=(
-                    "Start a word-level STT job (Tier 1 acoustic alignment). "
-                    "Segments are returned with a nested words[] array of "
-                    "(word, start, end, prob) spans from faster-whisper's "
-                    "word_timestamps=True output. Mirrors stt_start but the "
-                    "name is explicit about Tier 1 semantics so agents can "
-                    "distinguish word-level jobs from plain sentence-level "
-                    "STT. Returns a jobId for polling with stt_word_level_status."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker", "sourceWav"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
-                        "language": {"type": "string", "minLength": 1, "maxLength": 32},
-                        "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
-            # ── Tier 2 acoustic alignment: wav2vec2 forced alignment ──
-            "forced_align_start": ChatToolSpec(
-                name="forced_align_start",
-                description=(
-                    "Start a Tier 2 forced-alignment job for a speaker. Runs "
-                    "torchaudio.functional.forced_align against "
-                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft on each word window "
-                    "from the speaker's Tier 1 STT output, producing tight per-"
-                    "word (and optional per-phoneme) boundaries. G2P is used "
-                    "only internally to build CTC targets and is discarded; no "
-                    "G2P output is persisted. Returns a jobId for polling with "
-                    "forced_align_status."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "overwrite": {
-                            "type": "boolean",
-                            "description": "When true, replaces an existing aligned artifact (default: false).",
-                        },
-                        "language": {
-                            "type": "string",
-                            "minLength": 2,
-                            "maxLength": 8,
-                            "description": "espeak-ng language code for the internal G2P step (default: ku)",
-                        },
-                        "padMs": {"type": "integer", "minimum": 0, "maximum": 500},
-                        "emitPhonemes": {"type": "boolean"},
-                        "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
-            # ── Tier 3 acoustic alignment: wav2vec2-only IPA ──────────
-            "ipa_transcribe_acoustic_start": ChatToolSpec(
-                name="ipa_transcribe_acoustic_start",
-                description=(
-                    "Start a Tier 3 acoustic IPA job. Runs "
-                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho "
-                    "interval's audio window and writes the decoded phoneme "
-                    "string into the speaker's IPA tier. wav2vec2 is the ONLY "
-                    "IPA engine — there are no text-based fallbacks. Equivalent "
-                    "to the ipa_only compute job exposed in the UI under "
-                    "Actions → Run IPA transcription. Returns a jobId for "
-                    "polling with ipa_transcribe_acoustic_status."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "overwrite": {
-                            "type": "boolean",
-                            "description": "When true, replaces existing non-empty IPA cells (default: false).",
-                        },
-                        "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
+            **ACOUSTIC_STARTER_TOOL_SPECS,
             "cognate_compute_preview": ChatToolSpec(
                 name="cognate_compute_preview",
                 description=(
@@ -1093,172 +1001,7 @@ class ParseChatTools:
                     },
                 },
             ),
-            "pipeline_state_read": ChatToolSpec(
-                name="pipeline_state_read",
-                description=(
-                    "Preflight one speaker. Read-only. Returns per-step "
-                    "``{done, intervals|segments, can_run, reason, "
-                    "coverage_start_sec, coverage_end_sec, "
-                    "coverage_fraction, full_coverage}`` plus top-level "
-                    "``duration_sec``. "
-                    "IMPORTANT: ``done`` only means 'the tier has ≥1 "
-                    "non-empty interval'. That is NOT the same as 'the "
-                    "entire WAV was processed' — a tier whose 128 "
-                    "intervals only cover the first 30 seconds of a "
-                    "6-minute recording is still ``done: true`` but "
-                    "``full_coverage: false``. Gate re-run decisions on "
-                    "``full_coverage``, not ``done``."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                    },
-                },
-            ),
-            "pipeline_state_batch": ChatToolSpec(
-                name="pipeline_state_batch",
-                description=(
-                    "Preflight multiple speakers at once. Read-only. "
-                    "With no arguments, probes every speaker from "
-                    "``speakers_list``. Supply ``speakers`` to "
-                    "restrict. Each row carries the same per-step "
-                    "fields as ``pipeline_state_read``, including "
-                    "``full_coverage`` — the actual 'was the entire "
-                    "WAV processed?' signal (as distinct from "
-                    "``done``, which only checks for ≥1 non-empty "
-                    "interval). Top-level summary counts "
-                    "``blockedSpeakers`` (any step can_run=false) and "
-                    "``partialCoverageSpeakers`` (any STT/ORTH/IPA "
-                    "step has full_coverage=false). Ideal for "
-                    "answering 'can I kick off a full batch and walk "
-                    "away?' without surprises."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speakers": {
-                            "type": "array",
-                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
-                            "maxItems": 200,
-                            "description": "Optional speaker-id subset. Omit for every annotated speaker.",
-                        },
-                    },
-                },
-            ),
-            "pipeline_run": ChatToolSpec(
-                name="pipeline_run",
-                description=(
-                    "Kick off a transcription pipeline for ONE speaker — the same "
-                    "``full_pipeline`` compute the UI uses. Supports any subset of "
-                    "``normalize / stt / ortho / ipa`` in canonical order. Setting "
-                    "``steps: ['ortho']`` with ``overwrites: {ortho: true}`` runs the "
-                    "razhan model full-file against this speaker's working WAV and "
-                    "overwrites the ortho tier. Returns a jobId; poll via "
-                    "``compute_status`` (compute_type=\"full_pipeline\") until "
-                    "``status=complete``. Steps run step-resilient: a failing STT will "
-                    "not abort ORTH/IPA for the same speaker."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker", "steps"],
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID whose pipeline should run.",
-                        },
-                        "steps": {
-                            "type": "array",
-                            "items": {
-                                "type": "string",
-                                "enum": ["normalize", "stt", "ortho", "ipa"],
-                            },
-                            "minItems": 1,
-                            "maxItems": 4,
-                            "description": "Ordered pipeline subset to execute for this speaker.",
-                        },
-                        "overwrites": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "normalize": {"type": "boolean"},
-                                "stt": {"type": "boolean"},
-                                "ortho": {"type": "boolean"},
-                                "ipa": {"type": "boolean"},
-                            },
-                            "description": (
-                                "Per-step overwrite flags. Steps flagged false will "
-                                "skip when their tier / cache is already populated; "
-                                "flagged true will replace the existing data."
-                            ),
-                        },
-                        "language": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 32,
-                            "description": (
-                                "Optional language override forwarded to STT + ORTH "
-                                "(razhan). Empty / omitted = auto-detect for STT, "
-                                "``sd`` for ORTH (razhan's fine-tuning target)."
-                            ),
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, preview the planned compute payload without starting a background job.",
-                        },
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "speaker_ready_for_pipeline",
-                        "The target speaker must exist in the current project and have the files needed for the requested steps.",
-                        kind="project_state",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "pipeline_job_started",
-                        "When dryRun=false, a full_pipeline background job is created and can be polled via compute_status.",
-                        kind="job_state",
-                    ),
-                ),
-            ),
-            "audio_normalize_start": ChatToolSpec(
-                name="audio_normalize_start",
-                description=(
-                    "Start an audio normalization job for a speaker (two-pass ffmpeg loudnorm: "
-                    "mono, 44.1 kHz, -16 LUFS). Returns a jobId; poll with audio_normalize_status. "
-                    "sourceWav is optional — defaults to the speaker's primary source audio."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "sourceWav": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path to source WAV. Omit to use primary source.",
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, preview the normalize job without launching ffmpeg.",
-                        },
-                    },
-                },
-            ),
+            **PIPELINE_ORCHESTRATION_TOOL_SPECS,
             "enrichments_read": ChatToolSpec(
                 name="enrichments_read",
                 description=(
@@ -2259,47 +2002,7 @@ class ParseChatTools:
 
 
     def _tool_stt_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._start_stt_job is None:
-            raise ChatToolExecutionError("STT start callback is unavailable")
-
-        speaker = self._normalize_speaker(args.get("speaker"))
-        source_wav = str(args.get("sourceWav") or "").strip()
-        if not source_wav:
-            raise ChatToolValidationError("sourceWav is required")
-
-        safe_path = self._resolve_project_path(source_wav, allowed_roots=[self.audio_dir])
-        project_relative = str(safe_path.relative_to(self.project_root))
-
-        language_raw = args.get("language")
-        language = str(language_raw).strip() if language_raw is not None else None
-        if language == "":
-            language = None
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "stt_start",
-                "plan": {
-                    "speaker": speaker,
-                    "sourceWav": project_relative,
-                    "language": language,
-                },
-                "message": "Dry run. Would start an STT job for the requested audio file.",
-            }
-
-        job_id = self._start_stt_job(speaker, project_relative, language)
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "jobId": job_id,
-            "status": "running",
-            "speaker": speaker,
-            "sourceWav": project_relative,
-            "message": "STT job started. Poll with stt_status.",
-        }
+        return tool_stt_start(self, args)
 
     def _tool_stt_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_status(self, args)
@@ -2310,145 +2013,21 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_stt_word_level_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start a Tier 1 word-level STT job.
-
-        STT now always runs with word_timestamps=True (Tier 1), so this
-        delegates to the same callback as stt_start but the tool name
-        documents the expectation that segments[].words[] is present in
-        the output.
-        """
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "stt_word_level_start",
-                "speaker": self._normalize_speaker(args.get("speaker")),
-                "note": (
-                    "Dry run. Tier 1 STT would run with word_timestamps=True; "
-                    "segments would include a nested words[] array."
-                ),
-            }
-
-        payload = self._tool_stt_start(args)
-        payload["tier"] = "tier1_word_level"
-        payload["message"] = (
-            "Word-level STT job started. Poll with stt_word_level_status."
-        )
-        return payload
+        return tool_stt_word_level_start(self, args)
 
     def _tool_stt_word_level_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_word_level_status(self, args)
 
 
     def _tool_forced_align_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start a Tier 2 forced-alignment compute job."""
-        speaker = self._normalize_speaker(args.get("speaker"))
-
-        language_raw = args.get("language")
-        language = str(language_raw).strip() if language_raw is not None else "ku"
-        if not language:
-            language = "ku"
-
-        pad_ms_raw = args.get("padMs", 100)
-        try:
-            pad_ms = int(pad_ms_raw)
-        except (TypeError, ValueError):
-            pad_ms = 100
-        pad_ms = max(0, min(500, pad_ms))
-
-        emit_phonemes = bool(args.get("emitPhonemes", True))
-        overwrite = bool(args.get("overwrite", False))
-
-        payload_body: Dict[str, Any] = {
-            "speaker": speaker,
-            "overwrite": overwrite,
-            "language": language,
-            "padMs": pad_ms,
-            "emitPhonemes": emit_phonemes,
-        }
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "forced_align_start",
-                "plan": payload_body,
-                "note": (
-                    "Dry run. Would launch a forced_align compute job against "
-                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft. G2P output is "
-                    "used only to build CTC targets and is never persisted."
-                ),
-            }
-
-        if self._start_compute_job is None:
-            raise ChatToolExecutionError(
-                "Compute-job start callback is unavailable — wire ParseChatTools "
-                "with start_compute_job to enable Tier 2 forced alignment."
-            )
-
-        job_id = self._start_compute_job("forced_align", payload_body)
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "jobId": job_id,
-            "status": "running",
-            "tier": "tier2_forced_align",
-            "speaker": speaker,
-            "message": "Forced-alignment job started. Poll with forced_align_status.",
-        }
+        return tool_forced_align_start(self, args)
 
     def _tool_forced_align_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_forced_align_status(self, args)
 
 
     def _tool_ipa_transcribe_acoustic_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start a Tier 3 acoustic IPA job (wav2vec2 on audio slices)."""
-        speaker = self._normalize_speaker(args.get("speaker"))
-        overwrite = bool(args.get("overwrite", False))
-
-        payload_body: Dict[str, Any] = {
-            "speaker": speaker,
-            "overwrite": overwrite,
-        }
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "ipa_transcribe_acoustic_start",
-                "plan": payload_body,
-                "note": (
-                    "Dry run. Would launch the ipa_only compute job, running "
-                    "facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho "
-                    "interval's audio window. No text-based IPA paths exist."
-                ),
-            }
-
-        if self._start_compute_job is None:
-            raise ChatToolExecutionError(
-                "Compute-job start callback is unavailable — wire ParseChatTools "
-                "with start_compute_job to enable Tier 3 acoustic IPA."
-            )
-
-        job_id = self._start_compute_job("ipa_only", payload_body)
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "jobId": job_id,
-            "status": "running",
-            "tier": "tier3_acoustic_ipa",
-            "speaker": speaker,
-            "overwrite": overwrite,
-            "message": (
-                "Acoustic IPA job started. Poll with "
-                "ipa_transcribe_acoustic_status."
-            ),
-        }
+        return tool_ipa_transcribe_acoustic_start(self, args)
 
     def _tool_ipa_transcribe_acoustic_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_ipa_transcribe_acoustic_status(self, args)
@@ -2464,140 +2043,13 @@ class ParseChatTools:
 
 
     def _tool_pipeline_state_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._pipeline_state is None:
-            raise ChatToolExecutionError("pipeline state callback is unavailable")
-        speaker = self._normalize_speaker(args.get("speaker"))
-        try:
-            state = self._pipeline_state(speaker)
-        except Exception as exc:
-            raise ChatToolExecutionError("pipeline state lookup failed: {0}".format(exc)) from exc
-        if not isinstance(state, dict):
-            raise ChatToolExecutionError("pipeline state callback returned non-object")
-        payload = {"readOnly": True, "speaker": speaker}
-        payload.update(state)
-        return payload
+        return tool_pipeline_state_read(self, args)
 
     def _tool_pipeline_state_batch(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if self._pipeline_state is None:
-            raise ChatToolExecutionError("pipeline state callback is unavailable")
-
-        requested = args.get("speakers")
-        if requested is None:
-            # Default to every annotated speaker on disk.
-            inventory = self._tool_speakers_list({})
-            speakers = list(inventory.get("speakers") or [])
-        elif isinstance(requested, list):
-            speakers = []
-            for raw in requested:
-                normalized = self._normalize_speaker(raw)
-                if normalized and normalized not in speakers:
-                    speakers.append(normalized)
-        else:
-            raise ChatToolValidationError("speakers must be a list")
-
-        results: List[Dict[str, Any]] = []
-        blocked = 0
-        partial_coverage = 0
-        for speaker in speakers:
-            try:
-                state = self._pipeline_state(speaker)
-                if not isinstance(state, dict):
-                    state = {}
-            except Exception as exc:
-                state = {"error": str(exc)}
-            # Flatten one row per speaker for easy grid reading.
-            row: Dict[str, Any] = {"speaker": speaker}
-            row.update(state)
-            results.append(row)
-            # A speaker is "blocked" if ANY step currently can_run=False;
-            # "partial coverage" if ANY STT/ORTH/IPA step has done=true
-            # but full_coverage=false (work was started but doesn't span
-            # the whole WAV — likely constrained to stale timestamps).
-            step_any_blocked = False
-            step_any_partial = False
-            for step_name in ("normalize", "stt", "ortho", "ipa"):
-                step = state.get(step_name) if isinstance(state, dict) else None
-                if not isinstance(step, dict):
-                    continue
-                if step.get("can_run") is False:
-                    step_any_blocked = True
-                if step_name in ("stt", "ortho", "ipa"):
-                    if step.get("done") and step.get("full_coverage") is False:
-                        step_any_partial = True
-            if step_any_blocked:
-                blocked += 1
-            if step_any_partial:
-                partial_coverage += 1
-
-        return {
-            "readOnly": True,
-            "count": len(results),
-            "blockedSpeakers": blocked,
-            "partialCoverageSpeakers": partial_coverage,
-            "rows": results,
-        }
+        return tool_pipeline_state_batch(self, args)
 
     def _tool_pipeline_run(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        # Reuses the same start_compute_job callback that powers the Tier
-        # 2/3 acoustic tools above; full_pipeline is one compute type
-        # among many dispatched from server._run_compute_job.
-        if self._start_compute_job is None:
-            raise ChatToolExecutionError("start_compute_job callback is unavailable")
-
-        speaker = self._normalize_speaker(args.get("speaker"))
-        raw_steps = args.get("steps")
-        if not isinstance(raw_steps, list) or not raw_steps:
-            raise ChatToolValidationError("steps must be a non-empty list")
-        valid = {"normalize", "stt", "ortho", "ipa"}
-        steps: List[str] = []
-        for raw in raw_steps:
-            s = str(raw or "").strip().lower()
-            if s not in valid:
-                raise ChatToolValidationError("invalid step: {0!r}".format(raw))
-            if s not in steps:
-                steps.append(s)
-
-        overwrites_raw = args.get("overwrites") or {}
-        if not isinstance(overwrites_raw, dict):
-            raise ChatToolValidationError("overwrites must be an object")
-        overwrites: Dict[str, bool] = {}
-        for k, v in overwrites_raw.items():
-            kk = str(k or "").strip().lower()
-            if kk not in valid:
-                raise ChatToolValidationError("invalid overwrite key: {0!r}".format(k))
-            overwrites[kk] = bool(v)
-
-        language_raw = args.get("language")
-        language = str(language_raw).strip() if isinstance(language_raw, str) else ""
-
-        payload: Dict[str, Any] = {"speaker": speaker, "steps": steps, "overwrites": overwrites}
-        if language:
-            payload["language"] = language
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "pipeline_run",
-                "plan": payload,
-                "message": "Dry run. Would start a full_pipeline compute job for this speaker.",
-            }
-
-        try:
-            job_id = self._start_compute_job("full_pipeline", payload)
-        except Exception as exc:
-            raise ChatToolExecutionError("pipeline start failed: {0}".format(exc)) from exc
-
-        return {
-            "jobId": str(job_id),
-            "status": "running",
-            "speaker": speaker,
-            "steps": steps,
-            "overwrites": overwrites,
-            "computeType": "full_pipeline",
-            "message": "Pipeline job started. Poll with compute_status.",
-        }
+        return tool_pipeline_run(self, args)
 
     def _tool_compute_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_compute_status(self, args)
@@ -2608,37 +2060,7 @@ class ParseChatTools:
     # ------------------------------------------------------------------
 
     def _tool_audio_normalize_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Start a two-pass ffmpeg loudnorm job; returns jobId for polling."""
-        if self._start_normalize_job is None:
-            raise ChatToolExecutionError("normalize callback is unavailable")
-
-        speaker = self._normalize_speaker(args.get("speaker"))
-        source_wav: Optional[str] = str(args.get("sourceWav") or "").strip() or None
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "dry_run",
-                "tool": "audio_normalize_start",
-                "plan": {
-                    "speaker": speaker,
-                    "sourceWav": source_wav,
-                },
-                "message": "Dry run. Would start an audio normalize job for this speaker.",
-            }
-
-        try:
-            job_id = self._start_normalize_job(speaker, source_wav)
-        except Exception as exc:
-            raise ChatToolExecutionError("normalize start failed: {0}".format(exc)) from exc
-
-        return {
-            "jobId": str(job_id),
-            "status": "running",
-            "speaker": speaker,
-            "message": "Normalize job started. Poll with audio_normalize_status.",
-        }
+        return tool_audio_normalize_start(self, args)
 
     def _tool_audio_normalize_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_audio_normalize_status(self, args)
