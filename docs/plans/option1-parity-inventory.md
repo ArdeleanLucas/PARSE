@@ -313,8 +313,8 @@ The plan was originally written assuming oracle-as-immutable-spec. Dogfooding th
 
 | Deviation | Oracle issue | Status | Affects parity evidence |
 |---|---|---|---|
-| TranscriptionLanes hook-order crash on Annotate entry (Saha01 fixture) | #230 | Open on oracle; fixed in rebuild via PR #19 | PR #66 (Annotate parity) records this — rebuild PASSES the flow, oracle CRASHES; documented as deviation |
-| `_display_readable_path` leaks Windows path separators into `source_index.json` and `annotation.source_audio` | #231, #232 | Open on oracle; fixed in rebuild via PR #77 (MC-323) | Affected `test_import_processed_speaker_*` failures (2 of 8 in rebuild backend gate evidence per PR #64); fix is sync-pending to oracle |
+| TranscriptionLanes hook-order crash on Annotate entry (Saha01 fixture) | [ArdeleanLucas/PARSE#230](https://github.com/ArdeleanLucas/PARSE/issues/230) | **RESOLVED via oracle sync** in [ArdeleanLucas/PARSE#234](https://github.com/ArdeleanLucas/PARSE/pull/234) (merged 2026-04-26) | PR #66 (Annotate parity) remains the historical evidence for the old oracle crash; future Annotate parity passes should treat this as closed unless the regression reappears |
+| `_display_readable_path` leaks Windows path separators into `source_index.json` and `annotation.source_audio` | [ArdeleanLucas/PARSE#231](https://github.com/ArdeleanLucas/PARSE/issues/231), [ArdeleanLucas/PARSE#232](https://github.com/ArdeleanLucas/PARSE/issues/232) | **RESOLVED via oracle sync** in [ArdeleanLucas/PARSE#233](https://github.com/ArdeleanLucas/PARSE/pull/233) (merged 2026-04-26) | Historical caveat for the backend gate evidence in PR #64 only; future import/onboarding parity should assume the oracle now preserves POSIX project-relative paths unless new evidence contradicts that |
 | 10 oracle backend tests failing in unclassified state | none yet | Deferred audit | Parity claims for backend surfaces have caveats until classified |
 
 ### Rules going forward
@@ -322,7 +322,7 @@ The plan was originally written assuming oracle-as-immutable-spec. Dogfooding th
 - Every parity evidence pass MUST reference this deviation list at the top of its evidence doc.
 - A flow that fails ONLY because oracle is broken is recorded as DEVIATION, not as rebuild parity failure.
 - Adding a new deviation requires a one-line entry above + a linked oracle issue (file one if missing).
-- Removing a deviation requires the oracle bug to be fixed AND verified in a follow-up parity pass.
+- Mark a deviation **RESOLVED** once the oracle fix is merged on `main` with a linked upstream PR; the next parity pass on that surface should still note the historical deviation and confirm the regression stays closed.
 
 ## 12. Current evidence priority (added 2026-04-26 evening)
 
@@ -330,11 +330,11 @@ The P0/P1/P2 tiers in §3 describe what eventually needs evidence. This section 
 
 | Order | Surface | Tier | Why now |
 |---|---|---|---|
-| 1 | Tags | P0 | Twice-deferred (PR #78 task 3, PR #84 task 2). Cannot be deferred a third time without coordinator-level escalation. |
-| 2 | Import / onboarding | P1 | Path-separator bug fix (#77) needs forward-looking parity verification. |
-| 3 | Compute / report modals | P1 | Less drift risk, deferred. |
-| 4 | CLEF | P1 | Deferred. |
-| 5 | Job diagnostics | P1 | Deferred. |
+| 1 | Import / onboarding | P1 | Tags parity shipped in PR #113, and the oracle path-separator sync in ArdeleanLucas/PARSE#233 means the next forward-looking parity surface is end-to-end import/onboarding behavior. |
+| 2 | Compute / report modals | P1 | Still important, but can follow import/onboarding once the current modal extraction wave settles. |
+| 3 | CLEF | P1 | Deferred. |
+| 4 | Job diagnostics | P1 | Deferred. |
+| ~~done~~ | Tags | ~~P0~~ | Completed via PR #113 on 2026-04-26 (7/7 flows passed). |
 | ~~AI/chat~~ | ~~P1~~ | **DROPPED** 2026-04-26 — AIChat.tsx is now maintenance-mode-only per Lucas decision. The underlying chat_tools.py decomposition continues (foundation for internal tool use and MCP); only the in-app chat UI and its parity evidence are dropped. |
 
 Coordinator updates this table after each evidence pass ships.
