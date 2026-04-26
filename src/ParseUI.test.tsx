@@ -1114,6 +1114,71 @@ describe("ParseUI", () => {
     });
   });
 
+  it("does not start generic compare compute when no speakers remain selected", async () => {
+    render(<ParseUI />);
+    await screen.findByRole("button", { name: "Run" });
+
+    const rightPanel = screen.getByTestId("right-panel");
+    fireEvent.click(within(rightPanel).getByRole("button", { name: "Fail01" }));
+    fireEvent.click(within(rightPanel).getByRole("button", { name: "Kalh01" }));
+
+    expect(screen.getByText(/Selected speakers only: 0 of 2/i)).toBeTruthy();
+
+    const runButton = screen.getByRole("button", { name: "Run" }) as HTMLButtonElement;
+    expect(runButton.disabled).toBe(true);
+
+    vi.mocked(apiClient.startCompute).mockClear();
+    runButton.disabled = false;
+    runButton.removeAttribute("disabled");
+    fireEvent.click(runButton);
+
+    expect(apiClient.startCompute).not.toHaveBeenCalled();
+  });
+
+  it("keeps CLEF Run on the isolated contact-lexemes path even when no compare speakers are selected", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ["ar"],
+      languages: [{ code: "ar", name: "Arabic" }],
+      config_path: "config/sil_contact_languages.json",
+      concepts_csv_exists: true,
+      meta: {},
+    };
+
+    render(<ParseUI />);
+    await screen.findByRole("button", { name: "Run" });
+
+    const rightPanel = screen.getByTestId("right-panel");
+    const computeModeSelect = within(rightPanel).getAllByRole("combobox")[1];
+    fireEvent.change(computeModeSelect, { target: { value: "contact-lexemes" } });
+    fireEvent.click(within(rightPanel).getByRole("button", { name: "Fail01" }));
+    fireEvent.click(within(rightPanel).getByRole("button", { name: "Kalh01" }));
+
+    const runButton = screen.getByRole("button", { name: "Run" }) as HTMLButtonElement;
+    expect(runButton.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => {
+      expect(apiClient.startCompute).toHaveBeenCalledTimes(1);
+    });
+    expect(vi.mocked(apiClient.startCompute).mock.calls[0]).toEqual(["contact-lexemes"]);
+  });
+
+  it("Refresh reloads enrichments only and does not start a compute job", async () => {
+    render(<ParseUI />);
+    await screen.findByRole("button", { name: "Refresh" });
+
+    mockLoadEnrichments.mockClear();
+    vi.mocked(apiClient.startCompute).mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(mockLoadEnrichments).toHaveBeenCalledOnce();
+    });
+    expect(apiClient.startCompute).not.toHaveBeenCalled();
+  });
+
   it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
     // Regression: the mount effect used to call setProvider('openai')
     // unconditionally whenever the backend said authenticated=true, so users
