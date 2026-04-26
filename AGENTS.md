@@ -44,6 +44,20 @@ Exceptions to this rule (cases where landing on oracle IS correct):
 
 Both exceptions require Lucas's explicit approval per task. Do not assume.
 
+## Scope: Option 1 only (Option 3 cancelled 2026-04-26)
+
+Per Lucas decision 2026-04-26: the rebuild's done-state is **Option 1 (web/React monolith decomposition + parity evidence)** complete. **Option 3 (desktop platform pivot) is dropped, not deferred.** Do not start desktop work, do not scaffold electron/tauri shells, do not extend `desktop_product_architecture.md` (archived).
+
+Practical implications:
+
+- All implementation lanes target the React/web stack only
+- Parity evidence covers React shell + Python backend + on-disk artifacts only
+- §5.3 of `option1-parity-inventory.md` (reserved Phase-3 shell extensibility) is cancelled — no parity work for training/phonetics/broader CL workbenches
+- The `desktop/` directory in the repo (if present) is vestigial scaffolding; do not extend
+- Original plan doc `option1-separate-rebuild-to-option3-desktop-platform.md` carries a CANCELLED banner; the Option 3 sections are historical context only
+
+If a future Lucas decision reverses this, the cancellation banners on plan docs must be lifted explicitly — no implicit revival.
+
 ## Screenshot convention (private-repo constraint)
 
 **Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.

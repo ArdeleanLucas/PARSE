@@ -112,6 +112,10 @@ No P0 item may be silently downgraded.
 | Contact lexeme / CLEF compare extensions | `ContactLexemePanel.tsx` and CLEF helpers | same coverage/config/fetch flow and same decision-support affordances in Compare mode | P1 |
 | Job diagnostics | shell modals + `getJobLogs()` support | users can inspect job status/logs and distinguish running, failed, and finished states | P1 |
 
+### 5.3 ~~Reserved Phase-3 shell extensibility~~ — CANCELLED 2026-04-26
+
+> **Cancelled per Lucas decision 2026-04-26**: Option 3 desktop platform pivot is dropped. The reserved Phase-3 placeholders (training, phonetics, broader CL workbenches) are not parity targets. Original §5.3 content preserved below for historical context only.
+
 ### 5.3 Reserved Phase-3 shell extensibility
 
 Future shell placeholders for `training`, `phonetics`, and broader computational-linguistics workbenches may be scaffolded in Phase 3, but they are **not parity targets** for the current oracle unless and until the coordinator explicitly adds them.
