@@ -1,0 +1,3 @@
+Flow: reload survival
+Oracle result: PASS — after reload, tags-parity-renamed remained present with visible count 1 and concepts ['1'] in parse-tags-v2.
+Rebuild result: PASS — same surviving visible count 1 and concepts ['1'] after reload.

@@ -1,0 +1,3 @@
+Flow: create tag
+Oracle result: PASS — created tags-parity-oracle with magenta color (#ec4899); total tags increased to 5.
+Rebuild result: PASS — created tags-parity-rebuild with magenta color (#ec4899); total tags increased to 5.

@@ -1,0 +1,3 @@
+Flow: assign concept hair (#1)
+Oracle result: PASS — clicking right-panel hair (#1) persisted concepts ['1'] on tags-parity-renamed.
+Rebuild result: PASS — same persisted concepts ['1'].
