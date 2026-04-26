@@ -58,6 +58,9 @@ import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSumm
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar } from './components/parse/ConceptSidebar';
 import { RightPanel } from './components/parse/RightPanel';
+import {
+  type CompareComputeMode,
+} from './components/parse/compareComputeContract';
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus } from './api/types';
@@ -2169,7 +2172,7 @@ export function ParseUI() {
   const [conceptId, setConceptId] = useState(1);
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
-  const [computeMode, setComputeMode] = useState('cognates');
+  const [computeMode, setComputeMode] = useState<CompareComputeMode>('cognates');
   const compareComputePayload = useMemo(() => {
     const speakers = selectedSpeakers.filter((speaker) => speaker.trim().length > 0);
     if (speakers.length === 0) return undefined;
@@ -2562,7 +2565,7 @@ export function ParseUI() {
   // follow-up step so the user doesn't have to manually trigger
   // "Compute cognate sets" after every populate.
   const similarityJob = useActionJob({
-    start: () => startCompute('similarity'),
+    start: () => startCompute('similarity', compareComputePayload),
     poll: (id) => pollCompute('similarity', id),
     label: 'Computing similarity scores…',
     onComplete: async () => {

@@ -106,24 +106,109 @@ describe('RightPanel', () => {
     expect(onOpenCommentsImport).toHaveBeenCalledOnce();
   });
 
-  it('does not render the extra compare compute semantics explainer from the rebuild-only parity drift', () => {
+  it('wires compare compute controls without rendering the rebuild-only explainer drift', () => {
+    const onComputeModeChange = vi.fn();
+    const onComputeRun = vi.fn();
+    const onRefreshEnrichments = vi.fn();
+    const onOpenClefConfig = vi.fn();
+    const onOpenSourcesReport = vi.fn();
+
     renderRightPanel({
       currentMode: 'compare',
       selectedSpeakers: ['Fail01', 'Fail02'],
-      computeMode: 'similarity',
+      computeMode: 'contact-lexemes',
+      clefConfigured: false,
+      onComputeModeChange,
+      onComputeRun,
+      onRefreshEnrichments,
+      onOpenClefConfig,
+      onOpenSourcesReport,
     });
 
+    const panel = screen.getByTestId('right-panel');
+    const computeModePicker = within(panel).getAllByRole('combobox')[1];
+    fireEvent.change(computeModePicker, { target: { value: 'similarity' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sources Report' }));
+
+    expect(onComputeModeChange).toHaveBeenCalledWith('similarity');
+    expect(onComputeRun).toHaveBeenCalledOnce();
+    expect(onRefreshEnrichments).toHaveBeenCalledOnce();
+    expect(onOpenClefConfig).toHaveBeenCalledOnce();
+    expect(onOpenSourcesReport).toHaveBeenCalledOnce();
+    expect(screen.getByText(/CLEF not configured/i)).toBeTruthy();
     expect(screen.queryByTestId('compare-compute-semantics')).toBeNull();
-    expect(screen.queryByText(/Selected speakers only:/i)).toBeNull();
-    expect(screen.queryByText(/shared backend recompute path as Cognates/i)).toBeNull();
-    expect(screen.queryByText(/Refresh reloads saved enrichments only/i)).toBeNull();
+  });
+
+  it('uses separate disabled and status semantics for contact and non-contact compute modes', () => {
+    const { rerender } = renderRightPanel({
+      currentMode: 'compare',
+      selectedSpeakers: ['Fail01'],
+      computeMode: 'similarity',
+      computeJobStatus: 'running',
+      computeJobProgress: 0.42,
+      computeJobEtaMs: 25_000,
+    });
+
+    let runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement;
+    expect(runButton.disabled).toBe(true);
+    expect(screen.getByText(/Running… 42%/i)).toBeTruthy();
+    expect(screen.getByText(/25s left/i)).toBeTruthy();
+    expect(screen.queryByText(/CLEF configured/i)).toBeNull();
+
+    rerender(
+      <RightPanel
+        panelOpen
+        onTogglePanel={vi.fn()}
+        currentMode="compare"
+        selectedSpeakers={['Fail01']}
+        speakers={['Fail01', 'Fail02']}
+        conceptCount={2}
+        speakerPicker="Fail02"
+        onSpeakerSelect={vi.fn()}
+        onAddSpeaker={vi.fn()}
+        onToggleSpeaker={vi.fn()}
+        computeMode="contact-lexemes"
+        onComputeModeChange={vi.fn()}
+        onComputeRun={vi.fn()}
+        crossSpeakerJobStatus="running"
+        computeJobStatus="error"
+        computeJobProgress={0.42}
+        computeJobEtaMs={25_000}
+        computeJobError="Similarity failed"
+        clefConfigured
+        onOpenSourcesReport={vi.fn()}
+        onOpenClefConfig={vi.fn()}
+        onRefreshEnrichments={vi.fn()}
+        tagFilter="all"
+        onTagFilterChange={vi.fn()}
+        onOpenLoadDecisions={vi.fn()}
+        onSaveDecisions={vi.fn()}
+        onExportLingPy={vi.fn()}
+        exporting={false}
+        onOpenCommentsImport={vi.fn()}
+        activeActionSpeaker="Fail01"
+        offsetPhase="idle"
+        onDetectOffset={vi.fn()}
+        onOpenManualOffset={vi.fn()}
+        onSaveAnnotations={vi.fn()}
+      />,
+    );
+
+    runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement;
+    expect(runButton.disabled).toBe(true);
+    expect(screen.getByText(/CLEF configured/i)).toBeTruthy();
+    expect(screen.queryByText(/Running… 42%/i)).toBeNull();
+    expect(screen.queryByText(/Similarity failed/i)).toBeNull();
   });
 
   it('still disables generic compare Run when no speakers are selected without adding an extra explainer block', () => {
     renderRightPanel({
       currentMode: 'compare',
       selectedSpeakers: [],
-      computeMode: 'cognates',
+      speakerPicker: 'Fail01',
     });
 
     const runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement;
