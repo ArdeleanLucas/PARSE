@@ -1,6 +1,6 @@
 # PARSE Option-1 Rebuild — Phase 0 Shared Contract Checklist
 
-**Status:** Coordinator baseline signed (Sections 2-3 completed; broader Phase 0 checklist remains open)
+**Status:** Phase 0 baseline gate signed (source set, precedence order, oracle baseline, and evidence frozen for the current rebuild wave; broader Phase 0 checklist remains open)
 **Date:** 2026-04-26
 **Depends on:**
 - `docs/plans/option1-separate-rebuild-to-option3-desktop-platform.md`
@@ -83,7 +83,21 @@ The coordinator records the exact current PARSE baseline used for rebuild parity
 - [x] any known contract quirks called out explicitly
 - [x] both main agents acknowledge the same baseline
 
+### 3.1 Baseline gate sign-off
+
+The **Phase 0 baseline gate** is the minimum coordinator sign-off required before parity evidence can be treated as grounded rather than anecdotal.
+
+The baseline gate is considered signed on 2026-04-26 because all of the following are now true:
+
+- [x] the required source set in §2.1 is frozen for the active rebuild wave
+- [x] the precedence order in §2.2 is written down explicitly
+- [x] the oracle SHA, fixture set, and gate evidence in §3 are recorded concretely
+- [x] both active implementation lanes were already queueing work against the same rebuild/oracle SHA pair
+- [x] coordinator sign-off explicitly acknowledges that parity evidence after this point should cite this frozen baseline
+
 Acknowledgement basis on 2026-04-26: the active lane handoff PRs already reference the same rebuild/oracle SHA pair — parse-builder `#58` and parse-back-end `#59` both queue work against rebuild `f9aa3db1aa` and oracle `0951287a81`.
+
+This signs the **baseline gate**, not the entire broader Phase 0 checklist. Later sections (skeleton freeze, runtime handshake, route inventory, API inventory, etc.) still remain open contract work, but they no longer block the coordinator from recording parity evidence against the frozen oracle baseline.
 
 ---
 
@@ -357,7 +371,7 @@ Parallel rebuild work may start only when every item below is true.
 
 | Role | Name | Date | Notes |
 |---|---|---|---|
-| Coordinator | parse-gpt | 2026-04-26 | Baseline freeze recorded; broader Phase 0 checklist remains open. |
+| Coordinator | parse-gpt | 2026-04-26 | **Baseline gate signed.** This is sufficient to ground parity evidence; the rest of Phase 0 remains open follow-on contract work. |
 | Agent A owner | parse-builder lane | 2026-04-26 | Queue-time baseline in PR #58 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
 | Agent B owner | parse-back-end lane | 2026-04-26 | Queue-time baseline in PR #59 already matches coordinator freeze (`f9aa3db1aa` / `0951287a81`). |
 
