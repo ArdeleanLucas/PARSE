@@ -15,6 +15,8 @@ from external_api.openapi import build_openapi_document
 
 @contextmanager
 def _serve_parse_http() -> str:
+    server._chat_tools_runtime = None
+    server._chat_orchestrator_runtime = None
     httpd = server._BoundedThreadHTTPServer(("127.0.0.1", 0), server.RangeRequestHandler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -24,6 +26,8 @@ def _serve_parse_http() -> str:
         httpd.shutdown()
         thread.join(timeout=5)
         httpd.server_close()
+        server._chat_tools_runtime = None
+        server._chat_orchestrator_runtime = None
 
 
 def test_build_openapi_document_includes_mcp_bridge_and_auth_paths() -> None:
@@ -154,6 +158,19 @@ def test_http_mcp_bridge_lists_and_executes_tools(tmp_path: pathlib.Path, monkey
         assert payload["tool"] == "project_context_read"
         assert payload["ok"] is True
         assert "result" in payload
+
+
+def test_http_mcp_bridge_starts_from_clean_chat_runtime(tmp_path: pathlib.Path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    server._chat_tools_runtime = object()
+    server._chat_orchestrator_runtime = object()
+
+    with _serve_parse_http() as base_url:
+        with urllib.request.urlopen(base_url + "/api/mcp/tools?mode=all", timeout=10) as response:
+            catalog = json.loads(response.read().decode("utf-8"))
+
+    names = {tool["name"] for tool in catalog["tools"]}
+    assert "project_context_read" in names
 
 
 def test_http_mcp_bridge_rejects_invalid_mode_with_400(tmp_path: pathlib.Path, monkeypatch) -> None:
