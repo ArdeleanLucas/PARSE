@@ -2,6 +2,48 @@
 
 > **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle PARSE repo remains `ArdeleanLucas/PARSE` at `/home/lucas/gh/ardeleanlucas/parse`. Do not treat this repo as the currently deployed thesis runtime.
 
+## Repo-target rule (READ BEFORE OPENING ANY PR)
+
+All refactor and rebuild work in this lane lands on **`TarahAssistant/PARSE-rebuild`**, NEVER on `ArdeleanLucas/PARSE`. Three prior refactor PRs landed on the wrong remote and had to be reverted or replayed:
+
+- `ArdeleanLucas/PARSE#225` — reverted in oracle commit `0951287` (`revert: move refactor PRs out of live PARSE (#228)`)
+- `ArdeleanLucas/PARSE#226` — reverted in the same commit
+- `ArdeleanLucas/PARSE#229` — closed without merging on 2026-04-26; replayed onto rebuild as `TarahAssistant/PARSE-rebuild#68`
+
+Before opening any PR for any task in this lane, verify all three:
+
+1. **Working clone** is the rebuild clone:
+   ```
+   $ pwd
+   /home/lucas/gh/tarahassistant/PARSE-rebuild   # CORRECT
+   ```
+   NOT `/home/lucas/gh/ArdeleanLucas/PARSE` (oracle clone, capital).
+   NOT `/home/lucas/gh/ardeleanlucas/parse` (oracle clone, lowercase duplicate).
+   NOT any worktree under `/home/lucas/gh/worktrees/PARSE/...` whose `.git` gitfile resolves to either oracle clone above. Worktrees inherit the parent clone's remote.
+
+2. **Origin remote** points at rebuild, not oracle:
+   ```
+   $ git remote -v
+   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (fetch)   # CORRECT
+   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (push)
+   ```
+   If the URL says `ArdeleanLucas/PARSE`, **stop**. Switch to `/home/lucas/gh/tarahassistant/PARSE-rebuild` (or create a worktree under `/home/lucas/gh/worktrees/PARSE-rebuild/...`) before doing anything else.
+
+3. **PR-create command** explicitly targets the rebuild repo:
+   ```
+   $ gh pr create --repo TarahAssistant/PARSE-rebuild --base main ...
+   ```
+   The `--repo` flag is **mandatory**. Without it, `gh` infers the remote from the local clone's origin, and any agent that ends up in an oracle clone or worktree will silently push to oracle. **Do not omit the `--repo` flag.**
+
+If you ever see a PR URL like `https://github.com/ArdeleanLucas/PARSE/pull/...`, **close it immediately** and replay the same commit onto rebuild via `git cherry-pick`. The recovery path is documented in `docs/plans/2026-04-26-parse-back-end-next-chat-tools-decomposition.md` §Recovery path.
+
+Exceptions to this rule (cases where landing on oracle IS correct):
+
+- A live thesis-runtime bug fix that Lucas explicitly requests — open the PR on `ArdeleanLucas/PARSE` with title prefix `fix(live):`
+- A controlled sync/revert PR moving a previously-merged change between repos — open on whichever repo is the target, with title prefix `sync(oracle->rebuild):` or `revert(oracle):`
+
+Both exceptions require Lucas's explicit approval per task. Do not assume.
+
 ## Current State (updated 2026-04-25)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
