@@ -417,6 +417,11 @@ from ai.tools.job_status_tools import (
     tool_stt_status,
     tool_stt_word_level_status,
 )
+from ai.tools.memory_tools import (
+    MEMORY_TOOL_SPECS,
+    tool_parse_memory_read,
+    tool_parse_memory_upsert_section,
+)
 from ai.tools.pipeline_orchestration_tools import (
     PIPELINE_ORCHESTRATION_TOOL_SPECS,
     tool_pipeline_run,
@@ -435,6 +440,11 @@ from ai.tools.project_read_tools import (
     tool_annotation_read,
     tool_project_context_read,
     tool_speakers_list,
+)
+from ai.tools.tag_import_tools import (
+    TAG_IMPORT_TOOL_SPECS,
+    tool_import_tag_csv,
+    tool_prepare_tag_import,
 )
 
 
@@ -529,6 +539,7 @@ class ParseChatTools:
             **PROJECT_READ_TOOL_SPECS,
             **PREVIEW_TOOL_SPECS,
             **JOB_STATUS_TOOL_SPECS,
+            **TAG_IMPORT_TOOL_SPECS,
             "detect_timestamp_offset": ChatToolSpec(
                 name="detect_timestamp_offset",
                 description=(
@@ -711,51 +722,6 @@ class ParseChatTools:
                         "topK": {"type": "integer", "minimum": 1, "maximum": 20},
                         "minConfidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                         "maxConcepts": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "import_tag_csv": ChatToolSpec(
-                name="import_tag_csv",
-                description=(
-                    "Import a CSV file as a custom tag list. Matches CSV rows to project concept IDs "
-                    "by label (case-insensitive), numeric ID, or fuzzy match (edit distance <= 1). "
-                    "When dryRun=true returns a preview of matched/unmatched rows and asks for tag name. "
-                    "When dryRun=false and tagName is provided, creates the tag and writes parse-tags.json. "
-                    "Always use dryRun=true first, then dryRun=false after explicit user confirmation."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["dryRun"],
-                    "properties": {
-                        "csvPath": {"type": "string", "maxLength": 512},
-                        "tagName": {"type": "string", "minLength": 1, "maxLength": 100},
-                        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
-                        "labelColumn": {"type": "string", "maxLength": 64},
-                        "dryRun": {"type": "boolean"},
-                    },
-                },
-            ),
-            "prepare_tag_import": ChatToolSpec(
-                name="prepare_tag_import",
-                description=(
-                    "Create or update a tag with a list of concept IDs and write to parse-tags.json. "
-                    "Always use dryRun=true first to preview, then dryRun=false after user confirms."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["tagName", "conceptIds", "dryRun"],
-                    "properties": {
-                        "tagName": {"type": "string", "minLength": 1, "maxLength": 100},
-                        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
-                        "conceptIds": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 500,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
-                        },
-                        "dryRun": {"type": "boolean"},
                     },
                 },
             ),
@@ -951,56 +917,7 @@ class ParseChatTools:
                     ),
                 ),
             ),
-            "parse_memory_read": ChatToolSpec(
-                name="parse_memory_read",
-                description=(
-                    "Read PARSE's persistent chat memory markdown (parse-memory.md). This is "
-                    "where speaker provenance, file origins, user preferences, and session "
-                    "context are recorded. Read-only. Returns the full document bounded by "
-                    "maxBytes, or a specific `## Section` when section is provided."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "section": {
-                            "type": "string",
-                            "maxLength": 200,
-                            "description": "Heading text (without leading `##`). If given, only that section is returned.",
-                        },
-                        "maxBytes": {
-                            "type": "integer",
-                            "minimum": 512,
-                            "maximum": MEMORY_MAX_BYTES,
-                            "description": "Cap on bytes returned. Defaults to full file (up to {0} bytes).".format(MEMORY_MAX_BYTES),
-                        },
-                    },
-                },
-            ),
-            "parse_memory_upsert_section": ChatToolSpec(
-                name="parse_memory_upsert_section",
-                description=(
-                    "Create or replace a `## Section` block in parse-memory.md. Use for "
-                    "persisting user preferences, speaker notes, onboarding decisions, and "
-                    "file provenance that should survive across chat turns. Gated by dryRun — "
-                    "call dryRun=true first to preview the resulting block, then dryRun=false "
-                    "after the user confirms. The existing block under the same heading is "
-                    "overwritten; other sections are left untouched."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["section", "body", "dryRun"],
-                    "properties": {
-                        "section": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "body": {"type": "string", "minLength": 1, "maxLength": 16000},
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, return the rewritten file preview without writing.",
-                        },
-                    },
-                },
-            ),
+            **MEMORY_TOOL_SPECS,
             **PIPELINE_ORCHESTRATION_TOOL_SPECS,
             "enrichments_read": ChatToolSpec(
                 name="enrichments_read",
@@ -3926,212 +3843,10 @@ class ParseChatTools:
 
 
     def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Match CSV rows to project concept IDs and optionally create a tag."""
-        import csv as _csv
-
-        raw_path = str(args.get("csvPath") or "").strip()
-        tag_name = str(args.get("tagName") or "").strip()
-        color = str(args.get("color") or "#4461d4").strip()
-        label_column = str(args.get("labelColumn") or "").strip()
-        dry_run = bool(args.get("dryRun", True))
-
-        # Resolve CSV path
-        if raw_path:
-            csv_path = Path(raw_path).expanduser()
-            if not csv_path.is_absolute():
-                csv_path = self.project_root / csv_path
-            csv_path = csv_path.resolve()
-        else:
-            csv_path = self.project_root / "concepts.csv"
-
-        if not csv_path.exists():
-            return {"ok": False, "error": "CSV file not found: {0}".format(csv_path)}
-
-        # Load project concepts for matching
-        project_concepts = self._load_project_concepts()
-        if not project_concepts:
-            return {"ok": False, "error": "No project concepts loaded. concepts.csv not found in project root."}
-
-        # Build lookup tables
-        label_to_id: Dict[str, str] = {c["label"].lower(): c["id"] for c in project_concepts}
-        id_to_label: Dict[str, str] = {c["id"]: c["label"] for c in project_concepts}
-
-        # Read input CSV
-        delimiter = ","
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                sample = f.read(8192)
-            try:
-                dialect = _csv.Sniffer().sniff(sample, delimiters=",\t;")
-                delimiter = dialect.delimiter
-            except Exception:
-                pass
-        except Exception as exc:
-            return {"ok": False, "error": "Could not read CSV: {0}".format(exc)}
-
-        # Detect label column
-        csv_rows: list = []
-        fieldnames: list = []
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                reader = _csv.DictReader(f, delimiter=delimiter)
-                fieldnames = list(reader.fieldnames or [])
-                csv_rows = [dict(row) for row in reader]
-        except Exception as exc:
-            return {"ok": False, "error": "CSV parse error: {0}".format(exc)}
-
-        if not label_column:
-            hints = {"concept", "label", "english", "name", "gloss", "concept_en"}
-            for col in fieldnames:
-                if col.lower() in hints:
-                    label_column = col
-                    break
-            if not label_column and fieldnames:
-                label_column = fieldnames[0]
-
-        # Match each row
-        matched: list = []
-        unmatched: list = []
-
-        def _edit_distance(a: str, b: str) -> int:
-            a, b = a.lower(), b.lower()
-            if len(a) > len(b):
-                a, b = b, a
-            prev = list(range(len(b) + 1))
-            for i, ca in enumerate(a):
-                curr = [i + 1]
-                for j, cb in enumerate(b):
-                    curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (0 if ca == cb else 1)))
-                prev = curr
-            return prev[-1]
-
-        for row in csv_rows:
-            raw_label = str(row.get(label_column) or "").strip()
-            if not raw_label:
-                continue
-            concept_id = None
-            # 1. Exact case-insensitive label match
-            concept_id = label_to_id.get(raw_label.lower())
-            # 2. Numeric ID match
-            if not concept_id and raw_label in id_to_label:
-                concept_id = raw_label
-            # 3. Fuzzy edit-distance <= 1
-            if not concept_id:
-                for lbl, cid in label_to_id.items():
-                    if _edit_distance(raw_label, lbl) <= 1:
-                        concept_id = cid
-                        break
-            if concept_id:
-                matched.append({"csvLabel": raw_label, "conceptId": concept_id, "conceptLabel": id_to_label.get(concept_id, "")})
-            else:
-                unmatched.append({"csvLabel": raw_label})
-
-        result: Dict[str, Any] = {
-            "ok": True,
-            "matchedCount": len(matched),
-            "unmatchedCount": len(unmatched),
-            "matched": matched,
-            "unmatched": unmatched,
-            "dryRun": dry_run,
-        }
-
-        if not tag_name:
-            result["needsTagName"] = True
-            result["message"] = "Found {0} matches and {1} unmatched. What should this tag be called?".format(len(matched), len(unmatched))
-            return result
-
-        if dry_run:
-            result["preview"] = True
-            result["message"] = "Will create tag {0!r} with {1} concepts. Call again with dryRun=false to confirm.".format(tag_name, len(matched))
-            return result
-
-        # dryRun=false — create the tag
-        concept_ids = [m["conceptId"] for m in matched]
-        return self._tool_prepare_tag_import({
-            "tagName": tag_name,
-            "color": color,
-            "conceptIds": concept_ids,
-            "dryRun": False,
-        })
+        return tool_import_tag_csv(self, args)
 
     def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Create or update a named tag with concept IDs in parse-tags.json."""
-        import json as _json
-        import re as _re
-
-        tag_name = str(args.get("tagName") or "").strip()
-        color = str(args.get("color") or "#4461d4").strip()
-        concept_ids = [str(c).strip() for c in (args.get("conceptIds") or []) if str(c).strip()]
-        dry_run = bool(args.get("dryRun", True))
-
-        if not tag_name:
-            return {"ok": False, "error": "tagName is required"}
-        if not concept_ids:
-            return {"ok": False, "error": "conceptIds must not be empty"}
-
-        # Slugify tag name to ID
-        tag_id = _re.sub(r"[^a-z0-9]+", "-", tag_name.lower()).strip("-") or "tag"
-
-        if dry_run:
-            return {
-                "ok": True,
-                "dryRun": True,
-                "preview": True,
-                "tagId": tag_id,
-                "tagName": tag_name,
-                "color": color,
-                "conceptCount": len(concept_ids),
-                "message": "Will create tag {0!r} (id={1}) with {2} concepts. Call with dryRun=false to apply.".format(tag_name, tag_id, len(concept_ids)),
-            }
-
-        # Load existing tags
-        tags: list = []
-        if self.tags_path.exists():
-            try:
-                with open(self.tags_path, "r", encoding="utf-8") as f:
-                    existing = _json.load(f)
-                if isinstance(existing, list):
-                    tags = existing
-            except Exception:
-                tags = []
-
-        # Upsert: update if tag_id exists, else append
-        found = False
-        for tag in tags:
-            if tag.get("id") == tag_id:
-                # Additive merge — never remove existing concept assignments
-                existing_ids = set(tag.get("concepts") or [])
-                existing_ids.update(concept_ids)
-                tag["concepts"] = sorted(existing_ids)
-                tag["label"] = tag_name
-                tag["color"] = color
-                found = True
-                break
-        if not found:
-            tags.append({
-                "id": tag_id,
-                "label": tag_name,
-                "color": color,
-                "concepts": sorted(set(concept_ids)),
-            })
-
-        # Write parse-tags.json
-        try:
-            with open(self.tags_path, "w", encoding="utf-8") as f:
-                _json.dump(tags, f, indent=2, ensure_ascii=False)
-        except Exception as exc:
-            return {"ok": False, "error": "Failed to write parse-tags.json: {0}".format(exc)}
-
-        return {
-            "ok": True,
-            "dryRun": False,
-            "tagId": tag_id,
-            "tagName": tag_name,
-            "color": color,
-            "assignedCount": len(concept_ids),
-            "totalTagsInFile": len(tags),
-            "message": "Tag {0!r} created with {1} concepts. Refresh Compare to see it.".format(tag_name, len(concept_ids)),
-        }
+        return tool_prepare_tag_import(self, args)
 
     # ------------------------------------------------------------------
     # Speaker onboarding via chat
@@ -4639,205 +4354,11 @@ class ParseChatTools:
     # Persistent chat memory (parse-memory.md)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _memory_normalize_heading(raw: str) -> str:
-        return " ".join(str(raw or "").strip().split())
-
-    @classmethod
-    def _memory_match_section(cls, section: str, heading_line: str) -> bool:
-        stripped = heading_line.strip()
-        if not stripped.startswith("##"):
-            return False
-        heading_text = stripped.lstrip("#").strip()
-        return heading_text.lower() == section.lower()
-
-    @classmethod
-    def _memory_split_sections(cls, content: str) -> List[Tuple[str, str]]:
-        """Return [(heading_line_or_empty, body_text), ...] preserving order.
-
-        The first entry has heading_line="" and contains any prelude before the
-        first `##` heading. Subsequent entries start with their heading line.
-        """
-        lines = content.splitlines(keepends=True)
-        sections: List[Tuple[str, List[str]]] = [("", [])]
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("## ") or stripped == "##":
-                sections.append((line.rstrip("\n"), []))
-            else:
-                sections[-1][1].append(line)
-        return [(heading, "".join(body)) for heading, body in sections]
-
-    def _memory_read_raw(self) -> str:
-        if not self.memory_path.exists():
-            return ""
-        try:
-            return self.memory_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            raise ChatToolExecutionError("Failed to read parse-memory.md: {0}".format(exc))
-
     def _tool_parse_memory_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        section_arg = self._memory_normalize_heading(args.get("section"))
-        max_bytes_raw = args.get("maxBytes")
-        try:
-            max_bytes = int(max_bytes_raw) if max_bytes_raw is not None else MEMORY_MAX_BYTES
-        except (TypeError, ValueError):
-            max_bytes = MEMORY_MAX_BYTES
-        max_bytes = max(512, min(MEMORY_MAX_BYTES, max_bytes))
-
-        path_display = self._display_readable_path(self.memory_path)
-
-        if not self.memory_path.exists():
-            return {
-                "ok": True,
-                "path": path_display,
-                "exists": False,
-                "content": "",
-                "sections": [],
-                "message": "parse-memory.md does not exist yet. Use parse_memory_upsert_section to create it.",
-            }
-
-        raw = self._memory_read_raw()
-        parsed = self._memory_split_sections(raw)
-        section_headings = [
-            heading_line.lstrip("#").strip()
-            for heading_line, _body in parsed
-            if heading_line
-        ]
-
-        if section_arg:
-            for heading_line, body in parsed:
-                if heading_line and self._memory_match_section(section_arg, heading_line):
-                    content = "{0}\n{1}".format(heading_line, body).strip("\n")
-                    truncated = False
-                    encoded = content.encode("utf-8")
-                    if len(encoded) > max_bytes:
-                        content = encoded[:max_bytes].decode("utf-8", errors="ignore")
-                        truncated = True
-                    return {
-                        "ok": True,
-                        "path": path_display,
-                        "exists": True,
-                        "section": section_arg,
-                        "content": content,
-                        "truncated": truncated,
-                        "sections": section_headings,
-                    }
-            return {
-                "ok": True,
-                "path": path_display,
-                "exists": True,
-                "section": section_arg,
-                "found": False,
-                "content": "",
-                "sections": section_headings,
-                "message": "Section not found. Existing sections: {0}".format(
-                    ", ".join(section_headings) or "(none)"
-                ),
-            }
-
-        encoded = raw.encode("utf-8")
-        truncated = len(encoded) > max_bytes
-        content = encoded[:max_bytes].decode("utf-8", errors="ignore") if truncated else raw
-
-        return {
-            "ok": True,
-            "path": path_display,
-            "exists": True,
-            "content": content,
-            "truncated": truncated,
-            "totalBytes": len(encoded),
-            "sections": section_headings,
-        }
+        return tool_parse_memory_read(self, args)
 
     def _tool_parse_memory_upsert_section(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        section = self._memory_normalize_heading(args.get("section"))
-        if not section:
-            raise ChatToolValidationError("section is required")
-
-        body = str(args.get("body") or "").rstrip()
-        if not body:
-            raise ChatToolValidationError("body is required")
-
-        dry_run = bool(args.get("dryRun"))
-
-        # Ensure parse-memory.md lives somewhere writable (project root or under it).
-        try:
-            self.memory_path.relative_to(self.project_root)
-        except ValueError:
-            # Absolute custom location is allowed; just make sure the parent exists.
-            pass
-
-        existing = self._memory_read_raw()
-        sections = self._memory_split_sections(existing) if existing else [("", "")]
-
-        rendered_heading = "## {0}".format(section)
-        rendered_section = "{0}\n{1}\n".format(rendered_heading, body)
-
-        updated_parts: List[str] = []
-        replaced = False
-        for heading_line, section_body in sections:
-            if heading_line and self._memory_match_section(section, heading_line):
-                updated_parts.append(rendered_section)
-                replaced = True
-            elif not heading_line:
-                # Prelude (before first ## heading)
-                updated_parts.append(section_body)
-            else:
-                updated_parts.append("{0}\n{1}".format(heading_line, section_body))
-
-        if not replaced:
-            # Append a new section at end, ensuring a blank line separator.
-            preface = "".join(updated_parts)
-            if preface and not preface.endswith("\n"):
-                preface = preface + "\n"
-            if preface and not preface.endswith("\n\n"):
-                preface = preface + "\n"
-            if not preface:
-                preface = "# PARSE chat memory\n\n"
-            updated_content = preface + rendered_section
-        else:
-            updated_content = "".join(updated_parts)
-            if not updated_content.endswith("\n"):
-                updated_content = updated_content + "\n"
-
-        if len(updated_content.encode("utf-8")) > MEMORY_MAX_BYTES:
-            return {
-                "ok": False,
-                "error": "parse-memory.md would exceed {0} bytes. Trim an old section first.".format(MEMORY_MAX_BYTES),
-            }
-
-        path_display = self._display_readable_path(self.memory_path)
-
-        if dry_run:
-            return {
-                "ok": True,
-                "dryRun": True,
-                "path": path_display,
-                "section": section,
-                "action": "replace" if replaced else "create",
-                "previewSection": rendered_section,
-                "totalBytesAfter": len(updated_content.encode("utf-8")),
-            }
-
-        try:
-            self.memory_path.parent.mkdir(parents=True, exist_ok=True)
-            self.memory_path.write_text(updated_content, encoding="utf-8")
-        except Exception as exc:
-            return {"ok": False, "error": "Failed to write parse-memory.md: {0}".format(exc)}
-
-        return {
-            "ok": True,
-            "dryRun": False,
-            "path": path_display,
-            "section": section,
-            "action": "replace" if replaced else "create",
-            "totalBytesAfter": len(updated_content.encode("utf-8")),
-            "message": "parse-memory.md {0}d section {1!r}.".format(
-                "update" if replaced else "create",
-                section,
-            ),
-        }
+        return tool_parse_memory_upsert_section(self, args)
 
 
 __all__ = [
