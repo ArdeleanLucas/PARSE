@@ -12,7 +12,7 @@ import {
   Sun, Moon, XCircle, Undo2, Redo2
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, getJobLogs } from './api/client';
+import { saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, getJobLogs } from './api/client';
 import type { JobLogsPayload } from './api/client';
 import type { LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
@@ -35,6 +35,8 @@ import { LaneColorPicker } from './components/annotate/LaneColorPicker';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
+import { useExport } from './hooks/useExport';
+import { useTagImport } from './hooks/useTagImport';
 import { listActiveJobs } from './api/client';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -2162,9 +2164,13 @@ export function ParseUI() {
 
   const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<ConceptSortMode>('1n');
-  const [conceptImportError, setConceptImportError] = useState<string | null>(null);
-  const [conceptImportSummary, setConceptImportSummary] = useState<string | null>(null);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
+  const { exportLingPyTSV } = useExport();
+  const {
+    summary: conceptImportSummary,
+    error: conceptImportError,
+    importFile: importConceptTagFile,
+  } = useTagImport();
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [conceptId, setConceptId] = useState(1);
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
@@ -2727,13 +2733,7 @@ export function ParseUI() {
     setExporting(true);
     setActionsMenuOpen(false);
     try {
-      const blob = await getLingPyExport();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'parse-wordlist.tsv';
-      a.click();
-      URL.revokeObjectURL(url);
+      await exportLingPyTSV();
     } catch (err) {
       console.error('[ParseUI] LingPy export failed:', err);
     } finally {
@@ -2960,23 +2960,6 @@ export function ParseUI() {
   }, [query, tagFilter, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
-
-  const handleCustomListImport = async (file: File) => {
-    setConceptImportError(null);
-    setConceptImportSummary(null);
-    const defaultName = file.name.replace(/\.csv$/i, '');
-    const tagName = window.prompt('Tag name for this concept list:', defaultName);
-    if (tagName === null) return; // user cancelled
-    try {
-      const result = await importTagCsv(file, { tagName: tagName.trim() || defaultName });
-      const missedNote = result.missedCount > 0 ? `, ${result.missedCount} unmatched` : '';
-      setConceptImportSummary(`Tag "${result.tagName}": ${result.matchedCount} concepts assigned${missedNote}`);
-      // Refresh server-backed tags so the new tag appears in the Manage Tags view
-      await useTagStore.getState().syncFromServer();
-    } catch (err) {
-      setConceptImportError(err instanceof Error ? err.message : String(err));
-    }
-  };
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceFormLists = useMemo(
@@ -3426,7 +3409,7 @@ export function ParseUI() {
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) void handleCustomListImport(file);
+                  if (file) void importConceptTagFile(file);
                   if (conceptImportInputRef.current) conceptImportInputRef.current.value = '';
                 }}
               />

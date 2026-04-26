@@ -207,6 +207,16 @@ let mockCoverage: { languages: Record<string, { name: string; total: number; fil
 
 vi.mock("./api/client", () => ({
   getLingPyExport: vi.fn().mockResolvedValue(''),
+  importTagCsv: vi.fn().mockResolvedValue({
+    ok: true,
+    tagId: 'custom-sk-concept-list',
+    tagName: 'custom-sk-concept-list',
+    color: '#6366f1',
+    matchedCount: 2,
+    missedCount: 1,
+    missedLabels: [],
+    totalTagsInFile: 1,
+  }),
   saveApiKey: vi.fn().mockResolvedValue(undefined),
   getAuthStatus: mockGetAuthStatus,
   pollAuth: mockPollAuth,
@@ -1254,6 +1264,60 @@ describe("Actions menu — transcription run flow", () => {
 
     // The modal renders with the title supplied by the action.
     expect(screen.getByText(/Run Audio Normalization/i)).toBeTruthy();
+  });
+
+  it("exports LingPy TSV from the Actions menu through the canonical export helper path", async () => {
+    const createObjectURL = vi.fn(() => "blob:lingpy");
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /Export LingPy TSV/i })[0]);
+
+    await waitFor(() => expect(apiClient.getLingPyExport).toHaveBeenCalledTimes(1));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:lingpy");
+    expect(screen.queryByText("Run Cross-Speaker Match")).toBeNull();
+
+    clickSpy.mockRestore();
+  });
+
+  it("imports custom tags from the Actions menu and shows the shared summary banner", async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('custom-sk-concept-list');
+    vi.mocked(apiClient.importTagCsv).mockResolvedValueOnce({
+      ok: true,
+      tagId: 'custom-sk-concept-list',
+      tagName: 'custom-sk-concept-list',
+      color: '#6366f1',
+      matchedCount: 12,
+      missedCount: 3,
+      missedLabels: [],
+      totalTagsInFile: 1,
+    });
+
+    render(<ParseUI />);
+    mockSyncTagsFromServer.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByTestId('concept-import-menu'));
+
+    const input = screen.getByTestId('concept-import-input') as HTMLInputElement;
+    const file = new File(['concept\nwater\n'], 'custom-sk-concept-list.csv', { type: 'text/csv' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(apiClient.importTagCsv).toHaveBeenCalledWith(file, { tagName: 'custom-sk-concept-list' }));
+    expect(mockSyncTagsFromServer).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('concept-import-summary').textContent).toContain('Tag "custom-sk-concept-list": 12 concepts assigned, 3 unmatched');
+    expect(promptSpy).toHaveBeenCalledWith('Tag name for this concept list:', 'custom-sk-concept-list');
+
+    promptSpy.mockRestore();
   });
 
   it("opens the comments import modal from the compare right panel", () => {
