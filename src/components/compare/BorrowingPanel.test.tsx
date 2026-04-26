@@ -3,6 +3,14 @@ import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord } from "../../api/types";
 
+const { mockGetClefConfig } = vi.hoisted(() => ({
+  mockGetClefConfig: vi.fn(),
+}));
+
+vi.mock("../../api/client", () => ({
+  getClefConfig: mockGetClefConfig,
+}));
+
 /* ------------------------------------------------------------------ */
 /*  Mock state                                                         */
 /* ------------------------------------------------------------------ */
@@ -99,21 +107,35 @@ beforeEach(() => {
     },
   };
   mockSaveEnrichments.mockClear();
-
-  // Mock fetch for contact languages
-  vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    json: () =>
-      Promise.resolve([
-        { code: "ar", name: "Arabic", family: "Semitic" },
-        { code: "tr", name: "Turkish", family: "Turkic" },
-      ]),
-  } as Response);
+  mockGetClefConfig.mockReset();
+  mockGetClefConfig.mockResolvedValue({
+    configured: true,
+    primary_contact_languages: ["ar", "tr"],
+    languages: [
+      { code: "ar", name: "Arabic", family: "Semitic" },
+      { code: "tr", name: "Turkish", family: "Turkic" },
+    ],
+    config_path: "config/sil_contact_languages.json",
+    concepts_csv_exists: true,
+    meta: {},
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+it("loads contact languages through the typed CLEF client instead of bare fetch", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch");
+  render(<BorrowingPanel />);
+
+  await waitFor(() => {
+    expect(mockGetClefConfig).toHaveBeenCalledTimes(1);
+  });
+
+  expect(fetchSpy).not.toHaveBeenCalled();
+  expect(screen.getByText(/Arabic/)).toBeTruthy();
 });
 
 /* ------------------------------------------------------------------ */

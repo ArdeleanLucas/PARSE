@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ProjectConfig } from "../api/types";
-import { getConfig } from "../api/client";
+import { getConfig, updateConfig } from "../api/client";
 
 interface ConfigStore {
   config: ProjectConfig | null;
@@ -29,8 +29,19 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     }
   },
 
-  update: async (_patch: Partial<ProjectConfig>) => {
-    // TODO: implement PATCH /api/config when backend supports it
-    console.warn("[configStore] update() is not yet implemented");
+  update: async (patch: Partial<ProjectConfig>) => {
+    const current = get().config;
+    if (!current) {
+      set({ error: "Cannot update config before it has loaded" });
+      return;
+    }
+    set({ error: null });
+    try {
+      await updateConfig(patch);
+      set({ config: { ...current, ...patch } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ error: message });
+    }
   },
 }));
