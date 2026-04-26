@@ -94,6 +94,15 @@ from app.http.media_search_handlers import (
     build_get_lexeme_search_response as _app_build_get_lexeme_search_response,
     build_get_spectrogram_response as _app_build_get_spectrogram_response,
 )
+from app.http.speech_annotation_handlers import (
+    SpeechAnnotationHandlerError as _app_SpeechAnnotationHandlerError,
+    build_get_stt_segments_response as _app_build_get_stt_segments_response,
+    build_post_normalize_response as _app_build_post_normalize_response,
+    build_post_normalize_status_response as _app_build_post_normalize_status_response,
+    build_post_stt_start_response as _app_build_post_stt_start_response,
+    build_post_stt_status_response as _app_build_post_stt_status_response,
+    build_post_suggest_response as _app_build_post_suggest_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -6381,25 +6390,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         uniform avoids noisy 404s in the console on every speaker switch.
         """
         try:
-            speaker = _normalize_speaker_id(speaker_part)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        cache_path = _stt_cache_path(speaker)
-        if not cache_path.exists():
-            self._send_json(HTTPStatus.OK, {"speaker": speaker, "segments": []})
-            return
-        try:
-            with open(cache_path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError) as exc:
-            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, "Failed to read STT cache: {0}".format(exc))
-        if not isinstance(data, dict):
-            data = {"speaker": speaker, "segments": []}
-        data.setdefault("speaker", speaker)
-        segments = data.get("segments") if isinstance(data.get("segments"), list) else []
-        data["segments"] = segments
-        self._send_json(HTTPStatus.OK, data)
+            response = _app_build_get_stt_segments_response(
+                speaker_part,
+                normalize_speaker_id=_normalize_speaker_id,
+                stt_cache_path=_stt_cache_path,
+            )
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_get_pipeline_state(self, speaker_part: str) -> None:
         """Return per-step pipeline state for a speaker.
@@ -6553,55 +6551,29 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_post_normalize(self) -> None:
         """Handle POST /api/normalize — start audio normalization job."""
         body = self._expect_object(self._read_json_body(), "Request body")
-        speaker = str(body.get("speaker") or "").strip()
-
-        if not speaker:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
-
-        try:
-            speaker = _normalize_speaker_id(speaker)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        # Resolve source WAV — use explicit path if provided, else look up primary source
-        source_wav = str(body.get("sourceWav") or body.get("source_wav") or "").strip()
         callback_url = _job_callback_url_from_mapping(body)
-        if not source_wav:
-            source_wav = _annotation_primary_source_wav(speaker)
 
-        if not source_wav:
-            raise ApiError(
-                HTTPStatus.BAD_REQUEST,
-                "No source audio found for speaker '{0}'. Provide sourceWav explicitly.".format(speaker),
+        def _launch_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
+            thread = threading.Thread(
+                target=_run_normalize_job,
+                args=(job_id, speaker, source_wav),
+                daemon=True,
             )
+            thread.start()
 
         try:
-            job_id = _create_job(
-                "normalize",
-                {
-                    "speaker": speaker,
-                    "sourceWav": source_wav,
-                    "callbackUrl": callback_url,
-                },
+            response = _app_build_post_normalize_response(
+                body,
+                callback_url=callback_url,
+                normalize_speaker_id=_normalize_speaker_id,
+                annotation_primary_source_wav=_annotation_primary_source_wav,
+                create_job=_create_job,
+                launch_normalize_job=_launch_normalize_job,
+                job_conflict_error_cls=JobResourceConflictError,
             )
-        except JobResourceConflictError as exc:
-            raise ApiError(HTTPStatus.CONFLICT, str(exc))
-
-        thread = threading.Thread(
-            target=_run_normalize_job,
-            args=(job_id, speaker, source_wav),
-            daemon=True,
-        )
-        thread.start()
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "job_id": job_id,
-                "jobId": job_id,
-                "status": "running",
-            },
-        )
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_offset_detect(self) -> None:
         """Submit a compute job to detect a constant timestamp offset for a speaker.
@@ -6693,18 +6665,16 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_post_normalize_status(self) -> None:
         """Poll status for a normalize job."""
         body = self._expect_object(self._read_json_body(), "Request body")
-        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
-        if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is required")
+        try:
+            response = _app_build_post_normalize_status_response(
+                body,
+                get_job_snapshot=_get_job_snapshot,
+                job_response_payload=_job_response_payload,
+            )
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        job = _get_job_snapshot(job_id)
-        if job is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown job_id")
-
-        if str(job.get("type") or "") != "normalize":
-            raise ApiError(HTTPStatus.BAD_REQUEST, "job_id is not a normalize job")
-
-        self._send_json(HTTPStatus.OK, _job_response_payload(job))
+        self._send_json(response.status, response.payload)
 
     def _api_get_jobs(self) -> None:
         try:
@@ -6795,87 +6765,47 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_post_stt_start(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
-        speaker = str(body.get("speaker") or "").strip()
-        source_wav = str(body.get("sourceWav") or body.get("source_wav") or "").strip()
-
-        language_raw = body.get("language")
-        language = str(language_raw).strip() if language_raw is not None else None
-        if language == "":
-            language = None
         callback_url = _job_callback_url_from_mapping(body)
 
-        if not speaker:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
-        if not source_wav:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "sourceWav is required")
-
         try:
-            job_id = _create_job(
-                "stt",
-                {
-                    "speaker": speaker,
-                    "sourceWav": source_wav,
-                    "language": language,
-                    "callbackUrl": callback_url,
-                },
+            response = _app_build_post_stt_start_response(
+                body,
+                callback_url=callback_url,
+                create_job=_create_job,
+                launch_compute_runner=_launch_compute_runner,
+                job_conflict_error_cls=JobResourceConflictError,
             )
-        except JobResourceConflictError as exc:
-            raise ApiError(HTTPStatus.CONFLICT, str(exc))
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        _launch_compute_runner(
-            job_id, "stt",
-            {"speaker": speaker, "sourceWav": source_wav, "language": language},
-        )
-
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "jobId": job_id,
-                "status": "running",
-            },
-        )
+        self._send_json(response.status, response.payload)
 
     def _api_post_stt_status(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
-        job_id = str(body.get("jobId") or body.get("job_id") or "").strip()
-        if not job_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is required")
+        try:
+            response = _app_build_post_stt_status_response(
+                body,
+                get_job_snapshot=_get_job_snapshot,
+                job_response_payload=_job_response_payload,
+            )
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        job = _get_job_snapshot(job_id)
-        if job is None:
-            raise ApiError(HTTPStatus.NOT_FOUND, "Unknown jobId")
-
-        if job.get("type") != "stt":
-            raise ApiError(HTTPStatus.BAD_REQUEST, "jobId is not an STT job")
-
-        self._send_json(HTTPStatus.OK, _job_response_payload(job))
+        self._send_json(response.status, response.payload)
 
     def _api_post_suggest(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
-        speaker = str(body.get("speaker") or "").strip()
-        if not speaker:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
-
-        concept_ids = _coerce_concept_id_list(body.get("conceptIds") or body.get("concept_ids") or [])
-
-        suggestions: Any = []
         try:
-            llm_provider = get_llm_provider()
-            suggest_fn = getattr(llm_provider, "suggest_concepts", None)
-            if callable(suggest_fn):
-                transcript_windows = body.get("transcriptWindows", body.get("transcript_windows", []))
-                reference_forms = body.get("referenceForms", body.get("reference_forms", []))
-                try:
-                    suggestions = suggest_fn(transcript_windows, reference_forms)
-                except Exception:
-                    suggestions = []
-        except Exception:
-            suggestions = []
+            response = _app_build_post_suggest_response(
+                body,
+                get_llm_provider=get_llm_provider,
+                load_cached_suggestions=_load_cached_suggestions,
+                coerce_concept_id_list=_coerce_concept_id_list,
+            )
+        except _app_SpeechAnnotationHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        if not suggestions:
-            suggestions = _load_cached_suggestions(speaker, concept_ids)
-
-        self._send_json(HTTPStatus.OK, {"suggestions": suggestions})
+        self._send_json(response.status, response.payload)
 
     def _api_get_chat_session(self, session_part: str) -> None:
         try:
