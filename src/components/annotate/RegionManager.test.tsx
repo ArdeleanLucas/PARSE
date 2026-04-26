@@ -26,7 +26,7 @@ import { RegionManager } from "./RegionManager";
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function seedDecisions(conceptId: string, speaker: string, start: number, end: number) {
+function seedLegacyRegionAssignments(conceptId: string, speaker: string, start: number, end: number) {
   const decisions: Record<string, Record<string, unknown>> = {
     [conceptId]: {
       [speaker]: {
@@ -38,7 +38,7 @@ function seedDecisions(conceptId: string, speaker: string, start: number, end: n
       },
     },
   };
-  localStorage.setItem("parse-decisions", JSON.stringify(decisions));
+  localStorage.setItem("parse-annotate-region-decisions-v1", JSON.stringify(decisions));
 }
 
 /* ------------------------------------------------------------------ */
@@ -90,10 +90,58 @@ describe("RegionManager", () => {
     expect(onAssigned).toHaveBeenCalledWith("Fail01", "42", 1.5, 3.5);
   });
 
+  it('stores annotate-only prior regions under the scoped legacy key instead of parse-decisions', () => {
+    mockActiveSpeaker = "Fail01";
+    mockActiveConcept = "42";
+    mockSelectedRegion = { start: 1.5, end: 3.5 };
+
+    render(<RegionManager onSeek={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign to concept" }));
+
+    expect(localStorage.getItem("parse-decisions")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("parse-annotate-region-decisions-v1") ?? "{}")).toEqual({
+      "42": {
+        Fail01: {
+          source_wav: null,
+          start_sec: 1.5,
+          end_sec: 3.5,
+          assigned: true,
+          replaces_segment: true,
+        },
+      },
+    });
+  });
+
+  it('"Load prior region" reads only the scoped annotate-region key and ignores parse-decisions', () => {
+    mockActiveSpeaker = "Fail01";
+    mockActiveConcept = "42";
+    localStorage.setItem("parse-decisions", JSON.stringify({
+      "42": {
+        Fail01: {
+          source_wav: null,
+          start_sec: 0.5,
+          end_sec: 3.0,
+          assigned: true,
+          replaces_segment: true,
+        },
+      },
+    }));
+    seedLegacyRegionAssignments("42", "Fail01", 1.2, 1.7);
+
+    const onSeek = vi.fn();
+    render(<RegionManager onSeek={onSeek} />);
+
+    const btn = screen.getByRole("button", { name: "Load prior region" });
+    fireEvent.click(btn);
+
+    expect(onSeek).toHaveBeenCalledWith(1.2, true, 0.5);
+  });
+
   it('"Load prior region" calls onSeek with prior decision coordinates', () => {
     mockActiveSpeaker = "Fail01";
     mockActiveConcept = "42";
-    seedDecisions("42", "Fail01", 0.5, 3.0);
+    seedLegacyRegionAssignments("42", "Fail01", 0.5, 3.0);
 
     const onSeek = vi.fn();
     render(<RegionManager onSeek={onSeek} />);

@@ -44,6 +44,7 @@ const mockPlaybackSetState = vi.fn();
 const mockConfigSetState = vi.fn();
 const mockLoadEnrichments = vi.fn().mockResolvedValue(undefined);
 const mockSaveEnrichments = vi.fn();
+const mockReplaceEnrichments = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
@@ -142,19 +143,32 @@ vi.mock("./hooks/useWaveSurfer", () => ({
 
 vi.mock("./stores/enrichmentStore", () => {
   const useEnrichmentStore = (selector: (s: unknown) => unknown) =>
-    selector({ data: mockEnrichmentData, loading: false, load: mockLoadEnrichments, save: mockSaveEnrichments });
+    selector({
+      data: mockEnrichmentData,
+      loading: false,
+      load: mockLoadEnrichments,
+      save: mockSaveEnrichments,
+      replace: mockReplaceEnrichments,
+    });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockEnrichmentSetState(...args);
   // cycleSpeakerCognate / toggleSpeakerFlag read manual_overrides via
   // .getState() — provide a zustand-shaped accessor that resolves lazily
   // (not at mock-hoist time) so `mockEnrichmentData` is initialised.
   (useEnrichmentStore as unknown as {
-    getState: () => { data: Record<string, unknown>; loading: boolean; load: () => Promise<void>; save: typeof mockSaveEnrichments };
+    getState: () => {
+      data: Record<string, unknown>;
+      loading: boolean;
+      load: () => Promise<void>;
+      save: typeof mockSaveEnrichments;
+      replace: typeof mockReplaceEnrichments;
+    };
   }).getState = () => ({
     data: mockEnrichmentData,
     loading: false,
     load: mockLoadEnrichments,
     save: mockSaveEnrichments,
+    replace: mockReplaceEnrichments,
   });
   return { useEnrichmentStore };
 });
@@ -252,6 +266,63 @@ async function switchToAnnotateMode() {
   fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
 }
 
+function installBlobDownloadCapture() {
+  const blobs: Blob[] = [];
+  const originalCreate = (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+  const originalRevoke = (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+  (URL as unknown as { createObjectURL: (blob: Blob) => string }).createObjectURL = () => "blob:mock-url";
+  (URL as unknown as { revokeObjectURL: (url: string) => void }).revokeObjectURL = () => {};
+
+  const createObjectURL = vi
+    .spyOn(URL, "createObjectURL")
+    .mockImplementation((value: Blob | MediaSource) => {
+      if (value instanceof Blob) blobs.push(value);
+      return "blob:mock-url";
+    });
+  const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+  const realCreateElement = document.createElement.bind(document);
+  const anchorClick = vi.fn();
+  const createElement = vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+    const element = realCreateElement(tag) as HTMLElement;
+    if (tag === "a") {
+      (element as HTMLAnchorElement).click = anchorClick;
+    }
+    return element;
+  });
+
+  return {
+    blobs,
+    anchorClick,
+    createObjectURL,
+    revokeObjectURL,
+    restore() {
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+      createElement.mockRestore();
+      if (originalCreate === undefined) {
+        delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      } else {
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL = originalCreate;
+      }
+      if (originalRevoke === undefined) {
+        delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+      } else {
+        (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = originalRevoke;
+      }
+    },
+  };
+}
+
+async function readBlobText(blob: Blob): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   // Default every test to "CLEF not configured" so the Reference Forms
@@ -331,6 +402,7 @@ beforeEach(() => {
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
   mockSaveEnrichments.mockClear();
+  mockReplaceEnrichments.mockClear();
   mockTagSetState.mockClear();
   mockPlaybackSetState.mockClear();
   mockConfigSetState.mockClear();
@@ -672,6 +744,150 @@ describe("ParseUI", () => {
     expect(mockTagConcept).not.toHaveBeenCalledWith("problematic", "1");
     expect(mockSaveEnrichments).toHaveBeenCalledWith({
       manual_overrides: { speaker_flags: { "1": { Fail01: true } } },
+    });
+  });
+
+  it("uses one shared decisions import input for the right rail and Actions menu", () => {
+    render(<ParseUI />);
+
+    const inputs = Array.from(document.querySelectorAll('input[type="file"][accept=".json"]'));
+    expect(inputs).toHaveLength(1);
+
+    const sharedInput = inputs[0] as HTMLInputElement;
+    const clickSpy = vi.spyOn(sharedInput, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "Load decisions" }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load Decisions" }));
+    expect(clickSpy).toHaveBeenCalledTimes(2);
+
+    clickSpy.mockRestore();
+  });
+
+  it("exports the canonical decisions payload from the Actions menu", async () => {
+    mockEnrichmentData = {
+      reference_forms: { "1": { ar: { script: "ماء", ipa: "maːʔ" } } },
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+        borrowing_flags: { "1": { Fail01: { decision: "borrowed", sourceLang: "ar" } } },
+      },
+      cognate_decisions: { "1": { decision: "split", ts: 123 } },
+    };
+    const capture = installBlobDownloadCapture();
+
+    try {
+      render(<ParseUI />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save Decisions" }));
+
+      expect(capture.createObjectURL).toHaveBeenCalledTimes(1);
+      expect(capture.anchorClick).toHaveBeenCalledTimes(1);
+      expect(capture.blobs).toHaveLength(1);
+
+      const parsed = JSON.parse(await readBlobText(capture.blobs[0]));
+      expect(parsed).toEqual({
+        format: "parse-decisions/v1",
+        version: 1,
+        manual_overrides: {
+          cognate_decisions: { "1": { decision: "split", ts: 123 } },
+          cognate_sets: { "1": { A: ["Fail01"] } },
+          speaker_flags: { "1": { Fail01: true } },
+          borrowing_flags: { "1": { Fail01: { decision: "borrowed", sourceLang: "ar" } } },
+        },
+      });
+      expect(parsed).not.toHaveProperty("reference_forms");
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("exports the canonical decisions payload from the right-rail decisions panel", async () => {
+    mockEnrichmentData = {
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+        borrowing_flags: { "1": { Fail01: { decision: "uncertain", sourceLang: null } } },
+        cognate_decisions: { "1": { decision: "merge", ts: 456 } },
+      },
+      notes: { "1": "not part of canonical decisions payload" },
+    };
+    const capture = installBlobDownloadCapture();
+
+    try {
+      render(<ParseUI />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Save decisions" }));
+
+      expect(capture.createObjectURL).toHaveBeenCalledTimes(1);
+      expect(capture.anchorClick).toHaveBeenCalledTimes(1);
+      expect(capture.blobs).toHaveLength(1);
+
+      const parsed = JSON.parse(await readBlobText(capture.blobs[0]));
+      expect(parsed).toEqual({
+        format: "parse-decisions/v1",
+        version: 1,
+        manual_overrides: {
+          cognate_decisions: { "1": { decision: "merge", ts: 456 } },
+          cognate_sets: { "1": { A: ["Fail01"] } },
+          speaker_flags: { "1": { Fail01: true } },
+          borrowing_flags: { "1": { Fail01: { decision: "uncertain", sourceLang: null } } },
+        },
+      });
+      expect(parsed).not.toHaveProperty("notes");
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("imports the canonical decisions payload by replacing only decision categories in enrichments", async () => {
+    mockEnrichmentData = {
+      reference_forms: { "1": { ar: { script: "ماء", ipa: "maːʔ" } } },
+      manual_overrides: { reviewer_state: { owner: "parse-builder" } },
+      cognate_decisions: { "1": { decision: "accepted", ts: 111 } },
+    };
+
+    render(<ParseUI />);
+
+    const inputs = Array.from(document.querySelectorAll('input[type="file"][accept=".json"]'));
+    expect(inputs).toHaveLength(1);
+
+    const importFile = new File(
+      [JSON.stringify({
+        format: "parse-decisions/v1",
+        version: 1,
+        manual_overrides: {
+          cognate_decisions: { "2": { decision: "merge", ts: 222 } },
+          cognate_sets: { "2": { B: ["Kalh01"] } },
+          speaker_flags: { "2": { Kalh01: false } },
+          borrowing_flags: { "2": { Kalh01: { decision: "borrowed", sourceLang: "fa" } } },
+        },
+      })],
+      "parse-decisions.json",
+      { type: "application/json" },
+    );
+
+    const sharedInput = inputs[0] as HTMLInputElement;
+    Object.defineProperty(sharedInput, 'files', {
+      configurable: true,
+      value: [importFile],
+    });
+    fireEvent.change(sharedInput);
+
+    await waitFor(() => {
+      expect(mockReplaceEnrichments).toHaveBeenCalledWith({
+        reference_forms: { "1": { ar: { script: "ماء", ipa: "maːʔ" } } },
+        manual_overrides: {
+          reviewer_state: { owner: "parse-builder" },
+          cognate_decisions: { "2": { decision: "merge", ts: 222 } },
+          cognate_sets: { "2": { B: ["Kalh01"] } },
+          speaker_flags: { "2": { Kalh01: false } },
+          borrowing_flags: { "2": { Kalh01: { decision: "borrowed", sourceLang: "fa" } } },
+        },
+      });
     });
   });
 

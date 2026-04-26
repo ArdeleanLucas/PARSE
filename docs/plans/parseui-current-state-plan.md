@@ -1,13 +1,13 @@
 # ParseUI current-state execution plan
 
-**Updated:** 2026-04-20
+**Updated:** 2026-04-26
 **Applies to:** `origin/main`
 **Code branch policy:** new work branches from `origin/main` (per `AGENTS.md`); historical pivot branches like `feat/parseui-unified-shell` are archived
 **Docs branch for planning:** branch from `origin/main` (historical docs lane `docs/parseui-planning` was deleted after merge cleanup)
 
 ## TLDR
 
-The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archived — its early tasks all landed. The remaining ParseUI work is now mostly **contract reconciliation and verification** around Actions menu flows and compute/decisions persistence, with export/regression checks now tracked on a deferred validation backlog rather than a hard gate.
+The original wiring TODO (`docs/archive/plans/parseui-wiring-todo.md`) is archived — its early tasks all landed. The remaining ParseUI work is now mostly **compute-mode reconciliation and verification**, with the decisions story now explicit: unified-shell decision import/export uses a canonical `parse-decisions/v1` payload built from `manual_overrides.*`, while annotate-only prior-region state is isolated under a separate legacy localStorage key.
 
 ## Live sources of truth
 
@@ -32,7 +32,7 @@ These are no longer open execution tasks:
 - Compare notes persistence
 - Actions > Import Speaker Data modal
 - Compute panel basic Run / Refresh wiring
-- Decisions basic load/save wiring in the unified shell
+- Decisions import/export now share a canonical `parse-decisions/v1` payload (`manual_overrides.cognate_decisions`, `manual_overrides.cognate_sets`, `manual_overrides.speaker_flags`, `manual_overrides.borrowing_flags`) across the Actions menu and right rail
 - Manage Tags bulk-selection wiring
 - Spectrogram Worker — TS port (`src/workers/spectrogram-worker.ts`), `useSpectrogram` hook, AnnotateView `<canvas>` overlay wired (MC-297, PR #31)
 
@@ -75,18 +75,34 @@ The next implementation work is not "add raw fetch calls from the old TODO." It 
 
 All 5 processing actions (normalize, STT, IPA, full pipeline, cross-speaker match) now use `useActionJob` with proper start → poll → progress → complete/error lifecycle. Topbar status indicator shows progress bars, completion flashes, and error messages with dismiss. Buttons disabled while running. Reset Project clears all in-flight jobs. No `console.error`-only failure paths remain. Tests at landing time: 132 passing. For the current enforced suite floor, see `AGENTS.md`.
 
-### 4. Unify the decisions story
+### 4. ~~Unify the decisions story~~ ✅ DONE (current line)
 
-Decisions are partially wired, but the plan now needs to answer:
+The canonical persisted decisions artifact for the React unified shell is now explicit:
 
-- what is the canonical persisted decisions format?
-- are decisions stored in enrichments, in `parse-decisions` localStorage, or both?
-- do Actions-menu decision load/save and right-rail decision load/save operate on the same structure?
+```json
+{
+  "format": "parse-decisions/v1",
+  "version": 1,
+  "manual_overrides": {
+    "cognate_decisions": { "<conceptId>": { "decision": "accepted|split|merge", "ts": 0 } },
+    "cognate_sets": { "<conceptId>": { "A": ["Speaker01"] } },
+    "speaker_flags": { "<conceptId>": { "Speaker01": true } },
+    "borrowing_flags": { "<conceptId>": { "Speaker01": { "decision": "borrowed", "sourceLang": "fa" } } }
+  }
+}
+```
 
-#### Required follow-up
-- inspect current decision writes in `src/ParseUI.tsx`
-- inspect any existing `parse-decisions` localStorage readers/writers elsewhere in the app
-- pick one canonical format and document it before more UI changes
+Current rules:
+
+- The Actions menu and right-rail Decisions panel both call the same import/export helpers and the same hidden JSON input.
+- Canonical compare adjudication persists under `manual_overrides.cognate_decisions`.
+- Read compatibility still tolerates legacy top-level `cognate_decisions` in existing enrichments, but canonical export/import rewrites that data into `manual_overrides.cognate_decisions`.
+- Decisions import replaces only the decisions-backed `manual_overrides` categories listed above while preserving non-decision enrichments (for example `reference_forms`, similarity scores, or other enrichment payloads).
+- Annotate-only prior-region state is intentionally **not** the canonical decisions artifact; `RegionManager` now stores it only in localStorage key `parse-annotate-region-decisions-v1` so it cannot be mistaken for compare-mode decisions.
+
+Implication for future work:
+- new comparative decision affordances should extend the canonical `parse-decisions/v1` payload via `manual_overrides.*`
+- annotate-local convenience state should stay clearly segregated from enrichments-backed compare decisions
 
 ### 5. Verify compute-mode semantics against the server
 
@@ -114,7 +130,7 @@ Stage 3 landed in PR #58: `js/`, `parse.html`, `compare.html`, `review_tool_dev.
 2. **Do not** reopen completed annotate/compare wiring tasks from the historical TODO.
 3. Audit `src/ParseUI.tsx`, `src/api/client.ts`, and `python/server.py` together.
 4. Wire remaining Actions menu handlers to the typed client surface.
-5. Unify decision persistence/load-save behavior.
+5. Verify compute-mode semantics and payload expectations against the server.
 6. Re-run targeted tests and full test suite.
 7. Keep the deferred validation backlog current and return to it when real-data testing is ready.
 
@@ -128,4 +144,4 @@ Stage 3 landed in PR #58: `js/`, `parse.html`, `compare.html`, `review_tool_dev.
 
 If starting the next code slice now, the brief should be:
 
-> Contract gaps are fixed. Audit remaining ParseUI Actions menu handlers against the live typed client/server contract, wire progress/error UI for in-flight jobs, unify decisions persistence/load-save behavior, keep the deferred validation backlog current, and continue broader JS-removal/unification work as Lucas requests.
+> Contract gaps are fixed, and the canonical decisions artifact is now `parse-decisions/v1` over `manual_overrides.*`. Audit remaining ParseUI Actions menu handlers against the live typed client/server contract, verify compute-mode semantics and payload expectations, keep the deferred validation backlog current, and continue broader React-shell cleanup as Lucas requests.

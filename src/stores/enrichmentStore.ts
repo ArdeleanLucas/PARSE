@@ -7,6 +7,7 @@ interface EnrichmentStore {
   loading: boolean;
   load: () => Promise<void>;
   save: (patch: Record<string, unknown>) => Promise<void>;
+  replace: (nextData: Record<string, unknown>) => Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,5 +48,10 @@ export const useEnrichmentStore = create<EnrichmentStore>()((set, get) => ({
     const merged = deepMerge(current, patch);
     set({ data: merged });
     await saveEnrichments(merged as EnrichmentsPayload);
+  },
+
+  replace: async (nextData: Record<string, unknown>) => {
+    set({ data: nextData });
+    await saveEnrichments(nextData as EnrichmentsPayload);
   },
 }));
