@@ -15,6 +15,7 @@ import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffset
 import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
+import { useParseUIPipeline } from './hooks/useParseUIPipeline';
 import { compareSurveyKeys } from './lib/surveySort';
 import {
   conceptMatchesIntervalText,
@@ -56,11 +57,8 @@ import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
 import {
   TranscriptionRunModal,
-  type TranscriptionRunConfirm,
-  type PipelineStepId,
 } from './components/shared/TranscriptionRunModal';
 import { BatchReportModal } from './components/shared/BatchReportModal';
-import { useBatchPipelineJob } from './hooks/useBatchPipelineJob';
 import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
@@ -396,96 +394,29 @@ export function ParseUI() {
     await loadSpeaker(speakerId);
   };
 
-  // Single unified batch runner replaces the previous per-model hooks
-  // (normalizeJob / sttJob / ipaJob / orthoJob / pipelineJob). Every
-  // transcription action — single-model or full-pipeline — now goes
-  // through this batch pipeline: the TranscriptionRunModal picks
-  // speakers + steps, this hook iterates them sequentially, and
-  // BatchReportModal surfaces outcomes with expandable tracebacks.
-  // Continues on per-speaker failure; the walk-away-friendly design.
-  const batch = useBatchPipelineJob();
-
-  const [reportStepsRun, setReportStepsRun] = useState<PipelineStepId[]>([]);
-  const previousBatchStatusRef = useRef<typeof batch.state.status>('idle');
-  useEffect(() => {
-    if (previousBatchStatusRef.current === 'running' && batch.state.status === 'complete') {
-      modals.batchReport.open();
-      void (async () => {
-        // Reload stores for every speaker that actually had work done
-        // so the transcription lanes / annotations refresh without a
-        // page reload.
-        for (const outcome of batch.state.outcomes) {
-          if (outcome.status === 'complete') {
-            void useTranscriptionLanesStore.getState().reloadStt(outcome.speaker);
-            await reloadSpeakerAnnotation(outcome.speaker);
-          }
-        }
-        await loadEnrichments();
-      })();
-    }
-    previousBatchStatusRef.current = batch.state.status;
-  }, [batch.state.status, batch.state.outcomes, loadEnrichments, modals.batchReport]);
-
-  const handleRunConfirm = (confirm: TranscriptionRunConfirm) => {
-    modals.run.close();
-    if (confirm.speakers.length === 0 || confirm.steps.length === 0) return;
-    void batch.run({
-      speakers: confirm.speakers,
-      steps: confirm.steps,
-      overwrites: confirm.overwrites,
-      language: sttLanguageRef.current || undefined,
-      refineLexemes: confirm.refineLexemes,
-    });
-  };
-
-  const handleRerunFailed = (speakers: string[]) => {
-    if (speakers.length === 0 || reportStepsRun.length === 0) return;
-
-    // For each failed speaker, rerun ONLY the steps that errored last
-    // time — preserves steps that succeeded. Whole-speaker failures
-    // (result === null, typically a network error before the pipeline
-    // even started) retry the full step list.
-    const stepsBySpeaker: Partial<Record<string, PipelineStepId[]>> = {};
-    for (const outcome of batch.state.outcomes) {
-      if (!speakers.includes(outcome.speaker)) continue;
-      if (outcome.result == null) {
-        // Whole-speaker error → rerun everything the batch was asked to do.
-        stepsBySpeaker[outcome.speaker] = reportStepsRun;
-        continue;
-      }
-      const failedSteps = reportStepsRun.filter((step) => {
-        const stepResult = outcome.result?.results[step];
-        return stepResult?.status === 'error';
-      });
-      stepsBySpeaker[outcome.speaker] = failedSteps;
-    }
-
-    // Build the overwrite map from the UNION of all steps actually being
-    // rerun. Failed steps either produced no output or partial output,
-    // so overwrite=true is safe and often necessary.
-    const stepsToRerun = new Set<PipelineStepId>();
-    for (const steps of Object.values(stepsBySpeaker)) {
-      for (const step of steps ?? []) stepsToRerun.add(step);
-    }
-    if (stepsToRerun.size === 0) return;  // nothing to do
-
-    modals.batchReport.close();
-    void batch.run({
-      speakers,
-      // The global `steps` list is a fallback for any speaker without an
-      // entry in stepsBySpeaker (shouldn't happen, but defensive).
-      steps: Array.from(stepsToRerun).sort((a, b) => {
-        const order: PipelineStepId[] = ['normalize', 'stt', 'ortho', 'ipa'];
-        return order.indexOf(a) - order.indexOf(b);
-      }),
-      stepsBySpeaker,
-      overwrites: Array.from(stepsToRerun).reduce<Partial<Record<PipelineStepId, boolean>>>(
-        (acc, step) => { acc[step] = true; return acc; },
-        {},
-      ),
-      language: sttLanguageRef.current || undefined,
-    });
-  };
+  const {
+    batch,
+    reportStepsRun,
+    handleRunConfirm,
+    handleRerunFailed,
+    showBatchCompleteBanner,
+    completedCount,
+    errorCount,
+    cancelledCount,
+    dismissBatchStatus,
+    openBatchReport,
+  } = useParseUIPipeline({
+    closeRunModal: modals.run.close,
+    openBatchReport: modals.batchReport.open,
+    closeBatchReport: modals.batchReport.close,
+    isBatchReportOpen: modals.batchReport.isOpen,
+    getLanguage: () => sttLanguageRef.current || undefined,
+    reloadSpeakerAnnotation,
+    reloadStt: (speakerId) => {
+      void useTranscriptionLanesStore.getState().reloadStt(speakerId);
+    },
+    loadEnrichments,
+  });
 
   // Single source of truth for the contact-lexemes / CLEF populate job in
   // the header. Both the "Run Cross-Speaker Match" button (kept for the
@@ -1157,7 +1088,7 @@ export function ParseUI() {
             );
           })()}
 
-          {batch.state.status === 'complete' && !modals.batchReport.isOpen && (
+          {showBatchCompleteBanner && (
             <div
               className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
                 batch.state.cancelled
@@ -1168,19 +1099,19 @@ export function ParseUI() {
             >
               <Check className={`h-3 w-3 shrink-0 ${batch.state.cancelled ? 'text-amber-600' : 'text-emerald-600'}`} />
               <span className={`text-[11px] font-medium ${batch.state.cancelled ? 'text-amber-900' : 'text-emerald-900'}`}>
-                {batch.state.cancelled ? 'Cancelled' : 'Done'} · {batch.state.outcomes.filter(o => o.status === 'complete').length} ok
-                {batch.state.outcomes.filter(o => o.status === 'error').length > 0 && `, ${batch.state.outcomes.filter(o => o.status === 'error').length} err`}
-                {batch.state.outcomes.filter(o => o.status === 'cancelled').length > 0 && `, ${batch.state.outcomes.filter(o => o.status === 'cancelled').length} skip`}
+                {batch.state.cancelled ? 'Cancelled' : 'Done'} · {completedCount} ok
+                {errorCount > 0 && `, ${errorCount} err`}
+                {cancelledCount > 0 && `, ${cancelledCount} skip`}
               </span>
               <button
-                onClick={() => modals.batchReport.open()}
+                onClick={openBatchReport}
                 className={`rounded px-1.5 py-0.5 text-[11px] font-semibold underline ${batch.state.cancelled ? 'text-amber-700 hover:text-amber-800' : 'text-emerald-700 hover:text-emerald-800'}`}
                 data-testid="topbar-batch-view-report"
               >
                 View report
               </button>
               <button
-                onClick={() => batch.reset()}
+                onClick={dismissBatchStatus}
                 className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
                 aria-label="Dismiss batch status"
               >
@@ -2037,12 +1968,7 @@ export function ParseUI() {
         speakers={Object.keys(annotationRecords).sort()}
         defaultSelectedSpeaker={activeActionSpeaker}
         onClose={modals.run.close}
-        onConfirm={(confirm) => {
-          // Capture which steps the user asked for so the batch report
-          // modal knows which columns to render.
-          setReportStepsRun(confirm.steps);
-          handleRunConfirm(confirm);
-        }}
+        onConfirm={handleRunConfirm}
       />
       <BatchReportModal
         open={modals.batchReport.isOpen}
