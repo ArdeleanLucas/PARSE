@@ -159,7 +159,6 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
     _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
     outcome: _server.Dict[str, _server.Any] = {'ok': False}
     try:
-        import server as _server
         _server._compute_checkpoint('CHILD.entry', job_id=job_id, compute_type=compute_type)
         normalized_type = str(compute_type or '').strip().lower()
         if normalized_type in {'cognates', 'similarity'}:
