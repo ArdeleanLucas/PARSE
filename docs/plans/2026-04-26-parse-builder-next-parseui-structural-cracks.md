@@ -70,11 +70,57 @@ Acceptance: `wc -l src/ParseUI.tsx` shows reduction of ~590 lines. New file ≤6
 **Target file:** `src/components/compare/ManageTagsView.tsx`
 **Test file:** `src/components/compare/ManageTagsView.test.tsx`
 
+#### Step 1 chase items (fold into this PR or a same-branch follow-up commit before opening review)
+
+PR #61 (Step 1, AIChat extraction) shipped clean structurally but left two gaps.
+Add these here so the regression coverage is honest before Step 3 (the big AnnotateView)
+stacks more behavior on top of an under-tested base:
+
+1. **Add 4 missing AIChat test cases** to `src/components/shared/AIChat.test.tsx`. The
+   existing file covers (a) provider chooser when auth absent, (b) xAI badge restore +
+   markdown render, (c) collapsed-bar submit. Add:
+   - **Live xAI ↔ OpenAI provider switch** — render with one provider authenticated,
+     trigger the switch UI, assert badge + model label flip and that `saveApiKey` is
+     called with the new provider.
+   - **Minimize / restore** — assert `onMinimize` callback fires; assert that on
+     `minimized={true}` the panel collapses to its bar form and that the resize handle
+     is hidden.
+   - **conceptName display** — render with `conceptName="Foo"` and `speakerCount=3`,
+     assert the welcome/header copy includes `Foo` and `3 speakers`.
+   - **Send-on-enter keyboard handler** — type a message, fire `Enter` (no shift),
+     assert `chatSession.send` is called once with the typed text. Then fire
+     `Shift+Enter` and assert it inserts a newline instead.
+2. **Attach a browser screenshot** of the ManageTagsView modal in this PR's body —
+   not just text confirmation. The Step 1 PR body said "smoke at 127.0.0.1:4173
+   showing no obvious layout breakage" with no image; that's not enough for the
+   ManageTagsView and AnnotateView surfaces because they have visible state
+   transitions reviewers need to confirm.
+
+If you'd rather ship the chase items in their own one-commit PR titled
+`test(aichat): close coverage gaps from PR #61`, that is also fine — but it must
+merge before Step 3 opens. Do not let the AnnotateView PR be the first time the
+AIChat tests get exercised at full coverage.
+
+#### Step 2 procedure (the actual extraction)
+
 Procedure:
 1. Cut `ManageTagsView`, `ManageTagsProps`, and `SWATCHES` into the new file.
 2. Re-import from ParseUI.tsx.
 3. Verify `useTagStore` selector usage is unchanged.
-4. Tests cover: tag create/rename/delete/merge, swatch selection persistence, bulk-state changes, empty state.
+4. Tests cover, with one `it(...)` block per scenario (do not collapse multiple
+   scenarios into a single test):
+   - tag create — fills name + picks swatch + submits, asserts store mutation
+   - tag rename — opens existing tag, edits name, asserts store mutation + UI updates
+   - tag delete — confirms deletion path, asserts store mutation
+   - tag merge — selects source + target, confirms merge dialog, asserts store mutation
+     and that the source tag is gone from the list
+   - swatch selection persistence — pick a non-default swatch, save, reload component,
+     assert swatch survived
+   - bulk-state change — multi-select tags, apply bulk action, assert store mutation
+     for every selected tag
+   - empty state — render with empty `useTagStore`, assert empty-state copy + create
+     affordance visible
+   - ARIA / keyboard — at minimum, modal dismiss via Escape and focus trap behavior
 5. Run gates as Step 1.
 6. Browser regression: open Compare → Manage Tags, exercise create/rename/delete/merge/bulk paths.
 
@@ -111,7 +157,10 @@ Each PR must pass before requesting review:
 - `npm run test` — green, no skipped tests added
 - `npm run build` — green (catches accidental import-cycle issues)
 - ParseUI.test.tsx existing assertions still pass (no behavior regressions)
-- Browser smoke test (procedure above) — screenshot in PR body
+- Browser smoke test (procedure above) — **at least one screenshot in PR body**
+  showing the extracted view in its primary state. Text-only smoke confirmation is
+  not sufficient. For Step 3 (AnnotateView), include screenshots of: speaker loaded,
+  one interval edited and saved, one STT job run, JobLogsModal open.
 
 If a test in `ParseUI.test.tsx` references the inlined component by closure, lift that test into the new component's test file before extracting.
 
