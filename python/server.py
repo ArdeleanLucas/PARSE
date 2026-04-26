@@ -84,6 +84,16 @@ from app.http.compute_offset_handlers import (
     build_post_offset_detect_from_pair_response as _app_build_post_offset_detect_from_pair_response,
     build_post_offset_detect_response as _app_build_post_offset_detect_response,
 )
+from app.http.lexeme_note_handlers import (
+    LexemeNoteHandlerError as _app_LexemeNoteHandlerError,
+    build_post_lexeme_note_response as _app_build_post_lexeme_note_response,
+    build_post_lexeme_notes_import_response as _app_build_post_lexeme_notes_import_response,
+)
+from app.http.media_search_handlers import (
+    MediaSearchHandlerError as _app_MediaSearchHandlerError,
+    build_get_lexeme_search_response as _app_build_get_lexeme_search_response,
+    build_get_spectrogram_response as _app_build_get_spectrogram_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -7095,289 +7105,74 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _api_post_lexeme_note(self) -> None:
         """Write a single lexeme-level note into parse-enrichments.json."""
         body = self._expect_object(self._read_json_body(required=True), "Request body")
-        speaker_raw = str(body.get("speaker") or "").strip()
-        concept_id = _normalize_concept_id(body.get("concept_id"))
-        if not speaker_raw or not concept_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker and concept_id are required")
         try:
-            speaker = _normalize_speaker_id(speaker_raw)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
-        notes_block = payload.get("lexeme_notes")
-        if not isinstance(notes_block, dict):
-            notes_block = {}
-            payload["lexeme_notes"] = notes_block
-        speaker_block = notes_block.get(speaker)
-        if not isinstance(speaker_block, dict):
-            speaker_block = {}
-            notes_block[speaker] = speaker_block
-
-        if body.get("delete") is True:
-            speaker_block.pop(concept_id, None)
-            if not speaker_block:
-                notes_block.pop(speaker, None)
-        else:
-            entry = speaker_block.get(concept_id)
-            if not isinstance(entry, dict):
-                entry = {}
-            if "user_note" in body:
-                entry["user_note"] = str(body.get("user_note") or "")
-            if "import_note" in body:
-                entry["import_note"] = str(body.get("import_note") or "")
-            entry["updated_at"] = _utc_now_iso()
-            speaker_block[concept_id] = entry
-
-        _write_json_file(_enrichments_path(), payload)
-        self._send_json(HTTPStatus.OK, {
-            "success": True,
-            "lexeme_notes": payload.get("lexeme_notes") or {},
-        })
+            response = _app_build_post_lexeme_note_response(
+                body,
+                normalize_speaker_id=_normalize_speaker_id,
+                normalize_concept_id=_normalize_concept_id,
+                read_json_file=_read_json_file,
+                default_enrichments_payload=_default_enrichments_payload,
+                write_json_file=_write_json_file,
+                enrichments_path=_enrichments_path(),
+                utc_now_iso=_utc_now_iso,
+            )
+        except _app_LexemeNoteHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     def _api_post_lexeme_notes_import(self) -> None:
         """Multipart POST — parse Audition comments CSV into lexeme_notes."""
-        from lexeme_notes import parse_audition_csv, match_rows_to_lexemes
-
-        content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Type must be multipart/form-data")
-
-        raw_length = self.headers.get("Content-Length", "")
         try:
-            content_length = int(raw_length)
-        except (ValueError, TypeError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Content-Length header is required")
-        if content_length > ONBOARD_MAX_UPLOAD_BYTES:
-            raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload exceeds limit")
-
-        environ = {
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": content_type,
-            "CONTENT_LENGTH": str(content_length),
-        }
-        form = cgi.FieldStorage(
-            fp=self.rfile, headers=self.headers, environ=environ, keep_blank_values=True,
-        )
-
-        speaker_field = form.getfirst("speaker_id", "") if "speaker_id" in form else ""
-        if isinstance(speaker_field, bytes):
-            speaker_field = speaker_field.decode("utf-8", errors="replace")
-        try:
-            speaker = _normalize_speaker_id(str(speaker_field or "").strip())
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        csv_item = form["csv"] if "csv" in form else None
-        if csv_item is None or not getattr(csv_item, "filename", None):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv file is required (field name: csv)")
-        try:
-            csv_text = csv_item.file.read().decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "csv must be UTF-8: {0}".format(exc))
-
-        rows = parse_audition_csv(csv_text)
-        if not rows:
-            self._send_json(HTTPStatus.OK, {
-                "success": True, "imported": 0, "matched": 0, "total_rows": 0,
-            })
-            return
-
-        annotation_path = _annotation_read_path_for_speaker(speaker)
-        annotation_payload = _read_json_any_file(annotation_path)
-        normalized = _normalize_annotation_record(annotation_payload, speaker)
-        tiers = normalized.get("tiers") or {}
-        concept_tier = tiers.get("concept") if isinstance(tiers, dict) else None
-        intervals: List[Dict[str, Any]] = []
-        if isinstance(concept_tier, dict):
-            for iv in concept_tier.get("intervals") or []:
-                if not isinstance(iv, dict):
-                    continue
-                cid = _normalize_concept_id(iv.get("text"))
-                if not cid:
-                    continue
-                try:
-                    start = float(iv.get("start") or 0.0)
-                    end = float(iv.get("end") or 0.0)
-                except (TypeError, ValueError):
-                    continue
-                intervals.append({"concept_id": cid, "start": start, "end": end})
-
-        concept_labels: Dict[str, str] = {}
-        survey_to_id: Dict[str, str] = {}
-        try:
-            import csv as _csv
-            concepts_path = _project_root() / "concepts.csv"
-            if concepts_path.exists():
-                with open(concepts_path, newline="", encoding="utf-8") as fh:
-                    for row in _csv.DictReader(fh):
-                        cid = _normalize_concept_id(row.get("id"))
-                        label = str(row.get("concept_en") or "").strip()
-                        survey = str(row.get("survey_item") or "").strip()
-                        if cid and label:
-                            concept_labels[cid] = label
-                        if cid and survey:
-                            m = re.match(r"^[A-Za-z]+_([0-9]+(?:\.[0-9]+)?)", survey)
-                            if m:
-                                key = m.group(1)
-                                survey_to_id.setdefault(key, cid)
-                                concept_labels.setdefault(key, label)
-        except Exception:
-            concept_labels = {}
-            survey_to_id = {}
-
-        matches = match_rows_to_lexemes(rows, intervals, concept_labels=concept_labels)
-        label_to_id = {lbl.lower(): cid for cid, lbl in concept_labels.items() if cid.isdigit()}
-        for row, match in zip(rows, matches):
-            csv_id = _normalize_concept_id(row.concept_id)
-            if csv_id in survey_to_id:
-                match["concept_id"] = survey_to_id[csv_id]
-                continue
-            current = _normalize_concept_id(match.get("concept_id"))
-            if current.isdigit():
-                continue
-            if current.lower() in label_to_id:
-                match["concept_id"] = label_to_id[current.lower()]
-
-        payload = _read_json_file(_enrichments_path(), _default_enrichments_payload())
-        notes_block = payload.get("lexeme_notes")
-        if not isinstance(notes_block, dict):
-            notes_block = {}
-            payload["lexeme_notes"] = notes_block
-        speaker_block = notes_block.get(speaker)
-        if not isinstance(speaker_block, dict):
-            speaker_block = {}
-            notes_block[speaker] = speaker_block
-
-        imported = 0
-        for match in matches:
-            note_text = str(match.get("note") or "").strip()
-            if not note_text:
-                continue
-            cid = _normalize_concept_id(match.get("concept_id"))
-            if not cid:
-                continue
-            entry = speaker_block.get(cid)
-            if not isinstance(entry, dict):
-                entry = {}
-            entry["import_note"] = note_text
-            entry["import_raw"] = str(match.get("raw_name") or "")
-            entry["updated_at"] = _utc_now_iso()
-            speaker_block[cid] = entry
-            imported += 1
-
-        _write_json_file(_enrichments_path(), payload)
-
-        self._send_json(HTTPStatus.OK, {
-            "success": True,
-            "speaker": speaker,
-            "total_rows": len(rows),
-            "imported": imported,
-            "matched": sum(1 for m in matches if m.get("was_matched")),
-            "lexeme_notes": payload.get("lexeme_notes") or {},
-        })
+            response = _app_build_post_lexeme_notes_import_response(
+                headers=self.headers,
+                rfile=self.rfile,
+                project_root=_project_root(),
+                upload_limit=ONBOARD_MAX_UPLOAD_BYTES,
+                normalize_speaker_id=_normalize_speaker_id,
+                normalize_concept_id=_normalize_concept_id,
+                annotation_read_path_for_speaker=_annotation_read_path_for_speaker,
+                read_json_any_file=_read_json_any_file,
+                normalize_annotation_record=_normalize_annotation_record,
+                read_json_file=_read_json_file,
+                default_enrichments_payload=_default_enrichments_payload,
+                write_json_file=_write_json_file,
+                enrichments_path=_enrichments_path(),
+                utc_now_iso=_utc_now_iso,
+            )
+        except _app_LexemeNoteHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     # ── Spectrogram (shared cache) ───────────────────────────────────
 
     def _api_get_spectrogram(self) -> None:
         """Return (or generate) a PNG spectrogram for a clip; cached on disk."""
         import spectrograms as spectro_module
-        from urllib.parse import parse_qs
-
-        query = urlparse(self.path).query
-        params = {k: v[0] for k, v in parse_qs(query).items() if v}
-
-        speaker_raw = str(params.get("speaker") or "").strip()
-        if not speaker_raw:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
-        try:
-            speaker = _normalize_speaker_id(speaker_raw)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
 
         try:
-            start_sec = float(params.get("start") or 0.0)
-            end_sec = float(params.get("end") or 0.0)
-        except ValueError:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "start and end must be numbers")
-        if end_sec <= start_sec:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "end must be greater than start")
-
-        audio_hint = str(params.get("audio") or "").strip()
-        audio_path: Optional[pathlib.Path] = None
-        if audio_hint:
-            try:
-                audio_path = _resolve_project_path(audio_hint)
-            except ValueError as exc:
-                raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-        else:
-            working_candidate = _project_root() / "audio" / "working" / speaker
-            if working_candidate.is_dir():
-                for candidate in sorted(working_candidate.iterdir()):
-                    if candidate.is_file() and candidate.suffix.lower() in {".wav", ".flac"}:
-                        audio_path = candidate
-                        break
-            if audio_path is None:
-                primary = _annotation_primary_source_wav(speaker)
-                if primary:
-                    try:
-                        audio_path = _resolve_project_path(primary)
-                    except ValueError as exc:
-                        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        if audio_path is None or not pathlib.Path(audio_path).is_file():
-            raise ApiError(HTTPStatus.NOT_FOUND, "No audio file resolved for speaker {0}".format(speaker))
-
-        cache_file = spectro_module.cache_path(_project_root(), speaker, start_sec, end_sec)
-        force = str(params.get("force") or "").strip().lower() in {"1", "true", "yes"}
-
-        try:
-            spectro_module.generate_spectrogram_png(
-                pathlib.Path(audio_path), start_sec, end_sec, cache_file, force=force,
+            response = _app_build_get_spectrogram_response(
+                self.path,
+                spectro_module=spectro_module,
+                normalize_speaker_id=_normalize_speaker_id,
+                resolve_project_path=_resolve_project_path,
+                project_root=_project_root(),
+                annotation_primary_source_wav=_annotation_primary_source_wav,
+                cors_headers=CORS_HEADERS,
             )
-        except Exception as exc:
-            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, "spectrogram render failed: {0}".format(exc))
+        except _app_MediaSearchHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        png_bytes = cache_file.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "image/png")
-        self.send_header("Content-Length", str(len(png_bytes)))
-        self.send_header("Cache-Control", "public, max-age=3600")
-        for key, value in CORS_HEADERS.items():
+        self.send_response(response.status)
+        for key, value in response.headers.items():
             self.send_header(key, value)
         self.end_headers()
         try:
-            self.wfile.write(png_bytes)
+            self.wfile.write(response.body)
         except BrokenPipeError:
             pass
 
     def _api_get_lexeme_search(self) -> None:
-        """GET /api/lexeme/search — rank candidate time ranges for a concept.
-
-        Query params:
-            speaker       — required, the target speaker
-            variants      — required, comma/space-separated orthographic forms
-            concept_id    — optional, enables the cross-speaker signal + auto
-                            augmentation with contact-lexeme variants
-            language      — optional, phonemizer language code (default "ku")
-            tiers         — optional, comma-separated subset of
-                            ortho_words,ortho,stt,ipa (default all)
-            limit         — optional, max candidates to return (default 10)
-            max_distance  — optional float in (0, 1] — normalized Levenshtein
-                            threshold, anything worse is dropped (default 0.55)
-
-        Response JSON:
-            {
-              speaker, concept_id, variants, language,
-              candidates: [{ start, end, tier, matched_text, matched_variant,
-                             score, phonetic_score, cross_speaker_score,
-                             confidence_weight, source_label }],
-              signals_available: {
-                 phonemizer: bool, cross_speaker_anchors: int,
-                 contact_variants: [str]
-              }
-            }
-        """
+        """GET /api/lexeme/search — rank candidate time ranges for a concept."""
         try:
             from ai import lexeme_search as lex
         except Exception:
@@ -7389,124 +7184,22 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "lexeme_search module unavailable: {0}".format(exc),
                 )
 
-        from urllib.parse import parse_qs
-
-        query = urlparse(self.path).query
-        params = {k: v[0] for k, v in parse_qs(query).items() if v}
-
-        speaker_raw = str(params.get("speaker") or "").strip()
-        if not speaker_raw:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "speaker is required")
         try:
-            speaker = _normalize_speaker_id(speaker_raw)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-
-        variants_raw = str(params.get("variants") or "").strip()
-        user_variants = [v for v in re.split(r"[\s,;/]+", variants_raw) if v]
-        if not user_variants:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "variants is required (comma or space separated)")
-
-        concept_id = str(params.get("concept_id") or "").strip() or None
-        language = str(params.get("language") or lex.DEFAULT_LANGUAGE).strip() or lex.DEFAULT_LANGUAGE
-
-        tiers_raw = str(params.get("tiers") or "").strip()
-        tiers_filter: Optional[list] = None
-        if tiers_raw:
-            tiers_filter = [t for t in re.split(r"[\s,;]+", tiers_raw) if t]
-
-        try:
-            limit = int(params.get("limit") or lex.DEFAULT_LIMIT)
-        except (TypeError, ValueError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "limit must be an integer")
-        if limit <= 0 or limit > 200:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "limit must be in [1, 200]")
-
-        try:
-            max_distance = float(params.get("max_distance") or lex.DEFAULT_MAX_DISTANCE)
-        except (TypeError, ValueError):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "max_distance must be a number in (0, 1]")
-        if not (0 < max_distance <= 1):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "max_distance must be in (0, 1]")
-
-        # Load the target speaker's annotation (must exist).
-        try:
-            target_path = _annotation_read_path_for_speaker(speaker)
-        except ValueError as exc:
-            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
-        if not target_path.is_file():
-            raise ApiError(HTTPStatus.NOT_FOUND, "No annotation record for speaker {0}".format(speaker))
-        target_raw = _read_json_any_file(target_path)
-        target_record = _normalize_annotation_record(target_raw, speaker)
-
-        # Cross-speaker: load every OTHER annotation file — needed only when
-        # the caller supplied a concept_id. Missing dir → empty list, not fatal.
-        cross_records: list = []
-        if concept_id:
-            annotations_dir = _project_root() / "annotations"
-            if annotations_dir.is_dir():
-                for path in sorted(annotations_dir.iterdir()):
-                    if not path.is_file():
-                        continue
-                    if path.suffix not in {".json"}:
-                        continue
-                    # Skip the target speaker's own file so we don't match ourselves.
-                    stem = path.name.removesuffix(ANNOTATION_FILENAME_SUFFIX).removesuffix(
-                        ANNOTATION_LEGACY_FILENAME_SUFFIX,
-                    )
-                    if stem == speaker:
-                        continue
-                    try:
-                        raw = _read_json_any_file(path)
-                        cross_records.append(_normalize_annotation_record(raw, stem))
-                    except Exception:
-                        # One bad file shouldn't take the whole search down.
-                        continue
-
-        # Contact-lexeme variants: auto-augment the user's variant list so
-        # they don't have to know every documented form of the concept.
-        contact_variants: list = []
-        if concept_id:
-            try:
-                contact_variants = lex.load_contact_variants(concept_id, _sil_config_path())
-            except Exception:
-                contact_variants = []
-
-        all_variants = list(user_variants)
-        seen = {v for v in all_variants}
-        for v in contact_variants:
-            if v not in seen:
-                all_variants.append(v)
-                seen.add(v)
-
-        candidates = lex.search(
-            target_record,
-            all_variants,
-            concept_id=concept_id,
-            cross_speaker_records=cross_records,
-            language=language,
-            limit=limit,
-            max_distance=max_distance,
-            tiers=tiers_filter,
-        )
-
-        phonemizer_available = bool(lex.phonemize_variant(user_variants[0], language=language))
-
-        self._send_json(HTTPStatus.OK, {
-            "speaker": speaker,
-            "concept_id": concept_id,
-            "variants": user_variants,
-            "language": language,
-            "candidates": candidates,
-            "signals_available": {
-                "phonemizer": phonemizer_available,
-                "cross_speaker_anchors": sum(
-                    1 for rec in cross_records
-                    if concept_id and str(concept_id) in ((rec or {}).get("confirmed_anchors") or {})
-                ),
-                "contact_variants": contact_variants,
-            },
-        })
+            response = _app_build_get_lexeme_search_response(
+                self.path,
+                lex_module=lex,
+                normalize_speaker_id=_normalize_speaker_id,
+                annotation_read_path_for_speaker=_annotation_read_path_for_speaker,
+                read_json_any_file=_read_json_any_file,
+                normalize_annotation_record=_normalize_annotation_record,
+                project_root=_project_root(),
+                annotation_filename_suffix=ANNOTATION_FILENAME_SUFFIX,
+                annotation_legacy_filename_suffix=ANNOTATION_LEGACY_FILENAME_SUFFIX,
+                sil_config_path=_sil_config_path,
+            )
+        except _app_MediaSearchHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+        self._send_json(response.status, response.payload)
 
     # ── Auth endpoints ──────────────────────────────────────────────
 
@@ -8021,6 +7714,7 @@ class _BoundedThreadHTTPServer(http.server.HTTPServer):
 
     def __init__(self, server_address, RequestHandlerClass, max_workers: int = 4):
         import concurrent.futures
+        self._pool = None
         super().__init__(server_address, RequestHandlerClass)
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
 
@@ -8037,7 +7731,9 @@ class _BoundedThreadHTTPServer(http.server.HTTPServer):
 
     def server_close(self):
         super().server_close()
-        self._pool.shutdown(wait=False)
+        pool = getattr(self, "_pool", None)
+        if pool is not None:
+            pool.shutdown(wait=False)
 
 
 def main() -> None:

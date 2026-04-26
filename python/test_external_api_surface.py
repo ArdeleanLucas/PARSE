@@ -97,6 +97,21 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     }
 
 
+def test_build_openapi_document_keeps_lexeme_media_search_contract_honest() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+
+    spectrogram_params = {param["name"] for param in spec["paths"]["/api/spectrogram"]["get"]["parameters"]}
+    assert spectrogram_params == {"speaker", "start", "end", "audio", "force"}
+
+    lexeme_search_params = {param["name"] for param in spec["paths"]["/api/lexeme/search"]["get"]["parameters"]}
+    assert lexeme_search_params == {"speaker", "variants", "concept_id", "language", "tiers", "limit", "max_distance"}
+
+    import_schema = spec["paths"]["/api/lexeme-notes/import"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    assert import_schema["required"] == ["speaker_id", "csv"]
+    assert import_schema["properties"]["speaker_id"] == {"type": "string"}
+    assert import_schema["properties"]["csv"] == {"type": "string", "format": "binary"}
+
+
 def test_build_mcp_http_catalog_includes_workflow_specs_and_safety_metadata(tmp_path: pathlib.Path) -> None:
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "mcp_config.json").write_text('{"expose_all_tools": false}', encoding="utf-8")
