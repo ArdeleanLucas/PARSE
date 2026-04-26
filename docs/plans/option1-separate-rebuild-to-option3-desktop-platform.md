@@ -1,5 +1,8 @@
 # PARSE Separate-Rebuild Plan: Option 1 Now, Option 3 Later
 
+> **CANCELLED 2026-04-26** — Option 3 (desktop platform pivot) is not happening. Per Lucas decision: Option 1 (modular rebuild) only. The rebuild's done-state is monolith decomposition + parity evidence complete on the React/web stack. Desktop product work is dropped, not deferred. This document remains for historical context; do not act on the Option 3 sections.
+
+
 **Status:** Proposed plan-only PR  
 **Date:** 2026-04-25  
 **Applies to:** current `origin/main` as the behavior oracle; implementation happens in a separate rebuild repo  
