@@ -19,6 +19,8 @@ import pathlib
 import sys
 from typing import Any, Dict, List, Tuple
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from ai import provider as provider_module
@@ -76,6 +78,32 @@ def _make_audio(tmp_path: pathlib.Path) -> pathlib.Path:
     p = tmp_path / "clip.wav"
     p.write_bytes(b"RIFF    WAVEfmt ")  # faux header; provider only stats existence
     return p
+
+
+def _make_ortho_provider(
+    tmp_path: pathlib.Path,
+    ortho_config: Dict[str, Any],
+    monkeypatch: Any,
+) -> LocalWhisperProvider:
+    _StubWhisperModel.last_call = {}
+    monkeypatch.setattr(
+        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
+    )
+    import faster_whisper  # type: ignore
+    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
+
+    ortho_model_dir = tmp_path / "razhan-ct2"
+    ortho_model_dir.mkdir(exist_ok=True)
+    config = {
+        "language": "sd",
+        "model_path": str(ortho_model_dir),
+        **ortho_config,
+    }
+    return LocalWhisperProvider(
+        config={"ortho": config},
+        config_path=tmp_path / "ai_config.json",
+        config_section="ortho",
+    )
 
 
 def test_empty_language_becomes_none_for_auto_detect(tmp_path, monkeypatch):
@@ -220,6 +248,19 @@ def test_compression_ratio_threshold_null_disables_it(tmp_path, monkeypatch):
     assert "compression_ratio_threshold" not in _StubWhisperModel.last_call
 
 
+def test_ortho_requires_explicit_local_model_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
+    )
+
+    with pytest.raises(ValueError, match=r"ortho\.model_path is empty"):
+        LocalWhisperProvider(
+            config={"ortho": {"language": "sd"}},
+            config_path=tmp_path / "ai_config.json",
+            config_section="ortho",
+        )
+
+
 def test_ortho_section_defaults_cascade_guard(tmp_path, monkeypatch):
     """ORTH's defaults stop the repetition cascade that truncated Fail02
     at 06:31 on 2026-04-23:
@@ -227,18 +268,7 @@ def test_ortho_section_defaults_cascade_guard(tmp_path, monkeypatch):
       - vad_filter=True with tuned Silero params (gate silence)
       - compression_ratio_threshold=1.8 (reject repetition earlier)
     """
-    _StubWhisperModel.last_call = {}
-    monkeypatch.setattr(
-        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
-    )
-    import faster_whisper  # type: ignore
-    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
-
-    ortho_provider = LocalWhisperProvider(
-        config={"ortho": {"language": "sd"}},
-        config_path=tmp_path / "ai_config.json",
-        config_section="ortho",
-    )
+    ortho_provider = _make_ortho_provider(tmp_path, {}, monkeypatch)
     ortho_provider.transcribe(_make_audio(tmp_path))
     call = _StubWhisperModel.last_call
     assert call["condition_on_previous_text"] is False
@@ -253,22 +283,14 @@ def test_ortho_section_defaults_cascade_guard(tmp_path, monkeypatch):
 def test_ortho_explicit_override_beats_defaults(tmp_path, monkeypatch):
     """Config override wins over the ORTH-specific defaults — so a user
     who intentionally wants the old permissive behaviour can restore it."""
-    _StubWhisperModel.last_call = {}
-    monkeypatch.setattr(
-        provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
-    )
-    import faster_whisper  # type: ignore
-    monkeypatch.setattr(faster_whisper, "WhisperModel", _StubWhisperModel, raising=True)
-
-    ortho_provider = LocalWhisperProvider(
-        config={"ortho": {
-            "language": "sd",
+    ortho_provider = _make_ortho_provider(
+        tmp_path,
+        {
             "vad_filter": False,
             "condition_on_previous_text": True,
             "compression_ratio_threshold": 2.4,
-        }},
-        config_path=tmp_path / "ai_config.json",
-        config_section="ortho",
+        },
+        monkeypatch,
     )
     ortho_provider.transcribe(_make_audio(tmp_path))
     call = _StubWhisperModel.last_call

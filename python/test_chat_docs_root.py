@@ -1,8 +1,19 @@
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
+
+
+@pytest.fixture(autouse=True)
+def _reset_cached_chat_runtime() -> None:
+    server._chat_tools_runtime = None
+    server._chat_orchestrator_runtime = None
+    yield
+    server._chat_tools_runtime = None
+    server._chat_orchestrator_runtime = None
 
 
 class _DummyTools:

@@ -15,14 +15,20 @@
     "model_only": true
   },
   "ortho": {
-    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH model. model_path may be a HuggingFace repo id (razhan/whisper-base-sdh) or a local CTranslate2 path. vad_filter defaults to false for ortho so razhan produces full-waveform coverage; leave it false unless you've tuned vad_parameters for your recordings. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds ~1-2 min on thesis-scale audio but yields clean per-lexeme text in tiers.ortho_words even when the coarse ortho tier is monolithic.",
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). ORTH now requires an explicit local CTranslate2 path. Convert razhan/whisper-base-sdh first (for example: ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /models/razhan-whisper-base-sdh-ct2) and point model_path at that local CT2 directory. HuggingFace repo ids are intentionally rejected so ORTH cannot silently fall back to the wrong model. The recommended ORTH defaults below are the current anti-cascade safety contract for long recordings: vad_filter=true with tuned Silero params, condition_on_previous_text=false, and compression_ratio_threshold=1.8. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds ~1-2 min on thesis-scale audio but yields clean per-lexeme text in tiers.ortho_words even when the coarse ortho tier is monolithic.",
     "provider": "faster-whisper",
-    "model_path": "razhan/whisper-base-sdh",
+    "model_path": "/models/razhan-whisper-base-sdh-ct2",
     "language": "sd",
     "device": "cuda",
     "compute_type": "float16",
     "beam_size": 5,
-    "vad_filter": false,
+    "vad_filter": true,
+    "vad_parameters": {
+      "min_silence_duration_ms": 500,
+      "threshold": 0.35
+    },
+    "condition_on_previous_text": false,
+    "compression_ratio_threshold": 1.8,
     "initial_prompt": "",
     "refine_lexemes": false
   },
