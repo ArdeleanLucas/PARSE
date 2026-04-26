@@ -217,6 +217,7 @@ vi.mock("./api/client", () => ({
   pollNormalize: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   pollCompute: vi.fn().mockResolvedValue({ status: 'running', progress: 0 }),
   detectTimestampOffset: vi.fn().mockResolvedValue({ job_id: 'offset-job-default', jobId: 'offset-job-default' }),
+  detectTimestampOffsetFromPairs: vi.fn().mockResolvedValue({ job_id: 'offset-job-default', jobId: 'offset-job-default' }),
   pollOffsetDetectJob: vi.fn().mockResolvedValue({
     speaker: 'Fail01',
     offsetSec: 0.75,

@@ -12,10 +12,11 @@ import {
   Sun, Moon, XCircle, Undo2, Redo2
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, OffsetJobError, getJobLogs } from './api/client';
+import { getLingPyExport, saveApiKey, getAuthStatus, pollAuth, startAuthFlow, startCompute, pollCompute, importTagCsv, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, getJobLogs } from './api/client';
 import type { JobLogsPayload } from './api/client';
-import type { OffsetDetectResult, OffsetPair, LexemeSearchCandidate } from './api/client';
+import type { LexemeSearchCandidate } from './api/client';
 import { useChatSession, type UseChatSessionResult } from './hooks/useChatSession';
+import { useOffsetState } from './hooks/useOffsetState';
 import { compareSurveyKeys } from './lib/surveySort';
 import {
   applyCanonicalDecisionImport,
@@ -57,6 +58,7 @@ import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSumm
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar } from './components/parse/ConceptSidebar';
 import { RightPanel } from './components/parse/RightPanel';
+import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus } from './api/types';
 
@@ -138,7 +140,7 @@ function deriveAudioUrl(record: AnnotationRecord | null | undefined): string {
 }
 
 
-function conceptMatchesIntervalText(concept: Concept, text: string): boolean {
+function conceptMatchesIntervalText(concept: { name: string; key: string }, text: string): boolean {
   const normalizedText = text.trim().toLowerCase();
   const normalizedName = concept.name.trim().toLowerCase();
   const normalizedKey = concept.key.trim().toLowerCase();
@@ -2661,42 +2663,6 @@ export function ParseUI() {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  // The ``detecting`` / ``applying`` phases now carry the backend job id
-  // and the worker's latest progress checkpoint so the header chip can
-  // mirror what the worker is doing in real time. The ``error`` phase
-  // keeps ``jobId`` so the "View crash log" button can call
-  // ``GET /api/jobs/<id>/logs`` for the full stderr tail + Python
-  // traceback.
-  const [offsetState, setOffsetState] = useState<
-    | { phase: 'idle' }
-    | { phase: 'detecting'; jobId: string | null; progress: number; progressMessage?: string; origin: 'auto' | 'manual' }
-    | { phase: 'detected'; result: OffsetDetectResult }
-    | { phase: 'manual' }
-    | { phase: 'applying'; result: OffsetDetectResult }
-    | { phase: 'applied'; result: OffsetDetectResult; shifted: number; protected: number }
-    | { phase: 'error'; message: string; traceback?: string; jobId?: string }
-  >({ phase: 'idle' });
-
-  // Modal for viewing a failed compute job's error + traceback +
-  // worker stderr tail. Reachable from the offset header chip's "View
-  // crash log" button and from the inline error panel.
-  const [jobLogsOpen, setJobLogsOpen] = useState<string | null>(null);
-
-  // Manual-pair anchors live at parent scope so the playback-bar capture
-  // button (Annotate mode) and the modal share the same list. Each anchor
-  // captures the lexeme's current annotation time *at the moment of
-  // capture* — that's the "csv time" — plus the audio cursor position
-  // (the "audio time"). Per-pair offset = audioTimeSec − csvTimeSec.
-  type ManualAnchor = {
-    conceptKey: string;
-    conceptName: string;
-    csvTimeSec: number;
-    audioTimeSec: number;
-    capturedAt: number;
-  };
-  const [manualAnchors, setManualAnchors] = useState<ManualAnchor[]>([]);
-  const [manualBusy, setManualBusy] = useState(false);
-
   // Count of lexemes on the active speaker that the user has already
   // locked (direct timestamp edit or anchor capture). Surfaces in the
   // offset Review & apply modal and the header status chip so the user
@@ -2714,22 +2680,12 @@ export function ParseUI() {
     return count;
   });
 
-  // Briefly-flashed inline confirmation when the user captures an anchor
-  // straight from the playback bar. Vanishes after a couple of seconds so
-  // the chrome stays calm.
-  const [captureToast, setCaptureToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (!captureToast) return;
-    const handle = window.setTimeout(() => setCaptureToast(null), 2200);
-    return () => window.clearTimeout(handle);
-  }, [captureToast]);
-
   // Look up the current annotation interval (start + end) for a concept on
   // the active speaker (read directly from the store so we don't hold a
   // hook subscription at parent scope).
   const lookupConceptInterval = (
     speaker: string,
-    concept: Concept,
+    concept: { name: string; key: string },
   ): { start: number; end: number } | null => {
     const records = useAnnotationStore.getState().records;
     const record = records[speaker];
@@ -2739,204 +2695,6 @@ export function ParseUI() {
     return interval ? { start: interval.start, end: interval.end } : null;
   };
 
-  const markLexemeManuallyAdjusted = useAnnotationStore(
-    (s) => s.markLexemeManuallyAdjusted,
-  );
-
-  // Capture an anchor from the currently-selected concept + the current
-  // playback time. Wired to BOTH the in-Annotate "Anchor offset here"
-  // button and the modal's "Capture from current selection" button.
-  //
-  // Capturing an anchor is also an assertion that this lexeme's timing is
-  // now correct — so we flag the underlying interval as manuallyAdjusted
-  // immediately. A subsequent global offset will skip it, protecting the
-  // user's work from being shifted again.
-  const captureCurrentAnchor = (): { ok: boolean; message: string } => {
-    if (!activeActionSpeaker) {
-      return { ok: false, message: 'Select a speaker first.' };
-    }
-    const conc = concepts.find((c) => c.id === conceptId) ?? null;
-    if (!conc) {
-      return { ok: false, message: 'Select a lexeme in the sidebar first.' };
-    }
-    const interval = lookupConceptInterval(activeActionSpeaker, conc);
-    if (interval === null) {
-      return {
-        ok: false,
-        message: `No annotation interval for "${conc.name}" — open the lexeme in Annotate first.`,
-      };
-    }
-    const audio = usePlaybackStore.getState().currentTime;
-    if (audio <= 0) {
-      return {
-        ok: false,
-        message: 'Scrub the waveform to where the lexeme actually is, then capture again.',
-      };
-    }
-    setManualAnchors((prev) => {
-      // Replace any existing anchor for the same concept — capturing
-      // again on the same lexeme is a "I changed my mind, this is the
-      // right audio position" gesture, not a duplicate.
-      const filtered = prev.filter((a) => a.conceptKey !== conc.key);
-      return [
-        ...filtered,
-        {
-          conceptKey: conc.key,
-          conceptName: conc.name,
-          csvTimeSec: interval.start,
-          audioTimeSec: audio,
-          capturedAt: Date.now(),
-        },
-      ];
-    });
-    // Flag this lexeme as manually-adjusted so a later global offset
-    // skips it. Scenario: the user fixes lexemes 1–5 (or captures anchors
-    // for them), then later anchors lexemes 10–20 and applies +0.5s. The
-    // flag is what keeps 1–5 from being shifted again and undoing their
-    // verified timing. Capturing an anchor here is an explicit assertion
-    // that this lexeme is correctly placed — no reason to wait for the
-    // user to press Review & apply before locking it.
-    markLexemeManuallyAdjusted(activeActionSpeaker, interval.start, interval.end);
-    const offset = audio - interval.start;
-    const sign = offset >= 0 ? '+' : '';
-    return {
-      ok: true,
-      message: `Anchored ${conc.name} @ ${formatPlaybackTime(audio)} → ${sign}${offset.toFixed(2)}s offset.`,
-    };
-  };
-
-  const captureAnchorFromBar = () => {
-    const result = captureCurrentAnchor();
-    setCaptureToast(result.message);
-  };
-
-  const removeManualAnchor = (conceptKey: string) => {
-    setManualAnchors((prev) => prev.filter((a) => a.conceptKey !== conceptKey));
-  };
-
-  // Live consensus offset across captured anchors — median of per-pair
-  // offsets, plus median absolute deviation as a disagreement metric.
-  // Computed client-side so the user gets zero-latency feedback as they
-  // add or remove anchors. The backend re-derives the same number when
-  // the user clicks Apply, so this is purely UI.
-  const manualConsensus = useMemo(() => {
-    if (!manualAnchors.length) {
-      return null;
-    }
-    const offsets = manualAnchors.map((a) => a.audioTimeSec - a.csvTimeSec);
-    const sorted = [...offsets].sort((a, b) => a - b);
-    const median =
-      sorted.length % 2
-        ? sorted[(sorted.length - 1) / 2]
-        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
-    const deviations = offsets.map((o) => Math.abs(o - median)).sort((a, b) => a - b);
-    const mad =
-      deviations.length === 1
-        ? 0
-        : deviations.length % 2
-        ? deviations[(deviations.length - 1) / 2]
-        : (deviations[deviations.length / 2 - 1] + deviations[deviations.length / 2]) / 2;
-    return {
-      median,
-      mad,
-      offsets,
-    };
-  }, [manualAnchors]);
-
-  const detectOffsetForSpeaker = async () => {
-    setActionsMenuOpen(false);
-    if (!activeActionSpeaker) {
-      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
-      return;
-    }
-    setOffsetState({ phase: 'detecting', jobId: null, progress: 0, origin: 'auto' });
-    let submittedJobId: string | null = null;
-    try {
-      const { jobId } = await detectTimestampOffset(activeActionSpeaker);
-      if (!jobId) throw new Error('Server did not return a job ID for offset detection');
-      submittedJobId = jobId;
-      setOffsetState({ phase: 'detecting', jobId, progress: 0, origin: 'auto' });
-      const result = await pollOffsetDetectJob(jobId, 'offset_detect', {
-        onProgress: ({ progress, message }) => {
-          setOffsetState((prev) =>
-            prev.phase === 'detecting'
-              ? { ...prev, progress, progressMessage: message }
-              : prev,
-          );
-        },
-      });
-      setOffsetState({ phase: 'detected', result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
-      const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
-      setOffsetState({ phase: 'error', message, traceback, jobId });
-    }
-  };
-
-  const applyDetectedOffset = async () => {
-    if (offsetState.phase !== 'detected') return;
-    const { result } = offsetState;
-    setOffsetState({ phase: 'applying', result });
-    try {
-      const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
-      await reloadSpeakerAnnotation(result.speaker);
-      setOffsetState({
-        phase: 'applied',
-        result,
-        shifted: apply.shiftedIntervals,
-        protected: apply.protectedIntervals ?? 0,
-      });
-    } catch (err) {
-      setOffsetState({
-        phase: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
-  const submitManualOffset = async () => {
-    if (!activeActionSpeaker) {
-      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
-      return;
-    }
-    if (!manualAnchors.length) {
-      setOffsetState({
-        phase: 'error',
-        message: 'Capture at least one anchor before computing the offset.',
-      });
-      return;
-    }
-    setManualBusy(true);
-    let submittedJobId: string | null = null;
-    try {
-      const pairs: OffsetPair[] = manualAnchors.map((a) => ({
-        audioTimeSec: a.audioTimeSec,
-        csvTimeSec: a.csvTimeSec,
-      }));
-      const { jobId } = await detectTimestampOffsetFromPairs(activeActionSpeaker, pairs);
-      if (!jobId) throw new Error('Server did not return a job ID');
-      submittedJobId = jobId;
-      setOffsetState({ phase: 'detecting', jobId, progress: 0, origin: 'manual' });
-      const result = await pollOffsetDetectJob(jobId, 'offset_detect_from_pair', {
-        onProgress: ({ progress, message }) => {
-          setOffsetState((prev) =>
-            prev.phase === 'detecting'
-              ? { ...prev, progress, progressMessage: message }
-              : prev,
-          );
-        },
-      });
-      setOffsetState({ phase: 'detected', result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
-      const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
-      setOffsetState({ phase: 'error', message, traceback, jobId });
-    } finally {
-      setManualBusy(false);
-    }
-  };
   const [exporting, setExporting] = useState(false);
 
   const resetProject = () => {
@@ -3007,6 +2765,41 @@ export function ParseUI() {
       customOrder: c.custom_order,
     }));
   }, [rawConcepts, getTagsForConcept]);
+
+  const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
+  const markLexemeManuallyAdjusted = useAnnotationStore((s) => s.markLexemeManuallyAdjusted);
+  const {
+    offsetState,
+    setOffsetState,
+    jobLogsOpen,
+    openJobLogs,
+    closeJobLogs,
+    manualAnchors,
+    manualBusy,
+    captureToast,
+    manualConsensus,
+    openManualOffset,
+    closeOffsetModal,
+    captureCurrentAnchor,
+    captureAnchorFromBar,
+    removeManualAnchor,
+    detectOffsetForSpeaker,
+    applyDetectedOffset,
+    submitManualOffset,
+  } = useOffsetState({
+    activeActionSpeaker,
+    selectedConcept,
+    protectedLexemeCount,
+    getCurrentTime: () => usePlaybackStore.getState().currentTime,
+    lookupConceptInterval,
+    markLexemeManuallyAdjusted,
+    detectTimestampOffset,
+    detectTimestampOffsetFromPairs,
+    pollOffsetDetectJob,
+    applyTimestampOffset,
+    reloadSpeakerAnnotation,
+    onCloseActionsMenu: () => setActionsMenuOpen(false),
+  });
 
   // — Derived: tags list from store —
   const tagsList = useMemo<LingTag[]>(() =>
@@ -3405,7 +3198,7 @@ export function ParseUI() {
                 )}
                 {isError && offsetState.jobId && (
                   <button
-                    onClick={() => setJobLogsOpen(offsetState.jobId!)}
+                    onClick={() => openJobLogs(offsetState.jobId!)}
                     className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 underline hover:text-rose-800"
                     data-testid="topbar-offset-view-log"
                   >
@@ -3414,7 +3207,7 @@ export function ParseUI() {
                 )}
                 {isError && (
                   <button
-                    onClick={() => setOffsetState({ phase: 'idle' })}
+                    onClick={closeOffsetModal}
                     className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
                     aria-label="Dismiss offset status"
                   >
@@ -4279,7 +4072,7 @@ export function ParseUI() {
           activeActionSpeaker={activeActionSpeaker}
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
-          onOpenManualOffset={() => setOffsetState({ phase: 'manual' })}
+          onOpenManualOffset={openManualOffset}
           annotateSpeakerTools={selectedSpeakers[0] ? <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={concept.id} /> : null}
           annotateAuxTools={<TranscriptionLanesControls />}
           onSaveAnnotations={() => {
@@ -4349,360 +4142,29 @@ export function ParseUI() {
         open={sourcesReportOpen}
         onClose={() => setSourcesReportOpen(false)}
       />
-      <Modal
+      <OffsetAdjustmentModal
         open={offsetState.phase !== 'idle'}
-        onClose={() => setOffsetState({ phase: 'idle' })}
-        title="Timestamp Offset"
-        // While the async job is actually running, lock the modal. A
-        // stray click on the backdrop or the Escape key used to drop
-        // the user out of the flow while the worker kept computing —
-        // the progress was also invisible because nothing persisted in
-        // the header. The header chip now covers the "I want to dismiss
-        // this and come back" case, so blocking dismissal here is safe.
-        dismissible={offsetState.phase !== 'detecting' && offsetState.phase !== 'applying'}
-      >
-        <div className="space-y-3 text-sm" data-testid="offset-modal">
-          {offsetState.phase === 'detecting' && (
-            <div className="space-y-2" data-testid="offset-detecting">
-              <div className="flex items-center gap-2 text-slate-600">
-                <Loader2 className="h-4 w-4 animate-spin"/>
-                <span>{offsetState.progressMessage ?? 'Detecting offset…'}</span>
-                <span className="ml-auto font-mono text-[11px] tabular-nums text-slate-400">
-                  {Math.round(offsetState.progress)}%
-                </span>
-              </div>
-              <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-indigo-500 transition-all"
-                  style={{ width: `${Math.max(2, Math.round(offsetState.progress))}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                This window stays open while the worker is running — a
-                single click used to dismiss it silently and lose the
-                progress indicator. The header also mirrors the status.
-              </p>
-            </div>
-          )}
-          {offsetState.phase === 'manual' && (() => {
-            const consensus = manualConsensus;
-            const directionWord =
-              !consensus
-                ? null
-                : consensus.median > 0.001
-                ? 'later (toward the end)'
-                : consensus.median < -0.001
-                ? 'earlier (toward the start)'
-                : 'no shift';
-            const arrow =
-              !consensus
-                ? null
-                : consensus.median > 0.001
-                ? '→'
-                : consensus.median < -0.001
-                ? '←'
-                : '·';
-            const noisy = consensus !== null && consensus.mad > 2.0;
-            return (
-              <div className="space-y-3" data-testid="offset-manual">
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                  <p className="leading-snug">
-                    Capture one trusted lexeme at a time. In Annotate, click a lexeme,
-                    scrub to where you actually hear it, then press
-                    <span className="mx-1 inline-flex items-center gap-1 rounded bg-indigo-100 px-1.5 py-0.5 font-semibold text-indigo-700">
-                      <Anchor className="h-3 w-3"/>Anchor offset here
-                    </span>
-                    on the playback bar. Captured pairs accumulate below — adding
-                    more refines the offset.
-                  </p>
-                </div>
-
-                {manualAnchors.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 p-4 text-xs text-slate-500">
-                    <Anchor className="h-5 w-5 text-slate-300"/>
-                    No anchors captured yet.
-                    <span className="text-[11px] text-slate-400">
-                      Switch to Annotate, select a lexeme, scrub the waveform, then click
-                      <em> Anchor offset here</em>.
-                    </span>
-                  </div>
-                ) : (
-                  <ul className="space-y-1.5" data-testid="offset-manual-anchor-list">
-                    {manualAnchors.map((a) => {
-                      const pairOffset = a.audioTimeSec - a.csvTimeSec;
-                      const disagrees =
-                        consensus !== null && Math.abs(pairOffset - consensus.median) > 1.5;
-                      const sign = pairOffset >= 0 ? '+' : '';
-                      return (
-                        <li
-                          key={a.conceptKey}
-                          className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${disagrees ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}
-                          data-testid="offset-manual-anchor"
-                        >
-                          <div className="flex-1 truncate">
-                            <span className="font-semibold text-slate-800">{a.conceptName}</span>
-                            <span className="ml-1 font-mono text-slate-400">{a.conceptKey}</span>
-                          </div>
-                          <div className="font-mono text-[11px] text-slate-500 tabular-nums" title={`csv ${a.csvTimeSec.toFixed(3)}s → audio ${a.audioTimeSec.toFixed(3)}s`}>
-                            {formatPlaybackTime(a.csvTimeSec)} <span className="text-slate-300">→</span> {formatPlaybackTime(a.audioTimeSec)}
-                          </div>
-                          <div className={`w-16 text-right font-mono text-[11px] tabular-nums ${disagrees ? 'text-rose-600' : 'text-slate-700'}`}>
-                            {sign}{pairOffset.toFixed(2)}s
-                          </div>
-                          <button
-                            onClick={() => removeManualAnchor(a.conceptKey)}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
-                            title="Remove this anchor"
-                            data-testid={`offset-manual-anchor-remove-${a.conceptKey}`}
-                          >
-                            <X className="h-3 w-3"/>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-
-                {consensus !== null && (
-                  <div className={`rounded-md border p-3 text-xs ${noisy ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
-                    <div className="font-mono text-base text-slate-900" data-testid="offset-manual-consensus">
-                      {consensus.median >= 0 ? '+' : ''}{consensus.median.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
-                    </div>
-                    <div className="mt-1 text-slate-700">
-                      Apply will move every interval <strong>{Math.abs(consensus.median).toFixed(3)} s {directionWord}</strong>.
-                    </div>
-                    <div className="mt-1 text-slate-500">
-                      {manualAnchors.length} anchor{manualAnchors.length === 1 ? '' : 's'}
-                      {consensus.mad > 0 && (
-                        <> · spread ±{consensus.mad.toFixed(2)}s</>
-                      )}
-                      {noisy && (
-                        <> — anchors disagree, review the rose-highlighted ones above</>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                    onClick={() => {
-                      const r = captureCurrentAnchor();
-                      if (!r.ok) {
-                        setOffsetState({ phase: 'error', message: r.message });
-                      }
-                    }}
-                    title="Use the lexeme currently selected in the sidebar plus the current playback time"
-                    data-testid="offset-manual-capture"
-                  >
-                    <Plus className="h-3 w-3"/> Capture from current selection
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                      onClick={() => setOffsetState({ phase: 'idle' })}
-                    >
-                      Close
-                    </button>
-                    <button
-                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      onClick={() => { void submitManualOffset(); }}
-                      disabled={!manualAnchors.length || manualBusy}
-                      data-testid="offset-manual-submit"
-                    >
-                      {manualBusy ? 'Computing…' : 'Review & apply →'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-          {offsetState.phase === 'detected' && (
-            <>
-              {(() => {
-                const r = offsetState.result;
-                const direction = r.direction ?? (r.offsetSec >= 0 ? 'later' : 'earlier');
-                const sign = r.offsetSec >= 0 ? '+' : '';
-                const lowConf = (r.confidence ?? 0) < 0.5;
-                const directionWord =
-                  direction === 'later' ? 'later (toward the end)' :
-                  direction === 'earlier' ? 'earlier (toward the start)' :
-                  'no-op (no shift)';
-                const arrow = direction === 'later' ? '→' : direction === 'earlier' ? '←' : '·';
-                const isManual = r.method === 'manual_pair';
-                return (
-                  <>
-                    <div className={`rounded-md border p-3 text-xs ${lowConf ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
-                      <div className="font-mono text-base text-slate-900" data-testid="offset-value">
-                        {sign}{r.offsetSec.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
-                      </div>
-                      <div className="mt-1 text-slate-700" data-testid="offset-direction-label">
-                        Apply will move every interval <strong>{Math.abs(r.offsetSec).toFixed(3)} s {directionWord}</strong>.
-                      </div>
-                      <div className="mt-2 text-slate-500">
-                        {isManual ? (
-                          <>From single trusted pair · confidence {Math.round((r.confidence ?? 0) * 100)}%</>
-                        ) : (
-                          <>
-                            Confidence {Math.round((r.confidence ?? 0) * 100)}% · {r.nAnchors}/{r.totalAnchors} anchors matched · {r.totalSegments} STT segments
-                            {typeof r.spreadSec === 'number' && r.spreadSec > 0 && (
-                              <> · spread ±{r.spreadSec.toFixed(2)}s</>
-                            )}
-                            {r.method && <> · {r.method.replace('_', ' ')}</>}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {(r.warnings?.length ?? 0) > 0 && (
-                      <ul className="space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
-                        {r.warnings!.map((w, i) => (
-                          <li key={i} className="flex items-start gap-1.5">
-                            <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0"/>{w}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {protectedLexemeCount > 0 && (
-                      <div
-                        data-testid="offset-protected-notice"
-                        className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
-                      >
-                        <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0"/>
-                        <span>
-                          <strong>{protectedLexemeCount}</strong> lexeme{protectedLexemeCount === 1 ? '' : 's'} will be protected — you have manually adjusted {protectedLexemeCount === 1 ? 'its' : 'their'} timing and the offset will skip {protectedLexemeCount === 1 ? 'it' : 'them'}.
-                        </span>
-                      </div>
-                    )}
-                    {(r.matches?.length ?? 0) > 0 && (
-                      <details className="text-[11px] text-slate-600">
-                        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
-                          Show matched anchor pairs ({r.matches!.length})
-                        </summary>
-                        <table className="mt-1 w-full table-fixed border-separate border-spacing-y-0.5 font-mono">
-                          <thead className="text-[10px] text-slate-400">
-                            <tr>
-                              <th className="text-left">Anchor text</th>
-                              <th className="text-right">CSV t</th>
-                              <th className="text-right">Audio t</th>
-                              <th className="text-right">Δ</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {r.matches!.slice(0, 8).map((m, i) => (
-                              <tr key={i} className="text-slate-700">
-                                <td className="truncate">{m.anchor_text}</td>
-                                <td className="text-right">{m.anchor_start?.toFixed(2) ?? '—'}</td>
-                                <td className="text-right">{m.segment_start?.toFixed(2) ?? '—'}</td>
-                                <td className={`text-right ${Math.abs(m.offset_sec - r.offsetSec) > 1.5 ? 'text-rose-600' : ''}`}>
-                                  {m.offset_sec >= 0 ? '+' : ''}{m.offset_sec.toFixed(2)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </details>
-                    )}
-                    <div className="flex justify-between gap-2">
-                      <button
-                        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                        onClick={() => setOffsetState({ phase: 'manual' })}
-                        data-testid="offset-use-known-anchor"
-                      >
-                        Use a known anchor instead
-                      </button>
-                      <div className="flex gap-2">
-                        <button
-                          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                          onClick={() => setOffsetState({ phase: 'idle' })}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 ${lowConf ? 'bg-amber-600' : 'bg-indigo-600'}`}
-                          onClick={() => { void applyDetectedOffset(); }}
-                          data-testid="offset-apply"
-                          title={lowConf ? 'Low confidence — review the matches before applying' : undefined}
-                        >
-                          {lowConf ? 'Apply anyway' : 'Apply offset'}
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </>
-          )}
-          {offsetState.phase === 'applying' && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin"/> Applying offset…
-            </div>
-          )}
-          {offsetState.phase === 'applied' && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-emerald-700">
-                <CheckCircle2 className="h-4 w-4"/> Shifted {offsetState.shifted} interval{offsetState.shifted === 1 ? '' : 's'} by {offsetState.result.offsetSec.toFixed(3)}s
-              </div>
-              {offsetState.protected > 0 && (
-                <div
-                  data-testid="offset-applied-protected"
-                  className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
-                >
-                  <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0"/>
-                  <span>
-                    Left <strong>{offsetState.protected}</strong> interval row{offsetState.protected === 1 ? '' : 's'} untouched — they were previously locked by manual timestamp edits or anchor captures.
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-end">
-                <button
-                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={() => setOffsetState({ phase: 'idle' })}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-          {offsetState.phase === 'error' && (
-            <div className="space-y-2">
-              <div className="flex items-start gap-2 text-rose-700">
-                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0"/>
-                <span data-testid="offset-error">{offsetState.message}</span>
-              </div>
-              {offsetState.jobId && (
-                <div className="text-[11px] text-slate-500">
-                  Job <span className="font-mono text-slate-700">{offsetState.jobId}</span>
-                  {' — '}
-                  <button
-                    className="font-semibold text-indigo-700 underline hover:text-indigo-800"
-                    onClick={() => setJobLogsOpen(offsetState.jobId!)}
-                    data-testid="offset-error-view-log"
-                  >
-                    View crash log
-                  </button>
-                </div>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={() => setOffsetState({ phase: 'manual' })}
-                >
-                  Try a known anchor
-                </button>
-                <button
-                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={() => setOffsetState({ phase: 'idle' })}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
+        offsetState={offsetState}
+        manualAnchors={manualAnchors}
+        manualConsensus={manualConsensus}
+        manualBusy={manualBusy}
+        protectedLexemeCount={protectedLexemeCount}
+        onClose={closeOffsetModal}
+        onCaptureCurrentSelection={() => {
+          const result = captureCurrentAnchor();
+          if (!result.ok) {
+            setOffsetState({ phase: 'error', message: result.message });
+          }
+        }}
+        onRemoveManualAnchor={removeManualAnchor}
+        onSubmitManualOffset={() => { void submitManualOffset(); }}
+        onApplyDetectedOffset={() => { void applyDetectedOffset(); }}
+        onOpenManualOffset={openManualOffset}
+        onOpenJobLogs={openJobLogs}
+      />
       <JobLogsModal
         jobId={jobLogsOpen}
-        onClose={() => setJobLogsOpen(null)}
+        onClose={closeJobLogs}
       />
       <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
         <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
