@@ -106,7 +106,7 @@ No P0 item may be silently downgraded.
 
 | Surface | Current oracle files | Critical behaviors that must match | Priority |
 |---|---|---|---|
-| AI/chat shell | `src/components/annotate/ChatPanel.tsx`, `src/components/shared/ChatMarkdown.tsx` | start session, run/poll chat, show status/result/error cleanly, preserve session semantics expected by UI | P1 |
+| ~~AI/chat shell~~ — **DROPPED from rebuild parity scope 2026-04-26** | `src/components/annotate/ChatPanel.tsx`, `src/components/shared/ChatMarkdown.tsx` | start session, run/poll chat, show status/result/error cleanly, preserve session semantics expected by UI | P1 |
 | Import / onboarding | `src/components/annotate/OnboardingFlow.tsx`, `src/components/compare/SpeakerImport.tsx`, `src/components/compare/CommentsImport.tsx` | upload/start/poll flows, completion and failure states, no phantom success, persisted outputs appear where current PARSE expects them | P1 |
 | Compute and report modals | `src/components/compute/ClefConfigModal.tsx`, `ClefSourcesReportModal.tsx`, `ClefPopulateSummaryBanner.tsx`, `src/components/shared/BatchReportModal.tsx`, `TranscriptionRunModal.tsx` | same launch affordances, status/progress handling, and report visibility for users reviewing compute outputs | P1 |
 | Contact lexeme / CLEF compare extensions | `ContactLexemePanel.tsx` and CLEF helpers | same coverage/config/fetch flow and same decision-support affordances in Compare mode | P1 |
@@ -331,10 +331,10 @@ The P0/P1/P2 tiers in §3 describe what eventually needs evidence. This section 
 | Order | Surface | Tier | Why now |
 |---|---|---|---|
 | 1 | Tags | P0 | Twice-deferred (PR #78 task 3, PR #84 task 2). Cannot be deferred a third time without coordinator-level escalation. |
-| 2 | AI/chat | P1 | Most likely to expose contract drift after chat_tools.py decomposition (PRs 2-4 in flight). |
-| 3 | Import / onboarding | P1 | Path-separator bug fix (#77) needs forward-looking parity verification. |
-| 4 | Compute / report modals | P1 | Less drift risk, deferred. |
-| 5 | CLEF | P1 | Deferred. |
-| 6 | Job diagnostics | P1 | Deferred. |
+| 2 | Import / onboarding | P1 | Path-separator bug fix (#77) needs forward-looking parity verification. |
+| 3 | Compute / report modals | P1 | Less drift risk, deferred. |
+| 4 | CLEF | P1 | Deferred. |
+| 5 | Job diagnostics | P1 | Deferred. |
+| ~~AI/chat~~ | ~~P1~~ | **DROPPED** 2026-04-26 — AIChat.tsx is now maintenance-mode-only per Lucas decision. The underlying chat_tools.py decomposition continues (foundation for internal tool use and MCP); only the in-app chat UI and its parity evidence are dropped. |
 
 Coordinator updates this table after each evidence pass ships.

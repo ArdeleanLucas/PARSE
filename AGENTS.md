@@ -58,6 +58,30 @@ Practical implications:
 
 If a future Lucas decision reverses this, the cancellation banners on plan docs must be lifted explicitly — no implicit revival.
 
+### AIChat.tsx is maintenance-mode-only (added 2026-04-26)
+
+Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/AIChat.tsx`) is **maintenance-mode-only**. No new chat UI features should ship. The component stays mounted and functional but does not receive product investment.
+
+**What's still in scope:**
+
+- `python/ai/chat_tools.py` decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
+- `python/adapters/mcp_adapter.py` decomposition (env_config.py PR 1 + follow-ups)
+- The 50 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
+- Bug fixes that touch AIChat.tsx incidentally (e.g., the path-separator fix at PR #77 affected stt_start which AIChat consumes)
+
+**What's dropped:**
+
+- New AIChat features (Quick Actions additions, provider switch UX improvements, message history features, etc.)
+- AIChat parity evidence pass (was queued as inventory §12 priority position 2; now removed entirely from the priority list)
+- AIChat-specific test coverage gaps (don't add new tests for chat-only behavior)
+- Any chat-side performance / latency optimization work
+
+**Practical guidance:**
+
+- If a chat_tools.py decomposition PR incidentally touches AIChat.tsx (e.g., to update an import path), that's fine — keep the change minimal.
+- If a parity evidence pass against another P0/P1 surface reveals a chat-related bug, file an issue and triage; do NOT add it to active work.
+- Re-adding AIChat features later is cheap because the component is fully extracted (PR #61) and the tools are decomposed. ~1 day of work to re-enable a feature lane if Lucas reverses this decision.
+
 ## Screenshot convention (private-repo constraint)
 
 **Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.
