@@ -117,4 +117,16 @@ describe('RightPanel', () => {
     expect(screen.getByText(/shared backend recompute path as Cognates/i)).toBeTruthy();
     expect(screen.getByText(/Refresh reloads saved enrichments only/i)).toBeTruthy();
   });
+
+  it('disables generic compare Run when no speakers are selected', () => {
+    renderRightPanel({
+      currentMode: 'compare',
+      selectedSpeakers: [],
+      computeMode: 'cognates',
+    });
+
+    const runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement;
+    expect(runButton.disabled).toBe(true);
+    expect(screen.getByText(/Selected speakers only: 0 of 2/i)).toBeTruthy();
+  });
 });
