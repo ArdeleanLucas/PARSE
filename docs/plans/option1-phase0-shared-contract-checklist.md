@@ -99,6 +99,29 @@ Acknowledgement basis on 2026-04-26: the active lane handoff PRs already referen
 
 This signs the **baseline gate**, not the entire broader Phase 0 checklist. Later sections (skeleton freeze, runtime handshake, route inventory, API inventory, etc.) still remain open contract work, but they no longer block the coordinator from recording parity evidence against the frozen oracle baseline.
 
+### 3.2 Backend baseline failure classification
+
+The baseline also needs a caveat table because current oracle and rebuild backend suites are both red under the 2026-04-26 Windows conda run.
+
+| Test | Oracle | Rebuild | Class | Rationale |
+|---|---|---|---|---|
+| `test_onboard_speaker_dry_run_reports_plan_without_callback` | fail | fail | fixture-issue | Dry-run plan payload uses OS-native path separators (`\\` on Windows) in display strings; assertion is POSIX-only. |
+| `test_import_processed_speaker_dry_run_reports_plan` | fail | fail | fixture-issue | Same dry-run display-path separator mismatch as above. |
+| `test_import_processed_speaker_write_copies_assets_and_builds_workspace_files` | fail | fail | real-bug | Persisted `source_index.json` paths leak Windows separators into project metadata; this is a portability / contract bug, not just a display artifact. |
+| `test_import_processed_speaker_preserves_existing_sources_and_clears_stale_optional_metadata` | fail | fail | real-bug | Same persisted mixed-separator metadata bug as above. |
+| `test_read_audio_info_returns_metadata` | fail | fail | fixture-issue | Read-only metadata path string uses OS-native separators; assertion is POSIX-only. |
+| `test_run_full_annotation_pipeline_orchestrates_low_level_jobs` | fail | fail | fixture-issue | Workflow path argument is OS-native under Windows; orchestration logic is intact but the test is separator-strict. |
+| `test_run_normalize_job_forces_wav_output_for_non_wav_input_without_guard` | fail | fail | fixture-issue | `normalizedPath` result uses OS-native separators in the Windows run; behavior otherwise matches the intended output-path rule. |
+| `test_http_mcp_bridge_lists_and_executes_tools` | fail | pass | real-bug | Oracle log showed HTTP 500 from `GET /api/mcp/tools?mode=all`; this is a true API-boundary failure even though it did not reproduce on Linux. |
+| `test_ortho_section_defaults_cascade_guard` | fail | pass | fixture-issue | Oracle constructor now intentionally requires explicit `ortho.model_path`; the tmp test fixture does not satisfy that contract. |
+| `test_ortho_explicit_override_beats_defaults` | fail | pass | fixture-issue | Same missing `ortho.model_path` fixture precondition as above; failure occurs before the override behavior is actually exercised. |
+| `test_build_get_export_lingpy_response_preserves_headers_and_cleans_up_tempfile` | pass | fail | fixture-issue | Rebuild-only failure is a strict LF-vs-CRLF byte assertion under Windows; handler preserves bytes correctly and real export path writes LF-stable TSVs. |
+
+Implication for parity work on this baseline:
+- parity claims should treat the two persisted-path metadata failures as **shared real bugs** in the current baseline
+- the remaining red tests are **environment/fixture caveats** unless future evidence proves user-visible regressions
+- Annotate/Compare/Tags parity evidence after this point should cite which observed differences are baseline bugs versus rebuild drift
+
 ---
 
 ## 4. Freeze the rebuild-repo skeleton
