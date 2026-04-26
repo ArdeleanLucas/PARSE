@@ -2,10 +2,21 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock API client so tests don't need a live server
+const mockGetAnnotation = vi.fn();
+const mockSaveAnnotation = vi.fn();
+
 vi.mock("../api/client", () => ({
   getConfig: vi.fn(),
-  getAnnotation: vi.fn(),
-  saveAnnotation: vi.fn(),
+  getAnnotation: (...args: unknown[]) => mockGetAnnotation(...args),
+  saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
+  getEnrichments: vi.fn(),
+  saveEnrichments: vi.fn(),
+}));
+
+vi.mock("@/api/client", () => ({
+  getConfig: vi.fn(),
+  getAnnotation: (...args: unknown[]) => mockGetAnnotation(...args),
+  saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   getEnrichments: vi.fn(),
   saveEnrichments: vi.fn(),
 }));

@@ -8,6 +8,11 @@ vi.mock("../api/client", () => ({
   saveEnrichments: vi.fn(),
 }));
 
+vi.mock("@/api/client", () => ({
+  getAnnotation: vi.fn(),
+  saveAnnotation: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { useAnnotationStore } from "../stores/annotationStore";
 import type { AnnotationRecord } from "../api/types";
 

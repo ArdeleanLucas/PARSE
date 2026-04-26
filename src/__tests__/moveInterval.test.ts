@@ -8,6 +8,11 @@ vi.mock("../api/client", () => ({
   saveEnrichments: vi.fn(),
 }));
 
+vi.mock("@/api/client", () => ({
+  getAnnotation: vi.fn(),
+  saveAnnotation: vi.fn(),
+}));
+
 import { useAnnotationStore } from "../stores/annotationStore";
 
 function seedFail02() {
