@@ -9,6 +9,87 @@
 
 ---
 
+## Working environment — read this before you do anything
+
+**Push PRs to the rebuild repo, NEVER to the live oracle.** Your first attempt
+at this task ([PR #229 on ArdeleanLucas/PARSE](https://github.com/ArdeleanLucas/PARSE/pull/229))
+shipped against the wrong repo. The work was good; the venue was wrong. Two
+earlier refactor PRs (#225, #226) had the same problem and had to be reverted
+in oracle commit `0951287` — *revert: move refactor PRs out of live PARSE (#228)*.
+Do not make this the third occurrence.
+
+Before opening any PR for this task, verify all three of the following:
+
+1. **Working clone** is the rebuild clone:
+   ```
+   $ pwd
+   /home/lucas/gh/tarahassistant/PARSE-rebuild   # CORRECT
+   ```
+   NOT `/home/lucas/gh/ArdeleanLucas/PARSE` (oracle, capital).
+   NOT `/home/lucas/gh/ardeleanlucas/parse` (oracle, lowercase duplicate).
+   NOT any worktree under `/home/lucas/gh/worktrees/PARSE/...` whose `.git`
+   gitfile resolves to either oracle clone above. Worktrees inherit the parent
+   clone's remote — your PR #229 worktree (`/home/lucas/gh/worktrees/PARSE/chat-tools-tools-package-pr1`)
+   was a child of the oracle clone, which is why the push went to the wrong remote.
+   Always check:
+   ```
+   $ git remote -v
+   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (fetch)   # CORRECT
+   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (push)
+   ```
+   If the URL says `ArdeleanLucas/PARSE`, **stop**. Switch to
+   `/home/lucas/gh/tarahassistant/PARSE-rebuild` (or create a worktree under
+   `/home/lucas/gh/worktrees/PARSE-rebuild/...`) before continuing.
+
+2. **Branch is off rebuild's `origin/main`**, not oracle's. The two repos have
+   different SHAs even when they look superficially similar:
+   ```
+   $ git fetch origin main --quiet && git rev-parse --short=10 origin/main
+   # The hash here must match https://github.com/TarahAssistant/PARSE-rebuild/commits/main
+   ```
+
+3. **PR target is the rebuild repo:**
+   ```
+   $ gh pr create --repo TarahAssistant/PARSE-rebuild --base main ...
+   ```
+   The `--repo` flag is mandatory. Without it, gh will infer the remote from
+   the local clone's origin and you'll repeat the PR #229 mistake. If you ever
+   see a PR URL like `https://github.com/ArdeleanLucas/PARSE/pull/...`, **close
+   it immediately** and replay the same commit onto rebuild.
+
+### Recovery path for PR #229
+
+PR #229 should be **closed without merging on oracle**, then its single commit
+`a2d22b20fc3aea8d319e35d0d1c6b121481f1cd7` should be **cherry-picked onto a fresh
+branch off rebuild's `origin/main`** and opened as PR 1 of this task on the
+rebuild repo:
+
+```
+$ cd /home/lucas/gh/tarahassistant/PARSE-rebuild
+$ git fetch origin main --quiet
+$ git remote add oracle git@github.com:ArdeleanLucas/PARSE.git 2>/dev/null || true
+$ git fetch oracle refactor/chat-tools-tools-package-pr1 --quiet
+$ git checkout -B refactor/chat-tools-extract-read-only-bundles origin/main
+$ git cherry-pick a2d22b20fc3aea8d319e35d0d1c6b121481f1cd7
+$ # cherry-pick should apply cleanly: rebuild's chat_tools.py is byte-identical
+$ # to oracle's at the time PR #229 was branched.
+$ npm run typecheck && npm run test -- --run && python3 -m pytest python/ -x
+$ git push -u origin HEAD
+$ gh pr create --repo TarahAssistant/PARSE-rebuild --base main \
+    --title "refactor(chat_tools): extract read-only chat tool bundles" \
+    --body-file <body-pointing-at-PR-229-as-source>
+$ gh pr close 229 --repo ArdeleanLucas/PARSE --comment \
+    "Replayed onto the isolated refactor lane at TarahAssistant/PARSE-rebuild#NNN per docs/rebuild-context.md."
+$ git push oracle :refactor/chat-tools-tools-package-pr1   # delete oracle branch
+```
+
+Only after that replay PR is open on rebuild do you start PR 2 of this task.
+
+All commits, tests, gates, and screenshots referenced below assume you are in
+the rebuild clone with the rebuild remote.
+
+---
+
 ## Why this task
 
 `python/ai/chat_tools.py` is **6408 LoC, byte-identical to the live oracle**, and is the single largest untouched monolith in the rebuild. After PR #57 (speech/suggestion HTTP handlers) lands, it will be the dominant remaining structural risk.
@@ -46,64 +127,69 @@ The pattern is documented in the `parse-expose-chat-tool` skill — read it befo
 
 ---
 
-## Tool inventory + grouping (proposed)
+## Tool inventory + grouping (revised after PR #229)
 
-`chat_tools.py` currently registers ~50 tools per the live README claim. Group them by domain, one PR per group:
+`chat_tools.py` registers 50 tools (verified via `ParseChatTools(...).tool_names()`).
+PR #229 established a grouped-modules pattern (3 module files for ~17 read-only
+tools) instead of the originally-proposed one-file-per-tool layout. **The
+grouped-modules pattern is endorsed for the rest of this task** — it is more
+idiomatic Python, reduces import noise, and the agent demonstrated it works.
+Test coverage requirement is unchanged: each tool still gets covered by at
+least one dedicated test case (per-module test files are fine; do not collapse
+multiple tools' tests into a single `it`/`def test`).
 
-### Group 1 (PR 1) — Workspace/project read tools (lowest risk, no side effects)
+### PR 1 — Read-only context, preview, and job-status tools (already shipped on oracle as PR #229; replay to rebuild per Working environment §Recovery path)
 
-Files under `python/ai/tools/`:
-- `list_speakers.py`
-- `list_concepts.py`
-- `list_concept_speakers.py`
-- `read_workspace_config.py`
-- `read_audio_info.py`
-- `read_csv_preview.py`
-- `read_text_preview.py`
-- `get_speaker_status.py`
+Modules created in `python/ai/tools/`:
+- `project_read_tools.py` — `project_context_read`, `annotation_read`, `speakers_list`, `spectrogram_preview`, `read_audio_info`, `read_csv_preview`, `read_text_preview`
+- `preview_tools.py` — preview/inspection helpers (the agent's actual split; verify file contents)
+- `job_status_tools.py` — `stt_status`, `stt_word_level_status`, `forced_align_status`, `ipa_transcribe_acoustic_status`, `compute_status`, `audio_normalize_status`, `jobs_list`, `job_status`, `job_logs`, `jobs_list_active`
 
-### Group 2 (PR 2) — Annotation / editing tools
+Result: `python/ai/chat_tools.py` 6408 → 5428 LoC (−980).
 
-Files under `python/ai/tools/`:
-- `read_annotation.py`
-- `write_annotation.py`
-- `add_interval.py`
-- `update_interval.py`
-- `delete_interval.py`
-- `move_interval.py`
-- `mark_concept_done.py`
-- `apply_tag.py`
-- `remove_tag.py`
+### PR 2 — Acoustic starters + pipeline orchestration
 
-### Group 3 (PR 3) — Compute / job-orchestration tools
+Suggested module: `python/ai/tools/acoustic_pipeline_tools.py` (or split into
+`acoustic_starters.py` + `pipeline_tools.py` if the line count exceeds ~600).
+Tools to extract:
+- `stt_start`, `stt_word_level_start`, `forced_align_start`, `ipa_transcribe_acoustic_start`, `audio_normalize_start`
+- `pipeline_state_read`, `pipeline_state_batch`, `pipeline_run`
 
-Files under `python/ai/tools/`:
-- `start_normalize.py`
-- `start_stt.py`
-- `start_compute.py`
-- `start_offset_detect.py`
-- `apply_offset.py`
-- `poll_job.py`
-- `cancel_job.py`
-- `get_job_logs.py`
-- `start_lexeme_search.py`
-- `read_lexeme_results.py`
+Risk: medium. These are write-side operations that kick off long jobs. Tests
+must cover argument validation + the early-return paths; do not actually invoke
+GPU/STT pipelines in CI.
 
-### Group 4 (PR 4) — Onboarding / import / CLEF / export tools
+### PR 3 — Offset / import / memory bundles
 
-Files under `python/ai/tools/`:
-- `onboard_speaker_import.py`
-- `import_csv.py`
-- `import_comments.py`
-- `start_clef_populate.py`
-- `read_clef_status.py`
-- `read_contact_lexeme_coverage.py`
-- `export_lingpy.py`
-- `export_nexus.py`
-- `read_parse_memory.py`
-- `write_parse_memory.py`
+Suggested modules:
+- `python/ai/tools/offset_tools.py` — timestamp offset detect / apply / pair flows
+- `python/ai/tools/import_tools.py` — processed/onboard speaker import, tag import prep
+- `python/ai/tools/memory_tools.py` — `parse_memory_read`, `parse_memory_write`
 
-> **Before starting**, the agent must run `grep -nE "^def _handle_|^TOOL_SPEC_|tool_specs\\.append|register_tool" python/ai/chat_tools.py` and reconcile the actual tool list against the proposed grouping. If the real count differs from the proposed grouping (some tools may have been added or renamed since this prompt was written), update the grouping in PR 1's body and proceed with that revised grouping for PRs 2–4. **Do not silently drop or add tools.**
+Risk: medium-high. Onboarding tools have workspace-path coupling (see
+`parse-mcp-large-file-onboarding-timeouts` skill). Use the same fixture pattern
+PR #229 established for path-dependent tests.
+
+### PR 4 — Comparative / enrichment / export bundles
+
+Suggested modules:
+- `python/ai/tools/compare_tools.py` — concept comparison + cognate adjudication
+- `python/ai/tools/enrichment_tools.py` — CLEF / contact-lexeme enrichments
+- `python/ai/tools/export_tools.py` — LingPy TSV + NEXUS exports
+
+Risk: high. CLEF and export tools have the most external-API and on-disk
+side effects. Most likely to surface oracle-vs-rebuild parity drift if any
+exists.
+
+### Acceptance after all 4 PRs land on rebuild
+
+- `wc -l python/ai/chat_tools.py` ≤ 2500 (previously: ~60% reduction goal; PR #229 alone delivered 15%)
+- `python/ai/tools/` contains ~10 grouped-domain module files + per-domain `test_*.py` files
+- `ParseChatTools(...).tool_names()` still returns 50 tools, in the same order
+- MCP catalog tool count unchanged: 32 native + 36 with workflow macros + `mcp_get_exposure_mode`
+- `mcp_adapter.py`, `provider.py`, `chat_orchestrator.py`, `workflow_tools.py` unchanged in size and behavior (only import-path updates allowed)
+
+---
 
 ---
 
@@ -111,61 +197,75 @@ Files under `python/ai/tools/`:
 
 Each of the 4 PRs follows the same pattern. Use Group 1 as the worked example; repeat for Groups 2–4.
 
-### Step 1 — Create the per-tool file
+### Step 1 — Create the per-domain module file (grouped-modules pattern from PR #229)
 
-For each tool in the group, the new file should contain:
+Each domain module under `python/ai/tools/` should contain:
 
 ```python
-# python/ai/tools/list_speakers.py
-"""Chat tool: list_speakers — return all speakers in the workspace."""
+# python/ai/tools/<domain>_tools.py — example shape
+"""Chat tools: read-only project context (speakers, annotations, spectrogram preview)."""
 
-from typing import Any, Dict
-# any other imports the handler needs
+from typing import Any, Dict, List
+# any other imports the module needs
 
-TOOL_SPEC: Dict[str, Any] = {
-    "name": "list_speakers",
-    "description": "...",   # copy verbatim from chat_tools.py
-    "parameters": { ... },  # copy verbatim
-}
+TOOL_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "speakers_list",
+        "description": "...",   # copy verbatim from chat_tools.py
+        "parameters": { ... },
+    },
+    {
+        "name": "annotation_read",
+        "description": "...",
+        "parameters": { ... },
+    },
+    # ... rest of the domain's tool specs
+]
 
 
-def handle(workspace_root: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Implementation. Signature must match the existing _handle_list_speakers in chat_tools.py."""
-    # body cut from chat_tools.py
+def handle_speakers_list(workspace_root: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Signature must match the existing _handle_speakers_list in chat_tools.py."""
     ...
+
+
+def handle_annotation_read(workspace_root: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    ...
+
+
+HANDLERS = {
+    "speakers_list": handle_speakers_list,
+    "annotation_read": handle_annotation_read,
+    # ... rest
+}
 ```
 
 The handler signature must match what `ParseChatTools.execute` currently dispatches to. Read the dispatch site in `chat_tools.py` first to confirm signature shape (positional args vs **kwargs, sync vs async).
 
-### Step 2 — Update the registry
+### Step 2 — Wire each new module into chat_tools.py via thin delegating wrappers
 
-`python/ai/tools/_registry.py`:
+PR #229 established the wiring pattern: `chat_tools.py` keeps the
+`ParseChatTools` class and its public methods, but each `_handle_<tool>` body
+becomes a one-line delegation to the new module's handler. Example:
 
 ```python
-"""Aggregated chat-tool registry. chat_tools.py imports from here."""
+# python/ai/chat_tools.py — after extraction
+from ai.tools import project_read_tools as _project_read
 
-from typing import Callable, Dict, List
-from . import (
-    list_speakers,
-    list_concepts,
-    list_concept_speakers,
-    # ... rest of the group
-)
+class ParseChatTools:
+    ...
+    def _handle_speakers_list(self, args):
+        return _project_read.handle_speakers_list(self.workspace_root, args)
 
-TOOLS = [
-    list_speakers,
-    list_concepts,
-    # ...
-]
-
-def all_specs() -> List[Dict]:
-    return [t.TOOL_SPEC for t in TOOLS]
-
-def all_handlers() -> Dict[str, Callable]:
-    return {t.TOOL_SPEC["name"]: t.handle for t in TOOLS}
+    def _handle_annotation_read(self, args):
+        return _project_read.handle_annotation_read(self.workspace_root, args)
 ```
 
-For PRs 2–4, append to the existing `_registry.py` rather than rewriting it.
+And the tool-spec table is built from the modules' `TOOL_SPECS` lists during
+`ParseChatTools.__init__`. PR #229's actual implementation is the canonical
+reference — read it before starting PR 2.
+
+No separate `_registry.py` module is needed; PR #229 demonstrated the wiring
+works without one.
 
 ### Step 3 — Slim chat_tools.py
 
@@ -277,7 +377,8 @@ Use these installed Hermes skills:
 ## Out-of-band notes
 
 - **Do not modify `mcp_adapter.py` in this task.** It will be the next backend monolith after `chat_tools.py` lands. Splitting it now would conflict with the parity work this task enables.
-- The currently-checked-out branch on `/home/lucas/gh/tarahassistant/PARSE-rebuild` is stale. Branch from `origin/main` directly.
-- If a tool handler depends on private state inside `chat_tools.py` (a module-level cache, a closure over `__init__` args), pull that state into the new tool file as module-level state, OR pass it as a constructor arg if it must remain shared. Document the choice in the PR body.
-- If the actual tool count differs from the proposed grouping (because tools have been added/renamed since this prompt was written), update the grouping in PR 1 and proceed — but do not silently drop tools.
+- Always branch from `git fetch origin main --quiet && git rev-parse origin/main`, never from local HEAD. The disk state of the rebuild clone may be on a stale branch from prior agent runs.
+- If a tool handler depends on private state inside `chat_tools.py` (a module-level cache, a closure over `__init__` args), pull that state into the new module as module-level state, OR pass it as a constructor arg if it must remain shared. Document the choice in the PR body.
 - If any existing test relies on patching `ai.chat_tools._handle_<tool>` directly, update those patches to target the new module path. Do not delete the tests.
+- The docs PR carrying this prompt (#59) does not need to merge for you to act on this task. It is the queueing artifact, not a precondition.
+- After PR 1 (the PR #229 replay) opens on rebuild, **wait for coordinator review before starting PR 2.** This prevents stacking the same lane-violation mistake across multiple PRs in parallel.
