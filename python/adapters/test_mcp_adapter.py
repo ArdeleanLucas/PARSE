@@ -248,18 +248,28 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
     """Dict literals silently keep the last value for duplicate keys — and
     class-attribute method redefinitions silently keep the last def. A past
     regression had two copies of contact_lexeme_lookup disagreeing on schema
-    and behavior. Count source-level definitions to keep that from returning."""
+    and behavior. Count source-level definitions across the monolith + extracted
+    bundle modules to keep that from returning."""
     import re
-    source = pathlib.Path(__file__).resolve().parent.parent / "ai" / "chat_tools.py"
-    text = source.read_text(encoding="utf-8")
+
+    ai_dir = pathlib.Path(__file__).resolve().parent.parent / "ai"
+    chat_tools_source = ai_dir / "chat_tools.py"
+    tool_module_sources = sorted((ai_dir / "tools").glob("*.py"))
+
+    chat_tools_text = chat_tools_source.read_text(encoding="utf-8")
+    combined_specs_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [chat_tools_source, *tool_module_sources]
+    )
+
     for tool in [
         "annotation_read", "cognate_compute_preview", "contact_lexeme_lookup",
         "cross_speaker_match_preview", "import_processed_speaker", "import_tag_csv", "prepare_tag_import",
         "project_context_read", "read_csv_preview", "spectrogram_preview",
         "stt_start", "stt_status",
     ]:
-        spec_count = len(re.findall(r'"{0}":\s*ChatToolSpec'.format(re.escape(tool)), text))
-        handler_count = len(re.findall(r"^\s*def _tool_{0}\s*\(".format(re.escape(tool)), text, re.MULTILINE))
+        spec_count = len(re.findall(r'"{0}":\s*ChatToolSpec'.format(re.escape(tool)), combined_specs_text))
+        handler_count = len(re.findall(r"^\s*def _tool_{0}\s*\(".format(re.escape(tool)), chat_tools_text, re.MULTILINE))
         assert spec_count == 1, "{0} has {1} ChatToolSpec entries".format(tool, spec_count)
         assert handler_count == 1, "{0} has {1} handlers".format(tool, handler_count)
 
