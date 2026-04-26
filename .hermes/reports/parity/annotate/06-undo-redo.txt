@@ -1,0 +1,15 @@
+Flow: Undo / redo
+Fixture: Saha01 single-speaker parity workspace
+
+Oracle result
+- Not executable. Oracle crashed before edit history could be exercised.
+
+Rebuild result
+- `Undo` and `Redo` controls were present (disabled in the captured no-edit state).
+- Cross-repo parity could not be exercised because oracle never reached the same state.
+
+Status
+FAIL
+
+Why
+Flow 01 blocks all downstream annotate interactions on the oracle baseline.

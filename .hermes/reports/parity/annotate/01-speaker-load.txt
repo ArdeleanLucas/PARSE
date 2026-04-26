@@ -1,0 +1,28 @@
+Flow: Speaker load
+Fixture: Saha01 single-speaker parity workspace
+Oracle SHA: 0951287a812609068933ba22711a8ecd97765f38
+Rebuild SHA: f9aa3db1aad1d77078c9105cd8b5e5254c066338
+
+Steps
+1. Seed fresh temp worktrees for oracle and rebuild from origin/main.
+2. Inject the same Saha01 fixture workspace into both temp worktrees.
+3. Launch backend from the temp worktree cwd and browse through Vite on :5173.
+4. Select Saha01 and enter Annotate.
+
+Oracle result
+- Annotate did not remain usable.
+- The app fell into ErrorBoundary with: "Rendered more hooks than during the previous render".
+- Trace pointed at TranscriptionLanes (`src/components/annotate/TranscriptionLanes.tsx`) and AnnotateView (`src/ParseUI.tsx`).
+- Screenshot: oracle-annotate-hook-order-crash.png
+
+Rebuild result
+- Annotate loaded successfully on Saha01 / concept hair (#1).
+- Visible metadata: `Saha01`, `Annotated`, `Source Saha01.wav`, IPA `muːsɛr`, orthography `مۊ سەر`.
+- No JS errors beyond React Router future warnings.
+- Screenshot: rebuild-saha01-annotate-loaded.png
+
+Status
+FAIL
+
+Why
+The same speaker-load + Annotate-entry flow diverged immediately: oracle crashed, rebuild loaded the workstation.

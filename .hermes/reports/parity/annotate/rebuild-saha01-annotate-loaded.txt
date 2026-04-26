@@ -1,0 +1,15 @@
+Environment
+- Rebuild temp worktree: /tmp/parse-rebuild-parity
+- Rebuild SHA: f9aa3db1aad1d77078c9105cd8b5e5254c066338
+- Entry route: http://127.0.0.1:5173/ via Vite
+
+Observed state
+- Annotate view loaded on `Saha01` / concept `hair`
+- Speaker metadata visible: `Saha01`, `Annotated`, `Source Saha01.wav`
+- IPA visible: `muːsɛr`
+- Orthography visible: `مۊ سەر`
+- Visible annotate controls: `Save Annotation`, `Mark Done`, `Anchor offset here`, `Play (Space)`, speed selector, lane toggles
+- Console noise limited to React Router future warnings; no unhandled JS errors observed during the loaded state
+
+Artifact
+- rebuild-saha01-annotate-loaded.png
