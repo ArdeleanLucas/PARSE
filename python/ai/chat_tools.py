@@ -404,6 +404,38 @@ from ai.tools.acoustic_starter_tools import (
     tool_stt_start,
     tool_stt_word_level_start,
 )
+from ai.tools.artifact_tools import (
+    ARTIFACT_TOOL_SPECS,
+        peaks_generate as tool_peaks_generate,
+    source_index_validate as tool_source_index_validate,
+)
+from ai.tools.comparative_tools import (
+    COMPARATIVE_TOOL_SPECS,
+    cognate_compute_preview as tool_cognate_compute_preview,
+    cross_speaker_match_preview as tool_cross_speaker_match_preview,
+    segments_from_payload,
+)
+from ai.tools.contact_lexeme_tools import (
+    CONTACT_LEXEME_TOOL_SPECS,
+    contact_lexeme_lookup as tool_contact_lexeme_lookup,
+    load_project_concepts,
+)
+from ai.tools.enrichment_tools import (
+    ENRICHMENT_TOOL_SPECS,
+    enrichments_read as tool_enrichments_read,
+    enrichments_write as tool_enrichments_write,
+    lexeme_notes_read as tool_lexeme_notes_read,
+    lexeme_notes_write as tool_lexeme_notes_write,
+)
+from ai.tools.export_tools import (
+    EXPORT_TOOL_SPECS,
+    build_nexus_text,
+    export_annotations_csv as tool_export_annotations_csv,
+    export_annotations_elan as tool_export_annotations_elan,
+    export_annotations_textgrid as tool_export_annotations_textgrid,
+    export_lingpy_tsv as tool_export_lingpy_tsv,
+    export_nexus as tool_export_nexus,
+)
 from ai.tools.job_status_tools import (
     JOB_STATUS_TOOL_SPECS,
     tool_audio_normalize_status,
@@ -467,8 +499,11 @@ from ai.tools.tag_import_tools import (
     tool_import_tag_csv,
     tool_prepare_tag_import,
 )
-
-
+from ai.tools.transform_tools import (
+    TRANSFORM_TOOL_SPECS,
+    phonetic_rules_apply as tool_phonetic_rules_apply,
+    transcript_reformat as tool_transcript_reformat,
+)
 class ParseChatTools:
     """Strict read-only tool allowlist for PARSE chat."""
 
@@ -564,675 +599,15 @@ class ParseChatTools:
             **OFFSET_DETECTION_TOOL_SPECS,
             **OFFSET_APPLY_TOOL_SPECS,
             **ACOUSTIC_STARTER_TOOL_SPECS,
-            "cognate_compute_preview": ChatToolSpec(
-                name="cognate_compute_preview",
-                description=(
-                    "Compute a read-only cognate/similarity preview from annotations. "
-                    "Does not write parse-enrichments.json."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speakers": {
-                            "type": "array",
-                            "maxItems": 300,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
-                        },
-                        "conceptIds": {
-                            "type": "array",
-                            "maxItems": 500,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
-                        },
-                        "threshold": {"type": "number", "minimum": 0.01, "maximum": 2.0},
-                        "contactLanguages": {
-                            "type": "array",
-                            "maxItems": 20,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 16},
-                        },
-                        "includeSimilarity": {"type": "boolean"},
-                        "maxConcepts": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "cross_speaker_match_preview": ChatToolSpec(
-                name="cross_speaker_match_preview",
-                description=(
-                    "Compute read-only cross-speaker match candidates from STT output and existing "
-                    "annotations. Accepts sttJobId or inline sttSegments."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "sttJobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                        "sttSegments": {
-                            "type": "array",
-                            "maxItems": 20000,
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": True,
-                                "properties": {
-                                    "start": {"type": "number"},
-                                    "end": {"type": "number"},
-                                    "startSec": {"type": "number"},
-                                    "endSec": {"type": "number"},
-                                    "text": {"type": "string"},
-                                    "ipa": {"type": "string"},
-                                    "ortho": {"type": "string"},
-                                },
-                            },
-                        },
-                        "topK": {"type": "integer", "minimum": 1, "maximum": 20},
-                        "minConfidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                        "maxConcepts": {"type": "integer", "minimum": 1, "maximum": 500},
-                    },
-                },
-            ),
-            "contact_lexeme_lookup": ChatToolSpec(
-                name="contact_lexeme_lookup",
-                description=(
-                    "Fetch reference forms (IPA transcriptions) for contact/comparison languages "
-                    "from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grokipedia, "
-                    "literature). Gated by dryRun: pass dryRun=true FIRST to preview what would be "
-                    "fetched without touching sil_contact_languages.json, then dryRun=false after "
-                    "the user confirms — only the second call writes. maxConcepts caps the sample "
-                    "size per call for bounded previews."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["dryRun"],
-                    "properties": {
-                        "languages": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 10,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 16},
-                            "description": "ISO 639 language codes, e.g. [\"ar\", \"fa\", \"ckb\"]",
-                        },
-                        "conceptIds": {
-                            "type": "array",
-                            "maxItems": 100,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 100},
-                            "description": "Project concept IDs or English concept labels to look up. Defaults to all project concepts.",
-                        },
-                        "providers": {
-                            "type": "array",
-                            "maxItems": 10,
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
-                                    "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
-                                ],
-                            },
-                            "description": "Provider priority order. Defaults to full chain.",
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, preview only — fetches via the provider registry but does NOT write to sil_contact_languages.json. If false, merges results and writes. Required.",
-                        },
-                        "maxConcepts": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 200,
-                            "description": "Cap on concepts processed this call. Useful for bounded previews.",
-                        },
-                        "overwrite": {
-                            "type": "boolean",
-                            "description": "If true and dryRun is false, re-fetch even if forms already exist. Ignored when dryRun is true.",
-                        },
-                    },
-                },
-            ),
+            **PIPELINE_ORCHESTRATION_TOOL_SPECS,
             **SPEAKER_IMPORT_TOOL_SPECS,
             **MEMORY_TOOL_SPECS,
-            **PIPELINE_ORCHESTRATION_TOOL_SPECS,
-            "enrichments_read": ChatToolSpec(
-                name="enrichments_read",
-                description=(
-                    "Read parse-enrichments.json (cognate sets, similarities, borrowing flags, "
-                    "lexeme notes). Optionally filter to specific top-level keys."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "keys": {
-                            "type": "array",
-                            "maxItems": 16,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
-                            "description": (
-                                "Optional list of top-level keys to return "
-                                "(e.g. [\"cognate_sets\", \"lexeme_notes\"]). "
-                                "Omit to return the full payload."
-                            ),
-                        },
-                    },
-                },
-            ),
-            "enrichments_write": ChatToolSpec(
-                name="enrichments_write",
-                description=(
-                    "Write keys into parse-enrichments.json. By default merges (shallow) into the "
-                    "existing file; pass merge=false for a full replacement. Use with care — this "
-                    "file contains cognate sets and borrowing flags."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["enrichments"],
-                    "properties": {
-                        "enrichments": {
-                            "type": "object",
-                            "description": "Object to merge into (or replace) parse-enrichments.json.",
-                        },
-                        "merge": {
-                            "type": "boolean",
-                            "description": "If true (default), shallow-merge into existing data. If false, replace entirely.",
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, preview the resulting top-level keys without writing parse-enrichments.json.",
-                        },
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "enrichments_payload_provided",
-                        "The caller must supply an enrichments object to merge or replace.",
-                        kind="input_shape",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "enrichments_file_updated",
-                        "When dryRun=false, parse-enrichments.json is merged or replaced with the supplied payload.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "lexeme_notes_read": ChatToolSpec(
-                name="lexeme_notes_read",
-                description=(
-                    "Read lexeme-level notes from parse-enrichments.json. "
-                    "Optionally filter by speaker and/or conceptId."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Filter to a single speaker.",
-                        },
-                        "conceptId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "description": "Filter to a single concept ID.",
-                        },
-                    },
-                },
-            ),
-            "lexeme_notes_write": ChatToolSpec(
-                name="lexeme_notes_write",
-                description=(
-                    "Write or delete a single lexeme note in parse-enrichments.json "
-                    "(speaker + conceptId key). Supports userNote and importNote fields."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker", "conceptId"],
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID whose lexeme note will be updated.",
-                        },
-                        "conceptId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "description": "Concept ID whose note entry will be created, updated, or deleted.",
-                        },
-                        "userNote": {
-                            "type": "string",
-                            "maxLength": 4096,
-                            "description": "Human-authored note text to store under user_note.",
-                        },
-                        "importNote": {
-                            "type": "string",
-                            "maxLength": 4096,
-                            "description": "Machine/import provenance note to store under import_note.",
-                        },
-                        "delete": {
-                            "type": "boolean",
-                            "description": "If true, removes the note entry for this speaker+concept.",
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, preview the resulting lexeme_notes block without writing parse-enrichments.json.",
-                        },
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "speaker_and_concept_provided",
-                        "The caller must provide both speaker and conceptId to identify a single lexeme-note entry.",
-                        kind="input_shape",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "lexeme_note_written",
-                        "When dryRun=false, the targeted lexeme_notes entry is created, updated, or deleted in parse-enrichments.json.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "export_annotations_csv": ChatToolSpec(
-                name="export_annotations_csv",
-                description=(
-                    "Export speaker annotations to CSV (IPA, ortho, concept, timing). "
-                    "Pass speaker='all' to merge all speakers. Without outputPath returns a preview "
-                    "of the first 20 rows; with outputPath writes the full CSV inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID or 'all' for a merged multi-speaker export.",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root to write CSV.",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "annotations_available_for_export",
-                        "At least one annotation payload must be available for the requested speaker scope.",
-                        kind="project_state",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "export_file_written",
-                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "export_lingpy_tsv": ChatToolSpec(
-                name="export_lingpy_tsv",
-                description=(
-                    "Export a LingPy-compatible wordlist TSV from enrichments + annotations "
-                    "for cognate analysis. Without outputPath returns first 20 lines; "
-                    "with outputPath writes inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root.",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "enrichments_and_annotations_available",
-                        "parse-enrichments.json and the annotation inventory must contain enough data to build a LingPy export.",
-                        kind="project_state",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "export_file_written",
-                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "export_nexus": ChatToolSpec(
-                name="export_nexus",
-                description=(
-                    "Export a NEXUS cognate-character matrix for BEAST2 / phylogenetic tools. "
-                    "Characters are (concept, cognate group) pairs; values are 1/0/? per speaker. "
-                    "Without outputPath returns a preview (first 2000 chars); "
-                    "with outputPath writes inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root.",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "cognate_matrix_available",
-                        "The project must contain enough cognate/enrichment data to build a NEXUS character matrix.",
-                        kind="project_state",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "export_file_written",
-                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "export_annotations_elan": ChatToolSpec(
-                name="export_annotations_elan",
-                description=(
-                    "Export speaker annotations to ELAN .eaf XML format for use in ELAN or other "
-                    "linguistic annotation tools. Without outputPath returns an XML preview "
-                    "(first 2000 chars); with outputPath writes inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID whose annotations should be converted to ELAN format.",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root (e.g. exports/speaker.eaf).",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "speaker_annotation_exists",
-                        "The requested speaker must already have an annotation file to export.",
-                        kind="file_presence",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "export_file_written",
-                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "export_annotations_textgrid": ChatToolSpec(
-                name="export_annotations_textgrid",
-                description=(
-                    "Export speaker annotations to Praat TextGrid format (.TextGrid). "
-                    "Without outputPath returns a TextGrid string preview (first 2000 chars); "
-                    "with outputPath writes inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["speaker"],
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID whose annotations should be converted to TextGrid format.",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root (e.g. exports/speaker.TextGrid).",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
-                    },
-                },
-                mutability="mutating",
-                supports_dry_run=True,
-                dry_run_parameter="dryRun",
-                preconditions=(
-                    _project_loaded_condition(),
-                    _tool_condition(
-                        "speaker_annotation_exists",
-                        "The requested speaker must already have an annotation file to export.",
-                        kind="file_presence",
-                    ),
-                ),
-                postconditions=(
-                    _tool_condition(
-                        "export_file_written",
-                        "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
-                        kind="filesystem_write",
-                    ),
-                ),
-            ),
-            "phonetic_rules_apply": ChatToolSpec(
-                name="phonetic_rules_apply",
-                description=(
-                    "Apply the project phonetic rules to IPA forms. Three modes:\n"
-                    "  normalize — strip delimiters, lowercase, normalise whitespace\n"
-                    "  apply     — return all rule-generated variants of a form\n"
-                    "  equivalence — compare two forms; returns isEquivalent + similarity score\n"
-                    "Uses project phonetic_rules.json unless custom rules are supplied."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["form"],
-                    "properties": {
-                        "form": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 256,
-                            "description": "Primary IPA form to operate on.",
-                        },
-                        "mode": {
-                            "type": "string",
-                            "enum": ["normalize", "apply", "equivalence"],
-                            "description": "Operation mode (default: normalize).",
-                        },
-                        "form2": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 256,
-                            "description": "Second form for equivalence mode.",
-                        },
-                        "rules": {
-                            "type": "array",
-                            "maxItems": 64,
-                            "items": {"type": "object"},
-                            "description": (
-                                "Optional inline rule list (same schema as phonetic_rules.json entries). "
-                                "Omit to use the project file."
-                            ),
-                        },
-                    },
-                },
-            ),
-            "transcript_reformat": ChatToolSpec(
-                name="transcript_reformat",
-                description=(
-                    "Reformat a *_coarse.json alignment file into PARSE CoarseTranscript schema "
-                    "(speaker, source_wav, duration_sec, segments[]). Without outputPath returns "
-                    "the reformatted JSON object; with outputPath writes inside the project."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["inputPath"],
-                    "properties": {
-                        "inputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Path to the *_coarse.json file to reformat (absolute or project-relative).",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Project-relative or absolute path inside project root to write the result.",
-                        },
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Override speaker ID (inferred from filename if omitted).",
-                        },
-                        "sourceWav": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Override source WAV path written into the output metadata.",
-                        },
-                        "durationSec": {
-                            "type": "number",
-                            "minimum": 0.0,
-                            "description": "Override total duration in seconds (inferred from segments if omitted).",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Return parsed JSON without writing."},
-                    },
-                },
-            ),
-            "peaks_generate": ChatToolSpec(
-                name="peaks_generate",
-                description=(
-                    "Generate waveform peak data for a speaker's audio and write to "
-                    "peaks/<speaker>.json (or a custom outputPath). Required for the "
-                    "waveform visualiser after audio changes. Provide speaker or audioPath."
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID — resolves audio from annotations.",
-                        },
-                        "audioPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Explicit audio file path (absolute or project-relative). Overrides speaker lookup.",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Where to write peaks JSON. Defaults to peaks/<speaker>.json.",
-                        },
-                        "samplesPerPixel": {
-                            "type": "integer",
-                            "minimum": 64,
-                            "maximum": 8192,
-                            "description": "Samples per waveform pixel (default 512).",
-                        },
-                        "dryRun": {"type": "boolean", "description": "Compute peaks but do not write to disk."},
-                    },
-                },
-            ),
-            "source_index_validate": ChatToolSpec(
-                name="source_index_validate",
-                description=(
-                    "Validate a speaker manifest entry or full manifest against the SourceIndex schema. "
-                    "Two modes:\n"
-                    "  speaker — validate + transform one speaker entry; returns errors and transformed shape\n"
-                    "  full    — validate + build the complete source_index.json; "
-                    "optionally write to outputPath inside the project"
-                ),
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "mode": {
-                            "type": "string",
-                            "enum": ["speaker", "full"],
-                            "description": "Validation scope (default: speaker).",
-                        },
-                        "speakerId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Speaker ID (required for mode=speaker).",
-                        },
-                        "speakerData": {
-                            "type": "object",
-                            "description": "Speaker manifest entry to validate (required for mode=speaker).",
-                        },
-                        "manifest": {
-                            "type": "object",
-                            "description": "Full manifest with top-level 'speakers' key (required for mode=full).",
-                        },
-                        "outputPath": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 512,
-                            "description": "Write built source_index.json here (mode=full only, project-relative or absolute inside project).",
-                        },
-                        "dryRun": {
-                            "type": "boolean",
-                            "description": "If true, never writes outputPath even when provided; returns the validated/constructed payload only.",
-                        },
-                    },
-                },
-            ),
+            **COMPARATIVE_TOOL_SPECS,
+            **CONTACT_LEXEME_TOOL_SPECS,
+            **ENRICHMENT_TOOL_SPECS,
+            **EXPORT_TOOL_SPECS,
+            **TRANSFORM_TOOL_SPECS,
+            **ARTIFACT_TOOL_SPECS,
         }
         self._tool_specs = self._apply_default_metadata(self._tool_specs)
 
@@ -1679,15 +1054,11 @@ class ParseChatTools:
                 return candidate
 
         return None
-
     def _tool_project_context_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_project_context_read(self, args)
 
-
-
     def _tool_annotation_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_annotation_read(self, args)
-
 
     def _tool_stt_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_start(self, args)
@@ -1695,17 +1066,11 @@ class ParseChatTools:
     def _tool_stt_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_status(self, args)
 
-
-    # ------------------------------------------------------------------
-    # Tier 1/2/3 acoustic alignment tools (from feat/acoustic-alignment-ipa)
-    # ------------------------------------------------------------------
-
     def _tool_stt_word_level_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_word_level_start(self, args)
 
     def _tool_stt_word_level_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_stt_word_level_status(self, args)
-
 
     def _tool_forced_align_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_forced_align_start(self, args)
@@ -1713,22 +1078,14 @@ class ParseChatTools:
     def _tool_forced_align_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_forced_align_status(self, args)
 
-
     def _tool_ipa_transcribe_acoustic_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_ipa_transcribe_acoustic_start(self, args)
 
     def _tool_ipa_transcribe_acoustic_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_ipa_transcribe_acoustic_status(self, args)
 
-
-
-    # ------------------------------------------------------------------
-    # Pipeline preflight + run + status tools (from feat/mcp-pipeline-tools)
-    # ------------------------------------------------------------------
-
     def _tool_speakers_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_speakers_list(self, args)
-
 
     def _tool_pipeline_state_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_pipeline_state_read(self, args)
@@ -1742,765 +1099,65 @@ class ParseChatTools:
     def _tool_compute_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_compute_status(self, args)
 
-
-    # ------------------------------------------------------------------
-    # Tier 1 — audio normalize
-    # ------------------------------------------------------------------
-
     def _tool_audio_normalize_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_audio_normalize_start(self, args)
 
     def _tool_audio_normalize_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_audio_normalize_status(self, args)
 
-
-    # ------------------------------------------------------------------
-    # Tier 1 — enrichments read / write
-    # ------------------------------------------------------------------
-
     def _tool_enrichments_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Return parse-enrichments.json, optionally filtered to specified top-level keys."""
-        payload = _read_json_file(self.enrichments_path, {})
-        if not isinstance(payload, dict):
-            payload = {}
-        keys = args.get("keys")
-        if isinstance(keys, list) and keys:
-            payload = {k: payload[k] for k in keys if k in payload}
-        return {"readOnly": True, "enrichments": payload}
+        return tool_enrichments_read(self, args)
 
     def _tool_enrichments_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Shallow-merge (default) or replace parse-enrichments.json with the provided object."""
-        incoming = args.get("enrichments")
-        if not isinstance(incoming, dict):
-            raise ChatToolValidationError("enrichments must be an object")
-
-        merge = bool(args.get("merge", True))
-        if merge:
-            existing = _read_json_file(self.enrichments_path, {})
-            if not isinstance(existing, dict):
-                existing = {}
-            existing.update(incoming)
-            payload = existing
-        else:
-            payload = incoming
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "dryRun": True,
-                "merge": merge,
-                "incomingKeys": list(incoming.keys()),
-                "resultingKeys": list(payload.keys()),
-                "path": str(self.enrichments_path),
-            }
-
-        self.enrichments_path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        return {"success": True, "keys": list(payload.keys())}
-
-    # ------------------------------------------------------------------
-    # Tier 1 — lexeme notes read / write
-    # ------------------------------------------------------------------
+        return tool_enrichments_write(self, args)
 
     def _tool_lexeme_notes_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Return lexeme_notes block from enrichments, optionally filtered by speaker / conceptId."""
-        enrichments = _read_json_file(self.enrichments_path, {})
-        notes: Any = enrichments.get("lexeme_notes") or {}
-        if not isinstance(notes, dict):
-            notes = {}
-
-        speaker_filter = str(args.get("speaker") or "").strip()
-        concept_filter = _normalize_concept_id(args.get("conceptId") or "")
-
-        if speaker_filter:
-            notes = {speaker_filter: notes.get(speaker_filter, {})}
-        if concept_filter:
-            filtered: Dict[str, Any] = {}
-            for sp, sp_notes in notes.items():
-                if isinstance(sp_notes, dict) and concept_filter in sp_notes:
-                    filtered[sp] = {concept_filter: sp_notes[concept_filter]}
-            notes = filtered
-
-        return {"readOnly": True, "lexeme_notes": notes}
+        return tool_lexeme_notes_read(self, args)
 
     def _tool_lexeme_notes_write(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Upsert or delete a single (speaker, conceptId) lexeme note inside parse-enrichments.json."""
-        speaker = self._normalize_speaker(args.get("speaker"))
-        concept_id = _normalize_concept_id(args.get("conceptId") or "")
-        if not concept_id:
-            raise ChatToolValidationError("conceptId is required")
-
-        payload = _read_json_file(self.enrichments_path, {})
-        if not isinstance(payload, dict):
-            payload = {}
-
-        notes_block = payload.get("lexeme_notes")
-        if not isinstance(notes_block, dict):
-            notes_block = {}
-            payload["lexeme_notes"] = notes_block
-
-        speaker_block = notes_block.get(speaker)
-        if not isinstance(speaker_block, dict):
-            speaker_block = {}
-            notes_block[speaker] = speaker_block
-
-        if bool(args.get("delete", False)):
-            speaker_block.pop(concept_id, None)
-            if not speaker_block:
-                notes_block.pop(speaker, None)
-        else:
-            entry = speaker_block.get(concept_id)
-            if not isinstance(entry, dict):
-                entry = {}
-            if "userNote" in args:
-                entry["user_note"] = str(args.get("userNote") or "")
-            if "importNote" in args:
-                entry["import_note"] = str(args.get("importNote") or "")
-            entry["updated_at"] = _utc_now_iso()
-            speaker_block[concept_id] = entry
-
-        if bool(args.get("dryRun", False)):
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "dryRun": True,
-                "speaker": speaker,
-                "conceptId": concept_id,
-                "delete": bool(args.get("delete", False)),
-                "lexeme_notes": payload.get("lexeme_notes") or {},
-            }
-
-        self.enrichments_path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        return {"success": True, "lexeme_notes": payload.get("lexeme_notes") or {}}
-
-    # ------------------------------------------------------------------
-    # Tier 1 — export tools
-    # ------------------------------------------------------------------
+        return tool_lexeme_notes_write(self, args)
 
     def _tool_export_annotations_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Export annotations as CSV. Preview = first 20 rows; write requires outputPath."""
-        try:
-            from csv_export import (  # type: ignore[import]
-                annotations_to_csv_str,
-                _collect_all_rows,
-                _sort_rows_all,
-                _rows_to_csv_string,
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("csv_export is not importable: {0}".format(exc))
-
-        speaker_raw = str(args.get("speaker") or "all").strip()
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-
-        try:
-            if speaker_raw == "all":
-                rows = _collect_all_rows(self.annotations_dir)
-                _sort_rows_all(rows)
-                csv_content = _rows_to_csv_string(rows)
-            else:
-                sp = self._normalize_speaker(speaker_raw)
-                ann_path = self.annotations_dir / "{0}{1}".format(sp, ANNOTATION_FILENAME_SUFFIX)
-                if not ann_path.exists():
-                    raise ChatToolExecutionError("No annotation found for speaker: {0}".format(sp))
-                data = json.loads(ann_path.read_text(encoding="utf-8"))
-                csv_content = annotations_to_csv_str(data, sp)
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("CSV export failed: {0}".format(exc)) from exc
-
-        if dry_run or not output_path_str:
-            lines = csv_content.splitlines()
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "previewLines": "\n".join(lines[:20]),
-                "totalLines": len(lines),
-                "truncated": len(lines) > 20,
-            }
-
-        out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(csv_content, encoding="utf-8-sig")
-        return {
-            "success": True,
-            "outputPath": str(out_path),
-            "lines": len(csv_content.splitlines()),
-        }
+        return tool_export_annotations_csv(self, args)
 
     def _tool_export_lingpy_tsv(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Export LingPy wordlist TSV. Preview = first 20 lines via temp file; write requires outputPath."""
-        if cognate_compute_module is None:
-            raise ChatToolExecutionError("cognate_compute is not importable")
-
-        import os as _os
-        import tempfile
-
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-
-        try:
-            if dry_run or not output_path_str:
-                tmp_fd, tmp_str = tempfile.mkstemp(suffix=".tsv")
-                _os.close(tmp_fd)
-                tmp_path = Path(tmp_str)
-                try:
-                    count = cognate_compute_module.export_wordlist_tsv(
-                        self.enrichments_path, self.annotations_dir, tmp_path
-                    )
-                    content = tmp_path.read_text(encoding="utf-8")
-                finally:
-                    try:
-                        _os.unlink(tmp_str)
-                    except OSError:
-                        pass
-                lines = content.splitlines()
-                return {
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "previewLines": "\n".join(lines[:20]),
-                    "totalLines": len(lines),
-                    "truncated": len(lines) > 20,
-                    "rowCount": count,
-                }
-
-            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            count = cognate_compute_module.export_wordlist_tsv(
-                self.enrichments_path, self.annotations_dir, out_path
-            )
-            return {"success": True, "outputPath": str(out_path), "rowCount": count}
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("LingPy TSV export failed: {0}".format(exc)) from exc
+        return tool_export_lingpy_tsv(self, args)
 
     def _tool_export_nexus(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Build NEXUS matrix via _build_nexus_text(). Preview = first 2000 chars; write requires outputPath."""
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-
-        try:
-            nexus_text = self._build_nexus_text()
-        except Exception as exc:
-            raise ChatToolExecutionError("NEXUS build failed: {0}".format(exc)) from exc
-
-        if dry_run or not output_path_str:
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "preview": nexus_text[:2000],
-                "truncated": len(nexus_text) > 2000,
-                "totalChars": len(nexus_text),
-            }
-
-        out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(nexus_text, encoding="utf-8")
-        return {"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)}
+        return tool_export_nexus(self, args)
 
     def _build_nexus_text(self) -> str:
-        """Build NEXUS cognate-character matrix (mirrors server._api_get_export_nexus)."""
-        enrichments = _read_json_file(self.enrichments_path, {})
-        overrides = enrichments.get("manual_overrides") or {}
-        override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
-        auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None
-        override_sets = override_sets if isinstance(override_sets, dict) else {}
-        auto_sets = auto_sets if isinstance(auto_sets, dict) else {}
-
-        speakers_set: set = set()
-        project_payload = _read_json_file(self.project_json_path, {})
-        speakers_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None
-        if isinstance(speakers_block, dict):
-            speakers_set.update(str(s) for s in speakers_block.keys() if str(s).strip())
-        elif isinstance(speakers_block, list):
-            speakers_set.update(str(s) for s in speakers_block if str(s).strip())
-
-        union_keys: List[str] = []
-        seen_keys: set = set()
-        for key in list(override_sets.keys()) + list(auto_sets.keys()):
-            if key not in seen_keys:
-                seen_keys.add(key)
-                union_keys.append(key)
-
-        concept_keys: List[str] = []
-        concept_group_members: Dict[str, Dict[str, List[str]]] = {}
-        for key in union_keys:
-            override_block = override_sets.get(key)
-            auto_block = auto_sets.get(key)
-            block = override_block if isinstance(override_block, dict) else auto_block
-            if not isinstance(block, dict):
-                continue
-            groups: Dict[str, List[str]] = {}
-            for group, members in block.items():
-                if not isinstance(members, list):
-                    continue
-                cleaned = [str(m) for m in members if str(m).strip()]
-                if cleaned:
-                    groups[str(group)] = cleaned
-                    speakers_set.update(cleaned)
-            if groups:
-                concept_group_members[key] = groups
-                concept_keys.append(key)
-
-        speakers = sorted(speakers_set)
-
-        has_form: Dict[str, set] = {}
-        for key in concept_keys:
-            present: set = set()
-            for members in concept_group_members[key].values():
-                present.update(members)
-            has_form[key] = present
-
-        characters: List[Tuple[str, str, str]] = []
-        for key in sorted(concept_keys, key=_concept_sort_key):
-            for group in sorted(concept_group_members[key].keys()):
-                label = "{0}_{1}".format(str(key).replace(" ", "_"), group)
-                characters.append((key, group, label))
-
-        def row_for(speaker: str) -> str:
-            chars: List[str] = []
-            for key, group, _lbl in characters:
-                members = concept_group_members[key].get(group, [])
-                if speaker in members:
-                    chars.append("1")
-                elif speaker in has_form.get(key, set()):
-                    chars.append("0")
-                else:
-                    chars.append("?")
-            return "".join(chars)
-
-        lines: List[str] = []
-        lines.append("#NEXUS")
-        lines.append("")
-        lines.append("BEGIN TAXA;")
-        lines.append("    DIMENSIONS NTAX={0};".format(len(speakers)))
-        if speakers:
-            lines.append("    TAXLABELS")
-            for sp in speakers:
-                lines.append("        {0}".format(sp))
-            lines.append("    ;")
-        lines.append("END;")
-        lines.append("")
-        lines.append("BEGIN CHARACTERS;")
-        lines.append("    DIMENSIONS NCHAR={0};".format(len(characters)))
-        lines.append("    FORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"01\";")
-        if characters:
-            lines.append("    CHARSTATELABELS")
-            label_rows_str = []
-            for idx, (_key, _group, label) in enumerate(characters, start=1):
-                label_rows_str.append("        {0} {1}".format(idx, label))
-            lines.append(",\n".join(label_rows_str))
-            lines.append("    ;")
-        lines.append("    MATRIX")
-        for sp in speakers:
-            lines.append("        {0}    {1}".format(sp, row_for(sp)))
-        lines.append("    ;")
-        lines.append("END;")
-        lines.append("")
-        return "\n".join(lines)
-
-    # ------------------------------------------------------------------
-    # Tier 2 — ELAN / TextGrid export
-    # ------------------------------------------------------------------
+        return build_nexus_text(self)
 
     def _tool_export_annotations_elan(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Export annotation to ELAN .eaf XML. Preview = first 2000 chars; write requires outputPath."""
-        try:
-            from elan_export import annotations_to_elan_str, export_elan  # type: ignore[import]
-        except Exception as exc:
-            raise ChatToolExecutionError("elan_export is not importable: {0}".format(exc))
-
-        speaker = self._normalize_speaker(args.get("speaker"))
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-
-        ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
-        if not ann_path.exists():
-            raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
-
-        try:
-            data = json.loads(ann_path.read_text(encoding="utf-8"))
-            if dry_run or not output_path_str:
-                elan_str = annotations_to_elan_str(data, speaker)
-                return {
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "preview": elan_str[:2000],
-                    "truncated": len(elan_str) > 2000,
-                    "totalChars": len(elan_str),
-                }
-            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            export_elan(data, out_path, speaker)
-            return {"success": True, "outputPath": str(out_path)}
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("ELAN export failed: {0}".format(exc)) from exc
+        return tool_export_annotations_elan(self, args)
 
     def _tool_export_annotations_textgrid(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Export annotation to Praat TextGrid. Preview = first 2000 chars; write requires outputPath."""
-        try:
-            from textgrid_io import annotations_to_textgrid_str, write_textgrid  # type: ignore[import]
-        except Exception as exc:
-            raise ChatToolExecutionError("textgrid_io is not importable: {0}".format(exc))
-
-        speaker = self._normalize_speaker(args.get("speaker"))
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-
-        ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
-        if not ann_path.exists():
-            raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
-
-        try:
-            data = json.loads(ann_path.read_text(encoding="utf-8"))
-            if dry_run or not output_path_str:
-                tg_str = annotations_to_textgrid_str(data, speaker)
-                return {
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "preview": tg_str[:2000],
-                    "truncated": len(tg_str) > 2000,
-                    "totalChars": len(tg_str),
-                }
-            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            write_textgrid(data, out_path, speaker)
-            return {"success": True, "outputPath": str(out_path)}
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("TextGrid export failed: {0}".format(exc)) from exc
-
-    # ------------------------------------------------------------------
-    # Tier 2 — phonetic rules
-    # ------------------------------------------------------------------
+        return tool_export_annotations_textgrid(self, args)
 
     def _tool_phonetic_rules_apply(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize, apply, or compare IPA forms using project phonetic rules."""
-        try:
-            from compare.phonetic_rules import (  # type: ignore[import]
-                apply_rules,
-                are_phonetically_equivalent,
-                load_rules_from_file,
-                normalize_ipa_form,
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("phonetic_rules is not importable: {0}".format(exc))
-
-        form = str(args.get("form") or "").strip()
-        if not form:
-            raise ChatToolValidationError("form is required")
-
-        mode = str(args.get("mode") or "normalize").strip().lower()
-        inline_rules = args.get("rules")
-
-        if isinstance(inline_rules, list) and inline_rules:
-            rules = inline_rules
-        else:
-            rules = load_rules_from_file(self.phonetic_rules_path)
-
-        try:
-            if mode == "normalize":
-                result = normalize_ipa_form(form)
-                return {"readOnly": True, "mode": "normalize", "form": form, "normalized": result}
-
-            if mode == "apply":
-                normalized = normalize_ipa_form(form)
-                variants = apply_rules(normalized, rules)
-                return {
-                    "readOnly": True,
-                    "mode": "apply",
-                    "form": form,
-                    "normalized": normalized,
-                    "variants": variants,
-                }
-
-            if mode == "equivalence":
-                form2 = str(args.get("form2") or "").strip()
-                if not form2:
-                    raise ChatToolValidationError("form2 is required for equivalence mode")
-                is_equiv, score = are_phonetically_equivalent(form, form2, rules)
-                return {
-                    "readOnly": True,
-                    "mode": "equivalence",
-                    "form": form,
-                    "form2": form2,
-                    "isEquivalent": is_equiv,
-                    "similarityScore": round(score, 4),
-                }
-
-            raise ChatToolValidationError("Unknown mode: {0}".format(mode))
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("phonetic_rules_apply failed: {0}".format(exc)) from exc
-
-    # ------------------------------------------------------------------
-    # Tier 2 — transcript reformat
-    # ------------------------------------------------------------------
+        return tool_phonetic_rules_apply(self, args)
 
     def _tool_transcript_reformat(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert *_coarse.json alignment to CoarseTranscript schema. Dry-run returns parsed object."""
-        import os as _os
-        import tempfile
-
-        input_path_str = str(args.get("inputPath") or "").strip()
-        if not input_path_str:
-            raise ChatToolValidationError("inputPath is required")
-
-        output_path_str = str(args.get("outputPath") or "").strip()
-        dry_run = bool(args.get("dryRun", False))
-        speaker = str(args.get("speaker") or "").strip() or None
-        source_wav = str(args.get("sourceWav") or "").strip() or None
-        duration_sec_raw = args.get("durationSec")
-        duration_sec = float(duration_sec_raw) if duration_sec_raw is not None else None
-
-        input_path = self._resolve_readable_path(input_path_str)
-        if not input_path.exists():
-            raise ChatToolExecutionError("inputPath does not exist: {0}".format(input_path))
-
-        try:
-            from reformat_transcripts import reformat  # type: ignore[import]
-        except Exception as exc:
-            raise ChatToolExecutionError("reformat_transcripts is not importable: {0}".format(exc))
-
-        try:
-            if dry_run or not output_path_str:
-                tmp_fd, tmp_str = tempfile.mkstemp(suffix=".json")
-                _os.close(tmp_fd)
-                tmp_path = Path(tmp_str)
-                try:
-                    reformat(str(input_path), speaker, source_wav, duration_sec, str(tmp_path))
-                    result_data = json.loads(tmp_path.read_text(encoding="utf-8"))
-                finally:
-                    try:
-                        _os.unlink(tmp_str)
-                    except OSError:
-                        pass
-                return {"readOnly": True, "previewOnly": True, "result": result_data}
-
-            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            reformat(str(input_path), speaker, source_wav, duration_sec, str(out_path))
-            return {"success": True, "outputPath": str(out_path)}
-        except ChatToolError:
-            raise
-        except Exception as exc:
-            raise ChatToolExecutionError("transcript_reformat failed: {0}".format(exc)) from exc
-
-    # ------------------------------------------------------------------
-    # Tier 2 — peaks generate
-    # ------------------------------------------------------------------
+        return tool_transcript_reformat(self, args)
 
     def _tool_peaks_generate(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate waveform peak data; resolves audio from annotation source_audio when only speaker given."""
-        try:
-            from peaks import (  # type: ignore[import]
-                generate_peaks_for_audio,
-                build_peaks_payload,
-                write_peaks_json,
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("peaks is not importable: {0}".format(exc))
-
-        speaker_raw = str(args.get("speaker") or "").strip()
-        audio_path_str = str(args.get("audioPath") or "").strip()
-        output_path_str = str(args.get("outputPath") or "").strip()
-        samples_per_pixel = int(args.get("samplesPerPixel") or 512)
-        dry_run = bool(args.get("dryRun", False))
-
-        if not speaker_raw and not audio_path_str:
-            raise ChatToolValidationError("speaker or audioPath is required")
-
-        if audio_path_str:
-            audio_path = self._resolve_readable_path(audio_path_str)
-        else:
-            speaker = self._normalize_speaker(speaker_raw)
-            ann_path = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
-            if not ann_path.exists():
-                raise ChatToolExecutionError("No annotation found for speaker: {0}".format(speaker))
-            ann_data = json.loads(ann_path.read_text(encoding="utf-8"))
-            source_audio = str(ann_data.get("source_audio") or "").strip()
-            if not source_audio:
-                raise ChatToolExecutionError(
-                    "Speaker {0} annotation has no source_audio field".format(speaker)
-                )
-            audio_path = self._resolve_readable_path(source_audio)
-
-        if not audio_path.exists():
-            raise ChatToolExecutionError("Audio file not found: {0}".format(audio_path))
-
-        try:
-            sample_rate, peak_data, total_samples = generate_peaks_for_audio(
-                audio_path, samples_per_pixel
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("peaks generation failed: {0}".format(exc)) from exc
-
-        payload = build_peaks_payload(sample_rate, samples_per_pixel, peak_data)
-
-        if dry_run:
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "sampleRate": sample_rate,
-                "samplesPerPixel": samples_per_pixel,
-                "totalSamples": total_samples,
-                "peakCount": len(peak_data) // 2,
-                "durationSec": round(total_samples / sample_rate, 3) if sample_rate else None,
-            }
-
-        if output_path_str:
-            out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-        elif speaker_raw:
-            speaker = self._normalize_speaker(speaker_raw)
-            out_path = self.peaks_dir / "{0}.json".format(speaker)
-        else:
-            out_path = self.peaks_dir / "{0}.json".format(audio_path.stem)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        write_peaks_json(out_path, payload)
-        return {
-            "success": True,
-            "outputPath": str(out_path),
-            "sampleRate": sample_rate,
-            "samplesPerPixel": samples_per_pixel,
-            "totalSamples": total_samples,
-            "peakCount": len(peak_data) // 2,
-            "durationSec": round(total_samples / sample_rate, 3) if sample_rate else None,
-        }
-
-    # ------------------------------------------------------------------
-    # Tier 3 — infrastructure / preflight
-    # ------------------------------------------------------------------
+        return tool_peaks_generate(self, args)
 
     def _tool_source_index_validate(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate a speaker manifest entry or full manifest; optionally write source_index.json."""
-        try:
-            from source_index import validate_speaker, transform_speaker, build_source_index  # type: ignore[import]
-        except Exception as exc:
-            raise ChatToolExecutionError("source_index is not importable: {0}".format(exc))
-
-        import io as _io
-
-        def _call(fn: Any, *fn_args: Any) -> Tuple[bool, List[str], Any]:
-            """Invoke a source_index function; capture stderr and catch SystemExit."""
-            old_stderr = sys.stderr
-            sys.stderr = _io.StringIO()
-            result = None
-            try:
-                result = fn(*fn_args)
-                errors: List[str] = []
-                ok = True
-            except SystemExit:
-                raw = sys.stderr.getvalue()
-                errors = [
-                    line.replace("ERROR: ", "", 1).strip()
-                    for line in raw.strip().splitlines()
-                    if line.strip()
-                ]
-                ok = False
-            finally:
-                sys.stderr = old_stderr
-            return ok, errors, result
-
-        mode = str(args.get("mode") or "speaker").strip().lower()
-
-        if mode == "speaker":
-            speaker_id = str(args.get("speakerId") or "").strip()
-            if not speaker_id:
-                raise ChatToolValidationError("speakerId is required for mode=speaker")
-            speaker_data = args.get("speakerData")
-            if not isinstance(speaker_data, dict):
-                raise ChatToolValidationError("speakerData must be an object for mode=speaker")
-
-            valid, errors, _ = _call(validate_speaker, speaker_id, speaker_data)
-            transformed = None
-            if valid:
-                ok2, errs2, transformed = _call(transform_speaker, speaker_id, speaker_data)
-                if not ok2:
-                    valid = False
-                    errors = errs2
-
-            return {
-                "readOnly": True,
-                "mode": "speaker",
-                "speakerId": speaker_id,
-                "valid": valid,
-                "errors": errors,
-                "transformed": transformed,
-            }
-
-        if mode == "full":
-            manifest = args.get("manifest")
-            if not isinstance(manifest, dict):
-                raise ChatToolValidationError("manifest must be an object for mode=full")
-            output_path_str = str(args.get("outputPath") or "").strip()
-
-            valid, errors, source_index = _call(build_source_index, manifest)
-
-            if not valid or source_index is None:
-                return {"readOnly": True, "mode": "full", "valid": False, "errors": errors}
-
-            speaker_count = len(source_index.get("speakers") or {})
-            wav_count = sum(
-                len(v.get("source_wavs") or [])
-                for v in (source_index.get("speakers") or {}).values()
-            )
-
-            if output_path_str and not bool(args.get("dryRun", False)):
-                out_path = self._resolve_project_path(output_path_str, allowed_roots=[self.project_root])
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(
-                    json.dumps(source_index, indent=2, ensure_ascii=False), encoding="utf-8"
-                )
-                return {
-                    "success": True,
-                    "mode": "full",
-                    "valid": True,
-                    "errors": [],
-                    "speakerCount": speaker_count,
-                    "wavCount": wav_count,
-                    "outputPath": str(out_path),
-                }
-
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "mode": "full",
-                "valid": True,
-                "errors": [],
-                "speakerCount": speaker_count,
-                "wavCount": wav_count,
-                "sourceIndex": source_index,
-                "dryRun": bool(args.get("dryRun", False)),
-            }
-
-        raise ChatToolValidationError("mode must be 'speaker' or 'full'")
+        return tool_source_index_validate(self, args)
 
     def _tool_jobs_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_jobs_list(self, args)
 
-
     def _tool_job_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_job_status(self, args)
-
 
     def _tool_job_logs(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_job_logs(self, args)
 
-
     def _tool_jobs_list_active(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_jobs_list_active(self, args)
-
 
     def _tool_detect_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_detect_timestamp_offset(self, args)
@@ -2511,590 +1168,25 @@ class ParseChatTools:
     def _tool_apply_timestamp_offset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_apply_timestamp_offset(self, args)
 
-    def _annotation_path_for_speaker(self, speaker: str) -> Optional[Path]:
-        canonical = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_FILENAME_SUFFIX)
-        if canonical.is_file():
-            return canonical
-        legacy = self.annotations_dir / "{0}{1}".format(speaker, ANNOTATION_LEGACY_FILENAME_SUFFIX)
-        if legacy.is_file():
-            return legacy
-        return canonical
-
     def _tool_cognate_compute_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if cognate_compute_module is None:
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "unavailable",
-                "message": "compare.cognate_compute module is unavailable",
-            }
-
-        threshold = _coerce_float(args.get("threshold"), 0.60)
-        if threshold <= 0:
-            raise ChatToolValidationError("threshold must be > 0")
-
-        include_similarity = bool(args.get("includeSimilarity", True))
-        max_concepts = int(args.get("maxConcepts", 40) or 40)
-
-        speaker_values = args.get("speakers")
-        speaker_filter: List[str] = []
-        if isinstance(speaker_values, list):
-            seen: Dict[str, bool] = {}
-            for raw_speaker in speaker_values:
-                speaker = _normalize_space(raw_speaker)
-                if speaker and speaker not in seen:
-                    seen[speaker] = True
-                    speaker_filter.append(speaker)
-
-        concept_values = args.get("conceptIds")
-        concept_filter: List[str] = []
-        if isinstance(concept_values, list):
-            seen_concepts: Dict[str, bool] = {}
-            for raw_concept in concept_values:
-                concept_id = _normalize_concept_id(raw_concept)
-                if concept_id and concept_id not in seen_concepts:
-                    seen_concepts[concept_id] = True
-                    concept_filter.append(concept_id)
-
-        contact_override_raw = args.get("contactLanguages")
-        contact_override: List[str] = []
-        if isinstance(contact_override_raw, list):
-            contact_override = [str(item).strip().lower() for item in contact_override_raw if str(item).strip()]
-
-        contact_languages_from_config, refs_by_concept, form_selections_by_concept = cognate_compute_module.load_contact_language_data(
-            self.sil_config_path
-        )
-        contact_languages = contact_override or contact_languages_from_config
-
-        forms_by_concept, discovered_speakers = cognate_compute_module.load_annotations(self.annotations_dir)
-
-        speaker_filter_set = set(speaker_filter)
-        concept_filter_set = set(concept_filter)
-
-        filtered_forms: Dict[str, List[Any]] = {}
-        for raw_concept_id, records in forms_by_concept.items():
-            concept_id = _normalize_concept_id(raw_concept_id)
-            if not concept_id:
-                continue
-            if concept_filter_set and concept_id not in concept_filter_set:
-                continue
-
-            kept: List[Any] = []
-            for record in records:
-                speaker = _normalize_space(getattr(record, "speaker", ""))
-                if speaker_filter_set and speaker not in speaker_filter_set:
-                    continue
-                kept.append(record)
-
-            if kept:
-                filtered_forms[concept_id] = kept
-
-        if concept_filter:
-            selected_concepts = [concept for concept in concept_filter if concept in filtered_forms]
-        else:
-            selected_concepts = sorted(filtered_forms.keys(), key=_concept_sort_key)
-
-        truncated = len(selected_concepts) > max_concepts
-        if truncated:
-            selected_concepts = selected_concepts[:max_concepts]
-            filtered_forms = {
-                concept_id: filtered_forms.get(concept_id, [])
-                for concept_id in selected_concepts
-                if concept_id in filtered_forms
-            }
-
-        concept_specs = [
-            cognate_compute_module.ConceptSpec(concept_id=concept_id, label="")
-            for concept_id in selected_concepts
-        ]
-
-        cognate_sets = cognate_compute_module._compute_cognate_sets_with_lingpy(
-            filtered_forms,
-            concept_specs,
-            threshold,
-        )
-
-        similarity: Dict[str, Any] = {}
-        if include_similarity:
-            similarity = cognate_compute_module.compute_similarity_scores(
-                forms_by_concept=filtered_forms,
-                concepts=concept_specs,
-                contact_languages=contact_languages,
-                refs_by_concept=refs_by_concept,
-                form_selections_by_concept=form_selections_by_concept,
-            )
-
-        if speaker_filter:
-            speakers_included = sorted([speaker for speaker in discovered_speakers if speaker in speaker_filter_set])
-        else:
-            speakers_included = sorted(discovered_speakers)
-
-        preview_payload = {
-            "computed_at": _utc_now_iso(),
-            "config": {
-                "contact_languages": list(contact_languages),
-                "speakers_included": speakers_included,
-                "concepts_included": selected_concepts,
-                "lexstat_threshold": round(float(threshold), 3),
-            },
-            "cognate_sets": cognate_sets,
-            "similarity": similarity,
-            "borrowing_flags": {},
-            "manual_overrides": {},
-        }
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "appliedToProjectState": False,
-            "truncated": truncated,
-            "maxConcepts": max_concepts,
-            "summary": {
-                "conceptCount": len(preview_payload["config"]["concepts_included"]),
-                "speakerCount": len(preview_payload["config"]["speakers_included"]),
-                "hasSimilarity": include_similarity,
-            },
-            "enrichmentsPreview": preview_payload,
-            "note": "Preview only. parse-enrichments.json was not modified.",
-        }
+        return tool_cognate_compute_preview(self, args)
 
     def _segments_from_payload(self, payload: Sequence[Any]) -> List[Any]:
-        if cross_speaker_match_module is None:
-            return []
-
-        segments: List[Any] = []
-        for index, item in enumerate(payload):
-            if not isinstance(item, dict):
-                continue
-
-            start_sec = _coerce_float(item.get("start", item.get("startSec", 0.0)), 0.0)
-            end_sec = _coerce_float(item.get("end", item.get("endSec", start_sec)), start_sec)
-            if end_sec < start_sec:
-                end_sec = start_sec
-
-            text = _normalize_space(item.get("text"))
-            ipa = _normalize_space(item.get("ipa"))
-            ortho = _normalize_space(item.get("ortho", text))
-
-            token_source = "{0} {1}".format(ipa, text)
-            tokens = [token for token in TOKEN_RE.findall(token_source.lower()) if token]
-            deduped_tokens: List[str] = []
-            seen: Dict[str, bool] = {}
-            for token in tokens:
-                if token in seen:
-                    continue
-                seen[token] = True
-                deduped_tokens.append(token)
-
-            segments.append(
-                cross_speaker_match_module.SegmentRecord(
-                    index=index,
-                    start_sec=start_sec,
-                    end_sec=end_sec,
-                    text=text,
-                    ipa=ipa,
-                    ortho=ortho,
-                    tokens=deduped_tokens,
-                )
-            )
-
-        segments.sort(key=lambda row: (float(getattr(row, "start_sec", 0.0)), float(getattr(row, "end_sec", 0.0))))
-        for new_index, segment in enumerate(segments):
-            segment.index = new_index
-
-        return segments
+        return segments_from_payload(self, payload)
 
     def _tool_cross_speaker_match_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if cross_speaker_match_module is None:
-            return {
-                "readOnly": True,
-                "previewOnly": True,
-                "status": "unavailable",
-                "message": "compare.cross_speaker_match module is unavailable",
-            }
-
-        top_k = int(args.get("topK", 5) or 5)
-        min_confidence = _coerce_float(args.get("minConfidence"), 0.35)
-        min_confidence = max(0.0, min(1.0, min_confidence))
-        max_concepts = int(args.get("maxConcepts", 100) or 100)
-
-        speaker = _normalize_space(args.get("speaker"))
-        raw_segments: List[Any] = []
-        source_label = ""
-
-        stt_job_id = _normalize_space(args.get("sttJobId"))
-        if stt_job_id:
-            if self._get_job_snapshot is None:
-                raise ChatToolExecutionError("Job snapshot callback is unavailable")
-
-            snapshot = self._get_job_snapshot(stt_job_id)
-            if snapshot is None:
-                return {
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "status": "not_found",
-                    "jobId": stt_job_id,
-                    "message": "Unknown sttJobId",
-                }
-
-            if snapshot.get("type") != "stt":
-                raise ChatToolValidationError("sttJobId does not point to an STT job")
-
-            if snapshot.get("status") != "complete":
-                return {
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "status": snapshot.get("status"),
-                    "jobId": stt_job_id,
-                    "progress": snapshot.get("progress"),
-                    "message": "STT job is not complete yet",
-                }
-
-            result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
-            if not speaker:
-                speaker = _normalize_space(result.get("speaker") or snapshot.get("meta", {}).get("speaker"))
-
-            segments_obj = result.get("segments")
-            if isinstance(segments_obj, list):
-                raw_segments = segments_obj
-                source_label = "sttJob:{0}".format(stt_job_id)
-
-        if not raw_segments:
-            inline_segments = args.get("sttSegments")
-            if isinstance(inline_segments, list):
-                raw_segments = inline_segments
-                source_label = "inline"
-
-        if not raw_segments:
-            raise ChatToolValidationError("Provide sttJobId or sttSegments")
-
-        if not speaker:
-            speaker = "unknown"
-
-        segments = self._segments_from_payload(raw_segments)
-        profiles = cross_speaker_match_module.load_concept_profiles(self.annotations_dir)
-        rules = cross_speaker_match_module.load_rules_from_file(self.phonetic_rules_path)
-
-        result_payload = cross_speaker_match_module.match_cross_speaker(
-            speaker_id=speaker,
-            segments=segments,
-            profiles=profiles,
-            rules=rules,
-            top_k=max(1, int(top_k)),
-            min_confidence=min_confidence,
-        )
-
-        matches = result_payload.get("matches") if isinstance(result_payload, dict) else []
-        if not isinstance(matches, list):
-            matches = []
-
-        truncated = len(matches) > max_concepts
-        if truncated and isinstance(result_payload, dict):
-            result_payload["matches"] = matches[:max_concepts]
-
-        return {
-            "readOnly": True,
-            "previewOnly": True,
-            "appliedToProjectState": False,
-            "source": source_label,
-            "summary": {
-                "segmentCount": len(segments),
-                "profileCount": len(profiles),
-                "matchConceptCount": len(result_payload.get("matches", [])) if isinstance(result_payload, dict) else 0,
-                "truncated": truncated,
-                "maxConcepts": max_concepts,
-            },
-            "matchPreview": result_payload,
-            "note": "Preview only. No annotation/enrichment writes were performed.",
-        }
+        return tool_cross_speaker_match_preview(self, args)
 
     def _tool_spectrogram_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_spectrogram_preview(self, args)
 
-
-    # ------------------------------------------------------------------
-    # Contact lexeme / reference form lookup
-    # ------------------------------------------------------------------
-
     def _tool_contact_lexeme_lookup(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Fetch reference forms for contact languages via the provider registry.
-
-        dryRun controls write behavior:
-          dryRun=true  → call ProviderRegistry.fetch_all directly; no filesystem
-                         writes; returns a preview of what would be merged.
-          dryRun=false → call fetch_and_merge; writes results to
-                         sil_contact_languages.json.
-        """
-        dry_run = bool(args.get("dryRun"))
-
-        try:
-            from compare.contact_lexeme_fetcher import fetch_and_merge
-        except ImportError:
-            return {
-                "readOnly": True,
-                "status": "unavailable",
-                "message": (
-                    "compare.contact_lexeme_fetcher module is unavailable. "
-                    "Ensure the compare package is importable."
-                ),
-            }
-
-        concepts_path = self.project_root / "concepts.csv"
-        if not concepts_path.exists():
-            return {
-                "ok": False,
-                "error": "concepts.csv not found in project root. Import concepts first.",
-            }
-
-        config_path = self.sil_config_path
-        if not config_path.exists():
-            # Create minimal config so fetch_and_merge can proceed
-            import json as _json
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, "w", encoding="utf-8") as f:
-                _json.dump({}, f)
-
-        # Parse arguments
-        languages_raw = args.get("languages")
-        if isinstance(languages_raw, list) and languages_raw:
-            languages = [str(lc).strip().lower() for lc in languages_raw if str(lc).strip()]
-        else:
-            # Default: read configured languages from sil_contact_languages.json
-            import json as _json
-            try:
-                with open(config_path, encoding="utf-8") as f:
-                    sil_config = _json.load(f)
-                languages = [k for k, v in sil_config.items() if isinstance(v, dict) and "name" in v]
-            except Exception:
-                languages = []
-            if not languages:
-                return {
-                    "ok": False,
-                    "error": (
-                        "No languages specified and none configured in sil_contact_languages.json. "
-                        "Provide languages parameter, e.g. [\"ar\", \"fa\"]."
-                    ),
-                }
-
-        providers_raw = args.get("providers")
-        providers = None
-        if isinstance(providers_raw, list) and providers_raw:
-            providers = [str(p).strip() for p in providers_raw if str(p).strip()]
-
-        overwrite = bool(args.get("overwrite", False))
-        max_concepts_raw = args.get("maxConcepts")
-        max_concepts: Optional[int] = None
-        if isinstance(max_concepts_raw, int) and max_concepts_raw > 0:
-            max_concepts = max_concepts_raw
-
-        # Concept filter
-        concept_ids_raw = args.get("conceptIds")
-        concept_filter = None
-        if isinstance(concept_ids_raw, list) and concept_ids_raw:
-            project_concepts = self._load_project_concepts()
-            label_by_id = {
-                str(concept.get("id") or "").strip(): str(concept.get("label") or "").strip()
-                for concept in project_concepts
-                if str(concept.get("id") or "").strip() and str(concept.get("label") or "").strip()
-            }
-            label_by_label = {
-                str(concept.get("label") or "").strip().lower(): str(concept.get("label") or "").strip()
-                for concept in project_concepts
-                if str(concept.get("label") or "").strip()
-            }
-            concept_filter = []
-            for raw_concept in concept_ids_raw:
-                token = str(raw_concept).strip()
-                if not token:
-                    continue
-                concept_label = label_by_id.get(token) or label_by_label.get(token.lower()) or token
-                if concept_label not in concept_filter:
-                    concept_filter.append(concept_label)
-
-        if concept_filter is not None and max_concepts is not None:
-            concept_filter = concept_filter[:max_concepts]
-
-        # Load ai_config for provider credentials (grokipedia needs API keys)
-        ai_config = _read_json_file(self.config_path, {})
-
-        # If concept filter is given, write a temporary concepts CSV with only those
-        import tempfile
-        import csv as _csv
-        if concept_filter:
-            tmp_concepts = Path(tempfile.mktemp(suffix=".csv"))
-            try:
-                with open(tmp_concepts, "w", newline="", encoding="utf-8") as f:
-                    writer = _csv.DictWriter(f, fieldnames=["id", "concept_en"])
-                    writer.writeheader()
-                    for i, c in enumerate(concept_filter, 1):
-                        writer.writerow({"id": str(i), "concept_en": c})
-                effective_concepts_path = tmp_concepts
-            except Exception:
-                effective_concepts_path = concepts_path
-                concept_filter = None
-        else:
-            effective_concepts_path = concepts_path
-            tmp_concepts = None
-
-        try:
-            if dry_run:
-                # Preview path — load sil_config for language_meta, call the provider
-                # registry directly, never touch the filesystem. Imported lazily here
-                # (not at the top of the handler) because the provider registry pulls
-                # in optional deps like pycldf/pylexibank that the write path doesn't
-                # need — hoisting it would regress write-path availability when those
-                # deps are missing.
-                try:
-                    from compare.providers.registry import ProviderRegistry, PROVIDER_PRIORITY
-                except ImportError as exc:
-                    return {
-                        "ok": False,
-                        "error": (
-                            "Provider registry unavailable for dryRun preview: {0}. "
-                            "Re-run with dryRun=false to fall back to fetch_and_merge."
-                        ).format(exc),
-                    }
-                import csv as _csv_preview
-                import json as _json_preview
-                try:
-                    with open(config_path, encoding="utf-8") as f:
-                        sil_config_preview = _json_preview.load(f)
-                except Exception:
-                    sil_config_preview = {}
-                language_meta = {k: v for k, v in sil_config_preview.items() if isinstance(v, dict)}
-
-                with open(effective_concepts_path, newline="", encoding="utf-8") as f:
-                    reader = _csv_preview.DictReader(f)
-                    preview_concepts = [
-                        (row.get("concept_en") or "").strip()
-                        for row in reader
-                        if (row.get("concept_en") or "").strip()
-                    ]
-                if max_concepts is not None:
-                    preview_concepts = preview_concepts[:max_concepts]
-
-                registry = ProviderRegistry(ai_config if isinstance(ai_config, dict) else {})
-                fetched = registry.fetch_all(
-                    concepts=preview_concepts,
-                    language_codes=languages,
-                    language_meta=language_meta,
-                    priority_order=providers,
-                )
-                filled = {
-                    lc: sum(1 for forms in fetched.get(lc, {}).values() if forms)
-                    for lc in languages
-                }
-
-                sample_forms: Dict[str, Dict[str, List[str]]] = {}
-                for lc in languages:
-                    sample: Dict[str, List[str]] = {}
-                    for concept_en, forms in list(fetched.get(lc, {}).items())[:5]:
-                        if forms:
-                            sample[concept_en] = forms
-                    sample_forms[lc] = sample
-
-                return {
-                    "ok": True,
-                    "dryRun": True,
-                    "readOnly": True,
-                    "previewOnly": True,
-                    "languages": languages,
-                    "filled": filled,
-                    "totalConceptsFetched": sum(filled.values()),
-                    "providersUsed": providers or list(PROVIDER_PRIORITY),
-                    "sampleForms": sample_forms,
-                    "message": (
-                        "DRY RUN — fetched reference forms for {0} language(s); "
-                        "no writes to sil_contact_languages.json. "
-                        "Re-run with dryRun=false to persist these results."
-                    ).format(len(languages)),
-                }
-
-            filled = fetch_and_merge(
-                concepts_path=effective_concepts_path,
-                config_path=config_path,
-                language_codes=languages,
-                providers=providers,
-                overwrite=overwrite,
-                ai_config=ai_config if isinstance(ai_config, dict) else {},
-            )
-        except Exception as exc:
-            return {
-                "ok": False,
-                "error": "Contact lexeme fetch failed: {0}".format(exc),
-            }
-        finally:
-            if tmp_concepts and tmp_concepts.exists():
-                try:
-                    tmp_concepts.unlink()
-                except Exception:
-                    pass
-
-        # Read back what was fetched to provide a summary
-        import json as _json
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                updated_config = _json.load(f)
-        except Exception:
-            updated_config = {}
-
-        sample_forms = {}
-        for lc in languages:
-            lang_data = updated_config.get(lc, {})
-            concepts_data = lang_data.get("concepts", {})
-            sample = {}
-            for concept_en, forms in list(concepts_data.items())[:5]:
-                sample[concept_en] = forms if isinstance(forms, list) else []
-            sample_forms[lc] = sample
-
-        return {
-            "ok": True,
-            "dryRun": False,
-            "readOnly": False,
-            "previewOnly": False,
-            "languages": languages,
-            "filled": filled,
-            "totalConceptsFetched": sum(filled.values()),
-            "providersUsed": providers or [
-                "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
-                "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
-            ],
-            "overwrite": overwrite,
-            "configPath": str(config_path),
-            "sampleForms": sample_forms,
-            "message": (
-                "Fetched reference forms for {0} language(s). "
-                "Total concepts filled: {1}. "
-                "Results written to sil_contact_languages.json. "
-                "Use cognate_compute_preview with contactLanguages to compare."
-            ).format(len(languages), sum(filled.values())),
-        }
-
-    # ------------------------------------------------------------------
-    # Tag-import helpers
-    # ------------------------------------------------------------------
+        return tool_contact_lexeme_lookup(self, args)
 
     def _load_project_concepts(self) -> List[Dict[str, Any]]:
-        """Load project concepts from concepts.csv. Returns list of {id, label} dicts."""
-        concepts_path = self.project_root / "concepts.csv"
-        if not concepts_path.exists():
-            return []
-        import csv as _csv
-        concepts: List[Dict[str, Any]] = []
-        try:
-            with open(concepts_path, newline="", encoding="utf-8") as f:
-                reader = _csv.DictReader(f)
-                for row in reader:
-                    cid = str(row.get("id") or "").strip()
-                    label = str(row.get("concept_en") or "").strip()
-                    if cid and label:
-                        concepts.append({"id": cid, "label": label})
-        except Exception:
-            pass
-        return concepts
+        return load_project_concepts(self)
 
     def _display_readable_path(self, path: Path) -> str:
-        """Return a project-relative path if possible, else the absolute path."""
         try:
             return path.relative_to(self.project_root).as_posix()
         except ValueError:
@@ -3103,24 +1195,17 @@ class ParseChatTools:
     def _tool_read_audio_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_read_audio_info(self, args)
 
-
     def _tool_read_csv_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_read_csv_preview(self, args)
 
-
     def _tool_read_text_preview(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_read_text_preview(self, args)
-
 
     def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_import_tag_csv(self, args)
 
     def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_prepare_tag_import(self, args)
-
-    # ------------------------------------------------------------------
-    # Speaker onboarding via chat
-    # ------------------------------------------------------------------
 
     def _resolve_onboard_source(self, raw_path: str, *, must_be_audio: bool) -> Path:
         return _resolve_onboard_source(self, raw_path, must_be_audio=must_be_audio)
@@ -3170,10 +1255,6 @@ class ParseChatTools:
 
     def _tool_onboard_speaker_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_onboard_speaker_import(self, args)
-
-    # ------------------------------------------------------------------
-    # Persistent chat memory (parse-memory.md)
-    # ------------------------------------------------------------------
 
     def _tool_parse_memory_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_parse_memory_read(self, args)
