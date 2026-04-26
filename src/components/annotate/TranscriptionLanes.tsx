@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type WaveSurfer from "wavesurfer.js";
 import { useAnnotationStore } from "../../stores/annotationStore";
 import {
@@ -491,25 +491,10 @@ export function TranscriptionLanes({
     return out;
   }, [lanes, sttBySpeaker, sttStatus, record, speaker]);
 
-  if (strips.length === 0 || !audioReady || pxPerSec <= 0 || duration <= 0) {
-    return null;
-  }
-
-  const innerWidth = Math.max(viewportWidth, pxPerSec * duration);
-  const visibleStartSec = Math.max(0, (scrollLeft - VIRTUAL_BUFFER_PX) / pxPerSec);
-  const visibleEndSec =
-    (scrollLeft + viewportWidth + VIRTUAL_BUFFER_PX) / pxPerSec;
-
-  const commitEdit = (tier: string, sourceIdx: number, text: string) => {
-    const trimmed = text.trim();
-    if (!speaker) return;
-    updateInterval(speaker, tier, sourceIdx, trimmed);
-    setEditing(null);
-  };
-
-  // Strip lookup by kind (used by the context menu / pending-drag commit).
-  const stripByKind = (kind: LaneKind): LaneStrip | undefined =>
-    strips.find((s) => s.kind === kind);
+  const stripByKind = useCallback(
+    (kind: LaneKind): LaneStrip | undefined => strips.find((s) => s.kind === kind),
+    [strips],
+  );
 
   // Drag-to-create on a boundary-only lane: while pendingDrag is active,
   // track mouse moves anywhere on the page (the user may drag past the
@@ -550,8 +535,23 @@ export function TranscriptionLanes({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingDrag, speaker, pxPerSec, duration]);
+  }, [addInterval, duration, pendingDrag, pxPerSec, speaker, stripByKind]);
+
+  if (strips.length === 0 || !audioReady || pxPerSec <= 0 || duration <= 0) {
+    return null;
+  }
+
+  const innerWidth = Math.max(viewportWidth, pxPerSec * duration);
+  const visibleStartSec = Math.max(0, (scrollLeft - VIRTUAL_BUFFER_PX) / pxPerSec);
+  const visibleEndSec =
+    (scrollLeft + viewportWidth + VIRTUAL_BUFFER_PX) / pxPerSec;
+
+  const commitEdit = (tier: string, sourceIdx: number, text: string) => {
+    const trimmed = text.trim();
+    if (!speaker) return;
+    updateInterval(speaker, tier, sourceIdx, trimmed);
+    setEditing(null);
+  };
 
   return (
     <div className="mt-2 space-y-1 px-5">
