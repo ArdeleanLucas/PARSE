@@ -150,8 +150,11 @@ export function CognateControls({ onGroupsChanged }: CognateControlsProps) {
   }, [activeConcept]);
 
   const saveGroups = useCallback(
-    async (newGroups: Record<string, string[]>) => {
-      if (!activeConcept) return;
+    async (
+      newGroups: Record<string, string[]>,
+      previousGroups?: Record<string, string[]>,
+    ): Promise<boolean> => {
+      if (!activeConcept) return false;
 
       const existingOverrides =
         (enrichmentData?.manual_overrides as Record<string, unknown>) ?? {};
@@ -169,10 +172,14 @@ export function CognateControls({ onGroupsChanged }: CognateControlsProps) {
           },
         });
       } catch {
-        // enrichmentStore.save not yet implemented — store locally
+        if (previousGroups) {
+          setGroups(previousGroups);
+        }
+        return false;
       }
 
       onGroupsChanged?.(activeConcept, newGroups);
+      return true;
     },
     [activeConcept, enrichmentData, save, onGroupsChanged],
   );
@@ -184,17 +191,19 @@ export function CognateControls({ onGroupsChanged }: CognateControlsProps) {
     return null;
   };
 
-  const handleAccept = () => {
+  const handleAccept = async () => {
     const sanitized = sanitizeGroups(groups, speakersWithForm);
+    const previousGroups = groups;
     setGroups(sanitized);
-    saveGroups(sanitized);
-    setMode("view");
+    const ok = await saveGroups(sanitized, previousGroups);
+    if (ok) setMode("view");
   };
 
-  const handleMerge = () => {
+  const handleMerge = async () => {
     const merged = sanitizeGroups({ A: speakersWithForm }, speakersWithForm);
+    const previousGroups = groups;
     setGroups(merged);
-    saveGroups(merged);
+    await saveGroups(merged, previousGroups);
     setMode("view");
   };
 
@@ -220,14 +229,15 @@ export function CognateControls({ onGroupsChanged }: CognateControlsProps) {
     setGroups(newGroups);
   };
 
-  const handleDoneSplit = () => {
+  const handleDoneSplit = async () => {
     const sanitized = sanitizeGroups(groups, speakersWithForm);
+    const previousGroups = groups;
     setGroups(sanitized);
-    saveGroups(sanitized);
-    setMode("view");
+    const ok = await saveGroups(sanitized, previousGroups);
+    if (ok) setMode("view");
   };
 
-  const handleCycleClick = (speaker: string) => {
+  const handleCycleClick = async (speaker: string) => {
     const current = findSpeakerGroup(speaker);
     const currentIdx = current
       ? GROUP_LETTERS.indexOf(current as GroupLetter)
@@ -244,8 +254,9 @@ export function CognateControls({ onGroupsChanged }: CognateControlsProps) {
       if (newGroups[key].length === 0) delete newGroups[key];
     }
 
+    const previousGroups = groups;
     setGroups(newGroups);
-    saveGroups(newGroups);
+    await saveGroups(newGroups, previousGroups);
   };
 
   if (!activeConcept) {

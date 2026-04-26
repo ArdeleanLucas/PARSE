@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord } from "../../api/types";
 
@@ -130,6 +130,30 @@ describe("CognateControls", () => {
     const sp2Btn = screen.getByTestId("speaker-btn-Sp2");
     expect(sp1Btn.textContent).toContain("A");
     expect(sp2Btn.textContent).toContain("A");
+  });
+
+  it("does not report or keep a merged state when save fails", async () => {
+    mockActiveConcept = "water";
+    mockConfig = { speakers: ["Sp1", "Sp2"] };
+    mockRecords = {
+      Sp1: makeRecord("Sp1", [{ id: "water", ipa: "aw", start: 0, end: 1 }]),
+      Sp2: makeRecord("Sp2", [{ id: "water", ipa: "av", start: 0, end: 1 }]),
+    };
+    mockEnrichmentData = {
+      cognate_sets: { water: { A: ["Sp1"], B: ["Sp2"] } },
+    };
+    const onGroupsChanged = vi.fn();
+    mockSave.mockRejectedValueOnce(new Error("save failed"));
+
+    render(<CognateControls onGroupsChanged={onGroupsChanged} />);
+    fireEvent.click(screen.getByText("Merge"));
+
+    await waitFor(() => {
+      expect(mockSave).toHaveBeenCalledTimes(1);
+      expect(onGroupsChanged).not.toHaveBeenCalled();
+      expect(screen.getByTestId("speaker-btn-Sp1").textContent).toContain("A");
+      expect(screen.getByTestId("speaker-btn-Sp2").textContent).toContain("B");
+    });
   });
 
   it("split mode toggled by Split button", () => {
