@@ -66,6 +66,16 @@ from app.http.project_artifact_handlers import (
     build_get_tags_response as _app_build_get_tags_response,
     build_post_tags_merge_response as _app_build_post_tags_merge_response,
 )
+from app.http.clef_http_handlers import (
+    ClefHttpHandlerError as _app_ClefHttpHandlerError,
+    build_get_clef_catalog_response as _app_build_get_clef_catalog_response,
+    build_get_clef_config_response as _app_build_get_clef_config_response,
+    build_get_clef_providers_response as _app_build_get_clef_providers_response,
+    build_get_clef_sources_report_response as _app_build_get_clef_sources_report_response,
+    build_get_contact_lexeme_coverage_response as _app_build_get_contact_lexeme_coverage_response,
+    build_post_clef_config_response as _app_build_post_clef_config_response,
+    build_post_clef_form_selections_response as _app_build_post_clef_form_selections_response,
+)
 from app.http.request_helpers import (
     JsonBodyError as _app_JsonBodyError,
     path_parts as _app_path_parts,
@@ -7705,81 +7715,31 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _api_get_contact_lexeme_coverage(self) -> None:
         """Return coverage stats for contact language lexeme data."""
-        config_path = _sil_config_path()
-        config = _load_sil_config_safe(config_path)
-
-        concepts_path = _project_root() / "concepts.csv"
         try:
-            import csv as _csv
-            with open(concepts_path, newline="") as f:
-                reader = _csv.DictReader(f)
-                all_concepts = [row.get("concept_en", "").strip() for row in reader if row.get("concept_en")]
-        except (OSError, KeyError):
-            all_concepts = []
+            response = _app_build_get_contact_lexeme_coverage_response(
+                config_path=_sil_config_path(),
+                project_root=_project_root(),
+                load_sil_config_safe=_load_sil_config_safe,
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        languages = {}
-        for lang_code, lang_data in config.items():
-            if not isinstance(lang_code, str) or lang_code.startswith("_"):
-                continue
-            if not isinstance(lang_data, dict) or "name" not in lang_data:
-                continue
-            concepts_dict = lang_data.get("concepts", {})
-            filled = {c: v for c, v in concepts_dict.items() if v}
-            empty = [c for c in all_concepts if not filled.get(c)]
-            languages[lang_code] = {
-                "name": lang_data.get("name", lang_code),
-                "total": len(all_concepts),
-                "filled": len(filled),
-                "empty": len(empty),
-                "concepts": filled,
-            }
-
-        self._send_json(HTTPStatus.OK, {"languages": languages})
+        self._send_json(response.status, response.payload)
 
     def _api_get_clef_config(self) -> None:
         """Return the current CLEF configuration + readiness state. The UI's
         configure modal reads this to decide whether to prompt the user
         before running Borrowing detection."""
-        config_path = _sil_config_path()
-        config = _load_sil_config_safe(config_path)
+        try:
+            response = _app_build_get_clef_config_response(
+                config_path=_sil_config_path(),
+                project_root=_project_root(),
+                load_sil_config_safe=_load_sil_config_safe,
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        meta_raw = config.get("_meta") if isinstance(config.get("_meta"), dict) else {}
-        primary_raw = meta_raw.get("primary_contact_languages") if isinstance(meta_raw, dict) else []
-        primary: List[str] = []
-        if isinstance(primary_raw, list):
-            primary = [str(c).strip().lower() for c in primary_raw if isinstance(c, str) and c.strip()]
-
-        languages = []
-        for code, data in config.items():
-            if not isinstance(code, str) or code.startswith("_"):
-                continue
-            if not isinstance(data, dict):
-                continue
-            concepts_dict = data.get("concepts", {}) if isinstance(data.get("concepts"), dict) else {}
-            languages.append({
-                "code": code,
-                "name": data.get("name") or code,
-                "family": data.get("family") or None,
-                # ISO 15924 script hint -- when present, the Reference Forms
-                # panel routes bare strings deterministically to the script
-                # vs IPA slot, instead of guessing from Unicode blocks.
-                "script": data.get("script") or None,
-                "filled": sum(1 for v in concepts_dict.values() if v),
-                "total": len(concepts_dict),
-            })
-        languages.sort(key=lambda x: x["code"])
-
-        configured = bool(primary) and len(languages) > 0
-        concepts_exists = (_project_root() / "concepts.csv").exists()
-
-        self._send_json(HTTPStatus.OK, {
-            "configured": configured,
-            "primary_contact_languages": primary,
-            "languages": languages,
-            "config_path": str(config_path),
-            "concepts_csv_exists": concepts_exists,
-            "meta": meta_raw if isinstance(meta_raw, dict) else {},
-        })
+        self._send_json(response.status, response.payload)
 
     def _api_post_clef_config(self) -> None:
         """Create/update the SIL contact-language config. Accepts:
@@ -7794,77 +7754,18 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         forms are never dropped when the user re-saves the config."""
         body = self._expect_object(self._read_json_body(), "Request body")
 
-        primary_raw = body.get("primary_contact_languages", [])
-        if not isinstance(primary_raw, list):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "primary_contact_languages must be a list")
-        primary = [str(c).strip().lower() for c in primary_raw if isinstance(c, str) and c.strip()]
-        if len(primary) > 2:
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Pick at most 2 primary contact languages")
+        try:
+            response = _app_build_post_clef_config_response(
+                body,
+                config_path=_sil_config_path(),
+                load_sil_config_safe=_load_sil_config_safe,
+                write_sil_config=_write_sil_config,
+                now_factory=lambda: datetime.now(timezone.utc),
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        langs_raw = body.get("languages", [])
-        if not isinstance(langs_raw, list):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "languages must be a list")
-
-        clean_langs: Dict[str, Dict[str, Any]] = {}
-        for item in langs_raw:
-            if not isinstance(item, dict):
-                continue
-            code = str(item.get("code", "")).strip().lower()
-            if not code or code.startswith("_"):
-                continue
-            entry: Dict[str, Any] = {
-                "name": str(item.get("name") or code),
-            }
-            family = item.get("family")
-            if isinstance(family, str) and family.strip():
-                entry["family"] = family.strip()
-            # ISO 15924 script hint -- carried through from the configure
-            # modal so the Reference Forms panel can route bare strings
-            # without falling back to the Unicode-block heuristic.
-            script = item.get("script")
-            if isinstance(script, str) and script.strip():
-                entry["script"] = script.strip()
-            clean_langs[code] = entry
-
-        # Every primary code must appear in the language set. If the client
-        # only sent primaries, synthesize minimal entries so the compute
-        # path has somewhere to write forms.
-        for code in primary:
-            clean_langs.setdefault(code, {"name": code})
-
-        config_path = _sil_config_path()
-        existing = _load_sil_config_safe(config_path)
-
-        merged: Dict[str, Any] = {}
-        for code, entry in clean_langs.items():
-            prev = existing.get(code) if isinstance(existing.get(code), dict) else {}
-            prev_concepts = prev.get("concepts") if isinstance(prev.get("concepts"), dict) else {}
-            merged[code] = {**entry, "concepts": prev_concepts}
-
-        prev_meta = existing.get("_meta") if isinstance(existing.get("_meta"), dict) else {}
-        prev_selections = prev_meta.get("form_selections") if isinstance(prev_meta.get("form_selections"), dict) else None
-
-        new_meta: Dict[str, Any] = {
-            "primary_contact_languages": primary,
-            "configured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "schema_version": 1,
-        }
-        # Preserve user's per-concept form selections across config saves so
-        # re-saving CLEF config (e.g. to add a new primary language) doesn't
-        # wipe selections the user has made in the Reference Forms panel.
-        if prev_selections is not None:
-            new_meta["form_selections"] = prev_selections
-
-        merged["_meta"] = new_meta
-
-        _write_sil_config(config_path, merged)
-
-        self._send_json(HTTPStatus.OK, {
-            "success": True,
-            "config_path": str(config_path),
-            "primary_contact_languages": primary,
-            "language_count": len(clean_langs),
-        })
+        self._send_json(response.status, response.payload)
 
     def _api_post_clef_form_selections(self) -> None:
         """Persist which reference forms the user has selected for a given
@@ -7890,59 +7791,17 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         body = self._expect_object(self._read_json_body(), "Request body")
 
-        concept_en = body.get("concept_en")
-        if not isinstance(concept_en, str) or not concept_en.strip():
-            raise ApiError(HTTPStatus.BAD_REQUEST, "concept_en must be a non-empty string")
-        concept_key = concept_en.strip()
+        try:
+            response = _app_build_post_clef_form_selections_response(
+                body,
+                config_path=_sil_config_path(),
+                load_sil_config_safe=_load_sil_config_safe,
+                write_sil_config=_write_sil_config,
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        lang_code_raw = body.get("lang_code")
-        if not isinstance(lang_code_raw, str) or not lang_code_raw.strip():
-            raise ApiError(HTTPStatus.BAD_REQUEST, "lang_code must be a non-empty string")
-        lang_code = lang_code_raw.strip().lower()
-        if lang_code.startswith("_"):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "lang_code must not start with '_'")
-
-        forms_raw = body.get("forms", [])
-        if not isinstance(forms_raw, list):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "forms must be a list of strings")
-        forms: List[str] = []
-        seen: set = set()
-        for item in forms_raw:
-            if not isinstance(item, str):
-                continue
-            text = item.strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            forms.append(text)
-
-        config_path = _sil_config_path()
-        existing = _load_sil_config_safe(config_path)
-
-        meta = existing.get("_meta")
-        if not isinstance(meta, dict):
-            meta = {}
-        selections = meta.get("form_selections")
-        if not isinstance(selections, dict):
-            selections = {}
-
-        concept_entry = selections.get(concept_key)
-        if not isinstance(concept_entry, dict):
-            concept_entry = {}
-
-        concept_entry[lang_code] = forms
-        selections[concept_key] = concept_entry
-        meta["form_selections"] = selections
-        existing["_meta"] = meta
-
-        _write_sil_config(config_path, existing)
-
-        self._send_json(HTTPStatus.OK, {
-            "success": True,
-            "concept_en": concept_key,
-            "lang_code": lang_code,
-            "forms": forms,
-        })
+        self._send_json(response.status, response.payload)
 
     def _api_get_clef_catalog(self) -> None:
         """Return the bundled SIL/ISO language catalog the configure modal
@@ -7956,45 +7815,27 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         codes in the extras replace the bundled entry."""
         from compare.sil_catalog import SIL_CATALOG
 
-        merged: Dict[str, Dict[str, Any]] = {}
-        for entry in SIL_CATALOG:
-            code = str(entry.get("code", "")).strip().lower()
-            if not code:
-                continue
-            merged[code] = {k: v for k, v in entry.items() if v is not None}
+        try:
+            response = _app_build_get_clef_catalog_response(
+                project_root=_project_root(),
+                sil_catalog=SIL_CATALOG,
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        extras_path = _project_root() / "config" / "sil_catalog_extra.json"
-        if extras_path.exists():
-            try:
-                with open(extras_path, encoding="utf-8") as f:
-                    raw = json.load(f)
-            except (OSError, ValueError):
-                raw = None
-            if isinstance(raw, dict):
-                raw = raw.get("languages", [])
-            if isinstance(raw, list):
-                for item in raw:
-                    if not isinstance(item, dict):
-                        continue
-                    code = str(item.get("code", "")).strip().lower()
-                    if not code:
-                        continue
-                    merged[code] = {
-                        "code": code,
-                        "name": str(item.get("name") or code),
-                        **({"family": item["family"]} if isinstance(item.get("family"), str) and item["family"].strip() else {}),
-                        **({"script": item["script"]} if isinstance(item.get("script"), str) and item["script"].strip() else {}),
-                    }
-
-        languages = sorted(merged.values(), key=lambda x: x.get("name", x.get("code", "")))
-        self._send_json(HTTPStatus.OK, {"languages": languages})
+        self._send_json(response.status, response.payload)
 
     def _api_get_clef_providers(self) -> None:
         """Return the list of CLEF providers in priority order -- drives
         the provider-selection checkboxes in the configure modal."""
         from compare.providers.registry import PROVIDER_PRIORITY
-        providers = [{"id": p, "name": p} for p in PROVIDER_PRIORITY]
-        self._send_json(HTTPStatus.OK, {"providers": providers})
+
+        try:
+            response = _app_build_get_clef_providers_response(provider_priority=PROVIDER_PRIORITY)
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
+
+        self._send_json(response.status, response.payload)
 
     def _api_get_clef_sources_report(self) -> None:
         """Walk the SIL contact-language config and return a provenance
@@ -8031,82 +7872,23 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
               ]
             }
         """
+        from compare.providers.citations import CITATION_DISPLAY_ORDER, get_citations
         from compare.providers.provenance import iter_forms_with_sources
 
-        config_path = _sil_config_path()
-        config = _load_sil_config_safe(config_path)
-
-        concepts_path = _project_root() / "concepts.csv"
-        all_concepts_total = 0
         try:
-            import csv as _csv
-            with open(concepts_path, newline="") as f:
-                reader = _csv.DictReader(f)
-                all_concepts_total = sum(1 for row in reader if (row.get("concept_en") or "").strip())
-        except OSError:
-            all_concepts_total = 0
+            response = _app_build_get_clef_sources_report_response(
+                config_path=_sil_config_path(),
+                project_root=_project_root(),
+                load_sil_config_safe=_load_sil_config_safe,
+                iter_forms_with_sources=iter_forms_with_sources,
+                get_citations=get_citations,
+                citation_display_order=CITATION_DISPLAY_ORDER,
+                now_factory=lambda: datetime.now(timezone.utc),
+            )
+        except _app_ClefHttpHandlerError as exc:
+            raise ApiError(exc.status, exc.message) from exc
 
-        provider_totals: Dict[str, int] = {}
-        languages_out: List[Dict[str, Any]] = []
-
-        for code, data in sorted(config.items()):
-            if not isinstance(code, str) or code.startswith("_"):
-                continue
-            if not isinstance(data, dict):
-                continue
-            concepts_dict = data.get("concepts") if isinstance(data.get("concepts"), dict) else {}
-
-            forms_out: List[Dict[str, Any]] = []
-            per_provider: Dict[str, int] = {}
-            concepts_covered = 0
-            for concept_en, entry in sorted(concepts_dict.items()):
-                any_forms = False
-                for form, sources in iter_forms_with_sources(entry):
-                    any_forms = True
-                    forms_out.append({
-                        "concept_en": concept_en,
-                        "form": form,
-                        "sources": list(sources),
-                    })
-                    for src in sources:
-                        per_provider[src] = per_provider.get(src, 0) + 1
-                        provider_totals[src] = provider_totals.get(src, 0) + 1
-                if any_forms:
-                    concepts_covered += 1
-
-            languages_out.append({
-                "code": code,
-                "name": data.get("name") or code,
-                "family": data.get("family") or None,
-                "script": data.get("script") or None,
-                "total_forms": len(forms_out),
-                "concepts_covered": concepts_covered,
-                "concepts_total": all_concepts_total,
-                "per_provider": per_provider,
-                "forms": forms_out,
-            })
-
-        providers_sorted = sorted(
-            ({"id": pid, "total_forms": count} for pid, count in provider_totals.items()),
-            key=lambda x: (-x["total_forms"], x["id"]),
-        )
-
-        # Attach the per-provider academic citations so the Sources Report
-        # modal can render full bibliographic references next to each
-        # provider chip without a second round-trip. Citations are
-        # dataset-level, not per-form -- a follow-up change can extend
-        # the FetchResult shape to thread per-form metadata (URL, dataset
-        # version, retrieval date, lexeme id) for true per-form citations.
-        from compare.providers.citations import get_citations, CITATION_DISPLAY_ORDER
-
-        self._send_json(HTTPStatus.OK, {
-            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "providers": providers_sorted,
-            "languages": languages_out,
-            "concepts_total": all_concepts_total,
-            "citations": get_citations(),
-            "citation_order": list(CITATION_DISPLAY_ORDER),
-        })
+        self._send_json(response.status, response.payload)
 
     def _api_update_config(self) -> None:
         body = self._expect_object(self._read_json_body(), "Request body")
