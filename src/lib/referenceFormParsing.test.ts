@@ -4,7 +4,8 @@ import {
   parseReferenceFormList,
   resolveReferenceFormLists,
   resolveFormSelection,
-} from '../ParseUI';
+} from './referenceFormParsing';
+import { parseReferenceFormList as parseReferenceFormListFromParseUI } from '../ParseUI';
 
 // The single-form helpers in ParseUI power the Reference Forms panel's
 // multi-form display + selection UI. These tests lock in the
@@ -220,5 +221,11 @@ describe('resolveFormSelection', () => {
   it('filters out non-string entries defensively', () => {
     const meta = { form_selections: { water: { ar: ['ماء', 42, null] } } };
     expect(resolveFormSelection(meta, 'water', 'ar')).toEqual(['ماء']);
+  });
+});
+
+describe('ParseUI compatibility re-export', () => {
+  it('keeps parseReferenceFormList importable from ParseUI', () => {
+    expect(parseReferenceFormListFromParseUI(['maːʔ'])).toEqual(parseReferenceFormList(['maːʔ']));
   });
 });
