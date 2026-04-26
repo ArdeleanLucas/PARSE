@@ -83,6 +83,21 @@ def test_api_auth_key_wrapper_maps_helper_errors_to_error_payload(monkeypatch) -
 
 
 
+def test_api_auth_key_wrapper_preserves_legacy_500_for_json_body_errors(monkeypatch) -> None:
+    handler = _HandlerHarness("/api/auth/key")
+
+    def fake_read_json_body(required: bool = True):
+        raise server.ApiError(HTTPStatus.BAD_REQUEST, "Invalid JSON body")
+
+    monkeypatch.setattr(handler, "_read_json_body", fake_read_json_body)
+    monkeypatch.setattr(server, "_app_build_auth_key_response", _fail_if_called("_app_build_auth_key_response"), raising=False)
+
+    handler._api_auth_key()
+
+    assert handler.sent == [(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Invalid JSON body"})]
+
+
+
 def test_api_auth_status_wrapper_delegates_to_helper(monkeypatch) -> None:
     handler = _HandlerHarness("/api/auth/status")
 

@@ -7583,6 +7583,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except _app_AuthHandlerError as exc:
             self._send_json(exc.status, {"error": exc.message})
             return
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+            return
 
         self._send_json(response.status, response.payload)
 
