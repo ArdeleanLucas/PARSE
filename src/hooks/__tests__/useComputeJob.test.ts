@@ -40,6 +40,21 @@ describe("useComputeJob", () => {
     expect(result.current.state.progress).toBe(0);
   });
 
+  it("forwards an explicit compute payload to startCompute", async () => {
+    vi.mocked(startCompute).mockResolvedValue({ job_id: "job-payload" });
+    vi.mocked(pollCompute).mockResolvedValue({ status: "running", progress: 0.1 });
+
+    const { result } = renderHook(() =>
+      useComputeJob("cognates", { body: { speakers: ["Fail01"] } }),
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(startCompute).toHaveBeenCalledWith("cognates", { speakers: ["Fail01"] });
+  });
+
   it("sets status to complete when poll returns complete", async () => {
     vi.mocked(startCompute).mockResolvedValue({ job_id: "job-2" });
     vi.mocked(pollCompute).mockResolvedValue({ status: "complete", progress: 100 });
