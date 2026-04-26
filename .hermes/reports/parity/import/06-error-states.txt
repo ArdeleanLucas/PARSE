@@ -1,0 +1,9 @@
+Flow 06 — Empty/error states
+Oracle: PASS
+Rebuild: PASS
+
+Both sides returned the same 400-class failures for:
+- missing audio: `audio file is required`
+- invalid speaker: `speaker is required`
+- tag CSV all misses: `No rows matched any existing concept by id or concept_en. Import concepts first.`
+- bad concepts CSV: `csv must have an id or concept_en column`

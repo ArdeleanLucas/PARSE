@@ -1,0 +1,9 @@
+Flow 02 — Processed speaker import (write path)
+Oracle: PASS
+Rebuild: PASS
+
+Both sides executed `import_processed_speaker` through the HTTP MCP bridge and wrote POSIX paths:
+- oracle: audio/working/ProcWrite01/speaker.wav
+- rebuild: audio/working/ProcWrite01/speaker.wav
+
+Both also wrote `peaks_file = peaks/ProcWrite01.json`.

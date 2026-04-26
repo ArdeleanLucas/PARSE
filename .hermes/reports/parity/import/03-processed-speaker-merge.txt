@@ -1,0 +1,13 @@
+Flow 03 — Processed speaker import (preserve-existing merge)
+Oracle: PASS
+Rebuild: PASS
+
+Both sides preserved the existing original source, appended the working WAV, promoted the working WAV to primary, and cleared stale optional metadata.
+
+Oracle source paths:
+- audio/original/ProcMerge01/speaker.wav
+- audio/working/ProcMerge01/speaker.wav
+
+Rebuild source paths:
+- audio/original/ProcMerge01/speaker.wav
+- audio/working/ProcMerge01/speaker.wav
