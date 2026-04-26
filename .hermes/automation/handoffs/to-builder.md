@@ -9,6 +9,6 @@ Current instruction:
 
 Grounded state:
 - Current rebuild `origin/main`: `7b33696` — `fix(annotate): prevent TranscriptionLanes hook-order crash (#19)`
-- Open PRs: none
+- Implementation PRs from current rebuild `origin/main`: none after PR #19; this handoff PR is docs-only
 - Prior PR #14 / #19 blockers are resolved on main
 - Next builder-visible slice: `docs/plans/parseui-current-state-plan.md §5` compute-mode semantics / payload audit

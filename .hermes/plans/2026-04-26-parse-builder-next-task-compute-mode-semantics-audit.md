@@ -6,9 +6,9 @@ Reconcile the Compare-mode compute drawer with the live `/api/compute/*` contrac
 
 ## Why this is the right next task now
 
-- The session-window handoff for 2026-04-26 confirmed `TarahAssistant/PARSE-rebuild` current `origin/main` is green at `7b33696` with **no open PRs**.
+- The session-window handoff for 2026-04-26 confirmed `TarahAssistant/PARSE-rebuild` current `origin/main` is green at `7b33696`.
 - PR #19 (`fix(annotate): prevent TranscriptionLanes hook-order crash`) explicitly named the **compute-mode semantics / payload audit** as the remaining deferred Builder follow-up after the crash fix.
-- `.hermes/automation/reports/final.md` also still points to `docs/plans/parseui-current-state-plan.md §5` as the next builder-visible slice.
+- `docs/plans/parseui-current-state-plan.md §5` still names compute-mode semantics / payload verification as the next builder-visible contract audit.
 
 ## Current grounded context
 
@@ -16,7 +16,7 @@ Reconcile the Compare-mode compute drawer with the live `/api/compute/*` contrac
 - Repo: `TarahAssistant/PARSE-rebuild`
 - Base branch: `origin/main`
 - Current head: `7b33696` — `fix(annotate): prevent TranscriptionLanes hook-order crash (#19)`
-- Open PRs: `[]`
+- Open implementation PRs against current rebuild `origin/main`: `[]` before this docs handoff PR; current open PR is this docs-only handoff (`#22`)
 
 ### Frontend state on current main
 - `src/components/parse/RightPanel.tsx`
