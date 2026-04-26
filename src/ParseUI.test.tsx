@@ -1352,6 +1352,53 @@ describe("Actions menu — transcription run flow", () => {
     expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
   });
 
+  it("captures the current lexeme into the manual offset modal and shows the live consensus", async () => {
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset-manual"));
+    expect(await screen.findByTestId("offset-manual")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("offset-manual-capture"));
+
+    const anchorList = await screen.findByTestId("offset-manual-anchor-list");
+    expect(within(anchorList).getByText("water")).toBeTruthy();
+    expect(within(anchorList).getByText("1")).toBeTruthy();
+    expect(within(anchorList).getByText("+1.50s")).toBeTruthy();
+    expect(screen.getByTestId("offset-manual-consensus").textContent).toContain("+1.500 s");
+    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+  });
+
+  it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
+    vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
+    vi.mocked(apiClient.pollOffsetDetectJob).mockImplementation(
+      async (_jobId, _jobType, handlers) => {
+        handlers?.onProgress?.({ progress: 42, message: "Scanning anchors…" });
+        return new Promise(() => {});
+      },
+    );
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("drawer-detect-offset"));
+
+    const statusChip = await screen.findByTestId("topbar-offset-status");
+    const offsetModal = screen.getByTestId("offset-modal");
+    expect(statusChip).toBeTruthy();
+    expect(offsetModal).toBeTruthy();
+    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
+    expect(within(statusChip).getByText(/Scanning anchors/i)).toBeTruthy();
+    expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
+  });
+
   it("Reset Project resets the batch runner", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
