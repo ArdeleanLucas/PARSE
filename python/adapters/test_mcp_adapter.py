@@ -265,9 +265,10 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
     for tool in [
         "annotation_read", "audio_normalize_start", "cognate_compute_preview", "contact_lexeme_lookup",
         "cross_speaker_match_preview", "forced_align_start", "import_processed_speaker", "import_tag_csv",
-        "ipa_transcribe_acoustic_start", "pipeline_run", "pipeline_state_batch", "pipeline_state_read",
-        "prepare_tag_import", "project_context_read", "read_csv_preview", "spectrogram_preview",
-        "stt_start", "stt_status", "stt_word_level_start",
+        "ipa_transcribe_acoustic_start", "parse_memory_read", "parse_memory_upsert_section",
+        "pipeline_run", "pipeline_state_batch", "pipeline_state_read", "prepare_tag_import",
+        "project_context_read", "read_csv_preview", "spectrogram_preview", "stt_start",
+        "stt_status", "stt_word_level_start",
     ]:
         spec_count = len(re.findall(r'"{0}":\s*ChatToolSpec'.format(re.escape(tool)), combined_specs_text))
         handler_count = len(re.findall(r"^\s*def _tool_{0}\s*\(".format(re.escape(tool)), chat_tools_text, re.MULTILINE))
