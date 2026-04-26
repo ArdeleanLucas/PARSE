@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
-  Search, ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
+  ChevronLeft, ChevronRight, Check, Flag, Split, GitMerge,
   RotateCw, Save, Upload,
   Layers, ChevronDown, ChevronUp, X, AlertCircle,
   ArrowUpDown, Volume2,
@@ -12,9 +12,7 @@ import {
   Sun, Moon, XCircle,
 } from 'lucide-react';
 import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from './api/types';
-import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, searchLexeme, pollOffsetDetectJob, getJobLogs } from './api/client';
-import type { JobLogsPayload } from './api/client';
-import type { LexemeSearchCandidate } from './api/client';
+import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { compareSurveyKeys } from './lib/surveySort';
@@ -32,8 +30,7 @@ import {
   type CognateDecisionValue,
 } from './lib/decisionPersistence';
 import { useAnnotationStore } from './stores/annotationStore';
-import { useTranscriptionLanesStore, type LaneKind } from './stores/transcriptionLanesStore';
-import { LaneColorPicker } from './components/annotate/LaneColorPicker';
+import { useTranscriptionLanesStore } from './stores/transcriptionLanesStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
 import { useActionJob, formatEta } from './hooks/useActionJob';
@@ -58,6 +55,9 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ManageTagsView } from './components/compare/ManageTagsView';
 import { AnnotateView } from './components/annotate/AnnotateView';
+import { JobLogsModal } from './components/annotate/JobLogsModal';
+import { LexemeSearchBlock } from './components/annotate/LexemeSearchBlock';
+import { TranscriptionLanesControls } from './components/annotate/TranscriptionLanesControls';
 import { ClefConfigModal, type ClefConfigModalTab } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
@@ -2454,237 +2454,6 @@ export function ParseUI() {
       <Modal open={commentsImportOpen} onClose={() => setCommentsImportOpen(false)} title="Import Audition Comments">
         <CommentsImport onImportComplete={() => setCommentsImportOpen(false)} />
       </Modal>
-    </div>
-  );
-}
-
-// Crash-log modal. Fetches the worker error + traceback + stderr tail
-// for a given job id via /api/jobs/<id>/logs and renders it in a
-// scrollable <pre>. Rendered as null when no job id is selected so it
-// shares one mount point.
-function JobLogsModal({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
-  const [payload, setPayload] = useState<JobLogsPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!jobId) {
-      setPayload(null);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setPayload(null);
-    void (async () => {
-      try {
-        const data = await getJobLogs(jobId);
-        if (!cancelled) setPayload(data);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId]);
-
-  return (
-    <Modal open={jobId !== null} onClose={onClose} title="Job Crash Log">
-      <div className="space-y-3 text-sm" data-testid="job-logs-modal">
-        {jobId && (
-          <div className="text-[11px] text-slate-500">
-            Job <span className="font-mono text-slate-700">{jobId}</span>
-          </div>
-        )}
-        {loading && (
-          <div className="flex items-center gap-2 text-slate-600">
-            <Loader2 className="h-4 w-4 animate-spin"/> Fetching logs…
-          </div>
-        )}
-        {error && (
-          <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-800">
-            Failed to load logs: {error}
-          </div>
-        )}
-        {payload && (
-          <div className="space-y-3">
-            {payload.error && (
-              <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-rose-700">Error</div>
-                <div className="whitespace-pre-wrap break-words">{payload.error}</div>
-              </div>
-            )}
-            {payload.traceback && (
-              <details className="rounded-md border border-slate-200" open>
-                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                  Python traceback
-                </summary>
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800" data-testid="job-logs-traceback">{payload.traceback}</pre>
-              </details>
-            )}
-            {payload.stderrLog && (
-              <details className="rounded-md border border-slate-200">
-                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                  Per-job stderr
-                </summary>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800">{payload.stderrLog}</pre>
-              </details>
-            )}
-            {payload.workerStderrLog && (
-              <details className="rounded-md border border-slate-200">
-                <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                  Worker stderr tail
-                </summary>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-800">{payload.workerStderrLog}</pre>
-              </details>
-            )}
-            {!payload.error && !payload.traceback && !payload.stderrLog && !payload.workerStderrLog && (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
-                No crash log captured for this job. The worker may have
-                exited cleanly, or the stderr log was not written yet.
-              </div>
-            )}
-          </div>
-        )}
-        <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-// Visual order mirrors TranscriptionLanes.tsx: phone IPA → word IPA → STT → ORTH.
-const LANE_ORDER: LaneKind[] = ['ipa_phone', 'ipa', 'stt', 'ortho', 'stt_words', 'boundaries'];
-const LANE_DISPLAY: Record<LaneKind, { label: string; hint: string }> = {
-  ipa_phone: { label: 'Phones tier', hint: 'Phone-level IPA' },
-  ipa: { label: 'IPA tier', hint: 'Word/lexeme IPA' },
-  stt: { label: 'STT segments', hint: 'Coarse transcript' },
-  ortho: { label: 'Ortho tier', hint: 'Orthographic' },
-  stt_words: { label: 'Words (Tier 1)', hint: 'Raw faster-whisper word boundaries' },
-  boundaries: { label: 'Boundaries (Tier 2)', hint: 'Forced-aligned edges; colored by Tier 1 ↔ Tier 2 shift' },
-};
-
-function LexemeSearchBlock({ speaker, conceptId }: { speaker: string; conceptId: string | number }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<LexemeSearchCandidate[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const requestSeek = usePlaybackStore(s => s.requestSeek);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (!q || !speaker) { setResults([]); setError(null); return; }
-    const variants = q.split(/[\s,;/]+/).filter(Boolean);
-    if (variants.length === 0) { setResults([]); setError(null); return; }
-    const t = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await searchLexeme(speaker, variants, { conceptId: String(conceptId) });
-        setResults(res.candidates);
-      } catch (err) {
-        setResults([]);
-        setError(err instanceof Error ? err.message : 'Search failed');
-      } finally { setLoading(false); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [query, speaker, conceptId]);
-
-  return (
-    <div className="mb-3">
-      <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5">
-        <Search className="h-3 w-3 shrink-0 text-slate-400"/>
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search & anchor lexeme…"
-          aria-label="Search lexeme variants"
-          className="min-w-0 flex-1 bg-transparent text-[11px] focus:outline-none"
-        />
-        {loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400"/>}
-        {query && !loading && (
-          <button onClick={() => setQuery('')} aria-label="Clear search" className="shrink-0 text-slate-400 hover:text-slate-600"><X className="h-3 w-3"/></button>
-        )}
-      </div>
-      {(error || (query.trim() && !loading && results.length === 0) || results.length > 0) && (
-        <div className="max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white" role="listbox">
-          {error && <div className="px-2 py-1.5 text-[10px] text-rose-600">{error}</div>}
-          {!error && !loading && results.length === 0 && query.trim() && (
-            <div className="px-2 py-1.5 text-[10px] text-slate-400">No matches</div>
-          )}
-          {results.map((r, i) => (
-            <button
-              key={`${r.tier}:${r.start}:${i}`}
-              role="option"
-              onClick={() => requestSeek(r.start)}
-              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-indigo-50"
-            >
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate text-[11px] font-semibold text-slate-700">{r.matched_text}</span>
-                <span className="text-[9px] text-slate-400">
-                  {r.tier} · {r.start.toFixed(2)}s · &ldquo;{r.matched_variant}&rdquo;
-                </span>
-              </div>
-              <span className="shrink-0 rounded-full bg-indigo-50 px-1.5 py-0.5 font-mono text-[9px] text-indigo-700">
-                {Math.round(r.score * 100)}%
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TranscriptionLanesControls() {
-  const lanes = useTranscriptionLanesStore(s => s.lanes);
-  const toggleLane = useTranscriptionLanesStore(s => s.toggleLane);
-  const setLaneColor = useTranscriptionLanesStore(s => s.setLaneColor);
-
-  return (
-    <div className="mb-3 rounded-md bg-slate-50 p-2">
-      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-        Transcription lanes
-      </div>
-      <div className="space-y-1">
-        {LANE_ORDER.map(kind => {
-          const cfg = lanes[kind];
-          const { label, hint } = LANE_DISPLAY[kind];
-          return (
-            <div
-              key={kind}
-              className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-white"
-            >
-              <input
-                id={`lane-toggle-${kind}`}
-                type="checkbox"
-                checked={cfg.visible}
-                onChange={() => toggleLane(kind)}
-                className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
-              />
-              <LaneColorPicker
-                value={cfg.color}
-                onChange={c => setLaneColor(kind, c)}
-                ariaLabel={`Color for ${label}`}
-              />
-              <label htmlFor={`lane-toggle-${kind}`} className="flex-1 min-w-0 cursor-pointer">
-                <div className="text-[11px] font-medium text-slate-700 truncate">{label}</div>
-                <div className="text-[9px] text-slate-400 truncate">{hint}</div>
-              </label>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
