@@ -1,9 +1,9 @@
 # PARSE-rebuild progress scorecard — 2026-04-26
 
-**Date:** 2026-04-26  
-**Rebuild repo:** `TarahAssistant/PARSE-rebuild`  
-**Rebuild SHA:** `f9aa3db1aad1d77078c9105cd8b5e5254c066338`  
-**Oracle repo:** `ArdeleanLucas/PARSE`  
+**Date:** 2026-04-26
+**Rebuild repo:** `TarahAssistant/PARSE-rebuild`
+**Rebuild SHA:** `4ffb31dd6fe6b779673ef900b2cc7f1e9fb894be`
+**Oracle repo:** `ArdeleanLucas/PARSE`
 **Oracle SHA:** `0951287a812609068933ba22711a8ecd97765f38`
 
 ---
@@ -11,34 +11,35 @@
 ## TL;DR
 
 - **Browser/workstation runtime health:** `6/10`
-- **Monolith reduction:** `4/10`
+- **Monolith reduction:** `5/10`
 - **Parity-evidence coverage:** `1/10`
 - **Desktop-distribution readiness:** `planning-stage`
 
 Why it is not higher:
 - rebuild frontend gates are green, but rebuild backend is still red on **8** pytest failures
 - current oracle backend is also red on **10** pytest failures, so the parity baseline itself is imperfect
-- only **2 of 5** pressure-monolith targets have materially shrunk; `chat_tools.py`, `mcp_adapter.py`, and `provider.py` are still untouched
-- P0 parity evidence was effectively **0/4 committed surfaces** on main at measurement time
+- only **2 of 5** pressure-monolith targets have materially shrunk, but `ParseUI.tsx` has now dropped from `5328` oracle LoC to `3537` on rebuild current-main
+- P0 parity evidence was effectively **0/4 committed surfaces** on main at measurement time; the first Annotate evidence pass exists in open PR `#66`, not yet on `main`
 - desktop packaging remains documented as **Pre-implementation planning / Not started** in `docs/distribution_readiness_checklist.md`
 
 ---
 
 ## 1. Monolith reduction table
 
-**Axis score:** `4/10`
+**Axis score:** `5/10`
 
-Scoring basis for 2026-04-26:
+Scoring basis for the post-`#61/#62/#63/#58/#59` current-main snapshot:
 - 5 pressure-monoliths were audited
 - 2 were materially reduced on rebuild current-main
 - 3 remained byte-identical to the oracle
-- net reduction across the audited pressure set was **2,139 LoC removed from 24,665 LoC** (**8.7%**)
+- net reduction across the audited pressure set is now **3,006 LoC removed from 24,665 LoC** (**12.2%**)
+- the main structural movement came from `ParseUI.tsx`, which fell another **887 LoC** after the AI-chat and ManageTags extractions merged
 
 | File | Oracle LoC | Rebuild LoC | Delta | Delta % | Status | Notes |
 |---|---:|---:|---:|---:|---|---|
 | `python/server.py` | 8,972 | 7,757 | -1,215 | -13.5% | in-progress | HTTP extraction landed across multiple runtime slices, but the file is still the dominant backend monolith |
-| `python/ai/chat_tools.py` | 6,408 | 6,408 | 0 | 0.0% | untouched | Next queued backend lane is explicit chat-tools decomposition (open queue PR `#59`) |
-| `src/ParseUI.tsx` | 5,328 | 4,404 | -924 | -17.3% | structurally-cracked | Unified shell has shrunk, but annotate/AI/shell logic still sits in one oversized React file |
+| `python/ai/chat_tools.py` | 6,408 | 6,408 | 0 | 0.0% | untouched | Next active backend implementation PR is `#68` (`refactor(chat_tools): extract read-only chat tool bundles`) |
+| `src/ParseUI.tsx` | 5,328 | 3,537 | -1,791 | -33.6% | in-progress | `#61` (AIChat) and `#63` (ManageTagsView) landed, materially shrinking the shell while leaving AnnotateView extraction (`#69`) still open |
 | `python/adapters/mcp_adapter.py` | 2,050 | 2,050 | 0 | 0.0% | untouched | MCP surface is stable, but structural extraction has not started |
 | `python/ai/provider.py` | 1,907 | 1,907 | 0 | 0.0% | untouched | Provider/runtime contract remains concentrated in one file |
 
@@ -55,11 +56,11 @@ Scoring basis for 2026-04-26:
 | P0 surface | Evidence committed on main? | Evidence path | Current state |
 |---|---|---|---|
 | Shell / navigation | No | none yet | routed shell exists, but no committed oracle-vs-rebuild evidence set |
-| Annotate | No | none on main at measurement time | first Saha01 Annotate pass produced separately in a companion coordinator PR |
+| Annotate | No | none on main at measurement time | first Saha01 Annotate pass produced separately in companion PR `#66` |
 | Compare | No | none yet | compare surface is usable, but no committed parity artifact set |
 | Tags / enrichments management | No | none yet | behavior exists; evidence contract still unfulfilled |
 
-**Interpretation:** parity claims were still being made mostly from code review and spot testing rather than from committed artifacts. The evidence contract exists; coverage does not.
+**Interpretation:** parity claims were still being made mostly from code review and spot testing rather than from committed artifacts. The evidence contract exists; coverage does not. The important upgrade is that PR `#64` now makes the baseline **red-but-classified** instead of red-and-ambiguous: the current oracle/rebuild backend failures now have named buckets, including the shared `source_index.json` Windows path-separator bug that belongs to the oracle as well as the rebuild.
 
 ---
 
@@ -92,26 +93,46 @@ Current checklist snapshot on 2026-04-26:
 
 Grounded from merged PRs in the 24h window ending during this scorecard run.
 
-- **Merged PRs:** `34`
-- **Open PRs at measurement time:** `#61`, `#60`, `#59`, `#58`
+- **Merged PRs:** `39`
+- **Open PRs at measurement time:** `12` (`#64-#75`)
 
 | PR type prefix | Count |
 |---|---:|
-| `refactor:` | 14 |
+| `refactor:` | 16 |
 | `feat:` | 2 |
 | `fix:` | 6 |
-| `docs:` | 10 |
-| `test:` | 2 |
+| `docs:` | 12 |
+| `test:` | 3 |
 | `chore:` | 0 |
 | `other:` | 0 |
 
+### Open PR snapshot by lane
+
+#### Implementation lane
+- `#68` — clean, all checks green; next backend chat-tools decomposition slice
+- `#69` — dirty against current `main`; all historical checks green, but needs rebase before merge
+- `#71` — clean, all checks green; pure ParseUI utility lift ready once merge order reaches it
+- `#73` — dirty and still unrerun after upstream ParseUI churn; should follow `#69/#71`
+
+#### Handoffs / queued work
+- `#70` — clean, all checks green; Builder follow-up handoff for post-`AnnotateView` shell reduction
+- `#72` — clean, all checks green; backend while-waiting research handoff
+- `#74` — clean, all checks green; repo-target rule hardening for future coordinator/agent runs
+- `#75` — clean, all checks green; current parse-gpt burst coordinating the remaining wave
+
+#### Coordinator docs / parity set
+- `#64` — clean, all checks green; baseline signoff with the red-but-classified backend caveat ledger
+- `#65` — clean, all checks green; this scorecard, refreshed against the current 12-PR topology
+- `#66` — clean, all checks green; first Annotate parity evidence set
+- `#67` — clean, all checks green; `.hermes/handoffs/` queue migration
+
 ### Queue-prompt noise callout
 
-- `docs:` PRs that were primarily queue/handoff/coordinator prompts in the same 24h window: **7**
-- Share of all merged PRs in window: **20.6%**
-- Share of merged `docs:` PRs in window: **70.0%**
+- merged docs/handoff/coordinator prompt PRs in the same 24h window: **10** (`#59`, `#58`, `#45`, `#25`, `#22`, `#18`, `#17`, `#15`, `#10`, `#9`)
+- share of all merged PRs in window: **25.6%**
+- share of merged `docs:` PRs in window: **83.3%**
 
-**Interpretation:** throughput is high, but the merge count overstates product movement because coordinator queue prompts are still flowing through main-branch PRs.
+**Interpretation:** throughput is high, but the merge count still overstates product movement because coordination prompts remain a large share of merged docs traffic. The open-PR snapshot also shows that most remaining work is now explicit and classifiable rather than hidden in stale queue prose.
 
 ---
 
@@ -119,12 +140,12 @@ Grounded from merged PRs in the 24h window ending during this scorecard run.
 
 | Flag | 2026-04-26 state | Evidence |
 |---|---|---|
-| Phase 0 baseline signed | pending merge in companion coordinator PR | baseline data collected; see companion baseline-signoff PR work |
-| `.hermes` queue state freshness | stale on main | legacy `.hermes/automation/*` state reflected pre-merge-wave data and much of it was gitignored/local-only |
-| parse-builder lane | queued + one live implementation PR | open queue PR `#58`; live implementation PR `#61` |
-| parse-back-end lane | queued | open queue PR `#59` |
-| parse-gpt lane | still using old queue-PR pattern | open queue PR `#60`; cleanup not yet landed |
-| Real-data parity loop | incomplete | first Annotate evidence run still being produced separately |
+| Phase 0 baseline signed | pending merge in companion coordinator PR | PR `#64` now explicitly signs the baseline gate and classifies the red backend baseline |
+| `.hermes` queue state freshness | in active migration | old main-branch queue PRs `#58/#59` are now merged, while PR `#67` moves future queueing into `.hermes/handoffs/` |
+| parse-builder lane | implementation wave active | `#61`, `#62`, and `#63` merged; follow-on implementation `#69` and queued handoff `#70` are open |
+| parse-back-end lane | implementation wave active | legacy queue PR `#59` merged; follow-on implementation `#68` and while-waiting handoff `#72` are open |
+| parse-gpt lane | closing coordinator execution set | `#64-#67` remain the active coordinator docs quartet |
+| Real-data parity loop | incomplete | first Annotate evidence run is open in PR `#66`; Compare and Tags evidence still pending |
 
 **Interpretation:** the repo is active, but coordination hygiene lagged behind implementation speed. That mismatch is now material enough to deserve its own cleanup lane.
 
