@@ -213,6 +213,25 @@ However, on current `main`, coordinate shared-surface edits carefully.
 - `src/api/types.ts`
 - `python/server.py`
 
+
+## Coordinator handoff convention (2026-04-26)
+
+New queued work for `parse-builder`, `parse-back-end`, and `parse-gpt` is now tracked under repo-local handoff files instead of merge-to-main queue-prompt PRs.
+
+### Canonical queue location
+
+```text
+.hermes/handoffs/<agent>/<YYYY-MM-DD>-<slug>.md
+```
+
+### Rules
+
+- New coordinator task queueing should go into `.hermes/handoffs/`, not `docs: queue <agent> next task` PRs.
+- Handoff front matter must record at minimum: `agent`, `queued_by`, `queued_at`, `status`, and optional `related_prs`.
+- Lifecycle is file-based: `queued` → `in-progress` → `done` (move completed items into `.hermes/handoffs/<agent>/done/`).
+- Historical queue-prompt PRs remain part of the audit trail, but they are no longer the preferred mechanism for staging the next task.
+- Current open queue PRs that predate this convention can finish their immediate lifecycle, but future queue churn should not go through main-branch docs PRs.
+
 ## Safe Work Now (current priority)
 
 - Freeze the rebuild-repo contract: oracle SHA, parity fixtures, and Phase 0 shared-contract checklist
