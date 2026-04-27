@@ -57,6 +57,8 @@ DEFAULT_MCP_TOOL_NAMES = (
     "forced_align_status",
     "ipa_transcribe_acoustic_start",
     "ipa_transcribe_acoustic_status",
+    "compute_boundaries_start",
+    "compute_boundaries_status",
     "retranscribe_with_boundaries_start",
     "retranscribe_with_boundaries_status",
     "detect_timestamp_offset",
@@ -401,6 +403,7 @@ def _wsl_to_windows_path(raw: str) -> Optional[str]:
 from ai.tools.acoustic_starter_tools import (
     ACOUSTIC_STARTER_TOOL_SPECS,
     tool_audio_normalize_start,
+    tool_compute_boundaries_start,
     tool_forced_align_start,
     tool_ipa_transcribe_acoustic_start,
     tool_retranscribe_with_boundaries_start,
@@ -442,6 +445,7 @@ from ai.tools.export_tools import (
 from ai.tools.job_status_tools import (
     JOB_STATUS_TOOL_SPECS,
     tool_audio_normalize_status,
+    tool_compute_boundaries_status,
     tool_compute_status,
     tool_forced_align_status,
     tool_ipa_transcribe_acoustic_status,
@@ -661,6 +665,7 @@ class ParseChatTools:
             "stt_word_level_start",
             "forced_align_start",
             "ipa_transcribe_acoustic_start",
+            "compute_boundaries_start",
             "retranscribe_with_boundaries_start",
             "audio_normalize_start",
         }
@@ -698,6 +703,16 @@ class ParseChatTools:
                 ),
             )
 
+        if tool_name == "compute_boundaries_start":
+            return (
+                _project_loaded_condition(),
+                _tool_condition(
+                    "stt_word_timestamps_cached",
+                    "The requested speaker must already have a coarse_transcripts/<speaker>.json STT cache containing segment-level word timestamps — forced alignment uses those words as seeds. Run stt_word_level_start first if absent.",
+                    kind=TOOL_CONDITION_KIND_FILE_PRESENCE,
+                ),
+            )
+
         if tool_name == "retranscribe_with_boundaries_start":
             return (
                 _project_loaded_condition(),
@@ -713,6 +728,7 @@ class ParseChatTools:
             "stt_word_level_status",
             "forced_align_status",
             "ipa_transcribe_acoustic_status",
+            "compute_boundaries_status",
             "retranscribe_with_boundaries_status",
             "audio_normalize_status",
             "compute_status",
@@ -765,6 +781,7 @@ class ParseChatTools:
             "stt_word_level_start": "word_level_stt_job_started",
             "forced_align_start": "forced_alignment_job_started",
             "ipa_transcribe_acoustic_start": "acoustic_ipa_job_started",
+            "compute_boundaries_start": "boundaries_job_started",
             "retranscribe_with_boundaries_start": "boundary_constrained_stt_job_started",
             "audio_normalize_start": "audio_normalize_job_started",
             "pipeline_run": "pipeline_job_started",
@@ -799,6 +816,7 @@ class ParseChatTools:
             "read_audio_info",
             "read_csv_preview",
             "read_text_preview",
+            "compute_boundaries_status",
             "retranscribe_with_boundaries_status",
             "speakers_list",
             "spectrogram_preview",
@@ -1121,6 +1139,12 @@ class ParseChatTools:
 
     def _tool_ipa_transcribe_acoustic_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_ipa_transcribe_acoustic_status(self, args)
+
+    def _tool_compute_boundaries_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_compute_boundaries_start(self, args)
+
+    def _tool_compute_boundaries_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_compute_boundaries_status(self, args)
 
     def _tool_retranscribe_with_boundaries_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_retranscribe_with_boundaries_start(self, args)
