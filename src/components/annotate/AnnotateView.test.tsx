@@ -9,7 +9,31 @@ let mockCurrentTime = 0;
 let mockDuration = 4;
 let mockIsPlaying = false;
 
-const mockSetInterval = vi.fn();
+const applyIntervalToMockRecord = (tier: string, interval: AnnotationInterval) => {
+  if (!mockRecord) {
+    throw new Error('mockRecord must be seeded before saving intervals');
+  }
+  const existingTier = mockRecord.tiers[tier] ?? { name: tier, display_order: 99, intervals: [] };
+  const nextIntervals = existingTier.intervals
+    .filter((candidate) => !(Math.abs(candidate.start - interval.start) < 0.001 && Math.abs(candidate.end - interval.end) < 0.001))
+    .concat(interval)
+    .sort((left, right) => left.start - right.start);
+  mockRecord = {
+    ...mockRecord,
+    tiers: {
+      ...mockRecord.tiers,
+      [tier]: {
+        ...existingTier,
+        intervals: nextIntervals,
+      },
+    },
+  };
+};
+
+const mockSetInterval = vi.fn((speaker: string, tier: string, interval: AnnotationInterval) => {
+  expect(speaker).toBe('Fail01');
+  applyIntervalToMockRecord(tier, interval);
+});
 const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockUndo = vi.fn();
@@ -169,6 +193,34 @@ describe('AnnotateView', () => {
     expect(mockSetInterval).toHaveBeenCalledWith('Fail01', 'ortho', { start: 1.25, end: 2.5, text: 'ئاو' });
     expect(mockSetInterval).toHaveBeenCalledWith('Fail01', 'concept', { start: 1.25, end: 2.5, text: 'water' });
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+  });
+
+  it('reloads the saved ipa and orthography after saving onto a new selected region', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 0.2, end: 0.8 }]);
+    mockSelectedRegion = { start: 1.25, end: 2.5 };
+
+    const view = (
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />
+    );
+
+    const { unmount } = render(view);
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'new-ipa' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'new-ortho' } });
+    fireEvent.click(screen.getByRole('button', { name: /save annotation/i }));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+
+    unmount();
+    render(view);
+
+    expect(screen.getByDisplayValue('new-ipa')).toBeTruthy();
+    expect(screen.getByDisplayValue('new-ortho')).toBeTruthy();
   });
 
   it('marks the current concept done', () => {

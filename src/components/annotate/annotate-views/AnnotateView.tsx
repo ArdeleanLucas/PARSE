@@ -457,8 +457,12 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           <div className="flex items-center gap-3 pt-2">
             <button
               onClick={() => {
-                if (!selectedRegion) return;
-                const interval = { start: selectedRegion.start, end: selectedRegion.end };
+                const interval = conceptInterval
+                  ? { start: conceptInterval.start, end: conceptInterval.end }
+                  : selectedRegion
+                    ? { start: selectedRegion.start, end: selectedRegion.end }
+                    : null;
+                if (!interval) return;
                 setInterval(speaker, "ipa", { ...interval, text: ipa });
                 setInterval(speaker, "ortho", { ...interval, text: ortho });
                 setInterval(speaker, "concept", { ...interval, text: concept.name });
