@@ -21,6 +21,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
+# When launched as `python python/server.py`, downstream route modules still
+# import `server`. Register this module under that name early so script-mode
+# startup reuses the in-flight module instead of recursively re-importing it.
+sys.modules.setdefault("server", sys.modules[__name__])
+
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
@@ -994,6 +999,22 @@ def _compute_checkpoint(label: str, **kv: Any) -> None:
         # If the log file is unreachable the compute continues.
         pass
 
+def _resolve_http_port() -> int:
+    for env_key in ("PARSE_PORT", "PARSE_API_PORT"):
+        raw = str(os.environ.get(env_key) or "").strip()
+        if not raw:
+            continue
+        try:
+            port = int(raw)
+        except (TypeError, ValueError):
+            return PORT
+        if 0 <= port <= 65535:
+            return port
+        return PORT
+    return PORT
+
+
+
 def _resolve_ws_port() -> int:
     raw = str(os.environ.get("PARSE_WS_PORT") or "").strip()
     if not raw:
@@ -1810,14 +1831,16 @@ def _startup_banner_lines(
     serve_dir: pathlib.Path,
     local_ips: Sequence[str],
 ) -> List[str]:
+    http_port = _resolve_http_port()
+    ws_port = _resolve_ws_port()
     lines = [
         "",
         "=" * 60,
         "  PARSE - HTTP Server",
         "=" * 60,
         "  Serving: {0}".format(serve_dir),
-        "  Port   : {0}".format(PORT),
-        "  WS Port: {0}".format(_resolve_ws_port()),
+        "  Port   : {0}".format(http_port),
+        "  WS Port: {0}".format(ws_port),
         "",
         "  React dev UI (current workflow; requires `npm run dev`):",
         "    Annotate: http://localhost:5173/",
@@ -1827,12 +1850,12 @@ def _startup_banner_lines(
         lines.extend([
             "",
             "  Built UI (served by this Python server after `npm run build`):",
-            "    PARSE   : http://localhost:{0}/".format(PORT),
-            "    Compare : http://localhost:{0}/compare".format(PORT),
+            "    PARSE   : http://localhost:{0}/".format(http_port),
+            "    Compare : http://localhost:{0}/compare".format(http_port),
         ])
         for ip in local_ips:
-            lines.append("    PARSE   : http://{0}:{1}/".format(ip, PORT))
-            lines.append("    Compare : http://{0}:{1}/compare".format(ip, PORT))
+            lines.append("    PARSE   : http://{0}:{1}/".format(ip, http_port))
+            lines.append("    Compare : http://{0}:{1}/compare".format(ip, http_port))
     else:
         lines.extend([
             "",
@@ -1842,7 +1865,7 @@ def _startup_banner_lines(
     lines.extend([
         "",
         "  WebSocket job streaming:",
-        "    ws://localhost:{0}/ws/jobs/{{jobId}}".format(_resolve_ws_port()),
+        "    ws://localhost:{0}/ws/jobs/{{jobId}}".format(ws_port),
         "",
         "  Features: Range requests [x]  CORS [x]  Threaded [x]  API [x]  WS streaming [x]",
         "  Press Ctrl+C to stop.",
@@ -1934,7 +1957,8 @@ def main() -> None:
 
     _install_route_bindings()
 
-    server_address = (HOST, PORT)
+    http_port = _resolve_http_port()
+    server_address = (HOST, http_port)
     httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
 
     try:
