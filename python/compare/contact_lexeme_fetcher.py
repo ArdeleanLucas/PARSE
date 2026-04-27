@@ -27,10 +27,19 @@ def fetch_and_merge(
     overwrite: bool = False,
     ai_config: Optional[Dict] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None,
-) -> Dict[str, int]:
+    return_report: bool = False,
+) -> Dict[str, Any]:
     """
     Main entry point.
-    Returns: {lang_code: count_filled} -- how many concepts got forms per language.
+
+    Default return shape: ``{lang_code: count_filled}``.
+
+    When ``return_report=True`` the fetcher returns a richer dict with the
+    per-language counts under ``filled`` plus machine-readable CLEF
+    diagnostics (status, warnings, provider_errors, provider stats). The
+    server route uses that richer path so the UI can distinguish
+    ``ok`` / ``no_forms`` / ``provider_error`` instead of treating a
+    zero-form populate as a plain success.
     """
     # 1. Load concepts
     concepts = _load_concepts(concepts_path)
@@ -79,20 +88,61 @@ def fetch_and_merge(
         needs_fill = {lc: list(concepts) for lc in language_codes}
 
     # 4. Run registry
-    from .providers.registry import ProviderRegistry
+    from .providers.registry import PROVIDER_PRIORITY, ProviderRegistry
 
     registry = ProviderRegistry(ai_config)
     all_needed = sorted(set(c for cc in needs_fill.values() for c in cc))
     if not all_needed:
-        return {lc: 0 for lc in language_codes}
+        filled = {lc: 0 for lc in language_codes}
+        if return_report:
+            return {
+                "status": "no_forms",
+                "filled": filled,
+                "forms_count": 0,
+                "total_filled": 0,
+                "requested_concepts": [],
+                "requested_concepts_count": 0,
+                "providers_requested": list(providers or PROVIDER_PRIORITY),
+                "providers_attempted": [],
+                "providers_returning_forms": [],
+                "provider_errors": [],
+                "warnings": [
+                    "All requested concepts already have reference forms; nothing needed to be fetched."
+                ],
+                "provider_stats": {},
+                "config_path": str(config_path),
+            }
+        return filled
 
-    results = registry.fetch_all(
-        concepts=all_needed,
-        language_codes=language_codes,
-        language_meta=language_meta,
-        priority_order=providers,
-        progress_callback=progress_callback,
-    )
+    if return_report:
+        registry_payload = registry.fetch_all_detailed(
+            concepts=all_needed,
+            language_codes=language_codes,
+            language_meta=language_meta,
+            priority_order=providers,
+            progress_callback=progress_callback,
+        )
+        results = registry_payload.get("results", {})
+        provider_errors = list(registry_payload.get("provider_errors", []))
+        warnings = list(registry_payload.get("warnings", []))
+        providers_requested = list(registry_payload.get("providers_requested", providers or PROVIDER_PRIORITY))
+        providers_attempted = list(registry_payload.get("providers_attempted", []))
+        providers_returning_forms = list(registry_payload.get("providers_returning_forms", []))
+        provider_stats = registry_payload.get("provider_stats", {})
+    else:
+        results = registry.fetch_all(
+            concepts=all_needed,
+            language_codes=language_codes,
+            language_meta=language_meta,
+            priority_order=providers,
+            progress_callback=progress_callback,
+        )
+        provider_errors = []
+        warnings = []
+        providers_requested = list(providers or PROVIDER_PRIORITY)
+        providers_attempted = []
+        providers_returning_forms = []
+        provider_stats = {}
 
     # 5. Merge results back into config.
     # The registry now emits ``[{"form": str, "sources": [...]}]`` entries.
@@ -136,7 +186,30 @@ def fetch_and_merge(
         file=sys.stderr,
     )
 
-    return filled
+    if not return_report:
+        return filled
+
+    status = "ok" if total_filled > 0 else ("provider_error" if provider_errors else "no_forms")
+    if total_filled == 0 and not warnings:
+        warnings = [
+            "No provider returned forms for the remaining concept/language pairs."
+        ]
+
+    return {
+        "status": status,
+        "filled": filled,
+        "forms_count": total_filled,
+        "total_filled": total_filled,
+        "requested_concepts": list(all_needed),
+        "requested_concepts_count": len(all_needed),
+        "providers_requested": providers_requested,
+        "providers_attempted": providers_attempted,
+        "providers_returning_forms": providers_returning_forms,
+        "provider_errors": provider_errors,
+        "warnings": warnings,
+        "provider_stats": provider_stats,
+        "config_path": str(config_path),
+    }
 
 
 def _entry_has_forms(entry: Any) -> bool:

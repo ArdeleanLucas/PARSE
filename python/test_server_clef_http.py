@@ -193,3 +193,59 @@ def test_api_get_contact_lexeme_coverage_wrapper_maps_helper_errors_to_api_error
 
     assert exc_info.value.status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert exc_info.value.message == "coverage failed"
+
+
+def test_compute_contact_lexemes_zero_fill_returns_no_forms_status(monkeypatch, tmp_path: pathlib.Path) -> None:
+    (tmp_path / "concepts.csv").write_text("concept_en\nwater\n", encoding="utf-8")
+    config_path = tmp_path / "config" / "sil_contact_languages.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"_meta":{"primary_contact_languages":["ar"]},"ar":{"name":"Arabic"}}', encoding="utf-8")
+
+    progress_updates = []
+
+    def fake_fetch_and_merge(**kwargs):
+        progress_updates.append(kwargs)
+        return {"ar": 0}
+
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_sil_config_path", lambda: config_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr("compare.contact_lexeme_fetcher.fetch_and_merge", fake_fetch_and_merge)
+
+    result = server._compute_contact_lexemes("job-1", {})
+
+    assert progress_updates, "fetch_and_merge should be called"
+    assert result["status"] == "no_forms"
+    assert result["total_filled"] == 0
+    assert result["warnings"]
+    assert result["provider_errors"] == []
+
+
+
+def test_compute_contact_lexemes_zero_fill_with_provider_errors_returns_provider_error_status(monkeypatch, tmp_path: pathlib.Path) -> None:
+    (tmp_path / "concepts.csv").write_text("concept_en\nwater\n", encoding="utf-8")
+    config_path = tmp_path / "config" / "sil_contact_languages.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"_meta":{"primary_contact_languages":["ar"]},"ar":{"name":"Arabic"}}', encoding="utf-8")
+
+    def fake_fetch_and_merge(**kwargs):
+        del kwargs
+        return {
+            "status": "provider_error",
+            "filled": {"ar": 0},
+            "forms_count": 0,
+            "provider_errors": ["grokipedia: API key missing"],
+            "warnings": ["grokipedia: no xAI or OpenAI API key is configured."],
+        }
+
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_sil_config_path", lambda: config_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr("compare.contact_lexeme_fetcher.fetch_and_merge", fake_fetch_and_merge)
+
+    result = server._compute_contact_lexemes("job-2", {})
+
+    assert result["status"] == "provider_error"
+    assert result["total_filled"] == 0
+    assert result["provider_errors"] == ["grokipedia: API key missing"]
+    assert "Provider errors:" in result["warning"]
