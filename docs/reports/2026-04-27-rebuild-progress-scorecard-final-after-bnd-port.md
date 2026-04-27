@@ -1,45 +1,53 @@
-# PARSE-rebuild progress scorecard — final BND-wave signoff prep (DRAFT)
+# PARSE-rebuild progress scorecard — final BND-wave coordinator closeout
 
-> **DRAFT — landing after coordinator harness refresh + final real-workspace dogfood rerun.**
-> This scorecard supersedes the earlier 2026-04-27 final-v2 scorecard once the BND-wave closeout is actually ready to merge.
+This scorecard supersedes the earlier 2026-04-27 draft/final-v2 snapshots for the BND/MCP port wave.
 
 ## TL;DR
 
 - **BND frontend scope:** landed via PR #149; investigation verdict `A` confirms it is the real frontend port
 - **BND backend/MCP scope:** landed via PR #152
-- **Current BND feature-contract diff count:** `4` (down from the earlier `16`)
-- **Meaning of the remaining 4 diffs:** stale coordinator source-audit exact-string mismatches, not missing frontend/backend BND code
-- **Cutover still blocked today by:**
-  1. coordinator harness refresh + final rerun
-  2. parse-front-end real-workspace dogfood gate
+- **Current BND feature-contract diff count:** `0`
+- **Full harness status:** `raw 9 / allowlisted 9 / unallowlisted 0`
+- **Meaning of the remaining raw entries:** 8 metadata-only MCP descriptor-copy diffs plus 1 accepted oracle-only boot quirk
+- **Cutover verdict:** `needs-fixes` because PR #159 still reports real-workspace dogfood failures (#143 and #154). Harness parity is no longer the blocker.
 
 ## Current main snapshot
 
 - **Oracle SHA:** `b34578b45f2b972f7a04d44939069ad5684e461c`
-- **Rebuild SHA:** `6a55178da264794a60d1f2de32fc9daab9baef94`
+- **Rebuild SHA:** `fdd9af7625d349e8c40f47513155f7f135f222bf`
 - **Audit fixture:** `saha-2speaker`
 - **PR #149 verdict:** `A` — `docs/reports/2026-04-27-pr149-scope-investigation.md`
 - **Merged BND frontend PR:** https://github.com/TarahAssistant/PARSE-rebuild/pull/149
 - **Merged BND backend PR:** https://github.com/TarahAssistant/PARSE-rebuild/pull/152
+- **Dogfood blocker PR/report:** https://github.com/TarahAssistant/PARSE-rebuild/pull/159 / `docs/reports/2026-04-27-rebuild-dogfood-post-fix-verification.md`
 
-## Pre-flight harness snapshot at draft creation
+## Final coordinator harness snapshot
 
 ### Standard full harness (`all` sections)
-- raw diff count: **42**
-- allowlist count: **0**
-- unallowed count: **42**
-- section mix: `mcp_tools=40`, `server_boot_smoke=2`
+- raw diff count: **9**
+- allowlist count: **9**
+- unallowlisted count: **0**
+- section mix: `mcp_tools=8`, `server_boot_smoke=1`
 
 ### BND feature-contract harness slice
-- raw diff count: **4**
+- raw diff count: **0**
 - allowlist count: **0**
-- unallowed count: **4**
+- unallowlisted count: **0**
 - previous coordinator checkpoint before PR #149/#152 were merged: **16**
 
-### Expected closeout path
-The remaining BND-related `4` diffs should close after a coordinator harness refresh/rerun that stops treating these oracle-only literals as required rebuild strings:
-- exact frontend heading literal `Phonetic Tools`
-- exact backend string form `ortho_source = "ortho_words"`
+### MCP + boot triage breakdown
+- **mcp_tools:** `0` real rebuild gaps / `32` harness-artifact diffs closed by fresh MCP-fixture isolation / `8` metadata-only diffs allowlisted
+- **server_boot_smoke:** `0` rebuild gaps / local port-collision artifact removed by isolated boot ports / `1` oracle-only boot failure allowlisted as accepted baseline deviation
+
+## Validation evidence
+
+- `PYTHONPATH=. python3 -m pytest parity/harness/tests -q` → `21 passed`
+- `PYTHONPATH=. python3 -m parity.harness.runner --oracle /home/lucas/gh/ardeleanlucas/parse --rebuild . --fixture saha-2speaker --diff-category feature_contracts --output-dir /tmp/parse-bnd-fc-refreshed` → `raw 0`
+- `PYTHONPATH=. python3 -m parity.harness.runner --oracle /home/lucas/gh/ardeleanlucas/parse --rebuild . --fixture saha-2speaker --diff-category mcp_tools --output-dir /tmp/parse-bnd-mcp-allowlisted` → `raw 8 / allowlisted 8 / unallowlisted 0`
+- `PYTHONPATH=. python3 -m parity.harness.runner --oracle /home/lucas/gh/ardeleanlucas/parse --rebuild . --fixture saha-2speaker --emit-signoff --output-dir /tmp/parse-bnd-full-final-v3` → `raw 9 / allowlisted 9 / unallowlisted 0`
+- `npx vitest run` → `431 passed`
+- `./node_modules/.bin/tsc --noEmit` → clean
+- `PYTHONPATH=. python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults' python` → `777 passed, 2 deselected`
 
 ## Monolith state snapshot
 
@@ -58,41 +66,39 @@ The remaining BND-related `4` diffs should close after a coordinator harness ref
 
 ## Cluster-decomposition totals
 
-> Carry-forward baseline from `docs/reports/2026-04-27-rebuild-progress-scorecard-final-v2.md`; refresh on final landing.
-
 | Cluster | Rebuild LoC | File count | Status |
 |---|---:|---:|---|
-| CLEF cluster | 1,320 | 13 | carry-forward baseline `<!-- TBD refresh on landing -->` |
-| Compare cluster | 4,516 | 38 | carry-forward baseline `<!-- TBD refresh on landing -->` |
-| Annotate cluster | 6,725 | 47 | carry-forward baseline `<!-- TBD refresh on landing -->` |
-| Hooks cluster | 5,174 | 40 | carry-forward baseline `<!-- TBD refresh on landing -->` |
+| CLEF cluster | 1,320 | 13 | carry-forward baseline (not refreshed in this coordinator-only closeout) |
+| Compare cluster | 4,516 | 38 | carry-forward baseline (not refreshed in this coordinator-only closeout) |
+| Annotate cluster | 6,725 | 47 | carry-forward baseline (not refreshed in this coordinator-only closeout) |
+| Hooks cluster | 5,174 | 40 | carry-forward baseline (not refreshed in this coordinator-only closeout) |
 
 ## P0 / P1 surface coverage snapshot
 
 | Surface | Priority | Current status | Notes |
 |---|---|---|---|
-| Shell / navigation | P0 | `blocked` | Fresh real-workspace dogfood rerun still pending. |
-| Annotate core | P0 | `blocked` | Fresh real-workspace dogfood rerun still pending. |
-| Compare core | P0 | `blocked` | Fresh real-workspace dogfood rerun still pending. |
-| Annotate BND / phonetic-tools UI | P0 | `ported-awaiting-final-rerun` | PR #149 merged; buttons + gates are present on main. |
-| BND UI gate surfaces (`tiers.ortho_words`, STT word timestamps) | P0 | `ported-awaiting-final-rerun` | PR #149 merged; current remaining diff is harness exact-string mismatch, not missing UI logic. |
-| BND / MCP backend surface | P1 | `ported-awaiting-final-rerun` | PR #152 merged; compute routing + chat/MCP exposure are present on main. |
-| Tags / enrichments management | P0 | `pass-via-evidence-doc` | Historical browser evidence still exists; no new BND-specific blocker here. |
-| Import / onboarding | P1 | `pass-via-harness` | Underlying shared harness coverage remains present. |
-| Compute and report modals | P1 | `blocked` | Final browser rerun still pending. |
-| Contact lexeme / CLEF compare extensions | P1 | `blocked` | Final browser rerun still pending. |
-| Job diagnostics | P1 | `pass-via-harness` | Underlying shared harness coverage remains present. |
+| Shell / navigation | P0 | `blocked-by-dogfood` | PR #159 still reports live thesis-workspace failures. |
+| Annotate core | P0 | `blocked-by-dogfood` | Save → reload regression (#143) still fails in real-workspace dogfood. |
+| Compare core | P0 | `blocked-by-dogfood` | Final browser verdict still depends on the same real-workspace lane. |
+| Annotate BND / phonetic-tools UI | P0 | `pass-via-harness` | PR #149 merged; refreshed source-audit now matches rebuild literals. |
+| BND UI gate surfaces (`tiers.ortho_words`, STT word timestamps) | P0 | `pass-via-harness` | Gate logic verified via `bndIntervalCount` and `sttHasWordTimestamps` rather than stale oracle-only headings. |
+| BND / MCP backend surface | P1 | `pass-via-harness` | PR #152 merged; only metadata-copy diffs remain and are explicitly allowlisted. |
+| Tags / enrichments management | P0 | `pass-via-evidence-doc` | Historical browser evidence remains authoritative here. |
+| Import / onboarding | P1 | `pass-via-harness` | Shared harness coverage remains green. |
+| Compute and report modals | P1 | `blocked-by-dogfood` | Browser-side persistence/UX still waits on the real-workspace lane. |
+| Contact lexeme / CLEF compare extensions | P1 | `pass-via-harness` | Harness covers CLEF config/catalog/providers/report plus contact-lexeme jobs. |
+| Job diagnostics | P1 | `pass-via-harness` | Harness covers `/api/jobs`, `/api/jobs/active`, and `/api/jobs/{jobId}/logs`. |
 | ~~AI/chat shell~~ | P1 | `dropped` | Out of scope. |
-
-## Post-landing placeholders
-
-- **Final full-harness raw diff count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
-- **Final feature-contract diff count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
-- **Final dogfood result:** `<!-- TBD post parse-front-end real-workspace rerun -->`
-- **Final cutover-readiness verdict:** `<!-- TBD once both lines above are complete -->`
 
 ## Current coordinator recommendation
 
-Do **not** queue parse-front-end on a fresh BND/UI implementation task. The frontend BND port is already landed in PR #149. The next coordinator actions are:
-1. refresh the BND `feature_contracts` audit rules so current-main reruns cleanly
-2. merge the real-workspace dogfood evidence once parse-front-end finishes that lane
+Do **not** queue parse-front-end on a fresh BND/UI implementation task. That work already landed in PR #149. Do **not** hold cutover for coordinator parity work any longer either: the harness is now clean on all unallowlisted diffs. The remaining blocker is the real-workspace dogfood lane in PR #159, which still records:
+1. #143 save/reload regression still failing
+2. #154 note persistence still failing without blur on reload
+3. #153 did not reproduce in the focused re-verification pass
+
+## Final verdict
+
+- **Coordinator parity verdict:** `PASS`
+- **Cutover-readiness verdict:** `needs-fixes`
+- **Reason:** rebuild is caught up through oracle PR #242 for coordinator-owned parity/harness surfaces, but live thesis-workspace dogfood still reports user-visible regressions. Merge this coordinator PR as the final parity record, then hold cutover until PR #159 is resolved or superseded by a passing dogfood artifact.

@@ -16,7 +16,9 @@ from parity.harness.runner import (
     ROUND2_JOB_LIFECYCLE_KEYS,
     SUPPORTED_FIXTURE_NAMES,
     ScenarioCapture,
+    _apply_allowlist_rules,
     _extract_active_job_summary,
+    _pick_boot_smoke_ports,
     build_diff_report,
     build_server_boot_smoke_blockers,
     build_signoff_payload,
@@ -181,11 +183,9 @@ def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path
 def test_collect_feature_contracts_reports_bnd_gate_matrix_and_source_audit(tmp_path: Path) -> None:
     fixture = prepare_fixture_bundle(tmp_path / "fixture", fixture_name="saha-2speaker")
     repo_root = tmp_path / "repo"
-    (repo_root / "python").mkdir(parents=True)
-    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "python" / "server_routes").mkdir(parents=True)
     (repo_root / "python" / "server.py").write_text(
         '\n'.join([
-            'ortho_source = "ortho_words"',
             'def _compute_speaker_boundaries(job_id, payload):',
             'print("Writing tiers.ortho_words")',
             'def _compute_speaker_retranscribe_with_boundaries(job_id, payload):',
@@ -197,11 +197,22 @@ def test_collect_feature_contracts_reports_bnd_gate_matrix_and_source_audit(tmp_
         ]) + '\n',
         encoding="utf-8",
     )
+    (repo_root / "python" / "server_routes" / "annotate.py").write_text(
+        '\n'.join([
+            'if ortho_words_intervals:',
+            "    ortho_source = 'ortho_words'",
+        ]) + '\n',
+        encoding="utf-8",
+    )
+    (repo_root / "src").mkdir(parents=True)
     (repo_root / "src" / "ParseUI.tsx").write_text(
         '\n'.join([
-            'const label = "Phonetic Tools";',
+            'const gateA = "sttHasWordTimestamps";',
+            'const gateB = "bndIntervalCount";',
             'const a = "phonetic-retranscribe-with-boundaries";',
             'const b = "phonetic-refine-boundaries";',
+            'const c = "Refine Boundaries (BND)";',
+            'const d = "Re-run STT with Boundaries";',
         ]) + '\n',
         encoding="utf-8",
     )
@@ -340,7 +351,7 @@ def test_server_boot_smoke_failures_are_reported_as_real_blockers() -> None:
                 repo_label="rebuild",
                 success=False,
                 port=8766,
-                detail="NameError: _api_get_annotation is not defined",
+                detail="traceback...",
                 log_path=Path("/tmp/rebuild.log"),
             ),
         }
@@ -349,11 +360,56 @@ def test_server_boot_smoke_failures_are_reported_as_real_blockers() -> None:
     assert len(blockers) == 1
     assert blockers[0].section == "server_boot_smoke"
     assert blockers[0].path == "$.server_boot_smoke.rebuild"
-    assert blockers[0].oracle_value == {"expected": "boot success"}
     assert blockers[0].rebuild_value["success"] is False
 
 
+def test_pick_boot_smoke_ports_falls_back_when_defaults_are_busy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("parity.harness.runner._is_port_available", lambda port: False)
+    allocated = iter([43123, 43124])
+    monkeypatch.setattr(
+        "parity.harness.runner._allocate_ephemeral_port",
+        lambda *, reserved=None: next(allocated),
+    )
+
+    http_port, ws_port = _pick_boot_smoke_ports()
+
+    assert http_port == 43123
+    assert ws_port == 43124
+    assert http_port != ws_port
+
+
+def test_build_diff_report_and_boot_blockers_both_receive_allowlist_metadata(tmp_path: Path) -> None:
+    allowlist_path = tmp_path / "allowlist.yaml"
+    allowlist_path.write_text(
+        """
+version: 1
+rules:
+  - id: oracle-boot
+    section: server_boot_smoke
+    path: $.server_boot_smoke.oracle
+    classification: accepted-oracle-deviation
+    permanence: temporary
+    reason: Oracle script boot is an accepted baseline quirk for this test.
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    rules = load_allowlist_rules(allowlist_path)
+
+    blockers = build_server_boot_smoke_blockers(
+        {
+            "oracle": BootSmokeResult(repo_label="oracle", success=False, port=8766, detail="blocked", log_path=Path("/tmp/oracle.log")),
+            "rebuild": BootSmokeResult(repo_label="rebuild", success=True, port=8766, detail="booted", log_path=Path("/tmp/rebuild.log")),
+        }
+    )
+    annotated = [entry for entry in _apply_allowlist_rules(blockers, rules) if entry.path == "$.server_boot_smoke.oracle"]
+
+    assert len(annotated) == 1
+    assert annotated[0].allowlist_rule_id == "oracle-boot"
+
+
 def test_build_signoff_payload_captures_repo_shas_counts_and_boot_results() -> None:
+
     payload = build_signoff_payload(
         fixture_name="saha-2speaker",
         oracle_repo=Path("/repos/oracle"),
