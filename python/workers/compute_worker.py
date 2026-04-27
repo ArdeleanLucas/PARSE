@@ -430,6 +430,14 @@ def _dispatch(
         return server_mod._compute_training_job(job_id, payload)
     if normalized == "stt":
         return server_mod._compute_stt(job_id, payload)
+    if normalized in {
+        "retranscribe_with_boundaries",
+        "retranscribe-with-boundaries",
+        "boundary_constrained_stt",
+        "boundary-constrained-stt",
+        "bnd_stt",
+    }:
+        return server_mod._compute_speaker_retranscribe_with_boundaries(job_id, payload)
     if normalized in {"offset_detect", "offset-detect"}:
         return server_mod._compute_offset_detect(job_id, payload)
     if normalized in {"offset_detect_from_pair", "offset-detect-from-pair"}:

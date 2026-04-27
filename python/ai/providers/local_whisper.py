@@ -369,6 +369,121 @@ class LocalWhisperProvider(provider_module.AIProvider):
 
         return segments_out
 
+    def transcribe_segments_in_memory(
+        self,
+        audio_array: Any,
+        intervals: List[Tuple[float, float]],
+        *,
+        language: Optional[str] = None,
+        progress_callback: Optional[Callable[[float, int], None]] = None,
+        sample_rate: int = 16000,
+    ) -> List[SegmentWithWords]:
+        """Transcribe pre-sliced windows from a loaded mono waveform."""
+        if audio_array is None or not intervals:
+            return []
+
+        try:
+            import numpy as _np
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("numpy is required for boundary-constrained STT") from exc
+
+        if hasattr(audio_array, "numpy") and not isinstance(audio_array, _np.ndarray):
+            try:
+                audio_np = audio_array.detach().cpu().numpy()
+            except AttributeError:
+                audio_np = audio_array.numpy()
+        else:
+            audio_np = audio_array
+        audio_np = _np.ascontiguousarray(audio_np, dtype=_np.float32)
+        total_samples = int(audio_np.shape[0]) if audio_np.ndim else 0
+        if total_samples <= 0:
+            return []
+
+        model = self._load_whisper_model()
+        selected_language = (language or self.language) or None
+        kwargs: Dict[str, Any] = {
+            "language": selected_language,
+            "beam_size": self.beam_size,
+            "task": self.task,
+            "vad_filter": False,
+            "word_timestamps": True,
+            "condition_on_previous_text": False,
+        }
+        if self.compression_ratio_threshold is not None:
+            kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
+        if self.initial_prompt:
+            kwargs["initial_prompt"] = self.initial_prompt
+
+        segments_out: List[SegmentWithWords] = []
+        total_intervals = len(intervals)
+        for index, (start_sec, end_sec) in enumerate(intervals, start=1):
+            try:
+                start_sec_f = float(start_sec)
+                end_sec_f = float(end_sec)
+            except (TypeError, ValueError):
+                continue
+            if end_sec_f <= start_sec_f:
+                continue
+            start_sample = max(0, int(round(start_sec_f * sample_rate)))
+            end_sample = min(total_samples, int(round(end_sec_f * sample_rate)))
+            if end_sample <= start_sample:
+                continue
+
+            window = audio_np[start_sample:end_sample]
+            try:
+                segs_iter, _info = model.transcribe(window, **kwargs)
+            except Exception as exc:
+                print(
+                    "[WARN] transcribe_segments_in_memory: interval {0:.2f}-{1:.2f}s failed: {2}".format(
+                        start_sec_f,
+                        end_sec_f,
+                        exc,
+                    ),
+                    file=sys.stderr,
+                )
+                continue
+
+            for segment in segs_iter:
+                local_start = float(provider_module._dict_or_attr(segment, "start", 0.0) or 0.0)
+                local_end = float(provider_module._dict_or_attr(segment, "end", local_start) or local_start)
+                text = str(provider_module._dict_or_attr(segment, "text", "") or "").strip()
+                avg_logprob = provider_module._dict_or_attr(segment, "avg_logprob", None)
+                global_start = start_sec_f + local_start
+                global_end = min(end_sec_f, start_sec_f + local_end)
+                if global_end < global_start:
+                    global_end = global_start
+                seg_dict: SegmentWithWords = {
+                    "start": global_start,
+                    "end": global_end,
+                    "text": text,
+                    "confidence": provider_module._confidence_from_logprob(avg_logprob),
+                }
+                words_local = provider_module._extract_word_spans(segment)
+                if words_local:
+                    words_global = []
+                    for word in words_local:
+                        try:
+                            word_start = float(word.get("start", 0.0) or 0.0)
+                            word_end = float(word.get("end", word_start) or word_start)
+                        except (TypeError, ValueError):
+                            continue
+                        words_global.append(
+                            {
+                                **word,
+                                "start": start_sec_f + word_start,
+                                "end": min(end_sec_f, start_sec_f + word_end),
+                            }
+                        )
+                    if words_global:
+                        seg_dict["words"] = words_global
+                segments_out.append(seg_dict)
+
+            if progress_callback is not None:
+                progress_callback((index / total_intervals) * 100.0, index)
+
+        segments_out.sort(key=lambda seg: (float(seg.get("start", 0.0)), float(seg.get("end", 0.0))))
+        return segments_out
+
     def transcribe_clip(
         self,
         audio_array: Any,
