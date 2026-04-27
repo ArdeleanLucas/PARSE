@@ -172,6 +172,52 @@ GitHub auto-cleans the remote branch on merge; the local feature branch can be d
 
 `parse-coordinator` is NOT an implementation lane — it does not own monolith decompositions or large feature work. If a coordinator audit surfaces a real bug, the fix is queued to `parse-back-end` or `parse-front-end`, not done in-line by the coordinator.
 
+## Port-PR audit rule (added 2026-04-27)
+
+When `parse-coordinator` reviews a `port: oracle #N` PR, the agent's claim that "the feature was already present" or "this PR adds regression-proof coverage" must be verified by grep before merge — not trusted on its own.
+
+**Failure mode that motivated this rule:** PR #146 (`port: lock oracle frontend batch on rebuild parity surfaces`) claimed all 5 oracle PRs in its batch (#221, #218, #224, #222, #217) were already in rebuild main and shipped only regression tests. Partially true — Words+Boundaries lanes WERE present from earlier work — but partially false: the orphaned backend batch (#214, #216, #219) was assumed already-present and silently dropped on the floor for ~24h until coordinator re-audit caught the gap. By that point, oracle had shipped 5 more PRs (#238–#242) the rebuild also lacked.
+
+**Required check before merging any `port: oracle #N` PR:**
+
+1. Identify each oracle PR in the port batch by distinguishing strings — function names, identifiers, comments, UI button labels, MCP tool names. Pull them from `gh pr diff <N> --repo ArdeleanLucas/PARSE`.
+
+2. Grep current rebuild main for each string:
+
+   ```bash
+   cd /home/lucas/gh/tarahassistant/PARSE-rebuild
+   git fetch origin --quiet --prune
+   git checkout origin/main --quiet
+   grep -rE "<distinguishing-string>" src/ python/
+   ```
+
+3. **If the string is absent on main:** the port wasn't applied. Cross-check the port PR's diff — if the diff adds the matching code, port is real → safe to merge. If the diff lacks the matching code, port is **misclassified** → block merge. Comment on the PR explaining what's missing.
+
+4. **If the string is present on main:** the port either landed earlier or the agent correctly identified pre-existing coverage. Either way: safe to merge.
+
+**Why grep, not test count:** tests can pass against any state (even one that lacks the new feature) if the test fixtures don't exercise the new behavior. The Parity Diff Harness against the Saha 2-speaker fixture has shown 0 diff while the rebuild was missing several oracle features that simply aren't exercised by the fixture. Grep on identifier strings is the only cheap signal that the feature code itself is present.
+
+**Examples of distinguishing strings to derive per oracle PR:**
+
+| Change type | String to grep |
+|---|---|
+| New MCP tool | tool's registered name (e.g. `compute_boundaries`, `bnd_stt`) |
+| New UI button | button's label (e.g. `"Phonetic Tools"`) |
+| New lane / panel | component name (e.g. `BoundariesLane`, `WordsLane`) |
+| Backend fix | changed function name + a snippet of new logic |
+| New API endpoint | route path (e.g. `/api/compute/boundaries`) |
+| New tier | tier identifier (e.g. `tiers.ortho_words`, `bnd_tier`) |
+
+**Coordinator workflow on every `port:` PR:**
+
+1. List the oracle PRs the port claims to cover (from PR description's "Oracle mapping" section or commit log).
+2. For each oracle PR, derive 1-2 distinguishing strings via `gh pr diff <oracle-N> --repo ArdeleanLucas/PARSE`.
+3. Grep current rebuild main; record present/absent for each string.
+4. Cross-check against the port PR's diff to determine: real port (diff adds the missing feature), pre-existing (string already on main), or misclassified (absent and not added).
+5. Document the audit as a PR review comment so future coordinators inherit the trail.
+
+This rule applies specifically to `port: oracle #N` PRs. It does not apply to feature PRs (where the agent is writing new code from scratch) or refactor PRs (where parity harness is the gate).
+
 ## Screenshot convention (private-repo constraint)
 
 **Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.
