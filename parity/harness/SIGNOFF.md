@@ -1,81 +1,54 @@
-# PARSE Option 1 sign-off audit — 2026-04-27 (post-PR #139 refresh)
+# PARSE Option 1 sign-off prep — BND-wave draft (2026-04-27)
+
+> **DRAFT ONLY — not a final coordinator sign-off.**
+> This file is pre-staged for the final BND-wave closeout. PR #149 (frontend) and PR #152 (backend) are both merged; remaining coordinator work is a harness refresh/rerun plus final real-workspace dogfood evidence.
 
 ## Audit snapshot
 
-- **Oracle repo / SHA:** `ArdeleanLucas/PARSE` @ `c2fb743fbb30119bfcd18ce9d802f3125449acdf`
-- **Rebuild repo / SHA:** `TarahAssistant/PARSE-rebuild` @ `a1ab21176adcd6cbdcb3e96905f8370cd03e6e7d`
+- **Oracle repo / SHA:** `ArdeleanLucas/PARSE` @ `b34578b45f2b972f7a04d44939069ad5684e461c`
+- **Rebuild repo / SHA:** `TarahAssistant/PARSE-rebuild` @ `6a55178da264794a60d1f2de32fc9daab9baef94`
 - **Harness fixture:** `saha-2speaker`
-- **Harness raw diff count:** `0`
+- **Merged BND frontend port:** PR #149 — https://github.com/TarahAssistant/PARSE-rebuild/pull/149
+- **Merged BND backend/MCP port:** PR #152 — https://github.com/TarahAssistant/PARSE-rebuild/pull/152
+- **PR #149 investigation verdict:** `A` — real frontend port, not a false claim (`docs/reports/2026-04-27-pr149-scope-investigation.md`)
+
+## Current pre-final numbers
+
+### Standard full harness (`all` sections)
+- **Harness raw diff count:** `42`
 - **Harness allowlist count:** `0`
-- **Harness unallowed count:** `0`
-- **Allowlist reasons:** none — `parity/harness/allowlist.yaml` is empty at audit time
+- **Harness unallowed count:** `42`
+- **Section mix:** `mcp_tools=40`, `server_boot_smoke=2`
+- **Interpretation:** this is not the BND-wave blocker number; it is the current report-only full harness state on this machine and still needs a clean final rerun before cutover sign-off.
 
-## Server-boot smoke check
+### BND feature-contract slice
+- **Feature-contract raw diff count:** `4`
+- **Feature-contract allowlist count:** `0`
+- **Feature-contract unallowed count:** `4`
+- **Interpretation:** the old `16`-diff BND gap has narrowed to `4` after PR #149 + PR #152 merged. The remaining four diffs are stale exact-string source-audit mismatches (`Phonetic Tools` heading literal and double-quoted `ortho_source = "ortho_words"`), not missing frontend/backend BND code.
 
-| Repo | Result | Detail | Evidence |
-|---|---|---|---|
-| Oracle | PASS | Booted on port 8766. | `/tmp/parse-option1-signoff-audit-v2/oracle-server-script.log` |
-| Rebuild | PASS | Booted on port 8766. | `/tmp/parse-option1-signoff-audit-v2/rebuild-server-script.log` |
+## Validation evidence on current main
+- `PYTHONPATH=. python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults' python` → `777 passed, 2 deselected`
+- `npx vitest run` → `431 passed`
+- `./node_modules/.bin/tsc --noEmit` → clean
+- `PYTHONPATH=. python3 -m parity.harness.runner --oracle /home/lucas/gh/ardeleanlucas/parse --rebuild . --fixture saha-2speaker --output-dir /tmp/parse-bnd-final-signoff-full-harness` → `raw 42`
+- `PYTHONPATH=. python3 -m parity.harness.runner --oracle /home/lucas/gh/ardeleanlucas/parse --rebuild . --fixture saha-2speaker --diff-category feature_contracts --output-dir /tmp/parse-bnd-feature-contracts-current-main` → `raw 4`
 
-## Monolith state snapshot
+## Post-refresh placeholders
+- **Final full-harness raw diff count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
+- **Final full-harness allowlist count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
+- **Final full-harness unallowed count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
+- **Final BND feature-contract diff count:** `<!-- TBD post coordinator harness refresh + final rerun -->`
+- **Final real-workspace dogfood verdict:** `<!-- TBD post parse-front-end dogfood rerun -->`
+- **Final cutover readiness verdict:** `<!-- TBD after both items above are complete -->`
 
-### Originally tracked pressure files
-
-| File | Oracle LoC | Rebuild LoC | Delta | Delta % |
-|---|---:|---:|---:|---:|
-| `python/server.py` | 8,972 | 1,978 | -6,994 | -78.0% |
-| `python/ai/chat_tools.py` | 6,408 | 1,273 | -5,135 | -80.1% |
-| `src/ParseUI.tsx` | 5,328 | 2,035 | -3,293 | -61.8% |
-| `python/adapters/mcp_adapter.py` | 2,050 | 218 | -1,832 | -89.4% |
-| `python/ai/provider.py` | 1,907 | 325 | -1,582 | -83.0% |
-| `src/api/client.ts` | 1,048 | 18 | -1,030 | -98.3% |
-| `src/stores/annotationStore.ts` | 753 | 23 | -730 | -96.9% |
-| `src/components/shared/BatchReportModal.tsx` | 843 | 174 | -669 | -79.4% |
-| `src/components/shared/TranscriptionRunModal.tsx` | 792 | 298 | -494 | -62.4% |
-| `src/components/annotate/TranscriptionLanes.tsx` | 943 | 613 | -330 | -35.0% |
-
-### Cluster-decomposition totals (rebuild current-main)
-
-| Cluster | Rebuild LoC | File count |
-|---|---:|---:|
-| CLEF cluster | 1,320 | 13 |
-| Compare cluster | 4,516 | 38 |
-| Annotate cluster | 6,725 | 47 |
-| Hooks cluster | 5,174 | 40 |
-
-## P0 / P1 surface coverage matrix
-
-| Surface | Priority | Status | Evidence route | Notes |
-|---|---|---|---|---|
-| Shell / navigation | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Real-workspace dogfood found a frontend process kill during Annotate load (#153). |
-| Annotate | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Real-workspace dogfood found non-persistent Annotate save behavior (#143) and runtime instability (#153). |
-| Compare | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Compare notes did not persist across reload in the real workspace dogfood pass (#154). |
-| Tags / enrichments management | P0 | `pass-via-evidence-doc` | `docs/reports/2026-04-26-tags-parity-evidence.md` | Browser Tags parity previously passed `7/7` flows; the shared harness also covers the underlying contracts. |
-| ~~AI/chat shell~~ | P1 | `dropped` | scope decision | Dropped from rebuild parity scope on 2026-04-26. |
-| Import / onboarding | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers concept/tag import, onboard start/poll, persistence, and required error envelopes. |
-| Compute and report modals | P1 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | CLEF populate completed with zero fetched reference forms during real-workspace dogfood (#155). |
-| Contact lexeme / CLEF compare extensions | P1 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Harness covers contracts, but real-workspace dogfood exposed a zero-result populate outcome that still needs thesis-facing validation (#155). |
-| Job diagnostics | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers `/api/jobs`, `/api/jobs/active`, and `/api/jobs/{jobId}/logs`. |
-
-## Real-blocker diffs
-
-- #143 — Annotate save does not persist IPA / orthography field edits after reload.
-- #153 — Frontend dev server is killed during real-workspace Annotate load.
-- #154 — Compare notes are not persisted across reload.
-- #155 — CLEF populate can complete with zero fetched reference forms.
-
-## Option 1 readiness
-
-**Not ready to replace oracle for thesis-facing use yet.**
-
-The parity/meta-gate harness remains green (`raw=0`, `allowlisted=0`, `unallowed=0`), but the real-workspace browser dogfood pass uncovered blocker-class user-facing failures in Annotate runtime stability and save persistence, plus additional Compare/CLEF regressions. Option 1 therefore remains blocked on the filed dogfood issues even though the lower-level parity harness is currently clean.
-
-## Dogfood follow-up
-
-- **Dogfood pass (real workspace):** 9 flows tested, 4 issues filed, 2 blockers. Report: `docs/reports/2026-04-27-rebuild-dogfood-report.md`. Issue links: #143, #153, #154, #155.
+## Coordinator reading of the BND wave
+- **Frontend BND/UI port:** landed via PR #149.
+- **Backend/MCP BND port:** landed via PR #152.
+- **Remaining coordinator blocker for BND parity:** refresh `feature_contracts.source_audit` so rebuild-equivalent evidence passes instead of being judged by overly literal oracle strings.
+- **Separate cutover blocker outside the BND port itself:** fresh real-workspace browser dogfood still needs to land and pass.
 
 ## Coordinator sign-off
-
 - **Lucas:** ______________________________
 - **Date:** ______________________________
-- **Decision:** `blocked pending dogfood fixes`
+- **Decision:** `<!-- TBD post coordinator rerun -->`
