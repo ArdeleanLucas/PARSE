@@ -170,19 +170,21 @@ def test_create_mcp_server_defaults_to_33_tools_without_config(tmp_path, monkeyp
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 36
+    assert len(mcp_tools) == 38
     assert "mcp_get_exposure_mode" in tool_names
     assert "run_full_annotation_pipeline" in tool_names
     assert "prepare_compare_mode" in tool_names
     assert "export_complete_lingpy_dataset" in tool_names
+    assert "retranscribe_with_boundaries_start" in tool_names
+    assert "retranscribe_with_boundaries_status" in tool_names
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] is None
-    assert payload["result"]["mcpToolCount"] == 36
-    assert payload["result"]["parseChatToolCount"] == 50
+    assert payload["result"]["mcpToolCount"] == 38
+    assert payload["result"]["parseChatToolCount"] == 52
     assert payload["result"]["workflowToolCount"] == 3
 
 
@@ -203,14 +205,14 @@ def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_config_dir(tmp_p
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 54
+    assert len(mcp_tools) == 56
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is True
-    assert payload["result"]["mcpToolCount"] == 54
-    assert payload["result"]["parseChatToolCount"] == 50
+    assert payload["result"]["mcpToolCount"] == 56
+    assert payload["result"]["parseChatToolCount"] == 52
     assert payload["result"]["workflowToolCount"] == 3
 
 
@@ -229,7 +231,7 @@ def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_root_config(tmp_
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 54
+    assert len(mcp_tools) == 56
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
@@ -548,12 +550,113 @@ def test_stateful_job_starters_are_marked_stateful_with_project_preconditions(tm
         "stt_word_level_start",
         "forced_align_start",
         "ipa_transcribe_acoustic_start",
+        "retranscribe_with_boundaries_start",
         "audio_normalize_start",
     ]:
         spec = tools.tool_spec(tool_name)
         assert spec.mutability == "stateful_job"
         assert any(cond.id == "project_loaded" for cond in spec.preconditions)
         assert any(cond.kind == "job_state" for cond in spec.postconditions)
+
+
+def test_retranscribe_with_boundaries_start_dispatches_compute_job(tmp_path) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_start_compute(compute_type: str, payload: dict[str, object]) -> str:
+        calls.append((compute_type, dict(payload)))
+        return "job-bnd-stt"
+
+    tools = ParseChatTools(
+        project_root=tmp_path,
+        start_compute_job=fake_start_compute,
+    )
+    payload = tools.execute(
+        "retranscribe_with_boundaries_start",
+        {"speaker": "Fail02", "language": "ku"},
+    )["result"]
+
+    assert calls == [
+        (
+            "retranscribe_with_boundaries",
+            {"speaker": "Fail02", "language": "ku"},
+        )
+    ]
+    assert payload["jobId"] == "job-bnd-stt"
+    assert payload["status"] == "running"
+    assert payload["tier"] == "boundary_constrained_stt"
+    assert payload["speaker"] == "Fail02"
+    assert payload["language"] == "ku"
+
+
+def test_retranscribe_with_boundaries_start_omits_blank_language(tmp_path) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_start_compute(compute_type: str, payload: dict[str, object]) -> str:
+        calls.append((compute_type, dict(payload)))
+        return "job-bnd-stt"
+
+    tools = ParseChatTools(
+        project_root=tmp_path,
+        start_compute_job=fake_start_compute,
+    )
+    tools.execute(
+        "retranscribe_with_boundaries_start",
+        {"speaker": "Fail02", "language": "   "},
+    )
+
+    assert calls == [("retranscribe_with_boundaries", {"speaker": "Fail02"})]
+
+
+def test_retranscribe_with_boundaries_start_dry_run_does_not_launch(tmp_path) -> None:
+    calls: list[object] = []
+
+    def fake_start_compute(compute_type: str, payload: dict[str, object]) -> str:
+        calls.append((compute_type, payload))
+        return "job-bnd-stt"
+
+    tools = ParseChatTools(
+        project_root=tmp_path,
+        start_compute_job=fake_start_compute,
+    )
+    payload = tools.execute(
+        "retranscribe_with_boundaries_start",
+        {"speaker": "Fail02", "dryRun": True},
+    )["result"]
+
+    assert payload["status"] == "dry_run"
+    assert payload["tool"] == "retranscribe_with_boundaries_start"
+    assert payload["plan"]["speaker"] == "Fail02"
+    assert calls == []
+
+
+def test_retranscribe_with_boundaries_status_reads_snapshot(tmp_path) -> None:
+    snapshot = {
+        "jobId": "job-bnd-stt",
+        "type": "retranscribe_with_boundaries",
+        "status": "complete",
+        "progress": 100.0,
+        "message": "done",
+        "result": {
+            "speaker": "Fail02",
+            "boundary_intervals": 12,
+            "segments_written": 12,
+            "source": "boundary_constrained",
+        },
+    }
+    tools = ParseChatTools(
+        project_root=tmp_path,
+        get_job_snapshot=lambda job_id: snapshot,
+    )
+
+    payload = tools.execute(
+        "retranscribe_with_boundaries_status",
+        {"jobId": "job-bnd-stt"},
+    )["result"]
+
+    assert payload["jobId"] == "job-bnd-stt"
+    assert payload["status"] == "complete"
+    assert payload["tier"] == "boundary_constrained_stt"
+    assert payload["result"]["source"] == "boundary_constrained"
 
 
 def test_stt_start_supports_dry_run_preview(tmp_path) -> None:
