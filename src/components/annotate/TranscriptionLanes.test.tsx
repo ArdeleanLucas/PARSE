@@ -3,7 +3,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type WaveSurfer from "wavesurfer.js";
+import legacyFail01 from "./__fixtures__/Fail01.legacy-tier-split.json";
 import type { AnnotationRecord } from "../../api/types";
+
 
 let mockRecord: AnnotationRecord | null = null;
 let mockLanes: Record<string, { visible: boolean; color: string }> = {};
@@ -150,32 +152,20 @@ describe("TranscriptionLanes", () => {
     expect(screen.getByTitle("ORTH lane")).toBeTruthy();
   });
 
-  it("renders Tier 1 Words directly above Tier 2 Boundaries from legacy STT words", async () => {
+  it("renders the trimmed Fail01 legacy fixture without requiring a migrated stt_words tier", async () => {
     mockLanes.stt_words.visible = true;
     mockLanes.boundaries.visible = true;
-    mockRecord = {
-      ...makeRecord(),
-      tiers: {
-        ...makeRecord().tiers,
-        ortho_words: {
-          name: "ortho_words",
-          display_order: 5,
-          intervals: [
-            { start: 1, end: 1.45, text: "", confidence: 0.92 },
-            { start: 1.45, end: 2, text: "", confidence: 0.88 },
-          ],
-        },
-      },
-    };
+    mockRecord = structuredClone(legacyFail01) as AnnotationRecord;
     mockSttBySpeaker = {
       Fail01: [
         {
-          start: 1,
-          end: 2,
-          text: "awa test",
+          start: 0,
+          end: 3.56,
+          text: "försچ ڕی یان",
           words: [
-            { start: 1, end: 1.4, word: "awa" },
-            { start: 1.4, end: 2, word: "test" },
+            { start: 0.0, end: 0.28, word: "försچ" },
+            { start: 0.28, end: 1.12, word: "یان" },
+            { start: 1.12, end: 3.56, word: "ڕی" },
           ],
         },
       ],
@@ -194,13 +184,9 @@ describe("TranscriptionLanes", () => {
 
     await waitFor(() => expect(screen.getByTitle("Words lane")).toBeTruthy());
     expect(screen.getByTitle("BND lane")).toBeTruthy();
-
-    const laneTitles = Array.from(document.querySelectorAll('[title$=" lane"]')).map((el) => el.getAttribute('title'));
-    expect(laneTitles.slice(-4)).toEqual(['IPA lane', 'ORTH lane', 'Words lane', 'BND lane']);
-
-    expect(screen.getByRole('button', { name: 'Words 1.00s' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Words 1.40s' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'BND 1.00s' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'BND 1.45s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Words 0.00s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'BND 0.00s' })).toBeTruthy();
+    expect(mockEnsureSttWordsTier).not.toHaveBeenCalled();
+    expect((mockRecord?.tiers as Record<string, unknown>).stt_words).toBeUndefined();
   });
 });

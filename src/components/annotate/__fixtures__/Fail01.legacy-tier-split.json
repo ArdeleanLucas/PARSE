@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "project_id": "parse-sk-2026",
+  "speaker": "Fail01",
+  "source_audio": "audio/working/Fail01/Faili_M_1984.wav",
+  "source_audio_duration_sec": 12000.0,
+  "tiers": {
+    "ipa": {
+      "type": "interval",
+      "display_order": 1,
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.62,
+          "text": "ɹaʃən",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 0.62,
+          "end": 0.92,
+          "text": "a",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 0.92,
+          "end": 1.66,
+          "text": "nora",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 1.66,
+          "end": 2.32,
+          "text": "hpiːaː",
+          "manuallyAdjusted": false
+        }
+      ],
+      "name": "ipa"
+    },
+    "ortho": {
+      "type": "interval",
+      "display_order": 2,
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 7.26,
+          "text": "försچ یان ڕا ڕی μێ سێکەی نروستان ل ==",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 7.26,
+          "end": 11.92,
+          "text": "く ەپ تاس Sk Yemen",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 17.2,
+          "end": 19.3,
+          "text": "لی Goodness",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 19.3,
+          "end": 28.52,
+          "text": "چاہ cielo  ڕکێ بەیک ێگ ڕکێ  لی پ role",
+          "manuallyAdjusted": false
+        }
+      ],
+      "name": "ortho"
+    },
+    "stt": {
+      "type": "interval",
+      "display_order": 5,
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 5.26,
+          "text": "ڕاشەێن ئەوە و ئەو ئो ڕا نە adolescent very fine",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 5.26,
+          "end": 11.35,
+          "text": "I'm good 很 نەرا دۆی ددەوا نەا ژا انا chase",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 11.35,
+          "end": 17.41,
+          "text": "لۊ shapا دن تەو ئەڋолжن دوی ڕوێ سن I don't trust someone",
+          "manuallyAdjusted": false
+        }
+      ],
+      "name": "stt"
+    },
+    "ortho_words": {
+      "type": "interval",
+      "display_order": 4,
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.28,
+          "text": "försچ",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 0.24000000000000002,
+          "end": 3.5600000000000005,
+          "text": "ڕی",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 0.28,
+          "end": 0.28,
+          "text": "یان",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 0.28,
+          "end": 0.34,
+          "text": "ڕا",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 3.38,
+          "end": 5.92,
+          "text": "μێ",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 5.84,
+          "end": 6.42,
+          "text": "سێکەی",
+          "manuallyAdjusted": false
+        }
+      ],
+      "name": "ortho_words"
+    },
+    "concept": {
+      "type": "interval",
+      "display_order": 3,
+      "intervals": [
+        {
+          "start": 514.1074998716949,
+          "end": 514.5324998953716,
+          "text": "one",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 519.15,
+          "end": 519.745,
+          "text": "two",
+          "manuallyAdjusted": false
+        },
+        {
+          "start": 523.718,
+          "end": 524.553,
+          "text": "three",
+          "manuallyAdjusted": false
+        }
+      ],
+      "name": "concept"
+    },
+    "speaker": {
+      "type": "interval",
+      "display_order": 4,
+      "intervals": [],
+      "name": "speaker"
+    },
+    "sentence": {
+      "type": "interval",
+      "display_order": 7,
+      "intervals": [],
+      "name": "sentence"
+    },
+    "ipa_phone": {
+      "type": "interval",
+      "display_order": 1,
+      "intervals": [],
+      "name": "ipa_phone"
+    }
+  }
+}
