@@ -972,10 +972,17 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if not isinstance(annotation, dict):
         raise RuntimeError('Annotation is not a JSON object')
     tiers = annotation.get('tiers') or {}
-    ortho_tier = tiers.get('ortho') or {}
-    ortho_intervals = list(ortho_tier.get('intervals') or [])
+    ortho_words_tier = tiers.get('ortho_words') or {}
+    ortho_words_intervals = list(ortho_words_tier.get('intervals') or [])
+    if ortho_words_intervals:
+        ortho_intervals = ortho_words_intervals
+        ortho_source = 'ortho_words'
+    else:
+        ortho_tier = tiers.get('ortho') or {}
+        ortho_intervals = list(ortho_tier.get('intervals') or [])
+        ortho_source = 'ortho'
     if not ortho_intervals:
-        print('[IPA] no ortho intervals — early return', file=_server.sys.stderr, flush=True)
+        print('[IPA] no ortho/ortho_words intervals — early return', file=_server.sys.stderr, flush=True)
         return {'speaker': speaker, 'filled': 0, 'skipped': 0, 'total': 0, 'message': 'No ortho intervals.'}
     ipa_tier = tiers.setdefault('ipa', {'type': 'interval', 'display_order': 1, 'intervals': []})
     ipa_intervals: _server.List[_server.Dict[str, _server.Any]] = list(ipa_tier.get('intervals') or [])
@@ -1008,8 +1015,12 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     _server._compute_checkpoint('IPA.get_aligner_begin')
     aligner = _server._get_ipa_aligner()
     _server._compute_checkpoint('IPA.get_aligner_done')
-    stt_segments = _server._read_stt_cache(speaker)
-    has_words = bool(stt_segments and any((seg.get('words') for seg in stt_segments)))
+    if ortho_source == 'ortho_words':
+        stt_segments: _server.List[_server.Dict[str, _server.Any]] = []
+        has_words = False
+    else:
+        stt_segments = _server._read_stt_cache(speaker)
+        has_words = bool(stt_segments and any((seg.get('words') for seg in stt_segments)))
     exception_samples: _server.List[str] = []
     skipped_empty_ortho = 0
     skipped_existing_ipa = 0
@@ -1039,8 +1050,15 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         skipped = skipped_empty_ipa
         total = len(word_results)
     else:
-        print('[IPA] no STT word cache — using coarse ORTH-interval fallback', file=_server.sys.stderr, flush=True)
-        _server._compute_checkpoint('IPA.loop_begin', n=len(ortho_intervals))
+        print(
+            '[IPA] using {0}-interval CTC ({1} intervals)'.format(
+                ortho_source,
+                len(ortho_intervals),
+            ),
+            file=_server.sys.stderr,
+            flush=True,
+        )
+        _server._compute_checkpoint('IPA.loop_begin', source=ortho_source, n=len(ortho_intervals))
         filled = 0
         skipped = 0
         total = len(ortho_intervals)
@@ -1107,7 +1125,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if exception_samples:
         for sample in exception_samples:
             print('[IPA][EXC] {0}'.format(sample), file=_server.sys.stderr, flush=True)
-    return {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
+    return {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
 
 def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run Tier 2 forced alignment for a speaker.
