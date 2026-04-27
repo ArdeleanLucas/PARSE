@@ -14,15 +14,27 @@ if str(PYTHON_DIR) not in sys.path:
 from ai.chat_tools import REGISTRY
 from ai.workflow_tools import DEFAULT_MCP_WORKFLOW_TOOL_NAMES
 from parity.harness.runner import ScenarioCapture, compare_capture_sections
-from parity.harness.diff.mcp_tools import list_chat_tool_fixture_names, list_workflow_tool_fixture_names
+from parity.harness.diff.mcp_tools import (
+    ALL_TARGET_TOOL_NAMES,
+    PARITY_EXTRA_CHAT_TOOL_NAMES,
+    list_chat_tool_fixture_names,
+    list_workflow_tool_fixture_names,
+)
 
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "mcp-tool-payloads"
 
 
-def test_chat_tool_fixture_count_matches_registry() -> None:
+def test_chat_tool_fixtures_cover_registry_and_bnd_port_wave_extras() -> None:
     assert FIXTURE_DIR.exists()
-    assert len(list_chat_tool_fixture_names(FIXTURE_DIR)) == len(REGISTRY)
+    fixture_names = set(list_chat_tool_fixture_names(FIXTURE_DIR))
+    assert set(REGISTRY).issubset(fixture_names)
+    assert set(PARITY_EXTRA_CHAT_TOOL_NAMES).issubset(fixture_names)
+
+
+
+def test_all_target_tool_names_include_bnd_port_wave_extras() -> None:
+    assert set(PARITY_EXTRA_CHAT_TOOL_NAMES).issubset(set(ALL_TARGET_TOOL_NAMES))
 
 
 

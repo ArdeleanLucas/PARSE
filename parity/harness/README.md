@@ -10,10 +10,18 @@ This harness replaces the old plan of writing one evidence doc per surface. Inst
 - async job lifecycle traces
 - LingPy and NEXUS exports
 - persisted JSON artifacts in the workspace
+- feature-contract presence for coordinator-owned parity guards (currently the BND/MCP port wave)
 
 ## Current Round 3 scope
 
 The shared fixture now exercises every §6 contract group in `docs/plans/option1-parity-inventory.md` via deterministic, report-only probes. The emitted `report.json` includes a `coverage` section that maps each contract group to the concrete scenario keys used for Round 2 sign-off.
+
+Round 4 adds a deterministic `feature_contracts` section for the BND/MCP port wave so the harness stops false-greening when oracle has feature code that the rebuild still lacks. The new section checks:
+
+- gate-state contrast across the fixture speakers (`tiers.ortho_words` present vs absent)
+- standalone BND gate state from cached STT word timestamps
+- distinguishing-string presence for the coordinator grep-audit rules
+- MCP dry-run fixtures for `compute_boundaries_*` and `retranscribe_with_boundaries_*`
 
 Round 3 adds the final operational meta-gate:
 
@@ -33,6 +41,7 @@ Round 3 adds the final operational meta-gate:
 9. generic compute (`full_pipeline`) + job observability
 10. export + media contract (`LingPy`, `NEXUS`, spectrogram URL shape)
 11. CLEF config/catalog/providers/report + contact-lexeme fetch
+12. BND/MCP feature-contract coverage (`feature_contracts`)
 
 ### Round 2 operation breadth
 
@@ -102,6 +111,8 @@ Fixtures live under `parity/harness/fixtures/`:
 - `workspace/parse-enrichments.json`
 - `workspace/annotations/Base01.parse.json`
 - `workspace/annotations/Base02.parse.json`
+- `workspace/coarse_transcripts/Base01.json`
+- `workspace/coarse_transcripts/Base02.json`
 
 `prepare_fixture_bundle()` also synthesizes deterministic silent WAVs at runtime so the repo does not need to carry binary audio fixtures.
 

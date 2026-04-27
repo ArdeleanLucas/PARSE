@@ -1,0 +1,5 @@
+{
+  "speaker": "${COMPARE_SPEAKER}",
+  "overwrite": false,
+  "dryRun": true
+}

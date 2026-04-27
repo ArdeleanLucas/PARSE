@@ -23,23 +23,41 @@
         {
           "start": 0.0,
           "end": 0.1,
-          "text": "ash"
+          "text": "ash bark"
         }
       ]
     },
-    "concept": {
-      "display_order": 3,
+    "ortho_words": {
+      "display_order": 4,
       "type": "interval",
       "intervals": [
         {
           "start": 0.0,
+          "end": 0.05,
+          "text": "ash",
+          "source": "user+ortho_words"
+        },
+        {
+          "start": 0.05,
           "end": 0.1,
+          "text": "bark",
+          "source": "manual"
+        }
+      ]
+    },
+    "concept": {
+      "display_order": 5,
+      "type": "interval",
+      "intervals": [
+        {
+          "start": 0.0,
+          "end": 0.05,
           "text": "1: ash"
         }
       ]
     },
     "speaker": {
-      "display_order": 4,
+      "display_order": 6,
       "type": "interval",
       "intervals": [
         {
