@@ -6,7 +6,6 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 <p align="center">
   <img src="docs/pr-assets/dogfood-fix-153-annotate-stable.png" alt="Annotate mode in the unified PARSE React shell" width="32%" />
   <img src="docs/pr-assets/pr76-compare-table.png" alt="Compare mode concept by speaker matrix" width="32%" />
-  <img src="docs/pr-assets/pr160-clef-no-forms-soft-failure.png" alt="CLEF soft-failure surfacing for no_forms and provider_error outcomes" width="32%" />
 </p>
 
 > **Status**: Active development. Thesis-critical features are landing frequently, interfaces and file contracts are still evolving, and PARSE should currently be treated as research software rather than beta software.
