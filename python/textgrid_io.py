@@ -42,7 +42,7 @@ _CANONICAL_TEXTGRID_NAMES = {
 }
 
 # Numeric ordering used to sort exported TextGrid tiers. Matches
-# CANONICAL_TIER_ORDER in src/stores/annotationStore.ts — keep in sync.
+# CANONICAL_TIER_ORDER re-exported from the `src/stores/annotationStore.ts` barrel (concrete annotation-store modules now live under `src/stores/annotation/`) — keep in sync.
 _CANONICAL_DISPLAY_ORDERS = {
     "ipa_phone": 1,
     "ipa": 2,

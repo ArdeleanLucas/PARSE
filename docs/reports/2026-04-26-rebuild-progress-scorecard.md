@@ -1,5 +1,8 @@
 # PARSE-rebuild progress scorecard — 2026-04-26
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Date:** 2026-04-26
 **Rebuild repo:** `TarahAssistant/PARSE-rebuild`
 **Rebuild SHA:** `4ffb31dd6fe6b779673ef900b2cc7f1e9fb894be`
@@ -37,11 +40,11 @@ Scoring basis for the post-`#61/#62/#63/#58/#59` current-main snapshot:
 
 | File | Oracle LoC | Rebuild LoC | Delta | Delta % | Status | Notes |
 |---|---:|---:|---:|---:|---|---|
-| `python/server.py` | 8,972 | 7,757 | -1,215 | -13.5% | in-progress | HTTP extraction landed across multiple runtime slices, but the file is still the dominant backend monolith |
-| `python/ai/chat_tools.py` | 6,408 | 6,408 | 0 | 0.0% | untouched | Next active backend implementation PR is `#68` (`refactor(chat_tools): extract read-only chat tool bundles`) |
+| `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) | 8,972 | 7,757 | -1,215 | -13.5% | in-progress | HTTP extraction landed across multiple runtime slices, but the file is still the dominant backend monolith |
+| `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) | 6,408 | 6,408 | 0 | 0.0% | untouched | Next active backend implementation PR is `#68` (`refactor(chat_tools): extract read-only chat tool bundles`) |
 | `src/ParseUI.tsx` | 5,328 | 3,537 | -1,791 | -33.6% | in-progress | `#61` (AIChat) and `#63` (ManageTagsView) landed, materially shrinking the shell while leaving AnnotateView extraction (`#69`) still open |
-| `python/adapters/mcp_adapter.py` | 2,050 | 2,050 | 0 | 0.0% | untouched | MCP surface is stable, but structural extraction has not started |
-| `python/ai/provider.py` | 1,907 | 1,907 | 0 | 0.0% | untouched | Provider/runtime contract remains concentrated in one file |
+| `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) | 2,050 | 2,050 | 0 | 0.0% | untouched | MCP surface is stable, but structural extraction has not started |
+| `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`) | 1,907 | 1,907 | 0 | 0.0% | untouched | Provider/runtime contract remains concentrated in one file |
 
 **Interpretation:** the rebuild has produced real structural movement, but it is concentrated in `server.py` and `ParseUI.tsx`. The rest of the pressure set is still carrying oracle-sized complexity.
 

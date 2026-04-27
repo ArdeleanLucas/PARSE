@@ -32,7 +32,7 @@ fieldwork workstation for a linguistics PhD thesis on Southern Kurdish dialects.
   run phonetic enrichment pipelines. Export LingPy TSV for BEAST2 phylogenetic
   analysis. **You own this entirely.**
 
-Python backend (`python/server.py`, port 8766): frozen. You never modify it.
+Python backend (`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), port 8766): frozen. You never modify it.
 Thesis deadline: end of May 2026. This pivot ships in 10 days.
 
 ---
@@ -77,8 +77,8 @@ src/
 ```
 
 **ParseBuilder owns everything else:**
-`src/stores/annotationStore.ts`, `playbackStore.ts`, `configStore.ts`, `uiStore.ts`,
-`src/api/client.ts`, `src/api/types.ts`, `src/hooks/useWaveSurfer.ts`,
+`src/stores/annotationStore.ts` (barrel; concrete slices/helpers live under `src/stores/annotation/`), `playbackStore.ts`, `configStore.ts`, `uiStore.ts`,
+`src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), `src/api/types.ts`, `src/hooks/useWaveSurfer.ts` (barrel; concrete hook pieces live under `src/hooks/wave-surfer/`),
 `src/components/annotate/`, `src/components/shared/`,
 `src/App.tsx`, `src/main.tsx`, `vite.config.ts`, `package.json`, `index.html`.
 
@@ -127,7 +127,7 @@ Work through B7 → B9 in sequence (B1-B6 already done). Each phase has its own 
 Nothing else. Read any file. Write only to those paths.
 
 **Backend.** Python is frozen. Port 8766. Vite proxies `/api/*` to it.
-Every API call goes through `src/api/client.ts`. No bare `fetch()` calls anywhere.
+Every API call goes through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`). No bare `fetch()` calls anywhere.
 If a function is missing from `client.ts`, request it from ParseBuilder.
 
 **State.** Zustand only. No `useState` for store-owned data. Store shapes from Phase 0

@@ -12,7 +12,7 @@
 
 ## Code Quality
 
-1. **No bare `fetch()` calls.** Every API call goes through `src/api/client.ts`.
+1. **No bare `fetch()` calls.** Every API call goes through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`).
    No exceptions — not in components, not in hooks, not in stores.
 
 2. **No `window.PARSE` references.** The old global namespace is dead in React.
@@ -68,10 +68,10 @@
     `origin/main` unless Lucas explicitly revives the historical lane.
 
 16. **Write only to your owned files.** Never touch:
-    `src/components/annotate/`, `src/hooks/useWaveSurfer.ts`,
-    `src/stores/annotationStore.ts`, `src/stores/playbackStore.ts`,
+    `src/components/annotate/`, `src/hooks/useWaveSurfer.ts` (barrel; concrete hook pieces live under `src/hooks/wave-surfer/`),
+    `src/stores/annotationStore.ts` (barrel; concrete slices/helpers live under `src/stores/annotation/`), `src/stores/playbackStore.ts`,
     `src/stores/configStore.ts`, `src/stores/uiStore.ts`,
-    `src/api/client.ts`, `src/api/types.ts`,
+    `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), `src/api/types.ts`,
     `vite.config.ts`, `package.json`, `index.html`, `src/App.tsx`,
     or anything under `python/`.
 

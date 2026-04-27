@@ -28,7 +28,7 @@ In other words: PARSE is already usable as an agent-facing workstation API, not 
 **Status:** ✅ Complete
 
 **Shipped on `main`:**
-- `python/adapters/mcp_adapter.py` exposes a curated **32-tool** default task surface.
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) exposes a curated **32-tool** default task surface.
 - `python/ai/workflow_tools.py` adds **3** workflow macros on top of that base.
 - `mcp_get_exposure_mode` is always available so clients can inspect the active exposure mode.
 - `config/mcp_config.json` (or fallback root `mcp_config.json`) can opt into full exposure:
@@ -181,6 +181,6 @@ The historical roadmap in this file is **largely complete**. If you are looking 
 - `docs/mcp-schema.md`
 - `docs/api-reference.md`
 - `docs/getting-started-external-agents.md`
-- `python/adapters/mcp_adapter.py`
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
 - `python/external_api/`
 - `python/packages/parse_mcp/`

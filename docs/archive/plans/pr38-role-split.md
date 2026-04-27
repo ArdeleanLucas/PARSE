@@ -115,7 +115,7 @@ Opus decides the **layout and states** for the topbar status indicator. parse-gp
 > 5. Add an `ActionStatusBar` section below the Actions dropdown [per UI spec from 1D].
 > 6. In the Reset Project handler, call `.reset()` on all 5 action jobs.
 >
-> Do NOT modify `src/api/client.ts`, `src/api/types.ts`, `python/server.py`, or anything in `src/components/compare/`.
+> Do NOT modify `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), `src/api/types.ts`, `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), or anything in `src/components/compare/`.
 >
 > Run `npm run test -- --run` and `npm run check`.
 

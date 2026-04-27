@@ -2,12 +2,10 @@
 
 # PARSE Desktop Product Architecture (Living Plan)
 
-> **Living document (canonical):** this is the active plan for PARSE desktop packaging/evolution.
-> 
-> Update this file whenever architectural decisions, release assumptions, or packaging constraints change.
+> **Historical archived document:** Option 3 (desktop platform pivot) is cancelled. This file is preserved for context only and should not be treated as the active PARSE architecture reference.
 >
-> **Last updated:** 2026-03-27  
-> **Status:** Proposed architecture (pre-implementation)  
+> **Last updated:** 2026-03-27
+> **Status:** Archived historical plan
 > **Scope:** Local desktop product foundation for macOS + Windows (Electron shell + local Python engine)
 
 ---

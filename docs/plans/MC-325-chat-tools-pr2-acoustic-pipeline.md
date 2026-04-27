@@ -1,7 +1,10 @@
 # MC-325 — chat_tools PR 2 acoustic + pipeline bundle extraction
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
-Execute PR #85 in `TarahAssistant/PARSE-rebuild` by extracting 8 chat tools from `python/ai/chat_tools.py` into two grouped modules under `python/ai/tools/`, preserving tool names, schemas, MCP exposure counts, and runtime behavior.
+Execute PR #85 in `TarahAssistant/PARSE-rebuild` by extracting 8 chat tools from `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) into two grouped modules under `python/ai/tools/`, preserving tool names, schemas, MCP exposure counts, and runtime behavior.
 
 ## Scope
 In scope:
@@ -15,7 +18,7 @@ In scope:
    - `pipeline_state_read`
    - `pipeline_state_batch`
    - `pipeline_run`
-3. Update `python/ai/chat_tools.py` to merge bundle specs and delegate through thin wrappers.
+3. Update `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) to merge bundle specs and delegate through thin wrappers.
 4. Update `python/ai/tools/__init__.py` exports if needed.
 5. Add direct bundle tests:
    - `python/ai/tools/test_acoustic_starter_tools.py`
@@ -27,7 +30,7 @@ In scope:
 Out of scope:
 - sister-bug fix at `chat_tools.py:2271` (`project_relative` payload path normalization)
 - PR 3 offset/import/memory bundles
-- `python/adapters/mcp_adapter.py` refactors
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) refactors
 - any FastMCP private API changes
 
 ## Key facts
@@ -50,5 +53,5 @@ Out of scope:
 - `ParseChatTools(...).tool_names()` still returns 50.
 - MCP/default exposure counts stay unchanged.
 - New bundle tests and existing chat/MCP suites pass.
-- `python/ai/chat_tools.py` line count drops materially from current main.
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) line count drops materially from current main.
 - A rebuild PR is open with explicit `--repo TarahAssistant/PARSE-rebuild`.

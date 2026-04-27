@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-24
 >
-> This guide covers the external-agent interfaces that are currently shipped in the PARSE repository. The commands and tool counts below were cross-checked against `python/adapters/mcp_adapter.py`, `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, `python/adapters/test_mcp_adapter.py`, and the launcher/config docs already in this repo.
+> This guide covers the external-agent interfaces that are currently shipped in the PARSE repository. The commands and tool counts below were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`), `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`), `python/ai/workflow_tools.py`, `python/adapters/test_mcp_adapter.py`, and the launcher/config docs already in this repo.
 
 PARSE can be used programmatically by external agents and automation without opening the browser UI. Today, the recommended path is the built-in **MCP stdio adapter**. For custom scripts and services that do not speak MCP, PARSE also exposes a local **HTTP API**.
 
@@ -288,9 +288,9 @@ After you are up and running:
 - [AI Integration](./ai-integration.md)
 - [Getting Started](./getting-started.md)
 - [Developer Guide](./developer-guide.md)
-- MCP adapter source: `python/adapters/mcp_adapter.py`
+- MCP adapter source: `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
 - Workflow macros: `python/ai/workflow_tools.py`
-- Tool metadata source of truth: `python/ai/chat_tools.py`
+- Tool metadata source of truth: `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`)
 
 > [!NOTE]
 > If this guide saves you time, star the repo and join the PARSE discussion around external-agent workflows, MCP ergonomics, and field-ready automation.

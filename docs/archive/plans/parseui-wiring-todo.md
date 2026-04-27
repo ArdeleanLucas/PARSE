@@ -5,7 +5,7 @@
 > **Why archived:** this file predates the current `origin/main` state, the strict branch policy in `AGENTS.md`, and multiple merged ParseUI wiring slices.
 > **Already landed since this plan was written:** annotate prefill/save/mark/badge, compare real speaker forms/reference/reviewed count, import modal, notes persistence, compute run/refresh basic wiring, decisions load/save basics, manage tags bulk-selection, spectrogram worker TS port (MC-297).
 > **Current source of truth:** `docs/plans/parseui-current-state-plan.md`
-> **Rule:** For new work, start from `origin/main` and use the live client/server contract (`src/api/client.ts`, `python/server.py`) rather than the raw endpoint suggestions below.
+> **Rule:** For new work, start from `origin/main` and use the live client/server contract (`src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)) rather than the raw endpoint suggestions below.
 
 ---
 

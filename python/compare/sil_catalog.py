@@ -21,7 +21,7 @@ Two ways:
    ``<workspace>/config/sil_catalog_extra.json`` containing either a list
    in the same shape, or ``{"languages": [...]}``. The server merges these
    over the bundled list at request time so users can keep private entries
-   out of the repo. See ``_api_get_clef_catalog`` in ``python/server.py``.
+   out of the repo. See the CLEF route wiring in ``python/server.py`` (thin HTTP orchestrator) and ``python/server_routes/clef.py``.
 
 A future "Import from Ethnologue" or Glottolog integration would drop into
 the same shape: ``[{"code": ..., "name": ..., "family": ...}]``.

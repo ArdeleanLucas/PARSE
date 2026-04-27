@@ -1,5 +1,8 @@
 # PARSE Repository State Cleanup and Architecture Unification Plan
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 > **Historical completion record (2026-04-21):** the legacy-removal slice described here is closed — Stage 3 landed in PR #58. Keep this file as the execution record for that cutover, not as an open runbook. For current PARSE repo policy, branch rules, and validation gates, use `AGENTS.md`.
 
 **Historical goal at capture time:** Finish the React cutover by deleting the vanilla-JS legacy surface and making the Python server serve the React build — in a scoped, reversible PR that could only run once Lucas authorized destructive cleanup.
@@ -24,7 +27,7 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 
 **Objective:** Specify exactly what the Python server serves after legacy removal.
 
-**Files:** `README.md`, `python/server.py`, startup/build docs.
+**Files:** `README.md`, `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), startup/build docs.
 
 **Decision:**
 - `npm run build` produces `dist/`.
@@ -44,7 +47,7 @@ This slice was formerly labeled "C7". Per `AGENTS.md` § Deferred Validation Bac
 **Files:**
 - Delete: `parse.html`, `compare.html`, `review_tool_dev.html`, `js/`.
 - Delete: `forceSpaCompareRoute` plugin from `vite.config.ts` (only existed to redirect around `compare.html`).
-- Modify: `python/server.py` to serve `dist/` for non-API routes.
+- Modify: `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) to serve `dist/` for non-API routes.
 
 **Preconditions:**
 - Lucas has authorized destructive cleanup for this PR.

@@ -1,7 +1,10 @@
 # MC-323 — Fix persisted Windows path-separator leakage in `chat_tools.py`
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
-Ship the smallest focused rebuild PR that fixes project-relative path serialization in `python/ai/chat_tools.py` so persisted metadata uses POSIX separators across platforms.
+Ship the smallest focused rebuild PR that fixes project-relative path serialization in `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) so persisted metadata uses POSIX separators across platforms.
 
 ## Scope
 - Add one regression test that fails on current code even on Linux by simulating Windows-style relative paths.
@@ -15,13 +18,13 @@ Ship the smallest focused rebuild PR that fixes project-relative path serializat
 - Do not broaden this into fixture-only path normalization work unless required by the failing regression.
 
 ## Grounded facts
-- Root cause identified in PR #72 audit: `python/ai/chat_tools.py:5316-5321`.
+- Root cause identified in PR #72 audit: `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`):5316-5321`.
 - Current implementation uses `str(path.relative_to(self.project_root))`, which leaks backslashes on Windows.
 - Real-bug impact is on persisted metadata written by processed import (`source_index.json`, `annotation.source_audio`).
 - Rebuild `origin/main` is `ca4299c` at implementation time.
 
 ## Files
-- `python/ai/chat_tools.py`
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`)
 - `python/ai/test_parse_memory_tool.py` or a new focused backend regression test file
 - `docs/plans/MC-323-display-readable-path-posix.md`
 

@@ -1,5 +1,8 @@
 # B6 — SpeakerImport
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 > **Historical React-pivot handoff note (2026-04-21):** this file was written as an implementation brief during the Compare-track migration. `src/components/compare/SpeakerImport.tsx` has already landed, and the legacy source file named below was removed in Stage 3 / PR #58. Do **not** treat this as a pending task checklist.
 >
 > **Read current code first:** `src/components/compare/SpeakerImport.tsx` and `src/components/compare/SpeakerImport.test.tsx`.
@@ -44,7 +47,7 @@ idle → upload → preview → merging → done
 - Cancel from preview → returns to `idle` (closes modal).
 - File validation: must be valid JSON, must have a `speaker` field and `tiers` object.
   Show inline error text for invalid files — no modal.
-- `saveAnnotation` is from `src/api/client.ts` (ParseBuilder's function).
+- `saveAnnotation` is from `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) (ParseBuilder's function).
   Do not add your own fetch call.
 - After successful merge: call `enrichmentStore.load()` to refresh the compare table.
 

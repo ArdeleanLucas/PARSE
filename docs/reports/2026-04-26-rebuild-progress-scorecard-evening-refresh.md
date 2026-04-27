@@ -1,5 +1,8 @@
 # PARSE-rebuild progress scorecard — 2026-04-26 evening refresh
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Date:** 2026-04-26
 **Measurement timestamp (UTC):** `2026-04-26T19:23:08Z`
 **Rebuild repo:** `TarahAssistant/PARSE-rebuild`
@@ -14,7 +17,7 @@
 
 - **Monolith reduction:** substantial progress (**6,066 LoC removed / 24,665 = 24.6%**) across the pressure set.
 - **Largest win:** `src/ParseUI.tsx` is now **2,035 LoC** (from oracle **5,328**, a **61.8% reduction**).
-- **Backend movement:** `python/ai/chat_tools.py` is now **4,850 LoC** (from oracle **6,408**, a **24.3% reduction**).
+- **Backend movement:** `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) is now **4,850 LoC** (from oracle **6,408**, a **24.3% reduction**).
 - **Parity evidence:** **2/4 P0 surfaces** now have committed evidence on `main` (Annotate + Compare).
 - **Desktop axis:** **N/A / cancelled** in this rebuild lane (Option 3 cancelled by PR #98).
 
@@ -25,10 +28,10 @@
 | File | Oracle LoC | Rebuild LoC | Delta | Delta % | Status |
 |---|---:|---:|---:|---:|---|
 | `src/ParseUI.tsx` | 5,328 | **2,035** | **-3,293** | **-61.8%** | structurally cracked; remaining reductions moved to sibling files |
-| `python/ai/chat_tools.py` | 6,408 | **4,850** | **-1,558** | **-24.3%** | in progress; PR 3 flow active, PR 4 queued |
-| `python/server.py` | 8,972 | **7,757** | **-1,215** | **-13.5%** | in progress |
-| `python/adapters/mcp_adapter.py` | 2,050 | **2,050** | 0 | 0.0% | untouched; PR 1 seam queued (`env_config.py`) |
-| `python/ai/provider.py` | 1,907 | **1,907** | 0 | 0.0% | untouched |
+| `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) | 6,408 | **4,850** | **-1,558** | **-24.3%** | in progress; PR 3 flow active, PR 4 queued |
+| `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) | 8,972 | **7,757** | **-1,215** | **-13.5%** | in progress |
+| `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) | 2,050 | **2,050** | 0 | 0.0% | untouched; PR 1 seam queued (`env_config.py`) |
+| `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`) | 1,907 | **1,907** | 0 | 0.0% | untouched |
 | **Total** | **24,665** | **18,599** | **-6,066** | **-24.6%** | |
 
 Interpretation: reduction is real and now broad enough to be visible outside ParseUI, but two backend monoliths (`mcp_adapter.py`, `provider.py`) remain untouched on `main`.

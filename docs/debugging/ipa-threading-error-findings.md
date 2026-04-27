@@ -1,5 +1,8 @@
 # PARSE IPA threading error — findings, proof, and reproducible demonstrations
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Executive summary
 
 The recurring IPA failure is **not** a speaker-data problem and **not** a wav2vec2 decoding problem.
@@ -43,7 +46,7 @@ RuntimeError: Error: cannot set number of interop threads after parallel work ha
 
 ### 1) The full pipeline reaches IPA last
 
-`python/server.py`:
+`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
 
 ```python
 elif step == "ipa":
@@ -57,7 +60,7 @@ This means the IPA stage is entered **after** the earlier pipeline activity in t
 
 ### 2) IPA lazy-loads the aligner inside the server process
 
-`python/server.py`:
+`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
 
 ```python
 def _get_ipa_aligner() -> Any:

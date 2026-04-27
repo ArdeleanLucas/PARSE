@@ -1,5 +1,8 @@
 # PARSE Separate-Rebuild Plan: Option 1 Now, Option 3 Later
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 > **CANCELLED 2026-04-26** — Option 3 (desktop platform pivot) is not happening. Per Lucas decision: Option 1 (modular rebuild) only. The rebuild's done-state is monolith decomposition + parity evidence complete on the React/web stack. Desktop product work is dropped, not deferred. This document remains for historical context; do not act on the Option 3 sections.
 
 
@@ -34,11 +37,11 @@ The current PARSE codebase has multiple monoliths large enough that a safe in-pl
 
 ### Verified monolith pressure points
 
-- `python/server.py` — ~8962 lines
-- `python/ai/chat_tools.py` — ~6408 lines
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) — ~8962 lines
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) — ~6408 lines
 - `src/ParseUI.tsx` — ~5327 lines
-- `python/adapters/mcp_adapter.py` — ~2050 lines
-- `python/ai/provider.py` — ~1907 lines
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) — ~2050 lines
+- `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`) — ~1907 lines
 
 ### Verified current domain structure worth preserving
 

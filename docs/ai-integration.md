@@ -216,7 +216,7 @@ The current README includes a citation-oriented table for core external models a
 
 Both Annotate and Compare modes include a built-in assistant powered by the configured LLM provider.
 
-The current README describes it as a **domain-specific assistant**, not a general-purpose chatbot. It operates through `ParseChatTools` in `python/ai/chat_tools.py` and can currently support:
+The current README describes it as a **domain-specific assistant**, not a general-purpose chatbot. It operates through `ParseChatTools` in `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) and can currently support:
 
 - audio setup and file management
 - annotation workflow guidance

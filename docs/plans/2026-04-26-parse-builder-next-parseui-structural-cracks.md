@@ -1,5 +1,8 @@
 # parse-builder — next task: ParseUI.tsx structural cracks
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Lane:** Agent A (frontend)
 **Date queued:** 2026-04-26
 **Rebuild oracle SHA at queue time:** `f9aa3db1aa`
@@ -31,7 +34,7 @@ This is a **structural extraction**, not a redesign. Behavior must remain byte-e
 
 1. Extract `AIChat` (lines ~729–1322) → `src/components/shared/AIChat.tsx` + `src/components/shared/AIChat.test.tsx`.
 2. Extract `ManageTagsView` (lines ~1340–1554) → `src/components/compare/ManageTagsView.tsx` + `.test.tsx`.
-3. Extract `AnnotateView` (lines ~1567–4178) → `src/components/annotate/AnnotateView.tsx` + `.test.tsx`. Extract supporting helpers `JobLogsModal`, `LexemeSearchBlock`, `TranscriptionLanesControls` (lines ~4179–4500) into the same file *only if* they are exclusively used by AnnotateView; otherwise put them in their own files in the same dir.
+3. Extract `AnnotateView` (lines ~1567–4178) → `src/components/annotate/AnnotateView.tsx` (barrel; implementation lives under `src/components/annotate/annotate-views/`) + `.test.tsx`. Extract supporting helpers `JobLogsModal`, `LexemeSearchBlock`, `TranscriptionLanesControls` (lines ~4179–4500) into the same file *only if* they are exclusively used by AnnotateView; otherwise put them in their own files in the same dir.
 4. Update `src/ParseUI.tsx` imports and remove the inlined definitions.
 5. Move type/interface declarations (`AIChatProps`, `ManageTagsProps`, `AnnotateViewProps`, `ChatMessage`, `AIProvider`, `AIConnectionView`, `TestStatus`) into the extracted files.
 6. Move tightly-scoped local constants (`PROVIDER_META`, `QUICK_ACTIONS`, `SWATCHES`, `LANE_ORDER`, `LANE_DISPLAY`) into the file that uses them.
@@ -130,7 +133,7 @@ Acceptance: ParseUI.tsx down ~210 lines. New file ≤230 LoC. Test file ≥80 Lo
 
 **Branch:** `feat/parseui-extract-annotate-view`
 **Target files:**
-- `src/components/annotate/AnnotateView.tsx`
+- `src/components/annotate/AnnotateView.tsx` (barrel; implementation lives under `src/components/annotate/annotate-views/`)
 - `src/components/annotate/AnnotateView.test.tsx`
 - `src/components/annotate/JobLogsModal.tsx` (if standalone — verify with grep)
 - `src/components/annotate/LexemeSearchBlock.tsx` (verify standalone)
@@ -193,7 +196,7 @@ Use these installed Hermes skills:
 - `wc -l src/ParseUI.tsx` ≤ 1800
 - `src/components/shared/AIChat.tsx` exists with paired test
 - `src/components/compare/ManageTagsView.tsx` exists with paired test
-- `src/components/annotate/AnnotateView.tsx` exists with paired test
+- `src/components/annotate/AnnotateView.tsx` (barrel; implementation lives under `src/components/annotate/annotate-views/`) exists with paired test
 - All three PRs merged to `origin/main` of the rebuild repo
 - ParseUI.test.tsx still green
 - Browser regression: Annotate, Compare → Manage Tags, and AI Chat all behave identically to oracle

@@ -10,16 +10,21 @@ PARSE is a research workstation rather than a single-purpose annotator. Its arch
 
 ```mermaid
 flowchart LR
-    Browser[React + Vite frontend\nAnnotate / Compare / Tags / AI Chat] --> Client[src/api/client.ts]
-    Client --> Server[python/server.py\nHTTP API + built frontend serving]
-    Server --> Annotations[annotations/<Speaker>.json\nper-speaker annotation records]
-    Server --> Enrichments[parse-enrichments.json\ncomparative overlays + notes]
-    Server --> ChatTools[python/ai/chat_tools.py\n50 PARSE-specific tools]
+    Browser[React + Vite frontend\nAnnotate / Compare / Tags / AI Chat] --> Client[src/api/client.ts\nbarrel]
+    Client --> ClientContracts[src/api/contracts/*\nconcrete request helpers]
+    ClientContracts --> Server[python/server.py\nthin HTTP orchestrator]
+    Server --> Routes[python/server_routes/*\nroute-domain modules]
+    Routes --> Annotations[annotations/<Speaker>.json\nper-speaker annotation records]
+    Routes --> Enrichments[parse-enrichments.json\ncomparative overlays + notes]
+    Server --> ChatRegistry[python/ai/chat_tools.py\nregistry/orchestrator]
+    ChatRegistry --> ChatModules[python/ai/tools/* +\npython/ai/chat_tools/*]
     Server --> Compare[python/compare/*\ncognates + CLEF providers]
-    Server --> Models[local & remote AI providers\nfaster-whisper / wav2vec2 / OpenAI / xAI]
+    Server --> Providers[python/ai/provider.py\nbase provider surface]
+    Providers --> ProviderModules[python/ai/providers/*\nconcrete providers]
     Server --> Stream[WebSocket sidecar\nPARSE_WS_PORT + /ws/jobs/{jobId}]
     Server --> External[OpenAPI 3.1 + HTTP MCP bridge\n/openapi.json + /api/mcp/*]
-    ChatTools --> MCP[python/adapters/mcp_adapter.py\n32-task MCP surface + 3 workflow macros]
+    ChatRegistry --> MCP[python/adapters/mcp_adapter.py\nthin stdio entrypoint]
+    MCP --> MCPModules[python/adapters/mcp/*\ntransport + schema + dispatch]
     External --> PyPkg[python/packages/parse_mcp\nLangChain / LlamaIndex / CrewAI wrappers]
     Compare --> Exports[LingPy TSV + NEXUS]
 ```
@@ -52,58 +57,45 @@ After `npm run build`, the Python backend can also serve the built frontend at:
 
 ## Frontend structure
 
-The current top-level structure described in the README is:
+The rebuild still presents a stable top-level shell, but several high-traffic files are now **barrels** or thin shells rather than the concrete implementation homes they used to be.
 
-```text
-index.html              -- React/Vite entry HTML
-src/
-  App.tsx               -- BrowserRouter shell → <ParseUI />
-  ParseUI.tsx           -- Unified UI shell
-  api/
-    client.ts           -- Typed API client
-    types.ts            -- Shared TypeScript types
-  components/
-    annotate/           -- Annotate mode components
-    compare/            -- Compare mode components
-    shared/             -- Cross-mode shared components
-  hooks/                -- React hooks
-  stores/               -- Zustand stores
-python/
-  server.py             -- Backend API server + built-frontend serving
-  adapters/
-    mcp_adapter.py      -- MCP adapter
-  ai/                   -- AI provider layer and chat tools
-  external_api/         -- OpenAPI generation + HTTP MCP bridge catalog helpers
-  compare/              -- Compare pipeline and CLEF providers
-  packages/
-    parse_mcp/          -- Publishable Python client/wrapper package
-config/
-  ai_config.example.json
-  ai_config.json
-annotations/            -- Runtime annotation JSON
-parse-enrichments.json  -- Runtime comparative overlays
-desktop/                -- Electron shell scaffold
-docs/                   -- Documentation and planning material
-dist/                   -- Vite build output
-```
+Key examples:
+
+- `src/api/client.ts` — barrel only; concrete helpers live under `src/api/contracts/`
+- `src/stores/annotationStore.ts` — barrel only; concrete slices/helpers live under `src/stores/annotation/`
+- `src/components/compute/ClefConfigModal.tsx`, `ClefSourcesReportModal.tsx`, `ClefPopulateSummaryBanner.tsx` — barrels only; concrete UI modules live under `src/components/compute/clef/`
+- `src/components/compare/BorrowingPanel.tsx`, `ConceptTable.tsx`, `LexemeDetail.tsx`, `CognateControls.tsx` — barrels only; concrete UI modules live under `src/components/compare/compare-panels/`
+- `src/components/annotate/AnnotateView.tsx`, `AnnotateMode.tsx`, `AnnotationPanel.tsx`, `LexemeSearchPanel.tsx` — barrels only; concrete UI modules live under `src/components/annotate/annotate-views/`
+- `src/hooks/useWaveSurfer.ts` and `src/hooks/useBatchPipelineJob.ts` — barrels only; concrete hook pieces live under `src/hooks/wave-surfer/` and `src/hooks/batch-pipeline/`
+
+For the current file-by-file layout, use [Post-decomp File Map](./architecture/post-decomp-file-map.md).
 
 ## Backend design
 
-The backend is centered on `python/server.py`.
+The backend is centered on `python/server.py`, but that file is now deliberately a **thin orchestrator**.
 
-It is responsible for:
+Most concrete route behavior lives in `python/server_routes/`:
 
+- `annotate.py`
+- `compare.py`
+- `jobs.py`
+- `exports.py`
+- `config.py`
+- `clef.py`
+- `chat.py`
+- `media.py`
+
+`python/server.py` is still responsible for:
+
+- startup and shared runtime wiring
 - serving workspace configuration
-- reading and writing annotation records
-- managing background jobs
+- reading and writing annotation records through the route layer
+- managing background-job registries and shared polling/log infrastructure
 - publishing additive WebSocket job events through the sidecar endpoint
-- coordinating STT / normalization / compute endpoints
-- exposing chat and auth routes
-- generating exports
-- serving the OpenAPI 3.1 document and HTTP MCP bridge
+- coordinating auth, OpenAPI, and HTTP MCP serving
 - serving the built frontend for non-dev/local-server usage
 
-The backend is not just a thin file server. It is the orchestration layer for PARSE's workflow-specific automation.
+The backend is not just a thin file server. It is the orchestration layer for PARSE's workflow-specific automation, while `python/server_routes/` now owns most HTTP-domain logic.
 
 ## Hybrid data architecture
 
@@ -287,12 +279,12 @@ CLEF is intentionally separated from the main annotation store. It augments comp
 
 ## Chat tool architecture
 
-The in-app assistant works through `python/ai/chat_tools.py`.
+The in-app assistant works through `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`).
 
 Current counts:
 
 - **50** built-in PARSE chat tools
-- **32** MCP task tools via `python/adapters/mcp_adapter.py`
+- **32** MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
 - **36** total default MCP adapter tools including workflow macros + `mcp_get_exposure_mode`
 
 This separation matters architecturally:

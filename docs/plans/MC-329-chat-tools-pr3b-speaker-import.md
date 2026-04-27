@@ -1,7 +1,10 @@
 # MC-329 — chat_tools PR 3B speaker-import extraction
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
-Implement PR 3B in `TarahAssistant/PARSE-rebuild` by extracting the speaker-import chat tool family from `python/ai/chat_tools.py` into `python/ai/tools/speaker_import_tools.py`, preserving tool names, MCP exposure, schemas, and runtime behavior.
+Implement PR 3B in `TarahAssistant/PARSE-rebuild` by extracting the speaker-import chat tool family from `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) into `python/ai/tools/speaker_import_tools.py`, preserving tool names, MCP exposure, schemas, and runtime behavior.
 
 ## Scope
 In scope:
@@ -9,7 +12,7 @@ In scope:
    - `onboard_speaker_import`
    - `import_processed_speaker`
 2. Move the speaker-import helper family needed by those tools.
-3. Update `python/ai/chat_tools.py` to merge bundle specs and delegate through thin wrappers.
+3. Update `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) to merge bundle specs and delegate through thin wrappers.
 4. Add direct extraction/regression tests for the new module and bundle wiring.
 5. Update duplicate-spec coverage if needed.
 6. Re-run targeted backend tests, full backend suite, frontend Vitest gate, TypeScript gate, and branch-local API smoke.
@@ -45,5 +48,5 @@ Out of scope:
 - `_display_readable_path()` remains in-class on `ParseChatTools`.
 - `_load_project_concepts()` remains in-class on `ParseChatTools`.
 - New direct module tests and existing chat/MCP suites pass.
-- `python/ai/chat_tools.py` line count drops materially from current main.
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) line count drops materially from current main.
 - Rebuild PR open with explicit `--repo TarahAssistant/PARSE-rebuild`.

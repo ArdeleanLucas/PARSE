@@ -64,8 +64,8 @@ Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/
 
 **What's still in scope:**
 
-- `python/ai/chat_tools.py` decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
-- `python/adapters/mcp_adapter.py` decomposition (env_config.py PR 1 + follow-ups)
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) decomposition (env_config.py PR 1 + follow-ups)
 - The 50 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
 - Bug fixes that touch AIChat.tsx incidentally (e.g., the path-separator fix at PR #77 affected stt_start which AIChat consumes)
 
@@ -136,7 +136,19 @@ Why the link works: clicking the markdown link navigates to GitHub's blob view, 
 
 **Sanity-check your screenshot is real**: capture distinct browser states for each PR. If your screenshot tool keeps producing byte-identical PNGs across different PRs (compare blob SHAs), the tool is capturing a blank/error state, not real UI. Investigate before adding more screenshot evidence.
 
-## Current State (updated 2026-04-25)
+## Current code-layout guardrails (post-decomp)
+
+When the docs or older plans mention the historical monoliths, translate them through the current split layout:
+
+- `python/server.py` — thin HTTP orchestrator; concrete route domains live under `python/server_routes/`
+- `python/ai/chat_tools.py` — registry/orchestrator; concrete tool logic lives under `python/ai/tools/` and `python/ai/chat_tools/`
+- `python/adapters/mcp_adapter.py` — thin stdio MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`
+- `python/ai/provider.py` — base-provider surface only; concrete providers live under `python/ai/providers/`
+- `src/api/client.ts` — barrel only; concrete helpers live under `src/api/contracts/`
+- `src/stores/annotationStore.ts` — barrel only; concrete annotation-store helpers live under `src/stores/annotation/`
+- compare/annotate/CLEF top-level `.tsx` files may now be barrels; check `docs/architecture/post-decomp-file-map.md` before adding new logic directly into an old top-level entrypoint
+
+## Current State (updated 2026-04-27)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -167,7 +179,7 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 
 ## MCP adapter note
 
-- `python/adapters/mcp_adapter.py` now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
 - Default MCP surface is **36 tools**: the legacy 29 `ParseChatTools` wrappers, 3 high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, the 3 generic observability tools (`jobs_list`, `job_status`, `job_logs`), plus read-only `mcp_get_exposure_mode` for self-inspection.
 - Enabling `expose_all_tools` expands the MCP surface to **54 tools**: all 50 `ParseChatTools`, the 3 `WorkflowTools` macros, plus `mcp_get_exposure_mode`.
 - The workflow macros are:
@@ -176,12 +188,12 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - `export_complete_lingpy_dataset`
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 - `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
-- Task 5 adds a parallel **HTTP MCP bridge** in `python/server.py`:
+- Task 5 adds a parallel **HTTP MCP bridge** in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
   - `GET /api/mcp/exposure`
   - `GET /api/mcp/tools`
   - `GET /api/mcp/tools/{toolName}`
   - `POST /api/mcp/tools/{toolName}`
-- Task 5 also adds OpenAPI docs served directly by `python/server.py`:
+- Task 5 also adds OpenAPI docs served directly by `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
   - `GET /openapi.json`
   - `GET /docs`
   - `GET /redoc`
@@ -264,7 +276,7 @@ Recommended agent pattern:
 
 ## Client/Server Contract Surface
 
-All `src/api/client.ts` helpers have matching routes in `python/server.py`:
+All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) helpers have matching routes in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
 
 | Client helper | Endpoint | Server status |
 |---|---|---|
@@ -343,9 +355,11 @@ Historical split remains useful for boundaries:
 However, on current `main`, coordinate shared-surface edits carefully.
 
 ### Shared surfaces requiring coordination before commit
-- `src/api/client.ts`
+- `src/api/client.ts` — barrel only; coordinate the underlying `src/api/contracts/**` change set, not just the re-export line
 - `src/api/types.ts`
-- `python/server.py`
+- `python/server.py` — thin orchestrator; most route changes should happen in `python/server_routes/**`
+- `python/ai/chat_tools.py` — registry/orchestrator; most tool changes should happen in `python/ai/tools/**` or `python/ai/chat_tools/**`
+- `python/adapters/mcp_adapter.py` — entrypoint only; most MCP changes should happen in `python/adapters/mcp/**`
 
 
 ## Coordinator handoff convention (2026-04-26)
@@ -384,7 +398,7 @@ New queued work for `parse-builder`, `parse-back-end`, and `parse-gpt` is now tr
 These apply to every `src/` file. Violation = stop and fix before merge.
 
 **API & state**
-1. **No bare `fetch()` calls.** Every API call goes through `src/api/client.ts`.
+1. **No bare `fetch()` calls.** Every API call goes through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`).
 2. **No `window.PARSE` references.** The old global namespace is dead in React.
 3. **No `localStorage` reads/writes** except inside `tagStore.persist()` and `tagStore.hydrate()`.
 4. **Zustand is the only state for data.** `useState` is allowed only for pure UI state (modal open/close, which tab is active).

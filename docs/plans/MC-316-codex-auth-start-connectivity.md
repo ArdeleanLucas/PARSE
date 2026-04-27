@@ -1,5 +1,8 @@
 # MC-316 — Codex auth start connectivity and proxy verification
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
 Determine why PARSE showed `Could not reach the PARSE API for POST /api/auth/start...` during Codex login, verify the real root cause on the canonical repo/runtime, and implement the smallest durable fix if the failure is code-related rather than just a dead dev server.
 
@@ -12,8 +15,8 @@ Determine why PARSE showed `Could not reach the PARSE API for POST /api/auth/sta
 6. Re-run targeted and full validation; ship on a fresh branch/PR if code changes are required.
 
 ## Files likely in scope
-- `python/server.py`
-- `src/api/client.ts`
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
+- `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`)
 - `src/ParseUI.tsx`
 - `src/components/annotate/ChatPanel.tsx`
 - `vite.config.ts`

@@ -1,5 +1,8 @@
 # MC-315 — Grok reasoning-effort compatibility fix
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
 Fix PARSE AI chat so Grok/xAI requests do not send a `reasoningEffort` / `reasoning_effort` parameter to models that reject it, while preserving OpenAI reasoning-effort behavior where supported.
 
@@ -11,8 +14,8 @@ Fix PARSE AI chat so Grok/xAI requests do not send a `reasoningEffort` / `reason
 5. Deliver the fix on a fresh post-merge branch, update PR metadata if needed, and log the outcome.
 
 ## Files likely in scope
-- `python/ai/provider.py`
-- `python/server.py`
+- `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`)
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 - `python/test_server_chat_policy.py`
 - `config/ai_config.example.json` only if policy defaults need clarification
 

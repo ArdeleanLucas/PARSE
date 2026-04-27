@@ -154,14 +154,14 @@ The current Reset Project handler directly calls `setState` on multiple stores i
 | `src/ParseUI.tsx` | Replace fire-and-forget Actions handlers with `useActionJob` instances; add status indicator |
 | `src/ParseUI.test.tsx` | Add regression tests for action status + disable-while-running |
 | `src/api/types.ts` | No changes expected — existing types cover all job shapes |
-| `src/api/client.ts` | No changes expected — all poll/start functions already exist |
+| `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) | No changes expected — all poll/start functions already exist |
 
 ---
 
 ## What this PR does NOT do
 
 - **No new server endpoints** — all start/poll routes already exist and are verified
-- **No changes to `python/server.py`** — server contract is complete (PR #33)
+- **No changes to `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)** — server contract is complete (PR #33)
 - **No changes to Compare components** — per AGENTS.md "Do Not Touch" list
 - **No decisions persistence changes** — that's a separate follow-up (Priority 3)
 - **No C7 cleanup / legacy deletion** — blocked until C5+C6 signoff
@@ -228,7 +228,7 @@ npm run check                # tsc --noEmit clean
 - [ ] Buttons are disabled while their corresponding job is in-flight
 - [ ] `useComputeJob` existing behavior and tests are preserved
 - [ ] `npm run test -- --run` >= 119 passing, `npm run check` clean
-- [ ] No changes to `python/server.py`, `src/api/client.ts`, or compare components
+- [ ] No changes to `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), or compare components
 
 ---
 
