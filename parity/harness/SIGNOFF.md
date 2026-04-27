@@ -68,6 +68,10 @@
 
 **Not ready to replace oracle yet.** The parity meta-gate is otherwise in place (`raw=1`, `allowlisted=0`, `unallowed=1`), but the single remaining blocker is operationally critical because the rebuild cannot yet boot `python/server.py` as a script on current `origin/main`.
 
+## Dogfood follow-up
+
+- **Dogfood pass (Fail01):** 13 flows tested, 1 issues filed, 0 blockers. Report: `docs/reports/2026-04-27-rebuild-dogfood-report.md`. Issue links: #143.
+
 ## Coordinator sign-off
 
 - **Lucas:** ______________________________
