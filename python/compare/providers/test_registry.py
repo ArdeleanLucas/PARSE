@@ -151,6 +151,26 @@ def test_fetch_all_continues_when_one_provider_raises() -> None:
     assert len(fallback.calls) == 1
 
 
+def test_fetch_all_detailed_collects_provider_errors_without_hiding_fallback_results() -> None:
+    registry = ProviderRegistry(ai_config={})
+    broken = StubProvider(rows=[], raises=True)
+    fallback = StubProvider(rows=[("tree", "fa", ["deraxt"])])
+    registry._providers = {"broken": broken, "fallback": fallback}
+
+    detailed = registry.fetch_all_detailed(
+        concepts=["tree"],
+        language_codes=["fa"],
+        language_meta={"fa": {"name": "Persian"}},
+        priority_order=["broken", "fallback"],
+        stop_on_first_hit=True,
+    )
+
+    assert detailed["results"]["fa"]["tree"] == [{"form": "deraxt", "sources": ["stub"]}]
+    assert detailed["provider_errors"] == ["broken: stub boom"]
+    assert detailed["providers_attempted"] == ["broken", "fallback"]
+    assert detailed["providers_returning_forms"] == ["fallback"]
+
+
 def test_fetch_all_progress_callback_emits_every_five_results() -> None:
     registry = ProviderRegistry(ai_config={})
     provider = StubProvider(

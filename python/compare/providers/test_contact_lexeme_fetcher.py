@@ -315,6 +315,75 @@ def test_fetch_and_merge_creates_config_when_missing(monkeypatch, tmp_path: Path
     assert _read_json(config_path)["eng"]["concepts"]["water"] == ["water"]
 
 
+def test_fetch_and_merge_return_report_marks_zero_provider_results_as_no_forms(monkeypatch, tmp_path: Path) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    config_path = tmp_path / "sil_contact_languages.json"
+
+    _write_concepts_csv(concepts_path, ["hair"])
+    _write_json(
+        config_path,
+        {
+            "ar": {
+                "name": "Arabic",
+                "concepts": {"hair": []},
+            }
+        },
+    )
+
+    class StubRegistry:
+        def __init__(self, ai_config: Optional[Dict] = None) -> None:
+            del ai_config
+
+        def fetch_all_detailed(
+            self,
+            concepts: List[str],
+            language_codes: List[str],
+            language_meta: Dict,
+            priority_order=None,
+            stop_on_first_hit: bool = True,
+            progress_callback=None,
+        ) -> Dict:
+            del concepts, language_codes, language_meta, priority_order, stop_on_first_hit, progress_callback
+            return {
+                "results": {"ar": {}},
+                "providers_requested": ["stub_provider"],
+                "providers_attempted": ["stub_provider"],
+                "providers_returning_forms": [],
+                "provider_errors": [],
+                "warnings": [],
+                "provider_stats": {
+                    "stub_provider": {
+                        "concepts_requested": 1,
+                        "pairs_requested": 1,
+                        "results_seen": 1,
+                        "pairs_with_forms": 0,
+                        "forms_emitted": 0,
+                    }
+                },
+            }
+
+    monkeypatch.setattr(registry_module, "ProviderRegistry", StubRegistry)
+
+    report = contact_lexeme_fetcher.fetch_and_merge(
+        concepts_path=concepts_path,
+        config_path=config_path,
+        language_codes=["ar"],
+        overwrite=False,
+        return_report=True,
+    )
+
+    assert report["status"] == "no_forms"
+    assert report["filled"] == {"ar": 0}
+    assert report["forms_count"] == 0
+    assert report["providers_attempted"] == ["stub_provider"]
+    assert report["providers_returning_forms"] == []
+    assert report["provider_errors"] == []
+    assert report["warnings"] == [
+        "No provider returned forms for the remaining concept/language pairs."
+    ]
+
+
+
 def test_fetch_and_merge_empty_languages_raises_clean_error(tmp_path: Path) -> None:
     concepts_path = tmp_path / "concepts.csv"
     config_path = tmp_path / "sil_contact_languages.json"

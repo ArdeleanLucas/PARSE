@@ -3,6 +3,92 @@ from __future__ import annotations
 
 import server as _server
 
+
+def _coerce_contact_lexeme_result(
+    raw_result: _server.Any,
+    *,
+    languages_requested: _server.List[str],
+    providers_requested: _server.Any,
+    config_path: _server.Any,
+) -> _server.Dict[str, _server.Any]:
+    """Normalize legacy ``fetch_and_merge`` results and the new rich report
+    shape into one stable compute payload for the frontend."""
+    rich_result = raw_result if isinstance(raw_result, dict) else {}
+    if isinstance(rich_result.get('filled'), dict):
+        filled = {
+            str(code): int(count)
+            for code, count in rich_result.get('filled', {}).items()
+            if isinstance(code, str) and isinstance(count, int)
+        }
+        total_filled = rich_result.get('total_filled')
+        if not isinstance(total_filled, int):
+            total_filled = rich_result.get('forms_count')
+        if not isinstance(total_filled, int):
+            total_filled = sum(filled.values())
+    elif isinstance(raw_result, dict):
+        filled = {
+            str(code): int(count)
+            for code, count in raw_result.items()
+            if isinstance(code, str) and isinstance(count, int)
+        }
+        total_filled = sum(filled.values())
+        rich_result = {}
+    else:
+        filled = {}
+        total_filled = 0
+        rich_result = {}
+
+    provider_errors = _server._coerce_string_list(rich_result.get('provider_errors'))
+    warnings = _server._coerce_string_list(rich_result.get('warnings'))
+    status = rich_result.get('status') if isinstance(rich_result.get('status'), str) else None
+    if status not in {'ok', 'no_forms', 'provider_error'}:
+        status = 'ok' if total_filled > 0 else ('provider_error' if provider_errors else 'no_forms')
+
+    if total_filled == 0 and not warnings:
+        warnings = ['No provider returned forms for the requested concept/language pairs.']
+
+    warning = rich_result.get('warning') if isinstance(rich_result.get('warning'), str) and rich_result.get('warning').strip() else None
+    if total_filled == 0 and not warning:
+        warning = _build_zero_forms_warning(warnings=warnings, provider_errors=provider_errors)
+
+    result: _server.Dict[str, _server.Any] = {
+        'status': status,
+        'filled': filled,
+        'forms_count': total_filled,
+        'total_filled': total_filled,
+        'languages_requested': list(languages_requested),
+        'providers_requested': providers_requested,
+        'config_path': str(config_path),
+        'warnings': warnings,
+        'provider_errors': provider_errors,
+    }
+    if warning:
+        result['warning'] = warning
+
+    passthrough_keys = (
+        'requested_concepts',
+        'requested_concepts_count',
+        'providers_attempted',
+        'providers_returning_forms',
+        'provider_stats',
+    )
+    for key in passthrough_keys:
+        if key in rich_result:
+            result[key] = rich_result[key]
+    return result
+
+
+def _build_zero_forms_warning(*, warnings: _server.List[str], provider_errors: _server.List[str]) -> str:
+    parts: _server.List[str] = []
+    if warnings:
+        parts.append('Warnings: ' + ' | '.join(warnings[:4]))
+    if provider_errors:
+        parts.append('Provider errors: ' + ' | '.join(provider_errors[:4]))
+    if not parts:
+        parts.append('No provider returned forms for the requested concept/language pairs.')
+    return 'Populate finished with 0 reference forms. ' + ' '.join(parts)
+
+
 def _compute_contact_lexemes(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Fetch and merge contact language lexeme forms into sil_contact_languages.json."""
     from compare.contact_lexeme_fetcher import fetch_and_merge
@@ -30,12 +116,10 @@ def _compute_contact_lexemes(job_id: str, payload: _server.Dict[str, _server.Any
     except Exception:
         ai_config = {}
     _server._set_job_progress(job_id, 5.0, message='Starting contact lexeme fetch')
-    filled = fetch_and_merge(concepts_path=concepts_path, config_path=config_path, language_codes=languages_raw, providers=providers, overwrite=overwrite, ai_config=ai_config, progress_callback=_progress)
+    raw_result = fetch_and_merge(concepts_path=concepts_path, config_path=config_path, language_codes=languages_raw, providers=providers, overwrite=overwrite, ai_config=ai_config, progress_callback=_progress, return_report=True)
     _server._set_job_progress(job_id, 100.0, message='Done')
-    total_filled = sum(filled.values())
-    result: _server.Dict[str, _server.Any] = {'filled': filled, 'total_filled': total_filled, 'languages_requested': list(languages_raw), 'providers_requested': providers or 'all', 'config_path': str(config_path)}
-    if total_filled == 0:
-        result['warning'] = 'Populate finished with 0 reference forms. Try 1: check your internet connection — wikidata, wiktionary, asjp, cldf, and grokipedia all need network. Try 2: open the CLEF configure modal and enable more providers (or leave the list empty to try all built-in providers). Other causes: grokipedia needs an xAI API key; lingpy_wordlist and pycldf need local CLDF datasets under config/lexibank_data/; ASJP only covers 40 Swadesh concepts, so glosses outside that list return nothing from it. Backend stderr has per-provider errors.'
+    result = _coerce_contact_lexeme_result(raw_result, languages_requested=languages_raw, providers_requested=providers or 'all', config_path=config_path)
+    if result.get('status') in {'no_forms', 'provider_error'} and isinstance(result.get('warning'), str):
         print('[clef] {0}'.format(result['warning']), file=_server.sys.stderr)
     return result
 
