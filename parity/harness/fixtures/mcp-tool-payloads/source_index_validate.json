@@ -1,0 +1,5 @@
+{
+  "mode": "speaker",
+  "speakerId": "${SEED_SPEAKER}",
+  "speakerData": {}
+}

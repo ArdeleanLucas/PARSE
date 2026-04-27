@@ -1,0 +1,11 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "conceptIds": [
+    "1"
+  ],
+  "includeTiers": [
+    "concept",
+    "speaker"
+  ],
+  "maxIntervals": 4
+}

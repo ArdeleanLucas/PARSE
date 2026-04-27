@@ -88,8 +88,7 @@ PROJECT_READ_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "speakers_list": ChatToolSpec(
         name="speakers_list",
         description=(
-            "List speakers that currently have annotation files in annotations/. "
-            "Read-only inventory helper."
+            "List every speaker with an annotation file under ``annotations/``. Read-only. Use as the starting point for a batch pipeline run — pair with ``pipeline_state_batch`` to see which speakers are ready to process. Filters out non-annotation entries (e.g. a ``backups/`` directory) so the list is directly usable as input to ``pipeline_run``."
         ),
         parameters={
             "type": "object",

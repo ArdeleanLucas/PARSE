@@ -5,6 +5,7 @@ through ParseChatTools.execute(), so registering an MCP tool that isn't
 in the allowlist produces a runtime ChatToolValidationError on the
 client side. A test at import time catches that before shipping.
 """
+import json
 import os
 import pathlib
 import sys
@@ -18,6 +19,47 @@ if str(_PYTHON_DIR) not in sys.path:
 
 from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
+
+
+def _seed_minimal_annotation_project(project_root: pathlib.Path) -> None:
+    import wave
+
+    (project_root / "config").mkdir(parents=True, exist_ok=True)
+    (project_root / "annotations").mkdir(parents=True, exist_ok=True)
+    audio_dir = project_root / "audio" / "original" / "Base01"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    with wave.open(str(audio_dir / "source.wav"), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 1600)
+
+    (project_root / "project.json").write_text(
+        json.dumps({"project_id": "mcp-adapter-test", "speakers": {"Base01": {}}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "parse-enrichments.json").write_text("{}\n", encoding="utf-8")
+    (project_root / "annotations" / "Base01.parse.json").write_text(
+        json.dumps(
+            {
+                "speaker": "Base01",
+                "source_audio": "audio/original/Base01/source.wav",
+                "metadata": {
+                    "language_code": "sdh",
+                    "created": "2026-01-01T00:00:00Z",
+                    "modified": "2026-01-01T00:00:00Z",
+                },
+                "tiers": {
+                    "concept": {"intervals": [{"start": 0.0, "end": 0.1, "text": "1: ash"}]},
+                    "speaker": {"intervals": [{"start": 0.0, "end": 0.1, "text": "Base01"}]},
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_load_repo_parse_env_sets_missing_vars(tmp_path, monkeypatch) -> None:
@@ -193,6 +235,104 @@ def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_root_config(tmp_
     payload = json.loads(meta["result"])
     assert payload["result"]["configSource"] == str(tmp_path / "mcp_config.json")
     assert payload["result"]["exposeAllTools"] is True
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_accepts_direct_named_arguments_for_registered_tools(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    _seed_minimal_annotation_project(tmp_path)
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+
+    server = create_mcp_server(str(tmp_path))
+    _, meta = asyncio.run(server.call_tool("annotation_read", {"speaker": "Base01"}))
+    payload = json.loads(meta["result"])
+
+    assert payload["ok"] is True
+    assert payload["tool"] == "annotation_read"
+    assert payload["result"]["speaker"] == "Base01"
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_default_mcp_tool_metadata_matches_oracle_contract_for_preview_and_job_observability_tools(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "mcp_config.json").write_text('{"expose_all_tools": true}\n', encoding="utf-8")
+
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    server = create_mcp_server(str(tmp_path))
+    mcp_tools = asyncio.run(server.list_tools())
+    by_name = {tool.name: tool for tool in mcp_tools}
+
+    assert by_name["audio_normalize_status"].description == (
+        "Poll status of a normalize job started with audio_normalize_start. Returns status, progress, error, and result when complete."
+    )
+    assert by_name["compute_status"].description == (
+        "Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) by jobId. Read-only. Returns the job snapshot with status, progress, message, and — for completed jobs — the full ``result`` payload. For pipeline jobs the result includes per-step status and summary counts so the agent can reason about success/skip/error cells."
+    )
+    assert by_name["compute_status"].inputSchema["properties"]["computeType"]["description"] == (
+        'Optional expected compute type (e.g. "full_pipeline"). If provided, the tool validates the job\'s type matches before returning the snapshot.'
+    )
+    assert by_name["forced_align_status"].description == "Read status/progress of an existing Tier 2 forced-alignment job."
+    assert by_name["ipa_transcribe_acoustic_status"].description == "Read status/progress of an existing Tier 3 acoustic IPA job."
+    assert by_name["job_logs"].description == (
+        "Read structured log lines for any PARSE background job. Returns timestamped entries for progress and terminal events."
+    )
+    assert by_name["job_logs"].inputSchema["properties"]["limit"]["maximum"] == 200
+    assert by_name["job_logs"].inputSchema["properties"]["offset"]["maximum"] == 10000
+    assert by_name["job_status"].description == (
+        "Read the generic status of any PARSE background job by jobId. Returns type, status, progress, message, error, result, timestamps, and logCount."
+    )
+    assert by_name["jobs_list"].description == (
+        "List jobs from the PARSE job registry, including active and recent completed jobs. Supports filtering by status, type, and speaker, plus a bounded result limit."
+    )
+    assert by_name["jobs_list"].inputSchema["properties"]["statuses"]["items"]["maxLength"] == 32
+    assert by_name["jobs_list"].inputSchema["properties"]["statuses"]["maxItems"] == 10
+    assert by_name["jobs_list"].inputSchema["properties"]["types"]["items"]["maxLength"] == 128
+    assert by_name["jobs_list"].inputSchema["properties"]["types"]["maxItems"] == 20
+    assert by_name["jobs_list_active"].description == (
+        "List all currently-running jobs in the PARSE job registry (STT, normalize, compute, onboard, etc.). Returns type, status, progress, speaker, and message for each active job. Useful for recovering jobIds after a session restart."
+    )
+    assert by_name["read_audio_info"].description == (
+        "Read metadata for a WAV file in the project audio directory: duration, sample rate, channels, sample width, frame count, and file size. Read-only; does not return audio samples."
+    )
+    assert by_name["read_audio_info"].inputSchema["properties"]["sourceWav"]["maxLength"] == 512
+    assert by_name["read_csv_preview"].description == (
+        "Read first N rows of any CSV file and return column names, delimiter, total row count, and a sample. Defaults to concepts.csv in project root if no path given. Path must stay within the project root. Read-only."
+    )
+    assert by_name["read_csv_preview"].inputSchema["properties"]["csvPath"]["maxLength"] == 512
+    assert "minLength" not in by_name["read_csv_preview"].inputSchema["properties"]["csvPath"]
+    assert by_name["read_csv_preview"].inputSchema["properties"]["maxRows"]["default"] == 20
+    assert by_name["read_text_preview"].description == (
+        "Read a Markdown/text file preview from workspace or docs root. Allowed extensions: .md, .markdown, .txt, .rst. Read-only."
+    )
+    assert by_name["read_text_preview"].inputSchema["properties"]["path"]["maxLength"] == 1024
+    assert by_name["read_text_preview"].inputSchema["properties"]["startLine"]["default"] == 1
+    assert by_name["read_text_preview"].inputSchema["properties"]["startLine"]["maximum"] == 200000
+    assert by_name["read_text_preview"].inputSchema["properties"]["maxLines"]["default"] == 120
+    assert by_name["read_text_preview"].inputSchema["properties"]["maxLines"]["maximum"] == 400
+    assert by_name["read_text_preview"].inputSchema["properties"]["maxChars"]["default"] == 12000
+    assert by_name["read_text_preview"].inputSchema["properties"]["maxChars"]["minimum"] == 200
+    assert by_name["speakers_list"].description == (
+        "List every speaker with an annotation file under ``annotations/``. Read-only. Use as the starting point for a batch pipeline run — pair with ``pipeline_state_batch`` to see which speakers are ready to process. Filters out non-annotation entries (e.g. a ``backups/`` directory) so the list is directly usable as input to ``pipeline_run``."
+    )
+    assert by_name["spectrogram_preview"].description == (
+        "Read-only placeholder/backend hook for spectrogram preview requests. Validates bounds and reports capability status."
+    )
+    assert by_name["spectrogram_preview"].inputSchema["properties"]["sourceWav"]["maxLength"] == 512
+    assert by_name["spectrogram_preview"].inputSchema["properties"]["windowSize"]["enum"] == [256, 512, 1024, 2048, 4096]
+    assert by_name["stt_status"].description == "Read status/progress of an existing STT job."
+    assert by_name["stt_status"].inputSchema["properties"]["maxSegments"]["maximum"] == 300
+    assert by_name["stt_word_level_status"].description == (
+        "Read status of a Tier 1 word-level STT job. When includeSegments=true the returned segments include the nested words[] payload produced by word_timestamps=True."
+    )
+    assert by_name["stt_word_level_status"].inputSchema["properties"]["maxSegments"]["maximum"] == 300
 
 
 def test_load_mcp_config_rejects_non_boolean_expose_all_tools(tmp_path) -> None:

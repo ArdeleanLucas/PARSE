@@ -103,6 +103,42 @@ def test_normalize_for_diff_sorts_only_order_insensitive_lists() -> None:
     assert [interval["text"] for interval in normalized["intervals"]] == ["later", "earlier"]
 
 
+def test_normalize_for_diff_redacts_runtime_job_ids_but_preserves_schema_jobid_objects() -> None:
+    payload = {
+        "result": {"jobId": "job-123"},
+        "inputSchema": {
+            "properties": {
+                "jobId": {
+                    "type": "string",
+                    "description": "Job identifier used for polling.",
+                }
+            }
+        },
+    }
+
+    normalized = normalize_for_diff(payload, context=_context())
+
+    assert normalized["result"]["jobId"] == "<job-id>"
+    assert normalized["inputSchema"]["properties"]["jobId"] == {
+        "description": "Job identifier used for polling.",
+        "type": "string",
+    }
+
+
+def test_normalize_for_diff_scrubs_inline_timestamps_and_mcp_generated_model_names() -> None:
+    payload = {
+        "preview": "DATE=\"2026-04-27T11:00:15+00:00\"",
+        "error": "validation error for mcp_export_annotations_elanArguments",
+        "schema": {"title": "mcp_export_annotations_elanOutput"},
+    }
+
+    normalized = normalize_for_diff(payload, context=_context())
+
+    assert normalized["preview"] == 'DATE="<timestamp>"'
+    assert normalized["error"] == "validation error for export_annotations_elanArguments"
+    assert normalized["schema"]["title"] == "export_annotations_elanOutput"
+
+
 def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path: Path) -> None:
     fixture = prepare_fixture_bundle(tmp_path, fixture_name="saha-2speaker")
 
@@ -282,6 +318,7 @@ def test_compare_capture_sections_returns_path_level_diffs() -> None:
         job_lifecycles={"onboard": {"states": ["running", "done"]}},
         exports={"lingpy": "A\n", "nexus": "#NEXUS\nA\n"},
         persisted_json={"source_index.json": {"speakers": {"Imp01": {"path": "/tmp/oracle-workspace/audio/orig.wav"}}}},
+        mcp_tools={},
     )
     rebuild = ScenarioCapture(
         label="rebuild",
@@ -289,6 +326,7 @@ def test_compare_capture_sections_returns_path_level_diffs() -> None:
         job_lifecycles={"onboard": {"states": ["running", "done"]}},
         exports={"lingpy": "B\n", "nexus": "#NEXUS\nA\n"},
         persisted_json={"source_index.json": {"speakers": {"Imp01": {"path": "/tmp/rebuild-workspace/audio/orig.wav"}}}},
+        mcp_tools={},
     )
 
     diffs = compare_capture_sections(oracle, rebuild, context=_context())
@@ -323,6 +361,7 @@ rules:
         job_lifecycles={},
         exports={"lingpy": "A\n"},
         persisted_json={},
+        mcp_tools={},
     )
     rebuild = ScenarioCapture(
         label="rebuild",
@@ -330,6 +369,7 @@ rules:
         job_lifecycles={},
         exports={"lingpy": "B\n"},
         persisted_json={},
+        mcp_tools={},
     )
 
     report = build_diff_report(
@@ -347,8 +387,8 @@ rules:
 
 
 def test_render_markdown_report_summarizes_allowlisted_and_unallowlisted_diff_entries() -> None:
-    oracle = ScenarioCapture(label="oracle", api={}, job_lifecycles={}, exports={}, persisted_json={})
-    rebuild = ScenarioCapture(label="rebuild", api={}, job_lifecycles={}, exports={}, persisted_json={})
+    oracle = ScenarioCapture(label="oracle", api={}, job_lifecycles={}, exports={}, persisted_json={}, mcp_tools={})
+    rebuild = ScenarioCapture(label="rebuild", api={}, job_lifecycles={}, exports={}, persisted_json={}, mcp_tools={})
     report = DiffReport(
         raw_diffs=[
             DiffEntry(

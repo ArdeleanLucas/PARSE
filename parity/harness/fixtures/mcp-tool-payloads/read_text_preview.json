@@ -1,0 +1,6 @@
+{
+  "path": "${WORKSPACE_ROOT}/parse-memory.md",
+  "startLine": 1,
+  "maxLines": 20,
+  "maxChars": 1000
+}

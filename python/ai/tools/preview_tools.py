@@ -26,67 +26,62 @@ PREVIEW_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "spectrogram_preview": ChatToolSpec(
         name="spectrogram_preview",
         description=(
-            "Validate a speaker/audio time window for spectrogram inspection and return the "
-            "normalized request payload. Read-only placeholder until the backend image render "
-            "path is wired."
+            "Read-only placeholder/backend hook for spectrogram preview requests. Validates bounds and reports capability status."
         ),
         parameters={
             "type": "object",
             "additionalProperties": False,
             "required": ["sourceWav", "startSec", "endSec"],
             "properties": {
-                "sourceWav": {"type": "string", "minLength": 1, "maxLength": 1024},
+                "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
                 "startSec": {"type": "number", "minimum": 0.0},
                 "endSec": {"type": "number", "minimum": 0.0},
-                "windowSize": {"type": "integer", "minimum": 128, "maximum": 8192},
+                "windowSize": {"type": "integer", "enum": [256, 512, 1024, 2048, 4096]},
             },
         },
     ),
     "read_audio_info": ChatToolSpec(
         name="read_audio_info",
         description=(
-            "Read WAV metadata (duration, channels, sample rate, size) from project or explicitly "
-            "allowlisted external roots without loading the full audio into memory. Read-only."
+            "Read metadata for a WAV file in the project audio directory: duration, sample rate, channels, sample width, frame count, and file size. Read-only; does not return audio samples."
         ),
         parameters={
             "type": "object",
             "additionalProperties": False,
             "required": ["sourceWav"],
             "properties": {
-                "sourceWav": {"type": "string", "minLength": 1, "maxLength": 2048},
+                "sourceWav": {"type": "string", "minLength": 1, "maxLength": 512},
             },
         },
     ),
     "read_csv_preview": ChatToolSpec(
         name="read_csv_preview",
         description=(
-            "Read the header and first rows of a CSV/TSV file from the project or configured external "
-            "read roots. Read-only."
+            "Read first N rows of any CSV file and return column names, delimiter, total row count, and a sample. Defaults to concepts.csv in project root if no path given. Path must stay within the project root. Read-only."
         ),
         parameters={
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "csvPath": {"type": "string", "minLength": 1, "maxLength": 2048},
-                "maxRows": {"type": "integer", "minimum": 1, "maximum": 200},
+                "csvPath": {"type": "string", "maxLength": 512},
+                "maxRows": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
             },
         },
     ),
     "read_text_preview": ChatToolSpec(
         name="read_text_preview",
         description=(
-            "Read a bounded preview of a Markdown/text document from the project/docs root or configured "
-            "external read roots. Read-only."
+            "Read a Markdown/text file preview from workspace or docs root. Allowed extensions: .md, .markdown, .txt, .rst. Read-only."
         ),
         parameters={
             "type": "object",
             "additionalProperties": False,
             "required": ["path"],
             "properties": {
-                "path": {"type": "string", "minLength": 1, "maxLength": 2048},
-                "startLine": {"type": "integer", "minimum": 1, "maximum": 1000000},
-                "maxLines": {"type": "integer", "minimum": 1, "maximum": 500},
-                "maxChars": {"type": "integer", "minimum": 1, "maximum": 50000},
+                "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+                "startLine": {"type": "integer", "minimum": 1, "maximum": 200000, "default": 1},
+                "maxLines": {"type": "integer", "minimum": 1, "maximum": 400, "default": 120},
+                "maxChars": {"type": "integer", "minimum": 200, "maximum": 50000, "default": 12000},
             },
         },
     ),

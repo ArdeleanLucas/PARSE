@@ -504,6 +504,26 @@ from ai.tools.transform_tools import (
     phonetic_rules_apply as tool_phonetic_rules_apply,
     transcript_reformat as tool_transcript_reformat,
 )
+
+REGISTRY: Dict[str, ChatToolSpec] = {
+    **PROJECT_READ_TOOL_SPECS,
+    **PREVIEW_TOOL_SPECS,
+    **JOB_STATUS_TOOL_SPECS,
+    **TAG_IMPORT_TOOL_SPECS,
+    **OFFSET_DETECTION_TOOL_SPECS,
+    **OFFSET_APPLY_TOOL_SPECS,
+    **ACOUSTIC_STARTER_TOOL_SPECS,
+    **PIPELINE_ORCHESTRATION_TOOL_SPECS,
+    **SPEAKER_IMPORT_TOOL_SPECS,
+    **MEMORY_TOOL_SPECS,
+    **COMPARATIVE_TOOL_SPECS,
+    **CONTACT_LEXEME_TOOL_SPECS,
+    **ENRICHMENT_TOOL_SPECS,
+    **EXPORT_TOOL_SPECS,
+    **TRANSFORM_TOOL_SPECS,
+    **ARTIFACT_TOOL_SPECS,
+}
+
 class ParseChatTools:
     """Strict read-only tool allowlist for PARSE chat."""
 
@@ -1269,5 +1289,6 @@ __all__ = [
     "ChatToolExecutionError",
     "ChatToolSpec",
     "DEFAULT_MCP_TOOL_NAMES",
+    "REGISTRY",
     "ParseChatTools",
 ]

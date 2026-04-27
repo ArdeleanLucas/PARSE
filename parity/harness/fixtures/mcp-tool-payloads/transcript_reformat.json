@@ -1,0 +1,7 @@
+{
+  "inputPath": "${INPUT_ROOT}/transcript-input.txt",
+  "speaker": "${SEED_SPEAKER}",
+  "sourceWav": "audio/original/${SEED_SPEAKER}/source.wav",
+  "durationSec": 0.2,
+  "dryRun": true
+}

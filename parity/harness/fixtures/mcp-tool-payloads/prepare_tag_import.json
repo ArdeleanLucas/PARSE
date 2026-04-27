@@ -1,0 +1,9 @@
+{
+  "tagName": "${TAG_NAME}",
+  "conceptIds": [
+    "1",
+    "2"
+  ],
+  "dryRun": true,
+  "color": "${TAG_COLOR}"
+}

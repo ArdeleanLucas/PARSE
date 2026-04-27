@@ -1,0 +1,5 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "sourceWav": "audio/original/${SEED_SPEAKER}/source.wav",
+  "dryRun": true
+}

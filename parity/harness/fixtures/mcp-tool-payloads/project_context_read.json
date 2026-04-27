@@ -1,0 +1,9 @@
+{
+  "include": [
+    "project",
+    "source_index",
+    "annotation_inventory",
+    "enrichments_summary"
+  ],
+  "maxSpeakers": 5
+}

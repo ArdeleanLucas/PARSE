@@ -1,0 +1,5 @@
+{
+  "speaker": "${COMPARE_SPEAKER}",
+  "offsetSec": 0.05,
+  "dryRun": true
+}

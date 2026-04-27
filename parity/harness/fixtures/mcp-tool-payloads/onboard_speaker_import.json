@@ -1,0 +1,7 @@
+{
+  "speaker": "${ONBOARD_SPEAKER}",
+  "sourceWav": "${INPUT_ROOT}/onboard/Parity01.wav",
+  "sourceCsv": "${INPUT_ROOT}/onboard-concepts.csv",
+  "dryRun": true,
+  "isPrimary": false
+}

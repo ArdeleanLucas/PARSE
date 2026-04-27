@@ -1,0 +1,5 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "sttJobId": "job-missing",
+  "nAnchors": 2
+}

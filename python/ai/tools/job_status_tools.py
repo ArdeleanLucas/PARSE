@@ -27,7 +27,7 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "stt_status": ChatToolSpec(
         name="stt_status",
         description=(
-            "Read STT job status and optionally include returned segments. Read-only."
+            "Read status/progress of an existing STT job."
         ),
         parameters={
             "type": "object",
@@ -36,15 +36,15 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
             "properties": {
                 "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                 "includeSegments": {"type": "boolean"},
-                "maxSegments": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
             },
         },
     ),
     "stt_word_level_status": ChatToolSpec(
         name="stt_word_level_status",
         description=(
-            "Read Tier 1 word-level STT status. Reuses the STT status payload but keeps nested "
-            "words[] by default unless includeWords=false. Read-only."
+            "Read status of a Tier 1 word-level STT job. When includeSegments=true the returned "
+            "segments include the nested words[] payload produced by word_timestamps=True."
         ),
         parameters={
             "type": "object",
@@ -54,14 +54,14 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                 "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
                 "includeSegments": {"type": "boolean"},
                 "includeWords": {"type": "boolean"},
-                "maxSegments": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "maxSegments": {"type": "integer", "minimum": 1, "maximum": 300},
             },
         },
     ),
     "forced_align_status": ChatToolSpec(
         name="forced_align_status",
         description=(
-            "Read Tier 2 forced-alignment compute job status. Read-only."
+            "Read status/progress of an existing Tier 2 forced-alignment job."
         ),
         parameters={
             "type": "object",
@@ -75,7 +75,7 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "ipa_transcribe_acoustic_status": ChatToolSpec(
         name="ipa_transcribe_acoustic_status",
         description=(
-            "Read Tier 3 acoustic IPA compute job status. Read-only."
+            "Read status/progress of an existing Tier 3 acoustic IPA job."
         ),
         parameters={
             "type": "object",
@@ -89,8 +89,10 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "compute_status": ChatToolSpec(
         name="compute_status",
         description=(
-            "Read a generic PARSE compute job snapshot by jobId, with optional type check. "
-            "Read-only."
+            "Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) by jobId. "
+            "Read-only. Returns the job snapshot with status, progress, message, and — for "
+            "completed jobs — the full ``result`` payload. For pipeline jobs the result includes "
+            "per-step status and summary counts so the agent can reason about success/skip/error cells."
         ),
         parameters={
             "type": "object",
@@ -98,14 +100,19 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
             "required": ["jobId"],
             "properties": {
                 "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                "computeType": {"type": "string", "minLength": 1, "maxLength": 64},
+                "computeType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Optional expected compute type (e.g. \"full_pipeline\"). If provided, the tool validates the job's type matches before returning the snapshot.",
+                },
             },
         },
     ),
     "audio_normalize_status": ChatToolSpec(
         name="audio_normalize_status",
         description=(
-            "Poll a normalize job started with audio_normalize_start. Read-only."
+            "Poll status of a normalize job started with audio_normalize_start. Returns status, progress, error, and result when complete."
         ),
         parameters={
             "type": "object",
@@ -119,8 +126,7 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "jobs_list": ChatToolSpec(
         name="jobs_list",
         description=(
-            "List jobs from the shared PARSE job registry with optional type/status/speaker filters. "
-            "Read-only."
+            "List jobs from the PARSE job registry, including active and recent completed jobs. Supports filtering by status, type, and speaker, plus a bounded result limit."
         ),
         parameters={
             "type": "object",
@@ -128,13 +134,13 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
             "properties": {
                 "statuses": {
                     "type": "array",
-                    "maxItems": 16,
-                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "maxItems": 10,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 32},
                 },
                 "types": {
                     "type": "array",
-                    "maxItems": 16,
-                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "maxItems": 20,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 128},
                 },
                 "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
@@ -144,8 +150,7 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "job_status": ChatToolSpec(
         name="job_status",
         description=(
-            "Read a generic job snapshot from the shared PARSE registry, including timestamps, "
-            "error metadata, and lock info. Read-only."
+            "Read the generic status of any PARSE background job by jobId. Returns type, status, progress, message, error, result, timestamps, and logCount."
         ),
         parameters={
             "type": "object",
@@ -159,7 +164,7 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
     "job_logs": ChatToolSpec(
         name="job_logs",
         description=(
-            "Read structured log lines for a PARSE background job. Read-only."
+            "Read structured log lines for any PARSE background job. Returns timestamped entries for progress and terminal events."
         ),
         parameters={
             "type": "object",
@@ -167,15 +172,15 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
             "required": ["jobId"],
             "properties": {
                 "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
-                "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
             },
         },
     ),
     "jobs_list_active": ChatToolSpec(
         name="jobs_list_active",
         description=(
-            "List running jobs from the shared PARSE registry for restart recovery. Read-only."
+            "List all currently-running jobs in the PARSE job registry (STT, normalize, compute, onboard, etc.). Returns type, status, progress, speaker, and message for each active job. Useful for recovering jobIds after a session restart."
         ),
         parameters={
             "type": "object",
