@@ -1,10 +1,22 @@
 # AGENTS.md — PARSE React + Vite Integration (2026)
 
+## Post-cutover banner (added 2026-04-27)
+
+This repository — `ArdeleanLucas/PARSE` — became the canonical PARSE on 2026-04-27 via:
+
+1. Old `ArdeleanLucas/PARSE` renamed to `ArdeleanLucas/PARSE-pre-rebuild-archive` and archived
+2. `TarahAssistant/PARSE-rebuild` transferred to ArdeleanLucas, renamed to `PARSE`
+3. `TarahAssistant/PARSE-rebuild-archive` retained as private historical mirror
+
+**Going forward:** "the rebuild" and "the oracle" terminology is obsolete. Just call it PARSE. Sign-off doc at `parity/harness/SIGNOFF.md` records the audit that gated cutover (raw harness diff = 0).
+
+The repo-target rule below is updated post-cutover: PRs land on `ArdeleanLucas/PARSE`, NOT on the archived repos.
+
 > **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle PARSE repo remains `ArdeleanLucas/PARSE` at `/home/lucas/gh/ardeleanlucas/parse`. Do not treat this repo as the currently deployed thesis runtime.
 
 ## Repo-target rule (READ BEFORE OPENING ANY PR)
 
-All refactor and rebuild work in this lane lands on **`TarahAssistant/PARSE-rebuild`**, NEVER on `ArdeleanLucas/PARSE`. Three prior refactor PRs landed on the wrong remote and had to be reverted or replayed:
+All work lands on **`ArdeleanLucas/PARSE`** (the canonical post-cutover repo). The pre-cutover archives — `ArdeleanLucas/PARSE-pre-rebuild-archive` (read-only) and `TarahAssistant/PARSE-rebuild-archive` (private historical mirror) — should never receive new work. Three prior refactor PRs landed on what was then the wrong remote and had to be reverted or replayed:
 
 - `ArdeleanLucas/PARSE#225` — reverted in oracle commit `0951287` (`revert: move refactor PRs out of live PARSE (#228)`)
 - `ArdeleanLucas/PARSE#226` — reverted in the same commit
@@ -12,30 +24,30 @@ All refactor and rebuild work in this lane lands on **`TarahAssistant/PARSE-rebu
 
 Before opening any PR for any task in this lane, verify all three:
 
-1. **Working clone** is the rebuild clone:
+1. **Working clone** is the canonical PARSE clone:
    ```
    $ pwd
-   /home/lucas/gh/tarahassistant/PARSE-rebuild   # CORRECT
+   /home/lucas/gh/tarahassistant/PARSE-rebuild   # CORRECT (post-cutover, this directory's `origin` now resolves to ArdeleanLucas/PARSE; directory name preserved to avoid breaking worktrees)
    ```
    NOT `/home/lucas/gh/ArdeleanLucas/PARSE` (oracle clone, capital).
    NOT `/home/lucas/gh/ardeleanlucas/parse` (oracle clone, lowercase duplicate).
    NOT any worktree under `/home/lucas/gh/worktrees/PARSE/...` whose `.git` gitfile resolves to either oracle clone above. Worktrees inherit the parent clone's remote.
 
-2. **Origin remote** points at rebuild, not oracle:
+2. **Origin remote** points at canonical PARSE, not an archive:
    ```
    $ git remote -v
-   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (fetch)   # CORRECT
-   origin\tgit@github.com:TarahAssistant/PARSE-rebuild.git (push)
+   origin\tgit@github.com:ArdeleanLucas/PARSE.git (fetch)   # CORRECT
+   origin\tgit@github.com:ArdeleanLucas/PARSE.git (push)
    ```
    If the URL says `ArdeleanLucas/PARSE`, **stop**. Switch to `/home/lucas/gh/tarahassistant/PARSE-rebuild` (or create a worktree under `/home/lucas/gh/worktrees/PARSE-rebuild/...`) before doing anything else.
 
 3. **PR-create command** explicitly targets the rebuild repo:
    ```
-   $ gh pr create --repo TarahAssistant/PARSE-rebuild --base main ...
+   $ gh pr create --repo ArdeleanLucas/PARSE --base main ...
    ```
-   The `--repo` flag is **mandatory**. Without it, `gh` infers the remote from the local clone's origin, and any agent that ends up in an oracle clone or worktree will silently push to oracle. **Do not omit the `--repo` flag.**
+   The `--repo` flag is **mandatory**. Without it, `gh` infers the remote from the local clone's origin, and any agent in a stale archive clone or worktree may target the wrong repo. **Do not omit the `--repo` flag.**
 
-If you ever see a PR URL like `https://github.com/ArdeleanLucas/PARSE/pull/...`, **close it immediately** and replay the same commit onto rebuild via `git cherry-pick`. The recovery path is documented in `docs/plans/2026-04-26-parse-back-end-next-chat-tools-decomposition.md` §Recovery path.
+If you ever see a PR URL targeting `ArdeleanLucas/PARSE-pre-rebuild-archive` or `TarahAssistant/PARSE-rebuild-archive`, **close it immediately** and replay the commit onto `ArdeleanLucas/PARSE` via `git cherry-pick`. The recovery path is documented in `docs/plans/2026-04-26-parse-back-end-next-chat-tools-decomposition.md` §Recovery path.
 
 Exceptions to this rule (cases where landing on oracle IS correct):
 
@@ -94,7 +106,7 @@ Failure mode observed multiple times tonight: agent reports a PR as `MERGEABLE/C
 
 ```
 $ git fetch origin --quiet --prune
-$ gh pr view <N> --repo TarahAssistant/PARSE-rebuild --json mergeable,mergeStateStatus,baseRefOid,headRefOid
+$ gh pr view <N> --repo ArdeleanLucas/PARSE --json mergeable,mergeStateStatus,baseRefOid,headRefOid
 ```
 
 Report what `gh` returned, not what you remember from earlier. If the result surprises you (e.g., you just rebased and now it says CONFLICTING), check whether main moved between your rebase and this query.
@@ -138,9 +150,10 @@ The slug is a 2-4 word kebab-case description of the work (e.g. `back-end-mcp-to
 cd /home/lucas/gh/tarahassistant/PARSE-rebuild
 git fetch origin --quiet --prune
 git worktree add -f /home/lucas/gh/worktrees/<agent>-<slug> origin/main
+  # parent clone's origin must already point at git@github.com:ArdeleanLucas/PARSE.git
 cd /home/lucas/gh/worktrees/<agent>-<slug>
 git checkout -b <branch-name>
-# do the work, commit, push, open PR with --repo TarahAssistant/PARSE-rebuild
+# do the work, commit, push, open PR with --repo ArdeleanLucas/PARSE
 ```
 
 **Recipe — clean up after PR merges:**
@@ -155,7 +168,7 @@ GitHub auto-cleans the remote branch on merge; the local feature branch can be d
 
 **Constraints:**
 
-- Every worktree inherits the parent clone's `origin` remote — re-verify `git remote -v` shows `TarahAssistant/PARSE-rebuild` before any PR (per repo-target rule above). Worktrees from the wrong parent will silently push to oracle.
+- Every worktree inherits the parent clone's `origin` remote — re-verify `git remote -v` shows `ArdeleanLucas/PARSE` before any PR (per repo-target rule above). Worktrees from a stale archive clone will silently push to the wrong repo.
 - Each worktree needs its own `npm install` if running tests or builds — `node_modules/` is per-worktree, not shared.
 - Each worktree needs distinct ports if booting the live backend — `parse-rebuild-run` already uses 8866/5174 to coexist with oracle on 8766/5173. Multiple rebuild backends would need additional port shifts.
 - Cap per agent: 2-3 concurrent worktrees. More than that and the agent loses thread; queue subsequent tasks instead of fanning out further.
