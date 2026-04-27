@@ -9,6 +9,7 @@ import {
   isRecord,
   overlaps,
   readTextBlob,
+  resolveAssetUrl,
 } from './parseUIUtils';
 
 function makeRecord(overrides: Partial<AnnotationRecord> = {}): AnnotationRecord {
@@ -52,10 +53,15 @@ describe('parseUIUtils', () => {
   });
 
   it('normalizes source audio paths into workspace-rooted URLs', () => {
-    expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }))).toBe('/audio/working/Fail02/foo.wav');
-    expect(deriveAudioUrl(makeRecord({ source_wav: '///audio\\legacy\\Fail02.wav' }))).toBe('/audio/legacy/Fail02.wav');
-    expect(deriveAudioUrl(makeRecord())).toBe('');
-    expect(deriveAudioUrl(null)).toBe('');
+    expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: false })).toBe('/audio/working/Fail02/foo.wav');
+    expect(deriveAudioUrl(makeRecord({ source_wav: '///audio\\legacy\\Fail02.wav' }), { dev: false })).toBe('/audio/legacy/Fail02.wav');
+    expect(deriveAudioUrl(makeRecord(), { dev: false })).toBe('');
+    expect(deriveAudioUrl(null, { dev: false })).toBe('');
+  });
+
+  it('routes heavy media assets directly to the backend target during dev', () => {
+    expect(resolveAssetUrl('/peaks/Fail01.json', { dev: true, apiTarget: 'http://127.0.0.1:8866' })).toBe('http://127.0.0.1:8866/peaks/Fail01.json');
+    expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: true, apiTarget: 'http://127.0.0.1:8866/' })).toBe('http://127.0.0.1:8866/audio/working/Fail02/foo.wav');
   });
 
   it('matches concept intervals by concept name, key, or embedded name text', () => {

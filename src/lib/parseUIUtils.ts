@@ -20,13 +20,36 @@ export function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean 
   return a.start <= b.end && b.start <= a.end;
 }
 
+export interface AssetUrlOptions {
+  dev?: boolean;
+  apiTarget?: string;
+}
+
+const DEFAULT_PARSE_API_TARGET = typeof __PARSE_API_TARGET__ === 'string'
+  ? __PARSE_API_TARGET__.replace(/\/$/, '')
+  : '';
+
+export function resolveAssetUrl(path: string, options: AssetUrlOptions = {}): string {
+  if (!path) return '';
+  const normalizedPath = path.startsWith('/') ? path : `/${path.replace(/^\/+/, '')}`;
+  const dev = options.dev ?? import.meta.env.DEV;
+  const apiTarget = (options.apiTarget ?? DEFAULT_PARSE_API_TARGET).replace(/\/$/, '');
+  if (!dev || !apiTarget || /^https?:\/\//i.test(normalizedPath)) {
+    return normalizedPath;
+  }
+  return `${apiTarget}${normalizedPath}`;
+}
+
 // Build a workspace-relative audio URL from an annotation record. Server serves
 // static files from the project root, so "audio/working/X/foo.wav" → "/audio/working/X/foo.wav".
-export function deriveAudioUrl(record: AnnotationRecord | null | undefined): string {
+export function deriveAudioUrl(
+  record: AnnotationRecord | null | undefined,
+  options: AssetUrlOptions = {},
+): string {
   const raw = (record?.source_audio ?? record?.source_wav ?? '').trim();
   if (!raw) return '';
   const cleaned = raw.replace(/\\/g, '/').replace(/^\/+/, '');
-  return '/' + cleaned;
+  return resolveAssetUrl('/' + cleaned, options);
 }
 
 export function conceptMatchesIntervalText(concept: { name: string; key: string }, text: string): boolean {

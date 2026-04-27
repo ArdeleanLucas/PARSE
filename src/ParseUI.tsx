@@ -24,6 +24,7 @@ import {
   isInteractiveHotkeyTarget,
   isRecord,
   readTextBlob,
+  resolveAssetUrl,
 } from './lib/parseUIUtils';
 import type { ConceptTag } from './lib/parseUIUtils';
 import {
@@ -1626,7 +1627,7 @@ export function ParseUI() {
               onPrev={goPrev}
               onNext={goNext}
               audioUrl={deriveAudioUrl(annotationRecords[selectedSpeakers[0] ?? ''])}
-              peaksUrl={selectedSpeakers[0] ? `/peaks/${selectedSpeakers[0]}.json` : undefined}
+              peaksUrl={selectedSpeakers[0] ? resolveAssetUrl(`/peaks/${selectedSpeakers[0]}.json`) : undefined}
               onCaptureOffsetAnchor={captureAnchorFromBar}
               captureToast={captureToast}
             />
