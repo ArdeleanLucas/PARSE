@@ -1,5 +1,4 @@
 """PARSE HTTP server with static range serving and API endpoints."""
-
 import cgi
 import copy
 import http.server
@@ -20,12 +19,10 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
-
 # When launched as `python python/server.py`, downstream route modules still
 # import `server`. Register this module under that name early so script-mode
 # startup reuses the in-flight module instead of recursively re-importing it.
 sys.modules.setdefault("server", sys.modules[__name__])
-
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools

@@ -13,6 +13,8 @@ ACOUSTIC_STARTER_TOOL_NAMES = (
     "stt_word_level_start",
     "forced_align_start",
     "ipa_transcribe_acoustic_start",
+    "compute_boundaries_start",
+    "retranscribe_with_boundaries_start",
     "audio_normalize_start",
 )
 
@@ -117,6 +119,54 @@ ACOUSTIC_STARTER_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                 "overwrite": {
                     "type": "boolean",
                     "description": "When true, replaces existing non-empty IPA cells (default: false).",
+                },
+                "dryRun": {"type": "boolean"},
+            },
+        },
+    ),
+    "retranscribe_with_boundaries_start": ChatToolSpec(
+        name="retranscribe_with_boundaries_start",
+        description=(
+            "Start a boundary-constrained STT job for a speaker. Reads the speaker's "
+            "BND lane (tiers.ortho_words) as authoritative segment boundaries, slices "
+            "the source audio in memory at each window, and runs faster-whisper on each "
+            "slice independently. Writes the merged segments to coarse_transcripts/<speaker>.json "
+            "with source=boundary_constrained. Returns a jobId for polling with "
+            "retranscribe_with_boundaries_status."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["speaker"],
+            "properties": {
+                "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                "language": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 8,
+                    "description": "Optional ISO 639-1 language code for faster-whisper. Empty/omitted triggers auto-detect.",
+                },
+                "dryRun": {"type": "boolean"},
+            },
+        },
+    ),
+    "compute_boundaries_start": ChatToolSpec(
+        name="compute_boundaries_start",
+        description=(
+            "Start a standalone BND (Boundaries) job for a speaker. Runs Tier 2 forced "
+            "alignment on cached STT word timestamps and writes the refined word boundaries "
+            "to tiers.ortho_words without rerunning Whisper or IPA. Returns a jobId for polling "
+            "with compute_boundaries_status."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["speaker"],
+            "properties": {
+                "speaker": {"type": "string", "minLength": 1, "maxLength": 200},
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "When true, discards manuallyAdjusted ortho_words intervals and rebuilds the lane fully.",
                 },
                 "dryRun": {"type": "boolean"},
             },
@@ -329,6 +379,88 @@ def tool_ipa_transcribe_acoustic_start(tools: "ParseChatTools", args: Dict[str, 
     }
 
 
+def tool_retranscribe_with_boundaries_start(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    speaker = tools._normalize_speaker(args.get("speaker"))
+    language_raw = args.get("language")
+    language = str(language_raw).strip() if language_raw is not None else ""
+
+    payload_body: Dict[str, Any] = {"speaker": speaker}
+    if language:
+        payload_body["language"] = language
+
+    if bool(args.get("dryRun", False)):
+        return {
+            "readOnly": True,
+            "previewOnly": True,
+            "status": "dry_run",
+            "tool": "retranscribe_with_boundaries_start",
+            "plan": payload_body,
+            "note": (
+                "Dry run. Would launch the retranscribe_with_boundaries compute job, "
+                "slicing the source audio at each tiers.ortho_words interval and running "
+                "faster-whisper on each slice in memory. Writes the merged segments to "
+                "coarse_transcripts/<speaker>.json with source=boundary_constrained."
+            ),
+        }
+
+    if tools._start_compute_job is None:
+        raise ChatToolExecutionError(
+            "Compute-job start callback is unavailable — wire ParseChatTools with "
+            "start_compute_job to enable boundary-constrained STT."
+        )
+
+    job_id = tools._start_compute_job("retranscribe_with_boundaries", payload_body)
+    return {
+        "readOnly": True,
+        "previewOnly": True,
+        "jobId": job_id,
+        "status": "running",
+        "tier": "boundary_constrained_stt",
+        "speaker": speaker,
+        "language": language or None,
+        "message": "Boundary-constrained STT job started. Poll with retranscribe_with_boundaries_status.",
+    }
+
+
+def tool_compute_boundaries_start(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    speaker = tools._normalize_speaker(args.get("speaker"))
+    overwrite = bool(args.get("overwrite", False))
+    payload_body: Dict[str, Any] = {
+        "speaker": speaker,
+        "overwrite": overwrite,
+    }
+
+    if bool(args.get("dryRun", False)):
+        return {
+            "readOnly": True,
+            "previewOnly": True,
+            "status": "dry_run",
+            "tool": "compute_boundaries_start",
+            "plan": payload_body,
+            "note": (
+                "Dry run. Would launch the boundaries compute job, running Tier 2 forced alignment "
+                "on cached STT word timestamps and writing the refined word boundaries to tiers.ortho_words."
+            ),
+        }
+
+    if tools._start_compute_job is None:
+        raise ChatToolExecutionError(
+            "Compute-job start callback is unavailable — wire ParseChatTools with start_compute_job to enable standalone BND."
+        )
+
+    job_id = tools._start_compute_job("boundaries", payload_body)
+    return {
+        "readOnly": True,
+        "previewOnly": True,
+        "jobId": job_id,
+        "status": "running",
+        "tier": "tier2_boundaries_only",
+        "speaker": speaker,
+        "overwrite": overwrite,
+        "message": "Boundaries job started. Poll with compute_boundaries_status.",
+    }
+
+
 def tool_audio_normalize_start(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
     """Start a two-pass ffmpeg loudnorm job; returns jobId for polling."""
     if tools._start_normalize_job is None:
@@ -368,5 +500,7 @@ ACOUSTIC_STARTER_TOOL_HANDLERS = {
     "stt_word_level_start": tool_stt_word_level_start,
     "forced_align_start": tool_forced_align_start,
     "ipa_transcribe_acoustic_start": tool_ipa_transcribe_acoustic_start,
+    "compute_boundaries_start": tool_compute_boundaries_start,
+    "retranscribe_with_boundaries_start": tool_retranscribe_with_boundaries_start,
     "audio_normalize_start": tool_audio_normalize_start,
 }

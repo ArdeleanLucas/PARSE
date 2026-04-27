@@ -14,6 +14,8 @@ JOB_STATUS_TOOL_NAMES = (
     "stt_word_level_status",
     "forced_align_status",
     "ipa_transcribe_acoustic_status",
+    "compute_boundaries_status",
+    "retranscribe_with_boundaries_status",
     "compute_status",
     "audio_normalize_status",
     "jobs_list",
@@ -76,6 +78,34 @@ JOB_STATUS_TOOL_SPECS: Dict[str, ChatToolSpec] = {
         name="ipa_transcribe_acoustic_status",
         description=(
             "Read status/progress of an existing Tier 3 acoustic IPA job."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["jobId"],
+            "properties": {
+                "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
+        },
+    ),
+    "retranscribe_with_boundaries_status": ChatToolSpec(
+        name="retranscribe_with_boundaries_status",
+        description=(
+            "Read status/progress of a boundary-constrained STT job started by retranscribe_with_boundaries_start."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["jobId"],
+            "properties": {
+                "jobId": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
+        },
+    ),
+    "compute_boundaries_status": ChatToolSpec(
+        name="compute_boundaries_status",
+        description=(
+            "Read status/progress of a standalone BND job started by compute_boundaries_start."
         ),
         parameters={
             "type": "object",
@@ -323,6 +353,24 @@ def tool_ipa_transcribe_acoustic_status(tools: "ParseChatTools", args: Dict[str,
     )
 
 
+def tool_retranscribe_with_boundaries_status(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    return _generic_compute_status(
+        tools,
+        args,
+        expected_type="retranscribe_with_boundaries",
+        tier_label="boundary_constrained_stt",
+    )
+
+
+def tool_compute_boundaries_status(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    return _generic_compute_status(
+        tools,
+        args,
+        expected_type="boundaries",
+        tier_label="tier2_boundaries_only",
+    )
+
+
 def tool_compute_status(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
     if tools._get_job_snapshot is None:
         raise ChatToolExecutionError("Job snapshot callback is unavailable")
@@ -497,6 +545,8 @@ JOB_STATUS_TOOL_HANDLERS = {
     "stt_word_level_status": tool_stt_word_level_status,
     "forced_align_status": tool_forced_align_status,
     "ipa_transcribe_acoustic_status": tool_ipa_transcribe_acoustic_status,
+    "compute_boundaries_status": tool_compute_boundaries_status,
+    "retranscribe_with_boundaries_status": tool_retranscribe_with_boundaries_status,
     "compute_status": tool_compute_status,
     "audio_normalize_status": tool_audio_normalize_status,
     "jobs_list": tool_jobs_list,

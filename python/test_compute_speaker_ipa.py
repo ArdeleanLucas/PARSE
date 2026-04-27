@@ -57,20 +57,33 @@ class _FakeTensor:
         return (self._n,)
 
 
-def _seed_annotation(tmp_path: pathlib.Path, speaker: str, ortho: list, ipa: list):
+def _seed_annotation(
+    tmp_path: pathlib.Path,
+    speaker: str,
+    ortho: list,
+    ipa: list,
+    ortho_words: list | None = None,
+):
     (tmp_path / "annotations").mkdir(exist_ok=True)
+    tiers = {
+        "ipa":     {"type": "interval", "display_order": 1, "intervals": ipa},
+        "ortho":   {"type": "interval", "display_order": 2, "intervals": ortho},
+        "concept": {"type": "interval", "display_order": 3, "intervals": []},
+        "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+    }
+    if ortho_words is not None:
+        tiers["ortho_words"] = {
+            "type": "interval",
+            "display_order": 5,
+            "intervals": ortho_words,
+        }
     annotation = {
         "version": 1,
         "project_id": "t",
         "speaker": speaker,
         "source_audio": "x.wav",
         "source_audio_duration_sec": 10.0,
-        "tiers": {
-            "ipa":     {"type": "interval", "display_order": 1, "intervals": ipa},
-            "ortho":   {"type": "interval", "display_order": 2, "intervals": ortho},
-            "concept": {"type": "interval", "display_order": 3, "intervals": []},
-            "speaker": {"type": "interval", "display_order": 4, "intervals": []},
-        },
+        "tiers": tiers,
         "metadata": {"language_code": "sdh", "created": "2026-01-01T00:00:00Z", "modified": "2026-01-01T00:00:00Z"},
     }
     (tmp_path / "annotations" / f"{speaker}.parse.json").write_text(
@@ -200,3 +213,97 @@ def test_skips_when_aligner_returns_empty(tmp_path, monkeypatch):
     assert result["filled"] == 0
     assert result["skipped"] == 1
     assert len(aligner.calls) == 1  # audio *was* tried; just produced nothing
+
+
+def test_prefers_ortho_words_over_ortho_when_present(tmp_path, monkeypatch):
+    """When tiers.ortho_words exists, IPA should use those refined windows
+    instead of the coarse ortho tier and should not re-enter the STT cache
+    word-alignment branch."""
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+    monkeypatch.setattr(
+        server,
+        "_read_stt_cache",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("STT cache must not be read when ortho_words is present")
+        ),
+    )
+
+    ortho_segments = [{"start": 1.0, "end": 5.0, "text": "one two three"}]
+    ortho_words = [
+        {"start": 1.0, "end": 1.4, "text": "one"},
+        {"start": 2.0, "end": 2.5, "text": "two"},
+        {"start": 3.0, "end": 3.6, "text": "three"},
+    ]
+    _seed_annotation(tmp_path, "Fail01", ortho_segments, [], ortho_words=ortho_words)
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Fail01"})
+    assert result["ortho_source"] == "ortho_words"
+    assert result["filled"] == 3
+    assert result["total"] == 3
+    assert len(aligner.calls) == 3
+
+    ann = _load_canonical(tmp_path, "Fail01")
+    ipa_intervals = ann["tiers"]["ipa"]["intervals"]
+    starts = sorted(round(i["start"], 3) for i in ipa_intervals)
+    assert starts == [1.0, 2.0, 3.0]
+
+
+def test_falls_back_to_ortho_when_ortho_words_missing(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+    monkeypatch.setattr(server, "_read_stt_cache", lambda *_a, **_kw: [])
+
+    ortho = [{"start": 1.0, "end": 1.5, "text": "hair"}]
+    _seed_annotation(tmp_path, "Fail02", ortho, [])
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Fail02"})
+    assert result["ortho_source"] == "ortho"
+    assert result["filled"] == 1
+    assert len(aligner.calls) == 1
+
+
+def test_falls_back_to_ortho_when_ortho_words_empty(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+    monkeypatch.setattr(server, "_read_stt_cache", lambda *_a, **_kw: [])
+
+    ortho = [{"start": 1.0, "end": 1.5, "text": "hair"}]
+    _seed_annotation(tmp_path, "Fail02", ortho, [], ortho_words=[])
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Fail02"})
+    assert result["ortho_source"] == "ortho"
+    assert result["filled"] == 1
+
+
+def test_ortho_words_respects_overwrite_false_at_matching_keys(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+    monkeypatch.setattr(
+        server,
+        "_read_stt_cache",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("STT cache must not be read when ortho_words is present")
+        ),
+    )
+
+    ortho_words = [
+        {"start": 1.0, "end": 1.4, "text": "one"},
+        {"start": 2.0, "end": 2.5, "text": "two"},
+    ]
+    ipa = [{"start": 1.0, "end": 1.4, "text": "manual-keep"}]
+    _seed_annotation(tmp_path, "Fail01", [], ipa, ortho_words=ortho_words)
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Fail01"})
+    assert result["ortho_source"] == "ortho_words"
+    assert result["filled"] == 1
+    assert result["skipped"] == 1
+
+    ann = _load_canonical(tmp_path, "Fail01")
+    ipa_by_key = {
+        (round(i["start"], 3), round(i["end"], 3)): i["text"]
+        for i in ann["tiers"]["ipa"]["intervals"]
+    }
+    assert ipa_by_key[(1.0, 1.4)] == "manual-keep"
+    assert ipa_by_key[(2.0, 2.5)] == "IPA_1"
+    assert len(aligner.calls) == 1

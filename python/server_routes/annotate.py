@@ -254,14 +254,28 @@ def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_s
 def _stt_cache_path(speaker: str) -> _server.pathlib.Path:
     return _server._project_root() / 'coarse_transcripts' / '{0}.json'.format(speaker)
 
-def _write_stt_cache(speaker: str, source_wav: str, language: _server.Optional[str], segments: _server.List[_server.Dict[str, _server.Any]]) -> None:
+def _write_stt_cache(
+    speaker: str,
+    source_wav: str,
+    language: _server.Optional[str],
+    segments: _server.List[_server.Dict[str, _server.Any]],
+    *,
+    source: _server.Optional[str] = None,
+) -> None:
     speaker_norm = str(speaker or '').strip()
     if not speaker_norm or not isinstance(segments, list) or (not segments):
         return
     cache_path = _server._stt_cache_path(speaker_norm)
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {'speaker': speaker_norm, 'source_wav': source_wav, 'language': language, 'segments': segments}
+        payload: _server.Dict[str, _server.Any] = {
+            'speaker': speaker_norm,
+            'source_wav': source_wav,
+            'language': language,
+            'segments': segments,
+        }
+        if source:
+            payload['source'] = source
         with open(cache_path, 'w', encoding='utf-8') as fh:
             _server.json.dump(payload, fh, ensure_ascii=False)
     except OSError as exc:
@@ -972,10 +986,17 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if not isinstance(annotation, dict):
         raise RuntimeError('Annotation is not a JSON object')
     tiers = annotation.get('tiers') or {}
-    ortho_tier = tiers.get('ortho') or {}
-    ortho_intervals = list(ortho_tier.get('intervals') or [])
+    ortho_words_tier = tiers.get('ortho_words') or {}
+    ortho_words_intervals = list(ortho_words_tier.get('intervals') or [])
+    if ortho_words_intervals:
+        ortho_intervals = ortho_words_intervals
+        ortho_source = 'ortho_words'
+    else:
+        ortho_tier = tiers.get('ortho') or {}
+        ortho_intervals = list(ortho_tier.get('intervals') or [])
+        ortho_source = 'ortho'
     if not ortho_intervals:
-        print('[IPA] no ortho intervals — early return', file=_server.sys.stderr, flush=True)
+        print('[IPA] no ortho/ortho_words intervals — early return', file=_server.sys.stderr, flush=True)
         return {'speaker': speaker, 'filled': 0, 'skipped': 0, 'total': 0, 'message': 'No ortho intervals.'}
     ipa_tier = tiers.setdefault('ipa', {'type': 'interval', 'display_order': 1, 'intervals': []})
     ipa_intervals: _server.List[_server.Dict[str, _server.Any]] = list(ipa_tier.get('intervals') or [])
@@ -1008,8 +1029,12 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     _server._compute_checkpoint('IPA.get_aligner_begin')
     aligner = _server._get_ipa_aligner()
     _server._compute_checkpoint('IPA.get_aligner_done')
-    stt_segments = _server._read_stt_cache(speaker)
-    has_words = bool(stt_segments and any((seg.get('words') for seg in stt_segments)))
+    if ortho_source == 'ortho_words':
+        stt_segments: _server.List[_server.Dict[str, _server.Any]] = []
+        has_words = False
+    else:
+        stt_segments = _server._read_stt_cache(speaker)
+        has_words = bool(stt_segments and any((seg.get('words') for seg in stt_segments)))
     exception_samples: _server.List[str] = []
     skipped_empty_ortho = 0
     skipped_existing_ipa = 0
@@ -1039,8 +1064,15 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         skipped = skipped_empty_ipa
         total = len(word_results)
     else:
-        print('[IPA] no STT word cache — using coarse ORTH-interval fallback', file=_server.sys.stderr, flush=True)
-        _server._compute_checkpoint('IPA.loop_begin', n=len(ortho_intervals))
+        print(
+            '[IPA] using {0}-interval CTC ({1} intervals)'.format(
+                ortho_source,
+                len(ortho_intervals),
+            ),
+            file=_server.sys.stderr,
+            flush=True,
+        )
+        _server._compute_checkpoint('IPA.loop_begin', source=ortho_source, n=len(ortho_intervals))
         filled = 0
         skipped = 0
         total = len(ortho_intervals)
@@ -1107,7 +1139,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if exception_samples:
         for sample in exception_samples:
             print('[IPA][EXC] {0}'.format(sample), file=_server.sys.stderr, flush=True)
-    return {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
+    return {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
 
 def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run Tier 2 forced alignment for a speaker.
@@ -1165,6 +1197,193 @@ def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _serve
     _server._write_json_file(output_path, out_payload)
     _server._set_job_progress(job_id, 95.0, message='Wrote aligned artifact')
     return {'speaker': speaker, 'sttArtifact': str(stt_artifact_path), 'alignedArtifact': str(output_path), 'segmentCount': len(aligned_segments), 'methodCounts': method_counts}
+
+
+def _compute_speaker_boundaries(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    speaker = _server._normalize_speaker_id(payload.get('speaker'))
+    overwrite = bool(payload.get('overwrite', False))
+    canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
+    legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
+    if canonical_path.is_file():
+        annotation_path = canonical_path
+    elif legacy_path.is_file():
+        annotation_path = legacy_path
+    else:
+        raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
+
+    annotation = _server._read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise RuntimeError('Annotation is not a JSON object')
+
+    tiers = annotation.get('tiers') or {}
+    _server._set_job_progress(job_id, 5.0, message='Reading STT cache')
+    stt_segments = _server._read_stt_cache(speaker) or []
+    has_words = bool(stt_segments and any(seg.get('words') for seg in stt_segments))
+    if not has_words:
+        raise RuntimeError(
+            'No STT word-level timestamps cached for {0!r}. Run STT first before refining boundaries.'.format(speaker)
+        )
+
+    existing_tier_raw = tiers.get('ortho_words')
+    existing_tier = existing_tier_raw if isinstance(existing_tier_raw, dict) else None
+    existing_intervals = list((existing_tier or {}).get('intervals') or [])
+    if overwrite:
+        manual_intervals: _server.List[_server.Dict[str, _server.Any]] = []
+    else:
+        manual_intervals = [
+            interval
+            for interval in existing_intervals
+            if isinstance(interval, dict) and bool(interval.get('manuallyAdjusted'))
+        ]
+
+    _server._set_job_progress(job_id, 15.0, message='Resolving audio')
+    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+
+    _server._set_job_progress(job_id, 30.0, message='Running forced alignment')
+    aligned_words = _server._ortho_tier2_align_to_words(audio_path, stt_segments)
+
+    def _overlaps(a: _server.Dict[str, _server.Any], b: _server.Dict[str, _server.Any]) -> bool:
+        try:
+            a_start = float(a.get('start', 0.0) or 0.0)
+            a_end = float(a.get('end', a_start) or a_start)
+            b_start = float(b.get('start', 0.0) or 0.0)
+            b_end = float(b.get('end', b_start) or b_start)
+        except (TypeError, ValueError):
+            return False
+        return a_start < b_end and a_end > b_start
+
+    if manual_intervals:
+        aligned_words = [
+            word
+            for word in aligned_words
+            if not any(_overlaps(word, manual) for manual in manual_intervals)
+        ]
+
+    for word in aligned_words:
+        word['manuallyAdjusted'] = False
+
+    combined = sorted(
+        manual_intervals + aligned_words,
+        key=lambda interval: (
+            float(interval.get('start', 0.0) or 0.0),
+            float(interval.get('end', 0.0) or 0.0),
+        ),
+    )
+
+    _server._set_job_progress(job_id, 90.0, message='Writing tiers.ortho_words')
+    if existing_tier is None:
+        existing_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
+    existing_tier['intervals'] = combined
+    tiers['ortho_words'] = existing_tier
+    annotation['tiers'] = tiers
+    _server._annotation_touch_metadata(annotation, preserve_created=True)
+
+    _server._write_json_file(annotation_path, annotation)
+    if canonical_path != annotation_path and canonical_path.is_file():
+        _server._write_json_file(canonical_path, annotation)
+    if legacy_path != annotation_path and legacy_path.is_file():
+        _server._write_json_file(legacy_path, annotation)
+
+    return {
+        'speaker': speaker,
+        'generated': len(aligned_words),
+        'preserved_manual': len(manual_intervals),
+        'total': len(combined),
+    }
+
+
+def _compute_speaker_retranscribe_with_boundaries(
+    job_id: str,
+    payload: _server.Dict[str, _server.Any],
+) -> _server.Dict[str, _server.Any]:
+    speaker = _server._normalize_speaker_id(payload.get('speaker'))
+    language_raw = payload.get('language')
+    language = str(language_raw).strip() if language_raw is not None else None
+    if not language:
+        language = None
+
+    canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
+    legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
+    if canonical_path.is_file():
+        annotation_path = canonical_path
+    elif legacy_path.is_file():
+        annotation_path = legacy_path
+    else:
+        raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
+
+    annotation = _server._read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise RuntimeError('Annotation is not a JSON object')
+
+    tiers = annotation.get('tiers') or {}
+    ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
+    raw_intervals = list((ortho_words_tier or {}).get('intervals') or [])
+    intervals: _server.List[_server.Tuple[float, float]] = []
+    for interval in raw_intervals:
+        if not isinstance(interval, dict):
+            continue
+        try:
+            start_sec = float(interval.get('start', 0.0) or 0.0)
+            end_sec = float(interval.get('end', start_sec) or start_sec)
+        except (TypeError, ValueError):
+            continue
+        if end_sec <= start_sec:
+            continue
+        intervals.append((start_sec, end_sec))
+    if not intervals:
+        raise RuntimeError(
+            'No BND intervals available for {0!r}. Refine boundaries first before re-running STT with boundary constraints.'.format(speaker)
+        )
+    intervals.sort(key=lambda item: (item[0], item[1]))
+
+    _server._set_job_progress(job_id, 5.0, message='Resolving audio')
+    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+
+    _server._set_job_progress(job_id, 10.0, message='Loading audio')
+    from ai.forced_align import _load_audio_mono_16k
+
+    audio_tensor = _load_audio_mono_16k(audio_path)
+
+    _server._set_job_progress(job_id, 15.0, message='Loading STT provider')
+    provider = _server.get_stt_provider()
+    if not hasattr(provider, 'transcribe_segments_in_memory'):
+        raise RuntimeError(
+            'Boundary-constrained STT requires a provider that supports in-memory segment transcription (LocalWhisperProvider). The active provider {0!r} does not.'.format(type(provider).__name__)
+        )
+
+    interval_total = len(intervals)
+
+    def _on_progress(pct: float, done: int) -> None:
+        scaled = 15.0 + max(0.0, min(100.0, pct)) * 0.80
+        _server._set_job_progress(
+            job_id,
+            scaled,
+            message='Re-transcribing {0}/{1}'.format(done, interval_total),
+        )
+
+    segments = provider.transcribe_segments_in_memory(
+        audio_tensor,
+        intervals,
+        language=language,
+        progress_callback=_on_progress,
+    )
+
+    _server._set_job_progress(job_id, 96.0, message='Writing STT cache')
+    _write_stt_cache(
+        speaker,
+        str(audio_path),
+        language,
+        segments,
+        source='boundary_constrained',
+    )
+    return {
+        'speaker': speaker,
+        'language': language,
+        'boundary_intervals': interval_total,
+        'segments_written': len(segments),
+        'source': 'boundary_constrained',
+    }
+
 
 def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Generate an orthographic transcript for a speaker using the razhan model.
@@ -1696,5 +1915,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_short_clip_refine_lexemes', '_merge_ortho_words', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_ortho', '_compute_full_pipeline', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_short_clip_refine_lexemes', '_merge_ortho_words', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_full_pipeline', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

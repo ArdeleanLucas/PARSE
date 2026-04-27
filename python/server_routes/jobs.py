@@ -171,12 +171,22 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
             result = _server._compute_speaker_ortho('child-{0}'.format(job_id), payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
             result = _server._compute_speaker_forced_align('child-{0}'.format(job_id), payload)
+        elif normalized_type in {'boundaries', 'bnd', 'ortho_words', 'ortho-words'}:
+            result = _server._compute_speaker_boundaries('child-{0}'.format(job_id), payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline('child-{0}'.format(job_id), payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job('child-{0}'.format(job_id), payload)
         elif normalized_type == 'stt':
             result = _server._compute_stt('child-{0}'.format(job_id), payload)
+        elif normalized_type in {
+            'retranscribe_with_boundaries',
+            'retranscribe-with-boundaries',
+            'boundary_constrained_stt',
+            'boundary-constrained-stt',
+            'bnd_stt',
+        }:
+            result = _server._compute_speaker_retranscribe_with_boundaries('child-{0}'.format(job_id), payload)
         elif normalized_type in {'offset_detect', 'offset-detect'}:
             result = _server._compute_offset_detect('child-{0}'.format(job_id), payload)
         elif normalized_type in {'offset_detect_from_pair', 'offset-detect-from-pair'}:
@@ -720,12 +730,22 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             result = _server._compute_speaker_ortho(job_id, payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
             result = _server._compute_speaker_forced_align(job_id, payload)
+        elif normalized_type in {'boundaries', 'bnd', 'ortho_words', 'ortho-words'}:
+            result = _server._compute_speaker_boundaries(job_id, payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline(job_id, payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job(job_id, payload)
         elif normalized_type == 'stt':
             result = _server._compute_stt(job_id, payload)
+        elif normalized_type in {
+            'retranscribe_with_boundaries',
+            'retranscribe-with-boundaries',
+            'boundary_constrained_stt',
+            'boundary-constrained-stt',
+            'bnd_stt',
+        }:
+            result = _server._compute_speaker_retranscribe_with_boundaries(job_id, payload)
         elif normalized_type in {'offset_detect', 'offset-detect'}:
             result = _server._compute_offset_detect(job_id, payload)
         elif normalized_type in {'offset_detect_from_pair', 'offset-detect-from-pair'}:
