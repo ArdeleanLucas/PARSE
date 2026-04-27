@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** This cutover-harness document is preserved as sign-off reference. Active product docs live in [docs/](../../docs/). The harness stays in-tree as regression coverage even though the cutover gate is complete.
+
 # PARSE parity harness canonicalization rules
 
 The parity harness compares oracle vs rebuild after canonicalization so volatile runtime noise does not drown real contract drift.
