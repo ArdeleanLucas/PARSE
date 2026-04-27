@@ -1,6 +1,6 @@
 """Cross-platform runtime path helpers for PARSE desktop packaging.
 
-This module is intentionally isolated and currently not wired into ``python/server.py``.
+This module is intentionally isolated and currently not wired into the active ``python/server.py`` thin orchestrator / ``python/server_routes/*`` runtime.
 It provides a portable foundation for resolving application-owned directories
 without relying on machine-specific absolute paths or repository working
 directory assumptions.

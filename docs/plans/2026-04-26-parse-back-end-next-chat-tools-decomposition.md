@@ -1,5 +1,8 @@
 # parse-back-end — next task: chat_tools.py decomposition
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Lane:** Agent B (backend)
 **Date queued:** 2026-04-26
 **Rebuild oracle SHA at queue time:** `f9aa3db1aa`
@@ -92,7 +95,7 @@ the rebuild clone with the rebuild remote.
 
 ## Why this task
 
-`python/ai/chat_tools.py` is **6408 LoC, byte-identical to the live oracle**, and is the single largest untouched monolith in the rebuild. After PR #57 (speech/suggestion HTTP handlers) lands, it will be the dominant remaining structural risk.
+`python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) is **6408 LoC, byte-identical to the live oracle**, and is the single largest untouched monolith in the rebuild. After PR #57 (speech/suggestion HTTP handlers) lands, it will be the dominant remaining structural risk.
 
 Three reasons it matters now:
 
@@ -112,7 +115,7 @@ The pattern is documented in the `parse-expose-chat-tool` skill — read it befo
 
 1. Create `python/ai/tools/` package with `__init__.py`, a `_registry.py` for the spec aggregation, and one file per tool.
 2. Move each tool's spec dict and its handler function (currently inlined in `chat_tools.py` as `_handle_<tool_name>` or similar) into its own file under `python/ai/tools/`.
-3. Reduce `chat_tools.py` to a registry/orchestrator that imports specs and handlers from `python/ai/tools/`, wires them into the existing `ParseChatTools` class, and re-exports `ChatToolExecutionError`, `ChatToolValidationError`, `ParseChatTools` for callers (`python/server.py`, `python/adapters/mcp_adapter.py`, `python/ai/chat_orchestrator.py`).
+3. Reduce `chat_tools.py` to a registry/orchestrator that imports specs and handlers from `python/ai/tools/`, wires them into the existing `ParseChatTools` class, and re-exports `ChatToolExecutionError`, `ChatToolValidationError`, `ParseChatTools` for callers (`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`), `python/ai/chat_orchestrator.py`).
 4. Add one test file per extracted tool: `python/ai/tools/test_<tool_name>.py`. Each test file covers the tool's happy path, its argument validation errors, and at least one execution-error case.
 5. Update `python/ai/workflow_tools.py` only if it directly imports from `chat_tools.py` internals; do not change its public shape.
 
@@ -121,7 +124,7 @@ The pattern is documented in the `parse-expose-chat-tool` skill — read it befo
 - Any change to the tool list exposed via `mcp_adapter.py` (count must remain 32 native + 36 with workflow macros + `mcp_get_exposure_mode`, per `README.md` claims).
 - Any change to tool behavior, argument schema, return shape, or error wording.
 - Touching `mcp_adapter.py`, `provider.py`, `chat_orchestrator.py`, or `workflow_tools.py` beyond import-path updates.
-- Touching `python/server.py` beyond import-path updates if the registry export shape changes.
+- Touching `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) beyond import-path updates if the registry export shape changes.
 - Touching the React shell (`src/`) — frontend lane owns that.
 - Renaming any tool. Tool names are part of the chat-tool ABI and the MCP catalog.
 
@@ -145,7 +148,7 @@ Modules created in `python/ai/tools/`:
 - `preview_tools.py` — preview/inspection helpers (the agent's actual split; verify file contents)
 - `job_status_tools.py` — `stt_status`, `stt_word_level_status`, `forced_align_status`, `ipa_transcribe_acoustic_status`, `compute_status`, `audio_normalize_status`, `jobs_list`, `job_status`, `job_logs`, `jobs_list_active`
 
-Result: `python/ai/chat_tools.py` 6408 → 5428 LoC (−980).
+Result: `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) 6408 → 5428 LoC (−980).
 
 ### PR 2 — Acoustic starters + pipeline orchestration
 
@@ -183,7 +186,7 @@ exists.
 
 ### Acceptance after all 4 PRs land on rebuild
 
-- `wc -l python/ai/chat_tools.py` ≤ 2500 (previously: ~60% reduction goal; PR #229 alone delivered 15%)
+- `wc -l python/ai/chat_tools.py  # registry/orchestrator entrypoint` ≤ 2500 (previously: ~60% reduction goal; PR #229 alone delivered 15%)
 - `python/ai/tools/` contains ~10 grouped-domain module files + per-domain `test_*.py` files
 - `ParseChatTools(...).tool_names()` still returns 50 tools, in the same order
 - MCP catalog tool count unchanged: 32 native + 36 with workflow macros + `mcp_get_exposure_mode`
@@ -248,7 +251,7 @@ PR #229 established the wiring pattern: `chat_tools.py` keeps the
 becomes a one-line delegation to the new module's handler. Example:
 
 ```python
-# python/ai/chat_tools.py — after extraction
+# python/ai/chat_tools.py — registry/orchestrator after extraction
 from ai.tools import project_read_tools as _project_read
 
 class ParseChatTools:
@@ -313,7 +316,7 @@ Then start the dev server and run a sanity check via the chat panel: invoke at l
 
 PR title: `refactor(chat_tools): extract <group-name> tools into python/ai/tools/`
 PR body must include:
-- Before/after `wc -l python/ai/chat_tools.py`
+- Before/after `wc -l python/ai/chat_tools.py  # registry/orchestrator entrypoint`
 - List of extracted files
 - Output of `pytest python/ai/tools/ -v` (truncated to passing summary)
 - Confirmation that MCP catalog tool count is unchanged
@@ -323,7 +326,7 @@ PR body must include:
 
 ## Acceptance (cumulative across all 4 PRs)
 
-- `wc -l python/ai/chat_tools.py` ≤ 2500 (down from 6408 — about a 60% reduction)
+- `wc -l python/ai/chat_tools.py  # registry/orchestrator entrypoint` ≤ 2500 (down from 6408 — about a 60% reduction)
 - `python/ai/tools/` contains one file per chat tool, each with a paired test
 - `python/ai/tools/_registry.py` is the single aggregation point
 - `mcp_adapter.py` is unchanged in size and behavior; tool count exposed via MCP is unchanged
@@ -365,7 +368,7 @@ Use these installed Hermes skills:
 
 ## What "done" looks like at the end of all 4 PRs
 
-- `python/ai/chat_tools.py` ≤ 2500 LoC
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) ≤ 2500 LoC
 - `python/ai/tools/` contains ~37 tool modules + `_registry.py` + per-tool tests
 - All existing tests still green
 - New per-tool tests green

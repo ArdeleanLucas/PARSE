@@ -11,7 +11,7 @@
 
 Before writing any component code, ParseBuilder must have committed:
 
-- `src/api/client.ts` — typed fetch wrapper
+- `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) — typed fetch wrapper
 - `src/api/types.ts` — shared TypeScript interfaces
 - All six Zustand store files (types stubbed, no implementation needed)
 - `vite.config.ts` with `/api/*` proxy to `:8766`
@@ -125,7 +125,7 @@ annotationStore.records        // preview new speaker's annotations before impor
 ## Python API Contract
 
 Port 8766. Vite proxies `/api/*`. Never call `fetch()` directly.
-Always use functions from `src/api/client.ts`.
+Always use functions from `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`).
 
 **Functions you use:**
 

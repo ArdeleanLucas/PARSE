@@ -2,13 +2,13 @@
 
 > Last updated: 2026-04-24
 >
-> This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` and `python/server.py`; MCP tools were cross-checked against `python/adapters/mcp_adapter.py`.
+> This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
 ## API overview
 
 PARSE has three programmatic surfaces:
 
-1. **HTTP API** — used by the browser frontend and any local automation that talks to `python/server.py`
+1. **HTTP API** — used by the browser frontend and any local automation that talks to `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 2. **WebSocket job streaming** — additive realtime job updates from the sidecar in `python/external_api/streaming.py`
 3. **MCP server mode** — used by external agent clients through the PARSE MCP adapter
 
@@ -34,7 +34,7 @@ A few patterns recur across the API:
 - heavy-job starters can optionally attach a `callbackUrl` so external automation can receive the final generic job payload on completion or error
 - binary export/image endpoints return files rather than JSON
 - compute endpoints normalize job handling across multiple background workflows
-- `/api/config` carries a schema-versioned payload; if the config contract changes incompatibly, update the corresponding version constants in both `python/server.py` and `src/api/client.ts`
+- `/api/config` carries a schema-versioned payload; if the config contract changes incompatibly, update the corresponding version constants in both `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) and `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`)
 
 ## WebSocket job streaming
 
@@ -365,7 +365,7 @@ Both endpoints return downloadable file content rather than JSON.
 
 ## OpenAPI 3.1 and interactive API docs
 
-PARSE now serves a machine-readable OpenAPI 3.1 document directly from `python/server.py`.
+PARSE now serves a machine-readable OpenAPI 3.1 document directly from `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`).
 
 | Endpoint | Purpose |
 |---|---|
@@ -415,7 +415,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing a curated subset of `ParseChatTools` plus the 3 workflow macros through `python/adapters/mcp_adapter.py`.
+PARSE can also run as a stdio MCP server by exposing a curated subset of `ParseChatTools` plus the 3 workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
 ### Start the adapter
 

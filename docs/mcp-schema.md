@@ -12,7 +12,7 @@ PARSE now exposes three closely related machine-facing surfaces:
 2. **HTTP MCP bridge** on the same server
    - schema discovery and tool execution for Python wrappers
 3. **stdio MCP adapter**
-   - `python/adapters/mcp_adapter.py`
+   - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
    - for Claude Code, Cursor, Codex, Cline, Hermes, Windsurf, and other MCP-capable clients
 
 ## OpenAPI endpoints

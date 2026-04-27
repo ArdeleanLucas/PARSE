@@ -14,7 +14,7 @@
 | Path | Current state after Phase 3 | Why it matters | Handled in |
 |---|---|---|---|
 | `README.md` | Now distinguishes React/Vite routes (`:5173`) from legacy fallback pages (`:8766/parse.html`, `/compare.html`) | Primary onboarding doc no longer implies legacy is canonical | **Phase 3** |
-| `python/server.py` | Startup banner now separates React dev guidance from Python-served legacy fallback pages | Server output no longer implies legacy is the only frontend path | **Phase 3** |
+| `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) | Startup banner now separates React dev guidance from Python-served legacy fallback pages | Server output no longer implies legacy is the only frontend path | **Phase 3** |
 | `desktop/README.md` | Now labels `:8766/parse.html` as legacy fallback and documents React/Vite targets on `:5173` | Desktop scaffold instructions now match the current frontend architecture | **Phase 3** |
 | `desktop/dev-launch.js` | `--help` now explains that `:5173` is the current React UI and that the `:8766/parse.html` default is legacy fallback | CLI help is operator-facing and now clarifies React vs legacy | **Phase 3** |
 | `desktop/main.js` | Load-failure guidance now points users toward the React/Vite route when appropriate | Runtime failure UX now reduces entrypoint confusion | **Phase 3** |
@@ -65,7 +65,7 @@ They often refer to the API backend, which remains valid.
 
 | Path | Reference type | Action |
 |---|---|---|
-| `src/api/client.ts` | Documents Vite proxy to backend `http://localhost:8766` | Keep |
+| `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) | Documents Vite proxy to backend `http://localhost:8766` | Keep |
 | `docs/plans/react-vite-pivot.md` | Describes Vite proxy and backend API on `:8766` | Keep |
 | `docs/archive/plans/oda/b7-export.md` | Calls export API on `:8766/api/export/*` | Archived 2026-04-20 — task complete |
 
@@ -75,7 +75,7 @@ They often refer to the API backend, which remains valid.
 
 ### Change in Phase 3
 - `README.md`
-- `python/server.py` startup messaging
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) startup messaging
 - `desktop/README.md`
 - `desktop/dev-launch.js` help text
 - `desktop/main.js` failure guidance

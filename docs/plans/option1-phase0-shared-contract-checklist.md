@@ -41,9 +41,9 @@ The coordinator must freeze a precedence order so agents do not argue from diffe
 - [x] `docs/plans/option1-parity-inventory.md`
 - [x] `docs/desktop_product_architecture.md`
 - [x] `AGENTS.md`
-- [x] `src/api/client.ts`
+- [x] `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`)
 - [x] `package.json`
-- [x] selected backend route/tests in `python/` (`python/server.py`, `python/test_external_api_surface.py`, `python/test_server_static_paths.py`, `python/ai/test_parse_memory_tool.py`)
+- [x] selected backend route/tests in `python/` (`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), `python/test_external_api_surface.py`, `python/test_server_static_paths.py`, `python/ai/test_parse_memory_tool.py`)
 - [x] selected oracle project fixtures / exports / sample outputs (2026-04-26 Saha01 parity fixture seeded from `/home/lucas/parse-workspace`, plus current LingPy/export-facing workspace metadata)
 
 ### 2.2 Precedence order to record
@@ -259,7 +259,7 @@ The route inventory must be frozen before Agent A builds navigation and before A
 
 ## 8. Freeze HTTP API contract inventory
 
-The current frontend helper surface in `src/api/client.ts` is the baseline API inventory.
+The current frontend helper surface in `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) is the baseline API inventory.
 
 ### 8.1 Contract groups that must be frozen
 

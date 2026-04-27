@@ -37,15 +37,27 @@ It exists to prevent three common failure modes:
 
 The rebuild must be compared against the current PARSE repo, especially these surfaces:
 
-- `src/api/client.ts` — live frontend HTTP contract and helper surface
+- `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) — live frontend HTTP contract and helper surface
 - `package.json` — frontend scripts and baseline validation commands
 - `docs/desktop_product_architecture.md` — desktop launch, loopback, and path rules
 - `src/components/annotate/**` — Annotate workstation behavior
 - `src/components/compare/**` — Compare workstation behavior
 - `src/components/compute/**` and shared modals — compute/config/reporting flows
 - `src/stores/*.ts` — state persistence and UI orchestration invariants
-- `python/server.py` and backend tests — route semantics, jobs, errors, static/runtime safety
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) and backend tests — route semantics, jobs, errors, static/runtime safety
 - on-disk project artifacts — annotations, enrichments, project metadata, exports, audio/transcript layout
+
+### 2.1a Current rebuild mapping for those oracle surfaces
+
+Use these rebuild-lane destinations when translating oracle surfaces into the current post-decomposition layout:
+
+- frontend HTTP helpers → `src/api/contracts/*.ts` re-exported through `src/api/client.ts`
+- annotation-store logic → `src/stores/annotation/*.ts` re-exported through `src/stores/annotationStore.ts`
+- route/domain backend logic → `python/server_routes/*.py` wired through `python/server.py`
+- chat-tool implementations → `python/ai/tools/*.py` plus existing grouped bundles under `python/ai/chat_tools/`, aggregated by `python/ai/chat_tools.py`
+- MCP adapter internals → `python/adapters/mcp/*.py`, entered through `python/adapters/mcp_adapter.py`
+- provider implementations → `python/ai/providers/*.py`, routed through `python/ai/provider.py`
+- canonical quick reference → `docs/architecture/post-decomp-file-map.md`
 
 ### 2.2 Oracle baseline record
 
@@ -77,17 +89,17 @@ No P0 item may be silently downgraded.
 
 ## 4. Surface inventory summary
 
-| Surface | Primary oracle sources | Primary owner in rebuild | Required parity outcome |
-|---|---|---|---|
-| App shell + navigation | `src/ParseUI.tsx`, `src/components/shared/TopBar.tsx`, `src/stores/uiStore.ts` | Agent A | Same workbench entrypoints, shell state transitions, global feedback surfaces, and no missing thesis-critical controls |
-| Annotate workstation | `src/components/annotate/*.tsx`, `src/stores/annotationStore.ts`, `src/stores/playbackStore.ts` | Agent A + Agent B contract support | Same speaker load/edit/save workflow, waveform review, region/lane actions, STT-assisted review, and playback behavior |
-| Compare workstation | `src/components/compare/*.tsx`, `src/stores/enrichmentStore.ts`, `src/stores/tagStore.ts` | Agent A + Agent B contract support | Same concept × speaker review flow, cognate decisions, borrowing adjudication, enrichments, notes, and tag workflows |
-| Import / management flows | `OnboardingFlow.tsx`, `SpeakerImport.tsx`, `CommentsImport.tsx`, CSV import helpers | Agent A + Agent B contract support | Same upload/import entrypoints, state transitions, and persisted results |
-| HTTP API surface | `src/api/client.ts`, backend route tests | Agent B | Same method/path contracts, payload shapes, error semantics, and async job orchestration |
-| Async jobs + observability | job helpers in `src/api/client.ts`, backend job tests | Agent B | Same start/poll/log/result semantics and same visible progress/failure handling |
-| Export behavior | export helpers in `src/api/client.ts`, backend export tests | Agent B | LingPy parity, preserved NEXUS semantics, deterministic failures |
-| Desktop/runtime constraints | `docs/desktop_product_architecture.md`, static/path/runtime tests | Coordinator + Agent A + Agent B | Same local-first launch model, path safety, loopback-only backend boundary, and no hidden cwd/path assumptions |
-| Data/storage invariants | project artifact layout + stores + backend persistence paths | Coordinator + Agent B | Same files, same compatibility assumptions, same invariants for concept IDs, timestamps, tags, and enrichments |
+| Surface | Primary oracle sources | Primary rebuild paths now | Primary owner in rebuild | Required parity outcome |
+|---|---|---|---|---|
+| App shell + navigation | `src/ParseUI.tsx`, `src/components/shared/TopBar.tsx`, `src/stores/uiStore.ts` | `src/ParseUI.tsx`, shared shell modules, `src/components/parse/right-panel/` | Agent A | Same workbench entrypoints, shell state transitions, global feedback surfaces, and no missing thesis-critical controls |
+| Annotate workstation | `src/components/annotate/*.tsx`, `src/stores/annotationStore.ts` (barrel; concrete slices/helpers live under `src/stores/annotation/`), `src/stores/playbackStore.ts` | `src/components/annotate/annotate-views/**`, annotate siblings, `src/stores/annotation/**` | Agent A + Agent B contract support | Same speaker load/edit/save workflow, waveform review, region/lane actions, STT-assisted review, and playback behavior |
+| Compare workstation | `src/components/compare/*.tsx`, `src/stores/enrichmentStore.ts`, `src/stores/tagStore.ts` | `src/components/compare/compare-panels/**`, compare siblings, `src/stores/enrichmentStore.ts`, `src/stores/tagStore.ts` | Agent A + Agent B contract support | Same concept × speaker review flow, cognate decisions, borrowing adjudication, enrichments, notes, and tag workflows |
+| Import / management flows | `OnboardingFlow.tsx`, `SpeakerImport.tsx`, `CommentsImport.tsx`, CSV import helpers | annotate-view / compare-panel descendants plus import helpers under `src/api/contracts/` and backend route domains | Agent A + Agent B contract support | Same upload/import entrypoints, state transitions, and persisted results |
+| HTTP API surface | `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), backend route tests | `src/api/contracts/**`, `python/server_routes/**`, thin `python/server.py` wiring | Agent B | Same method/path contracts, payload shapes, error semantics, and async job orchestration |
+| Async jobs + observability | job helpers in `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), backend job tests | `src/api/contracts/job-observability.ts`, `python/server_routes/jobs.py`, shared job registry/log plumbing | Agent B | Same start/poll/log/result semantics and same visible progress/failure handling |
+| Export behavior | export helpers in `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`), backend export tests | `src/api/contracts/export-and-media.ts`, `python/server_routes/exports.py` | Agent B | LingPy parity, preserved NEXUS semantics, deterministic failures |
+| Desktop/runtime constraints | `docs/desktop_product_architecture.md` | archived historical reference only; active rebuild lane instead documents runtime constraints in `README.md`, `docs/getting-started.md`, and `docs/architecture/post-decomp-file-map.md` | Coordinator + Agent A + Agent B | Same local-first launch model, path safety, loopback-only backend boundary, and no hidden cwd/path assumptions |
+| Data/storage invariants | project artifact layout + stores + backend persistence paths | project artifacts plus current store/backend split documented in `docs/architecture.md` and `docs/architecture/post-decomp-file-map.md` | Coordinator + Agent B | Same files, same compatibility assumptions, same invariants for concept IDs, timestamps, tags, and enrichments |
 
 ---
 
@@ -98,7 +110,7 @@ No P0 item may be silently downgraded.
 | Surface | Current oracle files | Critical behaviors that must match | Priority |
 |---|---|---|---|
 | Shell / navigation | `src/ParseUI.tsx`, `src/components/shared/TopBar.tsx`, `src/stores/uiStore.ts` | boot into a usable shell, switch major workbenches/modes, preserve global feedback and blocking/error states, preserve keyboard-accessible top-level actions | P0 |
-| Annotate | `src/components/annotate/AnnotateMode.tsx`, `AnnotationPanel.tsx`, `TranscriptPanel.tsx`, `RegionManager.tsx`, `SuggestionsPanel.tsx`, `TranscriptionLanes.tsx` | load speaker, display waveform/transcript context, manage intervals/lanes, invoke STT/suggestions, preserve save/reload behavior, support fast playback/review loop | P0 |
+| Annotate | `src/components/annotate/AnnotateMode.tsx` (barrel; implementation lives under `src/components/annotate/annotate-views/`), `AnnotationPanel.tsx`, `TranscriptPanel.tsx`, `RegionManager.tsx`, `SuggestionsPanel.tsx`, `TranscriptionLanes.tsx` | load speaker, display waveform/transcript context, manage intervals/lanes, invoke STT/suggestions, preserve save/reload behavior, support fast playback/review loop | P0 |
 | Compare | `src/components/compare/CompareMode.tsx`, `ConceptTable.tsx`, `CognateControls.tsx`, `BorrowingPanel.tsx`, `EnrichmentsPanel.tsx`, `LexemeDetail.tsx` | concept × speaker table rendering, cognate accept/split/merge/cycle, borrowing marking, notes/enrichment persistence, navigation between items | P0 |
 | Tags / enrichments management | `src/components/compare/TagManager.tsx`, `src/stores/tagStore.ts`, `src/stores/enrichmentStore.ts` | create/edit/merge tags, bulk state changes, persistence after mutation, reload survival | P0 |
 
@@ -108,7 +120,7 @@ No P0 item may be silently downgraded.
 |---|---|---|---|
 | ~~AI/chat shell~~ — **DROPPED from rebuild parity scope 2026-04-26** | `src/components/annotate/ChatPanel.tsx`, `src/components/shared/ChatMarkdown.tsx` | start session, run/poll chat, show status/result/error cleanly, preserve session semantics expected by UI | P1 |
 | Import / onboarding | `src/components/annotate/OnboardingFlow.tsx`, `src/components/compare/SpeakerImport.tsx`, `src/components/compare/CommentsImport.tsx` | upload/start/poll flows, completion and failure states, no phantom success, persisted outputs appear where current PARSE expects them | P1 |
-| Compute and report modals | `src/components/compute/ClefConfigModal.tsx`, `ClefSourcesReportModal.tsx`, `ClefPopulateSummaryBanner.tsx`, `src/components/shared/BatchReportModal.tsx`, `TranscriptionRunModal.tsx` | same launch affordances, status/progress handling, and report visibility for users reviewing compute outputs | P1 |
+| Compute and report modals | `src/components/compute/ClefConfigModal.tsx` (barrel; implementation lives under `src/components/compute/clef/`), `ClefSourcesReportModal.tsx`, `ClefPopulateSummaryBanner.tsx`, `src/components/shared/BatchReportModal.tsx`, `TranscriptionRunModal.tsx` | same launch affordances, status/progress handling, and report visibility for users reviewing compute outputs | P1 |
 | Contact lexeme / CLEF compare extensions | `ContactLexemePanel.tsx` and CLEF helpers | same coverage/config/fetch flow and same decision-support affordances in Compare mode | P1 |
 | Job diagnostics | shell modals + `getJobLogs()` support | users can inspect job status/logs and distinguish running, failed, and finished states | P1 |
 
@@ -124,7 +136,7 @@ Future shell placeholders for `training`, `phonetics`, and broader computational
 
 ## 6. HTTP API parity inventory
 
-The rebuild must preserve the frontend helper surface presently exposed by `src/api/client.ts`.
+The rebuild must preserve the frontend helper surface presently exposed by `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`).
 
 | Contract group | Current client helpers | Expected parity requirement |
 |---|---|---|

@@ -1,7 +1,10 @@
 # MC-328 — chat_tools PR 3A tag import + memory extraction
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
-Implement PR 3A in `TarahAssistant/PARSE-rebuild` by extracting the tag-import and parse-memory chat tool families from `python/ai/chat_tools.py` into reviewable grouped modules under `python/ai/tools/`, preserving tool names, MCP exposure, schemas, and runtime behavior.
+Implement PR 3A in `TarahAssistant/PARSE-rebuild` by extracting the tag-import and parse-memory chat tool families from `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) into reviewable grouped modules under `python/ai/tools/`, preserving tool names, MCP exposure, schemas, and runtime behavior.
 
 ## Scope
 In scope:
@@ -12,7 +15,7 @@ In scope:
    - `parse_memory_read`
    - `parse_memory_upsert_section`
 3. Move family-local helpers needed by those tools.
-4. Update `python/ai/chat_tools.py` to merge bundle specs and delegate through thin wrappers.
+4. Update `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) to merge bundle specs and delegate through thin wrappers.
 5. Update `python/ai/tools/__init__.py` exports if needed.
 6. Add direct extraction/regression tests for the new modules and bundle wiring.
 7. Re-run targeted backend tests, full backend suite, frontend Vitest gate, TypeScript gate, and API smoke.
@@ -23,7 +26,7 @@ Out of scope:
 - offset extraction (PR 3C)
 - `_display_readable_path` centralization or helper cleanup
 - compare/enrichment/export PR 4 work
-- `python/adapters/mcp_adapter.py` refactors beyond any minimal duplicate-spec test updates required by the extraction
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) refactors beyond any minimal duplicate-spec test updates required by the extraction
 
 ## Key facts
 - Working lane is the rebuild repo only: `/home/lucas/gh/tarahassistant/PARSE-rebuild` with `origin=TarahAssistant/PARSE-rebuild`.
@@ -50,5 +53,5 @@ Out of scope:
 - `import_tag_csv` delegates to shared extracted logic directly.
 - `_display_readable_path` remains in-class on `ParseChatTools`.
 - New direct module tests and existing chat/MCP suites pass.
-- `python/ai/chat_tools.py` line count drops materially from current main.
+- `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) line count drops materially from current main.
 - Rebuild PR open with explicit `--repo TarahAssistant/PARSE-rebuild`.

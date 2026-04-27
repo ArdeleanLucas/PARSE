@@ -23,16 +23,17 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/ArdeleanLucas/PARSE.git
-cd PARSE
+git clone https://github.com/TarahAssistant/PARSE-rebuild.git
+cd PARSE-rebuild
+npm install
 ./scripts/parse-run.sh
 ```
 
 On a fresh clone, you will usually also want to:
 
-- run `npm install` once
 - copy `config/ai_config.example.json` to `config/ai_config.json`
 - review your local model/provider settings before serious speech work
+- prefer a standalone `PARSE_WORKSPACE_ROOT` for real fieldwork data rather than writing runtime artifacts into the git checkout
 
 Open:
 
@@ -95,7 +96,7 @@ PARSE exposes four machine-facing integration surfaces:
 1. **HTTP API** on `http://localhost:8766`
 2. **WebSocket job streaming** on `ws://localhost:8767/ws/jobs/{jobId}` (override with `PARSE_WS_PORT`)
 3. **HTTP MCP bridge** on the same server for schema discovery + tool execution
-4. **stdio MCP adapter** in `python/adapters/mcp_adapter.py`
+4. **stdio MCP adapter** through `python/adapters/mcp_adapter.py` (thin entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
 
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
@@ -164,11 +165,11 @@ It provides:
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP MCP bridge / `parse-mcp` entry points, environment conventions, and agent-facing examples
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
-- [AI Integration](docs/ai-integration.md) — provider routing, model roles, configuration, external dependencies, the full 50-tool chat surface, and MCP workflow macros
-- [API Reference](docs/api-reference.md) — HTTP endpoints, generic job observability, OpenAPI docs, MCP bridge routes, examples, and the full 32-tool MCP task surface
-- [MCP Schema](docs/mcp-schema.md) — MCP schema shape, HTTP bridge endpoints, exposure modes, and authentication model
-- [Architecture](docs/architecture.md) — unified shell, backend/data design, OpenAPI/MCP standardization points, and CLEF provider registry
-- [Developer Guide](docs/developer-guide.md) — project structure, tech stack, local development flow, and extension points for chat tools, MCP tools, and endpoints
+- [AI Integration](docs/ai-integration.md) — providers, models, configuration, the 50-tool chat surface, and workflow macros
+- [API Reference](docs/api-reference.md) — HTTP endpoints, generic job observability, OpenAPI docs, MCP bridge routes, examples, and the current MCP task surface
+- [Architecture](docs/architecture.md) — system design, data model, and runtime responsibilities
+- [Post-decomp File Map](docs/architecture/post-decomp-file-map.md) — canonical "where does code live now?" reference for the split backend/frontend modules
+- [Developer Guide](docs/developer-guide.md) — local development flow, extension points, and contributor rules after the module splits
 - [Research Context](docs/research-context.md) — thesis background, citation guidance, and research-software framing
 
 If you are new to PARSE, start with **[Getting Started](docs/getting-started.md)** and then move to the **[User Guide](docs/user-guide.md)**.
@@ -193,7 +194,12 @@ The guiding principle is simple: timestamps are central, human review stays expl
 A few practical details matter up front:
 
 - The active frontend is **React + Vite** in `src/`
-- The Python backend in `python/server.py` powers AI routes and can also serve the built frontend
+- `src/api/client.ts` is now a **barrel**; concrete request helpers live under `src/api/contracts/`
+- `src/stores/annotationStore.ts` is now a **barrel**; concrete annotation-store slices/helpers live under `src/stores/annotation/`
+- The Python backend in `python/server.py` is now a **thin orchestrator**; most HTTP route logic lives under `python/server_routes/`
+- MCP stdio entrypoint logic starts from `python/adapters/mcp_adapter.py`, with concrete adapter modules under `python/adapters/mcp/`
+- Chat tool registration starts from `python/ai/chat_tools.py`, with concrete tool logic split across `python/ai/tools/` and `python/ai/chat_tools/`
+- Provider routing starts from `python/ai/provider.py`, with concrete providers under `python/ai/providers/`
 - The preferred development URLs are:
   - `http://localhost:5173/`
   - `http://localhost:5173/compare`
@@ -202,9 +208,9 @@ A few practical details matter up front:
   - `http://localhost:8766/compare`
 - `config/ai_config.json` is machine-local and gitignored; start from `config/ai_config.example.json`
 - For real fieldwork usage, PARSE is intended to run against a **workspace root outside the git checkout**
-- PARSE is still in active development; the repository has explicitly treated full browser regression and export verification as ongoing validation work rather than fully settled release guarantees
+- `docs/architecture/post-decomp-file-map.md` is the canonical current-layout reference when older docs mention pre-split file paths
 
-Those details are expanded in [Getting Started](docs/getting-started.md) and [Developer Guide](docs/developer-guide.md).
+Those details are expanded in [Getting Started](docs/getting-started.md), [Developer Guide](docs/developer-guide.md), and [Post-decomp File Map](docs/architecture/post-decomp-file-map.md).
 
 ## 🔬 Research & Citation
 

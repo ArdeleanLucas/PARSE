@@ -29,7 +29,7 @@ Recover the ParseUI unified shell after the broken wiring attempt, then complete
 ## Files likely involved
 - `src/ParseUI.tsx`
 - `src/ParseUI.test.tsx`
-- `src/stores/annotationStore.ts`
+- `src/stores/annotationStore.ts` (barrel; concrete slices/helpers live under `src/stores/annotation/`)
 - possibly `src/App.tsx` only for validation, not planned edits
 
 ## Completion criteria

@@ -1,5 +1,8 @@
 # PARSE — Onboarding & Import Planning Document
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Status:** Living design doc
 **Updated:** 2026-04-20
 **Original author:** dr-kurd (dictated by Lucas Ardelean)
@@ -78,7 +81,7 @@ See section below.
 Until the wizard below lands, the live onboarding path is:
 
 - **Frontend:** `src/components/compare/SpeakerImport.tsx` — speaker ID, audio WAV, optional audition CSV, required xAI/OpenAI provider radio → calls `onboardSpeaker(speakerId, audioFile, csvFile, provider)`.
-- **API client:** `src/api/client.ts` → `POST /api/onboard/speaker` multipart form (`speaker_id`, `audio`, `csv?`, `provider`).
+- **API client:** `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) → `POST /api/onboard/speaker` multipart form (`speaker_id`, `audio`, `csv?`, `provider`).
 - **Server:** `python/server.py::_api_post_onboard_speaker` → background job that writes audio, scaffolds the annotation record, and returns `{ job_id }`. Progress is polled via `POST /api/onboard/speaker/status`.
 
 The AI-assisted resolution described below (Tasks A–D) is the target richer behavior, not the current runtime.

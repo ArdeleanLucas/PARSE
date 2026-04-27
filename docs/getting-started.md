@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-24
 >
-> This guide reflects the current React + Vite frontend, the Python backend in `python/server.py`, and the launcher workflow documented in the latest `README.md` and tracked scripts.
+> This guide reflects the current React + Vite frontend, the Python backend in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), and the launcher workflow documented in the latest `README.md` and tracked scripts.
 
 PARSE is a browser-based dual-mode research workstation for linguistic fieldwork and cross-speaker comparison. The fastest path is the tracked launcher script, which starts the Python API and the Vite frontend together and prints the working URLs.
 
@@ -44,8 +44,8 @@ This second setup matters because some local speech/model stacks may already be 
 Clone the repository and install frontend dependencies once per clone:
 
 ```bash
-git clone https://github.com/ArdeleanLucas/PARSE.git
-cd PARSE
+git clone https://github.com/TarahAssistant/PARSE-rebuild.git
+cd PARSE-rebuild
 npm install
 ```
 
@@ -80,7 +80,7 @@ The launcher is more than a simple two-process wrapper. It currently:
 1. Integrates the latest `origin/main` according to `PARSE_PULL_MODE` unless `PARSE_SKIP_PULL=1`
 2. Kills stale Python and Vite processes on both WSL and Windows sides
 3. Probes whether the API port is actually bindable before starting the backend
-4. Starts the Python API server (`python/server.py`) on `:8766`
+4. Starts the Python API server (`python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)) on `:8766`
 5. Waits for `/api/config` to return `200`
 6. Starts the Vite dev server on `:5173`
 7. Waits for Vite to respond, then prints the URLs

@@ -11,7 +11,7 @@ PARSE is a browser-based dual-mode workstation for linguistic fieldwork and hist
 Current architectural highlights:
 
 - **Frontend**: React 18 + TypeScript + Vite
-- **Backend**: Python API server in `python/server.py`
+- **Backend**: Python API server in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 - **Modes**: Annotate (`/`) and Compare (`/compare`) in one unified shell
 - **Data**: per-speaker annotation JSON + `parse-enrichments.json`
 - **AI**: task-routed provider system for STT, ORTH, acoustic IPA, and chat
@@ -20,44 +20,49 @@ Current architectural highlights:
 ## Repository structure
 
 ```text
-index.html              -- React/Vite entry HTML
+index.html
 src/
-  App.tsx               -- BrowserRouter shell → <ParseUI />
-  ParseUI.tsx           -- Unified shell (Annotate + Compare + Tags + AI Chat)
+  App.tsx
+  ParseUI.tsx                    -- unified workstation shell
   api/
-    client.ts           -- Typed API client
-    types.ts            -- Shared TypeScript types
+    client.ts                    -- barrel only
+    contracts/                   -- concrete HTTP helpers grouped by contract family
+    types.ts                     -- shared TypeScript shapes still reused across families
   components/
-    annotate/           -- Annotate mode components
-    compare/            -- Compare mode components
-    shared/             -- Shared components
-  hooks/                -- React hooks
-  stores/               -- Zustand stores
+    annotate/
+      annotate-views/            -- concrete annotate workstation modules
+    compare/
+      compare-panels/            -- concrete compare workstation modules
+    compute/
+      clef/                      -- concrete CLEF modal/report modules
+    parse/
+      right-panel/               -- extracted parse right-panel tab content
+    shared/
+  hooks/
+    wave-surfer/                 -- concrete WaveSurfer hook pieces
+    batch-pipeline/              -- concrete batch-pipeline hook pieces
+  stores/
+    annotationStore.ts           -- barrel only
+    annotation/                  -- concrete annotation-store slices/helpers
 python/
-  server.py             -- Backend API server + built frontend serving
+  server.py                      -- thin HTTP orchestrator
+  server_routes/                 -- concrete route-domain modules
   adapters/
-    mcp_adapter.py      -- MCP adapter
+    mcp_adapter.py               -- thin stdio entrypoint
+    mcp/                         -- concrete MCP env/transport/schema/dispatch modules
   ai/
-    chat_tools.py       -- ParseChatTools (50 tools)
-    chat_orchestrator.py
-    stt_pipeline.py
-    forced_align.py
-    ipa_transcribe.py
-  external_api/         -- OpenAPI generation + HTTP MCP bridge helpers
-  compare/
-    providers/          -- CLEF provider registry and adapters
-  shared/               -- Shared Python utilities
-  packages/
-    parse_mcp/          -- Publishable Python client/wrapper package
-config/
-  ai_config.example.json -- tracked template
-  ai_config.json         -- machine-local config (gitignored)
-annotations/            -- runtime annotation JSON
-parse-enrichments.json  -- runtime comparative overlays
-desktop/                -- Electron shell scaffold
-docs/                   -- user, developer, research, and planning docs
-dist/                   -- build output
+    chat_tools.py                -- registry/orchestrator only
+    tools/                       -- concrete tool implementations by domain family
+    chat_tools/                  -- earlier extracted tool bundles by family
+    provider.py                  -- base provider surface only
+    providers/                   -- concrete provider implementations
+  external_api/                  -- OpenAPI + HTTP MCP + streaming helpers
+  compare/                       -- comparative logic and CLEF providers
+  packages/parse_mcp/            -- publishable Python wrapper package
+parity/harness/                  -- oracle-vs-rebuild diff harness + tests
 ```
+
+For the canonical "where does code live now?" reference, use [Post-decomp File Map](./architecture/post-decomp-file-map.md).
 
 ## Tech stack summary
 
@@ -74,7 +79,7 @@ dist/                   -- build output
 ### Backend
 
 - Python 3.10–3.12
-- local HTTP server in `python/server.py`
+- local HTTP server in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 - additive WebSocket job-streaming sidecar in `python/external_api/streaming.py` (`PARSE_WS_PORT`, default `8767`)
 - OpenAPI 3.1 generation + interactive docs (`/openapi.json`, `/docs`, `/redoc`)
 - HTTP MCP bridge for schema discovery + tool execution (`/api/mcp/*`)
@@ -117,6 +122,7 @@ If you need separate terminals:
 cp config/ai_config.example.json config/ai_config.json
 
 # Terminal 1
+# thin orchestrator entrypoint; concrete route logic lives in python/server_routes/
 /path/to/python python/server.py
 
 # Terminal 2
@@ -206,12 +212,13 @@ Contributors working on import, annotation, or automation features should always
 
 The current PARSE architecture expects:
 
-- API traffic to go through `src/api/client.ts`
-- shared typed contracts to live in `src/api/types.ts`
+- API traffic to go through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/`)
+- shared typed contracts to live in `src/api/types.ts` plus helper-local contract-family modules
 - data persistence to flow through the established stores and backend routes
 - the unified shell model to remain the organizing principle rather than splitting Annotate and Compare into isolated apps again
+- contributors to verify whether a top-level `.tsx`/`.ts` file is now a barrel before adding new logic directly into it
 
-For implementation-level architectural context, see [Architecture](./architecture.md).
+For implementation-level architectural context, see [Architecture](./architecture.md) and [Post-decomp File Map](./architecture/post-decomp-file-map.md).
 
 ## Build and validation
 
@@ -227,7 +234,7 @@ These are the baseline TypeScript and test checks called out in the current PARS
 Two additional realities are worth documenting explicitly:
 
 - the project is still in active development, so full browser regression and export verification should be treated as ongoing validation work rather than assumed completed release guarantees
-- schema compatibility between frontend and backend is enforced through `/api/config`; if that payload changes incompatibly, update the version constant in both `python/server.py` and `src/api/client.ts` in the same change
+- schema compatibility between frontend and backend is enforced through `/api/config`; if that payload changes incompatibly, update the version constant in both `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) and `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) in the same change
 
 For documentation-only work, you should still at minimum:
 
@@ -256,15 +263,11 @@ When adding an endpoint, keep the client/server contract explicit.
 
 ### 1. Add the server route
 
-Implement the route in `python/server.py` by wiring it into the relevant dispatch method:
-
-- `_dispatch_api_get`
-- `_dispatch_api_post`
-- `_dispatch_api_put`
+Implement the concrete route handler in the appropriate `python/server_routes/<domain>.py` module, then wire it through the thin `python/server.py` orchestrator.
 
 ### 2. Add or update the typed client helper
 
-Expose the route from `src/api/client.ts`.
+Expose the route from the correct `src/api/contracts/*.ts` file and re-export it through `src/api/client.ts` when the helper belongs on the public client surface.
 
 This keeps the frontend on a single typed access layer instead of scattering raw `fetch()` calls.
 
@@ -278,6 +281,7 @@ At minimum update:
 
 - `docs/api-reference.md`
 - `docs/architecture.md` if the new route changes the data model or workflow surface
+- `docs/architecture/post-decomp-file-map.md` if the route introduces a new long-lived module family
 - the root `README.md` if the change is user-visible enough to belong on the landing page
 
 ## How to add a new WebSocket stream
@@ -286,7 +290,7 @@ PARSE's current realtime transport is intentionally narrow: a dedicated per-job 
 
 When extending it:
 
-1. Prefer reusing the existing job registry in `python/server.py` rather than inventing a parallel state store.
+1. Prefer reusing the existing job registry in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) rather than inventing a parallel state store.
 2. Publish typed envelopes through `python/external_api/streaming.py`.
 3. Keep polling endpoints working; streaming must stay additive, never mandatory.
 4. Use stable event names (`job.progress`, `job.log`, `stt.segment`, etc.).
@@ -295,14 +299,14 @@ When extending it:
 
 ## How to add a new chat tool
 
-The built-in assistant works through `ParseChatTools` in `python/ai/chat_tools.py`.
+The built-in assistant works through `python/ai/chat_tools.py`, but that file is now the registry/orchestrator layer rather than the main home for concrete tool logic.
 
 For high-level MCP-only workflow macros, use `python/ai/workflow_tools.py` instead. Those tools should stay thin orchestration layers over existing low-level tool handlers and publish their own `ChatToolSpec` metadata.
 
 A new tool should follow this pattern:
 
-1. Add the new `ChatToolSpec` entry in `python/ai/chat_tools.py`
-2. Implement the execution path and validation logic in the same tool layer
+1. Implement the concrete behavior in the right `python/ai/tools/<category>_tools.py` module or the existing `python/ai/chat_tools/<family>.py` bundle if that family is already grouped there
+2. Register or aggregate the tool through `python/ai/chat_tools.py`
 3. Decide whether the tool is:
    - read-only / preview
    - job-triggering
@@ -310,7 +314,7 @@ A new tool should follow this pattern:
    - tag-related
    - write / export / merge
 4. Update `docs/ai-integration.md` to keep the 50-tool list current
-5. If the tool should also be exposed externally, add it to the MCP adapter and update `docs/api-reference.md`
+5. If the tool should also be exposed externally, update the MCP adapter modules and `docs/api-reference.md`
 
 ### Why this matters
 
@@ -318,12 +322,12 @@ PARSE's AI layer is designed around **bounded workflow tools**, not arbitrary sh
 
 ## How to expose a tool over MCP
 
-The MCP adapter lives in `python/adapters/mcp_adapter.py`.
+The MCP adapter starts at `python/adapters/mcp_adapter.py`, but most implementation work now belongs in `python/adapters/mcp/`.
 
 To expose a tool over MCP:
 
 1. Ensure the underlying functionality already exists in `ParseChatTools` or `WorkflowTools`
-2. Add a matching `@mcp.tool()` wrapper in `python/adapters/mcp_adapter.py`
+2. Add the concrete adapter/schema/dispatch support in the appropriate `python/adapters/mcp/` module and keep `python/adapters/mcp_adapter.py` as the thin entrypoint
 3. Keep parameter naming and documentation aligned with the underlying tool
 4. Re-check the exported-tool count and update docs if the MCP subset changed
 
@@ -334,16 +338,16 @@ The adapter is intentionally a curated PARSE tool surface. Low-level browser/cha
 Task 5 adds two more extension surfaces that matter for contributors:
 
 1. **OpenAPI builder** — `python/external_api/openapi.py`
-   - keep the served `/openapi.json` spec aligned with real routes in `python/server.py`
+   - keep the served `/openapi.json` spec aligned with real routes in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
    - when adding HTTP routes, update the OpenAPI path table in the same PR
-2. **HTTP MCP bridge** — `python/external_api/catalog.py` + `python/server.py`
+2. **HTTP MCP bridge** — `python/external_api/catalog.py` + `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
    - exposes MCP tool schemas over HTTP
    - executes MCP-visible tools over `POST /api/mcp/tools/{toolName}`
    - should reuse existing `ChatToolSpec` metadata rather than inventing parallel schemas
 3. **Publishable wrapper package** — `python/packages/parse_mcp/`
    - keep discovery/execution behavior aligned with the HTTP MCP bridge
    - framework wrappers should remain thin adapters over the discovered tool schema
-4. **WebSocket streaming sidecar** — `python/external_api/streaming.py` + `python/server.py`
+4. **WebSocket streaming sidecar** — `python/external_api/streaming.py` + `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
    - keep the per-job stream shape aligned with the live job registry
    - treat polling, callbacks, and streaming as complementary transports over the same job state
    - do not assume strict ordering between near-simultaneous events like `job.log` and `job.progress` unless the code explicitly enforces it

@@ -1,5 +1,8 @@
 # MC-331 — parse-back-end go signal for chat_tools PR 4 + mcp_adapter PR 1
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
 Ship a fresh parse-back-end handoff PR that makes the next backend execution order explicit after PR #120: chat_tools PR 4 first, then mcp_adapter PR 1 (`env_config.py`), with the pre-research gate preserved where PR #102 lacks grounded line ranges and LoC estimates.
 
@@ -10,11 +13,11 @@ Ship a fresh parse-back-end handoff PR that makes the next backend execution ord
 - User instruction: do **not** re-derive the task from scratch
 - Current rebuild `origin/main` at planning time: `9dd8cc7d012a38d7e697a4ba0822e0e885da19e1`
 - Current `origin/main` monolith sizes used for the scorecard refresh:
-  - `python/ai/chat_tools.py`: `3192` lines
-  - `python/adapters/mcp_adapter.py`: `2050` lines
-  - `python/server.py`: `7757` lines
+  - `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`): `3192` lines
+  - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`): `2050` lines
+  - `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`): `7757` lines
   - `src/ParseUI.tsx`: `2035` lines
-  - `python/ai/provider.py`: `1907` lines
+  - `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`): `1907` lines
 - Current open rebuild PRs at planning time:
   - `#121` docs coordinator session snapshot
   - `#112` batch-report row extraction

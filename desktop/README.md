@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-04-26:** desktop packaging is cancelled with Option 3. This directory is preserved as historical scaffolding only; do not extend it for active rebuild work.
+
 # PARSE Desktop Shell Scaffold (MC-247)
 
 This directory is an **isolated Electron scaffold** for PARSE's desktop direction (Mac + Windows), while keeping the current web UI + Python backend workflow intact.
@@ -32,7 +34,7 @@ npm install
 
 ### A) Attach Electron to the current React/Vite UI
 
-Start the PARSE backend (`python/server.py`) and Vite (`npm run dev`) in the repo root first, then run:
+Start the PARSE backend (`python/server.py`, now a thin HTTP orchestrator with concrete route domains under `python/server_routes/`) and Vite (`npm run dev`) in the repo root first, then run:
 
 ```bash
 npm run dev -- --url http://127.0.0.1:5173/

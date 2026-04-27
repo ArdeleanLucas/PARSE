@@ -1,5 +1,8 @@
 # PARSE React + Vite Pivot — Historical Reference
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 > **Status:** the React/Vite pivot has landed on `main`. This doc is kept as
 > historical context only. It preserves the `js/` → React decomposition map
 > (the mechanical migration checklist used during the pivot) so future work
@@ -30,9 +33,9 @@ Canonical record of which legacy module became which React surface. Every row ha
 | `parse.html` | 3,202 | A | Vite entry via `src/main.tsx` → `src/App.tsx` |
 | `compare.html` | 1,591 | B | Vite entry via `src/main.tsx` → `src/App.tsx` |
 | `js/annotate/parse.js` | 1,871 | A | Decomposed into `src/ParseUI.tsx` + annotate components |
-| `js/annotate/waveform-controller.js` | 734 | A | `src/hooks/useWaveSurfer.ts` |
+| `js/annotate/waveform-controller.js` | 734 | A | `src/hooks/useWaveSurfer.ts` (barrel; concrete hook pieces live under `src/hooks/wave-surfer/`) |
 | `js/annotate/region-manager.js` | 933 | A | `src/components/annotate/RegionManager.tsx` |
-| `js/annotate/annotation-panel.js` | 1,037 | A | `src/components/annotate/AnnotationPanel.tsx` |
+| `js/annotate/annotation-panel.js` | 1,037 | A | `src/components/annotate/AnnotationPanel.tsx` (barrel; implementation lives under `src/components/annotate/annotate-views/`) |
 | `js/annotate/transcript-panel.js` | 765 | A | `src/components/annotate/TranscriptPanel.tsx` |
 | `js/annotate/suggestions-panel.js` | 885 | A | `src/components/annotate/SuggestionsPanel.tsx` |
 | `js/annotate/import-export.js` | 807 | A | `src/hooks/useImportExport.ts` |
@@ -40,14 +43,14 @@ Canonical record of which legacy module became which React surface. Every row ha
 | `js/annotate/fullscreen-mode.js` | 620 | A | **Not ported.** Feature dropped from React scope — if still needed, open a scoped issue before Stage 3 deletion. |
 | `js/annotate/video-sync-panel.js` | 1,376 | A | **Not ported.** Feature dropped from React scope — if still needed, open a scoped issue before Stage 3 deletion. |
 | `js/compare/compare.js` | 4,654 | B | Decomposed into `src/ParseUI.tsx` + compare components |
-| `js/compare/concept-table.js` | 873 | B | `src/components/compare/ConceptTable.tsx` |
-| `js/compare/cognate-controls.js` | 854 | B | `src/components/compare/CognateControls.tsx` |
-| `js/compare/borrowing-panel.js` | 1,678 | B | `src/components/compare/BorrowingPanel.tsx` |
+| `js/compare/concept-table.js` | 873 | B | `src/components/compare/ConceptTable.tsx` (barrel; implementation lives under `src/components/compare/compare-panels/`) |
+| `js/compare/cognate-controls.js` | 854 | B | `src/components/compare/CognateControls.tsx` (barrel; implementation lives under `src/components/compare/compare-panels/`) |
+| `js/compare/borrowing-panel.js` | 1,678 | B | `src/components/compare/BorrowingPanel.tsx` (barrel; implementation lives under `src/components/compare/compare-panels/`) |
 | `js/compare/enrichments.js` | 1,557 | B | `src/components/compare/EnrichmentsPanel.tsx` |
 | `js/compare/speaker-import.js` | 2,147 | B | `src/components/compare/SpeakerImport.tsx` |
-| `js/shared/annotation-store.js` | 2,587 | A | Zustand `src/stores/annotationStore.ts` |
+| `js/shared/annotation-store.js` | 2,587 | A | Zustand `src/stores/annotationStore.ts` (barrel; concrete slices/helpers live under `src/stores/annotation/`) |
 | `js/shared/tags.js` | 845 | B | Zustand `src/stores/tagStore.ts` + `TagManager.tsx` |
-| `js/shared/ai-client.js` | 909 | A | `src/api/client.ts` (typed) |
+| `js/shared/ai-client.js` | 909 | A | `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) (typed) |
 | `js/shared/project-config.js` | 371 | A | Zustand `src/stores/configStore.ts` |
 | `js/shared/audio-player.js` | 269 | A | absorbed into `useWaveSurfer` |
 | `js/shared/chat-client.js` | 1,430 | A | `src/components/annotate/ChatPanel.tsx` + `useChatSession` |

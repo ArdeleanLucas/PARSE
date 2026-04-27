@@ -1,5 +1,8 @@
 # Generalize PARSE Beyond Southern Kurdish — Plan
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Status:** Proposed
 **Author:** Lucas Ardelean (with Claude audit)
 **Date:** 2026-04-20
@@ -36,11 +39,11 @@ Grouped by refactor depth.
 
 **Orthography → IPA conversion is hardcoded to SK + Arabic script.**
 
-- `python/ai/provider.py:576–681` — `southern_kurdish_arabic_to_ipa()` with a 40+ character map (`_SOUTHERN_KURDISH_CHAR_MAP`), digraph table (`_SOUTHERN_KURDISH_DIGRAPHS`), and diacritic stripping.
+- `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`):576–681` — `southern_kurdish_arabic_to_ipa()` with a 40+ character map (`_SOUTHERN_KURDISH_CHAR_MAP`), digraph table (`_SOUTHERN_KURDISH_DIGRAPHS`), and diacritic stripping.
 - Call sites on the hot path:
   - `python/ai/ipa_transcribe.py` — annotation-time IPA derivation.
   - `python/compare/cross_speaker_match.py` — cross-speaker similarity matching.
-- Epitran fallback in `python/ai/provider.py:683–699` defaults to `"kur-Arab"` when language is missing/None.
+- Epitran fallback in `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`):683–699` defaults to `"kur-Arab"` when language is missing/None.
 
 **Change needed:** extract into a transliteration registry keyed by `(language, script)`. Ship the SK map as a preset (`presets/transliteration/sdh-arab.json` or similar). Call sites receive a resolver instead of calling the SK function directly.
 

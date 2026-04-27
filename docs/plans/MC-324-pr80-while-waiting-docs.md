@@ -1,13 +1,16 @@
 # MC-324 — PR #80 while-waiting docs on sister bugs and chat_tools PR 2 seams
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 ## Objective
 Use the PR #80 wait window for two docs-only research tasks while PR #77 is under review and chat_tools PR 2 remains explicitly gated.
 
 ## Scope
 1. Audit possible sister occurrences of the Windows path-separator bug pattern across:
-   - `python/ai/chat_tools.py`
+   - `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`)
    - `python/ai/tools/`
-   - `python/adapters/mcp_adapter.py`
+   - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
 2. Pre-research chat_tools PR 2 by locating the 8 queued tools, mapping line ranges/dependencies, and proposing a grouped-module extraction structure.
 3. Prepare the research outputs for the PR #80 lane; if PR #80 merges before push, ship them as a fresh follow-up docs PR from current `origin/main`.
 

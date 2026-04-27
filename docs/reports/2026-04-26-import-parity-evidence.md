@@ -1,5 +1,8 @@
 # PARSE-rebuild Import/onboarding parity evidence — 2026-04-26
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Date:** 2026-04-26  
 **Oracle repo:** `ArdeleanLucas/PARSE`  
 **Oracle SHA:** `c2fb743fbb30119bfcd18ce9d802f3125449acdf`  
@@ -30,7 +33,7 @@
 
 ### Harness note
 The parity run used **fresh detached current-main worktrees** plus local-only harness patches in those temp worktrees only:
-- `python/server.py` port constants moved off `8766/8767` to avoid an occupied Windows listener
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) port constants moved off `8766/8767` to avoid an occupied Windows listener
 - `vite.config.ts` was given a temporary `PARSE_API_HOST` override so Vite in WSL could proxy to the Windows-side backend listener
 
 These harness changes were **not** repo changes and are not proposed for merge.

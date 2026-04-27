@@ -1,5 +1,8 @@
 # Contact Language Lexeme Fetcher — Design Plan
 
+> **Post-decomp note (2026-04-27):** pre-refactor file paths mentioned below may refer to barrels or orchestrator entrypoints rather than the concrete implementation files now used on `main`. Use [`docs/architecture/post-decomp-file-map.md`](/docs/architecture/post-decomp-file-map.md) as the canonical current-layout reference.
+
+
 **Status:** Partially implemented / design reference
 **Priority:** High — required for borrowing adjudication in thesis
 **Branch target:** branch from `origin/main` (historical note: `feat/parse-react-vite` was the old pivot lane and has been deleted)
@@ -196,7 +199,7 @@ def _ipa_from_arabic_script(arabic_text: str) -> str:
 
 ---
 
-### D2 — `python/server.py` — new compute type `"contact-lexemes"`
+### D2 — `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) — new compute type `"contact-lexemes"`
 
 **Owner:** ParseBuilder  
 **Estimated effort:** 1 hour  
@@ -242,7 +245,7 @@ def _compute_contact_lexemes(job_id: str, payload: Dict[str, Any]) -> Dict[str, 
 
 ---
 
-### D3 — `src/api/client.ts` — new API function
+### D3 — `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) — new API function
 
 **Owner:** ParseBuilder
 
@@ -424,8 +427,8 @@ These thresholds are informed by the existing `lexstat_threshold: 0.6` and shoul
 | Step | File | Time | Blocker |
 |------|------|------|---------|
 | D1 | `python/compare/contact_lexeme_fetcher.py` | 4h | None |
-| D2 | `python/server.py` — compute type + coverage endpoint | 2h | D1 |
-| D3 | `src/api/client.ts` + `types.ts` | 30m | D2 |
+| D2 | `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) — compute type + coverage endpoint | 2h | D1 |
+| D3 | `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) + `types.ts` | 30m | D2 |
 | D4 | `src/components/compare/ContactLexemePanel.tsx` | 2h | D3 |
 | D5 | Mount in `CompareMode.tsx` | 30m | D4 |
 | D6 | Tests (Python + Vitest) | 2h | D4 |

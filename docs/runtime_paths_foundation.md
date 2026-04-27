@@ -12,8 +12,8 @@ No existing execution path is wired to these helpers yet.
 
 During backend/config inspection, the current codebase still contains path assumptions that are fine for local repo usage but fragile for packaged desktop apps:
 
-- `python/server.py` resolves project files from `Path.cwd()` (`_project_root()`), so behavior depends on launch directory.
-- `python/ai/provider.py` defaults to config via `Path(__file__).resolve().parents[2] / "config" / "ai_config.json"`.
+- `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) resolves project files from `Path.cwd()` (`_project_root()`), so behavior depends on launch directory.
+- `python/ai/provider.py` (base-provider surface; concrete providers live under `python/ai/providers/`) defaults to config via `Path(__file__).resolve().parents[2] / "config" / "ai_config.json"`.
 - Core files (`parse-enrichments.json`, `source_index.json`, `config/*.json`) are currently assumed under the repo root.
 - Historical scripts/docs include machine-specific absolute examples (e.g., `C:/...`).
 
@@ -140,7 +140,7 @@ Expected shape:
 
 ## Non-goals in this task
 
-- No wiring into `python/server.py` yet.
+- No wiring into `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`) yet.
 - No changes to existing endpoint behavior.
 - No migration of existing files/data in this PR.
 
