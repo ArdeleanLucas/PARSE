@@ -1383,6 +1383,35 @@ describe("ParseUI", () => {
     expect(vi.mocked(apiClient.startCompute).mock.calls[0]).toEqual(["contact-lexemes"]);
   });
 
+  it("shows contact-lexemes progress in the header chip instead of the compare drawer", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ['ar'],
+      languages: [{ code: 'ar', name: 'Arabic' }],
+      config_path: 'config/sil_contact_languages.json',
+      concepts_csv_exists: true,
+      meta: {},
+    };
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      { jobId: 'contact-job-chip', type: 'compute:contact-lexemes', status: 'running', progress: 0.25 },
+    ]);
+    vi.mocked(apiClient.pollCompute).mockImplementation(async (computeType: string, jobId: string) => ({
+      status: 'running',
+      progress: computeType === 'contact-lexemes' && jobId === 'contact-job-chip' ? 25 : 0,
+      message: `${computeType}:${jobId}`,
+    }));
+
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Run' });
+    await switchCompareComputeMode('contact-lexemes');
+
+    await waitFor(() => expect(apiClient.pollCompute).toHaveBeenCalledWith('contact-lexemes', 'contact-job-chip'));
+    const chip = screen.getByTestId('topbar-action-statuses');
+    expect(chip.textContent).toContain('Populating CLEF reference data');
+    expect(chip.textContent).toContain('25%');
+    expect(screen.queryByText(/Running… 25%/i)).toBeNull();
+  });
+
   it("opens the decomposed Sources Report modal with academic citations from the CLEF endpoint", async () => {
     mockClefConfig = {
       configured: true,
