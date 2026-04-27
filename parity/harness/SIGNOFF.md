@@ -65,6 +65,10 @@
 
 **Ready to replace oracle at the parity/meta-gate level.** The harness now reports `raw=0`, `allowlisted=0`, `unallowed=0`, and the direct script-mode `python python/server.py` smoke passes on both oracle and rebuild current-main.
 
+## Dogfood follow-up
+
+- **Dogfood pass (Fail01):** 13 flows tested, 1 issues filed, 0 blockers. Report: `docs/reports/2026-04-27-rebuild-dogfood-report.md`. Issue links: #143.
+
 ## Coordinator sign-off
 
 - **Lucas:** ______________________________
