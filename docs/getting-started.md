@@ -1,6 +1,6 @@
 # Getting Started
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
 > This guide reflects the current React + Vite frontend, the Python backend in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), and the launcher workflow documented in the latest `README.md` and tracked scripts.
 
@@ -226,7 +226,7 @@ These blocks control the in-app assistant provider and chat behavior:
 }
 ```
 
-Supported LLM/chat backends are currently **OpenAI** and **xAI (Grok)**.
+Supported in-app chat backends are currently **OpenAI** and **xAI (Grok)**. In the backend code, provider implementations are split explicitly under `python/ai/providers/` as `openai`, `xai`, `ollama`, and `local_whisper`.
 
 For the wider provider/model overview, see [AI Integration](./ai-integration.md).
 

@@ -1,6 +1,6 @@
 # AI Integration
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
 > This document consolidates the AI provider system, model roles, configuration expectations, and the full built-in PARSE chat tool surface currently described in the repository README and code.
 
@@ -14,7 +14,7 @@ PARSE routes AI work by task type rather than forcing one model/provider to do e
 |---|---|
 | STT (speech-to-text) | faster-whisper (local), OpenAI Whisper API |
 | IPA transcription | acoustic wav2vec2 via `ipa_only` compute |
-| LLM / chat | xAI (Grok), OpenAI |
+| LLM / chat | xAI (Grok), OpenAI, Ollama |
 
 A single project can therefore mix providers across tasks:
 
@@ -142,10 +142,13 @@ These blocks configure the workflow assistant.
 }
 ```
 
-Supported provider families for chat are currently:
+Supported provider families for chat/runtime are currently:
 
 - **OpenAI**
 - **xAI / Grok**
+- **Ollama**
+
+Backend provider modules are split explicitly under `python/ai/providers/` as **`openai`**, **`xai`**, **`ollama`**, and **`local_whisper`**. The current in-app auth UI surfaces xAI/OpenAI for chat, while `local_whisper` backs the speech-first STT/ORTH paths.
 
 ## Current model roles
 
@@ -224,9 +227,9 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (50 tools)
+## Full built-in chat tool surface (54 tools)
 
-The in-app assistant currently exposes **50 PARSE-specific tools**.
+The in-app assistant currently exposes **54 PARSE-specific tools**.
 
 ### Read-only / preview tools (15)
 
@@ -257,7 +260,7 @@ The in-app assistant currently exposes **50 PARSE-specific tools**.
 | `job_status` | Read one generic job snapshot, including `errorCode`, progress, lock metadata, and log counts |
 | `job_logs` | Read structured per-job logs and surfaced crash-log tails |
 
-### Job-triggering tools (12)
+### Job-triggering tools (16)
 
 | Tool | Description |
 |---|---|
@@ -270,6 +273,10 @@ The in-app assistant currently exposes **50 PARSE-specific tools**.
 | `stt_word_level_status` | Poll status/result of a Tier 1 word-level STT job |
 | `forced_align_start` | Start Tier 2 acoustic forced alignment for one speaker |
 | `forced_align_status` | Poll status/result of a Tier 2 forced-alignment job |
+| `compute_boundaries_start` | Start a standalone BND refinement job that derives `tiers.ortho_words` from cached Tier 1 word timestamps |
+| `compute_boundaries_status` | Poll status/result of a standalone BND refinement job |
+| `retranscribe_with_boundaries_start` | Start boundary-constrained STT using the speaker's BND lane (`tiers.ortho_words`) as authoritative windows |
+| `retranscribe_with_boundaries_status` | Poll status/result of a boundary-constrained STT job |
 | `pipeline_run` | Start a one-speaker pipeline or ORTH-only run with explicit steps and overwrites |
 | `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription for one speaker |
 | `ipa_transcribe_acoustic_status` | Poll status/result of a Tier 3 acoustic IPA job |
@@ -327,12 +334,14 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 50-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 54-tool chat surface.
 
-- **Built-in chat tools**: 50
-- **Default MCP task tools**: 32
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 36
-- **Full MCP adapter surface with `expose_all_tools=true`**: 54
+- **Built-in chat tools**: 54
+- **Default MCP task tools**: 36
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 40
+- **Full MCP adapter surface with `expose_all_tools=true`**: 58
+
+The curated MCP subset includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

@@ -7,7 +7,7 @@
 **Author:** Lucas Ardelean (with Claude audit)
 **Date:** 2026-04-20
 **Related:**
-- `docs/desktop_product_architecture.md` (packaging/launch)
+- `docs/archive/desktop_product_architecture.md` (historical packaging/launch context)
 - `docs/distribution_readiness_checklist.md` (release gates)
 - `docs/plans/generic-comparison-data-pipeline.md` (lexical-data providers — already generic)
 

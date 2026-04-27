@@ -1,7 +1,7 @@
 # PARSE Desktop Distribution Readiness Checklist
 
 This checklist is the release gate companion to:
-- `docs/desktop_product_architecture.md` (canonical architecture/living plan)
+- `docs/archive/desktop_product_architecture.md` (historical architecture reference; Option 3 is cancelled)
 - `docs/plans/generalize-beyond-southern-kurdish.md` (linguistic portability work tied to the Beta gate)
 
 Use this file to track practical readiness for shipping PARSE Desktop on macOS + Windows.

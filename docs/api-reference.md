@@ -186,6 +186,8 @@ The compute dispatcher normalizes several named background workflows.
 | `ipa_only` | `ipa-only`, `ipa` | Run Tier 3 acoustic IPA fill |
 | `ortho` | `ortho_only`, `ortho-only` | Run speaker-level ORTH transcription |
 | `forced_align` | `forced-align`, `align` | Run Tier 2 forced alignment |
+| `boundaries` | `bnd`, `ortho_words`, `ortho-words` | Run standalone BND boundary refinement and write `tiers.ortho_words` |
+| `retranscribe_with_boundaries` | `retranscribe-with-boundaries`, `boundary_constrained_stt`, `boundary-constrained-stt`, `bnd_stt` | Re-run STT using saved BND windows as authoritative segment boundaries |
 | `full_pipeline` | `full-pipeline`, `pipeline` | Run the step-resilient full annotation pipeline |
 
 ## Example requests and responses
@@ -415,7 +417,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing a curated subset of `ParseChatTools` plus the 3 workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
+PARSE can also run as a stdio MCP server by exposing a curated **36-tool** subset of `ParseChatTools` plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **40 tools** total and the `expose_all_tools=true` surface is **58**.
 
 ### Start the adapter
 
@@ -451,7 +453,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Full MCP task surface (32 task tools + 3 workflow macros; 36 default adapter tools including `mcp_get_exposure_mode`)
+## Curated MCP task surface (36 `ParseChatTools` + 3 workflow macros; 40 default adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -478,6 +480,10 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `stt_word_level_status` | Poll Tier 1 word-level STT status |
 | `forced_align_start` | Start Tier 2 forced alignment |
 | `forced_align_status` | Poll forced-alignment status |
+| `compute_boundaries_start` | Start standalone BND refinement and write `tiers.ortho_words` from cached Tier 1 word timestamps |
+| `compute_boundaries_status` | Poll standalone BND refinement status |
+| `retranscribe_with_boundaries_start` | Start boundary-constrained STT from saved BND windows |
+| `retranscribe_with_boundaries_status` | Poll boundary-constrained STT status |
 | `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA |
 | `ipa_transcribe_acoustic_status` | Poll Tier 3 acoustic IPA status |
 | `pipeline_run` | Start a one-speaker full pipeline or step-subset run |
@@ -498,6 +504,8 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `detect_timestamp_offset` | Detect a constant timestamp offset from annotation↔audio/STT evidence |
 | `detect_timestamp_offset_from_pair` | Detect an offset from trusted manual anchor pairs |
 | `apply_timestamp_offset` | Apply a constant shift to speaker timestamps |
+
+`bnd_stt` is worth calling out here because PR notes often name it explicitly: it is a compute-type alias for the HTTP/background job path above, not a separately registered MCP tool name. External agents should call `retranscribe_with_boundaries_start` over MCP and use `bnd_stt` only when driving `/api/compute/{type}` or worker aliases directly.
 
 ### Write / import / curation
 
