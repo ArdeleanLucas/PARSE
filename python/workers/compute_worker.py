@@ -424,6 +424,8 @@ def _dispatch(
         return server_mod._compute_speaker_ortho(job_id, payload)
     if normalized in {"forced_align", "forced-align", "align"}:
         return server_mod._compute_speaker_forced_align(job_id, payload)
+    if normalized in {"boundaries", "bnd", "ortho_words", "ortho-words"}:
+        return server_mod._compute_speaker_boundaries(job_id, payload)
     if normalized in {"full_pipeline", "full-pipeline", "pipeline"}:
         return server_mod._compute_full_pipeline(job_id, payload)
     if normalized in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
