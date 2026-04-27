@@ -286,28 +286,12 @@ jobs:
         run: echo "Parity diff harness disabled post-cutover. See workflow comment for rationale."
 
       - name: Publish parity-harness summary
-        env:
-          REPORT_JSON: ${{ github.workspace }}/parity/harness/output/ci/report.json
-          REPORT_MD: ${{ github.workspace }}/parity/harness/output/ci/report.md
         run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          import os
-          from pathlib import Path
-
-          report = json.loads(Path(os.environ["REPORT_JSON"]).read_text(encoding="utf-8"))
-          print("# Parity diff harness")
-          print()
-          print(f"Raw diff count: **{report['diff_count_raw']}**")
-          print(f"Allowlisted diff count: **{report['diff_count_allowlisted']}**")
-          print(f"Remaining unallowlisted diff count: **{report['diff_count_unallowlisted']}**")
-          print()
-          print(f"Markdown report: `{os.environ['REPORT_MD']}`")
-          PY
+          {
+            echo "# Parity diff harness"
+            echo
+            echo "Post-cutover no-op: harness unit tests still run as regression coverage, but the oracle-vs-canonical diff step is intentionally disabled."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload parity-harness artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: parity-harness-report
-          path: parity/harness/output/ci/
-          if-no-files-found: error
+        run: echo "No parity-harness diff artifact is produced post-cutover."
