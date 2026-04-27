@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # Historical queue-prompt PR audit trail — 2026-04-26
 
 This migration started from an estimate that there were "about 10" historical queue-prompt PRs. The grounded audit found a larger coordinator queue trail:

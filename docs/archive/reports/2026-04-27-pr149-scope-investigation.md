@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # PR #149 scope investigation — 2026-04-27
 
 ## Question
