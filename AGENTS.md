@@ -99,15 +99,78 @@ $ gh pr view <N> --repo TarahAssistant/PARSE-rebuild --json mergeable,mergeState
 
 Report what `gh` returned, not what you remember from earlier. If the result surprises you (e.g., you just rebased and now it says CONFLICTING), check whether main moved between your rebase and this query.
 
-**Why this matters for the merge tail:** the merge wave tonight processed ~30 PRs in ~3 hours. Branches created during the wave go stale within minutes. Coordinator (parse-gpt) and Lucas need accurate mergeable status to decide what to merge next. False-positive CLEAN reports cause Lucas to attempt merges that fail, then chase phantom rebase requests.
+**Why this matters for the merge tail:** the merge wave tonight processed ~30 PRs in ~3 hours. Branches created during the wave go stale within minutes. Coordinator (parse-coordinator) and Lucas need accurate mergeable status to decide what to merge next. False-positive CLEAN reports cause Lucas to attempt merges that fail, then chase phantom rebase requests.
 
 **Applies to:**
 
-- Implementation lanes (parse-builder, parse-back-end) reporting their own PR status after shipping
-- Coordinator (parse-gpt) reporting on PRs queued for merge
+- Implementation lanes (parse-front-end, parse-back-end) reporting their own PR status after shipping
+- Coordinator (parse-coordinator) reporting on PRs queued for merge
 - Any handoff or task-log entry that includes a PR mergeable claim
 
 Skip the refetch only if you are ABSOLUTELY certain main hasn't moved since your last fetch in the same session. If in doubt, refetch — it's a 1-second operation.
+
+## Agent identities and parallel worktrees (added 2026-04-27)
+
+The three implementation lanes are:
+
+| Identity | Domain | Owns |
+|---|---|---|
+| `parse-back-end` | All `python/` | `python/server_routes/`, `python/ai/`, `python/adapters/`, `python/packages/parse_mcp` |
+| `parse-front-end` | All `src/` | `src/components/`, `src/stores/`, `src/hooks/`, `src/api/contracts/` |
+| `parse-coordinator` | `parity/`, `.hermes/`, `docs/` | parity harness, handoff PRs, scorecards, sign-off audits, dogfood reports, integration audits |
+
+**Renamed 2026-04-27:** `parse-builder` → `parse-front-end`, `parse-gpt` → `parse-coordinator`. The old identifiers remain valid aliases during migration; new prompts and handoff docs use the new names. Existing handoff doc paths under `.hermes/handoffs/parse-builder/` and `.hermes/handoffs/parse-gpt/` are preserved as historical record — do not rename retroactively.
+
+### Parallel work via worktrees
+
+The post-decomp module layout enables a single agent identity to run multiple in-flight PRs concurrently by maintaining git worktrees, one per active branch. Each worktree shares the canonical clone's git object store but has an isolated working tree, so two streams from the same agent never collide on filesystem state.
+
+**Convention:**
+
+- Canonical clone (long-lived, kept at `origin/main`): `/home/lucas/gh/tarahassistant/PARSE-rebuild`
+- Active worktrees (per-branch, ephemeral): `/home/lucas/gh/worktrees/<agent>-<slug>/`
+
+The slug is a 2-4 word kebab-case description of the work (e.g. `back-end-mcp-tool-coverage`, `front-end-clef-port`, `coordinator-harness-round3`).
+
+**Recipe — start a new parallel stream:**
+
+```bash
+cd /home/lucas/gh/tarahassistant/PARSE-rebuild
+git fetch origin --quiet --prune
+git worktree add -f /home/lucas/gh/worktrees/<agent>-<slug> origin/main
+cd /home/lucas/gh/worktrees/<agent>-<slug>
+git checkout -b <branch-name>
+# do the work, commit, push, open PR with --repo TarahAssistant/PARSE-rebuild
+```
+
+**Recipe — clean up after PR merges:**
+
+```bash
+cd /home/lucas/gh/tarahassistant/PARSE-rebuild
+git fetch origin --quiet --prune
+git worktree remove -f /home/lucas/gh/worktrees/<agent>-<slug>
+```
+
+GitHub auto-cleans the remote branch on merge; the local feature branch can be deleted when the worktree is removed.
+
+**Constraints:**
+
+- Every worktree inherits the parent clone's `origin` remote — re-verify `git remote -v` shows `TarahAssistant/PARSE-rebuild` before any PR (per repo-target rule above). Worktrees from the wrong parent will silently push to oracle.
+- Each worktree needs its own `npm install` if running tests or builds — `node_modules/` is per-worktree, not shared.
+- Each worktree needs distinct ports if booting the live backend — `parse-rebuild-run` already uses 8866/5174 to coexist with oracle on 8766/5173. Multiple rebuild backends would need additional port shifts.
+- Cap per agent: 2-3 concurrent worktrees. More than that and the agent loses thread; queue subsequent tasks instead of fanning out further.
+
+### Coordinator role (post-rename clarification)
+
+`parse-coordinator` (formerly `parse-gpt`) explicitly owns:
+
+- **Parity harness** — `parity/harness/` infrastructure, fixture maintenance, allowlist tightening, coverage extension
+- **Sign-off audits** — `python -m parity.harness.runner --emit-signoff`, filling `parity/harness/SIGNOFF.md`, shipping superseding scorecards
+- **Dogfood reports** — end-to-end UI dogfood passes against fixture data, filing GitHub issues for findings
+- **Process coordination** — handoff PRs, scorecard refreshes, merge-tail draining, PR queue prioritization
+- **Cross-cutting integration audits** — when a feature or bug spans multiple agents' domains, the coordinator owns the integration story
+
+`parse-coordinator` is NOT an implementation lane — it does not own monolith decompositions or large feature work. If a coordinator audit surfaces a real bug, the fix is queued to `parse-back-end` or `parse-front-end`, not done in-line by the coordinator.
 
 ## Screenshot convention (private-repo constraint)
 
