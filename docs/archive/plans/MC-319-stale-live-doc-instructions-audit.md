@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # MC-319 — Stale docs that still read like live instructions
 
 > **Capture-time audit plan (2026-04-21):** this file records the stale-doc sweep performed on the `docs/mc-317-branch-cleanup-commands` branch. Treat the repo/worktree facts below as audit-time context, not evergreen operating defaults.

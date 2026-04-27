@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # ParseBuilder — Personal TODO
 
 > **Updated:** 2026-04-20 — trimmed to a minimal pointer. The historic completion log

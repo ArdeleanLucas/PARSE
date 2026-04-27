@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # MC-320 — Root and non-doc markdown audit
 
 > **Capture-time audit plan (2026-04-21):** this plan records the markdown sweep performed on the `docs/mc-317-branch-cleanup-commands` branch after Stage 3 / PR #58 removed the legacy frontend runtime.

@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # MC-326 — stt_start sourceWav POSIX payload fix
 
 ## Objective

@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # PARSE Option-1 Rebuild — Phase 0 Shared Contract Checklist
 
 **Status:** Phase 0 baseline gate signed (source set, precedence order, oracle baseline, and evidence frozen for the current rebuild wave; broader Phase 0 checklist remains open)

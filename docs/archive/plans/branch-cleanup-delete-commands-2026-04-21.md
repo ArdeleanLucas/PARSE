@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # PARSE branch cleanup delete commands — 2026-04-21
 
 > **Historical branch-state snapshot (2026-04-21):** this memo captures one validated deletion pass from the repo state at that time. The branch set has already drifted since capture. Use the commands below only after re-running the preflight and confirming the live refs still match.

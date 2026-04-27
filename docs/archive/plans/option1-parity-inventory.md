@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../../).
+
 # PARSE Option-1 Rebuild — Parity Inventory and Evidence Matrix
 
 **Status:** Proposed planning doc for the separate rebuild repo  
