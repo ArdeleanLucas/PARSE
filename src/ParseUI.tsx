@@ -94,6 +94,17 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 
+function persistCompareNotes(conceptId: number, value: string) {
+  try {
+    const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
+    const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
+    stored[conceptId.toString()] = value;
+    window.localStorage.setItem(COMPARE_NOTES_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // non-fatal localStorage failure
+  }
+}
+
 export { pickOrthoIntervalForConcept } from './lib/parseUIUtils';
 export {
   parseReferenceFormList,
@@ -2005,17 +2016,12 @@ export function ParseUI() {
               </SectionCard>
 
               <SectionCard title="Notes">
-                <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                  onBlur={() => {
-                    try {
-                      const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
-                      const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
-                      stored[conceptId.toString()] = notes;
-                      window.localStorage.setItem(COMPARE_NOTES_STORAGE_KEY, JSON.stringify(stored));
-                    } catch {
-                      // non-fatal localStorage failure
-                    }
-                  }}
+                <textarea value={notes} onChange={e => {
+                  const nextValue = e.target.value;
+                  setNotes(nextValue);
+                  persistCompareNotes(conceptId, nextValue);
+                }}
+                  onBlur={() => persistCompareNotes(conceptId, notes)}
                   placeholder="Add observations, etymological notes, or questions for review…"
                   className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
               </SectionCard>

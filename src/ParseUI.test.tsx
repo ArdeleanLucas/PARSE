@@ -1258,12 +1258,11 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
-  it("persists compare notes per concept via localStorage on blur", () => {
+  it("persists compare notes per concept via localStorage without requiring a blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
 
     fireEvent.change(notesField, { target: { value: "Loanword candidate from Arabic." } });
-    fireEvent.blur(notesField);
     unmount();
 
     render(<ParseUI />);
