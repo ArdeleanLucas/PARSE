@@ -286,28 +286,16 @@ jobs:
         run: echo "Parity diff harness disabled post-cutover. See workflow comment for rationale."
 
       - name: Publish parity-harness summary
-        env:
-          REPORT_JSON: ${{ github.workspace }}/parity/harness/output/ci/report.json
-          REPORT_MD: ${{ github.workspace }}/parity/harness/output/ci/report.md
         run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          import os
-          from pathlib import Path
+          {
+            echo "# Parity diff harness"
+            echo
+            echo "Post-cutover status: **disabled**"
+            echo ""
+            echo "The rebuild→canonical cutover completed on 2026-04-27, so the old oracle-vs-rebuild diff run is intentionally skipped."
+            echo "Harness unit tests above still run as regression coverage on the harness code."
+            echo "If a true diff is needed again, repoint the workflow at ArdeleanLucas/PARSE-pre-rebuild-archive."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          report = json.loads(Path(os.environ["REPORT_JSON"]).read_text(encoding="utf-8"))
-          print("# Parity diff harness")
-          print()
-          print(f"Raw diff count: **{report['diff_count_raw']}**")
-          print(f"Allowlisted diff count: **{report['diff_count_allowlisted']}**")
-          print(f"Remaining unallowlisted diff count: **{report['diff_count_unallowlisted']}**")
-          print()
-          print(f"Markdown report: `{os.environ['REPORT_MD']}`")
-          PY
-
-      - name: Upload parity-harness artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: parity-harness-report
-          path: parity/harness/output/ci/
-          if-no-files-found: error
+      - name: Skip parity-harness artifact upload (no diff output post-cutover)
+        run: echo "No parity diff artifact is produced post-cutover."
