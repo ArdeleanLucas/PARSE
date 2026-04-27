@@ -3,10 +3,18 @@
 **Browser-based dual-mode workstation for linguistic fieldwork.**
 Annotate per-speaker recordings with tiered IPA/orthography, then compare across speakers for cognate adjudication, borrowing detection, and export-ready historical-linguistic datasets.
 
-<!-- TODO: Add a hero GIF here showing the unified React shell: Annotate waveform + tiers, Compare concept matrix + CLEF panel, and the AI chat dock. A wide GitHub-friendly GIF or screenshot strip would work well. -->
-<!-- TODO: Add 2-3 static screenshots below the hero once the current UI settles: Annotate mode, Compare mode, and Lexeme Search / CLEF panels. -->
+| Annotate mode | Compare mode |
+| --- | --- |
+| ![Annotate mode](docs/pr-assets/pr58-annotateview-workstation.png) | ![Compare mode](docs/pr-assets/pr76-compare-table.png) |
 
-> **Status**: Active development. Thesis-critical features are landing frequently, interfaces and file contracts are still evolving, and PARSE should currently be treated as research software rather than beta software.
+> **Status**: Active development. The rebuild→canonical cutover is complete and this repository is now the primary PARSE, but thesis-critical features are still landing frequently, interfaces and file contracts still evolve, and the workstation should still be treated as research software rather than beta software.
+
+## Project state
+
+- **Cutover completed:** 2026-04-27
+- **Canonical repository:** `ArdeleanLucas/PARSE`
+- **Historical pre-cutover archive:** `ArdeleanLucas/PARSE-pre-rebuild-archive`
+- **Cutover gate record:** `parity/harness/SIGNOFF.md`
 
 ## ✨ What Makes PARSE Different
 

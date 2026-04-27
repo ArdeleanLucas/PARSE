@@ -1,4 +1,4 @@
-> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](..).
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../).
 
 > **ARCHIVED 2026-04-26** — Option 3 (desktop platform pivot) is cancelled per Lucas decision. This document is preserved for historical context only; do not implement against it. The rebuild lane focuses exclusively on Option 1 (web/React monolith decomposition + parity evidence) until further notice.
 
