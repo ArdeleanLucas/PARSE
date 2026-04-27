@@ -14,6 +14,10 @@ def test_server_py_is_thin_orchestrator() -> None:
     assert line_count < 2000, f"python/server.py should be <2000 LoC after decomposition, got {line_count}"
 
 
+def test_route_binding_installer_is_exposed() -> None:
+    assert callable(server._install_route_bindings)
+
+
 @pytest.mark.parametrize(
     ("module_name", "handler_name"),
     [
@@ -27,8 +31,9 @@ def test_server_py_is_thin_orchestrator() -> None:
         ("media", "_api_post_normalize"),
     ],
 )
-def test_route_handlers_are_installed_from_server_routes_modules(module_name: str, handler_name: str) -> None:
+def test_route_handlers_can_be_installed_from_server_routes_modules(module_name: str, handler_name: str) -> None:
     module = __import__(f"server_routes.{module_name}", fromlist=[handler_name])
+    server._install_route_bindings()
     assert getattr(server.RangeRequestHandler, handler_name) is getattr(module, handler_name)
 
 

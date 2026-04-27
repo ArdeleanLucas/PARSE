@@ -125,6 +125,11 @@ from app.services.workspace_config import build_workspace_frontend_config as _ap
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.streaming import JobStreamingSidecar
 
+# Route modules import `server` by name. When this file runs as a script its
+# module name is `__main__`; register that in-flight module under `server` too
+# so route helpers do not dual-load a second copy of server.py.
+sys.modules.setdefault("server", sys.modules[__name__])
+
 try:
     from compare import cognate_compute as cognate_compute_module
 except Exception:
@@ -175,6 +180,19 @@ _jobs_lock = threading.Lock()
 
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
+
+_ROUTE_MODULE_NAMES = (
+    "annotate",
+    "compare",
+    "jobs",
+    "exports",
+    "config",
+    "clef",
+    "chat",
+    "media",
+)
+_ROUTE_BINDINGS_LOCK = threading.Lock()
+_ROUTE_BINDINGS_INSTALLED = False
 
 _chat_sessions: Dict[str, Dict[str, Any]] = {}
 _chat_sessions_lock = threading.Lock()
@@ -1189,6 +1207,14 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path: str) -> str:
         return str(_resolve_static_request_path(path))
 
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_api_") or name in {"_parse_single_range", "_serve_range", "_send_416"}:
+            _install_route_bindings()
+            attr = getattr(type(self), name, None)
+            if attr is not None:
+                return attr.__get__(self, type(self))
+        raise AttributeError("{0!r} object has no attribute {1!r}".format(type(self).__name__, name))
+
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Content-Length", "0")
@@ -1662,76 +1688,35 @@ def _send_416(self, file_size: int, reason: str = "") -> None:
     self.send_header("Content-Length", "0")
     self.end_headers()
 
-# Route-domain re-exports
-from server_routes.annotate import *  # noqa: F401,F403
-from server_routes.compare import *  # noqa: F401,F403
-from server_routes.jobs import *  # noqa: F401,F403
-from server_routes.exports import *  # noqa: F401,F403
-from server_routes.config import *  # noqa: F401,F403
-from server_routes.clef import *  # noqa: F401,F403
-from server_routes.chat import *  # noqa: F401,F403
-from server_routes.media import *  # noqa: F401,F403
+def _install_route_bindings() -> None:
+    global _ROUTE_BINDINGS_INSTALLED
+    if _ROUTE_BINDINGS_INSTALLED:
+        return
+    with _ROUTE_BINDINGS_LOCK:
+        if _ROUTE_BINDINGS_INSTALLED:
+            return
+        import importlib
 
-# Install extracted route handlers onto the HTTP handler class
-RangeRequestHandler._api_get_annotation = _api_get_annotation
-RangeRequestHandler._api_get_stt_segments = _api_get_stt_segments
-RangeRequestHandler._api_get_pipeline_state = _api_get_pipeline_state
-RangeRequestHandler._api_post_annotation = _api_post_annotation
-RangeRequestHandler._api_post_offset_detect = _api_post_offset_detect
-RangeRequestHandler._api_post_offset_detect_from_pair = _api_post_offset_detect_from_pair
-RangeRequestHandler._api_post_offset_apply = _api_post_offset_apply
-RangeRequestHandler._api_get_enrichments = _api_get_enrichments
-RangeRequestHandler._api_post_enrichments = _api_post_enrichments
-RangeRequestHandler._api_post_lexeme_note = _api_post_lexeme_note
-RangeRequestHandler._api_post_lexeme_notes_import = _api_post_lexeme_notes_import
-RangeRequestHandler._api_get_lexeme_search = _api_get_lexeme_search
-RangeRequestHandler._api_get_tags = _api_get_tags
-RangeRequestHandler._api_post_tags_merge = _api_post_tags_merge
-RangeRequestHandler._api_get_jobs = _api_get_jobs
-RangeRequestHandler._api_get_job = _api_get_job
-RangeRequestHandler._api_get_job_logs = _api_get_job_logs
-RangeRequestHandler._api_get_jobs_active = _api_get_jobs_active
-RangeRequestHandler._api_get_job_error_logs = _api_get_job_error_logs
-RangeRequestHandler._api_get_worker_status = _api_get_worker_status
-RangeRequestHandler._api_post_compute_start = _api_post_compute_start
-RangeRequestHandler._api_post_compute_status = _api_post_compute_status
-RangeRequestHandler._api_get_export_lingpy = _api_get_export_lingpy
-RangeRequestHandler._api_get_export_nexus = _api_get_export_nexus
-RangeRequestHandler._api_post_concepts_import = _api_post_concepts_import
-RangeRequestHandler._api_post_tags_import = _api_post_tags_import
-RangeRequestHandler._api_get_config = _api_get_config
-RangeRequestHandler._api_update_config = _api_update_config
-RangeRequestHandler._api_auth_key = _api_auth_key
-RangeRequestHandler._api_auth_status = _api_auth_status
-RangeRequestHandler._api_auth_start = _api_auth_start
-RangeRequestHandler._api_auth_poll = _api_auth_poll
-RangeRequestHandler._api_auth_logout = _api_auth_logout
-RangeRequestHandler._api_get_contact_lexeme_coverage = _api_get_contact_lexeme_coverage
-RangeRequestHandler._api_get_clef_config = _api_get_clef_config
-RangeRequestHandler._api_post_clef_config = _api_post_clef_config
-RangeRequestHandler._api_post_clef_form_selections = _api_post_clef_form_selections
-RangeRequestHandler._api_get_clef_catalog = _api_get_clef_catalog
-RangeRequestHandler._api_get_clef_providers = _api_get_clef_providers
-RangeRequestHandler._api_get_clef_sources_report = _api_get_clef_sources_report
-RangeRequestHandler._api_get_chat_session = _api_get_chat_session
-RangeRequestHandler._api_get_mcp_exposure = _api_get_mcp_exposure
-RangeRequestHandler._api_get_mcp_tools = _api_get_mcp_tools
-RangeRequestHandler._api_get_mcp_tool = _api_get_mcp_tool
-RangeRequestHandler._api_post_mcp_tool = _api_post_mcp_tool
-RangeRequestHandler._api_post_chat_session = _api_post_chat_session
-RangeRequestHandler._api_post_chat_run_start = _api_post_chat_run_start
-RangeRequestHandler._api_post_chat_run_status = _api_post_chat_run_status
-RangeRequestHandler._api_post_onboard_speaker = _api_post_onboard_speaker
-RangeRequestHandler._api_post_normalize = _api_post_normalize
-RangeRequestHandler._api_post_onboard_speaker_status = _api_post_onboard_speaker_status
-RangeRequestHandler._api_post_normalize_status = _api_post_normalize_status
-RangeRequestHandler._api_post_stt_start = _api_post_stt_start
-RangeRequestHandler._api_post_stt_status = _api_post_stt_status
-RangeRequestHandler._api_post_suggest = _api_post_suggest
-RangeRequestHandler._api_get_spectrogram = _api_get_spectrogram
-RangeRequestHandler._parse_single_range = _parse_single_range
-RangeRequestHandler._serve_range = _serve_range
-RangeRequestHandler._send_416 = _send_416
+        for module_name in _ROUTE_MODULE_NAMES:
+            module = importlib.import_module("server_routes.{0}".format(module_name))
+            for export_name in getattr(module, "__all__", ()):
+                export = getattr(module, export_name)
+                globals()[export_name] = export
+                if export_name.startswith("_api_"):
+                    setattr(RangeRequestHandler, export_name, export)
+
+        RangeRequestHandler._parse_single_range = _parse_single_range
+        RangeRequestHandler._serve_range = _serve_range
+        RangeRequestHandler._send_416 = _send_416
+        _ROUTE_BINDINGS_INSTALLED = True
+
+
+def __getattr__(name: str) -> Any:
+    if name.startswith("_") and not name.startswith("__"):
+        _install_route_bindings()
+        if name in globals():
+            return globals()[name]
+    raise AttributeError("module {0!r} has no attribute {1!r}".format(__name__, name))
 
 def _get_local_ips() -> List[str]:
     ips: List[str] = []
@@ -1870,6 +1855,8 @@ def main() -> None:
 
     os.chdir(serve_dir)
 
+    _install_route_bindings()
+
     server_address = (HOST, PORT)
     httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
 
@@ -1908,3 +1895,7 @@ def main() -> None:
             pass
         _shutdown_websocket_sidecar()
         _shutdown_persistent_worker()
+
+
+if __name__ == "__main__":
+    main()
