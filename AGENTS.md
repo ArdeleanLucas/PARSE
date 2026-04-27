@@ -218,6 +218,39 @@ When `parse-coordinator` reviews a `port: oracle #N` PR, the agent's claim that 
 
 This rule applies specifically to `port: oracle #N` PRs. It does not apply to feature PRs (where the agent is writing new code from scratch) or refactor PRs (where parity harness is the gate).
 
+## Standard validation commands (added 2026-04-27)
+
+Use these exact invocations in PR validation. Paraphrasing breaks in subtle ways — the wrong wrapper can wedge in fresh worktree configs.
+
+| Purpose | Command |
+|---|---|
+| Frontend tests (one-shot) | `npx vitest run` |
+| Frontend tests (specific file) | `npx vitest run path/to/file.test.ts` |
+| Frontend tests (watch) | `npx vitest` |
+| TypeScript check | `./node_modules/.bin/tsc --noEmit` |
+| Frontend build | `npm run build` |
+| Backend tests (full, two known-baseline failures excluded) | `PYTHONPATH=python python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults'` |
+| Backend tests (targeted) | `PYTHONPATH=python python3 -m pytest python/path/to/test_*.py -q` |
+| Backend lint (pre-push, parse-back-end mandatory) | `uvx ruff check python/ --select E9,F63,F7,F82` |
+| Server boot smoke (script mode) | `python python/server.py` — must bind without NameError post-PR #139 |
+| Parity harness | `PYTHONPATH=. python -m parity.harness.runner --oracle ../ardeleanlucas/parse --rebuild . --fixture saha-2speaker` |
+
+### Avoid these patterns
+
+- **`npm run test -- --run`** — the `npm run test` script is already `"vitest run"`, so this double-passes `--run` and wedges in some fresh-worktree configs. Use `npx vitest run` instead. Found via parse-front-end PR #149 ship report (2026-04-27).
+- **`pytest python/`** without `PYTHONPATH=python` — modules under `python/` won't resolve their internal imports.
+- **`python server.py`** from a workspace under `/mnt/` — server.py refuses Windows-mount workspaces (FATAL guard, by design — WSL ext4 only).
+- **Running test commands from the canonical clone while a worktree has uncommitted changes** — vitest may pick up the wrong working tree state. Run validation in the worktree where the changes live.
+
+### Why these commands are codified here
+
+Drift between agent prompts ("npm run test", "pytest python/", "uvx ruff", etc.) caused intermittent CI surprises (PR #133 ruff F821, parse-front-end PR #149 vitest wedge). Standardizing to one canonical invocation per purpose eliminates that class of problem.
+
+Update this table when:
+- A test framework version change shifts the invocation
+- A new validation gate is added (e.g., a new ruff rule subset)
+- A worktree-specific pitfall surfaces
+
 ## Screenshot convention (private-repo constraint)
 
 **Use markdown links, NOT inline image embeds, for screenshots in PR descriptions.** This repo is private; inline `<img>` fetches in PR bodies do not carry repo auth, so `raw.githubusercontent.com` and `github.com/.../blob/...?raw=1` URLs 404 silently for everyone — including the PR author.
