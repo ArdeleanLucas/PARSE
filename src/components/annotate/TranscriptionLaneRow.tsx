@@ -20,6 +20,8 @@ export interface LaneStrip {
   migrate?: () => void;
   status?: "idle" | "loading" | "loaded" | "error";
   emptyHint?: string;
+  sourceBadge?: string;
+  sourceBadgeTitle?: string;
 }
 
 const LANE_HEIGHT_PX = 28;
@@ -79,11 +81,20 @@ export function TranscriptionLaneRow({
   return (
     <div className="relative flex items-stretch">
       <div
-        className="flex shrink-0 items-center justify-center border-r border-slate-100 text-[9px] font-semibold uppercase tracking-wider"
+        data-testid={`lane-label-${strip.kind}`}
+        className="flex shrink-0 flex-col items-center justify-center border-r border-slate-100 text-[9px] font-semibold uppercase tracking-wider"
         style={{ width: 56, color }}
-        title={`${strip.label} lane`}
+        title={strip.sourceBadgeTitle ?? `${strip.label} lane`}
       >
-        {strip.label}
+        <span>{strip.label}</span>
+        {strip.sourceBadge ? (
+          <span
+            data-testid={`lane-source-badge-${strip.kind}`}
+            className="mt-0.5 rounded bg-amber-100 px-1 text-[7px] font-bold tracking-wider text-amber-800 ring-1 ring-amber-300"
+          >
+            {strip.sourceBadge}
+          </span>
+        ) : null}
       </div>
       <div className="relative flex-1 overflow-hidden" style={{ height: LANE_HEIGHT_PX }}>
         <div

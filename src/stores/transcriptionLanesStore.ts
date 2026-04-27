@@ -32,6 +32,7 @@ interface PersistedState {
 interface TranscriptionLanesStore extends PersistedState {
   sttBySpeaker: Record<string, SttSegment[]>;
   sttStatus: Record<string, "idle" | "loading" | "loaded" | "error">;
+  sttSourceBySpeaker: Record<string, string | undefined>;
   selectedInterval: SelectedInterval | null;
 
   toggleLane: (kind: LaneKind) => void;
@@ -89,14 +90,17 @@ async function fetchSttInto(
   try {
     const payload = await getSttSegments(speaker);
     const segments = Array.isArray(payload?.segments) ? payload.segments : [];
+    const source = typeof payload?.source === "string" ? payload.source : undefined;
     set((s) => ({
       sttBySpeaker: { ...s.sttBySpeaker, [speaker]: segments },
       sttStatus: { ...s.sttStatus, [speaker]: "loaded" },
+      sttSourceBySpeaker: { ...s.sttSourceBySpeaker, [speaker]: source },
     }));
   } catch {
     set((s) => ({
       sttBySpeaker: { ...s.sttBySpeaker, [speaker]: [] },
       sttStatus: { ...s.sttStatus, [speaker]: "error" },
+      sttSourceBySpeaker: { ...s.sttSourceBySpeaker, [speaker]: undefined },
     }));
   }
 }
@@ -107,6 +111,7 @@ export const useTranscriptionLanesStore = create<TranscriptionLanesStore>()(
       lanes: DEFAULT_LANES,
       sttBySpeaker: {},
       sttStatus: {},
+      sttSourceBySpeaker: {},
       selectedInterval: null,
 
       toggleLane: (kind) =>

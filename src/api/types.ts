@@ -80,6 +80,10 @@ export interface SttSegmentsPayload {
   source_wav?: string;
   language?: string | null;
   segments: SttSegment[];
+  /** Provenance marker for the cached STT payload. Set to
+   * ``"boundary_constrained"`` when the cache was populated by the
+   * BND-anchored re-transcription flow instead of vanilla STT. */
+  source?: string;
 }
 
 export interface ConceptEntry {

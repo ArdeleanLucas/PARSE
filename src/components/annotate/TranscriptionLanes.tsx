@@ -103,6 +103,7 @@ export function TranscriptionLanes({
   const lanes = useTranscriptionLanesStore((s) => s.lanes);
   const sttBySpeaker = useTranscriptionLanesStore((s) => s.sttBySpeaker);
   const sttStatus = useTranscriptionLanesStore((s) => s.sttStatus);
+  const sttSourceBySpeaker = useTranscriptionLanesStore((s) => s.sttSourceBySpeaker);
   const ensureStt = useTranscriptionLanesStore((s) => s.ensureStt);
   const selectedInterval = useTranscriptionLanesStore((s) => s.selectedInterval);
   const setSelectedInterval = useTranscriptionLanesStore((s) => s.setSelectedInterval);
@@ -380,6 +381,11 @@ export function TranscriptionLanes({
       // for legacy records that haven't been touched since the new tier
       // landed. Edits create the tier entry and from then on it wins.
       if (kind === "stt") {
+        const sttSource = sttSourceBySpeaker[speaker];
+        const sourceBadge = sttSource === "boundary_constrained" ? "BND" : undefined;
+        const sourceBadgeTitle = sourceBadge
+          ? "STT was re-transcribed using your BND boundaries (boundary-constrained mode)."
+          : undefined;
         const tierIvs: AnnotationInterval[] = record?.tiers?.stt?.intervals ?? [];
         const hasTierStt = tierIvs.length > 0;
         if (hasTierStt) {
@@ -396,6 +402,8 @@ export function TranscriptionLanes({
             label: LANE_LABELS.stt,
             intervals: filtered,
             sourceIndices,
+            sourceBadge,
+            sourceBadgeTitle,
           });
         } else {
           // Pre-migration: STT sourced from the API cache. Emit identity
@@ -413,6 +421,8 @@ export function TranscriptionLanes({
             needsMigration: true,
             migrate: () => ensureSttTier(speaker, segs),
             status: sttStatus[speaker] ?? "idle",
+            sourceBadge,
+            sourceBadgeTitle,
           });
         }
         continue;
@@ -435,7 +445,7 @@ export function TranscriptionLanes({
       });
     }
     return out;
-  }, [lanes, sttBySpeaker, sttStatus, record, speaker]);
+  }, [lanes, sttBySpeaker, sttStatus, sttSourceBySpeaker, record, speaker]);
 
   const stripByKind = useCallback(
     (kind: LaneKind): LaneStrip | undefined => strips.find((s) => s.kind === kind),
