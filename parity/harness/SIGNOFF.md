@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** The rebuild→canonical cutover is complete and the CI parity step is now a no-op gate; these harness docs remain only as historical reference plus regression-test context.
+
 # PARSE Option 1 sign-off — BND-wave coordinator closeout (2026-04-27)
 
 This file supersedes the earlier draft snapshot for the BND/MCP port wave.
