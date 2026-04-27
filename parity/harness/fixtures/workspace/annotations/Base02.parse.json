@@ -1,8 +1,8 @@
 {
   "version": 1,
   "project_id": "parse-parity-fixture",
-  "speaker": "Base01",
-  "source_audio": "audio/original/Base01/source.wav",
+  "speaker": "Base02",
+  "source_audio": "audio/original/Base02/source.wav",
   "source_audio_duration_sec": 0.1,
   "tiers": {
     "ipa": {
@@ -12,7 +12,7 @@
         {
           "start": 0.0,
           "end": 0.1,
-          "text": "aʃ"
+          "text": "aʂ"
         }
       ]
     },
@@ -23,7 +23,7 @@
         {
           "start": 0.0,
           "end": 0.1,
-          "text": "ash"
+          "text": "aş"
         }
       ]
     },
@@ -45,14 +45,14 @@
         {
           "start": 0.0,
           "end": 0.1,
-          "text": "Base01"
+          "text": "Base02"
         }
       ]
     }
   },
   "metadata": {
     "language_code": "sdh",
-    "created": "2026-01-01T00:00:00Z",
-    "modified": "2026-01-01T00:00:00Z"
+    "created": "2026-01-01T00:00:10Z",
+    "modified": "2026-01-01T00:00:10Z"
   }
 }

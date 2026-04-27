@@ -8,6 +8,15 @@
           "duration_sec": 0.1
         }
       ]
+    },
+    "Base02": {
+      "source_wavs": [
+        {
+          "filename": "audio/original/Base02/source.wav",
+          "is_primary": true,
+          "duration_sec": 0.1
+        }
+      ]
     }
   }
 }

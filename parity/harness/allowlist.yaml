@@ -1,0 +1,5 @@
+version: 1
+rules: []
+# No permanent allowlist entries are required at the current Round 2 starting point.
+# Add a rule only when a diff is truly non-semantic or an accepted oracle deviation,
+# and record the exact reason + reason_ref instead of leaving TODO placeholders.

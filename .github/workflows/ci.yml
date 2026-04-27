@@ -234,10 +234,10 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install parity-harness test dependency
+      - name: Install parity-harness test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
+          python -m pip install pytest pyyaml
 
       - name: Run parity-harness unit tests
         env:
@@ -270,7 +270,9 @@ jobs:
           report = json.loads(Path(os.environ["REPORT_JSON"]).read_text(encoding="utf-8"))
           print("# Parity diff harness")
           print()
-          print(f"Current diff count: **{report['diff_count']}**")
+          print(f"Raw diff count: **{report['diff_count_raw']}**")
+          print(f"Allowlisted diff count: **{report['diff_count_allowlisted']}**")
+          print(f"Remaining unallowlisted diff count: **{report['diff_count_unallowlisted']}**")
           print()
           print(f"Markdown report: `{os.environ['REPORT_MD']}`")
           PY

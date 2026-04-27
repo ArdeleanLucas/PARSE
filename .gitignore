@@ -32,6 +32,8 @@ project.json
 # Allow committed harness fixtures that intentionally mirror runtime artifact names.
 !parity/harness/fixtures/workspace/project.json
 !parity/harness/fixtures/workspace/source_index.json
+!parity/harness/fixtures/workspace/concepts.csv
 !parity/harness/fixtures/workspace/annotations/
 !parity/harness/fixtures/workspace/annotations/Base01.parse.json
+!parity/harness/fixtures/workspace/annotations/Base02.parse.json
 docs/bugs.md
