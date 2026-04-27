@@ -481,25 +481,16 @@ The following validation items remain important, but they are **not hard blocker
 
 ## Branch + Worktree Policy
 
-### Canonical repository path
-- **Active execution repo in this rebuild lane:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
-- **Live/oracle PARSE repo:** `/home/lucas/gh/ardeleanlucas/parse`
-  - Treat this oracle repo and `github.com/ArdeleanLucas/PARSE` as the behavior source of truth until parity is explicitly signed off.
-  - Refactor implementation should happen here in the rebuild repo, not on the live/oracle repo.
-- **Archive/divergent clone:** `/home/lucas/gh/ArdeleanLucas/PARSE`
-  - This uppercase clone currently follows archival/worktree history and may not match `origin/main`.
-  - Do not use it as branch truth without an explicit fetch/prune check.
-
-### Historical worktrees (traceability only)
-- Oracle integration root: `/home/lucas/gh/ardeleanlucas/parse`
-- Historical pivot worktrees under `/home/lucas/gh/worktrees/PARSE/` remain useful for archaeology only.
-- These worktrees describe migration history; they are not the current rebuild repo source of truth.
+### Canonical clone path
+- **Canonical PARSE clone:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
+  - Directory name is historical (preserved post-cutover to avoid breaking worktrees and `parse-*` helper scripts).
+  - `git remote -v` must show `origin git@github.com:ArdeleanLucas/PARSE.git` (the canonical post-cutover repo) before any work.
+  - This is the only PARSE clone on the PC. Pre-cutover oracle and archive clones have been removed; their history is preserved in `/home/lucas/gh/backups/2026-04-27-pre-cutover/` (git bundles + workspace rsync).
 
 ### Active development rule
-- **New refactor/rebuild work should branch from `origin/main` in `/home/lucas/gh/tarahassistant/PARSE-rebuild`.**
-- Keep `ArdeleanLucas/PARSE` stable unless Lucas explicitly requests a live-repo bugfix or a controlled sync/revert PR.
-- `feat/annotate-react`, `feat/compare-react`, `feat/parse-react-vite` (merged/deleted), and `feat/annotate-ui-redesign` are historical pivot lanes, not default bases for new rebuild work.
-- Do not assume stale track branches or archival clones reflect current `main`.
+- New work branches from `origin/main` in the canonical clone, in a worktree under `/home/lucas/gh/worktrees/<agent>-<slug>/` (full recipe in §Parallel work via worktrees above).
+- Use `parse-worktree-new <slug>` to create worktrees; use `parse-worktree-clean` to remove merged ones.
+- Do not branch from pre-cutover archive bundles or stale local refs without an explicit reason; cutover-era history is read-only.
 
 ## Ownership + Coordination
 
