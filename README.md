@@ -7,7 +7,9 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 | --- | --- |
 | ![Annotate mode](docs/pr-assets/pr58-annotateview-workstation.png) | ![Compare mode](docs/pr-assets/pr76-compare-table.png) |
 
-> **Status**: Active development. The rebuild→canonical cutover is complete and this repository is now the primary PARSE, but thesis-critical features are still landing frequently, interfaces and file contracts still evolve, and the workstation should still be treated as research software rather than beta software.
+![CLEF failure surfacing](docs/pr-assets/pr160-clef-no-forms-soft-failure.png)
+
+> **Status**: Active development. The rebuild→canonical cutover is complete and this repository is now the primary PARSE, but thesis-critical features are still landing frequently, interfaces and file contracts still evolve, and the workstation should be treated as a **beta-quality research workstation**, not a stable production product.
 
 ## Project state
 
@@ -20,8 +22,8 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 
 - **Dual-mode unified React shell** for annotation and comparison in one workspace
 - **Fieldwork-first design** for long recordings, uneven metadata, and iterative review
-- **AI-native workflow surface** with a built-in chat assistant powered by **50 PARSE-specific tools**
-- **Full MCP server mode** exposing a curated **32-tool task surface** by default (**36** adapter tools including workflow macros + `mcp_get_exposure_mode`)
+- **AI-native workflow surface** with a built-in chat assistant powered by **54 PARSE-specific tools**
+- **Full MCP server mode** exposing a curated **36-tool task surface** by default (**40** adapter tools including workflow macros + `mcp_get_exposure_mode`)
 - **CLEF — Contact Lexeme Explorer Feature** for borrowing adjudication via a 10-provider contact-language lookup stack
 - **Lexical Anchor Alignment System** for locating repeated lexical items across long recordings and across speakers
 - **Export pipeline** for LingPy TSV and NEXUS outputs used in downstream comparative workflows
@@ -60,7 +62,8 @@ It combines:
 - **Four annotation tiers**: IPA, orthography, concept, and speaker
 - **Stacked transcription lanes** for STT, IPA, ORTH, plus optional **Words (Tier 1)** and **Boundaries (Tier 2)** diagnostic lanes with synchronized horizontal scrolling and inline edit / split / merge / delete controls
 - **Audio normalization**, **speaker-level STT**, **ORTH transcription**, and **acoustic IPA fill** jobs
-- **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries plus paired Tier 1/Tier 2 read-only overlays for spotting boundary drift
+- **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries plus paired Tier 1/Tier 2 diagnostic lanes for spotting boundary drift
+- **Annotate-side Phonetic tools** with `Refine Boundaries (BND)` and `Re-run STT with Boundaries`, gated by STT word timestamps and existing `tiers.ortho_words` intervals
 - **Per-speaker undo/redo** for annotation edits, including merge recovery and STT-tier migration
 - **Draggable timestamp correction** and clip-bounded playback for manual review
 - **Batch transcription** with preflight checks, per-step **Keep / Overwrite** scope controls, rerun-failed support, and report rows that preserve backend job ids when the UI loses `/api` connectivity mid-run
@@ -81,7 +84,7 @@ It provides:
 - Per-row editing, speaker flags, and secondary actions for review work
 - **Borrowing adjudication** aided by contact-language similarity evidence, dynamic primary-language similarity columns, and selectable reference forms
 - **Enrichment overlays** for computed comparative metadata
-- The **CLEF** panel for multi-source contact-language lookup, provenance-aware **Sources Report**, academic citation cards, and retryable populate workflows
+- The **CLEF** panel for multi-source contact-language lookup, provenance-aware **Sources Report**, academic citation cards, retryable populate workflows, and explicit empty-populate diagnostics (`ok` / `no_forms` / `provider_error`)
 - The same shared **tag system** used in Annotate mode
 - Export to **LingPy-compatible TSV** and **NEXUS** for downstream phylogenetic analysis
 
@@ -107,11 +110,11 @@ PARSE exposes four machine-facing integration surfaces:
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
 Current counts:
-- **50** built-in `ParseChatTools`
+- **54** built-in `ParseChatTools`
 - **3** workflow macros in `python/ai/workflow_tools.py`
-- **32** default MCP task tools
-- **36** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
-- **54** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+- **36** default MCP task tools
+- **40** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
+- **58** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
 
 #### Generic job observability
 
@@ -171,7 +174,7 @@ It provides:
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP MCP bridge / `parse-mcp` entry points, environment conventions, and agent-facing examples
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
-- [AI Integration](docs/ai-integration.md) — providers, models, configuration, the 50-tool chat surface, and workflow macros
+- [AI Integration](docs/ai-integration.md) — providers, models, configuration, the 54-tool chat surface, and workflow macros
 - [API Reference](docs/api-reference.md) — HTTP endpoints, generic job observability, OpenAPI docs, MCP bridge routes, examples, and the current MCP task surface
 - [Architecture](docs/architecture.md) — system design, data model, and runtime responsibilities
 - [Post-decomp File Map](docs/architecture/post-decomp-file-map.md) — canonical "where does code live now?" reference for the split backend/frontend modules
@@ -190,7 +193,7 @@ PARSE is designed around a real fieldwork sequence rather than a toy demo sequen
 4. **Correct timestamps and confirm segments** in Annotate mode
 5. **Search and anchor difficult lexemes** across long recordings
 6. **Compare the concept set across speakers** in the matrix view
-7. **Use CLEF evidence** when a borrowing analysis needs external lexical context — the first time you run **Borrowing detection (CLEF)** from the Compute panel, PARSE opens a guided setup modal where you pick 1–2 primary contact languages (English + Spanish by default) and optionally auto-populate lexeme forms from the provider stack. The config lives in `config/sil_contact_languages.json`; extend the language picker with `config/sil_catalog_extra.json`. Each language now also carries an ISO 15924 `script` hint so bare Reference Forms route deterministically between IPA-like Latin text and non-Latin script text. If your workspace was populated before the 2026-04-25 exact-match fix for `lingpy_wordlist`, rerun CLEF populate with overwrite so any previously misbucketed doculect forms are replaced.
+7. **Use CLEF evidence** when a borrowing analysis needs external lexical context — the first time you run **Borrowing detection (CLEF)** from the Compute panel, PARSE opens a guided setup modal where you pick 1–2 primary contact languages (English + Spanish by default) and optionally auto-populate lexeme forms from the provider stack. The config lives in `config/sil_contact_languages.json`; extend the language picker with `config/sil_catalog_extra.json`. Each language now also carries an ISO 15924 `script` hint so bare Reference Forms route deterministically between IPA-like Latin text and non-Latin script text. Empty populates now surface explicit `no_forms` / `provider_error` diagnostics instead of looking like silent success. If your workspace was populated before the 2026-04-25 exact-match fix for `lingpy_wordlist`, rerun CLEF populate with overwrite so any previously misbucketed doculect forms are replaced.
 8. **Export LingPy TSV or NEXUS** for downstream comparative and phylogenetic analysis
 
 The guiding principle is simple: timestamps are central, human review stays explicit, and automation should make linguistic judgment faster rather than opaque.
