@@ -2,6 +2,7 @@
 import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
+import { useTranscriptionLanesStore } from "./stores/transcriptionLanesStore";
 
 const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
   mockGetAuthStatus: vi.fn(),
@@ -538,6 +539,12 @@ beforeEach(() => {
   mockConfigSetState.mockClear();
   mockWaveOptions = [];
   mockWaveSurferInstance = null;
+  useTranscriptionLanesStore.setState({
+    sttBySpeaker: {},
+    sttStatus: {},
+    sttSourceBySpeaker: {},
+    selectedInterval: null,
+  });
 });
 
 afterEach(() => {
@@ -1053,6 +1060,124 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import Speaker Data…" }));
 
     expect(await screen.findByTestId("speaker-import")).toBeTruthy();
+  });
+
+  it("disables Refine Boundaries (BND) when the active speaker has no STT word timestamps", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-refine-boundaries");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("title") ?? "").toMatch(/run stt first/i);
+  });
+
+  it("enables Refine Boundaries (BND) when the speaker's STT cache has word timestamps", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+    useTranscriptionLanesStore.setState({
+      sttBySpeaker: {
+        Fail01: [
+          {
+            start: 1.0,
+            end: 2.0,
+            text: "ئاو",
+            words: [{ word: "ئاو", start: 1.05, end: 1.85, prob: 0.92 }],
+          },
+        ],
+      },
+      sttStatus: { Fail01: "loaded" },
+      sttSourceBySpeaker: {},
+      selectedInterval: null,
+    });
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-refine-boundaries");
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute("title") ?? "").toMatch(/run fast boundary refinement/i);
+  });
+
+  it("disables Re-run STT with Boundaries when the active speaker has no ortho_words intervals", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-retranscribe-with-boundaries");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("title") ?? "").toMatch(/refine boundaries/i);
+  });
+
+  it("enables Re-run STT with Boundaries when the active speaker has ortho_words intervals", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    const base = makeRecord("Fail01", [
+      { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+    ]);
+    mockRecords = {
+      Fail01: {
+        ...base,
+        tiers: {
+          ...base.tiers,
+          ortho_words: {
+            name: "ortho_words",
+            display_order: 4,
+            intervals: [{ start: 1.1, end: 1.4, text: "ئاو" }],
+          },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-retranscribe-with-boundaries");
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute("title") ?? "").toMatch(/respects your manual boundary corrections/i);
   });
 
   it("supports renaming an existing tag in Tags mode", async () => {

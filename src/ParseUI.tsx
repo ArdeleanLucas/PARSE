@@ -363,6 +363,8 @@ export function ParseUI() {
     try { localStorage.setItem('parse.stt.language', sttLanguage); }
     catch { /* storage unavailable */ }
   }, [sttLanguage]);
+  const [boundariesSpeaker, setBoundariesSpeaker] = useState<string | null>(null);
+  const [bndSttSpeaker, setBndSttSpeaker] = useState<string | null>(null);
   const activeActionSpeaker = selectedSpeakers[0] ?? null;
   const loadSpeaker = useAnnotationStore((s) => s.loadSpeaker);
   const loadEnrichments = useEnrichmentStore((s) => s.load);
@@ -497,6 +499,44 @@ export function ParseUI() {
     ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
   ];
 
+  const boundariesJob = useActionJob({
+    start: () => {
+      if (!boundariesSpeaker) {
+        return Promise.reject(new Error('Pick a speaker before refining boundaries.'));
+      }
+      return startCompute('boundaries', { speaker: boundariesSpeaker });
+    },
+    poll: (jobId) => pollCompute('boundaries', jobId),
+    label: 'Refining word boundaries…',
+    onComplete: async () => {
+      if (boundariesSpeaker) {
+        await loadSpeaker(boundariesSpeaker);
+      }
+    },
+    autoDismissMs: 4000,
+  });
+
+  const bndSttJob = useActionJob({
+    start: () => {
+      if (!bndSttSpeaker) {
+        return Promise.reject(new Error('Pick a speaker before re-transcribing with boundaries.'));
+      }
+      return startCompute('retranscribe_with_boundaries', {
+        speaker: bndSttSpeaker,
+        language: sttLanguageRef.current || undefined,
+      });
+    },
+    poll: (jobId) => pollCompute('retranscribe_with_boundaries', jobId),
+    label: 'Re-transcribing with BND…',
+    onComplete: async () => {
+      if (bndSttSpeaker) {
+        await useTranscriptionLanesStore.getState().reloadStt(bndSttSpeaker);
+        await loadSpeaker(bndSttSpeaker);
+      }
+    },
+    autoDismissMs: 4000,
+  });
+
   // Drawer "Run" button. ``contact-lexemes`` (Borrowing detection / CLEF)
   // routes through ``crossSpeakerJob`` so progress / ETA / completion
   // surface in the global header chip alongside STT / IPA / forced-align,
@@ -572,6 +612,111 @@ export function ParseUI() {
     }
     return count;
   });
+
+  const bndIntervalCount = useAnnotationStore((s) => {
+    const speaker = selectedSpeakers[0] ?? null;
+    if (!speaker) return 0;
+    return s.records[speaker]?.tiers?.ortho_words?.intervals?.length ?? 0;
+  });
+
+  const sttHasWordTimestamps = useTranscriptionLanesStore((s) => {
+    const speaker = selectedSpeakers[0] ?? null;
+    if (!speaker) return false;
+    const segs = s.sttBySpeaker[speaker] ?? [];
+    return segs.some((seg) => Array.isArray(seg.words) && seg.words.length > 0);
+  });
+
+  const annotatePhoneticTools = selectedSpeakers[0] ? (
+    <>
+      <div className="mb-2">
+        <button
+          data-testid="phonetic-refine-boundaries"
+          onClick={() => {
+            const speaker = selectedSpeakers[0] ?? null;
+            if (!speaker) return;
+            setBoundariesSpeaker(speaker);
+            void boundariesJob.run();
+          }}
+          disabled={!selectedSpeakers[0] || !sttHasWordTimestamps || boundariesJob.state.status === 'running'}
+          title={
+            !selectedSpeakers[0]
+              ? 'Select a speaker first.'
+              : !sttHasWordTimestamps
+                ? 'No STT word timestamps for this speaker yet. Run STT first (Actions → Run STT) — boundary refinement uses those words as alignment seeds.'
+                : 'Run fast boundary refinement independently. Useful before running slow ORTH/IPA models.'
+          }
+          className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Split className="h-3.5 w-3.5" />
+          <span className="flex-1 text-left">
+            {boundariesJob.state.status === 'running' ? 'Refining boundaries…' : 'Refine Boundaries (BND)'}
+          </span>
+          {boundariesJob.state.status === 'running' ? (
+            <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-amber-700">
+              {Math.round(boundariesJob.state.progress * 100)}%
+            </span>
+          ) : null}
+        </button>
+        {boundariesJob.state.status === 'running' && boundariesJob.state.etaMs !== null && boundariesJob.state.etaMs > 0 ? (
+          <div className="mb-1 text-[10px] text-amber-700">~{formatEta(boundariesJob.state.etaMs)} left</div>
+        ) : null}
+        {boundariesJob.state.status === 'complete' ? (
+          <div className="mb-1 text-[10px] text-emerald-700">Boundaries refreshed.</div>
+        ) : null}
+        {boundariesJob.state.status === 'error' ? (
+          <div className="mb-1 text-[10px] text-rose-700">
+            {boundariesJob.state.error?.includes('Run STT first')
+              ? 'Please run STT first before refining boundaries.'
+              : (boundariesJob.state.error ?? 'Boundary refinement failed.')}
+          </div>
+        ) : null}
+
+        <button
+          data-testid="phonetic-retranscribe-with-boundaries"
+          onClick={() => {
+            const speaker = selectedSpeakers[0] ?? null;
+            if (!speaker) return;
+            setBndSttSpeaker(speaker);
+            void bndSttJob.run();
+          }}
+          disabled={!selectedSpeakers[0] || bndIntervalCount === 0 || bndSttJob.state.status === 'running'}
+          title={
+            !selectedSpeakers[0]
+              ? 'Select a speaker first.'
+              : bndIntervalCount === 0
+                ? 'No BND intervals yet for this speaker. Refine boundaries (Refine Boundaries (BND) above) before re-running STT.'
+                : "Re-transcribe using the current BND boundaries. This respects your manual boundary corrections."
+          }
+          className="flex w-full items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Mic className="h-3.5 w-3.5" />
+          <span className="flex-1 text-left">
+            {bndSttJob.state.status === 'running' ? 'Re-transcribing with BND…' : 'Re-run STT with Boundaries'}
+          </span>
+          {bndSttJob.state.status === 'running' ? (
+            <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-amber-700">
+              {Math.round(bndSttJob.state.progress * 100)}%
+            </span>
+          ) : null}
+        </button>
+        {bndSttJob.state.status === 'running' && bndSttJob.state.etaMs !== null && bndSttJob.state.etaMs > 0 ? (
+          <div className="mt-1 text-[10px] text-amber-700">~{formatEta(bndSttJob.state.etaMs)} left</div>
+        ) : null}
+        {bndSttJob.state.status === 'complete' ? (
+          <div className="mt-1 text-[10px] text-emerald-700">STT re-transcribed using BND boundaries.</div>
+        ) : null}
+        {bndSttJob.state.status === 'error' ? (
+          <div className="mt-1 text-[10px] text-rose-700">
+            {bndSttJob.state.error?.includes('No BND intervals')
+              ? 'Refine boundaries (BND) first before re-running STT.'
+              : (bndSttJob.state.error ?? 'BND-constrained STT failed.')}
+          </div>
+        ) : null}
+      </div>
+
+      <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={conceptId} />
+    </>
+  ) : null;
 
   // Look up the current annotation interval (start + end) for a concept on
   // the active speaker (read directly from the store so we don't hold a
@@ -1942,7 +2087,7 @@ export function ParseUI() {
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
           onOpenManualOffset={openManualOffset}
-          annotateSpeakerTools={selectedSpeakers[0] ? <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={concept.id} /> : null}
+          annotateSpeakerTools={annotatePhoneticTools}
           annotateAuxTools={<TranscriptionLanesControls />}
           onSaveAnnotations={() => {
             const speaker = selectedSpeakers[0];
