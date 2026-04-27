@@ -1711,11 +1711,88 @@ def _install_route_bindings() -> None:
         _ROUTE_BINDINGS_INSTALLED = True
 
 
+def _require_route_export(name: str) -> Any:
+    _install_route_bindings()
+    if name in globals():
+        return globals()[name]
+    raise AttributeError("module {0!r} has no attribute {1!r}".format(__name__, name))
+
+
+def _set_job_progress(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_set_job_progress")(*args, **kwargs)
+
+
+def _set_job_complete(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_set_job_complete")(*args, **kwargs)
+
+
+def _set_job_error(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_set_job_error")(*args, **kwargs)
+
+
+def _chat_docs_root(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_docs_root")(*args, **kwargs)
+
+
+def _chat_external_read_roots(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_external_read_roots")(*args, **kwargs)
+
+
+def _chat_memory_path(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_memory_path")(*args, **kwargs)
+
+
+def _chat_start_stt_job(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_start_stt_job")(*args, **kwargs)
+
+
+def _chat_get_job_snapshot(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_get_job_snapshot")(*args, **kwargs)
+
+
+def _chat_list_jobs(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_list_jobs")(*args, **kwargs)
+
+
+def _chat_get_job_logs(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_get_job_logs")(*args, **kwargs)
+
+
+def _chat_onboard_speaker(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_onboard_speaker")(*args, **kwargs)
+
+
+def _chat_start_compute_job(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_start_compute_job")(*args, **kwargs)
+
+
+def _chat_pipeline_state(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_chat_pipeline_state")(*args, **kwargs)
+
+
+def _get_job_snapshot(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_get_job_snapshot")(*args, **kwargs)
+
+
+def _job_response_payload(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_job_response_payload")(*args, **kwargs)
+
+
+def _cleanup_old_jobs(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_cleanup_old_jobs")(*args, **kwargs)
+
+
+def _cleanup_old_chat_sessions(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_cleanup_old_chat_sessions")(*args, **kwargs)
+
+
+def _resolve_compute_mode(*args: Any, **kwargs: Any) -> Any:
+    return _require_route_export("_resolve_compute_mode")(*args, **kwargs)
+
+
 def __getattr__(name: str) -> Any:
     if name.startswith("_") and not name.startswith("__"):
-        _install_route_bindings()
-        if name in globals():
-            return globals()[name]
+        return _require_route_export(name)
     raise AttributeError("module {0!r} has no attribute {1!r}".format(__name__, name))
 
 def _get_local_ips() -> List[str]:
