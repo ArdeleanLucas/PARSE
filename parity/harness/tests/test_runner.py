@@ -7,14 +7,18 @@ import pytest
 
 from parity.harness.runner import (
     CanonicalizationContext,
+    BootSmokeResult,
     DiffEntry,
     DiffReport,
     ROUND2_CONTRACT_GROUP_COVERAGE,
     ROUND2_FAILURE_CASES,
     ROUND2_JOB_LIFECYCLE_KEYS,
+    SUPPORTED_FIXTURE_NAMES,
     ScenarioCapture,
     _extract_active_job_summary,
     build_diff_report,
+    build_server_boot_smoke_blockers,
+    build_signoff_payload,
     compare_capture_sections,
     load_allowlist_rules,
     normalize_for_diff,
@@ -100,8 +104,9 @@ def test_normalize_for_diff_sorts_only_order_insensitive_lists() -> None:
 
 
 def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path: Path) -> None:
-    fixture = prepare_fixture_bundle(tmp_path)
+    fixture = prepare_fixture_bundle(tmp_path, fixture_name="saha-2speaker")
 
+    assert "saha-2speaker" in SUPPORTED_FIXTURE_NAMES
     project = json.loads((fixture.workspace_root / "project.json").read_text(encoding="utf-8"))
     assert project["project_id"] == "parse-parity-fixture"
     assert sorted(project["speakers"].keys()) == ["Base01", "Base02"]
@@ -123,6 +128,9 @@ def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path
     assert (fixture.input_root / "onboard" / "Parity01.wav").exists()
     assert (fixture.input_root / "concepts-import.csv").read_text(encoding="utf-8").startswith("id,concept_en")
     assert (fixture.input_root / "tags-import.csv").read_text(encoding="utf-8").startswith("concept_en")
+
+    with pytest.raises(ValueError, match="Unknown fixture"):
+        prepare_fixture_bundle(tmp_path / "other", fixture_name="does-not-exist")
 
 
 def test_load_allowlist_rules_rejects_todo_reasons(tmp_path: Path) -> None:
@@ -222,6 +230,49 @@ def test_round2_coverage_matrix_tracks_all_inventory_groups_and_required_failure
         "jobs_list",
         "jobs_active",
     }
+
+
+def test_server_boot_smoke_failures_are_reported_as_real_blockers() -> None:
+    blockers = build_server_boot_smoke_blockers(
+        {
+            "oracle": BootSmokeResult(repo_label="oracle", success=True, port=8766, detail="booted", log_path=Path("/tmp/oracle.log")),
+            "rebuild": BootSmokeResult(
+                repo_label="rebuild",
+                success=False,
+                port=8766,
+                detail="NameError: _api_get_annotation is not defined",
+                log_path=Path("/tmp/rebuild.log"),
+            ),
+        }
+    )
+
+    assert len(blockers) == 1
+    assert blockers[0].section == "server_boot_smoke"
+    assert blockers[0].path == "$.server_boot_smoke.rebuild"
+    assert blockers[0].oracle_value == {"expected": "boot success"}
+    assert blockers[0].rebuild_value["success"] is False
+
+
+def test_build_signoff_payload_captures_repo_shas_counts_and_boot_results() -> None:
+    payload = build_signoff_payload(
+        fixture_name="saha-2speaker",
+        oracle_repo=Path("/repos/oracle"),
+        rebuild_repo=Path("/repos/rebuild"),
+        oracle_sha="abc123",
+        rebuild_sha="def456",
+        report=DiffReport(raw_diffs=[], allowlisted_diffs=[], unallowlisted_diffs=[], raw_diff_count=0, allowlisted_diff_count=0, unallowlisted_diff_count=0),
+        server_boot_results={
+            "oracle": BootSmokeResult(repo_label="oracle", success=True, port=8766, detail="booted", log_path=Path("/tmp/oracle.log")),
+            "rebuild": BootSmokeResult(repo_label="rebuild", success=False, port=8766, detail="blocked", log_path=Path("/tmp/rebuild.log")),
+        },
+    )
+
+    assert payload["fixture"] == "saha-2speaker"
+    assert payload["repos"]["oracle"]["sha"] == "abc123"
+    assert payload["repos"]["rebuild"]["sha"] == "def456"
+    assert payload["diff_counts"] == {"raw": 0, "allowlisted": 0, "unallowlisted": 0}
+    assert payload["server_boot_smoke"]["oracle"]["success"] is True
+    assert payload["server_boot_smoke"]["rebuild"]["success"] is False
 
 
 def test_compare_capture_sections_returns_path_level_diffs() -> None:

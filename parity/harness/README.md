@@ -11,9 +11,16 @@ This harness replaces the old plan of writing one evidence doc per surface. Inst
 - LingPy and NEXUS exports
 - persisted JSON artifacts in the workspace
 
-## Current Round 2 scope
+## Current Round 3 scope
 
 The shared fixture now exercises every §6 contract group in `docs/plans/option1-parity-inventory.md` via deterministic, report-only probes. The emitted `report.json` includes a `coverage` section that maps each contract group to the concrete scenario keys used for Round 2 sign-off.
+
+Round 3 adds the final operational meta-gate:
+
+- a script-mode server boot smoke for **both** oracle and rebuild (`cd $WORKSPACE && python python/server.py`)
+- fixture selection via `--fixture` (current audit fixture: `saha-2speaker`)
+- `--emit-signoff` artifacts (`signoff-summary.json` + `signoff-summary.md`)
+- automatic promotion of any script-boot failure into a real unallowlisted blocker
 
 1. annotation data (`GET/POST /api/annotations`, `GET /api/stt-segments`)
 2. project config + pipeline state (`GET/PUT /api/config`, `GET /api/pipeline/state/{speaker}`)
@@ -62,8 +69,10 @@ From the rebuild repo root:
 
 ```bash
 PYTHONPATH=. python3 -m parity.harness.runner \
-  --oracle-repo /home/lucas/gh/ardeleanlucas/parse \
-  --rebuild-repo $(pwd) \
+  --oracle /home/lucas/gh/ardeleanlucas/parse \
+  --rebuild $(pwd) \
+  --fixture saha-2speaker \
+  --emit-signoff \
   --output-dir parity/harness/output/local \
   --keep-temp
 ```
@@ -74,7 +83,9 @@ The command is report-only: it exits `0` and writes the current diff instead of 
 
 - `report.md` — human-readable diff summary
 - `report.json` — normalized machine-readable capture bundle
-- `oracle-server.log` / `rebuild-server.log` — backend logs for the run
+- `signoff-summary.md` / `signoff-summary.json` when `--emit-signoff` is used
+- `oracle-server.log` / `rebuild-server.log` — module-bootstrap backend logs for the parity run
+- `oracle-server-script.log` / `rebuild-server-script.log` — exact script-mode boot smoke logs
 - `oracle-workspace/` / `rebuild-workspace/` when `--keep-temp` is enabled
 
 ## Fixture contract
