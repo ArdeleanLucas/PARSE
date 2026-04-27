@@ -1,5 +1,20 @@
 version: 1
-rules: []
-# No permanent allowlist entries are required at the current Round 2 starting point.
-# Add a rule only when a diff is truly non-semantic or an accepted oracle deviation,
-# and record the exact reason + reason_ref instead of leaving TODO placeholders.
+rules:
+  - id: mcp-compute-boundaries-copy-drift
+    section: mcp_tools
+    path_regex: '^\$\.mcp_tools\.tools\.compute_boundaries_start\.(descriptor\.description|descriptor\.inputSchema\.properties\.overwrite\.description|success\.response\.(content\[0\]\.value\.result\.note|structuredContent\.result\.result\.note))$'
+    classification: metadata-only
+    permanence: temporary
+    reason: Rebuild exposes the same standalone BND job and dry-run contract as oracle, but its MCP descriptor copy in python/ai/tools/acoustic_starter_tools.py is shorter and omits oracle's extra explanatory prose.
+  - id: mcp-retranscribe-with-boundaries-copy-drift
+    section: mcp_tools
+    path_regex: '^\$\.mcp_tools\.tools\.retranscribe_with_boundaries_start\.(descriptor\.description|descriptor\.inputSchema\.properties\.language\.description|success\.response\.(content\[0\]\.value\.result\.note|structuredContent\.result\.result\.note))$'
+    classification: metadata-only
+    permanence: temporary
+    reason: Rebuild exposes the same boundary-constrained STT tool and dry-run contract as oracle, but its MCP descriptor copy in python/ai/tools/acoustic_starter_tools.py is shorter and uses equivalent wording.
+  - id: oracle-script-boot-bounded-thread-init
+    section: server_boot_smoke
+    path: $.server_boot_smoke.oracle
+    classification: accepted-oracle-deviation
+    permanence: temporary
+    reason: Oracle current main fails isolated script-mode boot because python/server.py initializes _BoundedThreadHTTPServer._pool after super().__init__ and server_close() can run first; rebuild boots successfully on isolated ports, so this is tracked as an oracle-side baseline quirk rather than a rebuild cutover blocker.

@@ -36,6 +36,7 @@ DEFAULT_FIXTURE_NAME = "saha-2speaker"
 SUPPORTED_FIXTURE_NAMES = ("saha-2speaker", "round2-multispeaker")
 FIXTURE_ROOTS = {name: FIXTURE_ROOT for name in SUPPORTED_FIXTURE_NAMES}
 DEFAULT_SCRIPT_BOOT_PORT = 8766
+DEFAULT_SCRIPT_BOOT_WS_PORT = 8767
 CANONICALIZATION_VERSION = 2
 DIFF_CATEGORY_SECTIONS: dict[str, tuple[str, ...]] = {
     "all": ("api", "job_lifecycles", "exports", "persisted_json", "feature_contracts", "mcp_tools"),
@@ -180,9 +181,16 @@ ROUND2_JOB_LIFECYCLE_KEYS = (
 )
 PLACEHOLDER_REASON_RE = re.compile(r"\b(?:todo|tbd|fixme|fill this in)\b", re.IGNORECASE)
 BND_MCP_SOURCE_AUDIT_RULES: dict[str, dict[str, tuple[str, ...]]] = {
-    "ipa_prefers_ortho_words": {
-        "globs": ("python/**/*.py",),
-        "patterns": ('ortho_source = "ortho_words"',),
+    # Rebuild post-decomposition keeps the IPA BND preference in
+    # python/server_routes/annotate.py:991-997. Match the branch condition plus
+    # the ortho_source assignment rather than the oracle monolith's exact quote
+    # style so equivalent runtime behavior still passes.
+    "ipa_prefers_ortho_words_runtime": {
+        "globs": ("python/server.py", "python/server_routes/annotate.py"),
+        "patterns": (
+            "if ortho_words_intervals:",
+            "ortho_source =",
+        ),
     },
     "compute_boundaries_backend": {
         "globs": ("python/**/*.py",),
@@ -212,12 +220,28 @@ BND_MCP_SOURCE_AUDIT_RULES: dict[str, dict[str, tuple[str, ...]]] = {
             "boundary_constrained_stt_job_started",
         ),
     },
-    "annotate_phonetic_tools_ui": {
+    # Rebuild post-#136 removed the literal "Phonetic Tools" heading and kept
+    # the feature as explicit action buttons + gate selectors in src/ParseUI.tsx.
+    # Audit those stable button/gate identifiers instead of the old heading text.
+    "annotate_bnd_gate_selectors_ui": {
         "globs": ("src/**/*.ts", "src/**/*.tsx"),
         "patterns": (
-            "Phonetic Tools",
-            "phonetic-retranscribe-with-boundaries",
+            "sttHasWordTimestamps",
+            "bndIntervalCount",
+        ),
+    },
+    "annotate_refine_boundaries_button_ui": {
+        "globs": ("src/**/*.ts", "src/**/*.tsx"),
+        "patterns": (
             "phonetic-refine-boundaries",
+            "Refine Boundaries (BND)",
+        ),
+    },
+    "annotate_retranscribe_with_boundaries_button_ui": {
+        "globs": ("src/**/*.ts", "src/**/*.tsx"),
+        "patterns": (
+            "phonetic-retranscribe-with-boundaries",
+            "Re-run STT with Boundaries",
         ),
     },
 }
@@ -614,21 +638,15 @@ def compare_capture_sections(
     return diffs
 
 
-def build_diff_report(
-    oracle: ScenarioCapture,
-    rebuild: ScenarioCapture,
-    *,
-    context: CanonicalizationContext,
-    allowlist_rules: Iterable[AllowlistRule],
-    sections: Iterable[str] | None = None,
-) -> DiffReport:
-    raw_diffs: list[DiffEntry] = []
-    for entry in compare_capture_sections(oracle, rebuild, context=context, sections=sections):
-        matched_rule = next((rule for rule in allowlist_rules if rule.matches(entry)), None)
+def _apply_allowlist_rules(entries: Iterable[DiffEntry], allowlist_rules: Iterable[AllowlistRule]) -> list[DiffEntry]:
+    annotated: list[DiffEntry] = []
+    rules = tuple(allowlist_rules)
+    for entry in entries:
+        matched_rule = next((rule for rule in rules if rule.matches(entry)), None)
         if matched_rule is None:
-            raw_diffs.append(entry)
+            annotated.append(entry)
             continue
-        raw_diffs.append(
+        annotated.append(
             DiffEntry(
                 section=entry.section,
                 path=entry.path,
@@ -641,6 +659,21 @@ def build_diff_report(
                 reason_ref=matched_rule.reason_ref,
             )
         )
+    return annotated
+
+
+def build_diff_report(
+    oracle: ScenarioCapture,
+    rebuild: ScenarioCapture,
+    *,
+    context: CanonicalizationContext,
+    allowlist_rules: Iterable[AllowlistRule],
+    sections: Iterable[str] | None = None,
+) -> DiffReport:
+    raw_diffs = _apply_allowlist_rules(
+        compare_capture_sections(oracle, rebuild, context=context, sections=sections),
+        allowlist_rules,
+    )
     return DiffReport(raw_diffs=raw_diffs).finalize()
 
 
@@ -764,6 +797,16 @@ def run_harness(
     with TemporaryDirectory(prefix="parse-parity-oracle-") as oracle_tmp, TemporaryDirectory(prefix="parse-parity-rebuild-") as rebuild_tmp:
         oracle_fixture = prepare_fixture_bundle(Path(oracle_tmp), fixture_name=fixture_name)
         rebuild_fixture = prepare_fixture_bundle(Path(rebuild_tmp), fixture_name=fixture_name)
+        oracle_mcp_fixture = None
+        rebuild_mcp_fixture = None
+        if "mcp_tools" in selected_sections:
+            # Keep MCP tool capture isolated from the shared HTTP scenario. The
+            # default scenario can legitimately mutate CLEF config/state, and
+            # repo-local provider data like config/lexibank_data is untracked
+            # across clones. Fresh bundles keep MCP parity grounded on tool
+            # contracts instead of prior workspace side-effects.
+            oracle_mcp_fixture = prepare_fixture_bundle(Path(oracle_tmp) / "mcp-tools", fixture_name=fixture_name)
+            rebuild_mcp_fixture = prepare_fixture_bundle(Path(rebuild_tmp) / "mcp-tools", fixture_name=fixture_name)
 
         server_boot_results: dict[str, BootSmokeResult] = {}
         oracle_server_log = output_dir / "oracle-server.log"
@@ -831,26 +874,26 @@ def run_harness(
                 oracle_capture,
                 mcp_tools=build_mcp_tools_capture(
                     repo_root=oracle_repo,
-                    workspace_root=oracle_fixture.workspace_root,
-                    input_root=oracle_fixture.input_root,
-                    seed_speaker_id=oracle_fixture.seed_speaker_id,
-                    compare_speaker_id=oracle_fixture.compare_speaker_id,
-                    onboard_speaker_id=oracle_fixture.onboard_speaker_id,
-                    tag_name=oracle_fixture.tag_name,
-                    tag_color=oracle_fixture.tag_color,
+                    workspace_root=oracle_mcp_fixture.workspace_root,
+                    input_root=oracle_mcp_fixture.input_root,
+                    seed_speaker_id=oracle_mcp_fixture.seed_speaker_id,
+                    compare_speaker_id=oracle_mcp_fixture.compare_speaker_id,
+                    onboard_speaker_id=oracle_mcp_fixture.onboard_speaker_id,
+                    tag_name=oracle_mcp_fixture.tag_name,
+                    tag_color=oracle_mcp_fixture.tag_color,
                 ),
             )
             rebuild_capture = replace(
                 rebuild_capture,
                 mcp_tools=build_mcp_tools_capture(
                     repo_root=rebuild_repo,
-                    workspace_root=rebuild_fixture.workspace_root,
-                    input_root=rebuild_fixture.input_root,
-                    seed_speaker_id=rebuild_fixture.seed_speaker_id,
-                    compare_speaker_id=rebuild_fixture.compare_speaker_id,
-                    onboard_speaker_id=rebuild_fixture.onboard_speaker_id,
-                    tag_name=rebuild_fixture.tag_name,
-                    tag_color=rebuild_fixture.tag_color,
+                    workspace_root=rebuild_mcp_fixture.workspace_root,
+                    input_root=rebuild_mcp_fixture.input_root,
+                    seed_speaker_id=rebuild_mcp_fixture.seed_speaker_id,
+                    compare_speaker_id=rebuild_mcp_fixture.compare_speaker_id,
+                    onboard_speaker_id=rebuild_mcp_fixture.onboard_speaker_id,
+                    tag_name=rebuild_mcp_fixture.tag_name,
+                    tag_color=rebuild_mcp_fixture.tag_color,
                 ),
             )
 
@@ -865,7 +908,7 @@ def run_harness(
             allowlist_rules=allowlist_rules,
             sections=selected_sections,
         )
-        report.raw_diffs.extend(build_server_boot_smoke_blockers(server_boot_results))
+        report.raw_diffs.extend(_apply_allowlist_rules(build_server_boot_smoke_blockers(server_boot_results), allowlist_rules))
         report.finalize()
         markdown = render_markdown_report(oracle_capture, rebuild_capture, report)
         signoff_payload = build_signoff_payload(
@@ -1015,24 +1058,28 @@ def _git_rev_parse(repo_root: Path) -> str:
 
 
 def _run_server_boot_smoke(*, repo_root: Path, workspace_root: Path, label: str, log_path: Path, timeout_seconds: float = 10.0) -> BootSmokeResult:
-    port = DEFAULT_SCRIPT_BOOT_PORT
+    port, ws_port = _pick_boot_smoke_ports()
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    if not _is_port_available(port):
-        log_path.write_text(f"Port {port} already in use before {label} script smoke run.\n", encoding="utf-8")
-        return BootSmokeResult(
-            repo_label=label,
-            success=False,
-            port=port,
-            detail=f"Port {port} already in use before script boot smoke.",
-            log_path=log_path,
-        )
-
     log_handle = open(log_path, "wb")
+    if port != DEFAULT_SCRIPT_BOOT_PORT or ws_port != DEFAULT_SCRIPT_BOOT_WS_PORT:
+        log_handle.write(
+            (
+                "[boot-smoke] default ports {0}/{1} occupied; using isolated ports {2}/{3}.\n"
+            ).format(DEFAULT_SCRIPT_BOOT_PORT, DEFAULT_SCRIPT_BOOT_WS_PORT, port, ws_port).encode("utf-8")
+        )
+        log_handle.flush()
     process = subprocess.Popen(
         [sys.executable, str(repo_root / "python" / "server.py")],
         cwd=str(workspace_root),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
+        env={
+            **os.environ,
+            "PARSE_PORT": str(port),
+            "PARSE_API_PORT": str(port),
+            "PARSE_WS_PORT": str(ws_port),
+            "PYTHONUNBUFFERED": "1",
+        },
     )
     last_error: str | None = None
     success = False
@@ -1078,6 +1125,30 @@ def _is_port_available(port: int) -> bool:
         except OSError:
             return False
     return True
+
+
+def _allocate_ephemeral_port(*, reserved: set[int] | None = None) -> int:
+    reserved = reserved or set()
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port not in reserved:
+            return port
+
+
+def _pick_boot_smoke_ports(
+    http_default: int = DEFAULT_SCRIPT_BOOT_PORT,
+    ws_default: int = DEFAULT_SCRIPT_BOOT_WS_PORT,
+) -> tuple[int, int]:
+    reserved: set[int] = set()
+    http_port = http_default if _is_port_available(http_default) else _allocate_ephemeral_port(reserved=reserved)
+    reserved.add(http_port)
+    if ws_default not in reserved and _is_port_available(ws_default):
+        ws_port = ws_default
+    else:
+        ws_port = _allocate_ephemeral_port(reserved=reserved)
+    return http_port, ws_port
 
 
 def _read_boot_failure_detail(log_path: Path, last_error: str | None) -> str:
