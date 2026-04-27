@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** This cutover-harness document is preserved as sign-off reference. Active product docs live in [docs/](../../docs/). The harness stays in-tree as regression coverage even though the cutover gate is complete.
+
 # PARSE Option 1 sign-off — BND-wave coordinator closeout (2026-04-27)
 
 This file supersedes the earlier draft snapshot for the BND/MCP port wave.

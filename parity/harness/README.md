@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** This cutover-harness document is preserved as sign-off reference. Active product docs live in [docs/](../../docs/). The harness stays in-tree as regression coverage even though the cutover gate is complete.
+
 # PARSE parity diff harness
 
 Single end-to-end oracle-vs-rebuild parity runner.
@@ -14,7 +16,7 @@ This harness replaces the old plan of writing one evidence doc per surface. Inst
 
 ## Current Round 3 scope
 
-The shared fixture now exercises every §6 contract group in `docs/plans/option1-parity-inventory.md` via deterministic, report-only probes. The emitted `report.json` includes a `coverage` section that maps each contract group to the concrete scenario keys used for Round 2 sign-off.
+The shared fixture now exercises every §6 contract group in `docs/archive/plans/option1-parity-inventory.md` via deterministic, report-only probes. The emitted `report.json` includes a `coverage` section that maps each contract group to the concrete scenario keys used for Round 2 sign-off.
 
 Round 4 adds a deterministic `feature_contracts` section for the BND/MCP port wave so the harness stops false-greening when oracle has feature code that the rebuild still lacks. The new section checks:
 

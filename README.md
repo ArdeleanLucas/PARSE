@@ -1,12 +1,13 @@
 # PARSE — Phonetic Analysis & Review Source Explorer
 
-> **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle repo remains [`ArdeleanLucas/PARSE`](https://github.com/ArdeleanLucas/PARSE). Refactor PRs should land here first; only controlled syncs or reverts should touch the live repo.
-
 **Browser-based dual-mode workstation for linguistic fieldwork.**
 Annotate per-speaker recordings with tiered IPA/orthography, then compare across speakers for cognate adjudication, borrowing detection, and export-ready historical-linguistic datasets.
 
-<!-- TODO: Add a hero GIF here showing the unified React shell: Annotate waveform + tiers, Compare concept matrix + CLEF panel, and the AI chat dock. A wide GitHub-friendly GIF or screenshot strip would work well. -->
-<!-- TODO: Add 2-3 static screenshots below the hero once the current UI settles: Annotate mode, Compare mode, and Lexeme Search / CLEF panels. -->
+<p align="center">
+  <img src="docs/pr-assets/dogfood-fix-153-annotate-stable.png" alt="Annotate mode in the unified PARSE React shell" width="32%" />
+  <img src="docs/pr-assets/pr76-compare-table.png" alt="Compare mode concept by speaker matrix" width="32%" />
+  <img src="docs/pr-assets/pr160-clef-no-forms-soft-failure.png" alt="CLEF soft-failure surfacing for no_forms and provider_error outcomes" width="32%" />
+</p>
 
 > **Status**: Active development. Thesis-critical features are landing frequently, interfaces and file contracts are still evolving, and PARSE should currently be treated as research software rather than beta software.
 
@@ -14,8 +15,8 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 
 - **Dual-mode unified React shell** for annotation and comparison in one workspace
 - **Fieldwork-first design** for long recordings, uneven metadata, and iterative review
-- **AI-native workflow surface** with a built-in chat assistant powered by **50 PARSE-specific tools**
-- **Full MCP server mode** exposing a curated **32-tool task surface** by default (**36** adapter tools including workflow macros + `mcp_get_exposure_mode`)
+- **AI-native workflow surface** with a built-in chat assistant powered by **54 PARSE-specific tools**
+- **Full MCP server mode** exposing a curated **36-tool MCP task surface** by default (**40** adapter tools including workflow macros + `mcp_get_exposure_mode`, **58** with `expose_all_tools=true`)
 - **CLEF — Contact Lexeme Explorer Feature** for borrowing adjudication via a 10-provider contact-language lookup stack
 - **Lexical Anchor Alignment System** for locating repeated lexical items across long recordings and across speakers
 - **Export pipeline** for LingPy TSV and NEXUS outputs used in downstream comparative workflows
@@ -23,8 +24,8 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/TarahAssistant/PARSE-rebuild.git
-cd PARSE-rebuild
+git clone https://github.com/ArdeleanLucas/PARSE.git
+cd PARSE
 npm install
 ./scripts/parse-run.sh
 ```
@@ -55,6 +56,7 @@ It combines:
 - **Stacked transcription lanes** for STT, IPA, ORTH, plus optional **Words (Tier 1)** and **Boundaries (Tier 2)** diagnostic lanes with synchronized horizontal scrolling and inline edit / split / merge / delete controls
 - **Audio normalization**, **speaker-level STT**, **ORTH transcription**, and **acoustic IPA fill** jobs
 - **Tier 2 forced alignment** with wav2vec2 for tighter word-level boundaries plus paired Tier 1/Tier 2 read-only overlays for spotting boundary drift
+- **Boundary-refinement controls**: current Annotate toolbar actions expose **Refine Boundaries (BND)** once Tier 1 STT word timestamps exist, then **Re-run STT with Boundaries** once `tiers.ortho_words` is available
 - **Per-speaker undo/redo** for annotation edits, including merge recovery and STT-tier migration
 - **Draggable timestamp correction** and clip-bounded playback for manual review
 - **Batch transcription** with preflight checks, per-step **Keep / Overwrite** scope controls, rerun-failed support, and report rows that preserve backend job ids when the UI loses `/api` connectivity mid-run
@@ -73,7 +75,7 @@ It provides:
 - A **concept × speaker matrix** for side-by-side lexical comparison
 - Cognate controls for **accept**, **split**, **merge**, and **cycle**
 - Per-row editing, speaker flags, and secondary actions for review work
-- **Borrowing adjudication** aided by contact-language similarity evidence, dynamic primary-language similarity columns, and selectable reference forms
+- **Borrowing adjudication** aided by contact-language similarity evidence, dynamic primary-language similarity columns, selectable reference forms, and explicit CLEF `no_forms` / `provider_error` soft-failure surfacing when populate jobs return empty or broken provider results
 - **Enrichment overlays** for computed comparative metadata
 - The **CLEF** panel for multi-source contact-language lookup, provenance-aware **Sources Report**, academic citation cards, and retryable populate workflows
 - The same shared **tag system** used in Annotate mode
@@ -87,7 +89,7 @@ PARSE includes a built-in **domain-specific chat dock** powered by the configure
 
 This assistant is not a generic chatbot. It operates through `ParseChatTools` and can inspect project state, guide annotation workflows, trigger jobs, help interpret comparative results, and support onboarding, export, and troubleshooting inside the same workstation.
 
-Supported LLM backends currently include **xAI (Grok)** and **OpenAI**. Local speech and alignment work is handled separately through faster-whisper, Razhan, Silero VAD, and wav2vec2.
+Backend provider modules are split explicitly as **`xai`**, **`openai`**, **`ollama`**, and **`local_whisper`**. The current in-app chat auth flows surface **xAI (Grok)** and **OpenAI**, while local speech and alignment work continues through faster-whisper, Razhan, Silero VAD, and wav2vec2.
 
 ### MCP & External API
 
@@ -101,11 +103,13 @@ PARSE exposes four machine-facing integration surfaces:
 That means external agent clients such as Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, or other MCP-capable tools can call a curated subset of PARSE functions programmatically, without going through the browser UI.
 
 Current counts:
-- **50** built-in `ParseChatTools`
+- **54** built-in `ParseChatTools`
 - **3** workflow macros in `python/ai/workflow_tools.py`
-- **32** default MCP task tools
-- **36** total default MCP adapter tools including read-only `mcp_get_exposure_mode`
-- **54** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+- **36** default MCP task tools from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`
+- **40** total default MCP adapter tools including the 3 workflow macros plus read-only `mcp_get_exposure_mode`
+- **58** total MCP adapter tools with `config/mcp_config.json` → `{ "expose_all_tools": true }`
+
+The curated default includes the BND-specific MCP tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is **not** a separately registered MCP tool in `REGISTRY`.
 
 #### Generic job observability
 
@@ -165,7 +169,7 @@ It provides:
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, `ai_config.json`, GPU notes, and troubleshooting
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP MCP bridge / `parse-mcp` entry points, environment conventions, and agent-facing examples
 - [User Guide](docs/user-guide.md) — detailed Annotate/Compare workflows, CLEF usage, Lexical Anchor Alignment, and workspace hydration
-- [AI Integration](docs/ai-integration.md) — providers, models, configuration, the 50-tool chat surface, and workflow macros
+- [AI Integration](docs/ai-integration.md) — providers, models, configuration, the 54-tool chat surface, and workflow macros
 - [API Reference](docs/api-reference.md) — HTTP endpoints, generic job observability, OpenAPI docs, MCP bridge routes, examples, and the current MCP task surface
 - [Architecture](docs/architecture.md) — system design, data model, and runtime responsibilities
 - [Post-decomp File Map](docs/architecture/post-decomp-file-map.md) — canonical "where does code live now?" reference for the split backend/frontend modules

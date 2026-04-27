@@ -1,3 +1,5 @@
+> **Historical (post-cutover 2026-04-27).** Preserved as cutover-narrative reference. Active state lives in [main docs/](../).
+
 > **Historical (post-cutover 2026-04-27).** This document describes the PARSE rebuild repo as it existed before the rename. As of 2026-04-27, the rebuild's structure took the canonical name `ArdeleanLucas/PARSE`. The pre-cutover oracle is archived at `ArdeleanLucas/PARSE-pre-rebuild-archive`. The terms 'rebuild' and 'oracle' are obsolete in current work — just call it PARSE. This file is preserved as historical reference for the cutover narrative.
 
 # PARSE rebuild repo context

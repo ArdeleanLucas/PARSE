@@ -1,6 +1,6 @@
 # Getting Started with External Agents
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
 > This guide covers the external-agent interfaces that are currently shipped in the PARSE repository. The commands and tool counts below were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`), `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`), `python/ai/workflow_tools.py`, `python/adapters/test_mcp_adapter.py`, and the launcher/config docs already in this repo.
 
@@ -117,8 +117,8 @@ The adapter supports two exposure modes:
 
 | Mode | What you get |
 |---|---|
-| **Default** | 36 MCP tools total: 32 curated PARSE tools + 3 workflow macros + `mcp_get_exposure_mode` |
-| **Expose all** | 54 MCP tools total: all 50 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
+| **Default** | 40 MCP tools total: 36 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
+| **Expose all** | 58 MCP tools total: all 54 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
 
 To enable the full surface, create either:
 
@@ -140,6 +140,7 @@ Examples:
 - “Run `run_full_annotation_pipeline` for speaker `Fail02` with `dryRun=true` first.”
 - “Prepare compare mode for concepts `1-25` across `Fail01`, `Mand01`, and `Qasr01`.”
 - “List active jobs, then show logs for the stalled job.”
+- “Run `compute_boundaries_start` for one speaker, then `retranscribe_with_boundaries_start` after `tiers.ortho_words` is ready.”
 - “Export the complete LingPy dataset after refreshing contact lexeme references.”
 
 ## 2. Use the local HTTP API for custom automation
@@ -263,6 +264,8 @@ Keep only the essentials in the client config and move the rest into repo-local 
 ### I expected more tools than I see by default
 
 That is normal. The default MCP surface is curated. If you need the full PARSE tool surface, set `{"expose_all_tools": true}` in `config/mcp_config.json`.
+
+The default curated set already includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
 
 ### Can I use an official `parse_mcp` Python package or an HTTP MCP bridge?
 

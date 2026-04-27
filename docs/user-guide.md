@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-04-25
+> Last updated: 2026-04-27
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -11,8 +11,10 @@ PARSE is organized around two tightly linked research modes:
 
 The same workspace, tag system, and backend data model support both.
 
-<!-- TODO: Add an Annotate-mode screenshot here: waveform, tiers, transcription lanes, and chat dock visible together. -->
-<!-- TODO: Add a Compare-mode screenshot here: concept × speaker matrix, cognate controls, and CLEF panel. -->
+<p align="center">
+  <img src="./pr-assets/dogfood-fix-153-annotate-stable.png" alt="Annotate mode in PARSE" width="48%" />
+  <img src="./pr-assets/pr76-compare-table.png" alt="Compare mode in PARSE" width="48%" />
+</p>
 
 ## Workflow at a glance
 
@@ -109,6 +111,15 @@ Each Tier 2 interval is color-coded from the delta between the Tier 1 STT word a
 - red — over 100 ms, or a Tier 2 `short_clip_fallback`
 
 When no Tier 1 partner exists, PARSE falls back to Tier 2 `confidence` coloring instead. Stacking **Words (Tier 1)** directly above **Boundaries (Tier 2)** lets you eyeball the same lexical item in both tiers without relying on color alone. Both lanes are read-only in the current build: they are meant to expose suspicious Tier 1 windows before you decide whether to correct timestamps or rerun a step, not to replace the existing interval-editing workflow.
+
+#### Boundary refinement (BND)
+
+The current React Annotate toolbar exposes the BND workflow directly as two gated actions:
+
+- **Refine Boundaries (BND)** appears once the active speaker has Tier 1 STT word timestamps
+- **Re-run STT with Boundaries** appears once `tiers.ortho_words` exists for that speaker
+
+Earlier PR notes referred to this area as **Phonetic Tools**, but the verified current UI labels are the two direct actions above.
 
 #### Acoustic IPA fill
 
@@ -266,7 +277,7 @@ Populate jobs now follow the same global-job pattern as other heavy PARSE workfl
 
 - **Save & populate** closes the modal and moves progress into the shared header status chip
 - a successful populate can trigger an automatic recompute so similarity columns refresh against the newly available reference data
-- empty-populate outcomes surface an explicit banner rather than silently looking like success
+- empty-populate outcomes surface explicit `no_forms` or `provider_error` banners rather than silently looking like success
 - that banner includes **Retry with different providers** so you can reopen the modal directly on the auto-populate tab
 
 The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to Arabic/Persian, and the **Reference Forms** panel can render multiple forms per language.
