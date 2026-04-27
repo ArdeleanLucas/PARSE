@@ -1,6 +1,6 @@
 # Post-decomposition file map
 
-> Canonical rebuild-layout reference as of 2026-04-27. Use this page when you need the **current** module layout for PARSE-rebuild rather than historical pre-decomposition paths mentioned in older plans or reports.
+> Canonical PARSE module layout reference as of 2026-04-27. Use this page when you need the **current** layout rather than historical pre-decomposition paths mentioned in older plans or reports.
 
 ## Backend module map
 
@@ -97,7 +97,7 @@
 - `src/components/parse/RightPanel.tsx` — thin shell; right-panel tab content now lives under `src/components/parse/right-panel/`
 
 ## Parity harness layout
-- `parity/harness/runner.py` — report-only oracle-vs-rebuild diff harness entrypoint
+- `parity/harness/runner.py` — diff-harness entrypoint; was the cutover-gate equivalence check (oracle vs rebuild). Post-cutover (2026-04-27) it remains as a historical artifact and self-consistency tool against `ArdeleanLucas/PARSE-pre-rebuild-archive`.
 - `parity/harness/tests/` — unit tests for harness behavior
 - `parity/harness/output/` — generated reports/artifacts
 - `parity/harness/SIGNOFF.md` — owned signoff/status document; do not preempt in unrelated docs PRs

@@ -1,7 +1,5 @@
 # PARSE — Phonetic Analysis & Review Source Explorer
 
-> **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle repo remains [`ArdeleanLucas/PARSE`](https://github.com/ArdeleanLucas/PARSE). Refactor PRs should land here first; only controlled syncs or reverts should touch the live repo.
-
 **Browser-based dual-mode workstation for linguistic fieldwork.**
 Annotate per-speaker recordings with tiered IPA/orthography, then compare across speakers for cognate adjudication, borrowing detection, and export-ready historical-linguistic datasets.
 
@@ -23,8 +21,8 @@ Annotate per-speaker recordings with tiered IPA/orthography, then compare across
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/TarahAssistant/PARSE-rebuild.git
-cd PARSE-rebuild
+git clone https://github.com/ArdeleanLucas/PARSE.git
+cd PARSE
 npm install
 ./scripts/parse-run.sh
 ```

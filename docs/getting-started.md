@@ -44,8 +44,8 @@ This second setup matters because some local speech/model stacks may already be 
 Clone the repository and install frontend dependencies once per clone:
 
 ```bash
-git clone https://github.com/TarahAssistant/PARSE-rebuild.git
-cd PARSE-rebuild
+git clone https://github.com/ArdeleanLucas/PARSE.git
+cd PARSE
 npm install
 ```
 

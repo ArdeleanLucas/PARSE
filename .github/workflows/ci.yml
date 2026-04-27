@@ -275,18 +275,15 @@ jobs:
           PYTHONPATH: .
         run: python -m pytest parity/harness/tests -q
 
-      - name: Clone oracle repository
-        run: git clone --depth 1 https://github.com/ArdeleanLucas/PARSE.git /tmp/parse-oracle
-
-      - name: Run report-only oracle vs rebuild harness
-        env:
-          PYTHONPATH: .
-        run: |
-          python -m parity.harness.runner \
-            --oracle-repo /tmp/parse-oracle \
-            --rebuild-repo "$GITHUB_WORKSPACE" \
-            --output-dir "$GITHUB_WORKSPACE/parity/harness/output/ci" \
-            --keep-temp
+      # Post-cutover (2026-04-27): the parity harness's purpose was the rebuild→canonical
+      # cutover gate, which is complete. The step below cloned ArdeleanLucas/PARSE as
+      # "oracle" — but post-cutover that URL IS the canonical (this very repo), making
+      # the comparison trivially zero-diff. Disabled to free CI minutes. Harness unit
+      # tests above still run as regression coverage on the harness code itself.
+      # If a true oracle-vs-canonical diff is needed in future, repoint at
+      # ArdeleanLucas/PARSE-pre-rebuild-archive (the archived pre-cutover oracle).
+      - name: Skip oracle-vs-rebuild parity diff (cutover complete)
+        run: echo "Parity diff harness disabled post-cutover. See workflow comment for rationale."
 
       - name: Publish parity-harness summary
         env:
