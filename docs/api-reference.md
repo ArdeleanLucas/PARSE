@@ -1,16 +1,17 @@
 # API Reference
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
 > This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
 ## API overview
 
-PARSE has three programmatic surfaces:
+PARSE has four programmatic surfaces:
 
 1. **HTTP API** — used by the browser frontend and any local automation that talks to `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 2. **WebSocket job streaming** — additive realtime job updates from the sidecar in `python/external_api/streaming.py`
-3. **MCP server mode** — used by external agent clients through the PARSE MCP adapter
+3. **HTTP MCP bridge** — schema discovery + tool execution over normal HTTP routes
+4. **MCP server mode** — stdio adapter used by external agent clients
 
 ### Base URLs
 
@@ -107,6 +108,9 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `GET /api/lexeme/search` | Rank candidate time ranges for a lexeme/concept | User-facing endpoint behind Search & anchor lexeme |
 | `GET /api/spectrogram` | Return or generate a PNG spectrogram for a clip | Cached on disk; returns `image/png` |
 | `GET /api/contact-lexemes/coverage` | Inspect CLEF provider coverage | Used by the Compare CLEF workflow |
+| `GET /api/mcp/exposure` | Read the active MCP exposure mode | Returns code-grounded tool counts and whether `expose_all_tools` is active |
+| `GET /api/mcp/tools` | Read the active HTTP MCP catalog | Includes strict parameter schemas and `meta.x-parse` safety metadata |
+| `GET /api/mcp/tools/{toolName}` | Read one HTTP MCP tool schema | Returns the catalog entry for one tool |
 
 ### Auth, exports, and worker health
 
@@ -139,7 +143,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/normalize/status` | Poll normalization status | Job polling |
 | `POST /api/stt` | Start STT | Accepts `speaker`, `sourceWav` / `source_wav`, optional `language` |
 | `POST /api/stt/status` | Poll STT status | Accepts `jobId` or `job_id` |
-| `POST /api/compute/{computeType}` | Start a compute job | Main dispatcher for ORTH, IPA, full pipeline, contact lexemes, etc. |
+| `POST /api/compute/{computeType}` | Start a compute job | Main dispatcher for ORTH, IPA, BND boundary refresh, boundary-constrained STT, full pipeline, contact lexemes, etc. |
 | `POST /api/compute/{computeType}/status` | Poll a typed compute job | Verifies the job matches the compute type |
 | `POST /api/compute/status` | Poll a compute job without specifying a type | Generic polling alias |
 | `POST /api/{computeType}/status` | Compatibility alias for compute status | Used for compute-style status endpoints other than STT |
@@ -152,6 +156,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/chat/session` | Create or resume a chat session | Returns normalized `sessionId` / `session_id` |
 | `POST /api/chat/run` | Start a chat run | Returns a job ID |
 | `POST /api/chat/run/status` | Poll chat run status | Background-job polling |
+| `POST /api/mcp/tools/{toolName}` | Execute one HTTP MCP tool | Uses the same schema/metadata surface exposed by the stdio adapter |
 | `POST /api/auth/key` | Save an API key for a provider | Provider-scoped credential save |
 | `POST /api/auth/start` | Start OAuth/device auth flow | Provider auth initiation |
 | `POST /api/auth/poll` | Poll OAuth/device auth flow | Normalized status: pending/complete/expired/error |
@@ -182,10 +187,12 @@ The compute dispatcher normalizes several named background workflows.
 
 | Compute type | Accepted aliases | Purpose |
 |---|---|---|
-| `contact-lexemes` | — | Start a CLEF contact-lexeme fetch/merge job |
+| `contact-lexemes` | — | Start a CLEF contact-lexeme fetch/merge job; zero-fill results now distinguish `ok`, `no_forms`, and `provider_error` |
 | `ipa_only` | `ipa-only`, `ipa` | Run Tier 3 acoustic IPA fill |
 | `ortho` | `ortho_only`, `ortho-only` | Run speaker-level ORTH transcription |
 | `forced_align` | `forced-align`, `align` | Run Tier 2 forced alignment |
+| `boundaries` | `bnd`, `ortho_words`, `ortho-words` | Refresh `tiers.ortho_words` from STT word timestamps / forced alignment output |
+| `retranscribe_with_boundaries` | `retranscribe-with-boundaries`, `boundary_constrained_stt`, `boundary-constrained-stt`, `bnd_stt` | Re-run STT constrained to the current `tiers.ortho_words` boundaries |
 | `full_pipeline` | `full-pipeline`, `pipeline` | Run the step-resilient full annotation pipeline |
 
 ## Example requests and responses
@@ -377,7 +384,7 @@ The OpenAPI document intentionally describes the HTTP workstation API and the HT
 
 ## HTTP MCP bridge
 
-Task 5 adds a discovery/execution bridge so external Python tooling can use the PARSE MCP schema without spawning the stdio adapter.
+The current HTTP MCP bridge lets external Python tooling use the PARSE MCP schema without spawning the stdio adapter.
 
 | Endpoint | Purpose | Notes |
 |---|---|---|
@@ -392,6 +399,13 @@ Task 5 adds a discovery/execution bridge so external Python tooling can use the 
 - `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
 - `default` — force the curated MCP subset
 - `all` — force the full tool surface
+
+Current code-grounded counts from `python/external_api/catalog.py`:
+- **54** built-in chat tools
+- **36** default MCP task tools
+- **3** workflow macros
+- **40** total default adapter tools including `mcp_get_exposure_mode`
+- **58** total adapter tools with `expose_all_tools=true`
 
 ### Tool schema payload
 
@@ -451,7 +465,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Full MCP task surface (32 task tools + 3 workflow macros; 36 default adapter tools including `mcp_get_exposure_mode`)
+## Full MCP task surface (36 task tools + 3 workflow macros; 40 default adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -478,6 +492,10 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `stt_word_level_status` | Poll Tier 1 word-level STT status |
 | `forced_align_start` | Start Tier 2 forced alignment |
 | `forced_align_status` | Poll forced-alignment status |
+| `compute_boundaries_start` | Start the standalone `tiers.ortho_words` / boundary-refresh job |
+| `compute_boundaries_status` | Poll boundary-refresh status |
+| `retranscribe_with_boundaries_start` | Re-run STT constrained to current `tiers.ortho_words` boundaries |
+| `retranscribe_with_boundaries_status` | Poll boundary-constrained STT status |
 | `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA |
 | `ipa_transcribe_acoustic_status` | Poll Tier 3 acoustic IPA status |
 | `pipeline_run` | Start a one-speaker full pipeline or step-subset run |

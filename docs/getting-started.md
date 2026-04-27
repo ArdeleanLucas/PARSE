@@ -1,10 +1,10 @@
 # Getting Started
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
-> This guide reflects the current React + Vite frontend, the Python backend in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), and the launcher workflow documented in the latest `README.md` and tracked scripts.
+> This guide reflects the post-cutover canonical PARSE repo, the current React + Vite frontend, the Python backend in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`), and the launcher workflow documented in the latest `README.md` and tracked scripts.
 
-PARSE is a browser-based dual-mode research workstation for linguistic fieldwork and cross-speaker comparison. The fastest path is the tracked launcher script, which starts the Python API and the Vite frontend together and prints the working URLs.
+PARSE is a browser-based dual-mode research workstation for linguistic fieldwork and cross-speaker comparison. As of 2026-04-27, `ArdeleanLucas/PARSE` is the canonical live repo after the rebuild→canonical cutover. The fastest path is the tracked launcher script, which starts the Python API and the Vite frontend together and prints the working URLs.
 
 If you are new to the project, use this page in order:
 

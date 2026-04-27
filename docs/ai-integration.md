@@ -1,6 +1,6 @@
 # AI Integration
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 >
 > This document consolidates the AI provider system, model roles, configuration expectations, and the full built-in PARSE chat tool surface currently described in the repository README and code.
 
@@ -22,7 +22,7 @@ A single project can therefore mix providers across tasks:
 - wav2vec2 for alignment and acoustic IPA
 - OpenAI or xAI for workflow chat
 
-Configuration lives in `config/ai_config.json`.
+Configuration lives in `config/ai_config.json`. The provider implementation split now lives under `python/ai/providers/` with explicit `openai.py`, `xai.py`, `local_whisper.py`, `ollama.py`, and shared-normalization helpers in `shared.py`.
 
 ## Configuration model
 
@@ -224,9 +224,9 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (50 tools)
+## Full built-in chat tool surface (54 tools)
 
-The in-app assistant currently exposes **50 PARSE-specific tools**.
+The in-app assistant currently exposes **54 PARSE-specific tools**.
 
 ### Read-only / preview tools (15)
 
@@ -257,7 +257,7 @@ The in-app assistant currently exposes **50 PARSE-specific tools**.
 | `job_status` | Read one generic job snapshot, including `errorCode`, progress, lock metadata, and log counts |
 | `job_logs` | Read structured per-job logs and surfaced crash-log tails |
 
-### Job-triggering tools (12)
+### Job-triggering tools (16)
 
 | Tool | Description |
 |---|---|
@@ -270,6 +270,10 @@ The in-app assistant currently exposes **50 PARSE-specific tools**.
 | `stt_word_level_status` | Poll status/result of a Tier 1 word-level STT job |
 | `forced_align_start` | Start Tier 2 acoustic forced alignment for one speaker |
 | `forced_align_status` | Poll status/result of a Tier 2 forced-alignment job |
+| `compute_boundaries_start` | Start the standalone boundary-refresh / `tiers.ortho_words` generation job for one speaker |
+| `compute_boundaries_status` | Poll status/result of the boundary-refresh job |
+| `retranscribe_with_boundaries_start` | Re-run STT constrained to the current `tiers.ortho_words` boundaries |
+| `retranscribe_with_boundaries_status` | Poll status/result of the boundary-constrained STT job |
 | `pipeline_run` | Start a one-speaker pipeline or ORTH-only run with explicit steps and overwrites |
 | `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription for one speaker |
 | `ipa_transcribe_acoustic_status` | Poll status/result of a Tier 3 acoustic IPA job |
@@ -327,12 +331,12 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 50-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 54-tool chat surface.
 
-- **Built-in chat tools**: 50
-- **Default MCP task tools**: 32
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 36
-- **Full MCP adapter surface with `expose_all_tools=true`**: 54
+- **Built-in chat tools**: 54
+- **Default MCP task tools**: 36
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 40
+- **Full MCP adapter surface with `expose_all_tools=true`**: 58
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

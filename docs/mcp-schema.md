@@ -4,14 +4,17 @@ This document describes the standardized external-agent surface added in Task 5.
 
 ## External surfaces
 
-PARSE now exposes three closely related machine-facing surfaces:
+PARSE now exposes four closely related machine-facing surfaces:
 
 1. **HTTP API** on port `8766`
    - browser workstation backend
    - documented via OpenAPI 3.1
-2. **HTTP MCP bridge** on the same server
+2. **WebSocket job stream** on port `8767` by default
+   - `ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}`
+   - additive realtime progress alongside normal polling
+3. **HTTP MCP bridge** on the same server
    - schema discovery and tool execution for Python wrappers
-3. **stdio MCP adapter**
+4. **stdio MCP adapter**
    - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
    - for Claude Code, Cursor, Codex, Cline, Hermes, Windsurf, and other MCP-capable clients
 
@@ -38,6 +41,15 @@ PARSE now exposes three closely related machine-facing surfaces:
 - `active` — obey `config/mcp_config.json` / `mcp_config.json`
 - `default` — use the curated MCP subset
 - `all` — expose the full tool surface
+
+Current code-grounded counts from `python/external_api/catalog.py`:
+- **54** built-in chat tools
+- **36** default MCP task tools (`DEFAULT_MCP_TOOL_NAMES`)
+- **3** workflow macros (`DEFAULT_MCP_WORKFLOW_TOOL_NAMES`)
+- **40** total default adapter tools including `mcp_get_exposure_mode`
+- **58** total adapter tools with `expose_all_tools=true`
+
+The default MCP subset now includes the BND workflow tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`.
 
 ## Tool schema shape
 

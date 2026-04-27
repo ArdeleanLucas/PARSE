@@ -1,8 +1,8 @@
 # User Guide
 
-> Last updated: 2026-04-25
+> Last updated: 2026-04-27
 >
-> This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
+> This guide focuses on the current post-cutover PARSE workstation: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
 PARSE is organized around two tightly linked research modes:
 
@@ -11,8 +11,8 @@ PARSE is organized around two tightly linked research modes:
 
 The same workspace, tag system, and backend data model support both.
 
-<!-- TODO: Add an Annotate-mode screenshot here: waveform, tiers, transcription lanes, and chat dock visible together. -->
-<!-- TODO: Add a Compare-mode screenshot here: concept × speaker matrix, cognate controls, and CLEF panel. -->
+![Annotate workstation](pr-assets/dogfood-fix-153-annotate-stable.png)
+![Compare workstation](pr-assets/dogfood-fix-154-compare-notes.png)
 
 ## Workflow at a glance
 
@@ -48,6 +48,7 @@ The current Annotate surface includes:
   - optional **Words (Tier 1)** diagnostics (off by default)
   - optional **Boundaries (Tier 2)** diagnostics (off by default)
 - **Inline lane editing** across STT, IPA, and ORTH via double-click or right-click context actions
+- A right-panel **Phonetic tools** section with `Refine Boundaries (BND)` and `Re-run STT with Boundaries` controls
 - **Synchronized horizontal scrolling** between waveform and lanes
 - **Clip-bounded playback** for the selected region
 - A global **Space** play/pause hotkey
@@ -108,7 +109,16 @@ Each Tier 2 interval is color-coded from the delta between the Tier 1 STT word a
 - amber — 50–100 ms
 - red — over 100 ms, or a Tier 2 `short_clip_fallback`
 
-When no Tier 1 partner exists, PARSE falls back to Tier 2 `confidence` coloring instead. Stacking **Words (Tier 1)** directly above **Boundaries (Tier 2)** lets you eyeball the same lexical item in both tiers without relying on color alone. Both lanes are read-only in the current build: they are meant to expose suspicious Tier 1 windows before you decide whether to correct timestamps or rerun a step, not to replace the existing interval-editing workflow.
+When no Tier 1 partner exists, PARSE falls back to Tier 2 `confidence` coloring instead. Stacking **Words (Tier 1)** directly above **Boundaries (Tier 2)** lets you eyeball the same lexical item in both tiers without relying on color alone. The **Words** lane can migrate into editable tier data on first manual edit; the **Boundaries** lane remains the Tier 2 review surface that feeds BND reruns and exposes suspicious drift before you decide whether to correct timestamps or rerun a step.
+
+#### Boundary refinement / BND reruns
+
+The Annotate **Phonetic tools** cluster now exposes two BND-specific actions:
+
+- **Refine Boundaries (BND)** — enabled when the current speaker has STT word timestamps
+- **Re-run STT with Boundaries** — enabled once `tiers.ortho_words` exists for that speaker, so the rerun can respect your current manual boundary corrections
+
+These controls are meant for the common loop of: generate Tier 1 words → tighten Tier 2 boundaries → re-run STT against those refreshed windows.
 
 #### Acoustic IPA fill
 
@@ -230,7 +240,7 @@ The current Compare interface provides:
 - a **concept × speaker matrix** for side-by-side lexical review
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
-- speaker flags and secondary-action controls
+- speaker flags, secondary-action controls, and compare notes that persist as you type
 - borrowing adjudication aided by contact-language similarity signals
 - enrichment overlays for computed analysis metadata
 - the **CLEF** panel
@@ -267,6 +277,7 @@ Populate jobs now follow the same global-job pattern as other heavy PARSE workfl
 - **Save & populate** closes the modal and moves progress into the shared header status chip
 - a successful populate can trigger an automatic recompute so similarity columns refresh against the newly available reference data
 - empty-populate outcomes surface an explicit banner rather than silently looking like success
+- the result envelope now distinguishes `ok`, `no_forms`, and `provider_error`, with surfaced `warnings` / `provider_errors` details behind the banner
 - that banner includes **Retry with different providers** so you can reopen the modal directly on the auto-populate tab
 
 The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to Arabic/Persian, and the **Reference Forms** panel can render multiple forms per language.
