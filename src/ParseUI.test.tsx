@@ -204,6 +204,64 @@ let mockClefConfig: {
 let mockCoverage: { languages: Record<string, { name: string; total: number; filled: number; empty: number; concepts: Record<string, string[]> }> } = {
   languages: {},
 };
+let mockSourcesReport = {
+  generated_at: '2026-04-25T16:00:00Z',
+  providers: [
+    { id: 'wikidata', total_forms: 3 },
+    { id: 'asjp', total_forms: 1 },
+  ],
+  languages: [
+    {
+      code: 'ar',
+      name: 'Arabic',
+      family: 'Semitic',
+      script: 'Arab',
+      total_forms: 4,
+      concepts_covered: 4,
+      concepts_total: 20,
+      per_provider: { wikidata: 3, asjp: 1 },
+      forms: [
+        { concept_en: 'water', form: 'ماء', sources: ['wikidata'] },
+      ],
+    },
+  ],
+  concepts_total: 20,
+  citations: {
+    wikidata: {
+      label: 'Wikidata',
+      type: 'dataset' as const,
+      authors: 'Vrandečić, D. & Krötzsch, M.',
+      year: 2014,
+      title: 'Wikidata: a free collaborative knowledgebase',
+      doi: '10.1145/2629489',
+      url: 'https://www.wikidata.org',
+      license: 'CC0-1.0',
+      citation: 'Vrandečić, D. & Krötzsch, M. 2014. Wikidata: a free collaborative knowledgebase.',
+      bibtex: '@article{wikidata2014, title={Wikidata}, year={2014}}',
+    },
+    asjp: {
+      label: 'ASJP',
+      type: 'dataset' as const,
+      authors: 'Wichmann, S., Holman, E. W., & Brown, C. H. (eds.)',
+      year: 2022,
+      title: 'The ASJP Database (version 20)',
+      url: 'https://asjp.clld.org',
+      license: 'CC-BY-4.0',
+      citation: 'Wichmann, S., Holman, E. W., & Brown, C. H. (eds.). 2022. The ASJP Database (version 20).',
+      bibtex: '@misc{asjp2022, title={{The ASJP Database (version 20)}}, year={2022}}',
+    },
+    unknown: {
+      label: 'Unattributed (legacy)',
+      type: 'sentinel' as const,
+      authors: null,
+      year: null,
+      title: 'Pre-provenance bare-string entry',
+      citation: 'Unattributed legacy entry: provider not recorded.',
+      bibtex: '',
+    },
+  },
+  citation_order: ['wikidata', 'asjp', 'unknown'],
+};
 
 vi.mock("./api/client", () => ({
   getLingPyExport: vi.fn().mockResolvedValue(''),
@@ -240,6 +298,7 @@ vi.mock("./api/client", () => ({
   getJobLogs: vi.fn().mockResolvedValue({ lines: [] }),
   getClefConfig: vi.fn(() => Promise.resolve(mockClefConfig)),
   getContactLexemeCoverage: vi.fn(() => Promise.resolve(mockCoverage)),
+  getClefSourcesReport: vi.fn(() => Promise.resolve(mockSourcesReport)),
   getClefCatalog: vi.fn().mockResolvedValue({ languages: [] }),
   getClefProviders: vi.fn().mockResolvedValue({ providers: [] }),
   saveClefConfig: vi.fn().mockResolvedValue(undefined),
@@ -1322,6 +1381,28 @@ describe("ParseUI", () => {
       expect(apiClient.startCompute).toHaveBeenCalledTimes(1);
     });
     expect(vi.mocked(apiClient.startCompute).mock.calls[0]).toEqual(["contact-lexemes"]);
+  });
+
+  it("opens the decomposed Sources Report modal with academic citations from the CLEF endpoint", async () => {
+    mockClefConfig = {
+      configured: true,
+      primary_contact_languages: ['ar'],
+      languages: [{ code: 'ar', name: 'Arabic' }],
+      config_path: 'config/sil_contact_languages.json',
+      concepts_csv_exists: true,
+      meta: {},
+    };
+
+    render(<ParseUI />);
+    await screen.findByRole('button', { name: 'Run' });
+    await switchCompareComputeMode('contact-lexemes');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sources Report' }));
+
+    await waitFor(() => expect(apiClient.getClefSourcesReport).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Academic citations')).toBeTruthy();
+    expect(screen.getByTestId('sources-report-citation-wikidata')).toBeTruthy();
+    expect(screen.getByText(/Vrandečić, D\. & Krötzsch, M\./i)).toBeTruthy();
   });
 
   it("restores the xAI provider badge after reload when backend reports provider=xai", async () => {
