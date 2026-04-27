@@ -1,6 +1,7 @@
 # MCP schema and authentication model
 
 This document describes the standardized external-agent surface added in Task 5.
+For the narrative overview of the four surfaces, tool counts, auth model, and `parse-mcp` usage, see [MCP & External API Guide](mcp-guide.md).
 
 ## External surfaces
 
