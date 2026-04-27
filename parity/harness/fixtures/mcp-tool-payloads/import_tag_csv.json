@@ -1,0 +1,6 @@
+{
+  "csvPath": "${INPUT_ROOT}/tags-import.csv",
+  "tagName": "${TAG_NAME}",
+  "color": "${TAG_COLOR}",
+  "dryRun": true
+}

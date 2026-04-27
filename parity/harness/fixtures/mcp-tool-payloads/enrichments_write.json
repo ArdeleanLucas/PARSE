@@ -1,0 +1,15 @@
+{
+  "enrichments": {
+    "manual_overrides": {
+      "cognate_sets": {
+        "1": {
+          "A": [
+            "${SEED_SPEAKER}"
+          ]
+        }
+      }
+    }
+  },
+  "dryRun": true,
+  "merge": true
+}

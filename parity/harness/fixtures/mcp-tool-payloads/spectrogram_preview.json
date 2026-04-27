@@ -1,0 +1,6 @@
+{
+  "sourceWav": "audio/original/${SEED_SPEAKER}/source.wav",
+  "startSec": 0.0,
+  "endSec": 0.1,
+  "windowSize": 512
+}

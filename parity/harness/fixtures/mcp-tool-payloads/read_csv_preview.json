@@ -1,0 +1,4 @@
+{
+  "csvPath": "${WORKSPACE_ROOT}/concepts.csv",
+  "maxRows": 5
+}

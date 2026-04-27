@@ -1,0 +1,5 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "audioTimeSec": 0.05,
+  "csvTimeSec": 0.0
+}

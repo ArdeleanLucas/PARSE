@@ -1,0 +1,8 @@
+{
+  "concept_range": "1-2",
+  "speakers": [
+    "${SEED_SPEAKER}",
+    "${COMPARE_SPEAKER}"
+  ],
+  "dryRun": true
+}

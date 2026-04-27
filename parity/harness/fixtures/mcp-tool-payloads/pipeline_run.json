@@ -1,0 +1,7 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "steps": [
+    "ortho"
+  ],
+  "dryRun": true
+}

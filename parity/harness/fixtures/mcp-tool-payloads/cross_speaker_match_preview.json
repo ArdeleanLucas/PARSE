@@ -1,0 +1,13 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "sttSegments": [
+    {
+      "start": 0.0,
+      "end": 0.1,
+      "text": "ash",
+      "ipa": "aʃ"
+    }
+  ],
+  "topK": 3,
+  "minConfidence": 0.2
+}

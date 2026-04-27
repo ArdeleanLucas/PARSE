@@ -1,0 +1,12 @@
+{
+  "speakers": [
+    "${SEED_SPEAKER}",
+    "${COMPARE_SPEAKER}"
+  ],
+  "conceptIds": [
+    "1",
+    "2"
+  ],
+  "includeSimilarity": true,
+  "maxConcepts": 5
+}

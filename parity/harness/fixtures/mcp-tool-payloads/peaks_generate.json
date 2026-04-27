@@ -1,0 +1,5 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "dryRun": true,
+  "samplesPerPixel": 128
+}

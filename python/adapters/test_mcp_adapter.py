@@ -5,6 +5,7 @@ through ParseChatTools.execute(), so registering an MCP tool that isn't
 in the allowlist produces a runtime ChatToolValidationError on the
 client side. A test at import time catches that before shipping.
 """
+import json
 import os
 import pathlib
 import sys
@@ -18,6 +19,47 @@ if str(_PYTHON_DIR) not in sys.path:
 
 from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
+
+
+def _seed_minimal_annotation_project(project_root: pathlib.Path) -> None:
+    import wave
+
+    (project_root / "config").mkdir(parents=True, exist_ok=True)
+    (project_root / "annotations").mkdir(parents=True, exist_ok=True)
+    audio_dir = project_root / "audio" / "original" / "Base01"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    with wave.open(str(audio_dir / "source.wav"), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 1600)
+
+    (project_root / "project.json").write_text(
+        json.dumps({"project_id": "mcp-adapter-test", "speakers": {"Base01": {}}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "parse-enrichments.json").write_text("{}\n", encoding="utf-8")
+    (project_root / "annotations" / "Base01.parse.json").write_text(
+        json.dumps(
+            {
+                "speaker": "Base01",
+                "source_audio": "audio/original/Base01/source.wav",
+                "metadata": {
+                    "language_code": "sdh",
+                    "created": "2026-01-01T00:00:00Z",
+                    "modified": "2026-01-01T00:00:00Z",
+                },
+                "tiers": {
+                    "concept": {"intervals": [{"start": 0.0, "end": 0.1, "text": "1: ash"}]},
+                    "speaker": {"intervals": [{"start": 0.0, "end": 0.1, "text": "Base01"}]},
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_load_repo_parse_env_sets_missing_vars(tmp_path, monkeypatch) -> None:
@@ -193,6 +235,24 @@ def test_create_mcp_server_exposes_all_54_tools_when_enabled_in_root_config(tmp_
     payload = json.loads(meta["result"])
     assert payload["result"]["configSource"] == str(tmp_path / "mcp_config.json")
     assert payload["result"]["exposeAllTools"] is True
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_accepts_direct_named_arguments_for_registered_tools(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    _seed_minimal_annotation_project(tmp_path)
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+
+    server = create_mcp_server(str(tmp_path))
+    _, meta = asyncio.run(server.call_tool("annotation_read", {"speaker": "Base01"}))
+    payload = json.loads(meta["result"])
+
+    assert payload["ok"] is True
+    assert payload["tool"] == "annotation_read"
+    assert payload["result"]["speaker"] == "Base01"
 
 
 def test_load_mcp_config_rejects_non_boolean_expose_all_tools(tmp_path) -> None:

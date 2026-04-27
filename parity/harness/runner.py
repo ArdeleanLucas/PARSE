@@ -15,10 +15,12 @@ import urllib.parse
 import urllib.request
 import uuid
 import wave
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable, Iterable
+
+from parity.harness.diff.mcp_tools import build_mcp_tools_capture
 
 try:
     import yaml
@@ -35,6 +37,10 @@ SUPPORTED_FIXTURE_NAMES = ("saha-2speaker", "round2-multispeaker")
 FIXTURE_ROOTS = {name: FIXTURE_ROOT for name in SUPPORTED_FIXTURE_NAMES}
 DEFAULT_SCRIPT_BOOT_PORT = 8766
 CANONICALIZATION_VERSION = 2
+DIFF_CATEGORY_SECTIONS: dict[str, tuple[str, ...]] = {
+    "all": ("api", "job_lifecycles", "exports", "persisted_json", "mcp_tools"),
+    "mcp_tools": ("mcp_tools",),
+}
 TIMESTAMP_FIELD_NAMES = {
     "completed_at",
     "completedAt",
@@ -66,6 +72,8 @@ UUID_VALUE_RE = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab
 CHAT_SESSION_VALUE_RE = re.compile(r"^chat_[0-9a-f]+$", re.IGNORECASE)
 HEX_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]+")
 TRACEBACK_LINE_RE = re.compile(r"line\s+\d+")
+TIMESTAMP_INLINE_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})")
+MCP_GENERATED_MODEL_NAME_RE = re.compile(r"\bmcp_([A-Za-z0-9_]+(?:Arguments|Output))\b")
 JSON_SNAPSHOT_PATTERNS = (
     "project.json",
     "source_index.json",
@@ -205,6 +213,7 @@ class ScenarioCapture:
     job_lifecycles: dict[str, Any]
     exports: dict[str, Any]
     persisted_json: dict[str, Any]
+    mcp_tools: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -293,13 +302,13 @@ def normalize_for_diff(
         for key in sorted(value):
             item_path = f"{path}.{key}"
             item = normalize_for_diff(value[key], context=context, path=item_path)
-            if key in JOB_ID_FIELD_NAMES and item not in {None, ""}:
+            if key in JOB_ID_FIELD_NAMES and isinstance(item, str) and item:
                 normalized[key] = "<job-id>"
                 continue
-            if key in SESSION_ID_FIELD_NAMES and item not in {None, ""}:
+            if key in SESSION_ID_FIELD_NAMES and isinstance(item, str) and item:
                 normalized[key] = "<session-id>"
                 continue
-            if key in TIMESTAMP_FIELD_NAMES and item not in {None, ""}:
+            if key in TIMESTAMP_FIELD_NAMES and isinstance(item, str) and item:
                 normalized[key] = "<timestamp>"
                 continue
             normalized[key] = item
@@ -452,9 +461,11 @@ def compare_capture_sections(
     rebuild: ScenarioCapture,
     *,
     context: CanonicalizationContext | None = None,
+    sections: Iterable[str] | None = None,
 ) -> list[DiffEntry]:
     diffs: list[DiffEntry] = []
-    for section in ("api", "job_lifecycles", "exports", "persisted_json"):
+    selected_sections = tuple(sections or ("api", "job_lifecycles", "exports", "persisted_json", "mcp_tools"))
+    for section in selected_sections:
         base_path = f"$.{section}"
         oracle_section = normalize_for_diff(getattr(oracle, section), context=context, path=base_path)
         rebuild_section = normalize_for_diff(getattr(rebuild, section), context=context, path=base_path)
@@ -468,9 +479,10 @@ def build_diff_report(
     *,
     context: CanonicalizationContext,
     allowlist_rules: Iterable[AllowlistRule],
+    sections: Iterable[str] | None = None,
 ) -> DiffReport:
     raw_diffs: list[DiffEntry] = []
-    for entry in compare_capture_sections(oracle, rebuild, context=context):
+    for entry in compare_capture_sections(oracle, rebuild, context=context, sections=sections):
         matched_rule = next((rule for rule in allowlist_rules if rule.matches(entry)), None)
         if matched_rule is None:
             raw_diffs.append(entry)
@@ -600,7 +612,9 @@ def run_harness(
     fixture_name: str = DEFAULT_FIXTURE_NAME,
     emit_signoff: bool = False,
     keep_temp: bool = False,
+    diff_category: str = "all",
 ) -> dict[str, Any]:
+    selected_sections = _resolve_diff_sections(diff_category)
     output_dir.mkdir(parents=True, exist_ok=True)
     allowlist_rules = load_allowlist_rules(allowlist_path)
     oracle_sha = _git_rev_parse(oracle_repo)
@@ -610,40 +624,77 @@ def run_harness(
         oracle_fixture = prepare_fixture_bundle(Path(oracle_tmp), fixture_name=fixture_name)
         rebuild_fixture = prepare_fixture_bundle(Path(rebuild_tmp), fixture_name=fixture_name)
 
-        server_boot_results = {
-            "oracle": _run_server_boot_smoke(
+        server_boot_results: dict[str, BootSmokeResult] = {}
+        oracle_server_log = output_dir / "oracle-server.log"
+        rebuild_server_log = output_dir / "rebuild-server.log"
+        oracle_script_log = output_dir / "oracle-server-script.log"
+        rebuild_script_log = output_dir / "rebuild-server-script.log"
+        oracle_capture = _empty_capture("oracle")
+        rebuild_capture = _empty_capture("rebuild")
+
+        if _requires_http_server(selected_sections):
+            server_boot_results = {
+                "oracle": _run_server_boot_smoke(
+                    repo_root=oracle_repo,
+                    workspace_root=oracle_fixture.workspace_root,
+                    label="oracle",
+                    log_path=oracle_script_log,
+                ),
+                "rebuild": _run_server_boot_smoke(
+                    repo_root=rebuild_repo,
+                    workspace_root=rebuild_fixture.workspace_root,
+                    label="rebuild",
+                    log_path=rebuild_script_log,
+                ),
+            }
+
+            oracle_server = _start_server(
+                label="oracle",
                 repo_root=oracle_repo,
                 workspace_root=oracle_fixture.workspace_root,
-                label="oracle",
-                log_path=output_dir / "oracle-server-script.log",
-            ),
-            "rebuild": _run_server_boot_smoke(
+                log_path=oracle_server_log,
+            )
+            rebuild_server = _start_server(
+                label="rebuild",
                 repo_root=rebuild_repo,
                 workspace_root=rebuild_fixture.workspace_root,
-                label="rebuild",
-                log_path=output_dir / "rebuild-server-script.log",
-            ),
-        }
+                log_path=rebuild_server_log,
+            )
 
-        oracle_server = _start_server(
-            label="oracle",
-            repo_root=oracle_repo,
-            workspace_root=oracle_fixture.workspace_root,
-            log_path=output_dir / "oracle-server.log",
-        )
-        rebuild_server = _start_server(
-            label="rebuild",
-            repo_root=rebuild_repo,
-            workspace_root=rebuild_fixture.workspace_root,
-            log_path=output_dir / "rebuild-server.log",
-        )
+            try:
+                oracle_capture = _run_default_scenario(oracle_server, oracle_fixture)
+                rebuild_capture = _run_default_scenario(rebuild_server, rebuild_fixture)
+            finally:
+                _stop_server(oracle_server)
+                _stop_server(rebuild_server)
 
-        try:
-            oracle_capture = _run_default_scenario(oracle_server, oracle_fixture)
-            rebuild_capture = _run_default_scenario(rebuild_server, rebuild_fixture)
-        finally:
-            _stop_server(oracle_server)
-            _stop_server(rebuild_server)
+        if "mcp_tools" in selected_sections:
+            oracle_capture = replace(
+                oracle_capture,
+                mcp_tools=build_mcp_tools_capture(
+                    repo_root=oracle_repo,
+                    workspace_root=oracle_fixture.workspace_root,
+                    input_root=oracle_fixture.input_root,
+                    seed_speaker_id=oracle_fixture.seed_speaker_id,
+                    compare_speaker_id=oracle_fixture.compare_speaker_id,
+                    onboard_speaker_id=oracle_fixture.onboard_speaker_id,
+                    tag_name=oracle_fixture.tag_name,
+                    tag_color=oracle_fixture.tag_color,
+                ),
+            )
+            rebuild_capture = replace(
+                rebuild_capture,
+                mcp_tools=build_mcp_tools_capture(
+                    repo_root=rebuild_repo,
+                    workspace_root=rebuild_fixture.workspace_root,
+                    input_root=rebuild_fixture.input_root,
+                    seed_speaker_id=rebuild_fixture.seed_speaker_id,
+                    compare_speaker_id=rebuild_fixture.compare_speaker_id,
+                    onboard_speaker_id=rebuild_fixture.onboard_speaker_id,
+                    tag_name=rebuild_fixture.tag_name,
+                    tag_color=rebuild_fixture.tag_color,
+                ),
+            )
 
         context = CanonicalizationContext(
             repo_roots={"oracle": oracle_repo, "rebuild": rebuild_repo},
@@ -654,6 +705,7 @@ def run_harness(
             rebuild_capture,
             context=context,
             allowlist_rules=allowlist_rules,
+            sections=selected_sections,
         )
         report.raw_diffs.extend(build_server_boot_smoke_blockers(server_boot_results))
         report.finalize()
@@ -673,6 +725,8 @@ def run_harness(
             "canonicalization_version": CANONICALIZATION_VERSION,
             "allowlist_path": str(allowlist_path),
             "allowlist_rule_count": len(allowlist_rules),
+            "diff_category": diff_category,
+            "selected_sections": list(selected_sections),
             "repos": signoff_payload["repos"],
             "coverage": {
                 "contract_groups": ROUND2_CONTRACT_GROUP_COVERAGE,
@@ -718,10 +772,10 @@ def run_harness(
             "report_markdown": report_markdown_path,
             "signoff_json": signoff_json_path,
             "signoff_markdown": signoff_markdown_path,
-            "oracle_server_log": oracle_server.log_path,
-            "rebuild_server_log": rebuild_server.log_path,
-            "oracle_script_log": output_dir / "oracle-server-script.log",
-            "rebuild_script_log": output_dir / "rebuild-server-script.log",
+            "oracle_server_log": oracle_server_log,
+            "rebuild_server_log": rebuild_server_log,
+            "oracle_script_log": oracle_script_log,
+            "rebuild_script_log": rebuild_script_log,
         }
 
 
@@ -732,6 +786,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REBUILD_REPO / "parity" / "harness" / "output" / "latest")
     parser.add_argument("--allowlist", type=Path, default=DEFAULT_ALLOWLIST_PATH)
     parser.add_argument("--fixture", default=DEFAULT_FIXTURE_NAME)
+    parser.add_argument("--diff-category", choices=sorted(DIFF_CATEGORY_SECTIONS), default="all")
     parser.add_argument("--emit-signoff", action="store_true", help="Write sign-off summary artifacts next to report.json/report.md.")
     parser.add_argument("--keep-temp", action="store_true", help="Copy final workspace snapshots into the output directory.")
     args = parser.parse_args(argv)
@@ -744,6 +799,7 @@ def main(argv: list[str] | None = None) -> int:
         fixture_name=str(args.fixture),
         emit_signoff=bool(args.emit_signoff),
         keep_temp=args.keep_temp,
+        diff_category=str(args.diff_category),
     )
 
     print(f"parity diff count: {result['diff_count']}")
@@ -765,7 +821,23 @@ def _capture_to_jsonable(capture: ScenarioCapture) -> dict[str, Any]:
         "job_lifecycles": capture.job_lifecycles,
         "exports": capture.exports,
         "persisted_json": capture.persisted_json,
+        "mcp_tools": capture.mcp_tools,
     }
+
+
+def _resolve_diff_sections(diff_category: str) -> tuple[str, ...]:
+    try:
+        return DIFF_CATEGORY_SECTIONS[diff_category]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported diff category: {diff_category}") from exc
+
+
+def _requires_http_server(selected_sections: Iterable[str]) -> bool:
+    return any(section != "mcp_tools" for section in selected_sections)
+
+
+def _empty_capture(label: str) -> ScenarioCapture:
+    return ScenarioCapture(label=label, api={}, job_lifecycles={}, exports={}, persisted_json={}, mcp_tools={})
 
 
 def _git_rev_parse(repo_root: Path) -> str:
@@ -1216,6 +1288,7 @@ def _run_default_scenario(instance: ServerInstance, fixture: FixtureBundle) -> S
         job_lifecycles=job_lifecycles,
         exports=exports,
         persisted_json=collect_persisted_json(instance.workspace_root),
+        mcp_tools={},
     )
 
 
@@ -1500,6 +1573,8 @@ def _normalize_string(value: str, context: CanonicalizationContext | None) -> st
     if CHAT_SESSION_VALUE_RE.match(text):
         return "<session-id>"
     text = _normalize_path_text(text, context)
+    text = TIMESTAMP_INLINE_RE.sub("<timestamp>", text)
+    text = MCP_GENERATED_MODEL_NAME_RE.sub(r"\1", text)
     text = HEX_ADDRESS_RE.sub("<hex-addr>", text)
     text = TRACEBACK_LINE_RE.sub("line <line>", text)
     return text

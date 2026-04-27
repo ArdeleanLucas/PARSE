@@ -1,0 +1,8 @@
+{
+  "speaker": "Proc01",
+  "workingWav": "${INPUT_ROOT}/processed/Proc01.wav",
+  "annotationJson": "${INPUT_ROOT}/processed/Proc01.parse.json",
+  "peaksJson": "${INPUT_ROOT}/processed/Proc01-peaks.json",
+  "transcriptCsv": "${INPUT_ROOT}/processed/Proc01.csv",
+  "dryRun": true
+}

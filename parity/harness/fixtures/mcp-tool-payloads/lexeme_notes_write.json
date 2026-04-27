@@ -1,0 +1,6 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "conceptId": "1",
+  "userNote": "keep vowel length",
+  "dryRun": true
+}

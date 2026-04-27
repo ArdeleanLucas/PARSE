@@ -1,0 +1,8 @@
+{
+  "speaker_id": "${SEED_SPEAKER}",
+  "concept_list": [
+    "1",
+    "2"
+  ],
+  "dryRun": true
+}

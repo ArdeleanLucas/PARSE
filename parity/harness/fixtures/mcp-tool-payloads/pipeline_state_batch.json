@@ -1,0 +1,6 @@
+{
+  "speakers": [
+    "${SEED_SPEAKER}",
+    "${COMPARE_SPEAKER}"
+  ]
+}
