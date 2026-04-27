@@ -338,17 +338,24 @@ The plan was originally written assuming oracle-as-immutable-spec. Dogfooding th
 - Adding a new deviation requires a one-line entry above + a linked oracle issue (file one if missing).
 - Mark a deviation **RESOLVED** once the oracle fix is merged on `main` with a linked upstream PR; the next parity pass on that surface should still note the historical deviation and confirm the regression stays closed.
 
-## 12. Current parity-harness priority (updated 2026-04-26 late)
+## 12. Current parity closure matrix (updated 2026-04-27 final sign-off audit)
 
-The P0/P1/P2 tiers in §3 still describe what ultimately needs proof, but the delivery vehicle has changed: **future parity work should prefer extending `parity/harness/` over spawning one evidence doc per surface**. Updated by coordinator as harness coverage ships.
+The shared harness is now the default evidence vehicle for contract-level parity. Surfaces that still depend on browser-only affordances remain explicitly marked below instead of being hand-waved as complete.
 
-| Order | Harness stream | Tier focus | Why now |
-|---|---|---|---|
-| 1 | Shared oracle-vs-rebuild diff harness scaffold | P0 + P1 | Replaces ~8 future surface-specific evidence docs with one reusable runner that diffs API responses, exports, persisted JSON, and job lifecycles. |
-| 2 | Extend harness scenario coverage to Compute / report modals | P1 | This is the next still-open user-facing surface after the scaffold lands, but it should ship as additional harness coverage instead of a standalone evidence memo. |
-| 3 | Extend harness scenario coverage to CLEF and job diagnostics | P1 | Deferred until the shared harness base is stable. |
-| historical | Import / onboarding | P1 | Historical evidence remains useful, but ongoing parity should move into the shared harness rather than repeating this as a standalone doc. |
-| historical | Tags | P0 | Historical evidence remains useful, but ongoing parity should move into the shared harness rather than repeating this as a standalone doc. |
-| dropped | AI/chat | P1 | **DROPPED** 2026-04-26 — AIChat.tsx is maintenance-mode-only; no dedicated parity stream. |
+| Surface | Priority | Current status | Evidence route | Notes |
+|---|---|---|---|---|
+| Shell / navigation | P0 | `blocked` | none yet | Current harness proves backend/data/export parity, but no final post-merge shell-navigation browser audit has been rerun on current `origin/main`. |
+| Annotate | P0 | `blocked` | historical evidence doc | `docs/reports/2026-04-26-annotate-parity-evidence.md` captured the old oracle-side `TranscriptionLanes` crash. Oracle issue `#230` was fixed upstream in `#234`, so Annotate needs a fresh rerun rather than treating the historical FAIL as final. |
+| Compare | P0 | `blocked` | historical evidence doc | `docs/reports/2026-04-26-compare-parity-evidence.md` still shows decision-row `Accept / Split / Merge` divergence on rebuild current-main. |
+| Tags / enrichments management | P0 | `pass-via-evidence-doc` | `docs/reports/2026-04-26-tags-parity-evidence.md` | Tags parity passed `7/7` browser flows; the shared harness also covers the underlying enrichments/tags contracts, but the browser evidence remains the authoritative closure artifact for this surface. |
+| ~~AI/chat shell~~ | P1 | `dropped` | scope decision | Dropped from rebuild parity scope on 2026-04-26; AI chat UI is maintenance-mode-only. |
+| Import / onboarding | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers concept import, tag import, onboard start/poll, persistence, and required error envelopes on shared oracle/rebuild fixtures. |
+| Compute and report modals | P1 | `blocked` | partial harness coverage only | Harness now covers the underlying compute/report contracts (`full_pipeline`, CLEF config/report/fetch, export/report payloads), but the modal/browser affordances themselves have not been rerun as a final browser parity pass. |
+| Contact lexeme / CLEF compare extensions | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers CLEF config/catalog/providers/report plus contact-lexeme coverage and fetch job lifecycles. |
+| Job diagnostics | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers `/api/jobs`, `/api/jobs/active`, and `/api/jobs/{jobId}/logs` with active + terminal job evidence. |
 
-Coordinator updates this table after each harness expansion ships.
+### Coordinator rule going forward
+
+- If a surface is covered by the shared harness, mark it **pass-via-harness** and link the harness artifact instead of spawning a new standalone evidence memo.
+- If a surface still depends on browser-only controls or workflows, keep it in `blocked` or `pass-via-evidence-doc` until a real browser artifact exists.
+- Do not collapse `blocked` browser-workbench gaps into harness success; backend parity and browser parity are related but not interchangeable.

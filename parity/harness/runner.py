@@ -30,6 +30,10 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 DEFAULT_REBUILD_REPO = Path(__file__).resolve().parents[2]
 DEFAULT_ORACLE_REPO = Path(os.environ.get("PARSE_ORACLE_REPO", "/home/lucas/gh/ardeleanlucas/parse"))
 DEFAULT_ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist.yaml"
+DEFAULT_FIXTURE_NAME = "saha-2speaker"
+SUPPORTED_FIXTURE_NAMES = ("saha-2speaker", "round2-multispeaker")
+FIXTURE_ROOTS = {name: FIXTURE_ROOT for name in SUPPORTED_FIXTURE_NAMES}
+DEFAULT_SCRIPT_BOOT_PORT = 8766
 CANONICALIZATION_VERSION = 2
 TIMESTAMP_FIELD_NAMES = {
     "completed_at",
@@ -172,6 +176,15 @@ PLACEHOLDER_REASON_RE = re.compile(r"\b(?:todo|tbd|fixme|fill this in)\b", re.IG
 class CanonicalizationContext:
     repo_roots: dict[str, Path] = field(default_factory=dict)
     workspace_roots: dict[str, Path] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BootSmokeResult:
+    repo_label: str
+    success: bool
+    port: int
+    detail: str
+    log_path: Path
 
 
 @dataclass(frozen=True)
@@ -368,20 +381,31 @@ def load_allowlist_rules(path: Path) -> list[AllowlistRule]:
     return rules
 
 
-def prepare_fixture_bundle(root: Path) -> FixtureBundle:
+def _fixture_root_for_name(fixture_name: str) -> Path:
+    normalized_name = str(fixture_name or "").strip()
+    fixture_root = FIXTURE_ROOTS.get(normalized_name)
+    if fixture_root is None:
+        supported = ", ".join(sorted(SUPPORTED_FIXTURE_NAMES))
+        raise ValueError(f"Unknown fixture '{fixture_name}'. Supported fixtures: {supported}")
+    return fixture_root
+
+
+def prepare_fixture_bundle(root: Path, *, fixture_name: str = DEFAULT_FIXTURE_NAME) -> FixtureBundle:
     workspace_root = root / "workspace"
     input_root = root / "inputs"
     workspace_root.mkdir(parents=True, exist_ok=True)
     input_root.mkdir(parents=True, exist_ok=True)
 
+    fixture_root = _fixture_root_for_name(fixture_name)
+
     for relative_name in ("concepts-import.csv", "tags-import.csv", "onboard-concepts.csv", "lexeme-notes.csv"):
-        shutil.copy2(FIXTURE_ROOT / relative_name, input_root / relative_name)
+        shutil.copy2(fixture_root / relative_name, input_root / relative_name)
 
     onboard_dir = input_root / "onboard"
     onboard_dir.mkdir(parents=True, exist_ok=True)
     _write_silence_wav(onboard_dir / "Parity01.wav")
 
-    workspace_fixture_root = FIXTURE_ROOT / "workspace"
+    workspace_fixture_root = fixture_root / "workspace"
     for relative_name in (
         "project.json",
         "source_index.json",
@@ -467,6 +491,51 @@ def build_diff_report(
     return DiffReport(raw_diffs=raw_diffs).finalize()
 
 
+def build_server_boot_smoke_blockers(results: dict[str, BootSmokeResult]) -> list[DiffEntry]:
+    blockers: list[DiffEntry] = []
+    for label in sorted(results):
+        result = results[label]
+        if result.success:
+            continue
+        blockers.append(
+            DiffEntry(
+                section="server_boot_smoke",
+                path=f"$.server_boot_smoke.{label}",
+                oracle_value={"expected": "boot success"},
+                rebuild_value=_boot_smoke_result_to_jsonable(result),
+            )
+        )
+    return blockers
+
+
+def build_signoff_payload(
+    *,
+    fixture_name: str,
+    oracle_repo: Path,
+    rebuild_repo: Path,
+    oracle_sha: str,
+    rebuild_sha: str,
+    report: DiffReport,
+    server_boot_results: dict[str, BootSmokeResult],
+) -> dict[str, Any]:
+    return {
+        "fixture": fixture_name,
+        "repos": {
+            "oracle": {"path": str(oracle_repo), "sha": oracle_sha},
+            "rebuild": {"path": str(rebuild_repo), "sha": rebuild_sha},
+        },
+        "diff_counts": {
+            "raw": report.raw_diff_count,
+            "allowlisted": report.allowlisted_diff_count,
+            "unallowlisted": report.unallowlisted_diff_count,
+        },
+        "server_boot_smoke": {
+            label: _boot_smoke_result_to_jsonable(result)
+            for label, result in sorted(server_boot_results.items())
+        },
+    }
+
+
 def render_markdown_report(
     oracle: ScenarioCapture,
     rebuild: ScenarioCapture,
@@ -528,14 +597,33 @@ def run_harness(
     rebuild_repo: Path,
     output_dir: Path,
     allowlist_path: Path = DEFAULT_ALLOWLIST_PATH,
+    fixture_name: str = DEFAULT_FIXTURE_NAME,
+    emit_signoff: bool = False,
     keep_temp: bool = False,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     allowlist_rules = load_allowlist_rules(allowlist_path)
+    oracle_sha = _git_rev_parse(oracle_repo)
+    rebuild_sha = _git_rev_parse(rebuild_repo)
 
     with TemporaryDirectory(prefix="parse-parity-oracle-") as oracle_tmp, TemporaryDirectory(prefix="parse-parity-rebuild-") as rebuild_tmp:
-        oracle_fixture = prepare_fixture_bundle(Path(oracle_tmp))
-        rebuild_fixture = prepare_fixture_bundle(Path(rebuild_tmp))
+        oracle_fixture = prepare_fixture_bundle(Path(oracle_tmp), fixture_name=fixture_name)
+        rebuild_fixture = prepare_fixture_bundle(Path(rebuild_tmp), fixture_name=fixture_name)
+
+        server_boot_results = {
+            "oracle": _run_server_boot_smoke(
+                repo_root=oracle_repo,
+                workspace_root=oracle_fixture.workspace_root,
+                label="oracle",
+                log_path=output_dir / "oracle-server-script.log",
+            ),
+            "rebuild": _run_server_boot_smoke(
+                repo_root=rebuild_repo,
+                workspace_root=rebuild_fixture.workspace_root,
+                label="rebuild",
+                log_path=output_dir / "rebuild-server-script.log",
+            ),
+        }
 
         oracle_server = _start_server(
             label="oracle",
@@ -567,17 +655,31 @@ def run_harness(
             context=context,
             allowlist_rules=allowlist_rules,
         )
+        report.raw_diffs.extend(build_server_boot_smoke_blockers(server_boot_results))
+        report.finalize()
         markdown = render_markdown_report(oracle_capture, rebuild_capture, report)
+        signoff_payload = build_signoff_payload(
+            fixture_name=fixture_name,
+            oracle_repo=oracle_repo,
+            rebuild_repo=rebuild_repo,
+            oracle_sha=oracle_sha,
+            rebuild_sha=rebuild_sha,
+            report=report,
+            server_boot_results=server_boot_results,
+        )
 
         report_json = {
+            "fixture": fixture_name,
             "canonicalization_version": CANONICALIZATION_VERSION,
             "allowlist_path": str(allowlist_path),
             "allowlist_rule_count": len(allowlist_rules),
+            "repos": signoff_payload["repos"],
             "coverage": {
                 "contract_groups": ROUND2_CONTRACT_GROUP_COVERAGE,
                 "failure_cases": ROUND2_FAILURE_CASES,
                 "job_lifecycles": ROUND2_JOB_LIFECYCLE_KEYS,
             },
+            "server_boot_smoke": signoff_payload["server_boot_smoke"],
             "diff_count_raw": report.raw_diff_count,
             "diff_count_allowlisted": report.allowlisted_diff_count,
             "diff_count_unallowlisted": report.unallowlisted_diff_count,
@@ -596,6 +698,14 @@ def run_harness(
         )
         report_markdown_path.write_text(markdown, encoding="utf-8")
 
+        signoff_json_path = None
+        signoff_markdown_path = None
+        if emit_signoff:
+            signoff_json_path = output_dir / "signoff-summary.json"
+            signoff_markdown_path = output_dir / "signoff-summary.md"
+            signoff_json_path.write_text(json.dumps(signoff_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            signoff_markdown_path.write_text(_render_signoff_summary(signoff_payload), encoding="utf-8")
+
         if keep_temp:
             _copy_workspace_snapshot(oracle_fixture.workspace_root, output_dir / "oracle-workspace")
             _copy_workspace_snapshot(rebuild_fixture.workspace_root, output_dir / "rebuild-workspace")
@@ -606,17 +716,23 @@ def run_harness(
             "diff_count_allowlisted": report.allowlisted_diff_count,
             "report_json": report_json_path,
             "report_markdown": report_markdown_path,
+            "signoff_json": signoff_json_path,
+            "signoff_markdown": signoff_markdown_path,
             "oracle_server_log": oracle_server.log_path,
             "rebuild_server_log": rebuild_server.log_path,
+            "oracle_script_log": output_dir / "oracle-server-script.log",
+            "rebuild_script_log": output_dir / "rebuild-server-script.log",
         }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the PARSE oracle-vs-rebuild parity diff harness.")
-    parser.add_argument("--oracle-repo", type=Path, default=DEFAULT_ORACLE_REPO)
-    parser.add_argument("--rebuild-repo", type=Path, default=DEFAULT_REBUILD_REPO)
+    parser.add_argument("--oracle-repo", "--oracle", dest="oracle_repo", type=Path, default=DEFAULT_ORACLE_REPO)
+    parser.add_argument("--rebuild-repo", "--rebuild", dest="rebuild_repo", type=Path, default=DEFAULT_REBUILD_REPO)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REBUILD_REPO / "parity" / "harness" / "output" / "latest")
     parser.add_argument("--allowlist", type=Path, default=DEFAULT_ALLOWLIST_PATH)
+    parser.add_argument("--fixture", default=DEFAULT_FIXTURE_NAME)
+    parser.add_argument("--emit-signoff", action="store_true", help="Write sign-off summary artifacts next to report.json/report.md.")
     parser.add_argument("--keep-temp", action="store_true", help="Copy final workspace snapshots into the output directory.")
     args = parser.parse_args(argv)
 
@@ -625,6 +741,8 @@ def main(argv: list[str] | None = None) -> int:
         rebuild_repo=args.rebuild_repo.resolve(),
         output_dir=args.output_dir.resolve(),
         allowlist_path=args.allowlist.resolve(),
+        fixture_name=str(args.fixture),
+        emit_signoff=bool(args.emit_signoff),
         keep_temp=args.keep_temp,
     )
 
@@ -633,6 +751,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"allowlisted diff count: {result['diff_count_allowlisted']}")
     print(f"markdown report: {Path(result['report_markdown']).resolve()}")
     print(f"json report: {Path(result['report_json']).resolve()}")
+    if result.get("signoff_json"):
+        print(f"signoff json: {Path(result['signoff_json']).resolve()}")
+    if result.get("signoff_markdown"):
+        print(f"signoff markdown: {Path(result['signoff_markdown']).resolve()}")
     return 0
 
 
@@ -644,6 +766,131 @@ def _capture_to_jsonable(capture: ScenarioCapture) -> dict[str, Any]:
         "exports": capture.exports,
         "persisted_json": capture.persisted_json,
     }
+
+
+def _git_rev_parse(repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(repo_root),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _run_server_boot_smoke(*, repo_root: Path, workspace_root: Path, label: str, log_path: Path, timeout_seconds: float = 10.0) -> BootSmokeResult:
+    port = DEFAULT_SCRIPT_BOOT_PORT
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not _is_port_available(port):
+        log_path.write_text(f"Port {port} already in use before {label} script smoke run.\n", encoding="utf-8")
+        return BootSmokeResult(
+            repo_label=label,
+            success=False,
+            port=port,
+            detail=f"Port {port} already in use before script boot smoke.",
+            log_path=log_path,
+        )
+
+    log_handle = open(log_path, "wb")
+    process = subprocess.Popen(
+        [sys.executable, str(repo_root / "python" / "server.py")],
+        cwd=str(workspace_root),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+    last_error: str | None = None
+    success = False
+    deadline = time.time() + timeout_seconds
+    try:
+        while time.time() < deadline:
+            if process.poll() is not None:
+                break
+            try:
+                response = _request_json("GET", f"http://127.0.0.1:{port}/api/config")
+                if response.get("status") == 200 and process.poll() is None:
+                    success = True
+                    break
+                last_error = f"GET /api/config returned {response.get('status')}"
+            except Exception as exc:  # pragma: no cover - exercised in runtime smoke checks
+                last_error = str(exc)
+            time.sleep(0.25)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        log_handle.close()
+
+    detail = f"Booted on port {port}." if success else _read_boot_failure_detail(log_path, last_error)
+    return BootSmokeResult(
+        repo_label=label,
+        success=success,
+        port=port,
+        detail=detail,
+        log_path=log_path,
+    )
+
+
+def _is_port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _read_boot_failure_detail(log_path: Path, last_error: str | None) -> str:
+    if log_path.exists():
+        log_text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+        if log_text:
+            tail = "\n".join(log_text.splitlines()[-12:])
+            return tail
+    return last_error or "Server did not bind before timeout."
+
+
+def _boot_smoke_result_to_jsonable(result: BootSmokeResult) -> dict[str, Any]:
+    return {
+        "repo_label": result.repo_label,
+        "success": result.success,
+        "port": result.port,
+        "detail": result.detail,
+        "log_path": str(result.log_path),
+    }
+
+
+def _render_signoff_summary(payload: dict[str, Any]) -> str:
+    lines = [
+        "# PARSE parity harness sign-off summary",
+        "",
+        f"- Fixture: `{payload['fixture']}`",
+        f"- Oracle SHA: `{payload['repos']['oracle']['sha']}`",
+        f"- Rebuild SHA: `{payload['repos']['rebuild']['sha']}`",
+        f"- Raw diff count: **{payload['diff_counts']['raw']}**",
+        f"- Allowlisted diff count: **{payload['diff_counts']['allowlisted']}**",
+        f"- Remaining unallowlisted diff count: **{payload['diff_counts']['unallowlisted']}**",
+        "",
+        "## Server boot smoke",
+        "",
+    ]
+    for label, result in payload["server_boot_smoke"].items():
+        status = "PASS" if result["success"] else "FAIL"
+        lines.extend(
+            [
+                f"### {label}",
+                f"- Status: **{status}**",
+                f"- Port: `{result['port']}`",
+                f"- Detail: {result['detail']}",
+                f"- Log: `{result['log_path']}`",
+                "",
+            ]
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _start_server(*, label: str, repo_root: Path, workspace_root: Path, log_path: Path) -> ServerInstance:
