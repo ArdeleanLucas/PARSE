@@ -673,7 +673,7 @@ describe("ParseUI", () => {
 
     const latestWaveOptions = () => mockWaveOptions[mockWaveOptions.length - 1];
 
-    expect(latestWaveOptions()?.audioUrl).toBe("/Fail01.wav");
+    expect(latestWaveOptions()?.audioUrl).toContain("/Fail01.wav");
 
     await act(async () => {
       latestWaveOptions()?.onReady?.(10);
@@ -688,7 +688,7 @@ describe("ParseUI", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Fail02" })[0]);
 
-    await waitFor(() => expect(latestWaveOptions()?.audioUrl).toBe("/Fail02.wav"));
+    await waitFor(() => expect(latestWaveOptions()?.audioUrl).toContain("/Fail02.wav"));
     expect(mockSeek).not.toHaveBeenCalled();
     expect(mockAddRegion).not.toHaveBeenCalled();
     expect(mockScrollToTimeAtFraction).not.toHaveBeenCalled();
@@ -1258,12 +1258,11 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
-  it("persists compare notes per concept via localStorage on blur", () => {
+  it("persists compare notes per concept via localStorage without requiring a blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
 
     fireEvent.change(notesField, { target: { value: "Loanword candidate from Arabic." } });
-    fireEvent.blur(notesField);
     unmount();
 
     render(<ParseUI />);

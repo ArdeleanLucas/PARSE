@@ -2,6 +2,8 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+declare const process: { env: Record<string, string | undefined> };
+
 export function resolveParseApiTarget(env: Record<string, string | undefined> = process.env): string {
   const port = (env.PARSE_API_PORT ?? env.PARSE_PORT ?? "8766").trim() || "8766";
   return `http://127.0.0.1:${port}`;
@@ -10,6 +12,9 @@ export function resolveParseApiTarget(env: Record<string, string | undefined> = 
 const parseApiTarget = resolveParseApiTarget();
 
 export default defineConfig({
+  define: {
+    __PARSE_API_TARGET__: JSON.stringify(parseApiTarget),
+  },
   plugins: [react()],
   resolve: {
     alias: {
