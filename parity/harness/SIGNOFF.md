@@ -47,30 +47,35 @@
 
 | Surface | Priority | Status | Evidence route | Notes |
 |---|---|---|---|---|
-| Shell / navigation | P0 | `blocked` | none yet | Current harness proves backend/data/export parity, but no final post-merge shell-navigation browser audit has been rerun on current `origin/main`. |
-| Annotate | P0 | `blocked` | `docs/reports/2026-04-26-annotate-parity-evidence.md` | Historical evidence captured the pre-`#234` oracle-side crash; a fresh rerun is still needed before claiming browser parity closure. |
-| Compare | P0 | `blocked` | `docs/reports/2026-04-26-compare-parity-evidence.md` | Historical evidence still records decision-row `Accept / Split / Merge` divergence on rebuild current-main. |
-| Tags / enrichments management | P0 | `pass-via-evidence-doc` | `docs/reports/2026-04-26-tags-parity-evidence.md` | Browser Tags parity passed `7/7` flows; the shared harness also covers the underlying contracts. |
+| Shell / navigation | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Real-workspace dogfood found a frontend process kill during Annotate load (#153). |
+| Annotate | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Real-workspace dogfood found non-persistent Annotate save behavior (#143) and runtime instability (#153). |
+| Compare | P0 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Compare notes did not persist across reload in the real workspace dogfood pass (#154). |
+| Tags / enrichments management | P0 | `pass-via-evidence-doc` | `docs/reports/2026-04-26-tags-parity-evidence.md` | Browser Tags parity previously passed `7/7` flows; the shared harness also covers the underlying contracts. |
 | ~~AI/chat shell~~ | P1 | `dropped` | scope decision | Dropped from rebuild parity scope on 2026-04-26. |
 | Import / onboarding | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers concept/tag import, onboard start/poll, persistence, and required error envelopes. |
-| Compute and report modals | P1 | `blocked` | partial harness coverage | Harness covers the underlying compute/report contracts, but the modal/browser affordances themselves have not been rerun as a final browser parity pass. |
-| Contact lexeme / CLEF compare extensions | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers CLEF config/catalog/providers/report plus contact-lexeme coverage and fetch lifecycles. |
+| Compute and report modals | P1 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | CLEF populate completed with zero fetched reference forms during real-workspace dogfood (#155). |
+| Contact lexeme / CLEF compare extensions | P1 | `blocked` | `docs/reports/2026-04-27-rebuild-dogfood-report.md` | Harness covers contracts, but real-workspace dogfood exposed a zero-result populate outcome that still needs thesis-facing validation (#155). |
 | Job diagnostics | P1 | `pass-via-harness` | `parity/harness/` | Current harness covers `/api/jobs`, `/api/jobs/active`, and `/api/jobs/{jobId}/logs`. |
 
 ## Real-blocker diffs
 
-**none — Option 1 ready**
+- #143 — Annotate save does not persist IPA / orthography field edits after reload.
+- #153 — Frontend dev server is killed during real-workspace Annotate load.
+- #154 — Compare notes are not persisted across reload.
+- #155 — CLEF populate can complete with zero fetched reference forms.
 
 ## Option 1 readiness
 
-**Ready to replace oracle at the parity/meta-gate level.** The harness now reports `raw=0`, `allowlisted=0`, `unallowed=0`, and the direct script-mode `python python/server.py` smoke passes on both oracle and rebuild current-main.
+**Not ready to replace oracle for thesis-facing use yet.**
+
+The parity/meta-gate harness remains green (`raw=0`, `allowlisted=0`, `unallowed=0`), but the real-workspace browser dogfood pass uncovered blocker-class user-facing failures in Annotate runtime stability and save persistence, plus additional Compare/CLEF regressions. Option 1 therefore remains blocked on the filed dogfood issues even though the lower-level parity harness is currently clean.
 
 ## Dogfood follow-up
 
-- **Dogfood pass (Fail01):** 13 flows tested, 1 issues filed, 0 blockers. Report: `docs/reports/2026-04-27-rebuild-dogfood-report.md`. Issue links: #143.
+- **Dogfood pass (real workspace):** 9 flows tested, 4 issues filed, 2 blockers. Report: `docs/reports/2026-04-27-rebuild-dogfood-report.md`. Issue links: #143, #153, #154, #155.
 
 ## Coordinator sign-off
 
 - **Lucas:** ______________________________
 - **Date:** ______________________________
-- **Decision:** `ready`
+- **Decision:** `blocked pending dogfood fixes`
