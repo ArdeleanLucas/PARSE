@@ -1,0 +1,27 @@
+{
+  "speaker": "Base01",
+  "source_wav": "audio/original/Base01/source.wav",
+  "language": "ku",
+  "source": "word_level_stt",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 0.1,
+      "text": "ash bark",
+      "words": [
+        {
+          "word": "ash",
+          "start": 0.01,
+          "end": 0.04,
+          "prob": 0.97
+        },
+        {
+          "word": "bark",
+          "start": 0.06,
+          "end": 0.09,
+          "prob": 0.93
+        }
+      ]
+    }
+  ]
+}

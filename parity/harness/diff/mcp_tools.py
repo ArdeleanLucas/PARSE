@@ -23,8 +23,14 @@ from ai.workflow_tools import DEFAULT_MCP_WORKFLOW_TOOL_NAMES
 MCP_FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "mcp-tool-payloads"
 CHAT_TOOL_NAMES = sorted(REGISTRY.keys())
 WORKFLOW_TOOL_NAMES = list(DEFAULT_MCP_WORKFLOW_TOOL_NAMES)
+PARITY_EXTRA_CHAT_TOOL_NAMES = (
+    "compute_boundaries_start",
+    "compute_boundaries_status",
+    "retranscribe_with_boundaries_start",
+    "retranscribe_with_boundaries_status",
+)
 ADAPTER_TOOL_NAME = "mcp_get_exposure_mode"
-ALL_TARGET_TOOL_NAMES = CHAT_TOOL_NAMES + WORKFLOW_TOOL_NAMES
+ALL_TARGET_TOOL_NAMES = list(dict.fromkeys(CHAT_TOOL_NAMES + list(PARITY_EXTRA_CHAT_TOOL_NAMES) + WORKFLOW_TOOL_NAMES))
 ALL_CASE_TOOL_NAMES = ALL_TARGET_TOOL_NAMES + [ADAPTER_TOOL_NAME]
 TEXT_EXTENSIONS = {
     ".csv",
@@ -559,6 +565,7 @@ __all__ = [
     "ALL_TARGET_TOOL_NAMES",
     "CHAT_TOOL_NAMES",
     "MCP_FIXTURE_DIR",
+    "PARITY_EXTRA_CHAT_TOOL_NAMES",
     "WORKFLOW_TOOL_NAMES",
     "build_mcp_tools_capture",
     "list_chat_tool_fixture_names",

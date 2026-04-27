@@ -38,7 +38,8 @@ FIXTURE_ROOTS = {name: FIXTURE_ROOT for name in SUPPORTED_FIXTURE_NAMES}
 DEFAULT_SCRIPT_BOOT_PORT = 8766
 CANONICALIZATION_VERSION = 2
 DIFF_CATEGORY_SECTIONS: dict[str, tuple[str, ...]] = {
-    "all": ("api", "job_lifecycles", "exports", "persisted_json", "mcp_tools"),
+    "all": ("api", "job_lifecycles", "exports", "persisted_json", "feature_contracts", "mcp_tools"),
+    "feature_contracts": ("feature_contracts",),
     "mcp_tools": ("mcp_tools",),
 }
 TIMESTAMP_FIELD_NAMES = {
@@ -178,6 +179,48 @@ ROUND2_JOB_LIFECYCLE_KEYS = (
     "contact_lexemes",
 )
 PLACEHOLDER_REASON_RE = re.compile(r"\b(?:todo|tbd|fixme|fill this in)\b", re.IGNORECASE)
+BND_MCP_SOURCE_AUDIT_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "ipa_prefers_ortho_words": {
+        "globs": ("python/**/*.py",),
+        "patterns": ('ortho_source = "ortho_words"',),
+    },
+    "compute_boundaries_backend": {
+        "globs": ("python/**/*.py",),
+        "patterns": (
+            "def _compute_speaker_boundaries(",
+            "Writing tiers.ortho_words",
+        ),
+    },
+    "boundary_constrained_stt_backend": {
+        "globs": ("python/**/*.py",),
+        "patterns": (
+            "def _compute_speaker_retranscribe_with_boundaries(",
+            '"bnd_stt"',
+        ),
+    },
+    "compute_boundaries_mcp_surface": {
+        "globs": ("python/**/*.py",),
+        "patterns": (
+            "compute_boundaries_start",
+            "boundaries_job_started",
+        ),
+    },
+    "boundary_constrained_stt_mcp_surface": {
+        "globs": ("python/**/*.py",),
+        "patterns": (
+            "retranscribe_with_boundaries_start",
+            "boundary_constrained_stt_job_started",
+        ),
+    },
+    "annotate_phonetic_tools_ui": {
+        "globs": ("src/**/*.ts", "src/**/*.tsx"),
+        "patterns": (
+            "Phonetic Tools",
+            "phonetic-retranscribe-with-boundaries",
+            "phonetic-refine-boundaries",
+        ),
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -214,6 +257,7 @@ class ScenarioCapture:
     exports: dict[str, Any]
     persisted_json: dict[str, Any]
     mcp_tools: dict[str, Any]
+    feature_contracts: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -428,6 +472,7 @@ def prepare_fixture_bundle(root: Path, *, fixture_name: str = DEFAULT_FIXTURE_NA
         "audio/original/Base01",
         "audio/original/Base02",
         "audio/working",
+        "coarse_transcripts",
         "config",
         "peaks",
     ):
@@ -438,6 +483,9 @@ def prepare_fixture_bundle(root: Path, *, fixture_name: str = DEFAULT_FIXTURE_NA
             workspace_fixture_root / "annotations" / f"{speaker_id}.parse.json",
             workspace_root / "annotations" / f"{speaker_id}.parse.json",
         )
+        coarse_transcript_path = workspace_fixture_root / "coarse_transcripts" / f"{speaker_id}.json"
+        if coarse_transcript_path.exists():
+            shutil.copy2(coarse_transcript_path, workspace_root / "coarse_transcripts" / f"{speaker_id}.json")
         _write_silence_wav(workspace_root / "audio" / "original" / speaker_id / "source.wav")
 
     (workspace_root / "config" / "sil_contact_languages.json").write_text(
@@ -456,6 +504,99 @@ def prepare_fixture_bundle(root: Path, *, fixture_name: str = DEFAULT_FIXTURE_NA
     )
 
 
+def _load_json_if_exists(path: Path) -> Any:
+    if not path.exists() or not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _build_bnd_gate_matrix(workspace_root: Path, speakers: Iterable[str]) -> dict[str, Any]:
+    matrix: dict[str, Any] = {}
+    for speaker in speakers:
+        annotation = _load_json_if_exists(workspace_root / "annotations" / f"{speaker}.parse.json") or {}
+        tiers = annotation.get("tiers") if isinstance(annotation, dict) else {}
+        ortho_words_intervals: list[Any] = []
+        if isinstance(tiers, dict):
+            tier = tiers.get("ortho_words")
+            if isinstance(tier, dict):
+                ortho_words_intervals = list(tier.get("intervals") or [])
+
+        stt_cache = _load_json_if_exists(workspace_root / "coarse_transcripts" / f"{speaker}.json") or {}
+        segments = stt_cache.get("segments") if isinstance(stt_cache, dict) else []
+        if not isinstance(segments, list):
+            segments = []
+        segments_with_word_timestamps = [
+            segment
+            for segment in segments
+            if isinstance(segment, dict)
+            and isinstance(segment.get("words"), list)
+            and len(segment.get("words") or []) > 0
+        ]
+
+        matrix[str(speaker)] = {
+            "has_ortho_words": bool(ortho_words_intervals),
+            "ortho_words_interval_count": len(ortho_words_intervals),
+            "has_stt_word_timestamps": bool(segments_with_word_timestamps),
+            "stt_word_timestamp_segment_count": len(segments_with_word_timestamps),
+            "retranscribe_with_boundaries_enabled": bool(ortho_words_intervals),
+            "compute_boundaries_enabled": bool(segments_with_word_timestamps),
+        }
+    return matrix
+
+
+def _audit_repo_for_distinguishing_strings(repo_root: Path) -> dict[str, Any]:
+    results: dict[str, Any] = {}
+    for rule_id, rule in BND_MCP_SOURCE_AUDIT_RULES.items():
+        raw_globs = tuple(rule.get("globs") or ())
+        patterns = tuple(rule.get("patterns") or ())
+        raw_hits: dict[str, list[dict[str, Any]]] = {pattern: [] for pattern in patterns}
+        for glob_pattern in raw_globs:
+            for candidate in sorted(repo_root.glob(glob_pattern)):
+                if not candidate.is_file():
+                    continue
+                try:
+                    lines = candidate.read_text(encoding="utf-8").splitlines()
+                except UnicodeDecodeError:
+                    continue
+                rel_path = candidate.relative_to(repo_root).as_posix()
+                for line_number, line in enumerate(lines, start=1):
+                    for pattern in patterns:
+                        if pattern not in line:
+                            continue
+                        raw_hits[pattern].append(
+                            {
+                                "path": rel_path,
+                                "line": line_number,
+                                "snippet": line.strip(),
+                            }
+                        )
+        pattern_presence = {
+            pattern: bool(raw_hits[pattern])
+            for pattern in patterns
+        }
+        results[rule_id] = {
+            "globs": list(raw_globs),
+            "patterns": list(patterns),
+            "pattern_presence": pattern_presence,
+            "all_present": all(pattern_presence.values()),
+        }
+    return results
+
+
+def collect_feature_contracts(
+    *,
+    repo_root: Path,
+    workspace_root: Path,
+    speakers: Iterable[str],
+) -> dict[str, Any]:
+    speaker_list = [str(speaker).strip() for speaker in speakers if str(speaker).strip()]
+    return {
+        "gate_matrix": _build_bnd_gate_matrix(workspace_root, speaker_list),
+        "source_audit": _audit_repo_for_distinguishing_strings(repo_root),
+        "speakers": speaker_list,
+    }
+
+
 def compare_capture_sections(
     oracle: ScenarioCapture,
     rebuild: ScenarioCapture,
@@ -464,7 +605,7 @@ def compare_capture_sections(
     sections: Iterable[str] | None = None,
 ) -> list[DiffEntry]:
     diffs: list[DiffEntry] = []
-    selected_sections = tuple(sections or ("api", "job_lifecycles", "exports", "persisted_json", "mcp_tools"))
+    selected_sections = tuple(sections or ("api", "job_lifecycles", "exports", "persisted_json", "feature_contracts", "mcp_tools"))
     for section in selected_sections:
         base_path = f"$.{section}"
         oracle_section = normalize_for_diff(getattr(oracle, section), context=context, path=base_path)
@@ -631,6 +772,23 @@ def run_harness(
         rebuild_script_log = output_dir / "rebuild-server-script.log"
         oracle_capture = _empty_capture("oracle")
         rebuild_capture = _empty_capture("rebuild")
+        if "feature_contracts" in selected_sections:
+            oracle_capture = replace(
+                oracle_capture,
+                feature_contracts=collect_feature_contracts(
+                    repo_root=oracle_repo,
+                    workspace_root=oracle_fixture.workspace_root,
+                    speakers=(oracle_fixture.seed_speaker_id, oracle_fixture.compare_speaker_id),
+                ),
+            )
+            rebuild_capture = replace(
+                rebuild_capture,
+                feature_contracts=collect_feature_contracts(
+                    repo_root=rebuild_repo,
+                    workspace_root=rebuild_fixture.workspace_root,
+                    speakers=(rebuild_fixture.seed_speaker_id, rebuild_fixture.compare_speaker_id),
+                ),
+            )
 
         if _requires_http_server(selected_sections):
             server_boot_results = {
@@ -732,6 +890,10 @@ def run_harness(
                 "contract_groups": ROUND2_CONTRACT_GROUP_COVERAGE,
                 "failure_cases": ROUND2_FAILURE_CASES,
                 "job_lifecycles": ROUND2_JOB_LIFECYCLE_KEYS,
+                "feature_contracts": {
+                    "bnd_mcp_source_audit_rules": list(BND_MCP_SOURCE_AUDIT_RULES.keys()),
+                    "gate_speakers": [oracle_fixture.seed_speaker_id, oracle_fixture.compare_speaker_id],
+                },
             },
             "server_boot_smoke": signoff_payload["server_boot_smoke"],
             "diff_count_raw": report.raw_diff_count,
@@ -821,6 +983,7 @@ def _capture_to_jsonable(capture: ScenarioCapture) -> dict[str, Any]:
         "job_lifecycles": capture.job_lifecycles,
         "exports": capture.exports,
         "persisted_json": capture.persisted_json,
+        "feature_contracts": capture.feature_contracts,
         "mcp_tools": capture.mcp_tools,
     }
 
@@ -833,7 +996,7 @@ def _resolve_diff_sections(diff_category: str) -> tuple[str, ...]:
 
 
 def _requires_http_server(selected_sections: Iterable[str]) -> bool:
-    return any(section != "mcp_tools" for section in selected_sections)
+    return any(section not in {"mcp_tools", "feature_contracts"} for section in selected_sections)
 
 
 def _empty_capture(label: str) -> ScenarioCapture:

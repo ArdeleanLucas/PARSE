@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from parity.harness.runner import (
+    BND_MCP_SOURCE_AUDIT_RULES,
     CanonicalizationContext,
     BootSmokeResult,
     DiffEntry,
@@ -19,6 +20,7 @@ from parity.harness.runner import (
     build_diff_report,
     build_server_boot_smoke_blockers,
     build_signoff_payload,
+    collect_feature_contracts,
     compare_capture_sections,
     load_allowlist_rules,
     normalize_for_diff,
@@ -159,14 +161,76 @@ def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path
     assert fixture.compare_speaker_id == "Base02"
     assert (fixture.workspace_root / "annotations" / "Base01.parse.json").exists()
     assert (fixture.workspace_root / "annotations" / "Base02.parse.json").exists()
+    assert (fixture.workspace_root / "coarse_transcripts" / "Base01.json").exists()
+    assert (fixture.workspace_root / "coarse_transcripts" / "Base02.json").exists()
     assert (fixture.workspace_root / "audio" / "original" / "Base01" / "source.wav").exists()
     assert (fixture.workspace_root / "audio" / "original" / "Base02" / "source.wav").exists()
     assert (fixture.input_root / "onboard" / "Parity01.wav").exists()
     assert (fixture.input_root / "concepts-import.csv").read_text(encoding="utf-8").startswith("id,concept_en")
     assert (fixture.input_root / "tags-import.csv").read_text(encoding="utf-8").startswith("concept_en")
 
+    base01 = json.loads((fixture.workspace_root / "annotations" / "Base01.parse.json").read_text(encoding="utf-8"))
+    base02 = json.loads((fixture.workspace_root / "annotations" / "Base02.parse.json").read_text(encoding="utf-8"))
+    assert len(base01["tiers"]["ortho_words"]["intervals"]) == 2
+    assert "ortho_words" not in base02["tiers"]
+
     with pytest.raises(ValueError, match="Unknown fixture"):
         prepare_fixture_bundle(tmp_path / "other", fixture_name="does-not-exist")
+
+
+def test_collect_feature_contracts_reports_bnd_gate_matrix_and_source_audit(tmp_path: Path) -> None:
+    fixture = prepare_fixture_bundle(tmp_path / "fixture", fixture_name="saha-2speaker")
+    repo_root = tmp_path / "repo"
+    (repo_root / "python").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "python" / "server.py").write_text(
+        '\n'.join([
+            'ortho_source = "ortho_words"',
+            'def _compute_speaker_boundaries(job_id, payload):',
+            'print("Writing tiers.ortho_words")',
+            'def _compute_speaker_retranscribe_with_boundaries(job_id, payload):',
+            'ALIASES = ["bnd_stt"]',
+            'compute_boundaries_start = object()',
+            'boundaries_job_started = True',
+            'retranscribe_with_boundaries_start = object()',
+            'boundary_constrained_stt_job_started = True',
+        ]) + '\n',
+        encoding="utf-8",
+    )
+    (repo_root / "src" / "ParseUI.tsx").write_text(
+        '\n'.join([
+            'const label = "Phonetic Tools";',
+            'const a = "phonetic-retranscribe-with-boundaries";',
+            'const b = "phonetic-refine-boundaries";',
+        ]) + '\n',
+        encoding="utf-8",
+    )
+
+    contracts = collect_feature_contracts(
+        repo_root=repo_root,
+        workspace_root=fixture.workspace_root,
+        speakers=(fixture.seed_speaker_id, fixture.compare_speaker_id),
+    )
+
+    assert contracts["speakers"] == ["Base01", "Base02"]
+    assert contracts["gate_matrix"]["Base01"] == {
+        "has_ortho_words": True,
+        "ortho_words_interval_count": 2,
+        "has_stt_word_timestamps": True,
+        "stt_word_timestamp_segment_count": 1,
+        "retranscribe_with_boundaries_enabled": True,
+        "compute_boundaries_enabled": True,
+    }
+    assert contracts["gate_matrix"]["Base02"] == {
+        "has_ortho_words": False,
+        "ortho_words_interval_count": 0,
+        "has_stt_word_timestamps": True,
+        "stt_word_timestamp_segment_count": 1,
+        "retranscribe_with_boundaries_enabled": False,
+        "compute_boundaries_enabled": True,
+    }
+    assert set(contracts["source_audit"]) == set(BND_MCP_SOURCE_AUDIT_RULES)
+    assert all(result["all_present"] for result in contracts["source_audit"].values())
 
 
 def test_load_allowlist_rules_rejects_todo_reasons(tmp_path: Path) -> None:
@@ -335,6 +399,35 @@ def test_compare_capture_sections_returns_path_level_diffs() -> None:
         ("api", "$.api.config.body.status"),
         ("exports", "$.exports.lingpy"),
     }
+
+
+
+def test_compare_capture_sections_includes_feature_contract_diffs() -> None:
+    oracle = ScenarioCapture(
+        label="oracle",
+        api={},
+        job_lifecycles={},
+        exports={},
+        persisted_json={},
+        mcp_tools={},
+        feature_contracts={"gate_matrix": {"Base01": {"retranscribe_with_boundaries_enabled": True}}},
+    )
+    rebuild = ScenarioCapture(
+        label="rebuild",
+        api={},
+        job_lifecycles={},
+        exports={},
+        persisted_json={},
+        mcp_tools={},
+        feature_contracts={"gate_matrix": {"Base01": {"retranscribe_with_boundaries_enabled": False}}},
+    )
+
+    diffs = compare_capture_sections(oracle, rebuild, context=_context(), sections=("feature_contracts",))
+
+    assert [(entry.section, entry.path) for entry in diffs] == [
+        ("feature_contracts", "$.feature_contracts.gate_matrix.Base01.retranscribe_with_boundaries_enabled"),
+    ]
+
 
 
 def test_build_diff_report_separates_allowlisted_and_unallowlisted_diffs(tmp_path: Path) -> None:
