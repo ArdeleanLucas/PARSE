@@ -3,7 +3,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type WaveSurfer from "wavesurfer.js";
+import legacyFail01 from "./__fixtures__/Fail01.legacy-tier-split.json";
 import type { AnnotationRecord } from "../../api/types";
+
 
 let mockRecord: AnnotationRecord | null = null;
 let mockLanes: Record<string, { visible: boolean; color: string }> = {};
@@ -148,5 +150,43 @@ describe("TranscriptionLanes", () => {
 
     await waitFor(() => expect(screen.getByTitle("IPA lane")).toBeTruthy());
     expect(screen.getByTitle("ORTH lane")).toBeTruthy();
+  });
+
+  it("renders the trimmed Fail01 legacy fixture without requiring a migrated stt_words tier", async () => {
+    mockLanes.stt_words.visible = true;
+    mockLanes.boundaries.visible = true;
+    mockRecord = structuredClone(legacyFail01) as AnnotationRecord;
+    mockSttBySpeaker = {
+      Fail01: [
+        {
+          start: 0,
+          end: 3.56,
+          text: "försچ ڕی یان",
+          words: [
+            { start: 0.0, end: 0.28, word: "försچ" },
+            { start: 0.28, end: 1.12, word: "یان" },
+            { start: 1.12, end: 3.56, word: "ڕی" },
+          ],
+        },
+      ],
+    };
+    mockSttStatus = { Fail01: "loaded" };
+
+    const wsRef = { current: createMockWaveSurfer() } as RefObject<WaveSurfer | null>;
+    render(
+      <TranscriptionLanes
+        speaker="Fail01"
+        wsRef={wsRef}
+        audioReady={true}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTitle("Words lane")).toBeTruthy());
+    expect(screen.getByTitle("BND lane")).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Words 0.00s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'BND 0.00s' })).toBeTruthy();
+    expect(mockEnsureSttWordsTier).not.toHaveBeenCalled();
+    expect((mockRecord?.tiers as Record<string, unknown>).stt_words).toBeUndefined();
   });
 });

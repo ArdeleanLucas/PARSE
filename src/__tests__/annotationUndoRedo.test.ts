@@ -163,11 +163,43 @@ describe("annotationStore undo/redo", () => {
     expect(useAnnotationStore.getState().histories.S1.undo).toHaveLength(histLenBefore);
   });
 
-  it("undo after ensureSttTier restores the empty-tier state", () => {
-    useAnnotationStore.getState().ensureSttTier("S1", [
-      { start: 0, end: 1, text: "one" },
+  it("ensureSttWordsTier migrates legacy word timestamps and is idempotent", () => {
+    const segs = [
+      {
+        start: 0,
+        end: 2,
+        text: "awa test",
+        words: [
+          { start: 0, end: 0.8, word: "awa" },
+          { start: 0.8, end: 2, word: "test" },
+        ],
+      },
+    ];
+    useAnnotationStore.getState().ensureSttWordsTier("S1", segs);
+    let sttWords = useAnnotationStore.getState().records.S1.tiers.stt_words.intervals;
+    expect(sttWords).toEqual([
+      { start: 0, end: 0.8, text: "" },
+      { start: 0.8, end: 2, text: "" },
     ]);
+
+    const histLenBefore = useAnnotationStore.getState().histories.S1.undo.length;
+    useAnnotationStore.getState().ensureSttWordsTier("S1", [
+      { start: 5, end: 6, text: "later", words: [{ start: 5, end: 6, word: "later" }] },
+    ]);
+    sttWords = useAnnotationStore.getState().records.S1.tiers.stt_words.intervals;
+    expect(sttWords).toEqual([
+      { start: 0, end: 0.8, text: "" },
+      { start: 0.8, end: 2, text: "" },
+    ]);
+    expect(useAnnotationStore.getState().histories.S1.undo).toHaveLength(histLenBefore);
+  });
+
+  it("undo after ensureSttWordsTier restores the pre-migration legacy state", () => {
+    useAnnotationStore.getState().ensureSttWordsTier("S1", [
+      { start: 0, end: 1, text: "yek", words: [{ start: 0, end: 1, word: "yek" }] },
+    ]);
+    expect(useAnnotationStore.getState().records.S1.tiers.stt_words.intervals).toHaveLength(1);
     useAnnotationStore.getState().undo("S1");
-    expect(useAnnotationStore.getState().records.S1.tiers.stt.intervals).toHaveLength(0);
+    expect(useAnnotationStore.getState().records.S1.tiers.stt_words).toBeUndefined();
   });
 });
