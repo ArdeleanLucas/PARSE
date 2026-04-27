@@ -42,12 +42,28 @@ describe('TranscriptionLanesControls', () => {
     cleanup();
   });
 
-  it('renders lane labels and hints', () => {
+  it('renders the oracle lane split with Words directly above Boundaries', () => {
     render(<TranscriptionLanesControls />);
     expect(screen.getByText('Transcription lanes')).toBeTruthy();
     expect(screen.getByText('Phones tier')).toBeTruthy();
     expect(screen.getByText('IPA tier')).toBeTruthy();
-    expect(screen.getByText('Coarse transcript')).toBeTruthy();
+    expect(screen.getByText('STT segments')).toBeTruthy();
+    expect(screen.getByText('Words (Tier 1)')).toBeTruthy();
+    expect(screen.getByText('Boundaries (Tier 2)')).toBeTruthy();
+    expect(screen.getByText('Raw faster-whisper word boundaries')).toBeTruthy();
+    expect(screen.getByText('Forced-aligned edges; colored by Tier 1 ↔ Tier 2 shift')).toBeTruthy();
+
+    const labels = Array.from(document.querySelectorAll('label')).map((el) =>
+      el.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(labels).toEqual([
+      'Phones tierPhone-level IPA',
+      'IPA tierWord/lexeme IPA',
+      'STT segmentsCoarse transcript',
+      'Ortho tierOrthographic',
+      'Words (Tier 1)Raw faster-whisper word boundaries',
+      'Boundaries (Tier 2)Forced-aligned edges; colored by Tier 1 ↔ Tier 2 shift',
+    ]);
   });
 
   it('toggles a lane visibility checkbox', () => {

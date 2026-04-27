@@ -149,4 +149,58 @@ describe("TranscriptionLanes", () => {
     await waitFor(() => expect(screen.getByTitle("IPA lane")).toBeTruthy());
     expect(screen.getByTitle("ORTH lane")).toBeTruthy();
   });
+
+  it("renders Tier 1 Words directly above Tier 2 Boundaries from legacy STT words", async () => {
+    mockLanes.stt_words.visible = true;
+    mockLanes.boundaries.visible = true;
+    mockRecord = {
+      ...makeRecord(),
+      tiers: {
+        ...makeRecord().tiers,
+        ortho_words: {
+          name: "ortho_words",
+          display_order: 5,
+          intervals: [
+            { start: 1, end: 1.45, text: "", confidence: 0.92 },
+            { start: 1.45, end: 2, text: "", confidence: 0.88 },
+          ],
+        },
+      },
+    };
+    mockSttBySpeaker = {
+      Fail01: [
+        {
+          start: 1,
+          end: 2,
+          text: "awa test",
+          words: [
+            { start: 1, end: 1.4, word: "awa" },
+            { start: 1.4, end: 2, word: "test" },
+          ],
+        },
+      ],
+    };
+    mockSttStatus = { Fail01: "loaded" };
+
+    const wsRef = { current: createMockWaveSurfer() } as RefObject<WaveSurfer | null>;
+    render(
+      <TranscriptionLanes
+        speaker="Fail01"
+        wsRef={wsRef}
+        audioReady={true}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTitle("Words lane")).toBeTruthy());
+    expect(screen.getByTitle("BND lane")).toBeTruthy();
+
+    const laneTitles = Array.from(document.querySelectorAll('[title$=" lane"]')).map((el) => el.getAttribute('title'));
+    expect(laneTitles.slice(-4)).toEqual(['IPA lane', 'ORTH lane', 'Words lane', 'BND lane']);
+
+    expect(screen.getByRole('button', { name: 'Words 1.00s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Words 1.40s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'BND 1.00s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'BND 1.45s' })).toBeTruthy();
+  });
 });
