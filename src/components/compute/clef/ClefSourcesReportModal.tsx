@@ -51,7 +51,7 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
             <div>
               <h2 className="text-sm font-semibold text-slate-900">CLEF Sources Report</h2>
               <p className="mt-1 text-[11px] text-slate-500">
-                Provenance of every reference form PARSE populated into this corpus. Cite the listed providers when a form appears in your thesis.
+                Provenance of every reference form PARSE populated into this corpus.
               </p>
             </div>
           </div>

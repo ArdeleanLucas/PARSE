@@ -46,9 +46,10 @@ export function resolveSessionId(payload: unknown): string {
 export function networkError(path: string, options: RequestInit | undefined, error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
   if (/failed to fetch|networkerror/i.test(message)) {
+    const target = (typeof __PARSE_API_TARGET__ !== "undefined" && __PARSE_API_TARGET__) || "http://127.0.0.1:8766";
     return new Error(
       `Could not reach the PARSE API for ${options?.method ?? "GET"} ${path}. `
-      + `Check that the Python server is running on http://127.0.0.1:8766 and that the Vite /api proxy is active.`,
+      + `Check that the Python server is running at ${target} and that the Vite /api proxy is active.`,
     );
   }
   return error instanceof Error ? error : new Error(message);
