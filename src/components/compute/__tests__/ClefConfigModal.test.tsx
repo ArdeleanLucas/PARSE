@@ -153,11 +153,12 @@ describe("ClefConfigModal", () => {
       },
       warnings: [],
     });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ClefConfigModal open onClose={() => {}} />);
 
     fireEvent.click(screen.getByRole("button", { name: /3\. settings/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Delete all CLEF data/i }));
+    expect(await screen.findByText(/This will delete all populated CLEF reference forms/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Delete CLEF data$/i }));
 
     await waitFor(() => expect(mockClearClefData).toHaveBeenCalledWith({ dryRun: false, clearCache: true }));
     await waitFor(() => expect(mockGetClefConfig).toHaveBeenCalledTimes(2));

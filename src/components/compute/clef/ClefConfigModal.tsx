@@ -2,6 +2,7 @@ import { AlertCircle, Play, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthStatus } from "../../../api/types";
 import { clearClefData, saveClefConfig } from "../../../api/client";
+import { Modal } from "../../shared/Modal";
 import { ConfigForm } from "./ConfigForm";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm";
 import { ProviderSelector } from "./ProviderSelector";
@@ -132,10 +133,6 @@ export function ClefConfigModal({
   }
 
   const handleClearClefData = useCallback(async () => {
-    const confirmed = window.confirm(
-      "Delete all populated CLEF reference forms and cached provider lookup files? PARSE creates a backend backup before clearing.",
-    );
-    if (!confirmed) return;
     setClearing(true);
     setSettingsMessage(null);
     setError(null);
@@ -327,6 +324,13 @@ function ClefSettingsPanel({
   onClear: () => void;
   onProviderAuthCancel: () => void;
 }) {
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+
+  function confirmClear() {
+    setConfirmClearOpen(false);
+    onClear();
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -343,7 +347,7 @@ function ClefSettingsPanel({
         </p>
         <button
           type="button"
-          onClick={onClear}
+          onClick={() => setConfirmClearOpen(true)}
           disabled={clearing}
           className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -351,6 +355,32 @@ function ClefSettingsPanel({
         </button>
         {message && <div className="mt-2 text-[11px] text-emerald-700">{message}</div>}
       </section>
+      <Modal open={confirmClearOpen} onClose={() => setConfirmClearOpen(false)} title="Delete all CLEF data?">
+        <div className="max-w-md space-y-4 text-[12px] text-slate-700">
+          <p>
+            This will delete all populated CLEF reference forms and cached provider lookup files. PARSE creates a backend backup before clearing.
+          </p>
+          <p className="text-slate-500">
+            Language metadata, primary-language settings, and other CLEF configuration stay intact.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setConfirmClearOpen(false)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmClear}
+              className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-rose-700"
+            >
+              Delete CLEF data
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
