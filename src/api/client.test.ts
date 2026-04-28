@@ -8,6 +8,7 @@ describe("chat API client contracts", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__PARSE_API_TARGET__", "http://127.0.0.1:8766");
   });
 
   afterEach(() => {
@@ -29,6 +30,13 @@ describe("chat API client contracts", () => {
     await expect(runChat("chat_123", "hello")).rejects.toThrow(
       /Could not reach the PARSE API.*8766/i,
     );
+  });
+
+  it("uses __PARSE_API_TARGET__ in network error messages", async () => {
+    vi.stubGlobal("__PARSE_API_TARGET__", "http://127.0.0.1:8866");
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(runChat("chat_123", "hello")).rejects.toThrow(/127\.0\.0\.1:8866/);
   });
 });
 
