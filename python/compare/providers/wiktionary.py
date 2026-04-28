@@ -9,12 +9,23 @@ from typing import Dict, Iterator, List
 import requests
 
 from .base import BaseProvider, FetchResult
+from .language_match import lang_key_matches
 
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "config" / "cache"
 
 WIKTIONARY_IPA_RE = re.compile(r'\{\{IPA\|([^}|]+)\|(/[^/]+/|[\[{][^\]}]+[\]}])\}\}')
 IPA_SLASH_RE = re.compile(r'/([^/]{1,40})/')
 IPA_BRACKET_RE = re.compile(r'\[([^\]]{1,40})\]')
+_WIKTIONARY_FRAGMENTS: Dict[str, List[str]] = {
+    "ar": ["ar", "arb", "ara", "arabic"],
+    "fa": ["fa", "fas", "pes", "persian", "farsi"],
+    "ckb": ["ckb", "sorani", "central kurdish", "centralkurdish"],
+    "kmr": ["kmr", "kurmanji", "northern kurdish", "northernkurdish"],
+    "tr": ["tr", "tur", "turkish"],
+    "heb": ["he", "heb", "hebrew"],
+    "syr": ["syr", "syriac"],
+    "urd": ["ur", "urd", "urdu"],
+}
 
 
 class WiktionaryProvider(BaseProvider):
@@ -142,9 +153,12 @@ class WiktionaryProvider(BaseProvider):
             return []
 
     def _extract_ipa_for_lang(self, wikitext: str, lang_code: str) -> List[str]:
+        fragments = _WIKTIONARY_FRAGMENTS.get(lang_code, [lang_code])
         forms = []
         for m in WIKTIONARY_IPA_RE.finditer(wikitext):
-            if lang_code in m.group(1):
+            tag = m.group(1)
+            base_tag = tag.split("-", 1)[0]
+            if lang_key_matches(tag, fragments) or lang_key_matches(base_tag, fragments):
                 raw = m.group(2).strip("/[]")
                 if raw:
                     forms.append(raw)

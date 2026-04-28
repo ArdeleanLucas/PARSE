@@ -8,7 +8,9 @@ Normalization: none.
 
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
+
 from .base import BaseProvider, FetchResult
+from .language_match import lang_key_matches
 
 
 class PycldfProvider(BaseProvider):
@@ -25,13 +27,17 @@ class PycldfProvider(BaseProvider):
         return sorted(self._data_dir.glob("**/cldf/*-metadata.json"))
 
     def _iso_fragments(self, iso: str) -> List[str]:
-        FRAGS: Dict[str, List[str]] = {
-            "ar":  ["arb", "arabic", "ar", "ara"],
-            "fa":  ["pes", "persian", "fa", "fas", "farsi"],
-            "ckb": ["ckb", "sorani", "central kurdish", "kurdish"],
-            "tr":  ["tur", "turkish", "tr"],
+        frags: Dict[str, List[str]] = {
+            "ar": ["arb", "ara", "ar", "arabic", "stan1318"],
+            "fa": ["pes", "fas", "fa", "persian", "farsi", "west2369"],
+            "ckb": ["ckb", "sorani", "centralkurdish", "kur"],
+            "kmr": ["kmr", "kurmanji", "northernkurdish"],
+            "tr": ["tur", "tr", "turkish", "nucl1301"],
+            "heb": ["heb", "he", "hebrew"],
+            "syr": ["syr", "syriac"],
+            "urd": ["urd", "ur", "urdu"],
         }
-        return FRAGS.get(iso, [iso])
+        return frags.get(iso, [iso])
 
     def _match_concept_key(self, concept_en: str, keys) -> Optional[str]:
         c = concept_en.lower().strip()
@@ -83,14 +89,17 @@ class PycldfProvider(BaseProvider):
                             continue
                         matched_lang_ids = set()
                         for row in langs_table:
-                            row_id = str(row.get("ID") or row.get("Language_ID") or "").lower()
-                            row_name = str(row.get("Name") or row.get("Glottocode") or "").lower()
-                            for frag in frags:
-                                if frag in row_id or frag in row_name:
-                                    lid = row.get("ID") or row.get("Language_ID") or ""
-                                    if lid:
-                                        matched_lang_ids.add(str(lid))
-                                    break
+                            row_id = str(row.get("ID") or row.get("Language_ID") or "")
+                            row_name = str(row.get("Name") or "")
+                            row_glottocode = str(row.get("Glottocode") or "")
+                            if (
+                                lang_key_matches(row_id, frags)
+                                or lang_key_matches(row_name, frags)
+                                or lang_key_matches(row_glottocode, frags)
+                            ):
+                                lid = row.get("ID") or row.get("Language_ID") or ""
+                                if lid:
+                                    matched_lang_ids.add(str(lid))
                         if not matched_lang_ids:
                             continue
 
