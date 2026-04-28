@@ -18,6 +18,21 @@ export interface AnnotationStorePersistenceSlice {
   saveSpeaker: (speaker: string) => Promise<void>;
 }
 
+export interface SaveLexemeAnnotationPayload {
+  speaker: string;
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+  ipaText: string;
+  orthoText: string;
+  conceptName: string;
+}
+
+export type SaveLexemeAnnotationResult =
+  | { ok: true; moved: number }
+  | { ok: false; error: string };
+
 export interface AnnotationStoreActionsSlice {
   setInterval: (speaker: string, tier: string, interval: AnnotationInterval) => void;
   updateInterval: (speaker: string, tier: string, index: number, text: string) => void;
@@ -45,7 +60,9 @@ export interface AnnotationStoreActionsSlice {
     oldEnd: number,
     newStart: number,
     newEnd: number,
+    tierScope?: readonly string[],
   ) => number;
+  saveLexemeAnnotation: (payload: SaveLexemeAnnotationPayload) => SaveLexemeAnnotationResult;
   markLexemeManuallyAdjusted: (speaker: string, start: number, end: number) => number;
   undo: (speaker: string) => string | null;
   redo: (speaker: string) => string | null;

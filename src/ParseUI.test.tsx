@@ -21,6 +21,7 @@ const mockHydrateTags = vi.fn();
 const mockSyncTagsFromServer = vi.fn().mockResolvedValue(undefined);
 const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockSetInterval = vi.fn();
+const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockMarkLexemeManuallyAdjusted = vi.fn();
 const mockTagConcept = vi.fn();
@@ -84,6 +85,7 @@ vi.mock("./stores/annotationStore", () => {
       histories: {},
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
+      saveLexemeAnnotation: mockSaveLexemeAnnotation,
       saveSpeaker: mockSaveSpeaker,
       markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
       moveIntervalAcrossTiers: vi.fn(),
@@ -491,6 +493,8 @@ beforeEach(() => {
   mockHydrateTags.mockClear();
   mockLoadSpeaker.mockClear();
   mockSetInterval.mockClear();
+  mockSaveLexemeAnnotation.mockReset();
+  mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
   mockSaveSpeaker.mockClear();
   mockMarkLexemeManuallyAdjusted.mockClear();
   mockTagConcept.mockClear();
@@ -607,7 +611,9 @@ describe("ParseUI", () => {
 
   it("saves annotation tiers for the selected region and persists the speaker record", async () => {
     mockRecords = {
-      Fail01: makeRecord("Fail01", []),
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", start: 1.25, end: 2.5 },
+      ]),
     };
 
     render(<ParseUI />);
@@ -615,24 +621,20 @@ describe("ParseUI", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Enter IPA…"), { target: { value: "aβ" } });
     fireEvent.change(screen.getByPlaceholderText("Enter orthographic form…"), { target: { value: "ئاو" } });
-    fireEvent.click(screen.getAllByRole("button", { name: /Save Annotation/i })[0]);
+    fireEvent.click(screen.getAllByTestId("save-lexeme-annotation")[0]);
 
-    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "ipa", {
-      start: 1.25,
-      end: 2.5,
-      text: "aβ",
-    });
-    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "ortho", {
-      start: 1.25,
-      end: 2.5,
-      text: "ئاو",
-    });
-    expect(mockSetInterval).toHaveBeenCalledWith("Fail01", "concept", {
-      start: 1.25,
-      end: 2.5,
-      text: "water",
+    expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith({
+      speaker: "Fail01",
+      oldStart: 1.25,
+      oldEnd: 2.5,
+      newStart: 1.25,
+      newEnd: 2.5,
+      ipaText: "aβ",
+      orthoText: "ئاو",
+      conceptName: "water",
     });
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith("Fail01"));
+    expect(mockSetInterval).not.toHaveBeenCalled();
   });
 
   it("marks the current concept confirmed from annotate mode", async () => {

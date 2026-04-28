@@ -34,6 +34,7 @@ const mockSetInterval = vi.fn((speaker: string, tier: string, interval: Annotati
   expect(speaker).toBe('Fail01');
   applyIntervalToMockRecord(tier, interval);
 });
+const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
 const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockUndo = vi.fn();
@@ -53,6 +54,7 @@ vi.mock('../../stores/annotationStore', () => ({
   useAnnotationStore: (selector: (state: unknown) => unknown) => selector({
     records: { Fail01: mockRecord },
     setInterval: mockSetInterval,
+    saveLexemeAnnotation: mockSaveLexemeAnnotation,
     moveIntervalAcrossTiers: mockMoveIntervalAcrossTiers,
     saveSpeaker: mockSaveSpeaker,
     undo: mockUndo,
@@ -131,6 +133,8 @@ describe('AnnotateView', () => {
     mockDuration = 4;
     mockIsPlaying = false;
     mockSetInterval.mockClear();
+    mockSaveLexemeAnnotation.mockReset();
+    mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
     mockMoveIntervalAcrossTiers.mockClear();
     mockSaveSpeaker.mockClear();
     mockUndo.mockClear();
@@ -171,8 +175,8 @@ describe('AnnotateView', () => {
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
   });
 
-  it('saves annotation tiers for the selected region', async () => {
-    mockRecord = makeRecord([]);
+  it('saves annotation tiers for the selected region with one atomic store action', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1.25, end: 2.5 }]);
 
     render(
       <AnnotateView
@@ -185,19 +189,33 @@ describe('AnnotateView', () => {
       />,
     );
 
+    fireEvent.change(screen.getByTestId('lexeme-start'), { target: { value: '1.75' } });
+    fireEvent.change(screen.getByTestId('lexeme-end'), { target: { value: '2.75' } });
     fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'aβ' } });
     fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'ئاو' } });
-    fireEvent.click(screen.getByRole('button', { name: /save annotation/i }));
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
 
-    expect(mockSetInterval).toHaveBeenCalledWith('Fail01', 'ipa', { start: 1.25, end: 2.5, text: 'aβ' });
-    expect(mockSetInterval).toHaveBeenCalledWith('Fail01', 'ortho', { start: 1.25, end: 2.5, text: 'ئاو' });
-    expect(mockSetInterval).toHaveBeenCalledWith('Fail01', 'concept', { start: 1.25, end: 2.5, text: 'water' });
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith({
+      speaker: 'Fail01',
+      oldStart: 1.25,
+      oldEnd: 2.5,
+      newStart: 1.75,
+      newEnd: 2.75,
+      ipaText: 'aβ',
+      orthoText: 'ئاو',
+      conceptName: 'water',
+    }));
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    expect(mockSetInterval).not.toHaveBeenCalled();
   });
 
   it('reloads the saved ipa and orthography after saving onto a new selected region', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 0.2, end: 0.8 }]);
     mockSelectedRegion = { start: 1.25, end: 2.5 };
+    mockSaveLexemeAnnotation.mockImplementation(({ newStart, newEnd, ipaText, orthoText, conceptName }) => {
+      mockRecord = makeRecord([{ conceptText: conceptName, ipa: ipaText, ortho: orthoText, start: newStart, end: newEnd }]);
+      return { ok: true, moved: 4 };
+    });
 
     const view = (
       <AnnotateView
@@ -213,7 +231,7 @@ describe('AnnotateView', () => {
     const { unmount } = render(view);
     fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'new-ipa' } });
     fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'new-ortho' } });
-    fireEvent.click(screen.getByRole('button', { name: /save annotation/i }));
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
 
     unmount();
@@ -221,6 +239,25 @@ describe('AnnotateView', () => {
 
     expect(screen.getByDisplayValue('new-ipa')).toBeTruthy();
     expect(screen.getByDisplayValue('new-ortho')).toBeTruthy();
+  });
+
+  it('does not render Save timestamp, Reset, or Chat placeholder buttons', () => {
+    mockRecord = makeRecord([]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    expect(screen.queryByTestId('lexeme-timestamp-save')).toBeNull();
+    expect(screen.queryByTestId('lexeme-timestamp-reset')).toBeNull();
+    expect(screen.queryByText(/^Chat$/)).toBeNull();
   });
 
   it('marks the current concept done', () => {
