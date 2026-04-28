@@ -96,7 +96,7 @@ def test_write_clear_is_write_allowed_and_removes_requested_scope(tools: ParseCh
     payload = json.loads((project_dir / "config" / "sil_contact_languages.json").read_text(encoding="utf-8"))
     assert payload["ar"]["concepts"] == {"fire": ["naːr"]}
     assert payload["fa"]["concepts"] == {}
-    assert payload["_meta"].get("form_selections", {}) == {}
+    assert payload["_meta"]["form_selections"] == {"water": {"ar": ["maːʔ"], "fa": ["ɒːb"]}}
 
 
 
@@ -104,14 +104,16 @@ def test_write_clear_can_remove_provider_caches(tools: ParseChatTools, project_d
     cache_dir = project_dir / "config" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / "wiktionary_ar.json").write_text("{}", encoding="utf-8")
+    (cache_dir / "wikidata_ar.json").write_text("{}", encoding="utf-8")
     (cache_dir / "asjp_fa.json").write_text("{}", encoding="utf-8")
 
     result = tools.execute("clef_clear_data", {"dryRun": False, "clearCache": True})
 
     assert result["ok"] is True
     inner = result["result"]
-    assert inner["summary"]["cacheFilesRemoved"] == 2
+    assert inner["summary"]["cacheFilesRemoved"] == 3
     assert not (cache_dir / "wiktionary_ar.json").exists()
+    assert not (cache_dir / "wikidata_ar.json").exists()
     assert not (cache_dir / "asjp_fa.json").exists()
 
 

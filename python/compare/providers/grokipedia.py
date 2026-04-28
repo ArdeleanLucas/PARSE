@@ -32,14 +32,33 @@ def _get_ai_config() -> Dict:
 
 
 def _get_auth_token(key_provider: str) -> Optional[str]:
+    """Look up a saved API key for a given provider.
+
+    Recognizes both auth-token shapes PARSE has written:
+    1. Legacy discrete keys: ``{"xai": "...", "openai": "..."}``
+    2. Chat-side direct key shape from ``ai.openai_auth.save_api_key``:
+       ``{"direct_api_key": "...", "direct_api_key_provider": "xai"}``
+    """
     tokens_path = _CONFIG_DIR / "auth_tokens.json"
-    if tokens_path.exists():
-        try:
-            with open(tokens_path) as f:
-                tokens = json.load(f)
-            return tokens.get(key_provider)
-        except (OSError, json.JSONDecodeError):
-            pass
+    if not tokens_path.exists():
+        return None
+    try:
+        with open(tokens_path) as f:
+            tokens = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(tokens, dict):
+        return None
+
+    legacy = tokens.get(key_provider)
+    if isinstance(legacy, str) and legacy.strip():
+        return legacy
+
+    direct_provider = str(tokens.get("direct_api_key_provider", "")).strip().lower()
+    if direct_provider == key_provider.lower():
+        direct_key = tokens.get("direct_api_key")
+        if isinstance(direct_key, str) and direct_key.strip():
+            return direct_key
     return None
 
 

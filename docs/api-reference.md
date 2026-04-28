@@ -164,14 +164,41 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/enrichments` | Save enrichments | Accepts either `{ enrichments: ... }` or the raw object |
 | `POST /api/config` | Update project configuration | Current server accepts POST as an update path |
 | `POST /api/clef/config` | Save CLEF language configuration | Used by the guided Configure CLEF modal before optional auto-populate |
-| `POST /api/clef/clear` | Clear CLEF reference forms and optional provider caches | Operates on `config/sil_contact_languages.json`; supports `dryRun`, language/concept scoping, and `clearCache` |
+| `POST /api/clef/clear` | Clear CLEF reference forms and optional provider caches | Operates only on per-language `config/sil_contact_languages.json[lang].concepts`; supports `dryRun`, language/concept scoping, and `clearCache` |
 | `POST /api/clef/form-selections` | Save CLEF form selections | Persists which populated reference forms should contribute to similarity scoring |
 | `POST /api/tags/merge` | Merge tag definitions | Shared tag persistence |
 | `POST /api/offset/detect` | Detect a constant timestamp offset | Starts an async compute job with progress updates and crash-log capture |
 | `POST /api/offset/detect-from-pair` | Detect a timestamp offset from trusted manual pairs | STT-free async correction path |
 | `POST /api/offset/apply` | Apply a constant timestamp shift | Mutates the speaker annotation file while preserving manually adjusted / anchored lexemes |
 
-Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of forms, languages, concepts, providers, and cache entries that would be removed. A destructive run (`dryRun=false`) backs up `config/sil_contact_languages.json` as `sil_contact_languages.json.<timestamp>.bak` before rewriting it, and `clearCache=true` removes known CLEF provider caches only from `config/cache/`.
+Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of forms, languages, concepts, and cache entries that would be removed. The request body is:
+
+```json
+{
+  "dryRun": false,
+  "languages": ["ar", "fa"],
+  "concepts": ["water"],
+  "clearCache": false
+}
+```
+
+`languages` and `concepts` may be `null` or omitted to select all configured languages/concepts. The response is always HTTP 200 for valid requests:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "summary": {
+    "languagesAffected": 2,
+    "conceptsAffected": 1,
+    "formsRemoved": 3,
+    "cacheFilesRemoved": 0
+  },
+  "warnings": []
+}
+```
+
+A destructive run (`dryRun=false`) backs up `config/sil_contact_languages.json` as `sil_contact_languages.json.<utc-iso>.bak` using basic UTC ISO timestamps such as `sil_contact_languages.json.20260428T205100Z.bak`, even if no forms are removed. The clear only edits selected per-language `concepts` dictionaries; it preserves `_meta`, `name`, `family`, `script`, and other config keys. It does **not** touch `parse-enrichments.json` because CLEF reference forms do not live there. With `clearCache=true`, the backend removes known CLEF provider caches only from `config/cache/`: `wiktionary_*.json`, `wikidata_*.json`, `asjp_*.json`, and `cldf_*` cache directories.
 
 ## PUT endpoints
 
@@ -515,7 +542,7 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | Tool | Description |
 |---|---|
 | `contact_lexeme_lookup` | Fetch contact-language reference forms; dry-run first |
-| `clef_clear_data` | Clear CLEF reference forms from `config/sil_contact_languages.json`; dry-run first and optionally remove provider caches |
+| `clef_clear_data` | MCP wrapper for `POST /api/clef/clear`; clears per-language `concepts` entries in `config/sil_contact_languages.json`, preserves `_meta`, and optionally removes known provider caches |
 | `import_tag_csv` | Import a CSV as a PARSE tag list |
 | `prepare_tag_import` | Preview and validate a tag import |
 | `onboard_speaker_import` | Import one speaker from on-disk audio/CSV into the workspace |
