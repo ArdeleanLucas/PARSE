@@ -65,4 +65,9 @@ else:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "requires the optional 'websockets' package" in result.stdout
+    assert (
+        "PARSE WebSocket streaming requires the optional 'websockets' package. "
+        "It is declared in python/requirements.txt and enables "
+        "ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}. "
+        "Install with: pip install websockets"
+    ) in result.stdout
