@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ClefPopulateSummaryBanner,
   type PopulateSummary,
@@ -51,11 +51,30 @@ const okSummary: PopulateSummary = {
   totalFilled: 42,
   perLang: { eng: 22, spa: 20 },
   warning: null,
+  warnings: [],
+};
+
+const clipboardWriteText = vi.fn(async () => {});
+
+const warningSummaryBase: PopulateSummary = {
+  state: "ok",
+  totalFilled: 2,
+  perLang: { eng: 1, spa: 1 },
+  warning: null,
+  warnings: [],
 };
 
 describe("ClefPopulateSummaryBanner", () => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWriteText },
+    });
+  });
+
   afterEach(() => {
     cleanup();
+    clipboardWriteText.mockClear();
   });
 
   it("shows retry button only on non-ok banner and fires onRetryWithProviders on click", () => {
@@ -122,5 +141,54 @@ describe("ClefPopulateSummaryBanner", () => {
     // And the languages tab is not active.
     const langTab = screen.getByRole("button", { name: /1\. languages/i });
     expect(langTab.className).not.toMatch(/border-b-white/);
+  });
+
+  it("renders no warnings section when warnings are empty", () => {
+    render(
+      <ClefPopulateSummaryBanner
+        summary={{ ...warningSummaryBase, warnings: [] }}
+        onDismiss={() => {}}
+        onRetryWithProviders={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("clef-populate-warning")).toBeNull();
+    expect(screen.queryByRole("button", { name: /provider warnings/i })).toBeNull();
+  });
+
+  it("renders all warnings expanded when there are up to 3", async () => {
+    const warnings = [
+      "pylexibank: optional pylexibank package is not installed.",
+      "grokipedia: no xAI or OpenAI API key is configured.",
+    ];
+
+    render(
+      <ClefPopulateSummaryBanner
+        summary={{ ...warningSummaryBase, warnings }}
+        onDismiss={() => {}}
+        onRetryWithProviders={() => {}}
+      />,
+    );
+
+    expect(screen.getAllByTestId("clef-populate-warning")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /copy warnings/i }));
+    await waitFor(() => {
+      expect(clipboardWriteText).toHaveBeenCalledWith(warnings.join("\n"));
+    });
+  });
+
+  it("defaults warnings collapsed when there are more than 3 and toggles open", () => {
+    render(
+      <ClefPopulateSummaryBanner
+        summary={{ ...warningSummaryBase, warnings: ["w1", "w2", "w3", "w4"] }}
+        onDismiss={() => {}}
+        onRetryWithProviders={() => {}}
+      />,
+    );
+
+    expect(screen.queryAllByTestId("clef-populate-warning")).toHaveLength(0);
+    const toggle = screen.getByRole("button", { name: /4 provider warnings/i });
+    fireEvent.click(toggle);
+    expect(screen.getAllByTestId("clef-populate-warning")).toHaveLength(4);
   });
 });
