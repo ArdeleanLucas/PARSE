@@ -100,6 +100,53 @@ function seedFail02AllTiers() {
   });
 }
 
+function seedFail02RealShape() {
+  // Real-world: ipa/ortho/ortho_words have their own boundaries from
+  // independent STT/forced-alignment passes that do not coincide with the
+  // concept span. This mirrors real PARSE annotation files.
+  useAnnotationStore.setState({
+    records: {
+      Fail02: {
+        speaker: "Fail02",
+        tiers: {
+          ipa: {
+            name: "ipa", display_order: 1,
+            intervals: [
+              { start: 99.50, end: 99.95, text: "prev" },
+              { start: 99.95, end: 101.10, text: "hɪr" },
+              { start: 101.20, end: 101.50, text: "next" },
+            ],
+          },
+          ortho: {
+            name: "ortho", display_order: 2,
+            intervals: [{ start: 99.90, end: 101.05, text: "هەر" }],
+          },
+          ortho_words: {
+            name: "ortho_words", display_order: 3,
+            intervals: [
+              { start: 99.90, end: 100.50, text: "" },
+              { start: 100.50, end: 101.05, text: "" },
+              { start: 101.20, end: 101.50, text: "" },
+            ],
+          },
+          concept: {
+            name: "concept", display_order: 4,
+            intervals: [{ start: 100.000, end: 101.000, text: "hair" }],
+          },
+          speaker: {
+            name: "speaker", display_order: 5,
+            intervals: [{ start: 0, end: 200, text: "Fail02" }],
+          },
+        },
+        created_at: "2026-01-01T00:00:00Z",
+        modified_at: "2026-01-01T00:00:00Z",
+        source_wav: "x.wav",
+      },
+    },
+    dirty: {}, loading: {}, histories: {},
+  });
+}
+
 describe("annotationStore.moveIntervalAcrossTiers", () => {
   beforeEach(() => {
     useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
@@ -309,5 +356,62 @@ describe("annotationStore.markLexemeManuallyAdjusted", () => {
     expect(
       useAnnotationStore.getState().markLexemeManuallyAdjusted("Ghost01", 1, 2),
     ).toBe(0);
+  });
+});
+
+
+describe("annotationStore.saveLexemeAnnotation (real-shape data)", () => {
+  beforeEach(() => {
+    useAnnotationStore.setState({ records: {}, dirty: {}, loading: {}, histories: {} });
+  });
+
+  it("retimes IPA/ORTH by overlap and scales ortho_words by midpoint when bounds differ from concept", () => {
+    seedFail02RealShape();
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Fail02",
+      oldStart: 100, oldEnd: 101,
+      newStart: 200, newEnd: 202,
+      ipaText: "ndʒə",
+      orthoText: "نوێ",
+      conceptName: "hair",
+    });
+    expect(result).toEqual({ ok: true, moved: 4 });
+
+    const rec = useAnnotationStore.getState().records["Fail02"];
+
+    expect(rec.tiers.concept.intervals[0]).toMatchObject({
+      start: 200, end: 202, text: "hair", manuallyAdjusted: true,
+    });
+
+    const movedIpa = rec.tiers.ipa.intervals.find((iv) => iv.text === "ndʒə");
+    expect(movedIpa).toMatchObject({ start: 200, end: 202, manuallyAdjusted: true });
+    expect(rec.tiers.ipa.intervals.find((iv) => iv.text === "prev")).toMatchObject({ start: 99.50, end: 99.95 });
+    expect(rec.tiers.ipa.intervals.find((iv) => iv.text === "next")).toMatchObject({ start: 101.20, end: 101.50 });
+
+    expect(rec.tiers.ortho.intervals[0]).toMatchObject({
+      start: 200, end: 202, text: "نوێ", manuallyAdjusted: true,
+    });
+
+    const words = [...rec.tiers.ortho_words.intervals].sort((a, b) => a.start - b.start);
+    expect(words).toHaveLength(3);
+    expect(words[0]).toMatchObject({ start: 101.20, end: 101.50 });
+    expect(words[0].manuallyAdjusted).toBeFalsy();
+    expect(words[1].start).toBeCloseTo(200);
+    expect(words[1].end).toBeCloseTo(201);
+    expect(words[1].manuallyAdjusted).toBe(true);
+    expect(words[2].start).toBeCloseTo(201);
+    expect(words[2].end).toBeCloseTo(202);
+    expect(words[2].manuallyAdjusted).toBe(true);
+  });
+
+  it("returns moved=0 with a clean error when no concept interval matches", () => {
+    seedFail02RealShape();
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Fail02",
+      oldStart: 500, oldEnd: 501,
+      newStart: 600, newEnd: 601,
+      ipaText: "x", orthoText: "y", conceptName: "z",
+    });
+    expect(result).toEqual({ ok: false, error: "No matching lexeme intervals found." });
   });
 });
