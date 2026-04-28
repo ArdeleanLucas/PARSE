@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import csv
+import fnmatch
 import json
 import pathlib
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -27,6 +30,22 @@ SilConfigWriter = Callable[[pathlib.Path, Dict[str, Any]], None]
 NowFactory = Callable[[], datetime]
 IterFormsWithSources = Callable[[Any], Iterable[Tuple[str, List[str]]]]
 CitationGetter = Callable[[], Dict[str, Dict[str, Any]]]
+
+CLEF_LANGUAGE_BUCKET_KEYS = ("forms", "concepts", "lexicon")
+PROVIDER_CACHE_PATTERNS: Dict[str, Tuple[str, ...]] = {
+    "asjp": ("asjp_*.json",),
+    "cldf": ("cldf_*",),
+    "wiktionary": ("wiktionary_*.json",),
+}
+
+
+@dataclass(frozen=True)
+class ClefClearPlan:
+    updated_config: Dict[str, Any]
+    summary: Dict[str, Any]
+    warnings: List[str]
+    cache_targets: List[pathlib.Path]
+    needs_write: bool
 
 
 
@@ -283,6 +302,371 @@ def build_post_clef_form_selections_response(
             "concept_en": concept_key,
             "lang_code": lang_code,
             "forms": forms,
+        },
+    )
+
+
+
+def _require_bool_field(body: Mapping[str, Any], field_name: str, *, default: bool) -> bool:
+    if field_name not in body:
+        return default
+    value = body.get(field_name)
+    if isinstance(value, bool):
+        return value
+    raise ClefHttpHandlerError(HTTPStatus.BAD_REQUEST, "{0} must be a boolean".format(field_name))
+
+
+
+def _optional_string_list(
+    value: Any,
+    *,
+    field_name: str,
+    lowercase: bool = False,
+) -> List[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ClefHttpHandlerError(HTTPStatus.BAD_REQUEST, "{0} must be null or a list of strings".format(field_name))
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ClefHttpHandlerError(HTTPStatus.BAD_REQUEST, "{0} must be null or a list of strings".format(field_name))
+        text = item.strip()
+        if not text:
+            raise ClefHttpHandlerError(HTTPStatus.BAD_REQUEST, "{0} must be null or a list of strings".format(field_name))
+        if lowercase:
+            text = text.lower()
+        if text not in seen:
+            seen.add(text)
+            normalized.append(text)
+    return normalized
+
+
+
+def _load_clef_config_object(config_path: pathlib.Path) -> Dict[str, Any]:
+    if not config_path.exists():
+        return {}
+
+    try:
+        with open(config_path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except OSError as exc:
+        raise ClefHttpHandlerError(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            "Could not read config/sil_contact_languages.json: {0}".format(exc),
+        ) from exc
+    except ValueError as exc:
+        raise ClefHttpHandlerError(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            "config/sil_contact_languages.json is not valid JSON: {0}".format(exc),
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ClefHttpHandlerError(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            "config/sil_contact_languages.json must contain a JSON object",
+        )
+    return payload
+
+
+
+def _count_entry_forms_and_sources(entry: Any) -> Tuple[int, set[str]]:
+    from compare.providers.provenance import iter_forms_with_sources
+
+    count = 0
+    providers: set[str] = set()
+    for _form, sources in iter_forms_with_sources(entry):
+        count += 1
+        for source in sources:
+            text = str(source).strip()
+            if text:
+                providers.add(text)
+    return count, providers
+
+
+
+def _matches_requested_scope(
+    *,
+    language_code: str,
+    concept_key: str,
+    languages_filter: set[str] | None,
+    concepts_filter: set[str] | None,
+) -> bool:
+    if languages_filter is not None and language_code not in languages_filter:
+        return False
+    if concepts_filter is not None and concept_key not in concepts_filter:
+        return False
+    return True
+
+
+
+def _collect_clef_cache_targets(cache_dir: pathlib.Path) -> List[pathlib.Path]:
+    if not cache_dir.exists() or not cache_dir.is_dir():
+        return []
+
+    targets: List[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    for child in cache_dir.iterdir():
+        for patterns in PROVIDER_CACHE_PATTERNS.values():
+            if any(fnmatch.fnmatch(child.name, pattern) for pattern in patterns):
+                resolved = child.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    targets.append(child)
+                break
+    return sorted(targets, key=lambda item: item.name)
+
+
+
+def _count_cache_payloads(targets: Sequence[pathlib.Path]) -> int:
+    count = 0
+    for target in targets:
+        if target.is_dir():
+            count += sum(1 for child in target.rglob("*") if child.is_file())
+        elif target.exists():
+            count += 1
+    return count
+
+
+
+def _remove_cache_payloads(targets: Sequence[pathlib.Path]) -> Tuple[int, List[str]]:
+    removed = 0
+    warnings: List[str] = []
+
+    for target in targets:
+        if not target.exists():
+            continue
+        try:
+            if target.is_dir():
+                removed += sum(1 for child in target.rglob("*") if child.is_file())
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+                removed += 1
+        except OSError as exc:
+            warnings.append("Could not remove cache entry {0}: {1}".format(target.name, exc))
+    return removed, warnings
+
+
+
+def _write_clef_config_json(config_path: pathlib.Path, payload: Dict[str, Any]) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+
+def _backup_clef_config(config_path: pathlib.Path, now_factory: NowFactory) -> pathlib.Path:
+    current = now_factory()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+
+    timestamp = current.replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = config_path.with_name("{0}.{1}.bak".format(config_path.name, timestamp))
+    suffix = 1
+    while backup_path.exists():
+        backup_path = config_path.with_name("{0}.{1}.{2}.bak".format(config_path.name, timestamp, suffix))
+        suffix += 1
+    shutil.copy2(config_path, backup_path)
+    return backup_path
+
+
+
+def _plan_clef_clear(
+    config: Dict[str, Any],
+    *,
+    config_exists: bool,
+    languages: Sequence[str] | None,
+    concepts: Sequence[str] | None,
+    clear_cache: bool,
+    cache_dir: pathlib.Path,
+) -> ClefClearPlan:
+    languages_filter = set(languages) if languages is not None else None
+    concepts_filter = set(concepts) if concepts is not None else None
+    updated = copy.deepcopy(config)
+
+    languages_affected: set[str] = set()
+    concepts_affected: set[str] = set()
+    providers_touched: set[str] = set()
+    forms_removed = 0
+    data_changed = False
+    selection_changed = False
+
+    def _record_removal(language_code: str, concept_key: str, entry: Any) -> bool:
+        nonlocal forms_removed, data_changed
+        count, providers = _count_entry_forms_and_sources(entry)
+        if count <= 0:
+            return False
+        forms_removed += count
+        languages_affected.add(language_code)
+        concepts_affected.add(concept_key)
+        providers_touched.update(providers)
+        data_changed = True
+        return True
+
+    global_concepts = updated.get("concepts")
+    if isinstance(global_concepts, dict):
+        for concept_key, per_language in list(global_concepts.items()):
+            if not isinstance(per_language, dict):
+                continue
+            for raw_language_code, entry in list(per_language.items()):
+                language_code = str(raw_language_code).strip().lower()
+                if not language_code:
+                    continue
+                if not _matches_requested_scope(
+                    language_code=language_code,
+                    concept_key=concept_key,
+                    languages_filter=languages_filter,
+                    concepts_filter=concepts_filter,
+                ):
+                    continue
+                if _record_removal(language_code, concept_key, entry):
+                    del per_language[raw_language_code]
+            if not per_language:
+                del global_concepts[concept_key]
+
+    for raw_language_code, payload in list(updated.items()):
+        if not isinstance(raw_language_code, str) or raw_language_code.startswith("_"):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        language_code = raw_language_code.strip().lower()
+        if languages_filter is not None and language_code not in languages_filter:
+            continue
+
+        for bucket_key in CLEF_LANGUAGE_BUCKET_KEYS:
+            scoped = payload.get(bucket_key)
+            if not isinstance(scoped, dict):
+                continue
+            for concept_key, entry in list(scoped.items()):
+                if not _matches_requested_scope(
+                    language_code=language_code,
+                    concept_key=concept_key,
+                    languages_filter=languages_filter,
+                    concepts_filter=concepts_filter,
+                ):
+                    continue
+                if _record_removal(language_code, concept_key, entry):
+                    del scoped[concept_key]
+
+    meta = updated.get("_meta") if isinstance(updated.get("_meta"), dict) else None
+    if isinstance(meta, dict):
+        form_selections = meta.get("form_selections")
+        if isinstance(form_selections, dict):
+            for concept_key, per_language in list(form_selections.items()):
+                if concepts_filter is not None and concept_key not in concepts_filter:
+                    continue
+                if not isinstance(per_language, dict):
+                    continue
+                for raw_language_code in list(per_language.keys()):
+                    language_code = str(raw_language_code).strip().lower()
+                    if languages_filter is not None and language_code not in languages_filter:
+                        continue
+                    del per_language[raw_language_code]
+                    selection_changed = True
+                if not per_language:
+                    del form_selections[concept_key]
+                    selection_changed = True
+            if selection_changed and not form_selections:
+                meta.pop("form_selections", None)
+
+    cache_targets = _collect_clef_cache_targets(cache_dir) if clear_cache else []
+
+    warnings: List[str] = []
+    if not config_exists:
+        warnings.append("config/sil_contact_languages.json not found; no CLEF reference forms were available to clear.")
+    elif forms_removed == 0:
+        warnings.append("No CLEF reference forms found in config/sil_contact_languages.json for the requested scope.")
+
+    return ClefClearPlan(
+        updated_config=updated,
+        summary={
+            "languagesAffected": len(languages_affected),
+            "conceptsAffected": len(concepts_affected),
+            "formsRemoved": forms_removed,
+            "providersTouched": sorted(providers_touched),
+            "cacheFilesRemoved": 0,
+        },
+        warnings=warnings,
+        cache_targets=cache_targets,
+        needs_write=bool(data_changed or selection_changed),
+    )
+
+
+
+def build_post_clef_clear_response(
+    body: Mapping[str, Any],
+    *,
+    config_path: pathlib.Path,
+    now_factory: NowFactory,
+) -> JsonResponseSpec:
+    """POST /api/clef/clear -- clear CLEF reference forms from
+    ``config/sil_contact_languages.json``.
+
+    Destructive writes use a backup-before-write strategy: when the config file
+    exists and the request would mutate it, a sibling
+    ``sil_contact_languages.json.<timestamp>.bak`` snapshot is created before
+    rewriting the JSON file. Cache cleanup is limited to ``config/cache`` and is
+    best-effort per entry.
+    """
+    dry_run = _require_bool_field(body, "dryRun", default=False)
+    clear_cache = _require_bool_field(body, "clearCache", default=False)
+    languages = _optional_string_list(body.get("languages"), field_name="languages", lowercase=True)
+    concepts = _optional_string_list(body.get("concepts"), field_name="concepts")
+
+    config_exists = config_path.exists()
+    config = _load_clef_config_object(config_path)
+    plan = _plan_clef_clear(
+        config,
+        config_exists=config_exists,
+        languages=languages,
+        concepts=concepts,
+        clear_cache=clear_cache,
+        cache_dir=config_path.parent / "cache",
+    )
+
+    summary = dict(plan.summary)
+    warnings = list(plan.warnings)
+
+    if dry_run:
+        if clear_cache:
+            summary["cacheFilesRemoved"] = _count_cache_payloads(plan.cache_targets)
+        return JsonResponseSpec(
+            status=HTTPStatus.OK,
+            payload={
+                "ok": True,
+                "dryRun": True,
+                "summary": summary,
+                "warnings": warnings,
+            },
+        )
+
+    if plan.needs_write:
+        try:
+            if config_exists:
+                _backup_clef_config(config_path, now_factory)
+            _write_clef_config_json(config_path, plan.updated_config)
+        except OSError as exc:
+            raise ClefHttpHandlerError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Could not write config/sil_contact_languages.json: {0}".format(exc),
+            ) from exc
+
+    if clear_cache:
+        removed_count, cache_warnings = _remove_cache_payloads(plan.cache_targets)
+        summary["cacheFilesRemoved"] = removed_count
+        warnings.extend(cache_warnings)
+
+    return JsonResponseSpec(
+        status=HTTPStatus.OK,
+        payload={
+            "ok": True,
+            "dryRun": False,
+            "summary": summary,
+            "warnings": warnings,
         },
     )
 

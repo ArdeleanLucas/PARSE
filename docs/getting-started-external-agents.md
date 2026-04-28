@@ -117,9 +117,9 @@ The adapter supports two exposure modes:
 
 | Mode | What you get |
 |---|---|
-| **Default** | 58 MCP tools total: 54 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
+| **Default** | 59 MCP tools total: 55 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
 | **Legacy curated opt-out** | 40 MCP tools total: 36 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` via explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` |
-| **Expose all** | 58 MCP tools total: all 54 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
+| **Expose all** | 59 MCP tools total: all 55 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
 
 The shipped default already exposes the full safe ParseChatTools surface. Create `config/mcp_config.json` (preferred) or root-level `mcp_config.json` only when you want to force a specific active mode:
 

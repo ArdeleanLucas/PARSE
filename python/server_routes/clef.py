@@ -159,6 +159,23 @@ def _api_post_clef_config(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
+def _api_post_clef_clear(self) -> None:
+    """Clear CLEF-populated reference forms from sil_contact_languages.json.
+
+    Supports dryRun preview, optional language/concept scoping, and optional
+    cache cleanup under config/cache.
+    """
+    body = self._expect_object(self._read_json_body(), 'Request body')
+    try:
+        response = _server._app_build_post_clef_clear_response(
+            body,
+            config_path=_server._sil_config_path(),
+            now_factory=lambda: _server.datetime.now(_server.timezone.utc),
+        )
+    except _server._app_ClefHttpHandlerError as exc:
+        raise _server.ApiError(exc.status, exc.message) from exc
+    self._send_json(response.status, response.payload)
+
 def _api_post_clef_form_selections(self) -> None:
     """Persist which reference forms the user has selected for a given
     (concept, language) into ``_meta.form_selections`` in the SIL
@@ -258,5 +275,5 @@ def _api_get_clef_sources_report(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_compute_contact_lexemes', '_api_get_contact_lexeme_coverage', '_api_get_clef_config', '_api_post_clef_config', '_api_post_clef_form_selections', '_api_get_clef_catalog', '_api_get_clef_providers', '_api_get_clef_sources_report']
+__all__ = ['_compute_contact_lexemes', '_api_get_contact_lexeme_coverage', '_api_get_clef_config', '_api_post_clef_config', '_api_post_clef_clear', '_api_post_clef_form_selections', '_api_get_clef_catalog', '_api_get_clef_providers', '_api_get_clef_sources_report']
 
