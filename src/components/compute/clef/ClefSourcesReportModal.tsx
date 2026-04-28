@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getClefSourcesReport } from "../../../api/client";
 import type { ClefSourcesReport, ClefSourcesReportLanguage } from "../../../api/types";
 import { CitationsSection } from "./CitationsSection";
+import { ConceptProviderMatrix } from "./ConceptProviderMatrix";
 import { CoverageMatrix } from "./CoverageMatrix";
 import type { ClefSourcesReportModalProps } from "./types";
 
@@ -89,6 +90,7 @@ export function ClefSourcesReportModal({ open, onClose }: ClefSourcesReportModal
                   </ul>
                 )}
               </section>
+              <ConceptProviderMatrix report={report} />
               <CitationsSection report={report} />
               <CoverageMatrix report={report} activeLang={activeLang} setActiveLang={setActiveLang} activeLangEntry={activeLangEntry} />
             </div>
