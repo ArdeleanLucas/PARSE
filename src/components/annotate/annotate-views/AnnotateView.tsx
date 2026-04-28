@@ -5,7 +5,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  MessageSquare,
   Pause,
   Play,
   Redo2,
@@ -19,6 +18,7 @@ import {
 
 import { useSpectrogram } from "../../../hooks/useSpectrogram";
 import { useWaveSurfer } from "../../../hooks/useWaveSurfer";
+import { LEXEME_SCOPE_TIERS } from "../../../stores/annotation/actions";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useTagStore } from "../../../stores/tagStore";
@@ -42,8 +42,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   captureToast,
 }) => {
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
-  const setInterval = useAnnotationStore((s) => s.setInterval);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
+  const saveLexemeAnnotation = useAnnotationStore((s) => s.saveLexemeAnnotation);
   const saveSpeaker = useAnnotationStore((s) => s.saveSpeaker);
   const undoAnnotation = useAnnotationStore((s) => s.undo);
   const redoAnnotation = useAnnotationStore((s) => s.redo);
@@ -167,7 +167,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       if (!previous) return;
       if (Math.abs(previous.start - start) < 0.001 && Math.abs(previous.end - end) < 0.001) return;
       if (end <= start) return;
-      const moved = moveIntervalAcrossTiers(speaker, previous.start, previous.end, start, end);
+      const moved = moveIntervalAcrossTiers(speaker, previous.start, previous.end, start, end, LEXEME_SCOPE_TIERS);
       if (moved > 0) {
         storedIntervalRef.current = { start, end };
         setEditStart(start.toFixed(3));
@@ -399,53 +399,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
                 />
               </div>
-              <button
-                data-testid="lexeme-timestamp-save"
-                disabled={!conceptInterval || timestampSaving}
-                onClick={async () => {
-                  if (!conceptInterval) return;
-                  const nextStart = parseFloat(editStart);
-                  const nextEnd = parseFloat(editEnd);
-                  if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd) || nextEnd <= nextStart) {
-                    setTimestampMessage({ kind: "err", text: "End must be greater than start." });
-                    return;
-                  }
-                  setTimestampSaving(true);
-                  try {
-                    const moved = moveIntervalAcrossTiers(speaker, conceptInterval.start, conceptInterval.end, nextStart, nextEnd);
-                    if (moved === 0) {
-                      setTimestampMessage({ kind: "err", text: "No matching intervals found to retime." });
-                    } else {
-                      await saveSpeaker(speaker);
-                      setTimestampMessage({ kind: "ok", text: `Retimed ${moved} tier${moved === 1 ? "" : "s"}.` });
-                      addRegion(nextStart, nextEnd);
-                      seek(nextStart);
-                    }
-                  } catch (err) {
-                    setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
-                  } finally {
-                    setTimestampSaving(false);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save className="h-3.5 w-3.5" /> Save timestamp
-              </button>
-              <button
-                data-testid="lexeme-timestamp-reset"
-                disabled={!conceptInterval}
-                onClick={() => {
-                  if (!conceptInterval) return;
-                  setEditStart(conceptInterval.start.toFixed(3));
-                  setEditEnd(conceptInterval.end.toFixed(3));
-                  addRegion(conceptInterval.start, conceptInterval.end);
-                  seek(conceptInterval.start);
-                  setTimestampMessage(null);
-                }}
-                className="text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:opacity-50"
-              >
-                Reset
-              </button>
               {timestampMessage && (
                 <span data-testid="lexeme-timestamp-msg" className={`ml-auto text-[11px] ${timestampMessage.kind === "ok" ? "text-emerald-600" : "text-rose-600"}`}>
                   {timestampMessage.text}
@@ -456,19 +409,39 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={() => {
-                const interval = conceptInterval
-                  ? { start: conceptInterval.start, end: conceptInterval.end }
-                  : selectedRegion
-                    ? { start: selectedRegion.start, end: selectedRegion.end }
-                    : null;
-                if (!interval) return;
-                setInterval(speaker, "ipa", { ...interval, text: ipa });
-                setInterval(speaker, "ortho", { ...interval, text: ortho });
-                setInterval(speaker, "concept", { ...interval, text: concept.name });
-                void saveSpeaker(speaker);
+              data-testid="save-lexeme-annotation"
+              disabled={!conceptInterval || timestampSaving}
+              onClick={async () => {
+                if (!conceptInterval) return;
+                const nextStart = parseFloat(editStart);
+                const nextEnd = parseFloat(editEnd);
+                setTimestampSaving(true);
+                try {
+                  const result = saveLexemeAnnotation({
+                    speaker,
+                    oldStart: conceptInterval.start,
+                    oldEnd: conceptInterval.end,
+                    newStart: nextStart,
+                    newEnd: nextEnd,
+                    ipaText: ipa,
+                    orthoText: ortho,
+                    conceptName: concept.name,
+                  });
+                  if (!result.ok) {
+                    setTimestampMessage({ kind: "err", text: result.error });
+                  } else {
+                    await saveSpeaker(speaker);
+                    setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
+                    addRegion(nextStart, nextEnd);
+                    seek(nextStart);
+                  }
+                } catch (err) {
+                  setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+                } finally {
+                  setTimestampSaving(false);
+                }
               }}
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <Save className="h-4 w-4" /> Save Annotation
             </button>
@@ -548,9 +521,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Redo2 className="h-3 w-3" /> Redo
-            </button>
-            <button className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
-              <MessageSquare className="h-3 w-3" /> Chat
             </button>
           </div>
         </div>

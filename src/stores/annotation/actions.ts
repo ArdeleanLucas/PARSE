@@ -29,6 +29,48 @@ import type {
   ScheduleAnnotationAutosave,
 } from "./types";
 
+/**
+ * Tiers updated by a lexeme-scoped retime.
+ *
+ * Lexeme retiming moves only intervals that semantically belong to the
+ * lexeme: its concept label, IPA transcription, orthographic transcription,
+ * and Tier-2 word boundaries. Sub-lexical (`ipa_phone`) and supra-lexical
+ * (`stt`, `sentence`, `speaker`) tiers are intentionally excluded.
+ */
+export const LEXEME_SCOPE_TIERS = ["concept", "ipa", "ortho", "ortho_words"] as const;
+
+const MATCH_TOLERANCE_SEC = 0.001;
+
+function findMatchingIntervalIndex(intervals: AnnotationInterval[], start: number, end: number): number {
+  return intervals.findIndex(
+    (interval) => Math.abs(interval.start - start) < MATCH_TOLERANCE_SEC && Math.abs(interval.end - end) < MATCH_TOLERANCE_SEC,
+  );
+}
+
+function updateMatchingInterval(
+  record: AnnotationRecord,
+  tierKey: string,
+  oldStart: number,
+  oldEnd: number,
+  newStart: number,
+  newEnd: number,
+  text?: string,
+): boolean {
+  const tier = record.tiers[tierKey];
+  if (!tier) return false;
+  const idx = findMatchingIntervalIndex(tier.intervals, oldStart, oldEnd);
+  if (idx < 0) return false;
+  tier.intervals[idx] = {
+    ...tier.intervals[idx],
+    start: newStart,
+    end: newEnd,
+    manuallyAdjusted: true,
+    ...(text !== undefined ? { text } : {}),
+  };
+  tier.intervals.sort((a, b) => a.start - b.start);
+  return true;
+}
+
 function commitRecordMutation(
   set: AnnotationStoreSet,
   scheduleAutosave: ScheduleAnnotationAutosave,
@@ -187,7 +229,7 @@ export function createAnnotationActionsSlice(
       );
     },
 
-    moveIntervalAcrossTiers: (speaker, oldStart, oldEnd, newStart, newEnd) => {
+    moveIntervalAcrossTiers: (speaker, oldStart, oldEnd, newStart, newEnd, tierScope) => {
       if (!Number.isFinite(newStart) || !Number.isFinite(newEnd)) return 0;
       if (newEnd < newStart) return 0;
 
@@ -195,12 +237,11 @@ export function createAnnotationActionsSlice(
       if (!pre) return 0;
 
       const clone = deepClone(pre);
-      const tol = 0.001;
+      const allowedTiers = tierScope ? new Set(tierScope) : null;
       let moved = 0;
-      for (const tier of Object.values(clone.tiers)) {
-        const idx = tier.intervals.findIndex(
-          (interval) => Math.abs(interval.start - oldStart) < tol && Math.abs(interval.end - oldEnd) < tol,
-        );
+      for (const [tierKey, tier] of Object.entries(clone.tiers)) {
+        if (allowedTiers && !allowedTiers.has(tierKey)) continue;
+        const idx = findMatchingIntervalIndex(tier.intervals, oldStart, oldEnd);
         if (idx < 0) continue;
         tier.intervals[idx] = {
           ...tier.intervals[idx],
@@ -216,6 +257,31 @@ export function createAnnotationActionsSlice(
 
       commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "retime lexeme");
       return moved;
+    },
+
+    saveLexemeAnnotation: ({ speaker, oldStart, oldEnd, newStart, newEnd, ipaText, orthoText, conceptName }) => {
+      if (!Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
+        return { ok: false, error: "End must be greater than start." };
+      }
+
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return { ok: false, error: "Speaker record not loaded." };
+
+      const clone = deepClone(pre);
+      let moved = 0;
+
+      if (updateMatchingInterval(clone, "concept", oldStart, oldEnd, newStart, newEnd, conceptName)) moved += 1;
+      if (updateMatchingInterval(clone, "ipa", oldStart, oldEnd, newStart, newEnd, ipaText)) moved += 1;
+      if (updateMatchingInterval(clone, "ortho", oldStart, oldEnd, newStart, newEnd, orthoText)) moved += 1;
+      if (updateMatchingInterval(clone, "ortho_words", oldStart, oldEnd, newStart, newEnd)) moved += 1;
+
+      if (moved === 0) {
+        return { ok: false, error: "No matching lexeme intervals found." };
+      }
+
+      clone.modified_at = nowIsoUtc();
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "save lexeme annotation");
+      return { ok: true, moved };
     },
 
     markLexemeManuallyAdjusted: (speaker, start, end) => {
