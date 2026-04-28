@@ -8,7 +8,9 @@ Normalization: none — forms returned verbatim.
 
 from pathlib import Path
 from typing import Dict, Iterator, List
+
 from .base import BaseProvider, FetchResult
+from .language_match import lang_key_matches
 
 
 class LingPyCldfProvider(BaseProvider):
@@ -152,31 +154,8 @@ class LingPyCldfProvider(BaseProvider):
 
     @staticmethod
     def _lang_key_matches(lang_key: str, fragments: List[str]) -> bool:
-        """Return True iff ``lang_key`` exactly equals one of ``fragments``.
-
-        Both sides are normalised (lowercased, whitespace-stripped, dashes
-        + underscores collapsed) so e.g. dataset IDs like ``"Standard Arabic"``
-        match a fragment ``"standardarabic"`` even though the raw strings
-        differ in case + spacing. This is the safe replacement for the
-        previous ``frag in lang_key`` substring containment check that
-        caused the cross-language pollution bug.
-        """
-        if not lang_key:
-            return False
-        normalised = lang_key.strip().lower()
-        compact = normalised.replace(" ", "").replace("-", "").replace("_", "")
-        for frag in fragments:
-            if not isinstance(frag, str):
-                continue
-            f = frag.strip().lower()
-            if not f:
-                continue
-            if f == normalised:
-                return True
-            f_compact = f.replace(" ", "").replace("-", "").replace("_", "")
-            if f_compact == compact:
-                return True
-        return False
+        """Compatibility shim for the shared provider language matcher."""
+        return lang_key_matches(lang_key, fragments)
 
     def fetch(
         self,

@@ -9,7 +9,9 @@ Normalization: none.
 """
 
 from typing import Dict, Iterator, List
+
 from .base import BaseProvider, FetchResult
+from .language_match import lang_key_matches
 
 try:
     import pylexibank  # type: ignore
@@ -26,10 +28,14 @@ KNOWN_DATASETS = [
 ]
 
 ISO_FRAGMENTS: Dict[str, List[str]] = {
-    "ar":  ["arb", "arabic", "ar"],
-    "fa":  ["pes", "persian", "fa", "farsi"],
-    "ckb": ["ckb", "sorani", "central kurdish", "kurdish"],
-    "tr":  ["tur", "turkish", "tr"],
+    "ar": ["arb", "ara", "ar", "arabic", "stan1318"],
+    "fa": ["pes", "fas", "fa", "persian", "farsi", "west2369"],
+    "ckb": ["ckb", "sorani", "centralkurdish", "kur"],
+    "kmr": ["kmr", "kurmanji", "northernkurdish"],
+    "tr": ["tur", "tr", "turkish", "nucl1301"],
+    "heb": ["heb", "he", "hebrew"],
+    "syr": ["syr", "syriac"],
+    "urd": ["urd", "ur", "urdu"],
 }
 
 
@@ -75,12 +81,10 @@ class PylexibankProvider(BaseProvider):
                         cldf = ds.cldf_reader()
                         lang_ids = set()
                         for row in cldf["LanguageTable"]:
-                            lid = str(row.get("ID") or "").lower()
-                            lname = str(row.get("Name") or "").lower()
-                            for frag in frags:
-                                if frag in lid or frag in lname:
-                                    lang_ids.add(row["ID"])
-                                    break
+                            lid = str(row.get("ID") or "")
+                            lname = str(row.get("Name") or "")
+                            if lang_key_matches(lid, frags) or lang_key_matches(lname, frags):
+                                lang_ids.add(row["ID"])
 
                         concept_lower = concept_en.lower()
                         param_ids = set()
