@@ -203,6 +203,13 @@ export interface ContactLexemeFetchOptions {
   overwrite?: boolean;
 }
 
+export interface ContactLexemePopulateResult {
+  filled: Record<string, number>;
+  total_filled: number;
+  warning?: string | null;
+  warnings?: string[];
+}
+
 export interface ClefLanguageEntry {
   code: string;
   name: string;

@@ -71,7 +71,7 @@ import { JobLogsModal } from './components/annotate/JobLogsModal';
 import { LexemeSearchBlock } from './components/annotate/LexemeSearchBlock';
 import { TranscriptionLanesControls } from './components/annotate/TranscriptionLanesControls';
 import { ClefConfigModal } from './components/compute/ClefConfigModal';
-import { ClefPopulateSummaryBanner } from './components/compute/ClefPopulateSummaryBanner';
+import { ClefPopulateSummaryBanner, type PopulateSummary } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar } from './components/parse/ConceptSidebar';
 import { RightPanel } from './components/parse/RightPanel';
@@ -81,7 +81,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus } from './api/types';
+import type { ClefConfigStatus, ContactLexemePopulateResult } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -438,16 +438,13 @@ export function ParseUI() {
   // action flow through this hook: the modal starts the job, then ParseUI
   // calls `adopt()` so the header's running-process chip picks it up and
   // behaves exactly like STT / forced-align / the batch pipeline.
-  // Last completed-populate summary: `{ok, totalFilled, perLang, warning}`.
+  // Last completed-populate summary: `{ok, totalFilled, perLang, warning, warnings}`.
   // Set by `crossSpeakerJob.onComplete` from the backend's `result` payload
   // so Compare mode can render a contextual banner when the job technically
   // succeeded but produced zero forms (providers offline, concepts outside
-  // ASJP's Swadesh list, etc.) -- previously that case showed as plain
+  // ASJP's list, etc.) -- previously that case showed as plain
   // green "complete" with no visible signal.
-  const [populateSummary, setPopulateSummary] = useState<
-    | { state: 'ok' | 'empty' | 'error'; totalFilled: number; perLang: Record<string, number>; warning: string | null }
-    | null
-  >(null);
+  const [populateSummary, setPopulateSummary] = useState<PopulateSummary | null>(null);
 
   // Similarity follow-up: after the populate job succeeds with forms
   // filled, the reference data on disk is fresh but the similarity block
@@ -476,9 +473,10 @@ export function ParseUI() {
       await loadEnrichments();
       await refreshClefStatus();
       // The backend's `_compute_contact_lexemes` returns
-      // `{filled, total_filled, warning?}`. Inspect it so we can show a
-      // non-fatal "0 forms found" banner near Reference Forms.
-      const payload = (result && typeof result === 'object') ? result as Record<string, unknown> : {};
+      // `{filled, total_filled, warning?, warnings?}`. Inspect it so we can show a
+      // non-fatal "0 forms found" banner near Reference Forms and surface
+      // provider-readiness caveats even on successful populates.
+      const payload = (result && typeof result === 'object') ? result as Partial<ContactLexemePopulateResult> : {};
       const totalFilled = typeof payload.total_filled === 'number' ? payload.total_filled : NaN;
       const rawPerLang = payload.filled && typeof payload.filled === 'object' ? payload.filled as Record<string, unknown> : {};
       const perLang: Record<string, number> = {};
@@ -486,6 +484,9 @@ export function ParseUI() {
         if (typeof count === 'number' && Number.isFinite(count)) perLang[code] = count;
       }
       const warning = typeof payload.warning === 'string' && payload.warning.trim() ? payload.warning : null;
+      const warnings = Array.isArray(payload.warnings)
+        ? payload.warnings.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        : [];
       const resolvedTotal = Number.isFinite(totalFilled)
         ? totalFilled
         : Object.values(perLang).reduce((a, b) => a + b, 0);
@@ -494,6 +495,7 @@ export function ParseUI() {
         totalFilled: resolvedTotal,
         perLang,
         warning,
+        warnings,
       });
       // When populate actually delivered forms, chain a similarity
       // recompute so the Sim. columns catch up to the new reference data

@@ -6,6 +6,7 @@ import type {
   ClefSourceCitation,
   ClefSourcesReport,
   ClefSourcesReportLanguage,
+  ContactLexemePopulateResult,
 } from "../../../api/types";
 
 export const MAX_PRIMARY = 2;
@@ -30,6 +31,7 @@ export interface PopulateSummary {
   totalFilled: number;
   perLang: Record<string, number>;
   warning: string | null;
+  warnings?: ContactLexemePopulateResult["warnings"];
 }
 
 export interface ClefPopulateSummaryBannerProps {
