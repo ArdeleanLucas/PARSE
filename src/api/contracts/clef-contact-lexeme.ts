@@ -7,6 +7,7 @@ import type {
   ComputeJob,
   ContactLexemeCoverage,
   ContactLexemeFetchOptions,
+  ClefClearResult,
 } from "../types";
 import { startCompute } from "./chat-and-generic-compute";
 import { apiFetch } from "./shared";
@@ -29,6 +30,18 @@ export async function saveClefConfig(
   payload: ClefConfigPayload,
 ): Promise<{ success: boolean; config_path: string; primary_contact_languages: string[]; language_count: number }> {
   return apiFetch("/api/clef/config", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function clearClefData(payload: {
+  dryRun?: boolean;
+  clearCache?: boolean;
+  languages?: string[];
+  concepts?: string[];
+} = {}): Promise<ClefClearResult> {
+  return apiFetch<ClefClearResult>("/api/clef/clear", {
     method: "POST",
     body: JSON.stringify(payload),
   });

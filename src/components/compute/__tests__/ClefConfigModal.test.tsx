@@ -6,6 +6,7 @@ const mockGetClefConfig = vi.fn();
 const mockGetClefCatalog = vi.fn();
 const mockGetClefProviders = vi.fn();
 const mockSaveClefConfig = vi.fn();
+const mockClearClefData = vi.fn();
 const mockStartContactLexemeFetch = vi.fn();
 const mockGetAuthStatus = vi.fn();
 
@@ -14,6 +15,7 @@ vi.mock("../../../api/client", () => ({
   getClefCatalog: (...args: unknown[]) => mockGetClefCatalog(...args),
   getClefProviders: (...args: unknown[]) => mockGetClefProviders(...args),
   saveClefConfig: (...args: unknown[]) => mockSaveClefConfig(...args),
+  clearClefData: (...args: unknown[]) => mockClearClefData(...args),
   startContactLexemeFetch: (...args: unknown[]) => mockStartContactLexemeFetch(...args),
   getAuthStatus: (...args: unknown[]) => mockGetAuthStatus(...args),
   saveApiKey: vi.fn(),
@@ -55,6 +57,7 @@ describe("ClefConfigModal", () => {
     mockGetClefCatalog.mockReset();
     mockGetClefProviders.mockReset();
     mockSaveClefConfig.mockReset();
+    mockClearClefData.mockReset();
     mockStartContactLexemeFetch.mockReset();
     mockGetAuthStatus.mockReset();
     setupBaseMocks();
@@ -62,6 +65,7 @@ describe("ClefConfigModal", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("defaults all ten providers to checked in the sources section", async () => {
@@ -122,5 +126,55 @@ describe("ClefConfigModal", () => {
     expect(screen.getByLabelText(/search contact languages/i)).toBeTruthy();
     expect(screen.queryByLabelText(/Wiktionary/i)).toBeNull();
     expect(mockSaveClefConfig).not.toHaveBeenCalled();
+  });
+
+  it("renders settings with provider key form and danger zone", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
+    render(<ClefConfigModal open onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /3\. settings/i }));
+
+    expect(await screen.findByText(/Provider API key/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /xAI \/ Grok/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Delete all CLEF data/i })).toBeTruthy();
+    expect(screen.queryByLabelText(/search contact languages/i)).toBeNull();
+  });
+
+  it("confirms delete-all CLEF data and refreshes status after success", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
+    mockClearClefData.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      summary: {
+        languagesAffected: 2,
+        conceptsAffected: 3,
+        formsRemoved: 4,
+        cacheFilesRemoved: 5,
+      },
+      warnings: [],
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ClefConfigModal open onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /3\. settings/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Delete all CLEF data/i }));
+
+    await waitFor(() => expect(mockClearClefData).toHaveBeenCalledWith({ dryRun: false, clearCache: true }));
+    await waitFor(() => expect(mockGetClefConfig).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Deleted 4 forms across 2 languages; removed 5 cache files\./i)).toBeTruthy();
+  });
+
+  it("resets to the default Languages tab when opened twice", async () => {
+    mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
+    const { rerender } = render(<ClefConfigModal open onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /3\. settings/i }));
+    expect(await screen.findByText(/Provider API key/i)).toBeTruthy();
+
+    rerender(<ClefConfigModal open={false} onClose={() => {}} />);
+    rerender(<ClefConfigModal open onClose={() => {}} />);
+
+    await waitFor(() => expect(screen.getByLabelText(/search contact languages/i)).toBeTruthy());
+    expect(screen.queryByText(/Provider API key/i)).toBeNull();
   });
 });

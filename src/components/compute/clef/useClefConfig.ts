@@ -66,6 +66,17 @@ export function useClefConfig(open: boolean, initialTab: ClefConfigModalTab): Us
     return next;
   }, [providers]);
 
+  const refreshStatus = useCallback(async () => {
+    const cfg = await getClefConfig();
+    setStatus(cfg);
+    setPrimary(cfg.primary_contact_languages.slice(0, MAX_PRIMARY));
+    const secondarySet = new Set<string>(
+      cfg.languages.map((language) => language.code).filter((code) => !cfg.primary_contact_languages.includes(code)),
+    );
+    setSecondary(secondarySet);
+    return cfg;
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     setTab(initialTab);
@@ -183,6 +194,7 @@ export function useClefConfig(open: boolean, initialTab: ClefConfigModalTab): Us
     providers,
     providerStatuses,
     refreshAuthStatus,
+    refreshStatus,
     search,
     secondary,
     setCustomCode,
