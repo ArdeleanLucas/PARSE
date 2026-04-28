@@ -1,4 +1,4 @@
-"""Grokipedia provider — LLM-backed IPA lookup via xAI/Grok or OpenAI fallback."""
+"""Grok LLM provider — LLM-backed IPA lookup via xAI/Grok or OpenAI fallback."""
 
 import json
 import sys
@@ -62,8 +62,8 @@ def _get_auth_token(key_provider: str) -> Optional[str]:
     return None
 
 
-class GrokipediaProvider(BaseProvider):
-    name = "grokipedia"
+class GrokLlmProvider(BaseProvider):
+    name = "grok_llm"
 
     def __init__(self, ai_config: Dict = None):
         self._ai_config = ai_config or _get_ai_config()
@@ -86,7 +86,7 @@ class GrokipediaProvider(BaseProvider):
                         concept_en=concept_en,
                         language_code=lang_code,
                         forms=forms,
-                        source="grokipedia",
+                        source="grok_llm",
                     )
 
     def _fetch_batch(self, concepts: List[str], lang_code: str, lang_name: str) -> Dict[str, List[str]]:
@@ -183,5 +183,5 @@ class GrokipediaProvider(BaseProvider):
             data = resp.json()
             return data["choices"][0]["message"]["content"].strip()
         except Exception as exc:
-            print("[grokipedia] API call failed: {}".format(exc), file=sys.stderr)
+            print("[grok_llm] API call failed: {}".format(exc), file=sys.stderr)
             return None

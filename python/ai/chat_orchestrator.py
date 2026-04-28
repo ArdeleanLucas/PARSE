@@ -119,7 +119,7 @@ class ChatOrchestrator:
             "\n"
             "External data fetching:\n"
             "- contact_lexeme_lookup can fetch reference forms (IPA) for ANY language from third-party sources\n"
-            "  (CLDF datasets, ASJP, Wikidata, Wiktionary, Grokipedia LLM, literature)\n"
+            "  (CLDF datasets, ASJP, Wikidata, Wiktionary, Grok LLM LLM, literature)\n"
             "- Use it when the user needs Arabic, Persian, Sorani, or other reference language data\n"
             "- After fetching, use cognate_compute_preview with contactLanguages to compare\n"
             "\n"

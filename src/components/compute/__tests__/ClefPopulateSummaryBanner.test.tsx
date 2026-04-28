@@ -158,8 +158,8 @@ describe("ClefPopulateSummaryBanner", () => {
 
   it("renders all warnings expanded when there are up to 3", async () => {
     const warnings = [
-      "pylexibank: optional pylexibank package is not installed.",
-      "grokipedia: no xAI or OpenAI API key is configured.",
+      "pylexibank: optional pylexibank package is not installed (install with `pip install pylexibank` if you want to use installed dataset packages).",
+      "grok_llm: no xAI or OpenAI API key configured. Open the Settings tab in CLEF Configure to add one, or skip this provider.",
     ];
 
     render(

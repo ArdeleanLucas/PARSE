@@ -8,7 +8,7 @@ class FetchResult:
     concept_en: str          # e.g. "water"
     language_code: str       # e.g. "ar"
     forms: List[str]         # raw forms from source, verbatim
-    source: str              # provider name: "asjp", "grokipedia", etc.
+    source: str              # provider name: "asjp", "grok_llm", etc.
     error: Optional[str] = None
 
 

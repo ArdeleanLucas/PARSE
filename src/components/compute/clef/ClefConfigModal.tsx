@@ -65,7 +65,7 @@ export function ClefConfigModal({
     }
     return count;
   }, [providerStatuses, selectedProviders]);
-  const grokipediaSelectedButUnauthed = selectedProviders.has("grokipedia") && (providerStatuses.grokipedia ?? "needs_auth") === "needs_auth";
+  const grokLlmSelectedButUnauthed = selectedProviders.has("grok_llm") && (providerStatuses.grok_llm ?? "needs_auth") === "needs_auth";
   const canStart = !saving && selectedProviderCount > 0;
 
   const saveOnly = useCallback(async () => {
@@ -97,10 +97,10 @@ export function ClefConfigModal({
       setError("Select at least one source before starting CLEF.");
       return;
     }
-    if (grokipediaSelectedButUnauthed) {
-      setError("Grokipedia is selected but no API key is configured. Connect a key or uncheck Grokipedia.");
+    if (grokLlmSelectedButUnauthed) {
+      setError("Grok LLM is selected but no API key is configured. Connect a key or uncheck Grok LLM.");
       setTab("populate");
-      setAuthExpandedProviderId("grokipedia");
+      setAuthExpandedProviderId("grok_llm");
       return;
     }
     setSaving(true);
@@ -118,7 +118,7 @@ export function ClefConfigModal({
     } finally {
       setSaving(false);
     }
-  }, [buildPayload, grokipediaSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
+  }, [buildPayload, grokLlmSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
 
   async function handleProviderAuthSaved(providerId: string, _status: AuthStatus) {
     await refreshAuthStatus();
@@ -204,9 +204,9 @@ export function ClefConfigModal({
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-6 py-4">
           <div className="text-[11px] text-slate-500">
             {selectedReadyCount} of {providers.length || 10} sources will run.
-            {grokipediaSelectedButUnauthed && (
+            {grokLlmSelectedButUnauthed && (
               <span className="ml-2 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                <AlertCircle className="h-3 w-3" /> Grokipedia needs a key
+                <AlertCircle className="h-3 w-3" /> Grok LLM needs a key
               </span>
             )}
           </div>

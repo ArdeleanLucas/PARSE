@@ -66,9 +66,16 @@ def test_provider_priority_matches_expected_clef_cascade() -> None:
         "cldf",
         "wikidata",
         "wiktionary",
-        "grokipedia",
         "literature",
+        "grok_llm",
     ]
+
+
+def test_grok_llm_in_priority_last() -> None:
+    registry = ProviderRegistry(ai_config={})
+
+    assert PROVIDER_PRIORITY[-1] == "grok_llm"
+    assert list(registry._providers)[-1] == "grok_llm"
 
 
 def test_fetch_all_stop_on_first_hit_keeps_first_provider_forms() -> None:

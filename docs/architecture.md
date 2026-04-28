@@ -255,7 +255,7 @@ The current README describes a 10-provider stack:
 - `asjp`
 - `cldf`
 - `csv_override`
-- `grokipedia`
+- `grok_llm`
 - `lingpy_wordlist`
 - `literature`
 - `pycldf_provider`

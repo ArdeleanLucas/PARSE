@@ -234,8 +234,8 @@ def test_compute_contact_lexemes_zero_fill_with_provider_errors_returns_provider
             "status": "provider_error",
             "filled": {"ar": 0},
             "forms_count": 0,
-            "provider_errors": ["grokipedia: API key missing"],
-            "warnings": ["grokipedia: no xAI or OpenAI API key is configured."],
+            "provider_errors": ["grok_llm: API key missing"],
+            "warnings": ["grok_llm: no xAI or OpenAI API key configured. Open the Settings tab in CLEF Configure to add one, or skip this provider."],
         }
 
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
@@ -247,5 +247,5 @@ def test_compute_contact_lexemes_zero_fill_with_provider_errors_returns_provider
 
     assert result["status"] == "provider_error"
     assert result["total_filled"] == 0
-    assert result["provider_errors"] == ["grokipedia: API key missing"]
+    assert result["provider_errors"] == ["grok_llm: API key missing"]
     assert "Provider errors:" in result["warning"]

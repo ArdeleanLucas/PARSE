@@ -54,8 +54,8 @@ CITATION_DISPLAY_ORDER = (
     "cldf",
     "wikidata",
     "wiktionary",
-    "grokipedia",
     "literature",
+    "grok_llm",
     "unknown",
 )
 
@@ -284,8 +284,8 @@ PROVIDER_CITATIONS: Dict[str, Dict[str, Any]] = {
         ),
         "bibtex": "",
     },
-    "grokipedia": {
-        "label": "Grokipedia (LLM-generated)",
+    "grok_llm": {
+        "label": "Grok LLM (LLM-generated)",
         "type": "ai",
         "authors": None,
         "year": None,
@@ -297,7 +297,7 @@ PROVIDER_CITATIONS: Dict[str, Dict[str, Any]] = {
             "against an authoritative source before using in published work."
         ),
         "citation": (
-            "Grokipedia provider: LLM-generated reference forms (xAI Grok or "
+            "Grok LLM provider: LLM-generated reference forms (xAI Grok or "
             "OpenAI GPT, depending on auth_tokens.json). Not citable as a "
             "primary source -- verify each form before publication."
         ),

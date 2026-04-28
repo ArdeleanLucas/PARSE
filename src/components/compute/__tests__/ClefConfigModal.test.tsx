@@ -44,7 +44,7 @@ function setupBaseMocks() {
       { id: "lingpy_wordlist", name: "LingPy wordlist" },
       { id: "csv_override", name: "CSV override" },
       { id: "literature", name: "Literature" },
-      { id: "grokipedia", name: "Grokipedia" },
+      { id: "grok_llm", name: "Grok LLM" },
     ],
   });
 }
@@ -68,16 +68,16 @@ describe("ClefConfigModal", () => {
     mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
     render(<ClefConfigModal open onClose={() => {}} />);
 
-    expect(screen.queryByLabelText(/Grokipedia/i)).toBeNull();
+    expect(screen.queryByLabelText(/Grok LLM/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /2\. sources/i }));
 
     await waitFor(() => screen.getByText(/9 of 10 sources will run/i));
     expect(screen.getByText(/9 of 10 sources will run/i)).toBeTruthy();
-    expect(screen.getByLabelText(/Grokipedia/i)).toBeTruthy();
+    expect(screen.getByLabelText(/Grok LLM/i)).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: /search contact languages/i })).toBeNull();
   });
 
-  it("blocks Start when Grokipedia is selected without an API key", async () => {
+  it("blocks Start when Grok LLM is selected without an API key", async () => {
     mockGetAuthStatus.mockResolvedValue({ authenticated: false, flow_active: false });
     render(<ClefConfigModal open onClose={() => {}} />);
 
@@ -85,7 +85,7 @@ describe("ClefConfigModal", () => {
     await waitFor(() => screen.getByText(/9 of 10 sources will run/i));
     fireEvent.click(screen.getByRole("button", { name: /start search/i }));
 
-    expect(await screen.findByText(/Grokipedia is selected but no API key is configured/i)).toBeTruthy();
+    expect(await screen.findByText(/Grok LLM is selected but no API key is configured/i)).toBeTruthy();
     expect(mockSaveClefConfig).not.toHaveBeenCalled();
     expect(mockStartContactLexemeFetch).not.toHaveBeenCalled();
   });

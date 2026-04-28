@@ -157,14 +157,14 @@ def test_fetches_with_provider_override(mock_fetch, tools, project_dir):
     result = tools.execute("contact_lexeme_lookup", {
         "dryRun": False,
         "languages": ["ar"],
-        "providers": ["grokipedia"],
+        "providers": ["grok_llm"],
     })
     assert result["ok"] is True
     inner = result["result"]
     assert inner["ok"] is True
 
     call_kwargs = mock_fetch.call_args
-    assert call_kwargs[1]["providers"] == ["grokipedia"]
+    assert call_kwargs[1]["providers"] == ["grok_llm"]
 
 
 @patch("compare.contact_lexeme_fetcher.fetch_and_merge")

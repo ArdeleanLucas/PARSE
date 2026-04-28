@@ -6,7 +6,7 @@ Standalone:
         --concepts ../../concepts.csv \
         --config ../../config/sil_contact_languages.json \
         --languages ar fa ckb \
-        --providers grokipedia asjp
+        --providers grok_llm asjp
 """
 
 import argparse

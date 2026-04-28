@@ -7,10 +7,10 @@ import { normalizeClefProviders } from "./shared";
 
 function buildProviderStatuses(authStatus: AuthStatus | null, providerIds: string[]): Record<string, UseClefConfigResult["providerStatuses"][string]> {
   const out: Record<string, UseClefConfigResult["providerStatuses"][string]> = {};
-  const grokipediaConnected = Boolean(authStatus?.authenticated && ["xai", "openai"].includes((authStatus.provider ?? "").toLowerCase()));
+  const grokLlmConnected = Boolean(authStatus?.authenticated && ["xai", "openai"].includes((authStatus.provider ?? "").toLowerCase()));
   for (const id of providerIds) {
-    out[id] = id === "grokipedia"
-      ? (grokipediaConnected ? "connected" : "needs_auth")
+    out[id] = id === "grok_llm"
+      ? (grokLlmConnected ? "connected" : "needs_auth")
       : "ready";
   }
   return out;
