@@ -334,9 +334,10 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 
 ## MCP adapter note
 
-- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` with `{ "expose_all_tools": true }`.
-- Default MCP adapter surface is **40 tools** total: **36** curated `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
-- Enabling `expose_all_tools` expands the MCP adapter surface to **58 tools** total: all **54** `ParseChatTools`, the **3** `WorkflowTools` macros, plus `mcp_get_exposure_mode`.
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
+- Shipped default MCP adapter surface is **58 tools** total: **54** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **36**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **40**-tool published surface.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **58**-tool adapter surface, which now matches the shipped default.
 - The curated default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`

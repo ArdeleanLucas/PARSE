@@ -4,7 +4,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ai.chat_tools import ChatToolSpec, DEFAULT_MCP_TOOL_NAMES, ParseChatTools
+from ai.chat_tools import (
+    ChatToolSpec,
+    DEFAULT_MCP_TOOL_NAMES,
+    LEGACY_CURATED_MCP_TOOL_NAMES,
+    ParseChatTools,
+)
 from ai.workflow_tools import DEFAULT_MCP_WORKFLOW_TOOL_NAMES, WorkflowTools
 
 MCP_CONFIG_FILENAME = "mcp_config.json"
@@ -46,11 +51,17 @@ def resolve_catalog_mode(raw_mode: Optional[str]) -> str:
     return mode
 
 
-def selected_mcp_tool_names(all_tool_names: List[str], expose_all_tools: bool) -> List[str]:
+def selected_mcp_tool_names(
+    all_tool_names: List[str],
+    expose_all_tools: bool,
+    *,
+    config_path: Optional[str] = None,
+) -> List[str]:
     if expose_all_tools:
         return list(all_tool_names)
     available_names = set(all_tool_names)
-    return [name for name in DEFAULT_MCP_TOOL_NAMES if name in available_names]
+    baseline = LEGACY_CURATED_MCP_TOOL_NAMES if config_path else DEFAULT_MCP_TOOL_NAMES
+    return [name for name in baseline if name in available_names]
 
 
 def mcp_exposure_payload(
@@ -150,7 +161,11 @@ def build_mcp_http_catalog(
         config_source = config.get("config_path")
 
     all_parse_tool_names = parse_tools.tool_names()
-    selected_parse_names = selected_mcp_tool_names(all_parse_tool_names, expose_all_tools)
+    selected_parse_names = selected_mcp_tool_names(
+        all_parse_tool_names,
+        expose_all_tools,
+        config_path=config_source if resolved_mode == "active" else None,
+    )
     selected_workflow_names = list(DEFAULT_MCP_WORKFLOW_TOOL_NAMES)
     mcp_tool_count = len(selected_parse_names) + len(selected_workflow_names) + 1
     exposure = mcp_exposure_payload(

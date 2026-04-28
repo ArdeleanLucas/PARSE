@@ -39,12 +39,21 @@ def _resolve_mcp_config_path(project_root_path: Path) -> Optional[Path]:
     return _shared_resolve_mcp_config_path(project_root_path)
 
 def _load_mcp_config(project_root_path: Path) -> Dict[str, Any]:
-    """Load MCP adapter config, defaulting to the legacy curated surface."""
+    """Load MCP adapter config used to choose shipped-default vs legacy-curated active mode."""
     return _shared_load_mcp_config(project_root_path)
 
-def _selected_mcp_tool_names(all_tool_names: List[str], expose_all_tools: bool) -> List[str]:
+def _selected_mcp_tool_names(
+    all_tool_names: List[str],
+    expose_all_tools: bool,
+    *,
+    config_path: Optional[str] = None,
+) -> List[str]:
     """Return the MCP tool surface for this server instance."""
-    return _shared_selected_mcp_tool_names(all_tool_names, expose_all_tools)
+    return _shared_selected_mcp_tool_names(
+        all_tool_names,
+        expose_all_tools,
+        config_path=config_path,
+    )
 
 def _mcp_exposure_payload(
     *,

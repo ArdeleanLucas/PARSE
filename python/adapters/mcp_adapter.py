@@ -111,7 +111,11 @@ def create_mcp_server(project_root: Optional[str] = None) -> "FastMCP":
     mcp_config = _load_mcp_config(root)
     expose_all_tools = mcp_config.get("expose_all_tools", False)
     all_mcp_tool_names = ParseChatTools.get_all_tool_names()
-    selected_mcp_tool_names = _selected_mcp_tool_names(all_mcp_tool_names, expose_all_tools)
+    selected_mcp_tool_names = _selected_mcp_tool_names(
+        all_mcp_tool_names,
+        expose_all_tools,
+        config_path=mcp_config.get("config_path"),
+    )
     selected_workflow_tool_names = list(DEFAULT_MCP_WORKFLOW_TOOL_NAMES)
     all_registered_tool_names = list(selected_mcp_tool_names) + list(selected_workflow_tool_names)
 

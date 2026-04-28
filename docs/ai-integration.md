@@ -337,11 +337,12 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 54-tool chat surface.
 
 - **Built-in chat tools**: 54
-- **Default MCP task tools**: 36
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 40
+- **Default MCP task tools**: 54
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 58
+- **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 40
 - **Full MCP adapter surface with `expose_all_tools=true`**: 58
 
-The curated MCP subset includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
+The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 36-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`
