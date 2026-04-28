@@ -41,7 +41,7 @@ READ_ONLY_NOTICE = (
     "only specific allowlisted tools may write dedicated support files such as contact lexeme config or parse-tags, "
     "not annotations or enrichments."
 )
-DEFAULT_MCP_TOOL_NAMES = (
+LEGACY_CURATED_MCP_TOOL_NAMES = (
     "project_context_read",
     "annotation_read",
     "read_csv_preview",
@@ -78,6 +78,27 @@ DEFAULT_MCP_TOOL_NAMES = (
     "jobs_list",
     "job_status",
     "job_logs",
+)
+DEFAULT_MCP_HOLD_BACK_TOOL_NAMES = ()
+DEFAULT_MCP_TOOL_NAMES = LEGACY_CURATED_MCP_TOOL_NAMES + (
+    "audio_normalize_start",
+    "audio_normalize_status",
+    "enrichments_read",
+    "enrichments_write",
+    "export_annotations_csv",
+    "export_annotations_elan",
+    "export_annotations_textgrid",
+    "export_lingpy_tsv",
+    "export_nexus",
+    "jobs_list_active",
+    "lexeme_notes_read",
+    "lexeme_notes_write",
+    "peaks_generate",
+    "phonetic_rules_apply",
+    "read_audio_info",
+    "read_text_preview",
+    "source_index_validate",
+    "transcript_reformat",
 )
 WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "audio_normalize_start",

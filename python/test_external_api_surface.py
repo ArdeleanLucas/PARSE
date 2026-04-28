@@ -112,6 +112,37 @@ def test_build_openapi_document_keeps_lexeme_media_search_contract_honest() -> N
     assert import_schema["properties"]["csv"] == {"type": "string", "format": "binary"}
 
 
+def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp_path: pathlib.Path) -> None:
+    catalog = build_mcp_http_catalog(project_root=tmp_path, mode="default")
+
+    tool_names = {tool["name"] for tool in catalog["tools"]}
+    assert catalog["mode"] == "default"
+    assert catalog["count"] == 58
+    assert catalog["exposure"]["mcpToolCount"] == 58
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 54
+    assert "audio_normalize_start" in tool_names
+    assert "export_annotations_csv" in tool_names
+    assert "transcript_reformat" in tool_names
+
+
+def test_build_mcp_http_catalog_active_mode_preserves_legacy_surface_for_explicit_false_config(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    config_path = tmp_path / "config" / "mcp_config.json"
+    config_path.write_text('{"expose_all_tools": false}', encoding="utf-8")
+
+    catalog = build_mcp_http_catalog(project_root=tmp_path, mode="active")
+
+    tool_names = {tool["name"] for tool in catalog["tools"]}
+    assert catalog["mode"] == "active"
+    assert catalog["count"] == 40
+    assert catalog["exposure"]["configSource"] == str(config_path)
+    assert catalog["exposure"]["mcpToolCount"] == 40
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 54
+    assert "annotation_read" in tool_names
+    assert "audio_normalize_start" not in tool_names
+    assert "export_annotations_csv" not in tool_names
+
+
 def test_build_mcp_http_catalog_includes_workflow_specs_and_safety_metadata(tmp_path: pathlib.Path) -> None:
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "mcp_config.json").write_text('{"expose_all_tools": false}', encoding="utf-8")
