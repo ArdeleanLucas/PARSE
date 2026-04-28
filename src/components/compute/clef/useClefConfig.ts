@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getClefCatalog, getClefConfig, getClefProviders } from "../../../api/client";
+import { getAuthStatus, getClefCatalog, getClefConfig, getClefProviders } from "../../../api/client";
+import type { AuthStatus } from "../../../api/types";
 import type { ClefCatalogEntry } from "../../../api/types";
 import { MAX_PRIMARY, type ClefConfigModalTab, type UseClefConfigResult } from "./types";
+import { normalizeClefProviders } from "./shared";
+
+function buildProviderStatuses(authStatus: AuthStatus | null, providerIds: string[]): Record<string, UseClefConfigResult["providerStatuses"][string]> {
+  const out: Record<string, UseClefConfigResult["providerStatuses"][string]> = {};
+  const grokipediaConnected = Boolean(authStatus?.authenticated && ["xai", "openai"].includes((authStatus.provider ?? "").toLowerCase()));
+  for (const id of providerIds) {
+    out[id] = id === "grokipedia"
+      ? (grokipediaConnected ? "connected" : "needs_auth")
+      : "ready";
+  }
+  return out;
+}
 
 export function useClefConfig(open: boolean, initialTab: ClefConfigModalTab): UseClefConfigResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<ClefCatalogEntry[]>([]);
   const [providers, setProviders] = useState<UseClefConfigResult["providers"]>([]);
+  const [providerStatuses, setProviderStatuses] = useState<UseClefConfigResult["providerStatuses"]>({});
   const [status, setStatus] = useState<UseClefConfigResult["status"]>(null);
   const [primary, setPrimary] = useState<string[]>([]);
   const [secondary, setSecondary] = useState<Set<string>>(new Set());
@@ -46,18 +60,26 @@ export function useClefConfig(open: boolean, initialTab: ClefConfigModalTab): Us
     );
   }, [allLanguages, search]);
 
+  const refreshAuthStatus = useCallback(async () => {
+    const next = await getAuthStatus();
+    setProviderStatuses((prev) => buildProviderStatuses(next, Object.keys(prev).length > 0 ? Object.keys(prev) : providers.map((provider) => provider.id)));
+    return next;
+  }, [providers]);
+
   useEffect(() => {
     if (!open) return;
     setTab(initialTab);
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([getClefConfig(), getClefCatalog(), getClefProviders()])
-      .then(([cfg, cat, prov]) => {
+    Promise.all([getClefConfig(), getClefCatalog(), getClefProviders(), getAuthStatus().catch(() => null)])
+      .then(([cfg, cat, prov, authStatus]) => {
         if (cancelled) return;
+        const normalizedProviders = normalizeClefProviders(prov.providers);
         setStatus(cfg);
         setCatalog(cat.languages);
-        setProviders(prov.providers);
+        setProviders(normalizedProviders);
+        setProviderStatuses(buildProviderStatuses(authStatus, normalizedProviders.map((provider) => provider.id)));
         setPrimary(cfg.primary_contact_languages.slice(0, MAX_PRIMARY));
         const secondarySet = new Set<string>(
           cfg.languages.map((language) => language.code).filter((code) => !cfg.primary_contact_languages.includes(code)),
@@ -159,6 +181,8 @@ export function useClefConfig(open: boolean, initialTab: ClefConfigModalTab): Us
     loading,
     primary,
     providers,
+    providerStatuses,
+    refreshAuthStatus,
     search,
     secondary,
     setCustomCode,

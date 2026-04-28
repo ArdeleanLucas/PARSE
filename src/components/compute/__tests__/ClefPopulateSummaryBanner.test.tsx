@@ -8,6 +8,7 @@ import {
 } from "../ClefPopulateSummaryBanner";
 
 vi.mock("../../../api/client", () => ({
+  getAuthStatus: vi.fn(async () => ({ authenticated: false, flow_active: false })),
   getClefConfig: vi.fn(async () => ({
     configured: true,
     primary_contact_languages: ["eng", "spa"],
@@ -32,6 +33,7 @@ vi.mock("../../../api/client", () => ({
     ],
   })),
   saveClefConfig: vi.fn(),
+  saveApiKey: vi.fn(),
   startContactLexemeFetch: vi.fn(),
 }));
 
@@ -111,13 +113,14 @@ describe("ClefPopulateSummaryBanner", () => {
     }
     render(<Harness />);
     fireEvent.click(screen.getByTestId("clef-populate-retry"));
-    // Auto-populate tab button becomes the visible indigo-tabbed one.
+    // Sources section nav becomes the visible active tab.
     const populateTab = await waitFor(() =>
-      screen.getByRole("button", { name: /auto-populate/i }),
+      screen.getByRole("button", { name: /2\. sources/i }),
     );
-    expect(populateTab.className).toMatch(/text-indigo-700/);
+    expect(populateTab.className).toMatch(/text-slate-900/);
+    expect(populateTab.className).toMatch(/border-b-white/);
     // And the languages tab is not active.
     const langTab = screen.getByRole("button", { name: /1\. languages/i });
-    expect(langTab.className).not.toMatch(/text-indigo-700/);
+    expect(langTab.className).not.toMatch(/border-b-white/);
   });
 });

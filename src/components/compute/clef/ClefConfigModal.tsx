@@ -1,5 +1,6 @@
 import { AlertCircle, Play, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AuthStatus } from "../../../api/types";
 import { saveClefConfig } from "../../../api/client";
 import { ConfigForm } from "./ConfigForm";
 import { ProviderSelector } from "./ProviderSelector";
@@ -15,6 +16,9 @@ export function ClefConfigModal({
   initialTab = "languages",
 }: ClefConfigModalProps) {
   const [saving, setSaving] = useState(false);
+  const [authExpandedProviderId, setAuthExpandedProviderId] = useState<string | null>(null);
+  const languagesRef = useRef<HTMLDivElement | null>(null);
+  const sourcesRef = useRef<HTMLDivElement | null>(null);
   const {
     addCustom,
     allLanguages,
@@ -28,6 +32,8 @@ export function ClefConfigModal({
     loading,
     primary,
     providers,
+    providerStatuses,
+    refreshAuthStatus,
     search,
     secondary,
     setCustomCode,
@@ -45,13 +51,32 @@ export function ClefConfigModal({
     overwrite,
     populateFailed,
     selectedProviders,
+    selectProvider,
     setOverwrite,
     setPopulateFailed,
     startPopulate,
     toggleProvider,
-  } = useClefFetchJob();
+  } = useClefFetchJob(providers.map((provider) => provider.id));
 
-  const handleSave = useCallback(async (runPopulate: boolean) => {
+  const selectedProviderCount = selectedProviders.size;
+  const selectedReadyCount = useMemo(() => {
+    let count = 0;
+    for (const providerId of selectedProviders) {
+      const kind = providerStatuses[providerId] ?? "ready";
+      if (kind === "ready" || kind === "connected") count += 1;
+    }
+    return count;
+  }, [providerStatuses, selectedProviders]);
+  const grokipediaSelectedButUnauthed = selectedProviders.has("grokipedia") && (providerStatuses.grokipedia ?? "needs_auth") === "needs_auth";
+  const canStart = !saving && primary.length > 0 && selectedProviderCount > 0;
+
+  const scrollSectionIntoView = useCallback((element: HTMLDivElement | null) => {
+    if (element && typeof element.scrollIntoView === "function") {
+      element.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, []);
+
+  const saveOnly = useCallback(async () => {
     if (primary.length === 0) {
       setError("Pick at least one primary contact language.");
       return;
@@ -62,20 +87,63 @@ export function ClefConfigModal({
     try {
       await saveClefConfig(buildPayload());
       onSaved?.(primary);
-      if (!runPopulate) {
-        onClose();
-        return;
-      }
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }, [buildPayload, onClose, onSaved, primary, setError, setPopulateFailed]);
+
+  const handleStart = useCallback(async () => {
+    if (primary.length === 0) {
+      setError("Pick at least one primary contact language.");
+      return;
+    }
+    if (selectedProviderCount === 0) {
+      setError("Select at least one source before starting CLEF.");
+      return;
+    }
+    if (grokipediaSelectedButUnauthed) {
+      setError("Grokipedia is selected but no API key is configured. Connect a key or uncheck Grokipedia.");
+      setTab("populate");
+      scrollSectionIntoView(sourcesRef.current);
+      setAuthExpandedProviderId("grokipedia");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setPopulateFailed(false);
+    try {
+      await saveClefConfig(buildPayload());
+      onSaved?.(primary);
       const jobId = await startPopulate(primary);
       onPopulateStarted?.(jobId);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
-      if (runPopulate) setPopulateFailed(true);
+      setError(err instanceof Error ? err.message : "Start failed");
+      setPopulateFailed(true);
     } finally {
       setSaving(false);
     }
-  }, [buildPayload, onClose, onPopulateStarted, onSaved, primary, setError, setPopulateFailed, startPopulate]);
+  }, [buildPayload, grokipediaSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, scrollSectionIntoView, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
+
+  async function handleProviderAuthSaved(providerId: string, _status: AuthStatus) {
+    await refreshAuthStatus();
+    selectProvider(providerId);
+    setAuthExpandedProviderId(null);
+    setError(null);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialTab === "populate") {
+      if (sourcesRef.current && typeof sourcesRef.current.scrollIntoView === "function") {
+        sourcesRef.current.scrollIntoView({ block: "start" });
+      }
+      setTab("populate");
+    }
+  }, [initialTab, open, setTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,50 +162,84 @@ export function ClefConfigModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={saving ? undefined : onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <ClefConfigHeader onClose={onClose} saving={saving} />
         {!loading && status && !status.concepts_csv_exists && <MissingConceptsBanner />}
-        <TabStrip tab={tab} setTab={setTab} />
-        <div className="flex-1 overflow-auto px-5 py-4">
+        <SectionStrip
+          tab={tab}
+          onSelect={(nextTab) => {
+            setTab(nextTab);
+            if (nextTab === "languages") scrollSectionIntoView(languagesRef.current);
+            else scrollSectionIntoView(sourcesRef.current);
+          }}
+        />
+        <div className="flex-1 overflow-auto px-6 py-5">
           {loading && <div className="text-[12px] text-slate-500">Loading…</div>}
           {error && <ClefErrorBanner error={error} populateFailed={populateFailed} />}
-          {!loading && tab === "languages" && (
-            <ConfigForm
-              addCustom={addCustom}
-              allLanguages={allLanguages}
-              customCode={customCode}
-              customName={customName}
-              filtered={filtered}
-              highlightIdx={highlightIdx}
-              primary={primary}
-              search={search}
-              secondary={secondary}
-              setCustomCode={setCustomCode}
-              setCustomName={setCustomName}
-              setHighlightIdx={setHighlightIdx}
-              setSearch={setSearch}
-              togglePrimary={togglePrimary}
-              toggleSecondary={toggleSecondary}
-            />
-          )}
-          {!loading && tab === "populate" && (
-            <ProviderSelector
-              overwrite={overwrite}
-              providers={providers}
-              saving={saving}
-              selectedProviders={selectedProviders}
-              setOverwrite={setOverwrite}
-              toggleProvider={toggleProvider}
-            />
+          {!loading && (
+            <div className="space-y-4">
+              <div ref={languagesRef} className="space-y-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Languages</div>
+                  <p className="mt-1 text-[12px] text-slate-600">
+                    Pick the primary contact languages PARSE should compare your speakers against.
+                  </p>
+                </div>
+                <ConfigForm
+                  addCustom={addCustom}
+                  allLanguages={allLanguages}
+                  customCode={customCode}
+                  customName={customName}
+                  filtered={filtered}
+                  highlightIdx={highlightIdx}
+                  primary={primary}
+                  search={search}
+                  secondary={secondary}
+                  setCustomCode={setCustomCode}
+                  setCustomName={setCustomName}
+                  setHighlightIdx={setHighlightIdx}
+                  setSearch={setSearch}
+                  togglePrimary={togglePrimary}
+                  toggleSecondary={toggleSecondary}
+                />
+              </div>
+
+              <div ref={sourcesRef} className="space-y-3">
+                <ProviderSelector
+                  mode="detailed"
+                  authExpandedProviderId={authExpandedProviderId}
+                  onAuthSaved={(providerId, status) => void handleProviderAuthSaved(providerId, status)}
+                  onExpandAuth={setAuthExpandedProviderId}
+                  overwrite={overwrite}
+                  providerStatuses={providerStatuses}
+                  providers={providers}
+                  saving={saving}
+                  selectedProviders={selectedProviders}
+                  setOverwrite={setOverwrite}
+                  toggleProvider={toggleProvider}
+                />
+              </div>
+            </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
-          <span className="mr-auto text-[10px] text-slate-400">{primary.length} primary · {secondary.size} secondary</span>
-          <button onClick={applyDefaults} disabled={saving} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" title="Preselect a sensible starter pair (English + Spanish). You can still edit before saving.">Use defaults</button>
-          <button onClick={onClose} disabled={saving} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" title="Close without configuring. The Run button will reopen this modal next time.">Configure later</button>
-          <button onClick={() => void handleSave(false)} disabled={saving || primary.length === 0} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">Save</button>
-          <button onClick={() => void handleSave(true)} disabled={saving || primary.length === 0} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"><Play className="h-3 w-3" /> {populateFailed ? "Retry populate" : "Save & populate"}</button>
-        </div>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-6 py-4">
+          <div className="text-[11px] text-slate-500">
+            {selectedReadyCount} of {providers.length || 10} sources will run.
+            {grokipediaSelectedButUnauthed && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                <AlertCircle className="h-3 w-3" /> Grokipedia needs a key
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={applyDefaults} disabled={saving} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Use defaults</button>
+            <button onClick={saveOnly} disabled={saving || primary.length === 0} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Save only</button>
+            <button onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
+            <button onClick={() => void handleStart()} disabled={!canStart} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+              <Play className="h-3 w-3" /> {populateFailed ? "Retry search" : "Start search"}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );
@@ -145,12 +247,11 @@ export function ClefConfigModal({
 
 function ClefConfigHeader({ onClose, saving }: { onClose: () => void; saving: boolean }) {
   return (
-    <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+    <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
       <div>
-        <h2 className="text-sm font-semibold text-slate-900">Borrowing detection (CLEF) — configure</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Borrowing detection (CLEF) — configure sources</h2>
         <p className="mt-1 text-[11px] text-slate-500">
-          Pick the contact languages PARSE should compare your speakers against. One or two primary
-          languages usually gives the cleanest borrowing signal — adding more dilutes it.
+          Configure the contact languages and lexical sources once, then launch the CLEF search from this single surface.
         </p>
       </div>
       <button onClick={onClose} disabled={saving} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30" aria-label="Close">
@@ -162,32 +263,33 @@ function ClefConfigHeader({ onClose, saving }: { onClose: () => void; saving: bo
 
 function MissingConceptsBanner() {
   return (
-    <div className="flex items-start gap-2 border-b border-amber-100 bg-amber-50 px-5 py-2 text-[11px] text-amber-800">
-      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>
-        No <code className="rounded bg-amber-100 px-1">concepts.csv</code> found in this workspace.
-        You can still configure CLEF, but running Borrowing detection will fail until concepts are
-        imported.
-      </span>
+    <div className="border-b border-amber-100 bg-amber-50 px-6 py-3 text-[11px] text-amber-800">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          No <code className="rounded bg-amber-100 px-1">concepts.csv</code> found in this workspace.
+          You can still configure CLEF, but running Borrowing detection will fail until concepts are imported.
+        </span>
+      </div>
     </div>
   );
 }
 
-function TabStrip({ tab, setTab }: { tab: ClefConfigModalTab; setTab: (tab: ClefConfigModalTab) => void }) {
+function SectionStrip({ tab, onSelect }: { tab: ClefConfigModalTab; onSelect: (tab: ClefConfigModalTab) => void }) {
   return (
-    <div className="flex gap-1 border-b border-slate-100 px-5 pt-2">
+    <div className="flex gap-1 border-b border-slate-200 px-6 pt-2">
       {(["languages", "populate"] as ClefConfigModalTab[]).map((entry) => (
         <button
           key={entry}
-          onClick={() => setTab(entry)}
+          onClick={() => onSelect(entry)}
           className={
             "rounded-t-md px-3 py-1.5 text-[11px] font-semibold "
             + (tab === entry
-              ? "bg-white text-indigo-700 border border-slate-200 border-b-white -mb-px"
+              ? "border border-slate-200 border-b-white -mb-px bg-white text-slate-900"
               : "text-slate-500 hover:text-slate-700")
           }
         >
-          {entry === "languages" ? "1. Languages" : "2. Auto-populate (optional)"}
+          {entry === "languages" ? "1. Languages" : "2. Sources"}
         </button>
       ))}
     </div>
@@ -196,16 +298,11 @@ function TabStrip({ tab, setTab }: { tab: ClefConfigModalTab; setTab: (tab: Clef
 
 function ClefErrorBanner({ error, populateFailed }: { error: string; populateFailed: boolean }) {
   return (
-    <div className="mb-3 flex items-start gap-2 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+    <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="flex-1">
-        <div className="font-semibold">{populateFailed ? "Populate failed — your selections were kept" : "Error"}</div>
+        <div className="font-semibold">{populateFailed ? "Start failed — your selections were kept" : "Error"}</div>
         <div className="mt-0.5 break-words">{error}</div>
-        {populateFailed && (
-          <div className="mt-1 text-rose-500">
-            Config was saved. Click <b>Retry populate</b> below, or close and run the fetcher later from the Contact Lexemes panel.
-          </div>
-        )}
       </div>
     </div>
   );

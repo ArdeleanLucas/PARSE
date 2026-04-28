@@ -1,4 +1,5 @@
 import type {
+  AuthStatus,
   ClefCatalogEntry,
   ClefConfigStatus,
   ClefProviderEntry,
@@ -62,6 +63,19 @@ export interface ProviderSelectorProps {
   overwrite: boolean;
   setOverwrite: (value: boolean) => void;
   saving: boolean;
+  mode?: "compact" | "detailed";
+  providerStatuses?: Record<string, ProviderStatusKind>;
+  authExpandedProviderId?: string | null;
+  onExpandAuth?: (providerId: string | null) => void;
+  onAuthSaved?: (providerId: string, status: AuthStatus) => void;
+}
+
+export type ProviderStatusKind = "ready" | "needs_auth" | "connected" | "no_data" | "missing_file" | "error";
+
+export interface ProviderApiKeyFormProps {
+  defaultProvider?: "xai" | "openai";
+  onCancel: () => void;
+  onSaved: (status: AuthStatus) => void | Promise<void>;
 }
 
 export interface CoverageMatrixProps {
@@ -76,12 +90,17 @@ export interface SourcesTableProps {
   citations: Record<string, ClefSourceCitation>;
 }
 
+export interface ConceptProviderMatrixProps {
+  report: ClefSourcesReport;
+}
+
 export interface UseClefConfigResult {
   loading: boolean;
   error: string | null;
   setError: (value: string | null) => void;
   catalog: ClefCatalogEntry[];
   providers: ClefProviderEntry[];
+  providerStatuses: Record<string, ProviderStatusKind>;
   status: ClefConfigStatus | null;
   primary: string[];
   secondary: Set<string>;
@@ -97,6 +116,7 @@ export interface UseClefConfigResult {
   setHighlightIdx: (value: number | ((current: number) => number)) => void;
   setCustomCode: (value: string) => void;
   setCustomName: (value: string) => void;
+  refreshAuthStatus: () => Promise<AuthStatus>;
   togglePrimary: (code: string) => void;
   toggleSecondary: (code: string) => void;
   addCustom: () => void;

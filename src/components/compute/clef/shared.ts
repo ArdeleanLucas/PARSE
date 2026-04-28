@@ -1,6 +1,6 @@
-import type { ClefSourceCitation, ClefSourcesReport } from "../../../api/types";
+import type { ClefProviderEntry, ClefSourceCitation, ClefSourcesReport } from "../../../api/types";
 
-const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
+export const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
   csv_override: "CSV override",
   lingpy_wordlist: "LingPy wordlist",
   pycldf: "pycldf",
@@ -13,6 +13,44 @@ const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
   literature: "Literature",
   unknown: "Unattributed (legacy)",
 };
+
+export const PROVIDER_GROUPS = [
+  {
+    id: "open-lexical-databases",
+    label: "Open lexical databases",
+    providerIds: ["wiktionary", "wikidata", "asjp", "cldf", "pycldf", "pylexibank", "lingpy_wordlist"],
+  },
+  {
+    id: "local-sources",
+    label: "Local sources",
+    providerIds: ["csv_override", "literature"],
+  },
+  {
+    id: "llm-augmented-search",
+    label: "LLM-augmented search",
+    providerIds: ["grokipedia"],
+  },
+] as const;
+
+export const PROVIDER_SUBTITLES: Record<string, string> = {
+  wiktionary: "Public dictionary API",
+  wikidata: "Structured lexical graph",
+  asjp: "Comparative wordlist dataset",
+  cldf: "Cross-linguistic dataset bundle",
+  pycldf: "Python CLDF tooling",
+  pylexibank: "Lexibank corpus wrappers",
+  lingpy_wordlist: "LingPy project wordlists",
+  csv_override: "Workspace CSV overrides",
+  literature: "Workspace literature notes",
+  grokipedia: "xAI/OpenAI assisted lookup",
+};
+
+export const ALL_PROVIDER_IDS = PROVIDER_GROUPS.flatMap((group) => [...group.providerIds]);
+
+export function normalizeClefProviders(entries: ClefProviderEntry[]): ClefProviderEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return ALL_PROVIDER_IDS.map((id) => byId.get(id) ?? { id, name: FALLBACK_PROVIDER_LABELS[id] ?? id });
+}
 
 export function providerLabel(id: string, citations?: Record<string, ClefSourceCitation>): string {
   return citations?.[id]?.label ?? FALLBACK_PROVIDER_LABELS[id] ?? id;
