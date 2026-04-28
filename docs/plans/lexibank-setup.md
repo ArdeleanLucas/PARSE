@@ -86,7 +86,7 @@ For Southern Kurdish contact-language workflows, local datasets above improve Ar
 ### Recommended strategy (now)
 
 1. Keep default provider cascade order (registry priority):
-   - `csv_override -> lingpy_wordlist -> pycldf -> pylexibank -> asjp -> cldf -> wikidata -> wiktionary -> grok_llm -> literature`
+   - `csv_override -> lingpy_wordlist -> pycldf -> pylexibank -> asjp -> cldf -> wikidata -> wiktionary -> literature -> grok_llm`
 2. Use CLEF panel + `/api/contact-lexemes/coverage` to identify unresolved CKB concepts.
 3. Curate high-confidence CKB forms into `config/contact_forms_override.csv` with citations in your thesis notes.
 4. When a stronger CKB scholarly dataset is found, clone it under `config/lexibank_data/<dataset>/` and re-run fetch (auto-discovered by local providers).
@@ -95,7 +95,7 @@ For Southern Kurdish contact-language workflows, local datasets above improve Ar
 
 - Local CLDF datasets maximize reproducibility and citation quality.
 - `csv_override` gives deterministic lock-in for adjudicated forms.
-- `grok_llm`/`literature` remain controlled fallback for residual gaps.
+- `literature` and `grok_llm` remain controlled fallbacks for residual gaps; `grok_llm` is the final xAI/Grok LLM fallback, not a Grokipedia.com scrape/provider.
 
 ## Minimal run recipe
 

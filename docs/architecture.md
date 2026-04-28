@@ -1,6 +1,6 @@
 # Architecture & Data Model
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-29
 >
 > This document summarizes the current PARSE system shape: the unified React shell, Python backend, hybrid data model, Lexical Anchor Alignment System, CLEF provider registry, and export flow.
 
@@ -250,18 +250,22 @@ It is implemented as a provider registry under `python/compare/providers/`.
 
 ### Registry shape
 
-The current README describes a 10-provider stack:
+The current registry exposes a 10-provider stack in this priority order:
 
+- `csv_override`
+- `lingpy_wordlist`
+- `pycldf`
+- `pylexibank`
 - `asjp`
 - `cldf`
-- `csv_override`
-- `grok_llm`
-- `lingpy_wordlist`
-- `literature`
-- `pycldf_provider`
-- `pylexibank_provider`
 - `wikidata`
 - `wiktionary`
+- `literature`
+- `grok_llm`
+
+`grok_llm` is the xAI/Grok LLM fallback. It runs last after citable/local providers and is not a Grokipedia.com scrape/provider.
+
+Recent CLEF hardening added exact doculect matching for local CLDF/Lexibank-style data, source/provenance reporting, provider-warning surfacing, form-selection persistence, and `POST /api/clef/clear` / `clef_clear_data` reset support.
 
 ### Architectural role of CLEF
 
@@ -283,9 +287,10 @@ The in-app assistant works through `python/ai/chat_tools.py` (registry/orchestra
 
 Current counts:
 
-- **50** built-in PARSE chat tools
-- **32** MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
-- **36** total default MCP adapter tools including workflow macros + `mcp_get_exposure_mode`
+- **55** built-in PARSE chat tools
+- **55** default MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
+- **59** total default MCP adapter tools including 3 workflow macros + `mcp_get_exposure_mode`
+- **40** total legacy curated opt-out tools when `config/mcp_config.json` sets `{ "expose_all_tools": false }`
 
 This separation matters architecturally:
 

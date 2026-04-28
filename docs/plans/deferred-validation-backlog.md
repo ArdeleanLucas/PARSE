@@ -11,19 +11,20 @@
 
 ---
 
-## Current automated baseline (captured 2026-04-20)
+## Current automated baseline (refreshed 2026-04-29)
 
 | Gate | Command | Result |
 |---|---|---|
-| Frontend/unit/integration tests | `npm run test -- --run` | ✅ 25 files, 138 tests passed |
-| TypeScript | `./node_modules/.bin/tsc --noEmit` | ✅ clean |
-| API regression | `npm run test:api` | ✅ 24 tests passed |
+| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #179: 81 files, 456 tests passed |
+| TypeScript | `./node_modules/.bin/tsc --noEmit` | ✅ clean in PR #179 validation |
+| Build | `npm run build` | ✅ clean in PR #179 validation |
+| API regression / backend gates | CI lightweight backend + parity harness | ✅ green on PR #179; rerun targeted `PYTHONPATH=python python3 -m pytest ...` for backend-affecting work |
 
 ### Non-blocking warnings observed during automated checks
 
 - Vitest prints React Router future-flag warnings in `AnnotateMode.test.tsx`.
 - `storePersistence.test.ts` prints `tagStore` `localStorage is not defined` warnings under jsdom, but the suite still passes.
-- `npm run test:api` logs benign config/chat warnings while exercising fallback config paths; the API regression suite still passes end-to-end.
+- Backend/API smoke may log benign config/chat warnings while exercising fallback config paths; record the exact command and CI gate used because the API regression surface is now split across Vitest, lightweight backend CI, and the parity harness.
 
 ---
 

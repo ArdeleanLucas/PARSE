@@ -1,6 +1,6 @@
 # API Reference
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-29
 >
 > This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
@@ -199,6 +199,8 @@ Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of for
 ```
 
 A destructive run (`dryRun=false`) backs up `config/sil_contact_languages.json` as `sil_contact_languages.json.<utc-iso>.bak` using basic UTC ISO timestamps such as `sil_contact_languages.json.20260428T205100Z.bak`, even if no forms are removed. The clear only edits selected per-language `concepts` dictionaries; it preserves `_meta`, `name`, `family`, `script`, and other config keys. It does **not** touch `parse-enrichments.json` because CLEF reference forms do not live there. With `clearCache=true`, the backend removes known CLEF provider caches only from `config/cache/`: `wiktionary_*.json`, `wikidata_*.json`, `asjp_*.json`, and `cldf_*` cache directories.
+
+Frontend note: current `src/api/contracts/clef-contact-lexeme.ts` has helpers for CLEF config/catalog/providers/sources/form selections but no `clearClefData()` helper yet. Browser UI work that calls this endpoint must add the helper first rather than using a bare `fetch()`.
 
 ## PUT endpoints
 

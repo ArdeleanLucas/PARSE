@@ -225,11 +225,11 @@ For implementation-level architectural context, see [Architecture](./architectur
 Before pushing PARSE changes, run the current project gates:
 
 ```bash
-npm run test -- --run
+npx vitest run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-These are the baseline TypeScript and test checks called out in the current PARSE instructions.
+These are the baseline frontend TypeScript and test checks called out in the current PARSE instructions. Backend/server changes should also run targeted `PYTHONPATH=python python3 -m pytest ...` coverage plus `uvx ruff check python/ --select E9,F63,F7,F82` before push.
 
 Two additional realities are worth documenting explicitly:
 
@@ -395,7 +395,7 @@ When extending CLEF:
 
 - keep the provider registry explicit
 - keep the guided config surface aligned with the backend endpoints (`GET/POST /api/clef/config`, `GET /api/clef/catalog`, `GET /api/clef/providers`)
-- keep the provenance / selection endpoints aligned with the UI surfaces (`GET /api/clef/sources-report`, `POST /api/clef/form-selections`)
+- keep the provenance / selection / reset endpoints aligned with the UI and agent surfaces (`GET /api/clef/sources-report`, `POST /api/clef/form-selections`, `POST /api/clef/clear`, MCP/chat tool `clef_clear_data`)
 - remember that fresh workspaces may start without `config/sil_contact_languages.json`; backend init and UI copy should treat that as normal, not as a crash path
 - document any new expectations around `config/sil_catalog_extra.json` if the language picker or catalog merge rules change
 - preserve per-language ISO 15924 `script` hints when touching the catalog/config flow; `ClefConfigModal` and `GET/POST /api/clef/config` now round-trip them intentionally
