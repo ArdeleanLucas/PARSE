@@ -86,18 +86,19 @@ CONTACT_LEXEME_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                     parameters={
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["dryRun"],
                         "properties": {
                             "dryRun": {
                                 "type": "boolean",
-                                "description": "If true, preview the number of forms, languages, providers, and cache entries that would be cleared without writing anything.",
+                                "description": "If true, preview the number of forms, languages, concepts, and cache entries that would be cleared without writing anything. Defaults to false.",
                             },
                             "languages": {
+                                "type": ["array", "null"],
                                 "items": {"type": "string", "minLength": 1, "maxLength": 16},
                                 "maxItems": 50,
                                 "description": "Optional list of language codes to clear. Omit or pass null to clear all configured languages.",
                             },
                             "concepts": {
+                                "type": ["array", "null"],
                                 "items": {"type": "string", "minLength": 1, "maxLength": 200},
                                 "maxItems": 500,
                                 "description": "Optional list of concept labels to clear. Omit or pass null to clear all concepts.",

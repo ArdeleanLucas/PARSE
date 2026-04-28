@@ -31,10 +31,11 @@ NowFactory = Callable[[], datetime]
 IterFormsWithSources = Callable[[Any], Iterable[Tuple[str, List[str]]]]
 CitationGetter = Callable[[], Dict[str, Dict[str, Any]]]
 
-CLEF_LANGUAGE_BUCKET_KEYS = ("forms", "concepts", "lexicon")
+CLEF_LANGUAGE_BUCKET_KEYS = ("concepts",)
 PROVIDER_CACHE_PATTERNS: Dict[str, Tuple[str, ...]] = {
     "asjp": ("asjp_*.json",),
     "cldf": ("cldf_*",),
+    "wikidata": ("wikidata_*.json",),
     "wiktionary": ("wiktionary_*.json",),
 }
 
@@ -490,43 +491,17 @@ def _plan_clef_clear(
 
     languages_affected: set[str] = set()
     concepts_affected: set[str] = set()
-    providers_touched: set[str] = set()
     forms_removed = 0
     data_changed = False
-    selection_changed = False
+    warnings: List[str] = []
 
-    def _record_removal(language_code: str, concept_key: str, entry: Any) -> bool:
+    def _record_removal(language_code: str, concept_key: str, entry: Any) -> None:
         nonlocal forms_removed, data_changed
-        count, providers = _count_entry_forms_and_sources(entry)
-        if count <= 0:
-            return False
+        count, _providers = _count_entry_forms_and_sources(entry)
         forms_removed += count
         languages_affected.add(language_code)
         concepts_affected.add(concept_key)
-        providers_touched.update(providers)
         data_changed = True
-        return True
-
-    global_concepts = updated.get("concepts")
-    if isinstance(global_concepts, dict):
-        for concept_key, per_language in list(global_concepts.items()):
-            if not isinstance(per_language, dict):
-                continue
-            for raw_language_code, entry in list(per_language.items()):
-                language_code = str(raw_language_code).strip().lower()
-                if not language_code:
-                    continue
-                if not _matches_requested_scope(
-                    language_code=language_code,
-                    concept_key=concept_key,
-                    languages_filter=languages_filter,
-                    concepts_filter=concepts_filter,
-                ):
-                    continue
-                if _record_removal(language_code, concept_key, entry):
-                    del per_language[raw_language_code]
-            if not per_language:
-                del global_concepts[concept_key]
 
     for raw_language_code, payload in list(updated.items()):
         if not isinstance(raw_language_code, str) or raw_language_code.startswith("_"):
@@ -540,6 +515,13 @@ def _plan_clef_clear(
         for bucket_key in CLEF_LANGUAGE_BUCKET_KEYS:
             scoped = payload.get(bucket_key)
             if not isinstance(scoped, dict):
+                if bucket_key == "concepts":
+                    warnings_message = (
+                        "Language {0} has no concepts object in config/sil_contact_languages.json; "
+                        "no forms removed for that language."
+                    ).format(language_code)
+                    if warnings_message not in warnings:
+                        warnings.append(warnings_message)
                 continue
             for concept_key, entry in list(scoped.items()):
                 if not _matches_requested_scope(
@@ -549,33 +531,11 @@ def _plan_clef_clear(
                     concepts_filter=concepts_filter,
                 ):
                     continue
-                if _record_removal(language_code, concept_key, entry):
-                    del scoped[concept_key]
-
-    meta = updated.get("_meta") if isinstance(updated.get("_meta"), dict) else None
-    if isinstance(meta, dict):
-        form_selections = meta.get("form_selections")
-        if isinstance(form_selections, dict):
-            for concept_key, per_language in list(form_selections.items()):
-                if concepts_filter is not None and concept_key not in concepts_filter:
-                    continue
-                if not isinstance(per_language, dict):
-                    continue
-                for raw_language_code in list(per_language.keys()):
-                    language_code = str(raw_language_code).strip().lower()
-                    if languages_filter is not None and language_code not in languages_filter:
-                        continue
-                    del per_language[raw_language_code]
-                    selection_changed = True
-                if not per_language:
-                    del form_selections[concept_key]
-                    selection_changed = True
-            if selection_changed and not form_selections:
-                meta.pop("form_selections", None)
+                _record_removal(language_code, concept_key, entry)
+                del scoped[concept_key]
 
     cache_targets = _collect_clef_cache_targets(cache_dir) if clear_cache else []
 
-    warnings: List[str] = []
     if not config_exists:
         warnings.append("config/sil_contact_languages.json not found; no CLEF reference forms were available to clear.")
     elif forms_removed == 0:
@@ -587,12 +547,11 @@ def _plan_clef_clear(
             "languagesAffected": len(languages_affected),
             "conceptsAffected": len(concepts_affected),
             "formsRemoved": forms_removed,
-            "providersTouched": sorted(providers_touched),
             "cacheFilesRemoved": 0,
         },
         warnings=warnings,
         cache_targets=cache_targets,
-        needs_write=bool(data_changed or selection_changed),
+        needs_write=bool(data_changed),
     )
 
 
@@ -607,10 +566,12 @@ def build_post_clef_clear_response(
     ``config/sil_contact_languages.json``.
 
     Destructive writes use a backup-before-write strategy: when the config file
-    exists and the request would mutate it, a sibling
-    ``sil_contact_languages.json.<timestamp>.bak`` snapshot is created before
-    rewriting the JSON file. Cache cleanup is limited to ``config/cache`` and is
-    best-effort per entry.
+    exists, every real (non-dryRun) clear creates a sibling
+    ``sil_contact_languages.json.<timestamp>.bak`` snapshot before any optional
+    rewrite, even if no forms are removed. This deliberately captures edge cases
+    where a user requests a destructive maintenance action against an already
+    empty or unexpectedly-shaped CLEF config. Cache cleanup is limited to
+    ``config/cache`` and is best-effort per entry.
     """
     dry_run = _require_bool_field(body, "dryRun", default=False)
     clear_cache = _require_bool_field(body, "clearCache", default=False)
@@ -644,10 +605,17 @@ def build_post_clef_clear_response(
             },
         )
 
+    if config_exists:
+        try:
+            _backup_clef_config(config_path, now_factory)
+        except OSError as exc:
+            raise ClefHttpHandlerError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Could not back up config/sil_contact_languages.json: {0}".format(exc),
+            ) from exc
+
     if plan.needs_write:
         try:
-            if config_exists:
-                _backup_clef_config(config_path, now_factory)
             _write_clef_config_json(config_path, plan.updated_config)
         except OSError as exc:
             raise ClefHttpHandlerError(

@@ -25,7 +25,7 @@ These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflo
 
 The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is a compute alias rather than a separately registered MCP tool name.
 
-New in the default write-capable surface: `clef_clear_data` clears CLEF reference forms from `config/sil_contact_languages.json` with `dryRun=true` preview support and optional provider-cache cleanup under `config/cache/`.
+New in the default write-capable surface: `clef_clear_data` wraps `POST /api/clef/clear`. It clears selected per-language `concepts` entries from `config/sil_contact_languages.json`, preserves `_meta` and language metadata, does not touch `parse-enrichments.json`, supports `dryRun=true` preview, and can optionally remove known provider caches under `config/cache/` (`wiktionary_*.json`, `wikidata_*.json`, `asjp_*.json`, `cldf_*`).
 
 ## Surface 1: HTTP API
 
