@@ -83,6 +83,7 @@ DEFAULT_MCP_HOLD_BACK_TOOL_NAMES = ()
 DEFAULT_MCP_TOOL_NAMES = LEGACY_CURATED_MCP_TOOL_NAMES + (
     "audio_normalize_start",
     "audio_normalize_status",
+    "clef_clear_data",
     "enrichments_read",
     "enrichments_write",
     "export_annotations_csv",
@@ -103,6 +104,7 @@ DEFAULT_MCP_TOOL_NAMES = LEGACY_CURATED_MCP_TOOL_NAMES + (
 WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "audio_normalize_start",
     "contact_lexeme_lookup",
+    "clef_clear_data",
     "enrichments_write",
     "export_annotations_csv",
     "export_annotations_elan",
@@ -444,6 +446,7 @@ from ai.tools.comparative_tools import (
 )
 from ai.tools.contact_lexeme_tools import (
     CONTACT_LEXEME_TOOL_SPECS,
+    clef_clear_data as tool_clef_clear_data,
     contact_lexeme_lookup as tool_contact_lexeme_lookup,
     load_project_concepts,
 )
@@ -856,6 +859,7 @@ class ParseChatTools:
 
         mutating_file_postconditions = {
             "contact_lexeme_lookup": "contact_lexeme_data_updated",
+            "clef_clear_data": "clef_reference_data_cleared",
             "import_tag_csv": "tag_import_written",
             "parse_memory_upsert_section": "parse_memory_section_written",
             "peaks_generate": "peaks_file_written",
@@ -1271,6 +1275,9 @@ class ParseChatTools:
 
     def _tool_contact_lexeme_lookup(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_contact_lexeme_lookup(self, args)
+
+    def _tool_clef_clear_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_clef_clear_data(self, args)
 
     def _load_project_concepts(self) -> List[Dict[str, Any]]:
         return load_project_concepts(self)

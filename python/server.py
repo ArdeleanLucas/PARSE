@@ -75,6 +75,7 @@ from app.http.clef_http_handlers import (
     build_get_clef_providers_response as _app_build_get_clef_providers_response,
     build_get_clef_sources_report_response as _app_build_get_clef_sources_report_response,
     build_get_contact_lexeme_coverage_response as _app_build_get_contact_lexeme_coverage_response,
+    build_post_clef_clear_response as _app_build_post_clef_clear_response,
     build_post_clef_config_response as _app_build_post_clef_config_response,
     build_post_clef_form_selections_response as _app_build_post_clef_form_selections_response,
 )
@@ -126,18 +127,14 @@ from app.http.static_paths import (
 from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.streaming import JobStreamingSidecar
-
 # Route modules import `server` by name. When this file runs as a script its
 # module name is `__main__`; register that in-flight module under `server` too
 # so route helpers do not dual-load a second copy of server.py.
 sys.modules.setdefault("server", sys.modules[__name__])
-
 try:
     from compare import cognate_compute as cognate_compute_module
 except Exception:
     cognate_compute_module = None
-
-
 HOST = "0.0.0.0"
 PORT = 8766
 WS_PORT = 8767
@@ -145,7 +142,6 @@ JOB_RETENTION_SECONDS = 60 * 60
 JOB_LOG_MAX_ENTRIES = 200
 JOB_LOCK_TTL_SECONDS = 10 * 60
 CONFIG_SCHEMA_VERSION = 1
-
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Range, Content-Type",
@@ -176,13 +172,10 @@ CHAT_SESSION_RETENTION_SECONDS = 8 * 60 * 60
 CHAT_DEFAULT_MAX_MESSAGES_PER_SESSION = 200
 CHAT_DEFAULT_MAX_MESSAGE_CHARS = 8000
 CHAT_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
-
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-
 _ROUTE_MODULE_NAMES = (
     "annotate",
     "compare",
@@ -1515,6 +1508,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if request_path == "/api/clef/config":
             self._api_post_clef_config()
+            return
+
+        if request_path == "/api/clef/clear":
+            self._api_post_clef_clear()
             return
 
         if request_path == "/api/clef/form-selections":

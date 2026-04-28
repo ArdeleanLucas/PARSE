@@ -178,6 +178,9 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         "/api/auth/logout": {
             "post": {"tags": ["Auth"], "summary": "Clear auth credentials", "operationId": "logoutAuth", "responses": {"200": _response("Logout result", _schema_ref("GenericObject"))}},
         },
+        "/api/clef/clear": {
+            "post": {"tags": ["Compare"], "summary": "Clear CLEF reference forms and optional caches", "operationId": "clearClefData", "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("CLEF clear summary", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
+        },
         "/api/worker/status": {
             "get": {"tags": ["Jobs"], "summary": "Read persistent worker health", "operationId": "getWorkerStatus", "responses": {"200": _response("Worker status", _schema_ref("GenericObject"))}},
         },

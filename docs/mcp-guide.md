@@ -15,15 +15,17 @@ This guide is the narrative overview of PARSE's machine-facing surfaces. For the
 
 These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, `python/external_api/catalog.py`, and the MCP adapter tests:
 
-- **54** built-in `ParseChatTools`
-- **54** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **55** built-in `ParseChatTools`
+- **55** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `DEFAULT_MCP_WORKFLOW_TOOL_NAMES`
-- **58** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
-- **58** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
+- **59** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
+- **59** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
 - **36** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
 - **40** total adapter tools when `config/mcp_config.json` or `mcp_config.json` explicitly sets `{ "expose_all_tools": false }`
 
 The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is a compute alias rather than a separately registered MCP tool name.
+
+New in the default write-capable surface: `clef_clear_data` clears CLEF reference forms from `config/sil_contact_languages.json` with `dryRun=true` preview support and optional provider-cache cleanup under `config/cache/`.
 
 ## Surface 1: HTTP API
 
@@ -111,7 +113,7 @@ The adapter does not add a separate network protocol. It launches as a local pro
 - `PARSE_API_PORT`
 - `PARSE_PORT`
 
-Use the curated default surface for most agent sessions. Switch to the full 58-tool surface only when you need the entire `ParseChatTools` registry exposed to the MCP client.
+Use the curated default surface for most agent sessions. Switch to the full 59-tool surface only when you need the entire `ParseChatTools` registry exposed to the MCP client.
 
 ## Authentication Model
 

@@ -38,6 +38,7 @@ def test_build_openapi_document_includes_mcp_bridge_and_auth_paths() -> None:
     assert spec["servers"] == [{"url": "http://127.0.0.1:8766"}]
     assert "/api/config" in spec["paths"]
     assert "/api/auth/status" in spec["paths"]
+    assert "/api/clef/clear" in spec["paths"]
     assert "/api/mcp/exposure" in spec["paths"]
     assert "/api/mcp/tools" in spec["paths"]
     assert "/api/mcp/tools/{toolName}" in spec["paths"]
@@ -62,6 +63,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/auth/start",
         "/api/auth/poll",
         "/api/auth/logout",
+        "/api/clef/clear",
         "/api/worker/status",
         "/api/export/lingpy",
         "/api/export/nexus",
@@ -117,10 +119,11 @@ def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp
 
     tool_names = {tool["name"] for tool in catalog["tools"]}
     assert catalog["mode"] == "default"
-    assert catalog["count"] == 58
-    assert catalog["exposure"]["mcpToolCount"] == 58
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 54
+    assert catalog["count"] == 59
+    assert catalog["exposure"]["mcpToolCount"] == 59
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 55
     assert "audio_normalize_start" in tool_names
+    assert "clef_clear_data" in tool_names
     assert "export_annotations_csv" in tool_names
     assert "transcript_reformat" in tool_names
 
@@ -137,9 +140,10 @@ def test_build_mcp_http_catalog_active_mode_preserves_legacy_surface_for_explici
     assert catalog["count"] == 40
     assert catalog["exposure"]["configSource"] == str(config_path)
     assert catalog["exposure"]["mcpToolCount"] == 40
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 54
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 55
     assert "annotation_read" in tool_names
     assert "audio_normalize_start" not in tool_names
+    assert "clef_clear_data" not in tool_names
     assert "export_annotations_csv" not in tool_names
 
 

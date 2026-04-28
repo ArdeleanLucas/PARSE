@@ -164,11 +164,14 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/enrichments` | Save enrichments | Accepts either `{ enrichments: ... }` or the raw object |
 | `POST /api/config` | Update project configuration | Current server accepts POST as an update path |
 | `POST /api/clef/config` | Save CLEF language configuration | Used by the guided Configure CLEF modal before optional auto-populate |
+| `POST /api/clef/clear` | Clear CLEF reference forms and optional provider caches | Operates on `config/sil_contact_languages.json`; supports `dryRun`, language/concept scoping, and `clearCache` |
 | `POST /api/clef/form-selections` | Save CLEF form selections | Persists which populated reference forms should contribute to similarity scoring |
 | `POST /api/tags/merge` | Merge tag definitions | Shared tag persistence |
 | `POST /api/offset/detect` | Detect a constant timestamp offset | Starts an async compute job with progress updates and crash-log capture |
 | `POST /api/offset/detect-from-pair` | Detect a timestamp offset from trusted manual pairs | STT-free async correction path |
 | `POST /api/offset/apply` | Apply a constant timestamp shift | Mutates the speaker annotation file while preserving manually adjusted / anchored lexemes |
+
+Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of forms, languages, concepts, providers, and cache entries that would be removed. A destructive run (`dryRun=false`) backs up `config/sil_contact_languages.json` as `sil_contact_languages.json.<timestamp>.bak` before rewriting it, and `clearCache=true` removes known CLEF provider caches only from `config/cache/`.
 
 ## PUT endpoints
 
@@ -417,7 +420,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing the shipped **54-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **58 tools** total and the `expose_all_tools=true` surface is also **58**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated **36**-tool parse-task surface / **40**-tool adapter surface preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`.
+PARSE can also run as a stdio MCP server by exposing the shipped **55-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **59 tools** total and the `expose_all_tools=true` surface is also **59**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 36-tool subset, which still becomes **40** adapter tools once the 3 workflow macros and adapter helper are included.
 
 ### Start the adapter
 
@@ -512,6 +515,7 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | Tool | Description |
 |---|---|
 | `contact_lexeme_lookup` | Fetch contact-language reference forms; dry-run first |
+| `clef_clear_data` | Clear CLEF reference forms from `config/sil_contact_languages.json`; dry-run first and optionally remove provider caches |
 | `import_tag_csv` | Import a CSV as a PARSE tag list |
 | `prepare_tag_import` | Preview and validate a tag import |
 | `onboard_speaker_import` | Import one speaker from on-disk audio/CSV into the workspace |
@@ -569,7 +573,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 The MCP surface is a curated subset of the low-level chat tools plus 3 high-level workflow macros.
 
 Operational rules that remain important:
-- use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `onboard_speaker_import`, and timestamp/application workflows
+- use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, and timestamp/application workflows
 - prefer `full_coverage` rather than bare `done` when making automation decisions about whether a tier really covers the full recording
 - onboarding remains **one speaker at a time**
 

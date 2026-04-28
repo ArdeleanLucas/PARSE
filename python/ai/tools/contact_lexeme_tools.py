@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 CONTACT_LEXEME_TOOL_NAMES = (
     "contact_lexeme_lookup",
+    "clef_clear_data",
 )
 
 
@@ -71,6 +72,39 @@ CONTACT_LEXEME_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                             "overwrite": {
                                 "type": "boolean",
                                 "description": "If true and dryRun is false, re-fetch even if forms already exist. Ignored when dryRun is true.",
+                            },
+                        },
+                    },
+                ),
+    "clef_clear_data": ChatToolSpec(
+                    name="clef_clear_data",
+                    description=(
+                        "Clear CLEF-populated reference forms from config/sil_contact_languages.json. "
+                        "Supports dryRun preview, optional language/concept scoping, and optional provider-cache cleanup. "
+                        "Use dryRun=true first before destructive clears."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["dryRun"],
+                        "properties": {
+                            "dryRun": {
+                                "type": "boolean",
+                                "description": "If true, preview the number of forms, languages, providers, and cache entries that would be cleared without writing anything.",
+                            },
+                            "languages": {
+                                "items": {"type": "string", "minLength": 1, "maxLength": 16},
+                                "maxItems": 50,
+                                "description": "Optional list of language codes to clear. Omit or pass null to clear all configured languages.",
+                            },
+                            "concepts": {
+                                "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                                "maxItems": 500,
+                                "description": "Optional list of concept labels to clear. Omit or pass null to clear all concepts.",
+                            },
+                            "clearCache": {
+                                "type": "boolean",
+                                "description": "If true, also remove known CLEF provider caches under config/cache.",
                             },
                         },
                     },
@@ -333,6 +367,43 @@ def contact_lexeme_lookup(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict
         }
 
 
+def clef_clear_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+        """Clear CLEF reference forms and optional provider caches.
+
+        Delegates to the HTTP handler logic so HTTP, chat, and MCP stay on one
+        contract for validation, dry-run semantics, summaries, and backup
+        behavior.
+        """
+        from datetime import datetime, timezone
+        from app.http.clef_http_handlers import (
+            ClefHttpHandlerError,
+            build_post_clef_clear_response,
+        )
+
+        body: Dict[str, Any] = {"dryRun": bool(args.get("dryRun", False))}
+        if "languages" in args:
+            body["languages"] = args.get("languages")
+        if "concepts" in args:
+            body["concepts"] = args.get("concepts")
+        if "clearCache" in args:
+            body["clearCache"] = args.get("clearCache")
+
+        try:
+            response = build_post_clef_clear_response(
+                body,
+                config_path=tools.sil_config_path,
+                now_factory=lambda: datetime.now(timezone.utc),
+            )
+        except ClefHttpHandlerError as exc:
+            return {
+                "ok": False,
+                "status": int(exc.status),
+                "error": exc.message,
+            }
+
+        return dict(response.payload)
+
+
 def load_project_concepts(tools: "ParseChatTools") -> List[Dict[str, Any]]:
     """Load project concepts from concepts.csv. Returns list of {id, label} dicts."""
     concepts_path = tools.project_root / "concepts.csv"
@@ -356,6 +427,7 @@ def load_project_concepts(tools: "ParseChatTools") -> List[Dict[str, Any]]:
 
 CONTACT_LEXEME_TOOL_HANDLERS = {
     "contact_lexeme_lookup": contact_lexeme_lookup,
+    "clef_clear_data": clef_clear_data,
 }
 
 
@@ -365,4 +437,5 @@ __all__ = [
     "CONTACT_LEXEME_TOOL_HANDLERS",
     "load_project_concepts",
     "contact_lexeme_lookup",
+    "clef_clear_data",
 ]

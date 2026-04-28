@@ -301,6 +301,7 @@ The in-app assistant currently exposes **54 PARSE-specific tools**.
 | Tool | Description |
 |---|---|
 | `contact_lexeme_lookup` | Fetch and optionally merge contact-language reference forms via the CLEF provider chain (`dryRun=true` first) |
+| `clef_clear_data` | Clear CLEF reference forms from `config/sil_contact_languages.json` and optionally purge provider caches (`dryRun=true` first) |
 | `onboard_speaker_import` | Copy external audio/CSV into the workspace, scaffold speaker state, and register it in `source_index.json` (`dryRun=true` first) |
 | `import_processed_speaker` | Hydrate one speaker from existing processed artifacts into the active workspace (`dryRun=true` first) |
 | `parse_memory_upsert_section` | Create or replace a `## Section` block in `parse-memory.md` (`dryRun=true` first) |
@@ -334,13 +335,13 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 54-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 55-tool chat surface.
 
-- **Built-in chat tools**: 54
-- **Default MCP task tools**: 54
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 58
+- **Built-in chat tools**: 55
+- **Default MCP task tools**: 55
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 59
 - **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 40
-- **Full MCP adapter surface with `expose_all_tools=true`**: 58
+- **Full MCP adapter surface with `expose_all_tools=true`**: 59
 
 The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 36-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
