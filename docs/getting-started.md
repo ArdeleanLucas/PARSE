@@ -28,7 +28,7 @@ PARSE currently assumes:
 
 ### Recommended Python environment
 
-The current PARSE launcher supports two common cases:
+The current PARSE launcher supports two common cases after you install `python/requirements.txt`:
 
 - **Linux/WSL-native Python** (`python3`)
 - **Windows `python.exe` from WSL**, typically a conda environment such as:
@@ -41,13 +41,24 @@ This second setup matters because some local speech/model stacks may already be 
 
 ### Required repository-local setup
 
-Clone the repository and install frontend dependencies once per clone:
+Clone the repository, install frontend dependencies, then install the tracked Python dependencies:
 
 ```bash
 git clone https://github.com/ArdeleanLucas/PARSE.git
 cd PARSE
 npm install
+
+# Python 3.10-3.12 only — python/server.py still imports cgi, which was removed in 3.13.
+# Option A: project-local virtualenv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r python/requirements.txt
+
+# Option B: PEP 668 distros (Debian/Ubuntu) without a venv
+# pip install --user --break-system-packages -r python/requirements.txt
 ```
+
+If you already have a Windows-side conda environment that carries your speech stack, install the same `python/requirements.txt` there before launching PARSE with that interpreter.
 
 ## One-command launch (recommended)
 

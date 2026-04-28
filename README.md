@@ -45,11 +45,19 @@ Fieldwork linguists, comparative phylogenetics researchers, and low-resource lan
 git clone https://github.com/ArdeleanLucas/PARSE.git
 cd PARSE
 npm install
+
+# Python 3.10-3.12 required (python/server.py still imports cgi, removed in 3.13).
+# Pick one:
+python3 -m venv .venv && source .venv/bin/activate && pip install -r python/requirements.txt
+# OR on PEP 668 distros (Debian/Ubuntu) without a venv:
+# pip install --user --break-system-packages -r python/requirements.txt
+
 ./scripts/parse-run.sh
 ```
 
 Runs on macOS / Linux / WSL. GPU optional (CUDA 12.x) for faster STT and forced alignment; CPU-only also works.
 
+- For fuller Python environment notes and launcher details, see [Getting Started](docs/getting-started.md).
 - Copy `config/ai_config.example.json` to `config/ai_config.json`.
 - Review local model/provider settings before serious speech work.
 - Prefer a standalone `PARSE_WORKSPACE_ROOT` for real fieldwork data rather than writing runtime artifacts into the git checkout.

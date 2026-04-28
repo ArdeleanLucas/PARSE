@@ -21,7 +21,9 @@ def _load_websockets_runtime() -> tuple[Any, type[BaseException]]:
     except ImportError as exc:
         raise RuntimeError(
             "PARSE WebSocket streaming requires the optional 'websockets' package. "
-            "Install it to enable ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}."
+            "It is declared in python/requirements.txt and enables "
+            "ws://<host>:<PARSE_WS_PORT or 8767>/ws/jobs/{jobId}. "
+            "Install with: pip install websockets"
         ) from exc
     return websockets, ConnectionClosed
 

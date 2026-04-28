@@ -1,0 +1,55 @@
+# PARSE Python runtime dependencies
+# Python 3.10-3.12 supported.
+# Python 3.13+ is currently excluded because python/server.py still imports cgi.
+
+# --- Web runtime ---
+# `fastapi` is kept here as a lightweight ecosystem dependency for PARSE's
+# external-API/dev workflows even though the current shipped server transport
+# remains the custom python/server.py stack.
+fastapi>=0.110
+# Additive WebSocket job-streaming sidecar (`python/external_api/streaming.py`).
+websockets>=12
+# Shared HTTP / schema client and config payload validation.
+pydantic>=2.7
+requests>=2.31
+
+# --- Speech & alignment ---
+numpy>=1.26
+soundfile>=0.12
+# Core STT / ORTH provider.
+faster-whisper>=1.0
+# STT VAD runtime used by the faster-whisper stack.
+silero-vad>=5.0
+# Tier 2 / Tier 3 acoustic alignment stack.
+torch>=2.0
+torchaudio>=2.0
+transformers>=4.40
+phonemizer>=3.2
+
+# --- Chat providers ---
+openai>=1.0
+anthropic>=0.40
+
+# --- Dev / test ---
+pytest>=8.0
+ruff>=0.4
+
+# --- Optional: local comparative-data providers ---
+# These providers soft-fail / no-op when missing.
+# lingpy>=2.6
+# pycldf>=1.36
+# pylexibank>=3.4
+
+# --- Optional: parse_mcp framework wrappers ---
+# The publishable parse_mcp package exposes these as optional extras.
+# langchain-core>=0.2
+# llama-index-core>=0.10
+# crewai>=0.30
+
+# --- Optional: helper scripts / platform extras ---
+# `python/video_sync.py`
+# scipy>=1.11
+# GPU runtime namespace wheels probed opportunistically by ai/providers/shared.py.
+# nvidia-cuda-runtime-cu12
+# nvidia-cublas-cu12
+# nvidia-cudnn-cu12
