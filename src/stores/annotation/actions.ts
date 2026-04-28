@@ -71,6 +71,99 @@ function updateMatchingInterval(
   return true;
 }
 
+function findBestOverlapIntervalIndex(intervals: AnnotationInterval[], start: number, end: number): number {
+  let bestIdx = -1;
+  let bestOverlap = 0;
+  for (let i = 0; i < intervals.length; i += 1) {
+    const interval = intervals[i];
+    if (interval.end <= start || interval.start >= end) continue;
+    const overlap = Math.min(interval.end, end) - Math.max(interval.start, start);
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function retimeOverlappingInterval(
+  record: AnnotationRecord,
+  tierKey: string,
+  oldStart: number,
+  oldEnd: number,
+  newStart: number,
+  newEnd: number,
+  text?: string,
+): boolean {
+  const tier = record.tiers[tierKey];
+  if (!tier) return false;
+  const idx = findBestOverlapIntervalIndex(tier.intervals, oldStart, oldEnd);
+  if (idx < 0) return false;
+  tier.intervals[idx] = {
+    ...tier.intervals[idx],
+    start: newStart,
+    end: newEnd,
+    manuallyAdjusted: true,
+    ...(text !== undefined ? { text } : {}),
+  };
+  tier.intervals.sort((a, b) => a.start - b.start);
+  return true;
+}
+
+function rescaleAssociatedIntervals(
+  record: AnnotationRecord,
+  tierKey: string,
+  oldStart: number,
+  oldEnd: number,
+  newStart: number,
+  newEnd: number,
+): number {
+  const tier = record.tiers[tierKey];
+  if (!tier) return 0;
+  const oldDur = oldEnd - oldStart;
+  if (oldDur <= 0) return 0;
+  const newDur = newEnd - newStart;
+  let count = 0;
+  for (let i = 0; i < tier.intervals.length; i += 1) {
+    const interval = tier.intervals[i];
+    const midpoint = (interval.start + interval.end) / 2;
+    if (midpoint < oldStart - MATCH_TOLERANCE_SEC) continue;
+    if (midpoint > oldEnd + MATCH_TOLERANCE_SEC) continue;
+    const startFraction = Math.max(0, Math.min(1, (interval.start - oldStart) / oldDur));
+    const endFraction = Math.max(0, Math.min(1, (interval.end - oldStart) / oldDur));
+    tier.intervals[i] = {
+      ...interval,
+      start: newStart + startFraction * newDur,
+      end: newStart + endFraction * newDur,
+      manuallyAdjusted: true,
+    };
+    count += 1;
+  }
+  if (count > 0) tier.intervals.sort((a, b) => a.start - b.start);
+  return count;
+}
+
+function isLexemeScope(scope: readonly string[] | undefined): boolean {
+  if (!scope || scope.length !== LEXEME_SCOPE_TIERS.length) return false;
+  return LEXEME_SCOPE_TIERS.every((tier) => scope.includes(tier));
+}
+
+function applyLexemeRetime(
+  record: AnnotationRecord,
+  oldStart: number,
+  oldEnd: number,
+  newStart: number,
+  newEnd: number,
+  texts?: { conceptName?: string; ipaText?: string; orthoText?: string },
+): number {
+  let moved = 0;
+  if (updateMatchingInterval(record, "concept", oldStart, oldEnd, newStart, newEnd, texts?.conceptName)) moved += 1;
+  if (retimeOverlappingInterval(record, "ipa", oldStart, oldEnd, newStart, newEnd, texts?.ipaText)) moved += 1;
+  if (retimeOverlappingInterval(record, "ortho", oldStart, oldEnd, newStart, newEnd, texts?.orthoText)) moved += 1;
+  if (rescaleAssociatedIntervals(record, "ortho_words", oldStart, oldEnd, newStart, newEnd) > 0) moved += 1;
+  return moved;
+}
+
 function commitRecordMutation(
   set: AnnotationStoreSet,
   scheduleAutosave: ScheduleAnnotationAutosave,
@@ -237,20 +330,24 @@ export function createAnnotationActionsSlice(
       if (!pre) return 0;
 
       const clone = deepClone(pre);
-      const allowedTiers = tierScope ? new Set(tierScope) : null;
       let moved = 0;
-      for (const [tierKey, tier] of Object.entries(clone.tiers)) {
-        if (allowedTiers && !allowedTiers.has(tierKey)) continue;
-        const idx = findMatchingIntervalIndex(tier.intervals, oldStart, oldEnd);
-        if (idx < 0) continue;
-        tier.intervals[idx] = {
-          ...tier.intervals[idx],
-          start: newStart,
-          end: newEnd,
-          manuallyAdjusted: true,
-        };
-        tier.intervals.sort((a, b) => a.start - b.start);
-        moved += 1;
+      if (isLexemeScope(tierScope)) {
+        moved = applyLexemeRetime(clone, oldStart, oldEnd, newStart, newEnd);
+      } else {
+        const allowedTiers = tierScope ? new Set(tierScope) : null;
+        for (const [tierKey, tier] of Object.entries(clone.tiers)) {
+          if (allowedTiers && !allowedTiers.has(tierKey)) continue;
+          const idx = findMatchingIntervalIndex(tier.intervals, oldStart, oldEnd);
+          if (idx < 0) continue;
+          tier.intervals[idx] = {
+            ...tier.intervals[idx],
+            start: newStart,
+            end: newEnd,
+            manuallyAdjusted: true,
+          };
+          tier.intervals.sort((a, b) => a.start - b.start);
+          moved += 1;
+        }
       }
       if (moved === 0) return 0;
       clone.modified_at = nowIsoUtc();
@@ -268,12 +365,7 @@ export function createAnnotationActionsSlice(
       if (!pre) return { ok: false, error: "Speaker record not loaded." };
 
       const clone = deepClone(pre);
-      let moved = 0;
-
-      if (updateMatchingInterval(clone, "concept", oldStart, oldEnd, newStart, newEnd, conceptName)) moved += 1;
-      if (updateMatchingInterval(clone, "ipa", oldStart, oldEnd, newStart, newEnd, ipaText)) moved += 1;
-      if (updateMatchingInterval(clone, "ortho", oldStart, oldEnd, newStart, newEnd, orthoText)) moved += 1;
-      if (updateMatchingInterval(clone, "ortho_words", oldStart, oldEnd, newStart, newEnd)) moved += 1;
+      const moved = applyLexemeRetime(clone, oldStart, oldEnd, newStart, newEnd, { conceptName, ipaText, orthoText });
 
       if (moved === 0) {
         return { ok: false, error: "No matching lexeme intervals found." };
