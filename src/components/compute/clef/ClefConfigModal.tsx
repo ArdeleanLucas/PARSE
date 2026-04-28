@@ -1,5 +1,5 @@
 import { AlertCircle, Play, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthStatus } from "../../../api/types";
 import { saveClefConfig } from "../../../api/client";
 import { ConfigForm } from "./ConfigForm";
@@ -17,8 +17,6 @@ export function ClefConfigModal({
 }: ClefConfigModalProps) {
   const [saving, setSaving] = useState(false);
   const [authExpandedProviderId, setAuthExpandedProviderId] = useState<string | null>(null);
-  const languagesRef = useRef<HTMLDivElement | null>(null);
-  const sourcesRef = useRef<HTMLDivElement | null>(null);
   const {
     addCustom,
     allLanguages,
@@ -68,13 +66,7 @@ export function ClefConfigModal({
     return count;
   }, [providerStatuses, selectedProviders]);
   const grokipediaSelectedButUnauthed = selectedProviders.has("grokipedia") && (providerStatuses.grokipedia ?? "needs_auth") === "needs_auth";
-  const canStart = !saving && primary.length > 0 && selectedProviderCount > 0;
-
-  const scrollSectionIntoView = useCallback((element: HTMLDivElement | null) => {
-    if (element && typeof element.scrollIntoView === "function") {
-      element.scrollIntoView({ block: "start", behavior: "smooth" });
-    }
-  }, []);
+  const canStart = !saving && selectedProviderCount > 0;
 
   const saveOnly = useCallback(async () => {
     if (primary.length === 0) {
@@ -98,6 +90,7 @@ export function ClefConfigModal({
   const handleStart = useCallback(async () => {
     if (primary.length === 0) {
       setError("Pick at least one primary contact language.");
+      setTab("languages");
       return;
     }
     if (selectedProviderCount === 0) {
@@ -107,7 +100,6 @@ export function ClefConfigModal({
     if (grokipediaSelectedButUnauthed) {
       setError("Grokipedia is selected but no API key is configured. Connect a key or uncheck Grokipedia.");
       setTab("populate");
-      scrollSectionIntoView(sourcesRef.current);
       setAuthExpandedProviderId("grokipedia");
       return;
     }
@@ -126,7 +118,7 @@ export function ClefConfigModal({
     } finally {
       setSaving(false);
     }
-  }, [buildPayload, grokipediaSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, scrollSectionIntoView, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
+  }, [buildPayload, grokipediaSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
 
   async function handleProviderAuthSaved(providerId: string, _status: AuthStatus) {
     await refreshAuthStatus();
@@ -138,9 +130,6 @@ export function ClefConfigModal({
   useEffect(() => {
     if (!open) return;
     if (initialTab === "populate") {
-      if (sourcesRef.current && typeof sourcesRef.current.scrollIntoView === "function") {
-        sourcesRef.current.scrollIntoView({ block: "start" });
-      }
       setTab("populate");
     }
   }, [initialTab, open, setTab]);
@@ -165,20 +154,12 @@ export function ClefConfigModal({
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <ClefConfigHeader onClose={onClose} saving={saving} />
         {!loading && status && !status.concepts_csv_exists && <MissingConceptsBanner />}
-        <SectionStrip
-          tab={tab}
-          onSelect={(nextTab) => {
-            setTab(nextTab);
-            if (nextTab === "languages") scrollSectionIntoView(languagesRef.current);
-            else scrollSectionIntoView(sourcesRef.current);
-          }}
-        />
+        <SectionStrip tab={tab} onSelect={setTab} />
         <div className="flex-1 overflow-auto px-6 py-5">
           {loading && <div className="text-[12px] text-slate-500">Loading…</div>}
           {error && <ClefErrorBanner error={error} populateFailed={populateFailed} />}
-          {!loading && (
-            <div className="space-y-4">
-              <div ref={languagesRef} className="space-y-3">
+          {!loading && tab === "languages" && (
+            <div className="space-y-3">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Languages</div>
                   <p className="mt-1 text-[12px] text-slate-600">
@@ -202,24 +183,22 @@ export function ClefConfigModal({
                   togglePrimary={togglePrimary}
                   toggleSecondary={toggleSecondary}
                 />
-              </div>
-
-              <div ref={sourcesRef} className="space-y-3">
-                <ProviderSelector
-                  mode="detailed"
-                  authExpandedProviderId={authExpandedProviderId}
-                  onAuthSaved={(providerId, status) => void handleProviderAuthSaved(providerId, status)}
-                  onExpandAuth={setAuthExpandedProviderId}
-                  overwrite={overwrite}
-                  providerStatuses={providerStatuses}
-                  providers={providers}
-                  saving={saving}
-                  selectedProviders={selectedProviders}
-                  setOverwrite={setOverwrite}
-                  toggleProvider={toggleProvider}
-                />
-              </div>
             </div>
+          )}
+          {!loading && tab === "populate" && (
+            <ProviderSelector
+              mode="detailed"
+              authExpandedProviderId={authExpandedProviderId}
+              onAuthSaved={(providerId, status) => void handleProviderAuthSaved(providerId, status)}
+              onExpandAuth={setAuthExpandedProviderId}
+              overwrite={overwrite}
+              providerStatuses={providerStatuses}
+              providers={providers}
+              saving={saving}
+              selectedProviders={selectedProviders}
+              setOverwrite={setOverwrite}
+              toggleProvider={toggleProvider}
+            />
           )}
         </div>
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-6 py-4">
