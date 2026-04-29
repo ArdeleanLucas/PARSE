@@ -187,6 +187,88 @@ def _register_speaker_in_project_json(speaker: str) -> None:
     project['speakers'] = speakers_block
     _server._write_json_file(_server._project_json_path(), project)
 
+
+def _looks_like_audition_csv(csv_path: _server.pathlib.Path) -> bool:
+    """Return True for Adobe Audition marker exports (Name + Start header)."""
+    import csv as _csv
+    import io as _io
+    try:
+        sample = csv_path.read_text(encoding='utf-8-sig')[:4096]
+        dialect = None
+        try:
+            dialect = _csv.Sniffer().sniff(sample, delimiters='\t,;')
+        except _csv.Error:
+            pass
+        reader = _csv.DictReader(_io.StringIO(sample), dialect=dialect) if dialect else _csv.DictReader(_io.StringIO(sample), delimiter='\t')
+        fieldnames = {str(name or '').strip().lower() for name in (reader.fieldnames or [])}
+        return 'name' in fieldnames and 'start' in fieldnames
+    except (OSError, UnicodeDecodeError, _csv.Error):
+        return False
+
+
+def _audition_row_label(row: _server.Any) -> str:
+    label = str(getattr(row, 'remainder', '') or '').strip()
+    if label:
+        return label
+    return str(getattr(row, 'raw_name', '') or '').strip()
+
+
+def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.Any], rows: _server.List[_server.Any]) -> int:
+    """Append Audition cue rows to concept + ortho_words tiers in CSV order."""
+    tiers = annotation.get('tiers')
+    if not isinstance(tiers, dict):
+        tiers = {}
+        annotation['tiers'] = tiers
+    concept_tier = tiers.get('concept')
+    if not isinstance(concept_tier, dict):
+        concept_tier = _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['concept'])
+        tiers['concept'] = concept_tier
+    concept_intervals = concept_tier.get('intervals')
+    if not isinstance(concept_intervals, list):
+        concept_intervals = []
+        concept_tier['intervals'] = concept_intervals
+    ortho_words_tier = tiers.get('ortho_words')
+    if not isinstance(ortho_words_tier, dict):
+        ortho_words_tier = _server._annotation_empty_tier(5)
+        tiers['ortho_words'] = ortho_words_tier
+    ortho_words_intervals = ortho_words_tier.get('intervals')
+    if not isinstance(ortho_words_intervals, list):
+        ortho_words_intervals = []
+        ortho_words_tier['intervals'] = ortho_words_intervals
+
+    imported = 0
+    max_end = float(annotation.get('source_audio_duration_sec') or 0.0)
+    for row in rows:
+        label = _audition_row_label(row)
+        if not label:
+            continue
+        start = float(getattr(row, 'start_sec', 0.0) or 0.0)
+        duration = float(getattr(row, 'duration_sec', 0.0) or 0.0)
+        if duration <= 0:
+            duration = 1.0
+        end = start + duration
+        interval = {'start': start, 'end': end, 'text': label}
+        concept_intervals.append(interval)
+        ortho_words_intervals.append(_server.copy.deepcopy(interval))
+        max_end = max(max_end, end)
+        imported += 1
+    annotation['source_audio_duration_sec'] = max_end
+    return imported
+
+
+def _concepts_from_audition_rows(rows: _server.List[_server.Any]) -> _server.List[_server.Dict[str, str]]:
+    concepts: _server.List[_server.Dict[str, str]] = []
+    seen = set()
+    for row in rows:
+        label = _audition_row_label(row)
+        cid = _server._normalize_concept_id(getattr(row, 'concept_id', ''))
+        if not label or not cid or cid in seen:
+            continue
+        seen.add(cid)
+        concepts.append({'id': cid, 'label': label})
+    return concepts
+
+
 def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path]) -> None:
     """Background worker for onboard/speaker — scaffold annotation + register in source_index."""
     try:
@@ -196,7 +278,8 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
         annotation['speaker'] = speaker
         _server._annotation_touch_metadata(annotation, preserve_created=False)
         annotation_path = _server._annotation_record_path_for_speaker(speaker)
-        _server._write_json_file(annotation_path, annotation)
+        legacy_annotation_path = _server._annotation_legacy_record_path_for_speaker(speaker)
+        _server._write_annotation_to_canonical_and_legacy(annotation_path, annotation_path, legacy_annotation_path, annotation)
         _server._set_job_progress(job_id, 55.0, message='Updating source index')
         source_index_path = _server._source_index_path()
         source_index = _server._read_json_file(source_index_path, {})
@@ -222,18 +305,29 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
         concept_total: _server.Optional[int] = None
         concepts_added = 0
         comments_imported = 0
+        lexemes_imported = 0
         if csv_dest is not None and csv_dest.exists():
             _server._set_job_progress(job_id, 80.0, message='Merging concepts from CSV')
             parsed = _server._parse_concepts_csv(csv_dest)
             if parsed:
                 concepts_added = len(parsed)
                 concept_total = _server._merge_concepts_into_root_csv(parsed)
-            else:
-                try:
-                    from lexeme_notes import parse_audition_csv as _parse_comments
-                    csv_text = csv_dest.read_text(encoding='utf-8-sig')
-                    comment_rows = _parse_comments(csv_text)
-                    if comment_rows:
+            elif _looks_like_audition_csv(csv_dest):
+                from lexeme_notes import parse_audition_csv as _parse_comments
+                csv_text = csv_dest.read_text(encoding='utf-8-sig')
+                comment_rows = _parse_comments(csv_text)
+                if comment_rows:
+                    lexemes_imported = _append_audition_rows_to_annotation(annotation, comment_rows)
+                    if lexemes_imported:
+                        _server._annotation_touch_metadata(annotation, preserve_created=True)
+                        _server._write_annotation_to_canonical_and_legacy(annotation_path, annotation_path, legacy_annotation_path, annotation)
+                        audition_concepts = _concepts_from_audition_rows(comment_rows)
+                        concepts_added = len(audition_concepts)
+                        if audition_concepts:
+                            concept_total = _server._merge_concepts_into_root_csv(audition_concepts)
+                    # TODO: comments-file row-index joins belong in the follow-up
+                    # PR; this preserves the existing single-CSV import_note path.
+                    try:
                         payload = _server._read_json_file(_server._enrichments_path(), _server._default_enrichments_payload())
                         notes_block = payload.get('lexeme_notes')
                         if not isinstance(notes_block, dict):
@@ -255,11 +349,12 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                             speaker_block[cid] = entry
                             comments_imported += 1
                         _server._write_json_file(_server._enrichments_path(), payload)
-                except Exception:
-                    comments_imported = 0
+                    except Exception:
+                        comments_imported = 0
         _server._set_job_progress(job_id, 90.0, message='Finalizing')
-        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'wavPath': wav_relative, 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'annotationPath': str(annotation_path.relative_to(_server._project_root())), 'conceptsAdded': concepts_added, 'conceptTotal': concept_total, 'commentsImported': comments_imported}
-        _server._set_job_complete(job_id, result, message='Speaker onboarded')
+        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'wavPath': wav_relative, 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'annotationPath': str(annotation_path.relative_to(_server._project_root())), 'conceptsAdded': concepts_added, 'conceptTotal': concept_total, 'commentsImported': comments_imported, 'lexemesImported': lexemes_imported}
+        complete_message = 'Imported {0} lexemes from {1}'.format(lexemes_imported, csv_dest.name) if lexemes_imported and csv_dest else 'Speaker onboarded'
+        _server._set_job_complete(job_id, result, message=complete_message)
     except Exception as exc:
         _server._set_job_error(job_id, str(exc))
 
