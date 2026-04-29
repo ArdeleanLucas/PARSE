@@ -22,8 +22,10 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence
 
 
-# Match a leading "(1.1)" / "(2.3)" / "(7)" style concept id prefix.
-_ID_PATTERN = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014:]?\s*(.*)$")
+# Match leading Audition cue ids in either "(1.1)- label" or "9- label" form.
+_PAREN_ID_PATTERN = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014:]?\s*(.*)$")
+_PLAIN_ID_PATTERN = re.compile(r"^\s*([0-9]+)\s*[-\u2013\u2014:]\s*(.*)$")
+_TRAILING_VARIANT_PATTERN = re.compile(r"\s+([A-D])\s*$")
 
 
 @dataclass
@@ -32,7 +34,8 @@ class CommentRow:
     start_sec: float
     duration_sec: float
     raw_name: str
-    remainder: str  # text after "(id)- " — may include the concept label + comment
+    remainder: str  # text after the id prefix, with a terminal A/B/C/D variant stripped
+    variant: str = ""
 
     @property
     def end_sec(self) -> float:
@@ -68,6 +71,31 @@ def _strip_bom(text: str) -> str:
     return text
 
 
+def _record_value(record: dict, *names: str) -> str:
+    normalized = {str(key or "").strip().lower(): value for key, value in record.items()}
+    for name in names:
+        value = normalized.get(name.strip().lower())
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def _parse_name_prefix(name: str) -> Optional[tuple[str, str, str]]:
+    """Return (concept_id, label/comment remainder, variant) for Audition Name."""
+    text = (name or "").strip()
+    match = _PAREN_ID_PATTERN.match(text) or _PLAIN_ID_PATTERN.match(text)
+    if not match:
+        return None
+    concept_id = match.group(1).strip()
+    remainder = match.group(2).strip()
+    variant = ""
+    variant_match = _TRAILING_VARIANT_PATTERN.search(remainder)
+    if variant_match:
+        variant = variant_match.group(1)
+        remainder = remainder[: variant_match.start()].strip()
+    return concept_id, remainder, variant
+
+
 def parse_audition_csv(text: str) -> List[CommentRow]:
     """Parse an Audition marker CSV (tab or comma separated) into CommentRows."""
     raw = _strip_bom(text or "")
@@ -87,18 +115,17 @@ def parse_audition_csv(text: str) -> List[CommentRow]:
     for record in reader:
         if not record:
             continue
-        name = (record.get("Name") or record.get("name") or "").strip()
-        start_raw = record.get("Start") or record.get("start") or ""
-        duration_raw = record.get("Duration") or record.get("duration") or "0"
+        name = _record_value(record, "Name").strip()
+        start_raw = _record_value(record, "Start")
+        duration_raw = _record_value(record, "Duration") or "0"
         if not name:
             continue
 
-        match = _ID_PATTERN.match(name)
-        if not match:
+        parsed_name = _parse_name_prefix(name)
+        if parsed_name is None:
             continue
 
-        concept_id = match.group(1).strip()
-        remainder = match.group(2).strip()
+        concept_id, remainder, variant = parsed_name
         start_sec = _parse_time(start_raw) or 0.0
         duration_sec = _parse_time(duration_raw) or 0.0
 
@@ -109,6 +136,7 @@ def parse_audition_csv(text: str) -> List[CommentRow]:
                 duration_sec=duration_sec,
                 raw_name=name,
                 remainder=remainder,
+                variant=variant,
             )
         )
 

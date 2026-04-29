@@ -4,6 +4,8 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
 
@@ -25,7 +27,23 @@ def _write_concepts_csv(path: pathlib.Path, rows: list) -> None:
             writer.writerow(row)
 
 
+def _write_audition_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["Name", "Start", "Duration", "Time Format", "Type", "Description"],
+            delimiter="\t",
+        )
+        writer.writeheader()
+        for row in rows:
+            payload = {"Time Format": "decimal", "Type": "Cue", "Description": ""}
+            payload.update(row)
+            writer.writerow(payload)
+
+
 def _stub_job(monkeypatch) -> None:
+    server._install_route_bindings()
     monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "_set_job_complete", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "_set_job_error", lambda *args, **kwargs: None)
@@ -102,6 +120,57 @@ def test_onboard_ignores_csv_with_unexpected_columns(tmp_path, monkeypatch) -> N
     server._run_onboard_speaker_job("job-4", "Fail02", wav_dest, csv_dest)
 
     assert not (tmp_path / "concepts.csv").exists()
+
+
+def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    complete_calls = []
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_set_job_complete", lambda job_id, result, **kwargs: complete_calls.append((job_id, result, kwargs)))
+    monkeypatch.setattr(
+        server,
+        "_set_job_error",
+        lambda job_id, message: (_ for _ in ()).throw(AssertionError(message)),
+    )
+
+    wav_dest = _make_wav(tmp_path, "SahaTest")
+    csv_dest = wav_dest.parent / "cues.csv"
+    _write_audition_csv(
+        csv_dest,
+        [
+            {"Name": "(1.2)- forehead", "Start": "2:19:07.403", "Duration": "0:01.236"},
+            {"Name": "9- nine", "Start": "20:12.776", "Duration": "0:00.967"},
+            {"Name": "(8.4)- to listen to", "Start": "2:48:11.681", "Duration": "0:00.993"},
+        ],
+    )
+
+    server._run_onboard_speaker_job("job-audition", "SahaTest", wav_dest, csv_dest)
+
+    canonical_path = tmp_path / "annotations" / "SahaTest.parse.json"
+    legacy_path = tmp_path / "annotations" / "SahaTest.json"
+    assert canonical_path.exists()
+    assert legacy_path.exists()
+    annotation = json.loads(canonical_path.read_text(encoding="utf-8"))
+    legacy_annotation = json.loads(legacy_path.read_text(encoding="utf-8"))
+    assert legacy_annotation == annotation
+
+    concept_intervals = annotation["tiers"]["concept"]["intervals"]
+    assert [interval["text"] for interval in concept_intervals] == ["forehead", "nine", "to listen to"]
+    assert [interval["start"] for interval in concept_intervals] == pytest.approx([8347.403, 1212.776, 10091.681])
+    assert [interval["end"] for interval in concept_intervals] == pytest.approx([8348.639, 1213.743, 10092.674])
+
+    ortho_words = annotation["tiers"]["ortho_words"]["intervals"]
+    assert ortho_words == concept_intervals
+    assert annotation["tiers"]["ipa"]["intervals"] == []
+    assert annotation["tiers"]["ortho"]["intervals"] == []
+    assert "bnd" not in annotation["tiers"]
+
+    with open(tmp_path / "concepts.csv", newline="", encoding="utf-8") as handle:
+        rows_by_id = {row["id"]: row["concept_en"] for row in csv.DictReader(handle)}
+    assert rows_by_id == {"1.2": "forehead", "9": "nine", "8.4": "to listen to"}
+    assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
+    assert complete_calls[0][1]["lexemesImported"] == 3
 
 
 def test_onboard_is_idempotent_on_replay(tmp_path, monkeypatch) -> None:
