@@ -110,6 +110,9 @@ def _compute_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _serve
     translates payload shapes.
     """
     speaker = str(payload.get('speaker') or '').strip()
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    if run_mode != 'full':
+        return _server._compute_speaker_stt(job_id, payload)
     source_wav = str(payload.get('sourceWav') or payload.get('source_wav') or '').strip()
     language_raw = payload.get('language')
     language = str(language_raw).strip() if language_raw is not None else None

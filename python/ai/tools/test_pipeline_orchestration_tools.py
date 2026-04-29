@@ -79,3 +79,38 @@ def test_tool_pipeline_run_deduplicates_steps_directly(tmp_path) -> None:
             "language": "sd",
         },
     }
+
+
+def test_tool_pipeline_run_forwards_concept_scoped_run_mode_and_concept_ids(tmp_path) -> None:
+    captured: Dict[str, Any] = {}
+
+    def _start_compute(compute_type: str, payload: Dict[str, Any]) -> str:
+        captured["type"] = compute_type
+        captured["payload"] = payload
+        return "job-pipeline-scoped"
+
+    tools = ParseChatTools(project_root=tmp_path, start_compute_job=_start_compute)
+
+    payload = tool_pipeline_run(
+        tools,
+        {
+            "speaker": "Fail02",
+            "steps": ["stt", "ortho", "ipa"],
+            "run_mode": "concept-windows",
+            "concept_ids": ["2", "3"],
+        },
+    )
+
+    assert payload["jobId"] == "job-pipeline-scoped"
+    assert payload["run_mode"] == "concept-windows"
+    assert payload["concept_ids"] == ["2", "3"]
+    assert captured == {
+        "type": "full_pipeline",
+        "payload": {
+            "speaker": "Fail02",
+            "steps": ["stt", "ortho", "ipa"],
+            "overwrites": {},
+            "run_mode": "concept-windows",
+            "concept_ids": ["2", "3"],
+        },
+    }

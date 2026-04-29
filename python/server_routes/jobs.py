@@ -826,6 +826,10 @@ def _api_post_compute_start(self, compute_type: str) -> None:
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Compute type is required')
     body = self._read_json_body(required=False)
     body_obj = self._expect_object(body or {}, 'Request body')
+    noop_payload = _server._compute_concept_scoped_noop_payload(normalized_type, body_obj)
+    if noop_payload is not None:
+        self._send_json(_server.HTTPStatus.OK, noop_payload)
+        return
     callback_url = _server._job_callback_url_from_mapping(body_obj)
     try:
         response = _server._app_build_post_compute_start_response(compute_type, body_obj, callback_url=callback_url, create_job=_server._create_job, launch_compute_runner=_server._launch_compute_runner, job_conflict_error_cls=_server.JobResourceConflictError)

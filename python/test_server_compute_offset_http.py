@@ -162,6 +162,7 @@ def test_api_post_compute_start_wrapper_delegates_to_helper(monkeypatch) -> None
         observed.update(kwargs)
         return SimpleNamespace(status=HTTPStatus.OK, payload={"jobId": "job-compute-1", "status": "running"})
 
+    monkeypatch.setattr(server, "_compute_concept_scoped_noop_payload", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(server, "_job_callback_url_from_mapping", lambda body: "https://example.com/hook")
     monkeypatch.setattr(server, "_app_build_post_compute_start_response", fake_builder, raising=False)
 
@@ -174,6 +175,34 @@ def test_api_post_compute_start_wrapper_delegates_to_helper(monkeypatch) -> None
     assert observed["create_job"] == server._create_job
     assert observed["launch_compute_runner"] == server._launch_compute_runner
     assert observed["job_conflict_error_cls"] == server.JobResourceConflictError
+
+
+
+def test_api_post_compute_start_scoped_noop_returns_without_job(monkeypatch) -> None:
+    handler = _HandlerHarness({"speaker": "Fail04", "run_mode": "edited-only"})
+
+    def unexpected_callback(_body):
+        raise AssertionError("scoped no-op must not validate callback or start a job")
+
+    def unexpected_builder(*_args, **_kwargs):
+        raise AssertionError("scoped no-op must not allocate a compute job")
+
+    noop_payload = {
+        "status": "skipped",
+        "skipped": True,
+        "no_op": True,
+        "run_mode": "edited-only",
+        "concept_windows": 0,
+        "affected_concepts": [],
+        "jobId": None,
+    }
+    monkeypatch.setattr(server, "_compute_concept_scoped_noop_payload", lambda *_args, **_kwargs: noop_payload)
+    monkeypatch.setattr(server, "_job_callback_url_from_mapping", unexpected_callback)
+    monkeypatch.setattr(server, "_app_build_post_compute_start_response", unexpected_builder, raising=False)
+
+    handler._api_post_compute_start("ortho")
+
+    assert handler.sent_json == [(HTTPStatus.OK, noop_payload)]
 
 
 
