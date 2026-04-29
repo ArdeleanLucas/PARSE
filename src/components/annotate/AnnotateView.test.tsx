@@ -3,6 +3,10 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../../api/types';
 
+const { mockSaveLexemeNoteApi } = vi.hoisted(() => ({
+  mockSaveLexemeNoteApi: vi.fn(),
+}));
+
 let mockRecord: AnnotationRecord | null = null;
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
 let mockCurrentTime = 0;
@@ -55,6 +59,10 @@ let mockWaveSurferOptions: { quickRetimeSelection?: {
   label: string;
   onContextMenu: (selection: { start: number; end: number }, event: MouseEvent) => void;
 } } | null = null;
+
+vi.mock('../../api/client', () => ({
+  saveLexemeNote: mockSaveLexemeNoteApi,
+}));
 
 vi.mock('../../stores/annotationStore', () => ({
   useAnnotationStore: (selector: (state: unknown) => unknown) => selector({
@@ -160,6 +168,8 @@ describe('AnnotateView', () => {
     mockPause.mockClear();
     mockSkip.mockClear();
     mockClearQuickRetimeSelection.mockClear();
+    mockSaveLexemeNoteApi.mockReset();
+    mockSaveLexemeNoteApi.mockResolvedValue({ success: true });
     mockWaveSurferOptions = null;
   });
 
@@ -167,7 +177,7 @@ describe('AnnotateView', () => {
     cleanup();
   });
 
-  it('renders stored annotate fields and annotated badge', () => {
+  it('renders stored annotate fields, speaker notes, and annotated badge', () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
 
     render(
@@ -183,8 +193,36 @@ describe('AnnotateView', () => {
 
     expect(screen.getByDisplayValue('aw')).toBeTruthy();
     expect(screen.getByDisplayValue('ئاو')).toBeTruthy();
+    expect(screen.getByText('Orthographic')).toBeTruthy();
+    expect(screen.queryByText('Orthographic (Kurdish)')).toBeNull();
+    expect(screen.getByTestId('lexeme-user-note-Fail01-water')).toBeTruthy();
     expect(screen.getByText('Annotated')).toBeTruthy();
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
+  });
+
+  it('saves speaker notes for the active speaker and concept on blur', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const notes = screen.getByTestId('lexeme-user-note-Fail01-water');
+    fireEvent.change(notes, { target: { value: 'Check vowel length.' } });
+    fireEvent.blur(notes);
+
+    await waitFor(() => expect(mockSaveLexemeNoteApi).toHaveBeenCalledWith({
+      speaker: 'Fail01',
+      concept_id: 'water',
+      user_note: 'Check vowel length.',
+    }));
   });
 
 

@@ -1022,9 +1022,21 @@ export function ParseUI() {
   }, [annotationRecords, concept, enrichmentData, getTagsForConcept, selectedSpeakers, speakers, primaryContactCodes]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
+  const navigationConcepts = filtered.length > 0 ? filtered : concepts;
+  const navigationTotal = navigationConcepts.length;
 
-  const goPrev = () => setConceptId(id => Math.max(1, id - 1));
-  const goNext = () => setConceptId(id => Math.min(total, id + 1));
+  const goToConceptOffset = useCallback((offset: number) => {
+    setConceptId((id) => {
+      const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
+      if (list.length === 0) return id;
+      const currentIndex = list.findIndex((candidate) => candidate.id === id);
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = Math.min(list.length - 1, Math.max(0, baseIndex + offset));
+      return list[nextIndex]?.id ?? id;
+    });
+  }, [concepts, navigationConcepts]);
+  const goPrev = useCallback(() => goToConceptOffset(-1), [goToConceptOffset]);
+  const goNext = useCallback(() => goToConceptOffset(1), [goToConceptOffset]);
 
   useEffect(() => {
     setActiveConceptUI(concept.key);
@@ -1059,7 +1071,7 @@ export function ParseUI() {
         return;
       }
 
-      if (currentMode === 'tags' || total <= 1) return;
+      if (currentMode === 'tags' || navigationTotal <= 1) return;
 
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -1072,7 +1084,7 @@ export function ParseUI() {
 
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, [currentMode, total, setActiveConceptUI]);
+  }, [currentMode, navigationTotal, goPrev, goNext]);
 
   const toggleSpeaker = (s: string) => {
     if (currentMode === 'annotate') {

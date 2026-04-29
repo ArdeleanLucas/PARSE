@@ -70,8 +70,6 @@ export function RightPanel(props: RightPanelProps) {
             onOpenSourcesReport={props.onOpenSourcesReport}
             onOpenClefConfig={props.onOpenClefConfig}
             onRefreshEnrichments={props.onRefreshEnrichments}
-            tagFilter={props.tagFilter}
-            onTagFilterChange={props.onTagFilterChange}
             onOpenLoadDecisions={props.onOpenLoadDecisions}
             onSaveDecisions={props.onSaveDecisions}
             onExportLingPy={props.onExportLingPy}

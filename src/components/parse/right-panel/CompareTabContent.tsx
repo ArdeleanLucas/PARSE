@@ -1,8 +1,7 @@
-import { AlertCircle, CheckCircle2, Download, Filter, Play, RefreshCw, Save, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Play, RefreshCw, Save, Upload } from 'lucide-react';
 
 import { formatEta } from '../../../hooks/useActionJob';
 import { isCompareComputeMode, isCompareRunDisabled } from '../compareComputeContract';
-import { tagFilterOptions } from './shared';
 import type { RightPanelProps } from './types';
 
 type CompareTabContentProps = Pick<
@@ -22,8 +21,6 @@ type CompareTabContentProps = Pick<
   | 'onOpenSourcesReport'
   | 'onOpenClefConfig'
   | 'onRefreshEnrichments'
-  | 'tagFilter'
-  | 'onTagFilterChange'
   | 'onOpenLoadDecisions'
   | 'onSaveDecisions'
   | 'onExportLingPy'
@@ -47,8 +44,6 @@ export function CompareTabContent({
   onOpenSourcesReport,
   onOpenClefConfig,
   onRefreshEnrichments,
-  tagFilter,
-  onTagFilterChange,
   onOpenLoadDecisions,
   onSaveDecisions,
   onExportLingPy,
@@ -165,24 +160,6 @@ export function CompareTabContent({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <Filter className="h-3 w-3" /> Filter by tag
-        </h4>
-        <div className="space-y-1">
-          {tagFilterOptions.map(({ key, label, dot }) => (
-            <button
-              key={key}
-              onClick={() => onTagFilterChange(key)}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter === key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-              {label}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="p-4">

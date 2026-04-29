@@ -140,6 +140,7 @@ describe('RightPanel', () => {
     expect(onOpenSourcesReport).toHaveBeenCalledOnce();
     expect(screen.getByText(/CLEF not configured/i)).toBeTruthy();
     expect(screen.queryByTestId('compare-compute-semantics')).toBeNull();
+    expect(screen.queryByText('Filter by tag')).toBeNull();
   });
 
   it('uses separate disabled and status semantics for contact and non-contact compute modes', () => {
