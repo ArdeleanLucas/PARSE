@@ -39,10 +39,10 @@ export function findAnnotationForConcept(
 }
 
 export function formatPlayhead(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return "0:00.000";
+  if (!Number.isFinite(sec) || sec < 0) return "0:00.00";
   const m = Math.floor(sec / 60);
   const s = sec - m * 60;
-  return `${m}:${s.toFixed(3).padStart(6, "0")}`;
+  return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 }
 
 export function formatSearchTime(sec: number): string {
