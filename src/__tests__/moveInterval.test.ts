@@ -439,6 +439,76 @@ describe("annotationStore.saveLexemeAnnotation (real-shape data)", () => {
     });
   });
 
+  it("returns moved=2 when typed IPA creates a missing interval and only the concept span also moves", () => {
+    useAnnotationStore.setState({
+      records: {
+        Fail01: {
+          speaker: "Fail01",
+          tiers: {
+            concept: {
+              name: "concept", display_order: 1,
+              intervals: [{ start: 808.689, end: 809.623, text: "hair" }],
+            },
+            ipa: { name: "ipa", display_order: 2, intervals: [] },
+            ortho: { name: "ortho", display_order: 3, intervals: [] },
+            ortho_words: { name: "ortho_words", display_order: 4, intervals: [] },
+          },
+          created_at: "2026-01-01T00:00:00Z",
+          modified_at: "2026-01-01T00:00:00Z",
+          source_wav: "Fail01.wav",
+        },
+      },
+      dirty: {}, loading: {}, histories: {},
+    });
+
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Fail01",
+      oldStart: 808.689, oldEnd: 809.623,
+      newStart: 808.700, newEnd: 809.500,
+      ipaText: "ndʒə",
+      orthoText: "",
+      conceptName: "hair",
+    });
+
+    expect(result).toMatchObject({ ok: true, moved: 2 });
+    const ipaIntervals = useAnnotationStore.getState().records.Fail01.tiers.ipa.intervals;
+    expect(ipaIntervals).toEqual([{ start: 808.700, end: 809.500, text: "ndʒə", manuallyAdjusted: true }]);
+  });
+
+  it("returns moved=1 when only the concept span moves and no IPA/ORTH text is typed", () => {
+    useAnnotationStore.setState({
+      records: {
+        Fail01: {
+          speaker: "Fail01",
+          tiers: {
+            concept: {
+              name: "concept", display_order: 1,
+              intervals: [{ start: 808.689, end: 809.623, text: "hair" }],
+            },
+            ipa: { name: "ipa", display_order: 2, intervals: [] },
+            ortho: { name: "ortho", display_order: 3, intervals: [] },
+            ortho_words: { name: "ortho_words", display_order: 4, intervals: [] },
+          },
+          created_at: "2026-01-01T00:00:00Z",
+          modified_at: "2026-01-01T00:00:00Z",
+          source_wav: "Fail01.wav",
+        },
+      },
+      dirty: {}, loading: {}, histories: {},
+    });
+
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Fail01",
+      oldStart: 808.689, oldEnd: 809.623,
+      newStart: 808.700, newEnd: 809.500,
+      ipaText: "",
+      orthoText: "",
+      conceptName: "hair",
+    });
+
+    expect(result).toMatchObject({ ok: true, moved: 1 });
+  });
+
   it("returns moved=0 with a clean error when no concept interval matches", () => {
     seedFail02RealShape();
     const result = useAnnotationStore.getState().saveLexemeAnnotation({
