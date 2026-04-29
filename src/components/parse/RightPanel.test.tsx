@@ -33,8 +33,6 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       onOpenSourcesReport={vi.fn()}
       onOpenClefConfig={vi.fn()}
       onRefreshEnrichments={vi.fn()}
-      tagFilter="all"
-      onTagFilterChange={vi.fn()}
       onOpenLoadDecisions={vi.fn()}
       onSaveDecisions={vi.fn()}
       onExportLingPy={vi.fn()}
@@ -73,6 +71,19 @@ describe('RightPanel', () => {
     expect(onToggleSpeaker).toHaveBeenCalledWith('Fail02');
     expect(onSaveAnnotations).toHaveBeenCalledOnce();
     expect(screen.getByText(/Concept list scoped to/i)).toBeTruthy();
+  });
+
+  it('does not render concept filters in annotate mode while keeping Save annotations', () => {
+    renderRightPanel({ currentMode: 'annotate' });
+
+    const panel = screen.getByTestId('right-panel');
+    expect(within(panel).queryByText(/Filter concepts/i)).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'All concepts' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Untagged' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Review needed' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Confirmed' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Problematic' })).toBeNull();
+    expect(within(panel).getByRole('button', { name: /save annotations/i })).toBeTruthy();
   });
 
   it('preserves speaker-selection behavior in compare mode', () => {
@@ -183,8 +194,6 @@ describe('RightPanel', () => {
         onOpenSourcesReport={vi.fn()}
         onOpenClefConfig={vi.fn()}
         onRefreshEnrichments={vi.fn()}
-        tagFilter="all"
-        onTagFilterChange={vi.fn()}
         onOpenLoadDecisions={vi.fn()}
         onSaveDecisions={vi.fn()}
         onExportLingPy={vi.fn()}

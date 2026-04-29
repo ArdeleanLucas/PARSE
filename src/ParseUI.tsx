@@ -2098,8 +2098,6 @@ export function ParseUI() {
           onOpenSourcesReport={modals.sourcesReport.open}
           onOpenClefConfig={modals.clef.open}
           onRefreshEnrichments={() => { void useEnrichmentStore.getState().load(); }}
-          tagFilter={tagFilter}
-          onTagFilterChange={setTagFilter}
           onOpenLoadDecisions={() => openDecisionsImport(false)}
           onSaveDecisions={() => handleSaveDecisions(false)}
           onExportLingPy={handleExportLingPy}
