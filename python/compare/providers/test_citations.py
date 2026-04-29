@@ -161,12 +161,12 @@ def test_get_citation_falls_back_to_unknown_for_unrecognised_id():
     assert entry["label"] == PROVIDER_CITATIONS[UNKNOWN_SOURCE]["label"]
 
 
-def test_grokipedia_is_flagged_as_ai():
+def test_grok_llm_is_flagged_as_ai():
     # The modal renders ``ai`` rows with a red caveat banner. If
-    # grokipedia ever drops to "tool" or "dataset" the warning vanishes,
+    # grok_llm ever drops to "tool" or "dataset" the warning vanishes,
     # which would let users cite LLM output as a primary source.
-    assert PROVIDER_CITATIONS["grokipedia"]["type"] == "ai"
-    note = PROVIDER_CITATIONS["grokipedia"].get("note", "")
+    assert PROVIDER_CITATIONS["grok_llm"]["type"] == "ai"
+    note = PROVIDER_CITATIONS["grok_llm"].get("note", "")
     assert "verify" in note.lower() or "primary source" in note.lower()
 
 

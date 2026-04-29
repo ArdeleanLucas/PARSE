@@ -17,7 +17,7 @@ function makeReport(): ClefSourcesReport {
     generated_at: "2026-04-28T09:00:00Z",
     providers: [
       { id: "wikidata", total_forms: 2 },
-      { id: "grokipedia", total_forms: 1 },
+      { id: "grok_llm", total_forms: 1 },
     ],
     languages: [
       {
@@ -28,10 +28,10 @@ function makeReport(): ClefSourcesReport {
         total_forms: 3,
         concepts_covered: 2,
         concepts_total: 2,
-        per_provider: { wikidata: 2, grokipedia: 1 },
+        per_provider: { wikidata: 2, grok_llm: 1 },
         forms: [
           { concept_en: "water", form: "ماء", sources: ["wikidata"] },
-          { concept_en: "water", form: "maːʔ", sources: ["grokipedia"] },
+          { concept_en: "water", form: "maːʔ", sources: ["grok_llm"] },
           { concept_en: "fire", form: "naːr", sources: ["wikidata"] },
         ],
       },
@@ -47,18 +47,18 @@ function makeReport(): ClefSourcesReport {
         citation: "Wikidata citation",
         bibtex: "@article{wikidata}",
       },
-      grokipedia: {
-        label: "Grokipedia",
+      grok_llm: {
+        label: "Grok LLM",
         type: "ai",
         authors: null,
         year: null,
-        title: "Grokipedia",
-        citation: "Grokipedia citation",
+        title: "Grok LLM",
+        citation: "Grok LLM citation",
         bibtex: "",
         note: "Verify",
       },
     },
-    citation_order: ["wikidata", "grokipedia"],
+    citation_order: ["wikidata", "grok_llm"],
   };
 }
 
@@ -90,7 +90,7 @@ describe("ClefSourcesReportModal matrix", () => {
 
     await waitFor(() => screen.getByTestId("concept-provider-matrix"));
     expect(screen.getByTestId("concept-provider-cell-water-wikidata")).toBeTruthy();
-    expect(screen.getByTestId("concept-provider-cell-water-grokipedia")).toBeTruthy();
+    expect(screen.getByTestId("concept-provider-cell-water-grok_llm")).toBeTruthy();
   });
 
   it("opens a drill-down drawer when a populated matrix cell is clicked", async () => {

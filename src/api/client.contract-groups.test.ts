@@ -72,6 +72,7 @@ const contractGroups = [
       "startContactLexemeFetch",
       "getClefConfig",
       "saveClefConfig",
+      "clearClefData",
       "getClefCatalog",
       "getClefProviders",
       "getClefSourcesReport",

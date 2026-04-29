@@ -306,7 +306,7 @@ If a workspace was populated before the 2026-04-25 exact-match fix in `lingpy_wo
 | `asjp` | ASJP database |
 | `cldf` | CLDF datasets |
 | `csv_override` | Local CSV overrides |
-| `grokipedia` | LLM-assisted lookup (xAI/Grok) |
+| `grok_llm` | LLM-assisted lookup (xAI/Grok) |
 | `lingpy_wordlist` | LingPy wordlist data |
 | `literature` | Published literature references |
 | `pycldf_provider` | `pycldf` library |

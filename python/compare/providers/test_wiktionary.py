@@ -37,3 +37,39 @@ def test_extract_ipa_for_arabic_matches_name_and_iso3_tags():
 
     assert forms == ["ħa", "ʕarabi"]
     assert all("t͡ɬ" not in form for form in forms)
+
+
+def test_translation_table_extraction():
+    provider = WiktionaryProvider()
+    wikitext = """
+====Translations====
+* Arabic: {{t|ar|شَعْر}} {{t+|ar|[[كتاب|كِتاب]]}} {{tt|ar|ماء}} {{tt+|ar|شَعْر}}
+* Central Kurdish: {{t+|ckb|قژ}} {{tt|ckb|[[پەر]]}}
+* Persian: {{tt|fa|مو}} {{t+|fas|موى}}
+* Turkish: {{t|tr|saç}}
+* Noise: {{t-needed|ar}} {{t|ar|{{l|ar|ماء}}}} {{t|ar|}}
+"""
+
+    assert provider._extract_translation_table_forms(wikitext, "ar") == ["شَعْر", "كِتاب", "ماء"]
+    assert provider._extract_translation_table_forms(wikitext, "ckb") == ["قژ", "پەر"]
+    assert provider._extract_translation_table_forms(wikitext, "fa") == ["مو", "موى"]
+
+
+def test_lookup_prefers_translation_table_before_ipa(monkeypatch):
+    provider = WiktionaryProvider()
+    wikitext = """
+{{t|ar|ماء}}
+{{IPA|ar|/maːʔ/}}
+"""
+    monkeypatch.setattr(provider, "_fetch_en_wiktionary_wikitext", lambda _word: wikitext)
+
+    assert provider._lookup("water", "ar") == ["ماء"]
+
+
+def test_extract_any_ipa_ignores_wikilink_brackets():
+    provider = WiktionaryProvider()
+    wikitext = """
+[[File:Pieni2.jpg|thumb]] [[کتاب]] /www.usgs.gov/ /water-science-school/ [maːʔ]
+"""
+
+    assert provider._extract_any_ipa(wikitext) == ["maːʔ"]

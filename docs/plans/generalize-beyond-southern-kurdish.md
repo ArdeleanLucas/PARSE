@@ -24,7 +24,7 @@ This is scoped to **linguistic portability**, not desktop packaging. The Electro
 ## 2) What's already generic (scope reducer)
 
 - **Frontend (`src/`).** No SK-specific labels, dialect lists, or placeholders in `ParseUI.tsx` or compare components.
-- **LLM system prompts.** `python/compare/providers/grokipedia.py` and chat/toolbox prompts are language-agnostic.
+- **LLM system prompts.** `python/compare/providers/grok_llm.py` and chat/toolbox prompts are language-agnostic.
 - **Data model.** Speakers, concepts, annotations, cross-speaker matches, cognate tables — all generic.
 - **Phonetic-rules engine.** `python/compare/phonetic_rules.py` is a generic rule runner. Only its *default rule set* is SK-specific.
 - **Comparison data pipeline.** Already designed as a pluggable provider registry (see `generic-comparison-data-pipeline.md`).

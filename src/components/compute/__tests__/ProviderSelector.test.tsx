@@ -25,7 +25,7 @@ describe("ProviderSelector", () => {
   const providers = [
     { id: "wiktionary", name: "Wiktionary" },
     { id: "literature", name: "Literature" },
-    { id: "grokipedia", name: "Grokipedia" },
+    { id: "grok_llm", name: "Grok LLM" },
   ];
 
   it("keeps compact pill mode for legacy callers", () => {
@@ -44,13 +44,13 @@ describe("ProviderSelector", () => {
     expect(screen.queryByText(/Open lexical databases/i)).toBeNull();
   });
 
-  it("renders grouped detailed mode with connect affordance for unauthed Grokipedia", () => {
+  it("renders grouped detailed mode with connect affordance for unauthed Grok LLM", () => {
     const onExpandAuth = vi.fn();
     render(
       <ProviderSelector
         mode="detailed"
         providers={providers}
-        selectedProviders={new Set(["wiktionary", "grokipedia"])}
+        selectedProviders={new Set(["wiktionary", "grok_llm"])}
         toggleProvider={() => {}}
         overwrite={false}
         setOverwrite={() => {}}
@@ -58,7 +58,7 @@ describe("ProviderSelector", () => {
         providerStatuses={{
           wiktionary: "ready",
           literature: "missing_file",
-          grokipedia: "needs_auth",
+          grok_llm: "needs_auth",
         }}
         onExpandAuth={onExpandAuth}
       />,
@@ -68,6 +68,6 @@ describe("ProviderSelector", () => {
     expect(screen.getByText(/Local sources/i)).toBeTruthy();
     expect(screen.getByText(/LLM-augmented search/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /connect/i }));
-    expect(onExpandAuth).toHaveBeenCalledWith("grokipedia");
+    expect(onExpandAuth).toHaveBeenCalledWith("grok_llm");
   });
 });

@@ -32,7 +32,7 @@ export function ProviderApiKeyForm({
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
       <div className="text-[11px] text-slate-500">
-        Either xAI or OpenAI works for Grokipedia. xAI is tried first; OpenAI is the fallback.
+        Either xAI or OpenAI works for Grok LLM. xAI is tried first; OpenAI is the fallback.
       </div>
 
       <div className="flex gap-2 rounded-lg bg-slate-100 p-0.5">

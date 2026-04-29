@@ -1,4 +1,4 @@
-"""Wiktionary/Wikipedia provider — IPA extraction from wiki sources."""
+"""Wiktionary/Wikipedia provider — translation-table forms with IPA fallback."""
 
 import json
 import re
@@ -14,8 +14,14 @@ from .language_match import lang_key_matches
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "config" / "cache"
 
 WIKTIONARY_IPA_RE = re.compile(r'\{\{IPA\|([^}|]+)\|(/[^/]+/|[\[{][^\]}]+[\]}])\}\}')
+WIKTIONARY_TRANSLATION_RE = re.compile(r"\{\{((?:t|tt)\+?\|[^{}]*)\}\}", re.IGNORECASE)
+WIKILINK_RE = re.compile(r"^\[\[([^\]]+)\]\]$")
 IPA_SLASH_RE = re.compile(r'/([^/]{1,40})/')
-IPA_BRACKET_RE = re.compile(r'\[([^\]]{1,40})\]')
+IPA_BRACKET_RE = re.compile(r'(?<!\[)\[([^\[\]]{1,40})\](?!\])')
+IPA_SIGNAL_RE = re.compile(r"[\u0250-\u02af\u1d00-\u1dbf\u0300-\u036fˈˌːʰʷ̃͡ʼʔ]")
+WIKI_REQUEST_HEADERS = {
+    "User-Agent": "PARSE-CLEF/0.1 (https://github.com/ArdeleanLucas/PARSE)",
+}
 _WIKTIONARY_FRAGMENTS: Dict[str, List[str]] = {
     "ar": ["ar", "arb", "ara", "arabic"],
     "fa": ["fa", "fas", "pes", "persian", "farsi"],
@@ -26,6 +32,52 @@ _WIKTIONARY_FRAGMENTS: Dict[str, List[str]] = {
     "syr": ["syr", "syriac"],
     "urd": ["ur", "urd", "urdu"],
 }
+
+
+def _split_template_args(body: str) -> List[str]:
+    parts: List[str] = []
+    buf: List[str] = []
+    link_depth = 0
+    i = 0
+    while i < len(body):
+        if body.startswith("[[", i):
+            link_depth += 1
+            buf.append("[[")
+            i += 2
+            continue
+        if body.startswith("]]", i) and link_depth:
+            link_depth -= 1
+            buf.append("]]")
+            i += 2
+            continue
+        char = body[i]
+        if char == "|" and link_depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+        i += 1
+    parts.append("".join(buf))
+    return parts
+
+
+def _clean_translation_form(raw: str) -> str:
+    form = re.sub(r"<[^>]+>", "", raw).strip()
+    match = WIKILINK_RE.match(form)
+    if match:
+        target = match.group(1)
+        form = target.rsplit("|", 1)[-1].strip()
+    return form
+
+
+def _looks_like_ipa(candidate: str) -> bool:
+    value = candidate.strip()
+    if not value or any(char.isdigit() for char in value):
+        return False
+    lowered = value.lower()
+    if any(token in lowered for token in ("http", "www", "archive", ".com", ".org")):
+        return False
+    return bool(IPA_SIGNAL_RE.search(value))
 
 
 class WiktionaryProvider(BaseProvider):
@@ -55,16 +107,21 @@ class WiktionaryProvider(BaseProvider):
             self._save_cache(lang_code, cache)
 
     def _lookup(self, concept_en: str, lang_code: str) -> List[str]:
-        forms = self._try_en_wiktionary(concept_en, lang_code)
-        if forms:
-            return forms
+        en_wikitext = self._fetch_en_wiktionary_wikitext(concept_en)
+        if en_wikitext:
+            forms = self._extract_translation_table_forms(en_wikitext, lang_code)
+            if forms:
+                return forms
+            forms = self._extract_ipa_for_lang(en_wikitext, lang_code)
+            if forms:
+                return forms
         forms = self._try_target_wiktionary(concept_en, lang_code)
         if forms:
             return forms
         forms = self._try_wikipedia_interwiki(concept_en, lang_code)
         return forms
 
-    def _try_en_wiktionary(self, word: str, lang_code: str) -> List[str]:
+    def _fetch_en_wiktionary_wikitext(self, word: str) -> str:
         try:
             resp = requests.get(
                 "https://en.wiktionary.org/w/api.php",
@@ -74,15 +131,23 @@ class WiktionaryProvider(BaseProvider):
                     "prop": "wikitext",
                     "format": "json",
                 },
+                headers=WIKI_REQUEST_HEADERS,
                 timeout=5,
             )
             if resp.status_code != 200:
-                return []
+                return ""
             data = resp.json()
             wikitext = data.get("parse", {}).get("wikitext", {}).get("*", "")
-            return self._extract_ipa_for_lang(wikitext, lang_code)
+            return wikitext if isinstance(wikitext, str) else ""
         except Exception:
+            return ""
+
+    def _try_en_wiktionary(self, word: str, lang_code: str) -> List[str]:
+        """Return IPA forms from en.wiktionary.org; translation forms are handled in _lookup."""
+        wikitext = self._fetch_en_wiktionary_wikitext(word)
+        if not wikitext:
             return []
+        return self._extract_ipa_for_lang(wikitext, lang_code)
 
     def _try_target_wiktionary(self, word: str, lang_code: str) -> List[str]:
         try:
@@ -94,6 +159,7 @@ class WiktionaryProvider(BaseProvider):
                     "prop": "wikitext",
                     "format": "json",
                 },
+                headers=WIKI_REQUEST_HEADERS,
                 timeout=5,
             )
             if resp.status_code != 200:
@@ -115,6 +181,7 @@ class WiktionaryProvider(BaseProvider):
                     "lllang": lang_code,
                     "format": "json",
                 },
+                headers=WIKI_REQUEST_HEADERS,
                 timeout=5,
             )
             if resp.status_code != 200:
@@ -142,6 +209,7 @@ class WiktionaryProvider(BaseProvider):
                     "format": "json",
                     "section": 0,
                 },
+                headers=WIKI_REQUEST_HEADERS,
                 timeout=5,
             )
             if resp.status_code != 200:
@@ -151,6 +219,25 @@ class WiktionaryProvider(BaseProvider):
             return self._extract_any_ipa(wikitext)
         except Exception:
             return []
+
+    def _extract_translation_table_forms(self, wikitext: str, lang_code: str) -> List[str]:
+        fragments = _WIKTIONARY_FRAGMENTS.get(lang_code, [lang_code])
+        forms: List[str] = []
+        seen = set()
+        for match in WIKTIONARY_TRANSLATION_RE.finditer(wikitext):
+            parts = _split_template_args(match.group(1))
+            if len(parts) < 3 or parts[0].strip().lower() not in {"t", "t+", "tt", "tt+"}:
+                continue
+            wikitext_lang = parts[1].strip()
+            if not lang_key_matches(wikitext_lang, fragments):
+                continue
+            form = _clean_translation_form(parts[2])
+            if not form or "{" in form or "}" in form:
+                continue
+            if form not in seen:
+                seen.add(form)
+                forms.append(form)
+        return forms
 
     def _extract_ipa_for_lang(self, wikitext: str, lang_code: str) -> List[str]:
         fragments = _WIKTIONARY_FRAGMENTS.get(lang_code, [lang_code])
@@ -167,12 +254,16 @@ class WiktionaryProvider(BaseProvider):
     def _extract_any_ipa(self, wikitext: str) -> List[str]:
         forms = []
         for m in IPA_SLASH_RE.finditer(wikitext):
-            forms.append(m.group(1))
+            candidate = m.group(1).strip()
+            if _looks_like_ipa(candidate):
+                forms.append(candidate)
             if len(forms) >= 2:
                 break
         if not forms:
             for m in IPA_BRACKET_RE.finditer(wikitext):
-                forms.append(m.group(1))
+                candidate = m.group(1).strip()
+                if _looks_like_ipa(candidate):
+                    forms.append(candidate)
                 if len(forms) >= 2:
                     break
         return forms[:2]

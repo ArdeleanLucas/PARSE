@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getContactLexemeCoverage, startContactLexemeFetch, pollCompute } from "../../api/client";
 import type { ContactLexemeCoverage } from "../../api/types";
 
-const PROVIDERS = ["csv_override", "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature"];
+const PROVIDERS = ["csv_override", "asjp", "cldf", "wikidata", "wiktionary", "grok_llm", "literature"];
 
 export function ContactLexemePanel() {
   const [coverage, setCoverage] = useState<ContactLexemeCoverage | null>(null);

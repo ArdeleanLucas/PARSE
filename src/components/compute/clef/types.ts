@@ -11,7 +11,7 @@ import type {
 
 export const MAX_PRIMARY = 2;
 
-export type ClefConfigModalTab = "languages" | "populate";
+export type ClefConfigModalTab = "languages" | "populate" | "settings";
 
 export interface ClefConfigModalProps {
   open: boolean;
@@ -119,6 +119,7 @@ export interface UseClefConfigResult {
   setCustomCode: (value: string) => void;
   setCustomName: (value: string) => void;
   refreshAuthStatus: () => Promise<AuthStatus>;
+  refreshStatus: () => Promise<ClefConfigStatus>;
   togglePrimary: (code: string) => void;
   toggleSecondary: (code: string) => void;
   addCustom: () => void;

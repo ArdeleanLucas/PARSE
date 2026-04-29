@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .asjp import ASJP_CONCEPT_MAP, AsjpProvider
 from .cldf import CldfProvider
 from .csv_override import CsvOverrideProvider, _OVERRIDE_PATH
-from .grokipedia import GrokipediaProvider, _get_auth_token as _grok_get_auth_token
+from .grok_llm import GrokLlmProvider, _get_auth_token as _grok_get_auth_token
 from .lingpy_wordlist import LingPyCldfProvider
 from .literature import LiteratureProvider
 from .pycldf_provider import PycldfProvider
@@ -24,8 +24,8 @@ PROVIDER_PRIORITY = [
     "cldf",             # HTTP CSV download fallback
     "wikidata",
     "wiktionary",
-    "grokipedia",       # LLM fallback for anything not found above
     "literature",
+    "grok_llm",         # LLM fallback for anything not found above
 ]
 
 
@@ -48,8 +48,8 @@ class ProviderRegistry:
             "cldf": CldfProvider(),
             "wikidata": WikidataProvider(),
             "wiktionary": WiktionaryProvider(),
-            "grokipedia": GrokipediaProvider(ai_config or {}),
             "literature": LiteratureProvider(),
+            "grok_llm": GrokLlmProvider(ai_config or {}),
         }
 
     def fetch_all(
@@ -206,17 +206,18 @@ class ProviderRegistry:
                 finder = getattr(provider, "_find_metadata_files", None)
                 metadata_files = list(finder()) if callable(finder) else []
                 data_dir = getattr(provider, "_data_dir", None)
+                data_dir_label = data_dir if isinstance(data_dir, Path) else "config/lexibank_data"
                 if not metadata_files:
                     warnings.append(
-                        "{0}: no local CLDF datasets found under {1}.".format(
+                        "{0}: no local CLDF datasets found under {1}. Drop a Lexibank dataset clone into that directory to enable this provider.".format(
                             provider_name,
-                            data_dir if isinstance(data_dir, Path) else "config/lexibank_data",
+                            data_dir_label,
                         )
                     )
             elif provider_name == "pylexibank":
                 if not PYLEXIBANK_AVAILABLE:
                     warnings.append(
-                        "pylexibank: optional pylexibank package is not installed."
+                        "pylexibank: optional pylexibank package is not installed (install with `pip install pylexibank` if you want to use installed dataset packages)."
                     )
                 else:
                     datasets = provider._load_installed_datasets()
@@ -226,37 +227,29 @@ class ProviderRegistry:
                         )
             elif provider_name == "asjp":
                 overlap_count = sum(1 for concept_en in concepts if concept_en in ASJP_CONCEPT_MAP)
-                if overlap_count == 0:
+                if overlap_count < len(concepts):
                     warnings.append(
-                        "asjp: none of the remaining concepts are in the provider's 40-concept Swadesh map."
-                    )
-                elif overlap_count < len(concepts):
-                    warnings.append(
-                        "asjp: built-in coverage only overlaps {0}/{1} remaining concepts.".format(
+                        "asjp: ASJP's built-in 40-concept Swadesh map covers {0} of your {1} requested concepts (this is normal — ASJP is a small reference set, not a coverage gap).".format(
                             overlap_count,
                             len(concepts),
                         )
                     )
             elif provider_name == "wikidata":
                 overlap_count = sum(1 for concept_en in concepts if concept_en in CONCEPT_TO_QID)
-                if overlap_count == 0:
+                if overlap_count < len(concepts):
                     warnings.append(
-                        "wikidata: none of the remaining concepts are in the built-in concept-to-QID map."
-                    )
-                elif overlap_count < len(concepts):
-                    warnings.append(
-                        "wikidata: built-in concept coverage only overlaps {0}/{1} remaining concepts.".format(
+                        "wikidata: Wikidata's built-in concept→QID map covers {0} of your {1} requested concepts (this is normal — Wikidata coverage depends on the bundled concept map, not a runtime failure).".format(
                             overlap_count,
                             len(concepts),
                         )
                     )
-            elif provider_name == "grokipedia":
+            elif provider_name == "grok_llm":
                 ai_config = getattr(provider, "_ai_config", {}) or {}
                 xai_key = _grok_get_auth_token("xai") or ai_config.get("xai_api_key")
                 openai_key = _grok_get_auth_token("openai") or ai_config.get("openai_api_key")
                 if not xai_key and not openai_key:
                     warnings.append(
-                        "grokipedia: no xAI or OpenAI API key is configured."
+                        "grok_llm: no xAI or OpenAI API key configured. Open the Settings tab in CLEF Configure to add one, or skip this provider."
                     )
         except Exception as exc:
             warnings.append(

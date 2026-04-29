@@ -1,8 +1,10 @@
 import { AlertCircle, Play, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthStatus } from "../../../api/types";
-import { saveClefConfig } from "../../../api/client";
+import { clearClefData, saveClefConfig } from "../../../api/client";
+import { Modal } from "../../shared/Modal";
 import { ConfigForm } from "./ConfigForm";
+import { ProviderApiKeyForm } from "./ProviderApiKeyForm";
 import { ProviderSelector } from "./ProviderSelector";
 import { useClefConfig } from "./useClefConfig";
 import { useClefFetchJob } from "./useClefFetchJob";
@@ -16,6 +18,8 @@ export function ClefConfigModal({
   initialTab = "languages",
 }: ClefConfigModalProps) {
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [authExpandedProviderId, setAuthExpandedProviderId] = useState<string | null>(null);
   const {
     addCustom,
@@ -32,6 +36,7 @@ export function ClefConfigModal({
     providers,
     providerStatuses,
     refreshAuthStatus,
+    refreshStatus,
     search,
     secondary,
     setCustomCode,
@@ -65,7 +70,7 @@ export function ClefConfigModal({
     }
     return count;
   }, [providerStatuses, selectedProviders]);
-  const grokipediaSelectedButUnauthed = selectedProviders.has("grokipedia") && (providerStatuses.grokipedia ?? "needs_auth") === "needs_auth";
+  const grokLlmSelectedButUnauthed = selectedProviders.has("grok_llm") && (providerStatuses.grok_llm ?? "needs_auth") === "needs_auth";
   const canStart = !saving && selectedProviderCount > 0;
 
   const saveOnly = useCallback(async () => {
@@ -97,10 +102,10 @@ export function ClefConfigModal({
       setError("Select at least one source before starting CLEF.");
       return;
     }
-    if (grokipediaSelectedButUnauthed) {
-      setError("Grokipedia is selected but no API key is configured. Connect a key or uncheck Grokipedia.");
+    if (grokLlmSelectedButUnauthed) {
+      setError("Grok LLM is selected but no API key is configured. Connect a key or uncheck Grok LLM.");
       setTab("populate");
-      setAuthExpandedProviderId("grokipedia");
+      setAuthExpandedProviderId("grok_llm");
       return;
     }
     setSaving(true);
@@ -118,7 +123,7 @@ export function ClefConfigModal({
     } finally {
       setSaving(false);
     }
-  }, [buildPayload, grokipediaSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
+  }, [buildPayload, grokLlmSelectedButUnauthed, onClose, onPopulateStarted, onSaved, primary, selectedProviderCount, setError, setPopulateFailed, setTab, startPopulate]);
 
   async function handleProviderAuthSaved(providerId: string, _status: AuthStatus) {
     await refreshAuthStatus();
@@ -127,10 +132,27 @@ export function ClefConfigModal({
     setError(null);
   }
 
+  const handleClearClefData = useCallback(async () => {
+    setClearing(true);
+    setSettingsMessage(null);
+    setError(null);
+    try {
+      const result = await clearClefData({ dryRun: false, clearCache: true });
+      await refreshStatus();
+      setSettingsMessage(
+        `Deleted ${result.summary.formsRemoved} forms across ${result.summary.languagesAffected} languages; removed ${result.summary.cacheFilesRemoved} cache files.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete CLEF data");
+    } finally {
+      setClearing(false);
+    }
+  }, [refreshStatus, setError]);
+
   useEffect(() => {
     if (!open) return;
-    if (initialTab === "populate") {
-      setTab("populate");
+    if (initialTab !== "languages") {
+      setTab(initialTab);
     }
   }, [initialTab, open, setTab]);
 
@@ -200,13 +222,22 @@ export function ClefConfigModal({
               toggleProvider={toggleProvider}
             />
           )}
+          {!loading && tab === "settings" && (
+            <ClefSettingsPanel
+              clearing={clearing}
+              message={settingsMessage}
+              onAuthSaved={(status) => void handleProviderAuthSaved("grok_llm", status)}
+              onClear={() => void handleClearClefData()}
+              onProviderAuthCancel={() => setAuthExpandedProviderId(null)}
+            />
+          )}
         </div>
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-6 py-4">
           <div className="text-[11px] text-slate-500">
             {selectedReadyCount} of {providers.length || 10} sources will run.
-            {grokipediaSelectedButUnauthed && (
+            {grokLlmSelectedButUnauthed && (
               <span className="ml-2 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                <AlertCircle className="h-3 w-3" /> Grokipedia needs a key
+                <AlertCircle className="h-3 w-3" /> Grok LLM needs a key
               </span>
             )}
           </div>
@@ -255,9 +286,14 @@ function MissingConceptsBanner() {
 }
 
 function SectionStrip({ tab, onSelect }: { tab: ClefConfigModalTab; onSelect: (tab: ClefConfigModalTab) => void }) {
+  const labels: Record<ClefConfigModalTab, string> = {
+    languages: "1. Languages",
+    populate: "2. Sources",
+    settings: "3. Settings",
+  };
   return (
     <div className="flex gap-1 border-b border-slate-200 px-6 pt-2">
-      {(["languages", "populate"] as ClefConfigModalTab[]).map((entry) => (
+      {(["languages", "populate", "settings"] as ClefConfigModalTab[]).map((entry) => (
         <button
           key={entry}
           onClick={() => onSelect(entry)}
@@ -268,9 +304,83 @@ function SectionStrip({ tab, onSelect }: { tab: ClefConfigModalTab; onSelect: (t
               : "text-slate-500 hover:text-slate-700")
           }
         >
-          {entry === "languages" ? "1. Languages" : "2. Sources"}
+          {labels[entry]}
         </button>
       ))}
+    </div>
+  );
+}
+
+function ClefSettingsPanel({
+  clearing,
+  message,
+  onAuthSaved,
+  onClear,
+  onProviderAuthCancel,
+}: {
+  clearing: boolean;
+  message: string | null;
+  onAuthSaved: (status: AuthStatus) => void;
+  onClear: () => void;
+  onProviderAuthCancel: () => void;
+}) {
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+
+  function confirmClear() {
+    setConfirmClearOpen(false);
+    onClear();
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Provider API key</div>
+        <p className="mt-1 text-[12px] text-slate-600">
+          Add the xAI or OpenAI key used by the Grok LLM fallback provider.
+        </p>
+      </div>
+      <ProviderApiKeyForm defaultProvider="xai" onCancel={onProviderAuthCancel} onSaved={onAuthSaved} />
+      <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Danger zone</div>
+        <p className="mt-1 max-w-2xl text-[12px] text-slate-600">
+          Delete populated CLEF reference forms from the workspace config and clear provider cache files. Language metadata and CLEF settings stay intact.
+        </p>
+        <button
+          type="button"
+          onClick={() => setConfirmClearOpen(true)}
+          disabled={clearing}
+          className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {clearing ? "Deleting CLEF data…" : "Delete all CLEF data"}
+        </button>
+        {message && <div className="mt-2 text-[11px] text-emerald-700">{message}</div>}
+      </section>
+      <Modal open={confirmClearOpen} onClose={() => setConfirmClearOpen(false)} title="Delete all CLEF data?">
+        <div className="max-w-md space-y-4 text-[12px] text-slate-700">
+          <p>
+            This will delete all populated CLEF reference forms and cached provider lookup files. PARSE creates a backend backup before clearing.
+          </p>
+          <p className="text-slate-500">
+            Language metadata, primary-language settings, and other CLEF configuration stay intact.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setConfirmClearOpen(false)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmClear}
+              className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-rose-700"
+            >
+              Delete CLEF data
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

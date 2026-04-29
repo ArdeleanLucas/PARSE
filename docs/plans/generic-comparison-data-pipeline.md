@@ -26,7 +26,7 @@ class ProviderRegistry:
         self.register('wiktionary', WiktionaryProvider())
         self.register('wikipedia', WikipediaProvider())
         self.register('wikidata', WikidataProvider())
-        self.register('grokipedia', GrokIpediaProvider(ai_config))  # xAI primary
+        self.register('grok_llm', GrokLlmProvider(ai_config))  # xAI primary
         self.register('literature', LiteratureReviewProvider())  # uses our tools
 
     def fetch(self, concepts: List[str], languages: List[str], priority_order: List[str] = None) -> Iterator[FetchResult]:
@@ -56,16 +56,16 @@ def fetch_wikipedia(self, concept: str, lang_code: str) -> List[str]:
 
 **Pros:** Broad coverage, up-to-date, free. Good for major languages.
 **Cons:** Inconsistent structure across language editions; noisy for low-resource languages.
-**Broad languages:** Excellent for major families; poor for dialects (use with Grokipedia fallback).
+**Broad languages:** Excellent for major families; poor for dialects (use with Grok LLM fallback).
 **Integration:** Second in priority after CSV/ASJP. Feeds IPA directly to sil_contact_languages.json.
 **Thesis:** Provides transparent, citable sources for comparative tables in Ch4.
 
-### 2. xAI/Grok "Grokipedia" mode via xAI API
-**Application:** Primary LLM provider. System prompt "You are Grokipedia, a linguistics database specialized in IPA for Swadesh concepts..." with few-shot examples for consistent JSON output. Uses the existing xai:default profile and grok-4.20-0309-reasoning model. Batch 10-20 concepts per call.
+### 2. xAI/Grok "Grok LLM" mode via xAI API
+**Application:** Primary LLM provider. System prompt "You are Grok LLM, a linguistics database specialized in IPA for Swadesh concepts..." with few-shot examples for consistent JSON output. Uses the existing xai:default profile and grok-4.20-0309-reasoning model. Batch 10-20 concepts per call.
 
 **Code sketch:**
 ```python
-def _fetch_batch_grokipedia(self, batch: List[str], lang: Dict):
+def _fetch_batch_grok_llm(self, batch: List[str], lang: Dict):
     prompt = f"Concept list: {batch}\nLanguage: {lang['name']} ({lang['iso']})\nReturn ONLY JSON array of IPA arrays."
     response = xai_client.chat.completions.create(model="grok-4.20-0309-reasoning", messages=[{"role": "system", "content": SYSTEM_PROMPT}, ...])
     parsed = json.loads(response.choices[0].message.content)
@@ -124,7 +124,7 @@ def fetch_asjp(self, concepts: List[str], lang_code: str) -> List[str]:
 |----------|---------|------------------|----------|------|----------|
 | CSV Override | Instant | Full | Highest | 0 | Researcher-provided gold data |
 | ASJP | Instant | Very High | Medium | 0 | Baseline Swadesh |
-| Grokipedia (xAI) | 2-8s/batch | Highest | High (with validation) | API quota | Rare dialects, variants |
+| Grok LLM (xAI) | 2-8s/batch | Highest | High (with validation) | API quota | Rare dialects, variants |
 | Wiktionary/Wikipedia | 1-3s | High | Medium-High | 0 | Major languages |
 | Lexibank/CLDF | Instant (local) | Medium-High | Very High | 0 | Scholarly citations |
 | Literature APIs | 10-60s | Variable | Highest (with review) | 0 | Thesis evidence |
@@ -139,11 +139,11 @@ def fetch_asjp(self, concepts: List[str], lang_code: str) -> List[str]:
 
 ## Thesis Relevance (§4.4)
 
-The pipeline makes borrowing adjudication empirical rather than manual. Similarity scores now have traceable sources (e.g., "Grokipedia + ASJP, validated against Belelli 2019"). This strengthens the Bayesian phylogeny by quantifying contact effects without outgroups. All sources are documented in the output JSON for the methodology appendix.
+The pipeline makes borrowing adjudication empirical rather than manual. Similarity scores now have traceable sources (e.g., "Grok LLM + ASJP, validated against Belelli 2019"). This strengthens the Bayesian phylogeny by quantifying contact effects without outgroups. All sources are documented in the output JSON for the methodology appendix.
 
 ## Implementation Roadmap (estimated effort)
 
-1. MC-294.1: Provider registry + Grokipedia/xAI (4h)
+1. MC-294.1: Provider registry + Grok LLM/xAI (4h)
 2. MC-294.2: ASJP + Wikipedia providers + validation (3h)
 3. MC-294.3: Literature and CLDF/Wikidata (3h)
 4. MC-294.4: Server endpoints, caching, generalize fetcher (2h)

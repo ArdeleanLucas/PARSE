@@ -23,7 +23,7 @@ CONTACT_LEXEME_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                     name="contact_lexeme_lookup",
                     description=(
                         "Fetch reference forms (IPA transcriptions) for contact/comparison languages "
-                        "from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grokipedia, "
+                        "from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grok LLM, "
                         "literature). Gated by dryRun: pass dryRun=true FIRST to preview what would be "
                         "fetched without touching sil_contact_languages.json, then dryRun=false after "
                         "the user confirms — only the second call writes. maxConcepts caps the sample "
@@ -54,7 +54,7 @@ CONTACT_LEXEME_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                     "type": "string",
                                     "enum": [
                                         "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
-                                        "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
+                                        "asjp", "cldf", "wikidata", "wiktionary", "grok_llm", "literature",
                                     ],
                                 },
                                 "description": "Provider priority order. Defaults to full chain.",
@@ -211,7 +211,7 @@ def contact_lexeme_lookup(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict
         if concept_filter is not None and max_concepts is not None:
             concept_filter = concept_filter[:max_concepts]
 
-        # Load ai_config for provider credentials (grokipedia needs API keys)
+        # Load ai_config for provider credentials (grok_llm needs API keys)
         ai_config = _read_json_file(tools.config_path, {})
 
         # If concept filter is given, write a temporary concepts CSV with only those
@@ -354,7 +354,7 @@ def contact_lexeme_lookup(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict
             "totalConceptsFetched": sum(filled.values()),
             "providersUsed": providers or [
                 "csv_override", "lingpy_wordlist", "pycldf", "pylexibank",
-                "asjp", "cldf", "wikidata", "wiktionary", "grokipedia", "literature",
+                "asjp", "cldf", "wikidata", "wiktionary", "grok_llm", "literature",
             ],
             "overwrite": overwrite,
             "configPath": str(config_path),

@@ -1,6 +1,6 @@
 import json
 
-from compare.providers import grokipedia
+from compare.providers import grok_llm
 
 
 def _write_tokens(tmp_path, payload):
@@ -11,9 +11,9 @@ def _write_tokens(tmp_path, payload):
 
 def test_get_auth_token_reads_legacy_discrete_provider_key(tmp_path, monkeypatch):
     _write_tokens(tmp_path, {"xai": "xai-legacy123"})
-    monkeypatch.setattr(grokipedia, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(grok_llm, "_CONFIG_DIR", tmp_path)
 
-    assert grokipedia._get_auth_token("xai") == "xai-legacy123"
+    assert grok_llm._get_auth_token("xai") == "xai-legacy123"
 
 
 def test_get_auth_token_reads_polymorphic_direct_key_only_for_matching_provider(tmp_path, monkeypatch):
@@ -24,15 +24,15 @@ def test_get_auth_token_reads_polymorphic_direct_key_only_for_matching_provider(
             "direct_api_key_provider": "xai",
         },
     )
-    monkeypatch.setattr(grokipedia, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(grok_llm, "_CONFIG_DIR", tmp_path)
 
-    assert grokipedia._get_auth_token("xai") == "xai-direct123"
-    assert grokipedia._get_auth_token("openai") is None
+    assert grok_llm._get_auth_token("xai") == "xai-direct123"
+    assert grok_llm._get_auth_token("openai") is None
 
 
 def test_get_auth_token_returns_none_for_empty_or_missing_tokens(tmp_path, monkeypatch):
-    monkeypatch.setattr(grokipedia, "_CONFIG_DIR", tmp_path)
-    assert grokipedia._get_auth_token("xai") is None
+    monkeypatch.setattr(grok_llm, "_CONFIG_DIR", tmp_path)
+    assert grok_llm._get_auth_token("xai") is None
 
     _write_tokens(tmp_path, {})
-    assert grokipedia._get_auth_token("xai") is None
+    assert grok_llm._get_auth_token("xai") is None

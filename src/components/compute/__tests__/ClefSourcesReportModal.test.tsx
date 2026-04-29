@@ -38,14 +38,14 @@ const baseCitations = {
       "Vrandečić, D. & Krötzsch, M. 2014. Wikidata: a free collaborative knowledgebase.",
     bibtex: "@article{wikidata2014, title={Wikidata}, year={2014}}",
   },
-  grokipedia: {
-    label: "Grokipedia (LLM-generated)",
+  grok_llm: {
+    label: "Grok LLM (LLM-generated)",
     type: "ai" as const,
     authors: null,
     year: null,
     title: "LLM-generated reference forms",
     note: "NOT CITABLE AS A PRIMARY SOURCE. Verify each form before using.",
-    citation: "Grokipedia provider: LLM-generated. Not citable as primary.",
+    citation: "Grok LLM provider: LLM-generated. Not citable as primary.",
     bibtex: "",
   },
   unknown: {
@@ -66,7 +66,7 @@ function makeReport(overrides: Partial<ClefSourcesReport> = {}): ClefSourcesRepo
     providers: [
       { id: "asjp", total_forms: 12 },
       { id: "wikidata", total_forms: 3 },
-      { id: "grokipedia", total_forms: 1 },
+      { id: "grok_llm", total_forms: 1 },
     ],
     languages: [
       {
@@ -77,7 +77,7 @@ function makeReport(overrides: Partial<ClefSourcesReport> = {}): ClefSourcesRepo
         total_forms: 16,
         concepts_covered: 16,
         concepts_total: 20,
-        per_provider: { asjp: 12, wikidata: 3, grokipedia: 1 },
+        per_provider: { asjp: 12, wikidata: 3, grok_llm: 1 },
         forms: [
           { concept_en: "water", form: "ماء", sources: ["wikidata"] },
           { concept_en: "fire", form: "naːr", sources: ["asjp"] },
@@ -86,7 +86,7 @@ function makeReport(overrides: Partial<ClefSourcesReport> = {}): ClefSourcesRepo
     ],
     concepts_total: 20,
     citations: baseCitations,
-    citation_order: ["asjp", "wikidata", "grokipedia", "unknown"],
+    citation_order: ["asjp", "wikidata", "grok_llm", "unknown"],
     ...overrides,
   };
 }
@@ -105,7 +105,7 @@ describe("ClefSourcesReportModal — academic citations section", () => {
 
     expect(screen.getByTestId("sources-report-citation-asjp")).toBeTruthy();
     expect(screen.getByTestId("sources-report-citation-wikidata")).toBeTruthy();
-    expect(screen.getByTestId("sources-report-citation-grokipedia")).toBeTruthy();
+    expect(screen.getByTestId("sources-report-citation-grok_llm")).toBeTruthy();
     // ``unknown`` is in citation_order but not in providers -- shouldn't render
     expect(screen.queryByTestId("sources-report-citation-unknown")).toBeNull();
   });
@@ -131,12 +131,12 @@ describe("ClefSourcesReportModal — academic citations section", () => {
     mockGetReport.mockResolvedValueOnce(makeReport());
     render(<ClefSourcesReportModal open onClose={() => {}} />);
 
-    await waitFor(() => screen.getByTestId("sources-report-citation-grokipedia"));
-    const block = screen.getByTestId("sources-report-citation-grokipedia");
+    await waitFor(() => screen.getByTestId("sources-report-citation-grok_llm"));
+    const block = screen.getByTestId("sources-report-citation-grok_llm");
 
     expect(block.textContent).toContain("NOT CITABLE AS A PRIMARY SOURCE");
     // No BibTeX button for AI rows -- their bibtex is intentionally empty.
-    expect(screen.queryByTestId("sources-report-copy-bibtex-grokipedia")).toBeNull();
+    expect(screen.queryByTestId("sources-report-copy-bibtex-grok_llm")).toBeNull();
   });
 
   it("hides the citations section entirely when no providers contributed", async () => {
@@ -211,7 +211,7 @@ describe("ClefSourcesReportModal — copy + export actions", () => {
   it("Export BibTeX is hidden when only non-bibliographic providers contributed", async () => {
     mockGetReport.mockResolvedValueOnce(
       makeReport({
-        providers: [{ id: "grokipedia", total_forms: 1 }],
+        providers: [{ id: "grok_llm", total_forms: 1 }],
         languages: [
           {
             code: "ar",
@@ -220,8 +220,8 @@ describe("ClefSourcesReportModal — copy + export actions", () => {
             total_forms: 1,
             concepts_covered: 1,
             concepts_total: 20,
-            per_provider: { grokipedia: 1 },
-            forms: [{ concept_en: "fire", form: "naːr", sources: ["grokipedia"] }],
+            per_provider: { grok_llm: 1 },
+            forms: [{ concept_en: "fire", form: "naːr", sources: ["grok_llm"] }],
           },
         ],
       }),
@@ -245,11 +245,11 @@ describe("ClefSourcesReportModal — provider chip styling reflects citation typ
             total_forms: 1,
             concepts_covered: 1,
             concepts_total: 20,
-            per_provider: { grokipedia: 1 },
-            forms: [{ concept_en: "fire", form: "naːr", sources: ["grokipedia"] }],
+            per_provider: { grok_llm: 1 },
+            forms: [{ concept_en: "fire", form: "naːr", sources: ["grok_llm"] }],
           },
         ],
-        providers: [{ id: "grokipedia", total_forms: 1 }],
+        providers: [{ id: "grok_llm", total_forms: 1 }],
       }),
     );
     render(<ClefSourcesReportModal open onClose={() => {}} />);
@@ -260,6 +260,6 @@ describe("ClefSourcesReportModal — provider chip styling reflects citation typ
       el.className.includes("rose"),
     );
     expect(chip, "expected an AI-tinted chip in the form row").toBeTruthy();
-    expect(chip!.textContent).toContain("Grokipedia");
+    expect(chip!.textContent).toContain("Grok LLM");
   });
 });

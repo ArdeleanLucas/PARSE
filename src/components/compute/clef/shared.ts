@@ -9,7 +9,7 @@ export const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
   cldf: "CLDF",
   wikidata: "Wikidata",
   wiktionary: "Wiktionary",
-  grokipedia: "Grokipedia",
+  grok_llm: "Grok LLM",
   literature: "Literature",
   unknown: "Unattributed (legacy)",
 };
@@ -28,7 +28,7 @@ export const PROVIDER_GROUPS = [
   {
     id: "llm-augmented-search",
     label: "LLM-augmented search",
-    providerIds: ["grokipedia"],
+    providerIds: ["grok_llm"],
   },
 ] as const;
 
@@ -42,7 +42,7 @@ export const PROVIDER_SUBTITLES: Record<string, string> = {
   lingpy_wordlist: "LingPy project wordlists",
   csv_override: "Workspace CSV overrides",
   literature: "Workspace literature notes",
-  grokipedia: "xAI/OpenAI assisted lookup",
+  grok_llm: "xAI/OpenAI assisted lookup",
 };
 
 export const ALL_PROVIDER_IDS = PROVIDER_GROUPS.flatMap((group) => [...group.providerIds]);
