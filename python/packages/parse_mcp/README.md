@@ -41,6 +41,11 @@ result = client.call_tool("project_context_read", {"include": ["project", "sourc
 print(result)
 ```
 
+`apply_timestamp_offset` responses include both backend row counts and user-facing
+concept counts: `shiftedIntervals` remains the tier-interval total, while
+`shiftedConcepts` reports the distinct concepts moved. Use
+`ApplyTimestampOffsetResult.from_payload(...)` when you want a typed result object.
+
 ## LangChain
 
 ```python

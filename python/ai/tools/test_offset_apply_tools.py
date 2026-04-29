@@ -44,6 +44,7 @@ def test_tool_apply_timestamp_offset_runs_direct_bundle_handler(tmp_path) -> Non
 
     assert payload["speaker"] == "Test01"
     assert payload["shiftedIntervals"] == 1
+    assert payload["shiftedConcepts"] == 1
     persisted = json.loads(path.read_text(encoding="utf-8"))
     by_text = {iv["text"]: iv for iv in persisted["tiers"]["concept"]["intervals"]}
     assert by_text["STONE"]["start"] == 10.0
@@ -61,4 +62,5 @@ def test_tool_apply_timestamp_offset_supports_dry_run_directly(tmp_path) -> None
 
     assert payload["dryRun"] is True
     assert payload["wouldShiftIntervals"] == 1
+    assert payload["wouldShiftConcepts"] == 1
     assert payload["preview"][0]["to"] == [25.0, 25.5]

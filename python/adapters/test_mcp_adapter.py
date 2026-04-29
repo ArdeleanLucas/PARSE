@@ -298,6 +298,33 @@ def test_create_mcp_server_accepts_direct_named_arguments_for_registered_tools(t
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_mcp_apply_timestamp_offset_returns_shifted_concepts(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    _seed_minimal_annotation_project(tmp_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "mcp_config.json").write_text('{"expose_all_tools": true}\n', encoding="utf-8")
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+
+    server = create_mcp_server(str(tmp_path))
+    _, meta = asyncio.run(
+        server.call_tool(
+            "apply_timestamp_offset",
+            {"speaker": "Base01", "offsetSec": 0.25, "dryRun": False},
+        )
+    )
+    payload = json.loads(meta["result"])
+
+    assert payload["ok"] is True
+    assert payload["tool"] == "apply_timestamp_offset"
+    assert payload["result"]["shiftedIntervals"] == 2
+    assert payload["result"]["shiftedConcepts"] == 1
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
 def test_default_mcp_tool_metadata_matches_oracle_contract_for_preview_and_job_observability_tools(tmp_path, monkeypatch) -> None:
     import asyncio
 

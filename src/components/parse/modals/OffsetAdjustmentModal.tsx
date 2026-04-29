@@ -158,7 +158,7 @@ export function OffsetAdjustmentModal({
                     {consensus.median >= 0 ? '+' : ''}{consensus.median.toFixed(3)} s <span className="text-slate-400">{arrow}</span>
                   </div>
                   <div className="mt-1 text-slate-700">
-                    Apply will move every interval <strong>{Math.abs(consensus.median).toFixed(3)} s {directionWord}</strong>.
+                    Apply will move every tier interval for every concept in this speaker <strong>{Math.abs(consensus.median).toFixed(3)} s {directionWord}</strong>.
                   </div>
                   <div className="mt-1 text-slate-500">
                     {manualAnchors.length} anchor{manualAnchors.length === 1 ? '' : 's'}
@@ -208,7 +208,7 @@ export function OffsetAdjustmentModal({
                   {summary.sign}{result.offsetSec.toFixed(3)} s <span className="text-slate-400">{summary.arrow}</span>
                 </div>
                 <div className="mt-1 text-slate-700" data-testid="offset-direction-label">
-                  Apply will move every interval <strong>{Math.abs(result.offsetSec).toFixed(3)} s {summary.directionWord}</strong>.
+                  Apply will move every tier interval for every concept in this speaker <strong>{Math.abs(result.offsetSec).toFixed(3)} s {summary.directionWord}</strong>.
                 </div>
                 <div className="mt-2 text-slate-500">
                   {summary.isManual ? (
@@ -277,32 +277,37 @@ export function OffsetAdjustmentModal({
           </div>
         )}
 
-        {offsetState.phase === 'applied' && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-emerald-700">
-              <CheckCircle2 className="h-4 w-4" /> Shifted {offsetState.shifted} interval{offsetState.shifted === 1 ? '' : 's'} by {offsetState.result.offsetSec.toFixed(3)}s
-            </div>
-            {offsetState.protected > 0 && (
-              <div
-                data-testid="offset-applied-protected"
-                className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
-              >
-                <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0" />
-                <span>
-                  Left <strong>{offsetState.protected}</strong> interval row{offsetState.protected === 1 ? '' : 's'} untouched — they were previously locked by manual timestamp edits or anchor captures.
-                </span>
+        {offsetState.phase === 'applied' && (() => {
+          const shiftedConcepts = offsetState.shiftedConcepts ?? offsetState.shifted;
+          const conceptUnit = shiftedConcepts === 1 ? 'concept' : 'concepts';
+          const intervalUnit = offsetState.shifted === 1 ? 'tier interval' : 'tier intervals';
+          return (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" /> Shifted {shiftedConcepts} {conceptUnit} ({offsetState.shifted} {intervalUnit}) by {offsetState.result.offsetSec.toFixed(3)}s
               </div>
-            )}
-            <div className="flex justify-end">
-              <button
-                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                onClick={onClose}
-              >
-                Close
-              </button>
+              {offsetState.protected > 0 && (
+                <div
+                  data-testid="offset-applied-protected"
+                  className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900"
+                >
+                  <Anchor className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                  <span>
+                    Left <strong>{offsetState.protected}</strong> interval row{offsetState.protected === 1 ? '' : 's'} untouched — they were previously locked by manual timestamp edits or anchor captures.
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={onClose}
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {offsetState.phase === 'error' && (
           <div className="space-y-2">

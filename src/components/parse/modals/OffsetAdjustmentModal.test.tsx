@@ -141,4 +141,33 @@ describe('OffsetAdjustmentModal', () => {
     expect(onOpenManualOffset).toHaveBeenCalledOnce();
     expect(onApplyDetectedOffset).toHaveBeenCalledOnce();
   });
+
+  it('summarizes applied offsets in concept units while preserving tier-interval detail', () => {
+    render(
+      <OffsetAdjustmentModal
+        open
+        offsetState={{
+          phase: 'applied',
+          result: makeDetectedResult({ offsetSec: 0.187 }),
+          shifted: 9358,
+          shiftedConcepts: 521,
+          protected: 11,
+        }}
+        manualAnchors={[]}
+        manualConsensus={null}
+        manualBusy={false}
+        protectedLexemeCount={0}
+        onClose={vi.fn()}
+        onCaptureCurrentSelection={vi.fn()}
+        onRemoveManualAnchor={vi.fn()}
+        onSubmitManualOffset={vi.fn()}
+        onApplyDetectedOffset={vi.fn()}
+        onOpenManualOffset={vi.fn()}
+        onOpenJobLogs={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Shifted 521 concepts \(9358 tier intervals\) by 0\.187s/)).toBeTruthy();
+    expect(screen.getByTestId('offset-applied-protected').textContent).toContain('11');
+  });
 });

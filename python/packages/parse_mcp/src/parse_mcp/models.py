@@ -4,6 +4,45 @@ from dataclasses import dataclass, field
 from typing import Any, Dict
 
 
+def _int_from_payload(payload: Dict[str, Any], key: str, default: int = 0) -> int:
+    value = payload.get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_from_payload(payload: Dict[str, Any], key: str, default: float = 0.0) -> float:
+    value = payload.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class ApplyTimestampOffsetResult:
+    speaker: str
+    appliedOffsetSec: float
+    shiftedIntervals: int
+    shiftedConcepts: int
+    protectedIntervals: int
+    protectedLexemes: int
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "ApplyTimestampOffsetResult":
+        payload = payload or {}
+        shifted_intervals = _int_from_payload(payload, "shiftedIntervals")
+        return cls(
+            speaker=str(payload.get("speaker") or ""),
+            appliedOffsetSec=_float_from_payload(payload, "appliedOffsetSec"),
+            shiftedIntervals=shifted_intervals,
+            shiftedConcepts=_int_from_payload(payload, "shiftedConcepts", shifted_intervals),
+            protectedIntervals=_int_from_payload(payload, "protectedIntervals"),
+            protectedLexemes=_int_from_payload(payload, "protectedLexemes"),
+        )
+
+
 @dataclass
 class ParseToolAnnotations:
     readOnlyHint: bool = False

@@ -28,7 +28,7 @@ export type OffsetState =
   | { phase: 'detected'; result: OffsetDetectResult }
   | { phase: 'manual' }
   | { phase: 'applying'; result: OffsetDetectResult }
-  | { phase: 'applied'; result: OffsetDetectResult; shifted: number; protected: number }
+  | { phase: 'applied'; result: OffsetDetectResult; shifted: number; shiftedConcepts: number; protected: number }
   | { phase: 'error'; message: string; traceback?: string; jobId?: string };
 
 interface UseOffsetStateArgs {
@@ -47,6 +47,7 @@ interface UseOffsetStateArgs {
   ) => Promise<OffsetDetectResult>;
   applyTimestampOffset: (speaker: string, offsetSec: number) => Promise<{
     shiftedIntervals?: number;
+    shiftedConcepts?: number;
     protectedIntervals?: number;
     protectedLexemes?: number;
     shifted?: number;
@@ -227,6 +228,7 @@ export function useOffsetState({
         phase: 'applied',
         result,
         shifted: apply.shiftedIntervals ?? apply.shifted ?? 0,
+        shiftedConcepts: apply.shiftedConcepts ?? apply.shiftedIntervals ?? apply.shifted ?? 0,
         protected: apply.protectedLexemes ?? apply.protected ?? 0,
       });
     } catch (err) {
