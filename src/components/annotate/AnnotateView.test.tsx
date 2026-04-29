@@ -254,6 +254,42 @@ describe('AnnotateView', () => {
     expect(mockSetInterval).not.toHaveBeenCalled();
   });
 
+  it('updates the saved lexeme bounds used by later waveform region commits after Save Annotation', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('lexeme-start'), { target: { value: '1.750' } });
+    fireEvent.change(screen.getByTestId('lexeme-end'), { target: { value: '2.750' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'aβ' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
+    expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('1.750');
+    expect((screen.getByTestId('lexeme-end') as HTMLInputElement).value).toBe('2.750');
+
+    (mockWaveSurferOptions as unknown as { onRegionCommit: (start: number, end: number) => void }).onRegionCommit(1.8, 2.8);
+
+    expect(mockMoveIntervalAcrossTiers).toHaveBeenLastCalledWith(
+      'Fail01',
+      1.75,
+      2.75,
+      1.8,
+      2.8,
+      ['concept', 'ipa', 'ortho', 'ortho_words'],
+    );
+  });
+
   it('commits a dragged waveform quick-retime selection from the dynamic context menu', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
 

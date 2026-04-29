@@ -542,6 +542,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     setTimestampMessage({ kind: "err", text: result.error });
                   } else {
                     await saveSpeaker(speaker);
+                    storedIntervalRef.current = { start: nextStart, end: nextEnd };
+                    setEditStart(nextStart.toFixed(3));
+                    setEditEnd(nextEnd.toFixed(3));
                     setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
                     addRegion(nextStart, nextEnd);
                     seek(nextStart);
