@@ -187,6 +187,39 @@ describe('AnnotateView', () => {
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
   });
 
+
+  it('renders a live waveform playhead chip from playback state with two-decimal precision', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+    mockCurrentTime = 5.125;
+
+    const view = (
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />
+    );
+
+    const { rerender } = render(view);
+    expect(screen.getByLabelText('Waveform playhead time').textContent).toBe('0:05.13');
+
+    mockCurrentTime = 65.1;
+    rerender(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+    expect(screen.getByLabelText('Waveform playhead time').textContent).toBe('1:05.10');
+  });
+
   it('saves annotation tiers for the selected region with one atomic store action', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', start: 1.25, end: 2.5 }]);
 
