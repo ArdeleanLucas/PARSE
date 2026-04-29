@@ -31,7 +31,13 @@ Contract rules:
 - `"full"` preserves the current whole-speaker behavior.
 - `"concept-windows"` runs the selected step set over concept-tier windows.
 - `"edited-only"` runs the selected step set only over concept-tier rows where `manuallyAdjusted === true`.
-- The endpoint response shape remains unchanged.
+- When `run_mode != "full"`, the response payload gains `affected_concepts`:
+  a list of `{ concept_id: str, start: number, end: number }` for the concepts
+  that were processed. The frontend uses this for scoped post-run refresh
+  (PR #191 → `applyConceptScopedRefresh`); a missing or empty list falls back
+  to a full annotation reload.
+- When `run_mode === "full"` or absent, the response shape is unchanged from
+  pre-#192 behavior (backwards-compatible).
 - The field name is `run_mode` on the wire; frontend TypeScript may expose `runMode` internally, but must serialize to `run_mode`.
 - This contract is locked by coordinator. If either implementation lane needs to revise it, the lane must request agreement in PR comments and wait for both lanes to acknowledge before changing the shared contract.
 
@@ -110,3 +116,10 @@ A lane has contract drift if it changes any of the following without coordinator
 - terminology from concept-scoped reruns to per-row cognates
 
 Daily coordinator comments should report drift as `contract-drift: no` unless one of the above is observed in a lane diff.
+
+## Amendment history
+
+- 2026-04-29: added affected_concepts to the response contract. The original
+  contract (PR #190) under-specified the response side; both implementation
+  lanes (PR #191 frontend, PR #192 backend) shipped consistent with each other,
+  so this is a doc-correction with no code drift.
