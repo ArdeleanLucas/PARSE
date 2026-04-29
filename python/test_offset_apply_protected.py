@@ -45,10 +45,11 @@ def _record_with_two_lexemes(flags: tuple[bool, bool]):
 def test_shift_intervals_skips_manually_adjusted_intervals() -> None:
     record = _record_with_two_lexemes((True, False))
 
-    shifted, protected_ = _annotation_shift_intervals(record, 5.0)
+    shifted, protected_, shifted_concepts = _annotation_shift_intervals(record, 5.0)
 
     assert shifted == 1
     assert protected_ == 1
+    assert shifted_concepts == 1
 
     concept = record["tiers"]["concept"]["intervals"]
     by_text = {iv["text"]: iv for iv in concept}
@@ -61,19 +62,59 @@ def test_shift_intervals_skips_manually_adjusted_intervals() -> None:
     assert by_text["WATER"]["end"] == 25.5
 
 
+def test_shift_intervals_reports_distinct_shifted_concepts_across_tiers() -> None:
+    record = {
+        "speaker": "Test01",
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 0,
+                "intervals": [
+                    {"start": 10.0, "end": 10.5, "text": "1: STONE", "concept_id": "1"},
+                    {"start": 20.0, "end": 20.5, "text": "2: WATER", "concept_id": "2"},
+                ],
+            },
+            "ortho": {
+                "type": "interval",
+                "display_order": 1,
+                "intervals": [
+                    {"start": 10.0, "end": 10.5, "text": "berd", "concept_id": "1"},
+                    {"start": 20.0, "end": 20.5, "text": "aw", "concept_id": "2"},
+                ],
+            },
+            "ipa": {
+                "type": "interval",
+                "display_order": 2,
+                "intervals": [
+                    {"start": 10.0, "end": 10.5, "text": "bɛrd", "concept_id": "1"},
+                    {"start": 20.0, "end": 20.5, "text": "aw", "concept_id": "2"},
+                ],
+            },
+        },
+    }
+
+    shifted, protected_, shifted_concepts = _annotation_shift_intervals(record, 1.0)
+
+    assert shifted == 6
+    assert protected_ == 0
+    assert shifted_concepts == 2
+
+
 def test_shift_intervals_returns_zero_zero_for_empty_record() -> None:
-    shifted, protected_ = _annotation_shift_intervals({}, 1.0)
+    shifted, protected_, shifted_concepts = _annotation_shift_intervals({}, 1.0)
     assert shifted == 0
     assert protected_ == 0
+    assert shifted_concepts == 0
 
 
 def test_shift_intervals_all_protected_shifts_nothing() -> None:
     record = _record_with_two_lexemes((True, True))
 
-    shifted, protected_ = _annotation_shift_intervals(record, -3.0)
+    shifted, protected_, shifted_concepts = _annotation_shift_intervals(record, -3.0)
 
     assert shifted == 0
     assert protected_ == 2
+    assert shifted_concepts == 0
     # Both intervals kept their original timing.
     concept = record["tiers"]["concept"]["intervals"]
     starts = sorted(iv["start"] for iv in concept)
@@ -140,3 +181,47 @@ def test_chat_tools_apply_offset_skips_manually_adjusted(tmp_path) -> None:
     assert by_text["STONE"]["start"] == 10.0
     assert by_text["STONE"]["manuallyAdjusted"] is True
     assert by_text["WATER"]["start"] == 25.0
+
+
+def test_chat_tools_apply_offset_reports_distinct_shifted_concepts(tmp_path) -> None:
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    path = annotations_dir / "Test01.parse.json"
+    path.write_text(
+        json.dumps(
+            {
+                "speaker": "Test01",
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {"start": 1.0, "end": 1.5, "text": "1: ash", "concept_id": "1"},
+                            {"start": 2.0, "end": 2.5, "text": "2: water", "concept_id": "2"},
+                        ]
+                    },
+                    "ortho": {
+                        "intervals": [
+                            {"start": 1.0, "end": 1.5, "text": "xol", "concept_id": "1"},
+                            {"start": 2.0, "end": 2.5, "text": "aw", "concept_id": "2"},
+                        ]
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    tools = ParseChatTools(project_root=tmp_path)
+
+    dry_run = tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 0.25, "dryRun": True},
+    )["result"]
+    applied = tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 0.25, "dryRun": False},
+    )["result"]
+
+    assert path.is_file()
+    assert dry_run["wouldShiftIntervals"] == 4
+    assert dry_run["wouldShiftConcepts"] == 2
+    assert applied["shiftedIntervals"] == 4
+    assert applied["shiftedConcepts"] == 2

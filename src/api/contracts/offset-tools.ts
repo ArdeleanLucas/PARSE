@@ -36,6 +36,7 @@ export interface OffsetApplyResult {
   speaker: string;
   appliedOffsetSec: number;
   shiftedIntervals: number;
+  shiftedConcepts: number;
   protectedIntervals: number;
   protectedLexemes: number;
 }

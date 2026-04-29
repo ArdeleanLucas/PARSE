@@ -26,7 +26,7 @@ SpeakerNormalizer = Callable[[Any], str]
 AnnotationPathResolver = Callable[[str], pathlib.Path]
 JsonReader = Callable[[pathlib.Path], Dict[str, Any]]
 AnnotationNormalizer = Callable[[Dict[str, Any], str], Dict[str, Any]]
-AnnotationShifter = Callable[[Dict[str, Any], float], tuple[int, int]]
+AnnotationShifter = Callable[[Dict[str, Any], float], Union[tuple[int, int], tuple[int, int, int]]]
 AnnotationToucher = Callable[[Dict[str, Any], bool], None]
 JsonWriter = Callable[[pathlib.Path, Dict[str, Any]], None]
 JobSnapshotGetter = Callable[[str], Optional[Dict[str, Any]]]
@@ -151,7 +151,10 @@ def build_post_offset_apply_response(
 
     annotation_path = annotation_read_path_for_speaker(speaker)
     annotation = normalize_annotation_record(read_json_any_file(annotation_path), speaker)
-    shifted_count, protected_count = annotation_shift_intervals(annotation, offset_sec)
+    shift_result = annotation_shift_intervals(annotation, offset_sec)
+    shifted_count = int(shift_result[0]) if len(shift_result) >= 1 else 0
+    protected_count = int(shift_result[1]) if len(shift_result) >= 2 else 0
+    shifted_concepts = int(shift_result[2]) if len(shift_result) >= 3 else 0
     if shifted_count == 0 and protected_count == 0:
         raise ComputeOffsetHandlerError(HTTPStatus.BAD_REQUEST, "No intervals were shifted")
 
@@ -167,6 +170,7 @@ def build_post_offset_apply_response(
             "speaker": speaker,
             "appliedOffsetSec": offset_sec,
             "shiftedIntervals": shifted_count,
+            "shiftedConcepts": shifted_concepts,
             "protectedIntervals": protected_count,
             "protectedLexemes": protected_lexemes,
         },

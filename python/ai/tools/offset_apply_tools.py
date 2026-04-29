@@ -71,14 +71,35 @@ OFFSET_APPLY_TOOL_SPECS: Dict[str, ChatToolSpec] = {
 }
 
 
-def _shift_annotation_intervals(record: Any, offset_sec: float) -> Tuple[int, List[Dict[str, Any]]]:
+def _interval_concept_identity(tier_key: str, raw: Dict[str, Any], index: int) -> str:
+    """Return the concept identity represented by an annotation interval.
+
+    Most tier rows now carry ``concept_id`` / ``conceptId``. Legacy concept-tier
+    rows may only have text, so concept-tier text or row position is a safe
+    fallback for counting user-facing concepts without treating speaker/BND/etc.
+    rows as additional concepts.
+    """
+    for key in ("concept_id", "conceptId", "concept", "conceptKey", "id"):
+        value = raw.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    if tier_key == "concept":
+        text = str(raw.get("text") or "").strip()
+        return text or "concept-index:{0}".format(index)
+    return ""
+
+
+def _shift_annotation_intervals(record: Any, offset_sec: float) -> Tuple[int, int, List[Dict[str, Any]]]:
     if not isinstance(record, dict):
-        return 0, []
+        return 0, 0, []
     tiers = record.get("tiers")
     if not isinstance(tiers, dict):
-        return 0, []
+        return 0, 0, []
 
     shifted = 0
+    shifted_concepts = set()
     preview: List[Dict[str, Any]] = []
     for tier_key, tier in tiers.items():
         if not isinstance(tier, dict):
@@ -86,7 +107,7 @@ def _shift_annotation_intervals(record: Any, offset_sec: float) -> Tuple[int, Li
         intervals = tier.get("intervals")
         if not isinstance(intervals, list):
             continue
-        for raw in intervals:
+        for index, raw in enumerate(intervals):
             if not isinstance(raw, dict):
                 continue
             if bool(raw.get("manuallyAdjusted")):
@@ -105,13 +126,16 @@ def _shift_annotation_intervals(record: Any, offset_sec: float) -> Tuple[int, Li
             if "xmax" in raw:
                 raw["xmax"] = new_end
             shifted += 1
+            concept_identity = _interval_concept_identity(str(tier_key), raw, index)
+            if concept_identity:
+                shifted_concepts.add(concept_identity)
             if len(preview) < 5:
                 preview.append({
                     "tier": tier_key,
                     "from": [start_f, end_f],
                     "to": [new_start, new_end],
                 })
-    return shifted, preview
+    return shifted, len(shifted_concepts), preview
 
 
 def tool_apply_timestamp_offset(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
@@ -147,7 +171,7 @@ def tool_apply_timestamp_offset(tools: "ParseChatTools", args: Dict[str, Any]) -
     except (OSError, json.JSONDecodeError) as exc:
         raise ChatToolExecutionError("Failed to read annotation: {0}".format(exc)) from exc
 
-    shifted_count, preview = _shift_annotation_intervals(record, offset_sec)
+    shifted_count, shifted_concepts, preview = _shift_annotation_intervals(record, offset_sec)
     if shifted_count == 0:
         raise ChatToolValidationError("No intervals were shifted")
 
@@ -158,6 +182,7 @@ def tool_apply_timestamp_offset(tools: "ParseChatTools", args: Dict[str, Any]) -
             "speaker": speaker,
             "offsetSec": offset_sec,
             "wouldShiftIntervals": shifted_count,
+            "wouldShiftConcepts": shifted_concepts,
             "preview": preview,
         }
 
@@ -179,6 +204,7 @@ def tool_apply_timestamp_offset(tools: "ParseChatTools", args: Dict[str, Any]) -
         "speaker": speaker,
         "appliedOffsetSec": offset_sec,
         "shiftedIntervals": shifted_count,
+        "shiftedConcepts": shifted_concepts,
         "annotationPath": str(annotation_path.relative_to(tools.project_root)),
     }
 

@@ -120,4 +120,47 @@ describe('useOffsetState', () => {
     });
     expect(result.current.lastProgressMessage).toBe('Scanning anchors…');
   });
+
+  it('stores shifted concept counts after applying an offset', async () => {
+    const applyTimestampOffset = vi.fn().mockResolvedValue({
+      shiftedIntervals: 9358,
+      shiftedConcepts: 521,
+      protectedIntervals: 11,
+      protectedLexemes: 1,
+    });
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useOffsetState({
+        activeActionSpeaker: 'Fail01',
+        selectedConcept,
+        protectedLexemeCount: 0,
+        getCurrentTime: () => 9.5,
+        lookupConceptInterval: () => ({ start: 8, end: 8.4 }),
+        markLexemeManuallyAdjusted: vi.fn(),
+        detectTimestampOffset: vi.fn(),
+        detectTimestampOffsetFromPairs: vi.fn(),
+        pollOffsetDetectJob: vi.fn(),
+        applyTimestampOffset,
+        reloadSpeakerAnnotation,
+      }),
+    );
+
+    act(() => {
+      result.current.setOffsetState({ phase: 'detected', result: makeDetectedResult({ offsetSec: 0.187 }) });
+    });
+
+    await act(async () => {
+      await result.current.applyDetectedOffset();
+    });
+
+    expect(applyTimestampOffset).toHaveBeenCalledWith('Fail01', 0.187);
+    expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Fail01');
+    expect(result.current.offsetState).toMatchObject({
+      phase: 'applied',
+      shifted: 9358,
+      shiftedConcepts: 521,
+      protected: 1,
+    });
+  });
 });

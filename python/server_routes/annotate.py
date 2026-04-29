@@ -207,29 +207,43 @@ def _annotation_offset_anchor_intervals(record: _server.Dict[str, _server.Any]) 
             return collected
     return []
 
-def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_sec: float) -> _server.Tuple[int, int]:
+def _annotation_interval_concept_identity(tier_key: str, raw: _server.Dict[str, _server.Any], index: int) -> str:
+    for key in ('concept_id', 'conceptId', 'concept', 'conceptKey', 'id'):
+        value = raw.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    if tier_key == 'concept':
+        text = str(raw.get('text') or '').strip()
+        return text or 'concept-index:{0}'.format(index)
+    return ''
+
+
+def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_sec: float) -> _server.Tuple[int, int, int]:
     """Add ``offset_sec`` to every interval's start/end. Negative values clamp to 0.
 
     Mutates the record in place. Intervals flagged ``manuallyAdjusted`` are
     skipped — once the annotator has locked a lexeme's timing (direct edit or
     a captured anchor pair) a later global shift must not move it again.
 
-    Returns a tuple of ``(shifted, skipped_protected)``.
+    Returns ``(shifted_intervals, skipped_protected, shifted_concepts)``.
     """
     if not isinstance(record, dict):
-        return (0, 0)
+        return (0, 0, 0)
     tiers = record.get('tiers')
     if not isinstance(tiers, dict):
-        return (0, 0)
+        return (0, 0, 0)
     shifted = 0
     skipped_protected = 0
-    for tier in tiers.values():
+    shifted_concept_keys = set()
+    for tier_key, tier in tiers.items():
         if not isinstance(tier, dict):
             continue
         intervals = tier.get('intervals')
         if not isinstance(intervals, list):
             continue
-        for raw in intervals:
+        for index, raw in enumerate(intervals):
             if not isinstance(raw, dict):
                 continue
             start = _server._coerce_finite_float(raw.get('start', raw.get('xmin')))
@@ -248,8 +262,11 @@ def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_s
             if 'xmax' in raw:
                 raw['xmax'] = new_end
             shifted += 1
+            concept_identity = _annotation_interval_concept_identity(str(tier_key), raw, index)
+            if concept_identity:
+                shifted_concept_keys.add(concept_identity)
     _server._annotation_sort_all_intervals(record)
-    return (shifted, skipped_protected)
+    return (shifted, skipped_protected, len(shifted_concept_keys))
 
 def _stt_cache_path(speaker: str) -> _server.pathlib.Path:
     return _server._project_root() / 'coarse_transcripts' / '{0}.json'.format(speaker)
