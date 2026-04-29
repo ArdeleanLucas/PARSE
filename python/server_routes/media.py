@@ -338,7 +338,60 @@ def _concepts_from_audition_rows(rows: _server.List[_server.Any]) -> _server.Lis
     return _unique_resolved_concepts(_resolve_audition_concepts(rows))
 
 
-def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path]) -> None:
+def _strip_audition_comment_connector(note_text: str) -> str:
+    note = str(note_text or '').strip()
+    while note[:1] in {'-', ':', '–', '—'}:
+        note = note[1:].strip()
+    return note
+
+
+def _collect_audition_comment_notes(cue_rows: _server.List[_server.Any], comments_rows: _server.List[_server.Any], resolved_concepts: _server.List[_server.Dict[str, str]], cue_name: str, comments_name: str) -> _server.List[_server.Dict[str, _server.Any]]:
+    """Return import-note entries by physical Audition CSV row index."""
+    if len(cue_rows) != len(comments_rows):
+        print('[audition-csv] comments row count mismatch for {0} vs {1}: {2} != {3}'.format(cue_name, comments_name, len(cue_rows), len(comments_rows)), file=_server.sys.stderr, flush=True)
+        return []
+    notes: _server.List[_server.Dict[str, _server.Any]] = []
+    for import_index, (cue_row, comments_row, resolved) in enumerate(zip(cue_rows, comments_rows, resolved_concepts)):
+        cue_raw = str(getattr(cue_row, 'raw_name', '') or '')
+        comments_raw = str(getattr(comments_row, 'raw_name', '') or '')
+        if comments_raw == cue_raw:
+            continue
+        if not comments_raw.startswith(cue_raw):
+            print('[audition-csv] row {0} misaligned: cue={1} comments={2}'.format(import_index, cue_raw, comments_raw), file=_server.sys.stderr, flush=True)
+            continue
+        note = _strip_audition_comment_connector(comments_raw[len(cue_raw):])
+        cid = _server._normalize_concept_id(resolved.get('id'))
+        if not note or not cid:
+            continue
+        notes.append({'concept_id': cid, 'import_note': note, 'import_raw': comments_raw, 'import_index': int(import_index), 'audition_prefix': str(resolved.get('audition_prefix') or '').strip()})
+    return notes
+
+
+def _write_audition_comment_notes(speaker: str, notes: _server.List[_server.Dict[str, _server.Any]]) -> int:
+    if not notes:
+        return 0
+    payload = _server._read_json_file(_server._enrichments_path(), _server._default_enrichments_payload())
+    notes_block = payload.get('lexeme_notes')
+    if not isinstance(notes_block, dict):
+        notes_block = {}
+        payload['lexeme_notes'] = notes_block
+    speaker_block = notes_block.get(speaker)
+    if not isinstance(speaker_block, dict):
+        speaker_block = {}
+        notes_block[speaker] = speaker_block
+    now = _server._utc_now_iso()
+    imported = 0
+    for note in notes:
+        cid = _server._normalize_concept_id(note.get('concept_id'))
+        if not cid:
+            continue
+        speaker_block[cid] = {'import_note': str(note.get('import_note') or '').strip(), 'import_raw': str(note.get('import_raw') or ''), 'import_index': int(note.get('import_index') or 0), 'audition_prefix': str(note.get('audition_prefix') or ''), 'updated_at': now}
+        imported += 1
+    _server._write_json_file(_server._enrichments_path(), payload)
+    return imported
+
+
+def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path], comments_csv_dest: _server.Optional[_server.pathlib.Path] = None) -> None:
     """Background worker for onboard/speaker — scaffold annotation + register in source_index."""
     try:
         _server._set_job_progress(job_id, 30.0, message='Scaffolding annotation record')
@@ -382,12 +435,12 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                 concepts_added = len(parsed)
                 concept_total = _server._merge_concepts_into_root_csv(parsed)
             elif _looks_like_audition_csv(csv_dest):
-                from lexeme_notes import parse_audition_csv as _parse_comments
+                from lexeme_notes import parse_audition_csv as _parse_audition_csv
                 csv_text = csv_dest.read_text(encoding='utf-8-sig')
-                comment_rows = _parse_comments(csv_text)
-                if comment_rows:
-                    audition_resolved_concepts = _resolve_audition_concepts(comment_rows)
-                    lexemes_imported = _append_audition_rows_to_annotation(annotation, comment_rows, audition_resolved_concepts)
+                cue_rows = _parse_audition_csv(csv_text)
+                if cue_rows:
+                    audition_resolved_concepts = _resolve_audition_concepts(cue_rows)
+                    lexemes_imported = _append_audition_rows_to_annotation(annotation, cue_rows, audition_resolved_concepts)
                     if lexemes_imported:
                         _server._annotation_touch_metadata(annotation, preserve_created=True)
                         _server._write_annotation_to_canonical_and_legacy(annotation_path, annotation_path, legacy_annotation_path, annotation)
@@ -395,34 +448,17 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                         concepts_added = len(audition_concepts)
                         if audition_concepts:
                             concept_total = _server._merge_concepts_into_root_csv(audition_concepts)
-                    # TODO: comments-file row-index joins belong in the follow-up
-                    # PR; this preserves the existing single-CSV import_note path.
-                    try:
-                        payload = _server._read_json_file(_server._enrichments_path(), _server._default_enrichments_payload())
-                        notes_block = payload.get('lexeme_notes')
-                        if not isinstance(notes_block, dict):
-                            notes_block = {}
-                            payload['lexeme_notes'] = notes_block
-                        speaker_block = notes_block.get(speaker)
-                        if not isinstance(speaker_block, dict):
-                            speaker_block = {}
-                            notes_block[speaker] = speaker_block
-                        for row, resolved in zip(comment_rows, audition_resolved_concepts):
-                            cid = _server._normalize_concept_id(resolved.get('id'))
-                            note = (row.remainder or '').strip()
-                            if not cid or not note:
-                                continue
-                            entry = speaker_block.get(cid) or {}
-                            entry['import_note'] = note
-                            entry['import_raw'] = row.raw_name
-                            entry['updated_at'] = _server._utc_now_iso()
-                            speaker_block[cid] = entry
-                            comments_imported += 1
-                        _server._write_json_file(_server._enrichments_path(), payload)
-                    except Exception:
-                        comments_imported = 0
+                    if comments_csv_dest is not None and comments_csv_dest.exists():
+                        try:
+                            comments_text = comments_csv_dest.read_text(encoding='utf-8-sig')
+                            comments_rows = _parse_audition_csv(comments_text)
+                            comment_notes = _collect_audition_comment_notes(cue_rows, comments_rows, audition_resolved_concepts, csv_dest.name, comments_csv_dest.name)
+                            comments_imported = _write_audition_comment_notes(speaker, comment_notes)
+                        except Exception as exc:
+                            print('[audition-csv] comments import failed for {0}: {1!r}'.format(comments_csv_dest.name, exc), file=_server.sys.stderr, flush=True)
+                            comments_imported = 0
         _server._set_job_progress(job_id, 90.0, message='Finalizing')
-        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'wavPath': wav_relative, 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'annotationPath': str(annotation_path.relative_to(_server._project_root())), 'conceptsAdded': concepts_added, 'conceptTotal': concept_total, 'commentsImported': comments_imported, 'lexemesImported': lexemes_imported}
+        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'wavPath': wav_relative, 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'commentsCsvPath': str(comments_csv_dest.relative_to(_server._project_root())) if comments_csv_dest else None, 'annotationPath': str(annotation_path.relative_to(_server._project_root())), 'conceptsAdded': concepts_added, 'conceptTotal': concept_total, 'commentsImported': comments_imported, 'lexemesImported': lexemes_imported}
         complete_message = 'Imported {0} lexemes from {1}'.format(lexemes_imported, csv_dest.name) if lexemes_imported and csv_dest else 'Speaker onboarded'
         _server._set_job_complete(job_id, result, message=complete_message)
     except Exception as exc:
@@ -535,23 +571,37 @@ def _api_post_onboard_speaker(self) -> None:
     audio_ext = _server.pathlib.Path(audio_filename).suffix.lower()
     if audio_ext not in _server.ONBOARD_AUDIO_EXTENSIONS:
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Unsupported audio format: {0} (allowed: {1})'.format(audio_ext, ', '.join(sorted(_server.ONBOARD_AUDIO_EXTENSIONS))))
+    csv_dest: _server.Optional[_server.pathlib.Path] = None
+    comments_csv_dest: _server.Optional[_server.pathlib.Path] = None
+    csv_item = form['csv'] if 'csv' in form else None
+    comments_item = form['commentsCsv'] if 'commentsCsv' in form else None
+    has_csv = csv_item is not None and bool(getattr(csv_item, 'filename', None))
+    has_comments_csv = comments_item is not None and bool(getattr(comments_item, 'filename', None))
+    if has_comments_csv and not has_csv:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'commentsCsv requires csv cue file')
     speaker_audio_dir = _server._project_root() / 'audio' / 'original' / speaker
     speaker_audio_dir.mkdir(parents=True, exist_ok=True)
     wav_dest = speaker_audio_dir / audio_filename
     audio_data = audio_item.file.read()
     wav_dest.write_bytes(audio_data)
-    csv_dest: _server.Optional[_server.pathlib.Path] = None
-    csv_item = form['csv'] if 'csv' in form else None
-    if csv_item is not None and getattr(csv_item, 'filename', None):
+    if has_csv:
         csv_filename = _server.os.path.basename(csv_item.filename or 'elicitation.csv')
         csv_dest = speaker_audio_dir / csv_filename
         csv_data = csv_item.file.read()
         csv_dest.write_bytes(csv_data)
+    if has_comments_csv and csv_dest is not None:
+        csv_path = _server.pathlib.Path(csv_dest.name)
+        suffix = csv_path.suffix or '.csv'
+        comments_filename = '{0}.comments{1}'.format(csv_path.stem, suffix)
+        comments_csv_dest = speaker_audio_dir / comments_filename
+        comments_csv_data = comments_item.file.read()
+        comments_csv_dest.write_bytes(comments_csv_data)
     try:
-        job_id = _server._create_job('onboard:speaker', {'speaker': speaker, 'wavPath': str(wav_dest.relative_to(_server._project_root())), 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None})
+        job_payload = {'speaker': speaker, 'wavPath': str(wav_dest.relative_to(_server._project_root())), 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'commentsCsvPath': str(comments_csv_dest.relative_to(_server._project_root())) if comments_csv_dest else None}
+        job_id = _server._create_job('onboard:speaker', job_payload)
     except _server.JobResourceConflictError as exc:
         raise _server.ApiError(_server.HTTPStatus.CONFLICT, str(exc))
-    thread = _server.threading.Thread(target=_server._run_onboard_speaker_job, args=(job_id, speaker, wav_dest, csv_dest), daemon=True)
+    thread = _server.threading.Thread(target=_server._run_onboard_speaker_job, args=(job_id, speaker, wav_dest, csv_dest, comments_csv_dest), daemon=True)
     thread.start()
     self._send_json(_server.HTTPStatus.OK, {'job_id': job_id, 'jobId': job_id, 'status': 'running', 'speaker': speaker})
 
