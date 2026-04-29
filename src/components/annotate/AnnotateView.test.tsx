@@ -49,6 +49,12 @@ const mockPlayPause = vi.fn();
 const mockPlayRange = vi.fn();
 const mockPause = vi.fn();
 const mockSkip = vi.fn();
+const mockClearQuickRetimeSelection = vi.fn();
+let mockWaveSurferOptions: { quickRetimeSelection?: {
+  enabled: boolean;
+  label: string;
+  onContextMenu: (selection: { start: number; end: number }, event: MouseEvent) => void;
+} } | null = null;
 
 vi.mock('../../stores/annotationStore', () => ({
   useAnnotationStore: (selector: (state: unknown) => unknown) => selector({
@@ -85,18 +91,22 @@ vi.mock('../../hooks/useSpectrogram', () => ({
 }));
 
 vi.mock('../../hooks/useWaveSurfer', () => ({
-  useWaveSurfer: () => ({
-    playPause: mockPlayPause,
-    playRange: mockPlayRange,
-    pause: mockPause,
-    seek: mockSeek,
-    scrollToTimeAtFraction: mockScrollToTimeAtFraction,
-    skip: mockSkip,
-    addRegion: mockAddRegion,
-    setZoom: mockSetZoom,
-    setRate: mockSetRate,
-    wsRef: { current: null },
-  }),
+  useWaveSurfer: (options: typeof mockWaveSurferOptions) => {
+    mockWaveSurferOptions = options;
+    return {
+      playPause: mockPlayPause,
+      playRange: mockPlayRange,
+      pause: mockPause,
+      seek: mockSeek,
+      scrollToTimeAtFraction: mockScrollToTimeAtFraction,
+      skip: mockSkip,
+      addRegion: mockAddRegion,
+      clearQuickRetimeSelection: mockClearQuickRetimeSelection,
+      setZoom: mockSetZoom,
+      setRate: mockSetRate,
+      wsRef: { current: null },
+    };
+  },
 }));
 
 vi.mock('./TranscriptionLanes', () => ({
@@ -149,6 +159,8 @@ describe('AnnotateView', () => {
     mockPlayRange.mockClear();
     mockPause.mockClear();
     mockSkip.mockClear();
+    mockClearQuickRetimeSelection.mockClear();
+    mockWaveSurferOptions = null;
   });
 
   afterEach(() => {
@@ -207,6 +219,48 @@ describe('AnnotateView', () => {
     }));
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
     expect(mockSetInterval).not.toHaveBeenCalled();
+  });
+
+  it('commits a dragged waveform quick-retime selection from the dynamic context menu', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'edited-ipa' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'edited-ortho' } });
+
+    expect(mockWaveSurferOptions?.quickRetimeSelection?.enabled).toBe(true);
+    expect(mockWaveSurferOptions?.quickRetimeSelection?.label).toBe('Update water timestamp');
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu({ start: 1.75, end: 2.75 }, contextEvent);
+
+    const commit = await screen.findByRole('menuitem', { name: 'Update water timestamp' });
+    fireEvent.click(commit);
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith({
+      speaker: 'Fail01',
+      oldStart: 1.25,
+      oldEnd: 2.5,
+      newStart: 1.75,
+      newEnd: 2.75,
+      ipaText: 'edited-ipa',
+      orthoText: 'edited-ortho',
+      conceptName: 'water',
+    }));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
+    expect(mockSeek).toHaveBeenCalledWith(1.75);
   });
 
   it('reloads the saved ipa and orthography after saving onto a new selected region', async () => {

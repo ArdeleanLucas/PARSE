@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // vi.hoisted ensures these are available inside vi.mock factories (which are hoisted)
-const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState } =
+const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState, mockDisableQuickRetimeSelection } =
   vi.hoisted(() => {
     const mockViewport = document.createElement("div");
     Object.defineProperty(mockViewport, "clientWidth", { value: 200, configurable: true });
@@ -37,14 +37,16 @@ const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState } =
       end: 3,
     };
 
+    const mockDisableQuickRetimeSelection = vi.fn();
     const mockRegionsPlugin = {
       on: vi.fn(),
       addRegion: vi.fn(() => mockRegionInstance),
+      enableDragSelection: vi.fn(() => mockDisableQuickRetimeSelection),
     };
 
     const mockSetState = vi.fn();
 
-    return { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState };
+    return { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState, mockDisableQuickRetimeSelection };
   });
 
 vi.mock("wavesurfer.js", () => ({
@@ -301,5 +303,60 @@ describe("useWaveSurfer", () => {
     expect(started).toBe(true);
     // playClip re-seeks to start defensively — fine, cursor's already there.
     expect(mockWsInstance.seekTo).toHaveBeenCalledWith(0.2);
+  });
+
+  it("enables drag selection with a transient region that does not replace the active lexeme region", () => {
+    const onContextMenu = vi.fn();
+    const { result, rerender, unmount } = renderHook(
+      (props: { enabled: boolean }) =>
+        useWaveSurfer({
+          containerRef: makeContainerRef(),
+          audioUrl: "/audio/test.wav",
+          quickRetimeSelection: props.enabled
+            ? {
+                enabled: true,
+                label: "Update water timestamp",
+                onContextMenu,
+              }
+            : null,
+        }),
+      { initialProps: { enabled: false } },
+    );
+
+    act(() => result.current.addRegion(2, 4, "lexeme-active"));
+    mockRegionInstance.remove.mockClear();
+
+    rerender({ enabled: true });
+
+    expect(mockRegionsPlugin.enableDragSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.stringContaining("quick-retime-selection"), drag: false, resize: true }),
+      1,
+    );
+
+    const transientElement = document.createElement("div");
+    const transientRegion = {
+      id: "quick-retime-selection-test",
+      start: 1.75,
+      end: 2.75,
+      element: transientElement,
+      play: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    for (const [, handler] of mockRegionsPlugin.on.mock.calls.filter(([name]) => name === "region-created")) {
+      act(() => handler(transientRegion));
+    }
+
+    expect(mockRegionInstance.remove).not.toHaveBeenCalled();
+    expect(transientElement.getAttribute("aria-label")).toBe("Update water timestamp");
+
+    const contextEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 20 });
+    transientElement.dispatchEvent(contextEvent);
+    expect(contextEvent.defaultPrevented).toBe(true);
+    expect(onContextMenu).toHaveBeenCalledWith({ start: 1.75, end: 2.75 }, contextEvent);
+
+    unmount();
+    expect(mockDisableQuickRetimeSelection).toHaveBeenCalled();
+    expect(transientRegion.remove).toHaveBeenCalled();
   });
 });
