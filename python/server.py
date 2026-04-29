@@ -157,6 +157,7 @@ ANNOTATION_TIER_ORDER = {
     "ortho": 2,
     "concept": 3,
     "speaker": 4,
+    "ortho_words": 5,
 }
 ANNOTATION_MATCH_EPSILON = 0.0005
 
