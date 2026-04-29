@@ -95,8 +95,9 @@ Key behavior:
 - **Razhan** (`razhan/whisper-base-sdh`) is still the canonical Southern Kurdish source model, but `ortho.model_path` must point at a **local CTranslate2 conversion directory**
 - HuggingFace repo ids are **rejected** in `ortho.model_path`; convert first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`
 - ORTH defaults now keep the anti-cascade guard enabled: `vad_filter=true` with tuned Silero params, `condition_on_previous_text=false`, and `compression_ratio_threshold=1.8`
-- `initial_prompt` can prime the Whisper decoder for elicitation-style recordings
-- `refine_lexemes=true` adds a short-clip lexeme refinement pass after forced alignment
+- Full-speaker ORTH can still accept an explicit configured `initial_prompt`, but concept-window short clips deliberately do **not** seed Whisper with English PARSE concept IDs or glosses.
+- STT/ORTH language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing Whisper auto-detect.
+- `refine_lexemes=true` adds a short-clip lexeme refinement pass after forced alignment and uses the same language-resolution guard.
 
 #### `ipa` + `wav2vec2`
 
@@ -329,7 +330,7 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 | Tool | Description |
 |---|---|
-| `run_full_annotation_pipeline` | Run STT → forced alignment → acoustic IPA for one speaker in one call |
+| `run_full_annotation_pipeline` | Run the annotation pipeline for one speaker; supports `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids` |
 | `prepare_compare_mode` | Build a compare-ready concept × speaker bundle with fresh preview data |
 | `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
 

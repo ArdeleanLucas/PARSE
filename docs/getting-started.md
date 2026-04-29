@@ -197,7 +197,9 @@ The template also explains the current ORTH runtime contract:
 - `ortho.model_path` must point at a **local CT2 conversion directory**. PARSE will not accept a HuggingFace repo id here.
 - To keep using Razhan, convert `razhan/whisper-base-sdh` first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`.
 - ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=true`, `condition_on_previous_text=false`, and `compression_ratio_threshold=1.8`.
-- `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime.
+- Full-speaker ORTH can still use an explicit configured `initial_prompt`, but concept-window short clips do not seed Whisper with English PARSE concept IDs or glosses.
+- STT/ORTH language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing Whisper auto-detect.
+- `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime and using the same language-resolution guard.
 
 #### `ipa` and `wav2vec2`
 

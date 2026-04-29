@@ -27,6 +27,8 @@ The shipped default includes the BND-facing tools `compute_boundaries_start`, `c
 
 New in the default write-capable surface: `clef_clear_data` wraps `POST /api/clef/clear`. It clears selected per-language `concepts` entries from `config/sil_contact_languages.json`, preserves `_meta` and language metadata, does not touch `parse-enrichments.json`, supports `dryRun=true` preview, and can optionally remove known provider caches under `config/cache/` (`wiktionary_*.json`, `wikidata_*.json`, `asjp_*.json`, `cldf_*`).
 
+`run_full_annotation_pipeline` now supports concept-scoped reruns through `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids`. Non-full responses include `affected_concepts`; empty `edited-only` runs return a no-op instead of starting an empty job. `apply_timestamp_offset` responses include `shiftedConcepts` alongside `shiftedIntervals`.
+
 ## Surface 1: HTTP API
 
 The PARSE backend serves a local HTTP API on `http://127.0.0.1:8766` by default.
@@ -75,8 +77,8 @@ Core endpoints:
 The `mode` query parameter accepts:
 
 - `active` — obey `config/mcp_config.json` or the legacy root-level `mcp_config.json`
-- `default` — expose the curated MCP subset
-- `all` — expose the full tool surface
+- `default` — expose the shipped default 59-tool surface
+- `all` — expose the full tool surface (currently also 59 tools unless a future all-only surface diverges)
 
 Each listed tool includes standard MCP schema fields plus `meta.x-parse` safety metadata such as `mutability`, `supports_dry_run`, `dry_run_parameter`, `preconditions`, and `postconditions`.
 
@@ -113,7 +115,7 @@ The adapter does not add a separate network protocol. It launches as a local pro
 - `PARSE_API_PORT`
 - `PARSE_PORT`
 
-Use the curated default surface for most agent sessions. Switch to the full 59-tool surface only when you need the entire `ParseChatTools` registry exposed to the MCP client.
+Use the shipped default 59-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
 
 ## Authentication Model
 

@@ -4,7 +4,7 @@
 
 - Original audit window: 2026-04-28 01:08+02 through 2026-04-29 01:08+02, grounded on `origin/main` at `5153669`; rebase refresh folded forward current `origin/main` at `680a97f` after PR #182 merged.
 - Main moved through 11 merged PRs in the original window: #168, #169, #170, #171, #172, #173, #174, #175, #176, #177, #179. Post-window rebase addendum: #182 is now merged on `main`.
-- Current open follow-up: PR #180 (`fix: create missing IPA lexeme interval on save`), green checks but not merged; do not document its behavior as shipped yet.
+- Original-audit open follow-up: PR #180 (`fix: create missing IPA lexeme interval on save`) was open at that audit time, but it later merged during the same local calendar day. See `2026-04-29-calendar-day-merged-pr-doc-refresh.md` for the superseding calendar-day ledger.
 - Documentation updates in this PR refresh current user/developer/coordinator docs for CLEF, MCP counts, lexeme save retiming, active handoff queue state, and stale post-cutover repo wording.
 
 ## Grounding evidence
@@ -47,11 +47,11 @@ Tool-grounded checks used:
 |---:|---|---|---|
 | [#182](https://github.com/ArdeleanLucas/PARSE/pull/182) | `680a97f` | CLEF Grok LLM rename, Wiktionary translation tables, Settings tab | Conflict resolution preserves current provider id `grok_llm`, places it last after `literature`, treats Grokipedia.com as explicitly out of scope, and retires the now-executed backend handoff to `done/`. |
 
-## Open follow-up not yet documented as shipped
+## Original-audit follow-up state (superseded later the same day)
 
 | PR | State | Why it matters |
 |---:|---|---|
-| [#180](https://github.com/ArdeleanLucas/PARSE/pull/180) | OPEN, green checks, mergeStateStatus `BLOCKED` at audit time | Adds missing IPA interval creation on Save Annotation. Current docs should mention it only as pending; update shipped behavior after merge. |
+| [#180](https://github.com/ArdeleanLucas/PARSE/pull/180) | OPEN at this report's original audit time; later merged on 2026-04-29 | Adds missing IPA interval creation on Save Annotation. Superseding calendar-day docs now treat it as shipped behavior. |
 
 ## Files refreshed by this documentation pass
 
@@ -77,5 +77,5 @@ Tool-grounded checks used:
 - Last-24h doc drift found and corrected: **yes**.
 - Active queue ambiguity reduced: **yes** — the PR #179-completed frontend handoff moved to `done/`; the CLEF backend follow-up was executed by PR #182 and is now also under `done/`.
 - Current shipped MCP counts: **55** `ParseChatTools`, **55** default MCP task tools, **59** default adapter tools.
-- Current shipped Annotate behavior: PR #179 overlap retime is merged; PR #180 missing-IPA creation remains pending. Current shipped CLEF behavior also includes PR #182 `grok_llm` naming, Wiktionary translation-table extraction, and the CLEF Settings tab.
-- Further action after PR #180 merges: update Annotate/user docs if missing-IPA interval creation becomes shipped behavior.
+- Current shipped Annotate behavior at original audit time: PR #179 overlap retime was merged and PR #180 was pending; later 2026-04-29 docs supersede this with PR #180/#188/#195 shipped save/retime behavior. Current shipped CLEF behavior also includes PR #182 `grok_llm` naming, Wiktionary translation-table extraction, and the CLEF Settings tab.
+- Superseded action: PR #180 has merged; use `2026-04-29-calendar-day-merged-pr-doc-refresh.md` for current same-day state.

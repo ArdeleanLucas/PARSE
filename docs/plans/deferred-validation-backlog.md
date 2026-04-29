@@ -15,10 +15,10 @@
 
 | Gate | Command | Result |
 |---|---|---|
-| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #179: 81 files, 456 tests passed |
-| TypeScript | `./node_modules/.bin/tsc --noEmit` | ✅ clean in PR #179 validation |
-| Build | `npm run build` | ✅ clean in PR #179 validation |
-| API regression / backend gates | CI lightweight backend + parity harness | ✅ green on PR #179; rerun targeted `PYTHONPATH=python python3 -m pytest ...` for backend-affecting work |
+| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #197: 82 files, 485 tests passed |
+| TypeScript | `./node_modules/.bin/tsc --noEmit` or `npm run typecheck` | ✅ clean in PR #197 validation |
+| Build | `npm run build` | ✅ clean in PR #197 validation |
+| API regression / backend gates | CI lightweight backend + parity harness; targeted/full `PYTHONPATH=python:python/packages/parse_mcp/src python -m pytest -q` for backend work | ✅ PR #196 full Python suite: 875 passed, 1 warning; PR #198 onboarding/Audition CSV full suite: 878 passed, 1 warning; PR #200 revalidated Audition onboarding targets, `python/test_lexeme_notes.py`, full `python3 -m pytest -q`, `npm run check`, `npm run build`, and `git diff --check` |
 
 ### Non-blocking warnings observed during automated checks
 
