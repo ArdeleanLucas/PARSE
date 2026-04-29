@@ -1261,6 +1261,31 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
+  it("uses arrow keys to follow the sorted annotate concept list selection path", async () => {
+    mockConfig = {
+      ...mockConfig!,
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "apple" },
+      ],
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    fireEvent.click(screen.getByTestId("concept-sort-az"));
+    fireEvent.click(screen.getByRole("button", { name: /apple/i }));
+    expect(await screen.findByRole("heading", { name: "apple" })).toBeTruthy();
+    mockSetActiveConcept.mockClear();
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("1"));
+
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(await screen.findByRole("heading", { name: "apple" })).toBeTruthy();
+  });
+
   it("persists compare notes per concept via localStorage without requiring a blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
@@ -1850,7 +1875,7 @@ describe("Actions menu — transcription run flow", () => {
     confirmSpy.mockRestore();
   });
 
-  it("prefills Orthographic (Kurdish) from ortho_words word when coarse ortho is a monolithic segment", async () => {
+  it("prefills Orthographic from ortho_words word when coarse ortho is a monolithic segment", async () => {
     // Simulates the Fail102 regression: razhan produces one giant coarse
     // ortho interval covering minutes of narrative. Without ortho_words, the
     // whole paragraph text would land in the lexeme field. With ortho_words

@@ -22,6 +22,7 @@ import { LEXEME_SCOPE_TIERS } from "../../../stores/annotation/actions";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useTagStore } from "../../../stores/tagStore";
+import { saveLexemeNote } from "../../../api/client";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 
 import { SpeakerHeader } from "./SpeakerHeader";
@@ -104,6 +105,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : "");
   const [timestampSaving, setTimestampSaving] = useState(false);
   const [timestampMessage, setTimestampMessage] = useState<{ kind: "ok"; text: string } | { kind: "err"; text: string } | null>(null);
+  const [userNote, setUserNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
 
   useEffect(() => {
@@ -112,6 +116,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : "");
     setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : "");
     setTimestampMessage(null);
+    setUserNote("");
+    setNoteError(null);
+    setSavingNote(false);
     setQuickRetimeMenu(null);
   }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval]);
 
@@ -236,6 +243,18 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     clearQuickRetimeSelection();
     setQuickRetimeMenu(null);
   }, [clearQuickRetimeSelection]);
+
+  const handleSaveNote = useCallback(async () => {
+    setSavingNote(true);
+    setNoteError(null);
+    try {
+      await saveLexemeNote({ speaker, concept_id: concept.key, user_note: userNote });
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSavingNote(false);
+    }
+  }, [concept.key, speaker, userNote]);
 
   useEffect(() => {
     if (!quickRetimeMenu) return;
@@ -464,7 +483,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
 
           <div>
-            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic (Kurdish)</label>
+            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic</label>
             <input
               value={ortho}
               onChange={(e) => setOrtho(e.target.value)}
@@ -472,6 +491,21 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
               dir="rtl"
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-serif text-xl text-slate-900 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
             />
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Speaker Notes</label>
+            <textarea
+              data-testid={`lexeme-user-note-${speaker}-${concept.key}`}
+              value={userNote}
+              onChange={(e) => setUserNote(e.target.value)}
+              onBlur={() => void handleSaveNote()}
+              placeholder="Add notes specific to this speaker/lexeme…"
+              className="mt-2 min-h-[72px] w-full resize-y rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
+            />
+            <div className={`mt-1 text-[10px] ${savingNote ? "text-slate-500" : noteError ? "text-rose-600" : "text-transparent"}`}>
+              {savingNote ? "Saving…" : noteError ?? "saved"}
+            </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
