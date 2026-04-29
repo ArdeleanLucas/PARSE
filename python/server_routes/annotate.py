@@ -846,6 +846,42 @@ def _ortho_tier2_align_to_words(audio_path: _server.pathlib.Path, segments: _ser
 _CONCEPT_COMPUTE_RUN_MODES = {'full', 'concept-windows', 'edited-only'}
 
 
+def _transcription_language_from_payload_or_annotation(
+    payload: _server.Dict[str, _server.Any],
+    annotation: _server.Dict[str, _server.Any],
+    *,
+    speaker: str,
+    step: str,
+) -> _server.Optional[str]:
+    """Resolve Whisper language with annotation metadata as a safe fallback.
+
+    PARSE compute payloads may omit ``language``. For fieldwork corpora whose
+    annotations already record ``metadata.language_code`` (for example Fail01 →
+    ``ku``), forwarding that code is safer than asking Whisper to auto-detect a
+    short Kurdish clip.
+    """
+    raw_language = payload.get('language') if isinstance(payload, dict) else None
+    if isinstance(raw_language, str) and raw_language.strip():
+        return raw_language.strip()
+
+    metadata = annotation.get('metadata') if isinstance(annotation, dict) else None
+    meta_language = metadata.get('language_code') if isinstance(metadata, dict) else None
+    if isinstance(meta_language, str):
+        language_code = meta_language.strip()
+        if language_code and language_code.lower() != 'und':
+            return language_code
+
+    print(
+        '[{0}][WARN] no payload.language or annotation metadata.language_code for speaker={1!r}; using Whisper auto-detect'.format(
+            str(step or 'transcription').upper(),
+            speaker,
+        ),
+        file=_server.sys.stderr,
+        flush=True,
+    )
+    return None
+
+
 def _set_compute_progress(job_id: str, progress: float, **kwargs: _server.Any) -> None:
     try:
         _server._set_job_progress(job_id, progress, **kwargs)
@@ -1030,8 +1066,10 @@ def _run_step_on_concept_windows(
     duration_sec = total_samples / float(DEFAULT_SAMPLE_RATE) if total_samples else 0.0
     if duration_sec <= 0.0:
         return []
-    labels = [_concept_id_from_interval(iv) for iv in concept_intervals if isinstance(iv, dict) and _concept_id_from_interval(iv)]
-    initial_prompt = ', '.join(labels)[:400] if labels else None
+    # Deliberately avoid seeding Whisper with PARSE concept IDs/glosses here.
+    # They are often English labels ("head", "arm", "knee") and caused
+    # Razhan to drift into English/Latin-script loops on short Kurdish clips.
+    initial_prompt = None
     rows: _server.List[_server.Dict[str, _server.Any]] = []
     source_by_step = {
         'stt': 'concept_window_stt',
@@ -1111,7 +1149,7 @@ def _run_step_on_concept_windows(
             _set_compute_progress(job_id, pct, message='{0} concept window {1}/{2}'.format(step_name.upper(), idx + 1, total))
     return rows
 
-def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.8, weak_conf: float=0.5, job_id: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
+def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.8, weak_conf: float=0.5, job_id: _server.Optional[str]=None, language: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
     """Re-transcribe weak/missing concept-aligned lexeme windows.
 
     This keeps the original refine_lexemes gating semantics, but delegates the
@@ -1170,6 +1208,7 @@ def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_interva
         step='ortho_refine',
         job_id=job_id,
         pad_sec=pad_sec,
+        language=language,
     )
 
 def _merge_ortho_words(aligned: _server.List[_server.Dict[str, _server.Any]], refined: _server.List[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, _server.Any]]:
@@ -1226,10 +1265,18 @@ def _write_annotation_to_canonical_and_legacy(
 def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     speaker = _server._normalize_speaker_id(payload.get('speaker'))
     run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
-    language_raw = payload.get('language')
-    language = str(language_raw).strip() if language_raw is not None else None
-    if not language:
-        language = None
+    annotation_path: _server.Optional[_server.pathlib.Path] = None
+    try:
+        annotation_path, _canonical_path, _legacy_path = _server._annotation_paths_for_speaker(speaker)
+    except RuntimeError:
+        if run_mode != 'full':
+            raise
+        annotation: _server.Dict[str, _server.Any] = {}
+    else:
+        annotation = _server._read_json_file(annotation_path, {})
+        if not isinstance(annotation, dict):
+            raise RuntimeError('Annotation is not a JSON object')
+    language = _transcription_language_from_payload_or_annotation(payload, annotation, speaker=speaker, step='stt')
 
     if run_mode == 'full':
         source_wav = str(payload.get('sourceWav') or payload.get('source_wav') or '').strip()
@@ -1238,10 +1285,8 @@ def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -
         return _server._run_stt_job(job_id, speaker, source_wav, language)
 
     concept_ids = _server._payload_concept_ids(payload)
-    annotation_path, _canonical_path, _legacy_path = _server._annotation_paths_for_speaker(speaker)
-    annotation = _server._read_json_file(annotation_path, {})
-    if not isinstance(annotation, dict):
-        raise RuntimeError('Annotation is not a JSON object')
+    if annotation_path is None:
+        raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
     concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
     if not concept_intervals:
         return _server._concept_window_no_op_result(
@@ -1286,6 +1331,8 @@ def _compute_speaker_ortho_concept_windows(
     language: _server.Optional[str],
     has_existing_text: bool,
 ) -> _server.Dict[str, _server.Any]:
+    if not language:
+        language = _transcription_language_from_payload_or_annotation({}, annotation, speaker=speaker, step='ortho')
     concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
     if not concept_intervals:
         return _server._concept_window_no_op_result(
@@ -1856,8 +1903,6 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     """
     speaker = _server._normalize_speaker_id(payload.get('speaker'))
     overwrite = bool(payload.get('overwrite', False))
-    language = payload.get('language')
-    language_str = str(language).strip() if isinstance(language, str) and language.strip() else None
     refine_payload = payload.get('refine_lexemes')
     run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
     concept_ids = _server._payload_concept_ids(payload)
@@ -1872,6 +1917,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     annotation = _server._read_json_file(annotation_path, {})
     if not isinstance(annotation, dict):
         raise RuntimeError('Annotation is not a JSON object')
+    language_str = _transcription_language_from_payload_or_annotation(payload, annotation, speaker=speaker, step='ortho')
     tiers = annotation.get('tiers') or {}
     ortho_tier = tiers.get('ortho') if isinstance(tiers.get('ortho'), dict) else None
     existing_intervals: _server.List[_server.Dict[str, _server.Any]] = []
@@ -1927,7 +1973,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
         concept_intervals = [iv for iv in (concept_tier.get('intervals') or [] if concept_tier else []) if isinstance(iv, dict)]
         if concept_intervals:
             _set_compute_progress(job_id, 97.0, message='ORTH refine_lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
-            refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, job_id=job_id)
+            refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, job_id=job_id, language=language_str)
     merged_words = _server._merge_ortho_words(ortho_words, refined_additions)
     ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
     if ortho_words_tier is None:

@@ -140,7 +140,11 @@ def test_refine_lexemes_payload_override_enables_fallback(tmp_path, monkeypatch)
     assert result["refine_lexemes_enabled"] is True
     assert result["refined_lexemes"] == 1
     assert len(stub.clip_calls) == 1
-    assert "hair" in (stub.clip_calls[0]["initial_prompt"] or "")
+    # Regression guard: English concept IDs/glosses like "hair" must not be
+    # fed back to Whisper as an initial_prompt; that biases Razhan away from
+    # Arabic-script Kurdish and can trigger prompt-token loops.
+    assert stub.clip_calls[0]["initial_prompt"] is None
+    assert stub.clip_calls[0]["language"] == "sdh"
 
     ann = _load(tmp_path, "Fail02")
     words = ann["tiers"]["ortho_words"]["intervals"]
