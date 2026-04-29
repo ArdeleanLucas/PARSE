@@ -71,4 +71,8 @@ export interface PipelineRunResult {
   steps_run: string[];
   results: Partial<Record<"normalize" | "stt" | "ortho" | "ipa", PipelineStepResultBase>>;
   summary: { ok: number; skipped: number; error: number };
+  run_mode?: "full" | "concept-windows" | "edited-only";
+  runMode?: "full" | "concept-windows" | "edited-only";
+  affected_concepts?: Array<{ concept_id?: string; conceptId?: string; id?: string; start?: number; end?: number; [key: string]: unknown }>;
+  affectedConcepts?: Array<{ concept_id?: string; conceptId?: string; id?: string; start?: number; end?: number; [key: string]: unknown }>;
 }

@@ -203,6 +203,80 @@ function commitRecordMutation(
   scheduleAutosave(speaker);
 }
 
+type ConceptScopedRefreshTarget = {
+  concept_id?: unknown;
+  conceptId?: unknown;
+  id?: unknown;
+  start?: unknown;
+  end?: unknown;
+  tiers?: unknown;
+  intervals?: unknown;
+};
+
+function targetId(target: ConceptScopedRefreshTarget): string | null {
+  const raw = target.concept_id ?? target.conceptId ?? target.id;
+  const text = raw == null ? "" : String(raw).trim();
+  return text || null;
+}
+
+function targetTierIntervals(target: ConceptScopedRefreshTarget): Record<string, AnnotationInterval[]> {
+  const raw = target.tiers ?? target.intervals;
+  if (!raw || typeof raw !== "object") return {};
+  const result: Record<string, AnnotationInterval[]> = {};
+  for (const [tier, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(value)) result[tier] = value as AnnotationInterval[];
+    else if (value && typeof value === "object") result[tier] = [value as AnnotationInterval];
+  }
+  return result;
+}
+
+function intervalMatchesTarget(interval: AnnotationInterval, index: number, target: ConceptScopedRefreshTarget): boolean {
+  const id = targetId(target);
+  if (id) {
+    const intervalId = (interval as AnnotationInterval & { id?: unknown; concept_id?: unknown; conceptId?: unknown }).id
+      ?? (interval as AnnotationInterval & { concept_id?: unknown }).concept_id
+      ?? (interval as AnnotationInterval & { conceptId?: unknown }).conceptId
+      ?? String(index + 1);
+    if (String(intervalId) === id) return true;
+  }
+  const start = typeof target.start === "number" ? target.start : NaN;
+  const end = typeof target.end === "number" ? target.end : NaN;
+  return Number.isFinite(start) && Number.isFinite(end)
+    && Math.abs(interval.start - start) <= MATCH_TOLERANCE_SEC
+    && Math.abs(interval.end - end) <= MATCH_TOLERANCE_SEC;
+}
+
+function applyConceptScopedRefreshToRecord(record: AnnotationRecord, targets: readonly unknown[]): number {
+  let updated = 0;
+  for (const target of targets) {
+    if (!target || typeof target !== "object") continue;
+    const typedTarget = target as ConceptScopedRefreshTarget;
+    const conceptIndex = record.tiers.concept?.intervals.findIndex((interval, index) => intervalMatchesTarget(interval, index, typedTarget)) ?? -1;
+    if (conceptIndex < 0) continue;
+    const conceptInterval = record.tiers.concept?.intervals[conceptIndex];
+    if (!conceptInterval) continue;
+    const start = typeof typedTarget.start === "number" ? typedTarget.start : conceptInterval.start;
+    const end = typeof typedTarget.end === "number" ? typedTarget.end : conceptInterval.end;
+    const tierIntervals = targetTierIntervals(typedTarget);
+    if (typeof typedTarget.start === "number" || typeof typedTarget.end === "number") {
+      record.tiers.concept.intervals[conceptIndex] = { ...conceptInterval, start, end };
+      updated += 1;
+    }
+    for (const [tierName, intervals] of Object.entries(tierIntervals)) {
+      if (!record.tiers[tierName]) continue;
+      const replacement = intervals[0];
+      if (!replacement) continue;
+      const idx = record.tiers[tierName].intervals.findIndex((interval, index) => intervalMatchesTarget(interval, index, typedTarget));
+      if (idx < 0) continue;
+      record.tiers[tierName].intervals[idx] = { ...record.tiers[tierName].intervals[idx], ...replacement };
+      record.tiers[tierName].intervals.sort((a, b) => a.start - b.start);
+      updated += 1;
+    }
+  }
+  if (updated > 0) record.modified_at = nowIsoUtc();
+  return updated;
+}
+
 export function createAnnotationActionsSlice(
   set: AnnotationStoreSet,
   get: AnnotationStoreGet,
@@ -424,6 +498,19 @@ export function createAnnotationActionsSlice(
 
       commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "mark lexeme manually adjusted");
       return flagged;
+    },
+
+    applyConceptScopedRefresh: (speaker, targets) => {
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return 0;
+      if (!Array.isArray(targets) || targets.length === 0) return 0;
+      const clone = deepClone(pre);
+      const updated = applyConceptScopedRefreshToRecord(clone, targets);
+      if (updated === 0) return 0;
+      set((state) => ({
+        records: { ...state.records, [speaker]: clone },
+      }));
+      return updated;
     },
 
     undo: (speaker: string) => {

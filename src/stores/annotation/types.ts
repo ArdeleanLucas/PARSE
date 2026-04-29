@@ -64,6 +64,7 @@ export interface AnnotationStoreActionsSlice {
   ) => number;
   saveLexemeAnnotation: (payload: SaveLexemeAnnotationPayload) => SaveLexemeAnnotationResult;
   markLexemeManuallyAdjusted: (speaker: string, start: number, end: number) => number;
+  applyConceptScopedRefresh: (speaker: string, targets: readonly unknown[]) => number;
   undo: (speaker: string) => string | null;
   redo: (speaker: string) => string | null;
 }

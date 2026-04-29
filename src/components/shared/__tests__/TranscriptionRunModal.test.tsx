@@ -14,10 +14,11 @@ import {
 } from "../TranscriptionRunModal";
 
 vi.mock("../../../api/client", () => ({
+  getAnnotation: vi.fn(),
   getPipelineState: vi.fn(),
 }));
 
-import { getPipelineState } from "../../../api/client";
+import { getAnnotation, getPipelineState } from "../../../api/client";
 
 function makeState(overrides: Partial<{
   speaker: string;
@@ -69,6 +70,11 @@ function makeState(overrides: Partial<{
 describe("TranscriptionRunModal", () => {
   beforeEach(() => {
     vi.mocked(getPipelineState).mockReset();
+    vi.mocked(getAnnotation).mockReset();
+    vi.mocked(getAnnotation).mockResolvedValue({
+      speaker: "Sp",
+      tiers: { concept: { name: "concept", display_order: 0, intervals: [] } },
+    });
   });
   afterEach(() => {
     cleanup();
@@ -353,6 +359,146 @@ describe("TranscriptionRunModal", () => {
     )) as HTMLButtonElement;
     // No default speaker → nothing selected → disabled.
     expect(confirm.disabled).toBe(true);
+  });
+
+  it("renders run-mode radios and defaults to full audio", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        title="Run Full Pipeline"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    expect(screen.getByRole("radio", { name: /full audio/i })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /all concept windows/i })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /edited concepts only/i })).toBeTruthy();
+    expect((screen.getByRole("radio", { name: /full audio/i }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("hides Normalize and Refine lexemes in concept-windowed modes", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        title="Run Full Pipeline"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    expect(screen.getByTestId("transcription-run-step-normalize")).toBeTruthy();
+    expect(screen.getByTestId("transcription-run-refine-lexemes")).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+
+    expect(screen.queryByTestId("transcription-run-step-normalize")).toBeNull();
+    expect(screen.queryByTestId("transcription-run-col-normalize")).toBeNull();
+    expect(screen.queryByTestId("transcription-run-refine-lexemes")).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /edited concepts only/i }));
+    });
+
+    expect(screen.queryByTestId("transcription-run-step-normalize")).toBeNull();
+    expect(screen.queryByTestId("transcription-run-col-normalize")).toBeNull();
+    expect(screen.queryByTestId("transcription-run-refine-lexemes")).toBeNull();
+  });
+
+  it("renders edited-only preview rows and passes runMode on confirm", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    vi.mocked(getAnnotation).mockResolvedValue({
+      speaker: "Alpha",
+      tiers: {
+        concept: {
+          name: "concept",
+          display_order: 0,
+          intervals: [
+            { start: 2, end: 3, text: "water", manuallyAdjusted: false },
+            { start: 10.1, end: 11.2345, text: "hair", manuallyAdjusted: true },
+            { start: 5, end: 6.7777, text: "eye", manuallyAdjusted: true },
+          ],
+        },
+      },
+    });
+    const onConfirm = vi.fn<[TranscriptionRunConfirm], void>();
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        title="Run Full Pipeline"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /edited concepts only/i }));
+    });
+
+    expect(await screen.findByText(/#3 "eye"\s+5\.000–6\.778s/)).toBeTruthy();
+    expect(screen.getByText(/#2 "hair"\s+10\.100–11\.235s/)).toBeTruthy();
+    expect(screen.queryByText(/water/)).toBeNull();
+    expect(screen.getByText(/Run on 2 edited concepts × 3 steps \(STT, ORTH, IPA\)/)).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-confirm"));
+    });
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      steps: ["stt", "ortho", "ipa"],
+      runMode: "edited-only",
+    }));
+  });
+
+  it("disables confirm in edited-only mode when no manually edited concepts exist", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    vi.mocked(getAnnotation).mockResolvedValue({
+      speaker: "Alpha",
+      tiers: { concept: { name: "concept", display_order: 0, intervals: [{ start: 1, end: 2, text: "water" }] } },
+    });
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        title="Run Full Pipeline"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /edited concepts only/i }));
+    });
+
+    expect(await screen.findByText("No manually edited concepts on this speaker.")).toBeTruthy();
+    expect((screen.getByTestId("transcription-run-confirm") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("handles getPipelineState rejection per-speaker (Test F)", async () => {

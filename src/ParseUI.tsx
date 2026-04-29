@@ -426,6 +426,7 @@ export function ParseUI() {
     isBatchReportOpen: modals.batchReport.isOpen,
     getLanguage: () => sttLanguageRef.current || undefined,
     reloadSpeakerAnnotation,
+    refreshScopedConceptRows: (speakerId, targets) => useAnnotationStore.getState().applyConceptScopedRefresh(speakerId, targets) > 0,
     reloadStt: (speakerId) => {
       void useTranscriptionLanesStore.getState().reloadStt(speakerId);
     },

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 export type PipelineStepId = "normalize" | "stt" | "ortho" | "ipa";
+export type TranscriptionRunMode = "full" | "concept-windows" | "edited-only";
 export type RunScope = "gaps" | "overwrite";
 export const DEFAULT_SCOPE: RunScope = "gaps";
 export const STEP_ORDER: PipelineStepId[] = ["normalize", "stt", "ortho", "ipa"];

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Workflow } from "lucide-react";
 import { Modal } from "./Modal";
 import { TranscriptionRunGrid } from "./TranscriptionRunGrid";
-import { getPipelineState } from "../../api/client";
+import { getAnnotation, getPipelineState } from "../../api/client";
+import type { AnnotationInterval } from "../../api/types";
 import {
   DEFAULT_SCOPE,
   STEP_ICONS,
@@ -12,6 +13,7 @@ import {
   type PipelineStepId,
   type RunScope,
   type SpeakerLoadEntry,
+  type TranscriptionRunMode,
 } from "./transcriptionRunShared";
 
 export type { PipelineStepId, RunScope } from "./transcriptionRunShared";
@@ -21,6 +23,26 @@ export interface TranscriptionRunConfirm {
   steps: PipelineStepId[];
   overwrites: Partial<Record<PipelineStepId, boolean>>;
   refineLexemes?: boolean;
+  runMode: TranscriptionRunMode;
+}
+
+interface EditedConceptPreviewRow {
+  conceptId: string;
+  conceptName: string;
+  start: number;
+  end: number;
+}
+
+function conceptIntervalId(interval: AnnotationInterval, index: number): string {
+  const raw = (interval as AnnotationInterval & { id?: unknown; concept_id?: unknown; conceptId?: unknown }).id
+    ?? (interval as AnnotationInterval & { concept_id?: unknown }).concept_id
+    ?? (interval as AnnotationInterval & { conceptId?: unknown }).conceptId;
+  const text = raw == null ? "" : String(raw).trim();
+  return text || String(index + 1);
+}
+
+function formatEditedConceptPreviewRow(row: EditedConceptPreviewRow): string {
+  return `#${row.conceptId} "${row.conceptName}"  ${row.start.toFixed(3)}–${row.end.toFixed(3)}s`;
 }
 
 export interface TranscriptionRunModalProps {
@@ -45,6 +67,10 @@ export function TranscriptionRunModal({
   const [stateBySpeaker, setStateBySpeaker] = useState<Record<string, SpeakerLoadEntry>>({});
   const [selectedSpeakers, setSelectedSpeakers] = useState<Set<string>>(() => new Set());
   const [selectedSteps, setSelectedSteps] = useState<Set<PipelineStepId>>(() => new Set());
+  const [runMode, setRunMode] = useState<TranscriptionRunMode>("full");
+  const [editedConcepts, setEditedConcepts] = useState<EditedConceptPreviewRow[]>([]);
+  const [editedConceptsStatus, setEditedConceptsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [editedConceptsError, setEditedConceptsError] = useState<string | null>(null);
   const [refineLexemes, setRefineLexemes] = useState(false);
   const [scopeByStep, setScopeByStep] = useState<Record<PipelineStepId, RunScope>>(() => ({
     normalize: DEFAULT_SCOPE,
@@ -57,6 +83,10 @@ export function TranscriptionRunModal({
     if (!open) return;
     let cancelled = false;
     setRefineLexemes(false);
+    setRunMode("full");
+    setEditedConcepts([]);
+    setEditedConceptsStatus("idle");
+    setEditedConceptsError(null);
     setScopeByStep({
       normalize: DEFAULT_SCOPE,
       stt: DEFAULT_SCOPE,
@@ -109,17 +139,64 @@ export function TranscriptionRunModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const previewSpeaker = useMemo(() => {
+    if (defaultSelectedSpeaker && selectedSpeakers.has(defaultSelectedSpeaker)) return defaultSelectedSpeaker;
+    return speakers.find((speaker) => selectedSpeakers.has(speaker)) ?? null;
+  }, [defaultSelectedSpeaker, selectedSpeakers, speakers]);
+
+  useEffect(() => {
+    if (!open || runMode !== "edited-only" || !previewSpeaker) {
+      setEditedConcepts([]);
+      setEditedConceptsStatus("idle");
+      setEditedConceptsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setEditedConceptsStatus("loading");
+    setEditedConceptsError(null);
+    getAnnotation(previewSpeaker)
+      .then((record) => {
+        if (cancelled) return;
+        const rows = (record.tiers.concept?.intervals ?? [])
+          .map((interval, index) => ({ interval, index }))
+          .filter(({ interval }) => interval.manuallyAdjusted === true)
+          .map(({ interval, index }) => ({
+            conceptId: conceptIntervalId(interval, index),
+            conceptName: interval.text || "(untitled)",
+            start: interval.start,
+            end: interval.end,
+          }))
+          .sort((a, b) => a.start - b.start);
+        setEditedConcepts(rows);
+        setEditedConceptsStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setEditedConcepts([]);
+        setEditedConceptsStatus("error");
+        setEditedConceptsError(err instanceof Error ? err.message : String(err ?? "Failed to load concepts"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, previewSpeaker, runMode]);
+
+  const selectableStepOrder: PipelineStepId[] = useMemo(() => (
+    runMode === "full" ? STEP_ORDER : STEP_ORDER.filter((step) => step !== "normalize")
+  ), [runMode]);
+
   const stepsToRender: PipelineStepId[] = useMemo(() => {
-    const active = fixedSteps && fixedSteps.length > 0 ? fixedSteps : STEP_ORDER;
-    return STEP_ORDER.filter((s) => active.includes(s)).filter((s) => selectedSteps.has(s));
-  }, [fixedSteps, selectedSteps]);
+    const active = fixedSteps && fixedSteps.length > 0 ? fixedSteps : selectableStepOrder;
+    return selectableStepOrder.filter((s) => active.includes(s)).filter((s) => selectedSteps.has(s));
+  }, [fixedSteps, selectedSteps, selectableStepOrder]);
 
   const gridStepColumns: PipelineStepId[] = useMemo(() => {
     if (fixedSteps && fixedSteps.length > 0) {
-      return STEP_ORDER.filter((s) => fixedSteps.includes(s));
+      return selectableStepOrder.filter((s) => fixedSteps.includes(s));
     }
-    return STEP_ORDER.filter((s) => selectedSteps.has(s));
-  }, [fixedSteps, selectedSteps]);
+    return selectableStepOrder.filter((s) => selectedSteps.has(s));
+  }, [fixedSteps, selectedSteps, selectableStepOrder]);
 
   const toggleStep = (step: PipelineStepId) => {
     if (fixedSteps && fixedSteps.length > 0) return;
@@ -151,6 +228,9 @@ export function TranscriptionRunModal({
 
   const hasAnySpeaker = selectedSpeakers.size > 0;
   const hasAnyStep = stepsToRender.length > 0;
+  const editedOnlyEmpty = runMode === "edited-only" && editedConceptsStatus === "ready" && editedConcepts.length === 0;
+  const editedOnlyLoading = runMode === "edited-only" && editedConceptsStatus === "loading";
+  const editedOnlyError = runMode === "edited-only" && editedConceptsStatus === "error";
   const willOverwrite = summary.overwrite > 0;
 
   const handleConfirm = () => {
@@ -172,7 +252,8 @@ export function TranscriptionRunModal({
       speakers: speakersArr,
       steps: stepsArr,
       overwrites,
-      refineLexemes: includesOrtho && refineLexemes ? true : undefined,
+      runMode,
+      refineLexemes: runMode === "full" && includesOrtho && refineLexemes ? true : undefined,
     });
   };
 
@@ -189,13 +270,67 @@ export function TranscriptionRunModal({
           Pick speakers and steps. The grid below previews what will run — green cells run fresh, sky cells keep existing data, amber cells overwrite it, grey cells are skipped, and red cells are blocked by the backend.
         </p>
 
+        <fieldset
+          className="rounded-md border border-slate-200 bg-white px-3 py-2"
+          data-testid="transcription-run-mode"
+        >
+          <legend className="mb-1 text-xs font-semibold text-slate-700">Run mode</legend>
+          <div className="flex flex-wrap gap-3">
+            {([
+              ["full", "Full audio", "Whole-file pipeline run."],
+              ["concept-windows", "All concept windows", "Run selected steps on each concept window."],
+              ["edited-only", "Edited concepts only", "Run selected steps on manually edited concepts."],
+            ] as const).map(([mode, label, help]) => (
+              <label key={mode} className="flex items-start gap-1.5 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="transcription-run-mode"
+                  value={mode}
+                  checked={runMode === mode}
+                  onChange={() => {
+                    setRunMode(mode);
+                    if (mode !== "full") setRefineLexemes(false);
+                  }}
+                  className="mt-0.5 h-3.5 w-3.5 border-slate-300"
+                />
+                <span>
+                  <span className="font-medium text-slate-800">{label}</span>
+                  <span className="ml-1 text-slate-500">{help}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        {runMode === "edited-only" && (
+          <div
+            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+            data-testid="transcription-run-edited-preview"
+          >
+            <div className="mb-1 font-semibold text-slate-700">Edited concept preview</div>
+            {!previewSpeaker ? <div>Select a speaker to preview edited concepts.</div> : null}
+            {editedConceptsStatus === "loading" ? <div>Loading edited concepts…</div> : null}
+            {editedConceptsStatus === "error" ? (
+              <div className="text-rose-700">{editedConceptsError ?? "Failed to load edited concepts."}</div>
+            ) : null}
+            {editedOnlyEmpty ? <div className="text-rose-700">No manually edited concepts on this speaker.</div> : null}
+            {editedConcepts.length > 0 ? (
+              <div className="max-h-28 overflow-y-auto rounded border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-700">
+                {editedConcepts.map((row) => (
+                  <div key={`${row.conceptId}-${row.start}-${row.end}`}>{formatEditedConceptPreviewRow(row)}</div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
+
         {!fixedSteps && (
           <div
             className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
             data-testid="transcription-run-step-checkboxes"
           >
             <span className="text-xs font-semibold text-slate-700">Steps</span>
-            {STEP_ORDER.map((step) => {
+            {selectableStepOrder.map((step) => {
               const Icon = STEP_ICONS[step];
               const checked = selectedSteps.has(step);
               return (
@@ -218,7 +353,7 @@ export function TranscriptionRunModal({
           </div>
         )}
 
-        {stepsToRender.includes("ortho") && (
+        {runMode === "full" && stepsToRender.includes("ortho") && (
           <div
             className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
             data-testid="transcription-run-ortho-options"
@@ -265,7 +400,11 @@ export function TranscriptionRunModal({
           data-testid="transcription-run-summary"
         >
           <span>
-            Running {selectedSpeakers.size} speaker{selectedSpeakers.size === 1 ? "" : "s"} × {stepsToRender.length} step{stepsToRender.length === 1 ? "" : "s"}. <span className="text-emerald-700 font-medium">{summary.ok} ok</span>, <span className="text-sky-700 font-medium">{summary.keep} keep existing</span>, <span className="text-amber-700 font-medium">{summary.overwrite} will overwrite</span>, <span className="text-rose-700 font-medium">{summary.blocked} blocked</span> (will be skipped at runtime).
+            {runMode === "edited-only" ? (
+              <>Run on {editedConcepts.length} edited concepts × {stepsToRender.length} steps ({stepsToRender.map((step) => STEP_LABELS[step]).join(", ") || "none"}).</>
+            ) : (
+              <>Running {selectedSpeakers.size} speaker{selectedSpeakers.size === 1 ? "" : "s"} × {stepsToRender.length} step{stepsToRender.length === 1 ? "" : "s"}. <span className="text-emerald-700 font-medium">{summary.ok} ok</span>, <span className="text-sky-700 font-medium">{summary.keep} keep existing</span>, <span className="text-amber-700 font-medium">{summary.overwrite} will overwrite</span>, <span className="text-rose-700 font-medium">{summary.blocked} blocked</span> (will be skipped at runtime).</>
+            )}
           </span>
         </div>
 
@@ -281,7 +420,7 @@ export function TranscriptionRunModal({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={!hasAnySpeaker || !hasAnyStep}
+            disabled={!hasAnySpeaker || !hasAnyStep || editedOnlyLoading || editedOnlyEmpty || editedOnlyError}
             data-testid="transcription-run-confirm"
             className={`inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
               willOverwrite ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
