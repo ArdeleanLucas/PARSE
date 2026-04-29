@@ -138,6 +138,18 @@ PIPELINE_ORCHESTRATION_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                         "``sd`` for ORTH (razhan's fine-tuning target)."
                     ),
                 },
+                "run_mode": {
+                    "type": "string",
+                    "enum": ["full", "concept-windows", "edited-only"],
+                    "default": "full",
+                    "description": "Pipeline scope: full-file behavior, all concept windows, or manually adjusted concept windows only.",
+                },
+                "concept_ids": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "maxItems": 500,
+                    "description": "Optional exact concept-id filter used when run_mode is concept-windows or edited-only.",
+                },
                 "dryRun": {
                     "type": "boolean",
                     "description": "If true, preview the planned compute payload without starting a background job.",
@@ -266,9 +278,26 @@ def tool_pipeline_run(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
     language_raw = args.get("language")
     language = str(language_raw).strip() if isinstance(language_raw, str) else ""
 
+    run_mode = str(args.get("run_mode") or "full").strip().lower().replace("_", "-")
+    if run_mode not in {"full", "concept-windows", "edited-only"}:
+        raise ChatToolValidationError("run_mode must be one of 'full', 'concept-windows', or 'edited-only'")
+    concept_ids_raw = args.get("concept_ids")
+    concept_ids: List[str] = []
+    if concept_ids_raw is not None:
+        if not isinstance(concept_ids_raw, list):
+            raise ChatToolValidationError("concept_ids must be a list")
+        for raw in concept_ids_raw:
+            concept_id = str(raw or "").strip()
+            if concept_id and concept_id not in concept_ids:
+                concept_ids.append(concept_id)
+
     payload: Dict[str, Any] = {"speaker": speaker, "steps": steps, "overwrites": overwrites}
     if language:
         payload["language"] = language
+    if run_mode != "full":
+        payload["run_mode"] = run_mode
+    if concept_ids:
+        payload["concept_ids"] = concept_ids
 
     if bool(args.get("dryRun", False)):
         return {
@@ -285,7 +314,7 @@ def tool_pipeline_run(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
     except Exception as exc:
         raise ChatToolExecutionError("pipeline start failed: {0}".format(exc)) from exc
 
-    return {
+    result = {
         "jobId": str(job_id),
         "status": "running",
         "speaker": speaker,
@@ -294,6 +323,11 @@ def tool_pipeline_run(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
         "computeType": "full_pipeline",
         "message": "Pipeline job started. Poll with compute_status.",
     }
+    if run_mode != "full":
+        result["run_mode"] = run_mode
+    if concept_ids:
+        result["concept_ids"] = concept_ids
+    return result
 
 
 PIPELINE_ORCHESTRATION_TOOL_HANDLERS = {

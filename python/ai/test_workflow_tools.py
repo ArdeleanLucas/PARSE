@@ -184,6 +184,134 @@ def test_run_full_annotation_pipeline_returns_structured_failure_payload(tmp_pat
     assert payload["events"][-1]["event"] == "stage_failed"
 
 
+def test_run_full_annotation_pipeline_spec_exposes_run_mode_and_concept_ids(tmp_path: pathlib.Path) -> None:
+    workflow = WorkflowTools(project_root=tmp_path)
+    spec = workflow.tool_spec("run_full_annotation_pipeline")
+    properties = spec.parameters["properties"]
+
+    assert properties["run_mode"]["enum"] == ["full", "concept-windows", "edited-only"]
+    assert properties["run_mode"]["default"] == "full"
+    assert properties["concept_ids"]["type"] == "array"
+    assert properties["concept_ids"]["items"]["type"] == "string"
+    assert "concept-scoped" in spec.description
+    assert "reporting/summary" not in spec.description
+
+
+def test_run_full_annotation_pipeline_dry_run_reports_scoped_plan(tmp_path: pathlib.Path) -> None:
+    _seed_annotation(tmp_path, "Fail02")
+    workflow = WorkflowTools(project_root=tmp_path)
+
+    payload = workflow.execute(
+        "run_full_annotation_pipeline",
+        {
+            "speaker_id": "Fail02",
+            "concept_list": ["1", "2"],
+            "run_mode": "concept-windows",
+            "concept_ids": ["2"],
+            "dryRun": True,
+        },
+    )["result"]
+
+    assert payload["dryRun"] is True
+    assert payload["run_mode"] == "concept-windows"
+    assert payload["concept_ids"] == ["2"]
+    assert payload["stages"] == [
+        {"stage": "stt", "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"},
+        {"stage": "ortho", "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"},
+        {"stage": "ipa", "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"},
+    ]
+
+
+def test_run_full_annotation_pipeline_scoped_mode_starts_single_full_pipeline_job(tmp_path: pathlib.Path) -> None:
+    _seed_annotation(tmp_path, "Fail02")
+    start_calls: List[Tuple[str, Dict[str, Any]]] = []
+
+    def fake_start_compute(compute_type: str, payload: Dict[str, Any]) -> str:
+        start_calls.append((compute_type, dict(payload)))
+        return "job-full-pipeline"
+
+    workflow = WorkflowTools(
+        project_root=tmp_path,
+        start_stt_job=lambda *_args: (_ for _ in ()).throw(AssertionError("scoped workflow must use full_pipeline, not speaker-wide stt_start")),
+        start_compute_job=fake_start_compute,
+        get_job_snapshot=lambda job_id: {
+            "type": "compute:full_pipeline",
+            "status": "complete",
+            "progress": 100.0,
+            "result": {"summary": {"ok": 3}, "speaker": "Fail02"},
+        } if job_id == "job-full-pipeline" else None,
+    )
+
+    payload = workflow.execute(
+        "run_full_annotation_pipeline",
+        {
+            "speaker_id": "Fail02",
+            "concept_list": ["1", "2"],
+            "run_mode": "edited-only",
+            "concept_ids": ["2"],
+        },
+    )["result"]
+
+    assert start_calls == [
+        (
+            "full_pipeline",
+            {
+                "speaker": "Fail02",
+                "steps": ["stt", "ortho", "ipa"],
+                "overwrites": {"stt": True, "ortho": True, "ipa": True},
+                "run_mode": "edited-only",
+                "concept_ids": ["2"],
+            },
+        )
+    ]
+    assert payload["run_mode"] == "edited-only"
+    assert payload["concept_ids"] == ["2"]
+    assert payload["job_ids"] == {"full_pipeline": "job-full-pipeline"}
+    assert payload["final_status"] == "complete"
+
+
+def test_run_full_annotation_pipeline_scoped_mode_omits_concept_ids_when_not_explicit(tmp_path: pathlib.Path) -> None:
+    _seed_annotation(tmp_path, "Fail02")
+    start_calls: List[Tuple[str, Dict[str, Any]]] = []
+
+    def fake_start_compute(compute_type: str, payload: Dict[str, Any]) -> str:
+        start_calls.append((compute_type, dict(payload)))
+        return "job-full-pipeline"
+
+    workflow = WorkflowTools(
+        project_root=tmp_path,
+        start_compute_job=fake_start_compute,
+        get_job_snapshot=lambda job_id: {
+            "type": "compute:full_pipeline",
+            "status": "complete",
+            "progress": 100.0,
+            "result": {"summary": {"ok": 3}, "speaker": "Fail02"},
+        } if job_id == "job-full-pipeline" else None,
+    )
+
+    payload = workflow.execute(
+        "run_full_annotation_pipeline",
+        {
+            "speaker_id": "Fail02",
+            "concept_list": ["1", "2"],
+            "run_mode": "concept-windows",
+        },
+    )["result"]
+
+    assert start_calls == [
+        (
+            "full_pipeline",
+            {
+                "speaker": "Fail02",
+                "steps": ["stt", "ortho", "ipa"],
+                "overwrites": {"stt": True, "ortho": True, "ipa": True},
+                "run_mode": "concept-windows",
+            },
+        )
+    ]
+    assert payload["concept_ids"] == []
+
+
 def test_prepare_compare_mode_builds_compare_bundle_from_selected_range(tmp_path: pathlib.Path) -> None:
     _write_concepts_csv(tmp_path)
     _seed_annotation(tmp_path, "Fail01", concepts=["1", "2", "3"])

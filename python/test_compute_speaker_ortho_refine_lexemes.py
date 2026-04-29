@@ -178,3 +178,93 @@ def test_refine_lexemes_strong_match_skipped(tmp_path, monkeypatch):
     assert result["refine_lexemes_enabled"] is True
     assert result["refined_lexemes"] == 0
     assert stub.clip_calls == []
+
+
+class _ConceptWindowOrthoProvider:
+    def __init__(self) -> None:
+        self.clip_calls: list[dict] = []
+
+    def transcribe(self, *args, **kwargs):  # pragma: no cover - failure path
+        raise AssertionError("concept-window ORTH must not run full-file transcribe")
+
+    def transcribe_clip(self, audio_array, *, initial_prompt=None, language=None):
+        call_index = len(self.clip_calls) + 1
+        self.clip_calls.append({
+            "len": int(getattr(audio_array, "shape", [0])[0] or 0),
+            "initial_prompt": initial_prompt,
+            "language": language,
+        })
+        return (f"orth-window-{call_index}", 0.80 + call_index / 100.0)
+
+
+def _seed_ortho_scoped_annotation(tmp_path, concept_intervals, ortho_intervals=None):
+    _seed(tmp_path, concept_intervals=concept_intervals)
+    path = tmp_path / "annotations" / "Fail02.parse.json"
+    payload = json.loads(path.read_text("utf-8"))
+    payload["tiers"]["ortho"]["intervals"] = list(ortho_intervals or [])
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_ortho_concept_windows_uses_shared_short_clip_helper_and_preserves_outside_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    stub = _ConceptWindowOrthoProvider()
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: stub)
+    _patch_audio_loader(monkeypatch, duration_sec=6.0)
+
+    _seed_ortho_scoped_annotation(
+        tmp_path,
+        concept_intervals=[
+            {"start": 1.0, "end": 1.2, "text": "1"},
+            {"start": 2.0, "end": 2.4, "text": "2"},
+        ],
+        ortho_intervals=[{"start": 5.0, "end": 5.4, "text": "manual-outside"}],
+    )
+    _fake_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho(
+        "j",
+        {"speaker": "Fail02", "run_mode": "concept-windows", "overwrite": True, "language": "sd"},
+    )
+
+    assert result["run_mode"] == "concept-windows"
+    assert result["concept_windows"] == 2
+    assert result["filled"] == 2
+    assert len(stub.clip_calls) == 2
+    assert all(call["language"] == "sd" for call in stub.clip_calls)
+    ann = _load(tmp_path, "Fail02")
+    rows = ann["tiers"]["ortho"]["intervals"]
+    assert [(row["start"], row["end"], row["text"], row.get("conceptId")) for row in rows] == [
+        (1.0, 1.2, "orth-window-1", "1"),
+        (2.0, 2.4, "orth-window-2", "2"),
+        (5.0, 5.4, "manual-outside", None),
+    ]
+
+
+def test_ortho_edited_only_empty_is_structured_no_op(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        server,
+        "get_ortho_provider",
+        lambda: (_ for _ in ()).throw(AssertionError("edited-only empty must not load ORTH provider")),
+    )
+    _seed_ortho_scoped_annotation(
+        tmp_path,
+        concept_intervals=[
+            {"start": 1.0, "end": 1.2, "text": "1"},
+            {"start": 2.0, "end": 2.4, "text": "2"},
+        ],
+    )
+    _fake_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho(
+        "j",
+        {"speaker": "Fail02", "run_mode": "edited-only"},
+    )
+
+    assert result["run_mode"] == "edited-only"
+    assert result["skipped"] is True
+    assert result["no_op"] is True
+    assert result["concept_windows"] == 0
+    assert "No edited concepts" in result["reason"]

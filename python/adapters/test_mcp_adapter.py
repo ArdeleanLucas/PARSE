@@ -121,6 +121,85 @@ def _has_mcp() -> bool:
         return False
 
 
+class _FakeRegisteredTool:
+    def __init__(self) -> None:
+        self.description = ""
+        self.parameters = {}
+        self.annotations = None
+        self.meta = {}
+
+
+class _FakeToolManager:
+    def __init__(self) -> None:
+        self._tools = {}
+
+
+class _FakeMcp:
+    def __init__(self) -> None:
+        self._tool_manager = _FakeToolManager()
+        self.handlers = {}
+
+    def tool(self, name: str):
+        def _decorator(handler):
+            self.handlers[name] = handler
+            self._tool_manager._tools[name] = _FakeRegisteredTool()
+            return handler
+
+        return _decorator
+
+
+class _FakeToolAnnotations:
+    def __init__(self, **kwargs):
+        self.payload = dict(kwargs)
+
+
+def test_mcp_workflow_dispatch_preserves_run_mode_and_concept_ids_through_tool_dispatch(tmp_path) -> None:
+    from adapters.mcp.tool_dispatch import register_workflow_tools
+
+    captured = {}
+
+    class _CapturingWorkflowTools(WorkflowTools):
+        def execute(self, tool_name, raw_args):
+            captured["tool_name"] = tool_name
+            captured["raw_args"] = dict(raw_args)
+            return {"tool": tool_name, "ok": True, "result": dict(raw_args)}
+
+    workflow = _CapturingWorkflowTools(project_root=tmp_path)
+    mcp = _FakeMcp()
+
+    register_workflow_tools(
+        mcp,
+        workflow,
+        ["run_full_annotation_pipeline"],
+        _FakeToolAnnotations,
+    )
+
+    registered = mcp._tool_manager._tools["run_full_annotation_pipeline"]
+    assert registered.parameters["properties"]["run_mode"]["enum"] == ["full", "concept-windows", "edited-only"]
+    assert "concept_ids" in registered.parameters["properties"]
+
+    raw = mcp.handlers["run_full_annotation_pipeline"](
+        speaker_id="Fail02",
+        concept_list=["1"],
+        run_mode="edited-only",
+        concept_ids=["2", "3"],
+        dryRun=True,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert captured == {
+        "tool_name": "run_full_annotation_pipeline",
+        "raw_args": {
+            "speaker_id": "Fail02",
+            "concept_list": ["1"],
+            "run_mode": "edited-only",
+            "concept_ids": ["2", "3"],
+            "dryRun": True,
+        },
+    }
+
+
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
 def test_every_mcp_tool_is_allowlisted_in_parse_chat_tools(tmp_path) -> None:
     import asyncio

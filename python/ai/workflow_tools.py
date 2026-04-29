@@ -86,10 +86,10 @@ class WorkflowTools:
             "run_full_annotation_pipeline": ChatToolSpec(
                 name="run_full_annotation_pipeline",
                 description=(
-                    "Run the high-level annotation workflow for one speaker: STT, forced alignment, "
-                    "then acoustic IPA transcription. The workflow uses the existing low-level tool "
-                    "handlers internally and waits for each stage to reach a terminal job status. "
-                    "concept_list is used for reporting/summary, not for concept-scoped compute."
+                    "Run the high-level annotation workflow for one speaker. In run_mode='full' "
+                    "it preserves the legacy speaker-wide STT → forced-align → IPA sequence; "
+                    "in concept-scoped modes it starts one full_pipeline compute job restricted "
+                    "to all concept windows or manually edited concept windows."
                 ),
                 parameters={
                     "type": "object",
@@ -102,7 +102,19 @@ class WorkflowTools:
                             "minItems": 1,
                             "maxItems": 500,
                             "items": {"type": "string", "minLength": 1, "maxLength": 64},
-                            "description": "Concept IDs used for workflow reporting and post-run filtering.",
+                            "description": "Concept IDs used for workflow reporting and final annotation summary filtering.",
+                        },
+                        "run_mode": {
+                            "type": "string",
+                            "enum": ["full", "concept-windows", "edited-only"],
+                            "default": "full",
+                            "description": "full preserves the legacy speaker-wide path; concept-windows and edited-only run the backend compute pipeline on concept windows.",
+                        },
+                        "concept_ids": {
+                            "type": "array",
+                            "maxItems": 500,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                            "description": "Optional exact concept IDs for scoped run modes. When omitted, concept-windows selects all concept rows and edited-only selects manually adjusted rows.",
                         },
                         "dryRun": {"type": "boolean", "description": "Validate inputs and preview the planned workflow without starting jobs."},
                     },
@@ -562,6 +574,22 @@ class WorkflowTools:
         if not concept_list:
             raise ChatToolValidationError("concept_list must contain at least one valid concept ID")
 
+        run_mode = str(args.get("run_mode") or "full").strip().lower().replace("_", "-")
+        if run_mode not in {"full", "concept-windows", "edited-only"}:
+            raise ChatToolValidationError("run_mode must be one of 'full', 'concept-windows', or 'edited-only'")
+        concept_ids_raw = args.get("concept_ids")
+        concept_ids: Optional[List[str]] = None
+        if concept_ids_raw is not None:
+            if not isinstance(concept_ids_raw, list):
+                raise ChatToolValidationError("concept_ids must be a list")
+            concept_ids = []
+            seen_scope: set[str] = set()
+            for raw_value in concept_ids_raw:
+                concept_id = _normalize_concept_id(raw_value)
+                if concept_id and concept_id not in seen_scope:
+                    seen_scope.add(concept_id)
+                    concept_ids.append(concept_id)
+
         total_stages = 3
         completed_stages = 0
         events: List[Dict[str, Any]] = []
@@ -605,6 +633,35 @@ class WorkflowTools:
                 pipeline_state = None
 
         if bool(args.get("dryRun", False)):
+            if run_mode != "full":
+                scoped_stages = [
+                    {"stage": "stt", "tool": "pipeline_run", "status": "planned", "run_mode": run_mode},
+                    {"stage": "ortho", "tool": "pipeline_run", "status": "planned", "run_mode": run_mode},
+                    {"stage": "ipa", "tool": "pipeline_run", "status": "planned", "run_mode": run_mode},
+                ]
+                return {
+                    "readOnly": True,
+                    "previewOnly": True,
+                    "dryRun": True,
+                    "speaker_id": speaker_id,
+                    "concept_list": concept_list,
+                    "run_mode": run_mode,
+                    "concept_ids": concept_ids or [],
+                    "source_wav": source_wav,
+                    "stages": scoped_stages,
+                    "events": [
+                        self._stage_event(event="stage_planned", stage="stt", tool="pipeline_run", completed_stages=0, total_stages=total_stages, status="planned"),
+                        self._stage_event(event="stage_planned", stage="ortho", tool="pipeline_run", completed_stages=0, total_stages=total_stages, status="planned"),
+                        self._stage_event(event="stage_planned", stage="ipa", tool="pipeline_run", completed_stages=0, total_stages=total_stages, status="planned"),
+                    ],
+                    "progress": self._workflow_progress_payload(
+                        completed_stages=0,
+                        total_stages=total_stages,
+                        current_stage="stt",
+                    ),
+                    "pipeline_state": pipeline_state,
+                    "note": "Dry run only. Scoped run would start one full_pipeline job with run_mode={0}.".format(run_mode),
+                }
             return {
                 "readOnly": True,
                 "previewOnly": True,
@@ -628,7 +685,131 @@ class WorkflowTools:
                     current_stage="stt",
                 ),
                 "pipeline_state": pipeline_state,
-                "note": "Dry run only. concept_list is used for reporting; the underlying workflow remains speaker-wide.",
+                "note": "Dry run only. Full run preserves the legacy speaker-wide workflow.",
+            }
+
+        if run_mode != "full":
+            full_payload: Dict[str, Any] = {
+                "speaker": speaker_id,
+                "steps": ["stt", "ortho", "ipa"],
+                "overwrites": {"stt": True, "ortho": True, "ipa": True},
+                "run_mode": run_mode,
+            }
+            if concept_ids is not None:
+                full_payload["concept_ids"] = list(concept_ids)
+            events.append(
+                self._stage_event(
+                    event="stage_started",
+                    stage="full_pipeline",
+                    tool="pipeline_run",
+                    completed_stages=0,
+                    total_stages=1,
+                    status="running",
+                )
+            )
+            try:
+                if self._parse_tools._start_compute_job is None:
+                    raise ChatToolExecutionError("start_compute_job callback is unavailable")
+                full_job_id = self._parse_tools._start_compute_job("full_pipeline", full_payload)
+                full_job_id = str(full_job_id or "").strip()
+                if not full_job_id:
+                    raise ChatToolExecutionError("full_pipeline stage did not return a jobId")
+                job_ids["full_pipeline"] = full_job_id
+                pipeline_status = self._poll_tool_status(
+                    lambda status_args: self._parse_tools._tool_compute_status({**status_args, "computeType": "full_pipeline"}),
+                    job_id=full_job_id,
+                )
+            except Exception as exc:
+                events.append(
+                    self._stage_event(
+                        event="stage_failed",
+                        stage="full_pipeline",
+                        tool="pipeline_run",
+                        completed_stages=0,
+                        total_stages=1,
+                        status="error",
+                        job_id=job_ids.get("full_pipeline"),
+                        message=str(exc),
+                    )
+                )
+                return self._workflow_failure_payload(
+                    speaker_id=speaker_id,
+                    concept_list=concept_list,
+                    source_wav=source_wav,
+                    stages=stages,
+                    events=events,
+                    job_ids=job_ids,
+                    completed_stages=0,
+                    total_stages=1,
+                    failed_step="full_pipeline",
+                    failed_tool="pipeline_run",
+                    error_message=str(exc),
+                    error_type=type(exc).__name__,
+                )
+
+            pipeline_stage_status = self._terminal_stage_status(pipeline_status)
+            stages.append({
+                "stage": "full_pipeline",
+                "tool": "pipeline_run",
+                "status": pipeline_stage_status,
+                "payload": pipeline_status,
+                "run_mode": run_mode,
+            })
+            if not self._is_complete_stage(pipeline_status):
+                events.append(
+                    self._stage_event(
+                        event="stage_failed",
+                        stage="full_pipeline",
+                        tool="compute_status",
+                        completed_stages=0,
+                        total_stages=1,
+                        status=pipeline_stage_status,
+                        job_id=job_ids.get("full_pipeline"),
+                        message=str(pipeline_status.get("error") or pipeline_status.get("message") or pipeline_stage_status),
+                    )
+                )
+                return self._workflow_failure_payload(
+                    speaker_id=speaker_id,
+                    concept_list=concept_list,
+                    source_wav=source_wav,
+                    stages=stages,
+                    events=events,
+                    job_ids=job_ids,
+                    completed_stages=0,
+                    total_stages=1,
+                    failed_step="full_pipeline",
+                    failed_tool="compute_status",
+                    failed_payload=pipeline_status,
+                    error_type="workflow_stage_status",
+                )
+            events.append(
+                self._stage_event(
+                    event="stage_completed",
+                    stage="full_pipeline",
+                    tool="compute_status",
+                    completed_stages=1,
+                    total_stages=1,
+                    status=pipeline_stage_status,
+                    job_id=job_ids.get("full_pipeline"),
+                )
+            )
+            return {
+                "speaker_id": speaker_id,
+                "concept_list": concept_list,
+                "run_mode": run_mode,
+                "concept_ids": concept_ids or [],
+                "source_wav": source_wav,
+                "job_ids": dict(job_ids),
+                "stages": stages,
+                "events": events,
+                "progress": self._workflow_progress_payload(
+                    completed_stages=1,
+                    total_stages=1,
+                    current_stage=None,
+                ),
+                "annotation_summary": pipeline_status.get("result"),
+                "final_status": "complete",
+                "completed_at": _utc_now_iso(),
             }
 
         events.append(

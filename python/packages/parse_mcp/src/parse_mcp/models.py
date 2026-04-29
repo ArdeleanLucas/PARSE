@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, List, Literal, Optional
+
+PipelineRunMode = Literal["full", "concept-windows", "edited-only"]
 
 
 def _int_from_payload(payload: Dict[str, Any], key: str, default: int = 0) -> int:
@@ -18,6 +20,63 @@ def _float_from_payload(payload: Dict[str, Any], key: str, default: float = 0.0)
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+@dataclass
+class RunFullAnnotationPipelineInput:
+    speaker_id: str
+    concept_list: List[str]
+    run_mode: PipelineRunMode = "full"
+    concept_ids: Optional[List[str]] = None
+    dryRun: Optional[bool] = None
+
+    def to_arguments(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "speaker_id": self.speaker_id,
+            "concept_list": list(self.concept_list),
+            "run_mode": self.run_mode,
+        }
+        if self.concept_ids is not None:
+            payload["concept_ids"] = list(self.concept_ids)
+        if self.dryRun is not None:
+            payload["dryRun"] = bool(self.dryRun)
+        return payload
+
+
+@dataclass
+class AffectedConcept:
+    concept_id: str
+    start: float
+    end: float
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "AffectedConcept":
+        payload = payload or {}
+        return cls(
+            concept_id=str(payload.get("concept_id") or ""),
+            start=_float_from_payload(payload, "start"),
+            end=_float_from_payload(payload, "end"),
+        )
+
+
+@dataclass
+class RunFullAnnotationPipelineResult:
+    speaker: str
+    run_mode: PipelineRunMode = "full"
+    affected_concepts: List[AffectedConcept] = field(default_factory=list)
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "RunFullAnnotationPipelineResult":
+        payload = payload or {}
+        return cls(
+            speaker=str(payload.get("speaker") or payload.get("speaker_id") or ""),
+            run_mode=str(payload.get("run_mode") or "full"),  # type: ignore[arg-type]
+            affected_concepts=[
+                AffectedConcept.from_payload(item)
+                for item in (payload.get("affected_concepts") or [])
+                if isinstance(item, dict)
+            ],
+        )
 
 
 @dataclass

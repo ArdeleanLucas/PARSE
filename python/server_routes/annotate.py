@@ -842,41 +842,285 @@ def _ortho_tier2_align_to_words(audio_path: _server.pathlib.Path, segments: _ser
     flat.sort(key=lambda iv: (float(iv['start']), float(iv['end'])))
     return flat
 
-def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.8, weak_conf: float=0.5, job_id: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
-    """Re-transcribe a ±``pad_sec`` window per concept whose ortho_words
-    match is missing or weak, using a Whisper ``initial_prompt`` built from
-    the concept labels themselves. Returns new ``ortho_words``-shaped
-    entries with ``source="short_clip_fallback"`` that the caller should
-    merge (upsert) into the main list.
+
+_CONCEPT_COMPUTE_RUN_MODES = {'full', 'concept-windows', 'edited-only'}
+
+
+def _set_compute_progress(job_id: str, progress: float, **kwargs: _server.Any) -> None:
+    try:
+        _server._set_job_progress(job_id, progress, **kwargs)
+    except RecursionError:
+        # Direct unit tests can reach annotate exports before the jobs-route
+        # progress implementation replaces server.py's lazy wrapper. Progress is
+        # observability-only, so keep compute behavior deterministic.
+        return
+
+
+def _normalize_compute_run_mode(raw_value: _server.Any) -> str:
+    value = str(raw_value or 'full').strip().lower().replace('_', '-')
+    if not value:
+        value = 'full'
+    if value not in _CONCEPT_COMPUTE_RUN_MODES:
+        raise RuntimeError("run_mode must be one of 'full', 'concept-windows', or 'edited-only'")
+    return value
+
+
+def _payload_concept_ids(payload: _server.Dict[str, _server.Any]) -> _server.Optional[_server.List[str]]:
+    raw = payload.get('concept_ids')
+    if raw is None:
+        raw = payload.get('conceptIds')
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise RuntimeError('concept_ids must be a list of strings')
+    ids: _server.List[str] = []
+    for item in raw:
+        concept_id = str(item or '').strip()
+        if concept_id and concept_id not in ids:
+            ids.append(concept_id)
+    return ids
+
+
+def _concept_id_from_interval(interval: _server.Dict[str, _server.Any]) -> str:
+    for key in ('conceptId', 'concept_id', 'id', 'text'):
+        raw = interval.get(key)
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value:
+            return value
+    return ''
+
+
+def _concept_intervals_for_run_mode(
+    annotation: _server.Dict[str, _server.Any],
+    run_mode: str,
+    concept_ids: _server.Optional[_server.Sequence[str]] = None,
+) -> _server.List[_server.Dict[str, _server.Any]]:
+    tiers = annotation.get('tiers') if isinstance(annotation.get('tiers'), dict) else {}
+    concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None
+    raw_intervals = concept_tier.get('intervals') if concept_tier else []
+    allowed = set(str(item or '').strip() for item in (concept_ids or []) if str(item or '').strip())
+    selected: _server.List[_server.Dict[str, _server.Any]] = []
+    for interval in raw_intervals or []:
+        if not isinstance(interval, dict):
+            continue
+        if run_mode == 'edited-only' and not bool(interval.get('manuallyAdjusted')):
+            continue
+        concept_id = _concept_id_from_interval(interval)
+        if allowed and concept_id not in allowed:
+            continue
+        try:
+            start_sec = float(interval.get('start', 0.0) or 0.0)
+            end_sec = float(interval.get('end', start_sec) or start_sec)
+        except (TypeError, ValueError):
+            continue
+        if end_sec <= start_sec:
+            continue
+        copied = dict(interval)
+        copied['start'] = start_sec
+        copied['end'] = end_sec
+        if concept_id:
+            copied['conceptId'] = concept_id
+        selected.append(copied)
+    selected.sort(key=lambda iv: (float(iv.get('start', 0.0) or 0.0), float(iv.get('end', 0.0) or 0.0)))
+    return selected
+
+
+def _affected_concepts_payload(concept_intervals: _server.Sequence[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, _server.Any]]:
+    affected: _server.List[_server.Dict[str, _server.Any]] = []
+    for interval in concept_intervals:
+        if not isinstance(interval, dict):
+            continue
+        try:
+            start_sec = float(interval.get('start', 0.0) or 0.0)
+            end_sec = float(interval.get('end', start_sec) or start_sec)
+        except (TypeError, ValueError):
+            continue
+        affected.append({'concept_id': _concept_id_from_interval(interval), 'start': start_sec, 'end': end_sec})
+    return affected
+
+
+def _concept_window_no_op_result(speaker: str, run_mode: str, step: str, reason: str) -> _server.Dict[str, _server.Any]:
+    return {
+        'speaker': speaker,
+        'step': step,
+        'run_mode': run_mode,
+        'skipped': True,
+        'no_op': True,
+        'concept_windows': 0,
+        'affected_concepts': [],
+        'reason': reason,
+    }
+
+
+def _concept_windows_empty_reason(run_mode: str, concept_ids: _server.Optional[_server.Sequence[str]]) -> str:
+    if run_mode == 'edited-only':
+        return 'No edited concepts matched the requested scope.'
+    if concept_ids:
+        return 'No concept intervals matched the requested concept_ids.'
+    return 'No concept intervals are available for concept-windowed compute.'
+
+
+def _interval_overlaps_any_window(interval: _server.Dict[str, _server.Any], windows: _server.Sequence[_server.Dict[str, _server.Any]]) -> bool:
+    try:
+        start_sec = float(interval.get('start', 0.0) or 0.0)
+        end_sec = float(interval.get('end', start_sec) or start_sec)
+    except (TypeError, ValueError):
+        return False
+    for window in windows:
+        try:
+            win_start = float(window.get('start', 0.0) or 0.0)
+            win_end = float(window.get('end', win_start) or win_start)
+        except (TypeError, ValueError):
+            continue
+        if start_sec < win_end and end_sec > win_start:
+            return True
+    return False
+
+
+def _merge_concept_window_rows(
+    existing: _server.Sequence[_server.Dict[str, _server.Any]],
+    replacements: _server.Sequence[_server.Dict[str, _server.Any]],
+    concept_windows: _server.Sequence[_server.Dict[str, _server.Any]],
+) -> _server.List[_server.Dict[str, _server.Any]]:
+    kept = [dict(row) for row in existing if isinstance(row, dict) and not _interval_overlaps_any_window(row, concept_windows)]
+    combined = kept + [dict(row) for row in replacements if isinstance(row, dict)]
+    combined.sort(key=lambda iv: (float(iv.get('start', 0.0) or 0.0), float(iv.get('end', 0.0) or 0.0)))
+    return combined
+
+
+def _run_step_on_concept_windows(
+    audio_path: _server.pathlib.Path,
+    concept_intervals: _server.List[_server.Dict[str, _server.Any]],
+    provider: _server.Any,
+    step: str,
+    job_id: _server.Optional[str],
+    *,
+    language: _server.Optional[str] = None,
+    pad_sec: float = 0.8,
+) -> _server.List[_server.Dict[str, _server.Any]]:
+    """Run one provider over ±pad_sec short clips around concept intervals.
+
+    The emitted rows keep the concept interval's exact start/end bounds while the
+    model receives a padded clip for acoustic context. ``step`` is one of
+    ``stt``, ``ortho``, ``ortho_refine``, or ``ipa``.
     """
     if not concept_intervals:
         return []
-    concept_labels = sorted({str(iv.get('text') or '').strip() for iv in concept_intervals if isinstance(iv, dict) and str(iv.get('text') or '').strip()})
-    if not concept_labels:
-        return []
-    initial_prompt = ', '.join(concept_labels)[:400]
+    step_name = str(step or '').strip().lower()
+    if step_name not in {'stt', 'ortho', 'ortho_refine', 'ipa'}:
+        raise RuntimeError('Unsupported concept-window step: {0}'.format(step))
     try:
         from ai.forced_align import _load_audio_mono_16k, DEFAULT_SAMPLE_RATE
     except Exception as exc:
-        print('[ORTH] short-clip fallback import failed: {0}'.format(exc), file=_server.sys.stderr)
+        print('[{0}] concept-window audio import failed: {1}'.format(step_name.upper(), exc), file=_server.sys.stderr)
         return []
-    try:
-        waveform = _load_audio_mono_16k(audio_path)
-    except Exception as exc:
-        print('[ORTH] short-clip audio load failed: {0}'.format(exc), file=_server.sys.stderr)
-        return []
+    waveform = _load_audio_mono_16k(audio_path)
+    tensor = waveform.squeeze() if hasattr(waveform, 'squeeze') else waveform
     import numpy as np
     try:
-        tensor = waveform
-        if hasattr(tensor, 'squeeze'):
-            tensor = tensor.squeeze()
-        audio_np = tensor.numpy() if hasattr(tensor, 'numpy') else np.asarray(tensor)
+        np_source = tensor.detach().cpu() if hasattr(tensor, 'detach') else (tensor.cpu() if hasattr(tensor, 'cpu') else tensor)
+        audio_np = np_source.numpy() if hasattr(np_source, 'numpy') else np.asarray(np_source)
         audio_np = np.asarray(audio_np, dtype=np.float32).reshape(-1)
     except Exception as exc:
-        print('[ORTH] short-clip audio conversion failed: {0}'.format(exc), file=_server.sys.stderr)
+        print('[{0}] concept-window audio conversion failed: {1}'.format(step_name.upper(), exc), file=_server.sys.stderr)
         return []
-    total_samples = audio_np.shape[0]
+    total_samples = int(audio_np.shape[0])
     duration_sec = total_samples / float(DEFAULT_SAMPLE_RATE) if total_samples else 0.0
+    if duration_sec <= 0.0:
+        return []
+    labels = [_concept_id_from_interval(iv) for iv in concept_intervals if isinstance(iv, dict) and _concept_id_from_interval(iv)]
+    initial_prompt = ', '.join(labels)[:400] if labels else None
+    rows: _server.List[_server.Dict[str, _server.Any]] = []
+    source_by_step = {
+        'stt': 'concept_window_stt',
+        'ortho': 'concept_window_ortho',
+        'ortho_refine': 'short_clip_fallback',
+        'ipa': 'concept_window_ipa',
+    }
+    total = len(concept_intervals)
+    for idx, concept_iv in enumerate(concept_intervals):
+        if not isinstance(concept_iv, dict):
+            continue
+        try:
+            c_start = float(concept_iv.get('start', 0.0) or 0.0)
+            c_end = float(concept_iv.get('end', c_start) or c_start)
+        except (TypeError, ValueError):
+            continue
+        if c_end <= c_start:
+            continue
+        slice_start = max(0.0, c_start - pad_sec)
+        slice_end = min(duration_sec, c_end + pad_sec)
+        if slice_end <= slice_start:
+            continue
+        s0 = max(0, int(round(slice_start * DEFAULT_SAMPLE_RATE)))
+        s1 = min(total_samples, int(round(slice_end * DEFAULT_SAMPLE_RATE)))
+        if s1 <= s0:
+            continue
+        concept_id = _concept_id_from_interval(concept_iv)
+        confidence: _server.Optional[float] = None
+        if step_name == 'ipa':
+            try:
+                clip_for_ipa = tensor[s0:s1]
+            except Exception:
+                clip_for_ipa = audio_np[s0:s1]
+            text = provider.transcribe_window(clip_for_ipa)
+        else:
+            clip_np = audio_np[s0:s1]
+            if clip_np.size == 0:
+                continue
+            try:
+                result = provider.transcribe_clip(clip_np, initial_prompt=initial_prompt, language=language)
+            except TypeError:
+                result = provider.transcribe_clip(clip_np, initial_prompt=initial_prompt)
+            if isinstance(result, (list, tuple)):
+                text = result[0] if result else ''
+                if len(result) > 1:
+                    try:
+                        confidence = float(result[1])
+                    except (TypeError, ValueError):
+                        confidence = None
+            elif isinstance(result, dict):
+                text = result.get('text') or result.get('transcript') or ''
+                raw_conf = result.get('confidence')
+                if raw_conf is not None:
+                    try:
+                        confidence = float(raw_conf)
+                    except (TypeError, ValueError):
+                        confidence = None
+            else:
+                text = result
+        text = str(text or '').strip()
+        if not text:
+            continue
+        row: _server.Dict[str, _server.Any] = {
+            'start': c_start,
+            'end': c_end,
+            'text': text,
+            'source': source_by_step[step_name],
+        }
+        if concept_id:
+            row['conceptId'] = concept_id
+        if confidence is not None:
+            row['confidence'] = confidence
+        rows.append(row)
+        print("[{0}] concept-window {1}/{2} concept='{3}' → '{4}'".format(step_name.upper(), idx + 1, total, concept_id[:40], text[:40]), file=_server.sys.stderr, flush=True)
+        if job_id:
+            pct = 10.0 + 85.0 * (idx + 1) / max(total, 1)
+            _set_compute_progress(job_id, pct, message='{0} concept window {1}/{2}'.format(step_name.upper(), idx + 1, total))
+    return rows
+
+def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.8, weak_conf: float=0.5, job_id: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
+    """Re-transcribe weak/missing concept-aligned lexeme windows.
+
+    This keeps the original refine_lexemes gating semantics, but delegates the
+    shared audio-load + padded-clip + ``transcribe_clip`` loop to
+    ``_run_step_on_concept_windows`` so STT/ORTH/IPA concept modes use the
+    same field-tested clipping path.
+    """
+    if not concept_intervals:
+        return []
     ortho_sorted = sorted((w for w in ortho_words if isinstance(w, dict)), key=lambda w: (float(w.get('start', 0.0) or 0.0), float(w.get('end', 0.0) or 0.0)))
 
     def _best_match(concept_iv: _server.Dict[str, _server.Any]) -> _server.Optional[_server.Dict[str, _server.Any]]:
@@ -896,9 +1140,9 @@ def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_interva
                 best_overlap = ov
                 best = w
         return best
-    additions: _server.List[_server.Dict[str, _server.Any]] = []
-    total = len(concept_intervals)
-    for idx, concept_iv in enumerate(concept_intervals):
+
+    weak_concepts: _server.List[_server.Dict[str, _server.Any]] = []
+    for concept_iv in concept_intervals:
         if not isinstance(concept_iv, dict):
             continue
         try:
@@ -906,10 +1150,9 @@ def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_interva
             c_end = float(concept_iv.get('end', c_start) or c_start)
         except (TypeError, ValueError):
             continue
-        if c_end <= c_start or duration_sec <= 0.0:
+        if c_end <= c_start:
             continue
         match = _best_match(concept_iv)
-        match_conf = 0.0
         if match is not None:
             try:
                 match_conf = float(match.get('confidence') or 0.0)
@@ -917,25 +1160,17 @@ def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_interva
                 match_conf = 0.0
             if match_conf >= weak_conf and str(match.get('text') or '').strip():
                 continue
-        slice_start = max(0.0, c_start - pad_sec)
-        slice_end = min(duration_sec, c_end + pad_sec)
-        if slice_end <= slice_start:
-            continue
-        s0 = int(slice_start * DEFAULT_SAMPLE_RATE)
-        s1 = int(slice_end * DEFAULT_SAMPLE_RATE)
-        clip = audio_np[s0:s1]
-        if clip.size == 0:
-            continue
-        text, conf = provider.transcribe_clip(clip, initial_prompt=initial_prompt)
-        text = (text or '').strip()
-        if not text:
-            continue
-        additions.append({'start': c_start, 'end': c_end, 'text': text, 'confidence': float(conf or 0.0), 'source': 'short_clip_fallback'})
-        print("[ORTH] refine_lexemes {0}/{1} concept='{2}' → '{3}' (conf {4:.2f})".format(idx + 1, total, str(concept_iv.get('text') or '')[:40], text[:40], float(conf or 0.0)), file=_server.sys.stderr, flush=True)
-        if job_id and (idx + 1) % 10 == 0:
-            pct = 97.0 + 2.0 * (idx + 1) / max(total, 1)
-            _server._set_job_progress(job_id, pct, message='Refining lexeme {0}/{1}'.format(idx + 1, total))
-    return additions
+        weak_concepts.append(concept_iv)
+    if not weak_concepts:
+        return []
+    return _server._run_step_on_concept_windows(
+        audio_path=audio_path,
+        concept_intervals=weak_concepts,
+        provider=provider,
+        step='ortho_refine',
+        job_id=job_id,
+        pad_sec=pad_sec,
+    )
 
 def _merge_ortho_words(aligned: _server.List[_server.Dict[str, _server.Any]], refined: _server.List[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, _server.Any]]:
     """Merge short-clip refined entries into the forced-alignment list.
@@ -964,6 +1199,186 @@ def _merge_ortho_words(aligned: _server.List[_server.Dict[str, _server.Any]], re
     combined.sort(key=lambda iv: (float(iv.get('start', 0.0) or 0.0), float(iv.get('end', 0.0) or 0.0)))
     return combined
 
+
+def _annotation_paths_for_speaker(speaker: str) -> _server.Tuple[_server.pathlib.Path, _server.pathlib.Path, _server.pathlib.Path]:
+    canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
+    legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
+    if canonical_path.is_file():
+        return canonical_path, canonical_path, legacy_path
+    if legacy_path.is_file():
+        return legacy_path, canonical_path, legacy_path
+    raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
+
+
+def _write_annotation_to_canonical_and_legacy(
+    annotation_path: _server.pathlib.Path,
+    canonical_path: _server.pathlib.Path,
+    legacy_path: _server.pathlib.Path,
+    annotation: _server.Dict[str, _server.Any],
+) -> None:
+    _server._write_json_file(annotation_path, annotation)
+    if canonical_path != annotation_path:
+        _server._write_json_file(canonical_path, annotation)
+    if legacy_path != annotation_path:
+        _server._write_json_file(legacy_path, annotation)
+
+
+def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    speaker = _server._normalize_speaker_id(payload.get('speaker'))
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    language_raw = payload.get('language')
+    language = str(language_raw).strip() if language_raw is not None else None
+    if not language:
+        language = None
+
+    if run_mode == 'full':
+        source_wav = str(payload.get('sourceWav') or payload.get('source_wav') or '').strip()
+        if not source_wav:
+            source_wav = str(_server._pipeline_audio_path_for_speaker(speaker))
+        return _server._run_stt_job(job_id, speaker, source_wav, language)
+
+    concept_ids = _server._payload_concept_ids(payload)
+    annotation_path, _canonical_path, _legacy_path = _server._annotation_paths_for_speaker(speaker)
+    annotation = _server._read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise RuntimeError('Annotation is not a JSON object')
+    concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
+    if not concept_intervals:
+        return _server._concept_window_no_op_result(
+            speaker,
+            run_mode,
+            'stt',
+            _server._concept_windows_empty_reason(run_mode, concept_ids),
+        )
+    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+    provider = _server.get_stt_provider()
+    segments = _server._run_step_on_concept_windows(
+        audio_path=audio_path,
+        concept_intervals=concept_intervals,
+        provider=provider,
+        step='stt',
+        job_id=job_id,
+        language=language,
+    )
+    _server._write_stt_cache(speaker, str(audio_path), language, segments, source=run_mode)
+    return {
+        'speaker': speaker,
+        'language': language,
+        'run_mode': run_mode,
+        'concept_windows': len(concept_intervals),
+        'segments_written': len(segments),
+        'source': run_mode,
+        'affected_concepts': _server._affected_concepts_payload(concept_intervals),
+    }
+
+
+def _compute_speaker_ortho_concept_windows(
+    job_id: str,
+    *,
+    speaker: str,
+    annotation_path: _server.pathlib.Path,
+    canonical_path: _server.pathlib.Path,
+    legacy_path: _server.pathlib.Path,
+    annotation: _server.Dict[str, _server.Any],
+    tiers: _server.Dict[str, _server.Any],
+    run_mode: str,
+    concept_ids: _server.Optional[_server.Sequence[str]],
+    language: _server.Optional[str],
+    has_existing_text: bool,
+) -> _server.Dict[str, _server.Any]:
+    concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
+    if not concept_intervals:
+        return _server._concept_window_no_op_result(
+            speaker,
+            run_mode,
+            'ortho',
+            _server._concept_windows_empty_reason(run_mode, concept_ids),
+        )
+    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+    provider = _server.get_ortho_provider()
+    rows = _server._run_step_on_concept_windows(
+        audio_path=audio_path,
+        concept_intervals=concept_intervals,
+        provider=provider,
+        step='ortho',
+        job_id=job_id,
+        language=language,
+    )
+    ortho_tier = tiers.get('ortho') if isinstance(tiers.get('ortho'), dict) else None
+    if ortho_tier is None:
+        ortho_tier = {'type': 'interval', 'display_order': 3, 'intervals': []}
+    existing = [iv for iv in ortho_tier.get('intervals') or [] if isinstance(iv, dict)]
+    ortho_tier['intervals'] = _server._merge_concept_window_rows(existing, rows, concept_intervals)
+    tiers['ortho'] = ortho_tier
+    annotation['tiers'] = tiers
+    _server._annotation_touch_metadata(annotation, preserve_created=True)
+    _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+    return {
+        'speaker': speaker,
+        'run_mode': run_mode,
+        'concept_windows': len(concept_intervals),
+        'filled': len(rows),
+        'total': len(rows),
+        'skipped': False,
+        'replaced_existing': has_existing_text,
+        'audio_path': str(audio_path),
+        'affected_concepts': _server._affected_concepts_payload(concept_intervals),
+    }
+
+
+def _compute_speaker_ipa_concept_windows(
+    job_id: str,
+    *,
+    speaker: str,
+    annotation_path: _server.pathlib.Path,
+    canonical_path: _server.pathlib.Path,
+    legacy_path: _server.pathlib.Path,
+    annotation: _server.Dict[str, _server.Any],
+    tiers: _server.Dict[str, _server.Any],
+    run_mode: str,
+    concept_ids: _server.Optional[_server.Sequence[str]],
+) -> _server.Dict[str, _server.Any]:
+    concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
+    if not concept_intervals:
+        return _server._concept_window_no_op_result(
+            speaker,
+            run_mode,
+            'ipa',
+            _server._concept_windows_empty_reason(run_mode, concept_ids),
+        )
+    ipa_tier = tiers.get('ipa') if isinstance(tiers.get('ipa'), dict) else None
+    if ipa_tier is None:
+        ipa_tier = {'type': 'interval', 'display_order': 1, 'intervals': []}
+    existing = [iv for iv in ipa_tier.get('intervals') or [] if isinstance(iv, dict)]
+    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+    _set_compute_progress(job_id, 5.0, message='Loading IPA aligner')
+    aligner = _server._get_ipa_aligner()
+    rows = _server._run_step_on_concept_windows(
+        audio_path=audio_path,
+        concept_intervals=concept_intervals,
+        provider=aligner,
+        step='ipa',
+        job_id=job_id,
+    )
+    ipa_tier['intervals'] = _server._merge_concept_window_rows(existing, rows, concept_intervals)
+    tiers['ipa'] = ipa_tier
+    annotation['tiers'] = tiers
+    _server._annotation_touch_metadata(annotation, preserve_created=True)
+    _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+    skipped = max(0, len(concept_intervals) - len(rows))
+    return {
+        'speaker': speaker,
+        'run_mode': run_mode,
+        'concept_windows': len(concept_intervals),
+        'filled': len(rows),
+        'skipped': skipped,
+        'total': len(concept_intervals),
+        'ortho_source': 'concept',
+        'skip_breakdown': {'empty_ipa_from_model': skipped},
+        'exception_samples': [],
+        'affected_concepts': _server._affected_concepts_payload(concept_intervals),
+    }
+
 def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Fill missing IPA cells on a speaker's annotation via acoustic wav2vec2.
 
@@ -984,7 +1399,9 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     print('[IPA] enter _compute_speaker_ipa payload={0}'.format(payload), file=_server.sys.stderr, flush=True)
     speaker = _server._normalize_speaker_id(payload.get('speaker'))
     overwrite = bool(payload.get('overwrite', False))
-    _server._compute_checkpoint('IPA.parsed_args', speaker=speaker, overwrite=overwrite)
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    concept_ids = _server._payload_concept_ids(payload)
+    _server._compute_checkpoint('IPA.parsed_args', speaker=speaker, overwrite=overwrite, run_mode=run_mode)
     canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
     legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
     _server._compute_checkpoint('IPA.resolved_paths', canonical=str(canonical_path), legacy=str(legacy_path))
@@ -1003,6 +1420,18 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if not isinstance(annotation, dict):
         raise RuntimeError('Annotation is not a JSON object')
     tiers = annotation.get('tiers') or {}
+    if run_mode != 'full':
+        return _server._compute_speaker_ipa_concept_windows(
+            job_id,
+            speaker=speaker,
+            annotation_path=annotation_path,
+            canonical_path=canonical_path,
+            legacy_path=legacy_path,
+            annotation=annotation,
+            tiers=tiers,
+            run_mode=run_mode,
+            concept_ids=concept_ids,
+        )
     ortho_words_tier = tiers.get('ortho_words') or {}
     ortho_words_intervals = list(ortho_words_tier.get('intervals') or [])
     if ortho_words_intervals:
@@ -1065,7 +1494,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         total_words = sum((len(seg.get('words') or []) for seg in stt_segments))
 
         def _word_progress(pct: float, n: int) -> None:
-            _server._set_job_progress(job_id, 5.0 + pct * 0.9, message='IPA {0}/{1} words'.format(n, total_words))
+            _set_compute_progress(job_id, 5.0 + pct * 0.9, message='IPA {0}/{1} words'.format(n, total_words))
         try:
             import json as _json2
             _ai_cfg2 = _json2.loads((_server._project_root() / 'config' / 'ai_config.json').read_text())
@@ -1140,7 +1569,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 ipa_by_key[key] = new_interval
             filled += 1
             progress = 5.0 + (idx + 1) / total * 90.0
-            _server._set_job_progress(job_id, progress, message='IPA {0}/{1}'.format(idx + 1, total))
+            _set_compute_progress(job_id, progress, message='IPA {0}/{1}'.format(idx + 1, total))
     ipa_intervals.sort(key=lambda i: (float(i.get('start', 0.0)), float(i.get('end', 0.0))))
     ipa_tier['intervals'] = ipa_intervals
     tiers['ipa'] = ipa_tier
@@ -1189,7 +1618,7 @@ def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _serve
     segments = artifact.get('segments') or []
     if not isinstance(segments, list):
         raise RuntimeError('STT artifact segments[] is missing or malformed')
-    _server._set_job_progress(job_id, 10.0, message='Loading wav2vec2 aligner')
+    _set_compute_progress(job_id, 10.0, message='Loading wav2vec2 aligner')
     from ai.forced_align import align_segments
     aligned = align_segments(audio_path=_server.pathlib.Path(audio_path), segments=segments, language=language, pad_ms=pad_ms, emit_phonemes=emit_phonemes)
     aligned_segments: _server.List[_server.Dict[str, _server.Any]] = []
@@ -1212,7 +1641,7 @@ def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _serve
         return {'speaker': speaker, 'skipped': True, 'reason': 'aligned artifact already exists; pass overwrite=true to replace', 'alignedArtifact': str(output_path), 'segmentCount': len(existing.get('segments') or [])}
     out_payload = {**artifact, 'segments': aligned_segments, 'alignment': {'tier': 'tier2_forced_align', 'model': 'facebook/wav2vec2-xlsr-53-espeak-cv-ft', 'language': language, 'padMs': pad_ms, 'emitPhonemes': emit_phonemes, 'methodCounts': method_counts}}
     _server._write_json_file(output_path, out_payload)
-    _server._set_job_progress(job_id, 95.0, message='Wrote aligned artifact')
+    _set_compute_progress(job_id, 95.0, message='Wrote aligned artifact')
     return {'speaker': speaker, 'sttArtifact': str(stt_artifact_path), 'alignedArtifact': str(output_path), 'segmentCount': len(aligned_segments), 'methodCounts': method_counts}
 
 
@@ -1233,7 +1662,7 @@ def _compute_speaker_boundaries(job_id: str, payload: _server.Dict[str, _server.
         raise RuntimeError('Annotation is not a JSON object')
 
     tiers = annotation.get('tiers') or {}
-    _server._set_job_progress(job_id, 5.0, message='Reading STT cache')
+    _set_compute_progress(job_id, 5.0, message='Reading STT cache')
     stt_segments = _server._read_stt_cache(speaker) or []
     has_words = bool(stt_segments and any(seg.get('words') for seg in stt_segments))
     if not has_words:
@@ -1253,10 +1682,10 @@ def _compute_speaker_boundaries(job_id: str, payload: _server.Dict[str, _server.
             if isinstance(interval, dict) and bool(interval.get('manuallyAdjusted'))
         ]
 
-    _server._set_job_progress(job_id, 15.0, message='Resolving audio')
+    _set_compute_progress(job_id, 15.0, message='Resolving audio')
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
 
-    _server._set_job_progress(job_id, 30.0, message='Running forced alignment')
+    _set_compute_progress(job_id, 30.0, message='Running forced alignment')
     aligned_words = _server._ortho_tier2_align_to_words(audio_path, stt_segments)
 
     def _overlaps(a: _server.Dict[str, _server.Any], b: _server.Dict[str, _server.Any]) -> bool:
@@ -1287,7 +1716,7 @@ def _compute_speaker_boundaries(job_id: str, payload: _server.Dict[str, _server.
         ),
     )
 
-    _server._set_job_progress(job_id, 90.0, message='Writing tiers.ortho_words')
+    _set_compute_progress(job_id, 90.0, message='Writing tiers.ortho_words')
     if existing_tier is None:
         existing_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
     existing_tier['intervals'] = combined
@@ -1353,15 +1782,15 @@ def _compute_speaker_retranscribe_with_boundaries(
         )
     intervals.sort(key=lambda item: (item[0], item[1]))
 
-    _server._set_job_progress(job_id, 5.0, message='Resolving audio')
+    _set_compute_progress(job_id, 5.0, message='Resolving audio')
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
 
-    _server._set_job_progress(job_id, 10.0, message='Loading audio')
+    _set_compute_progress(job_id, 10.0, message='Loading audio')
     from ai.forced_align import _load_audio_mono_16k
 
     audio_tensor = _load_audio_mono_16k(audio_path)
 
-    _server._set_job_progress(job_id, 15.0, message='Loading STT provider')
+    _set_compute_progress(job_id, 15.0, message='Loading STT provider')
     provider = _server.get_stt_provider()
     if not hasattr(provider, 'transcribe_segments_in_memory'):
         raise RuntimeError(
@@ -1372,7 +1801,7 @@ def _compute_speaker_retranscribe_with_boundaries(
 
     def _on_progress(pct: float, done: int) -> None:
         scaled = 15.0 + max(0.0, min(100.0, pct)) * 0.80
-        _server._set_job_progress(
+        _set_compute_progress(
             job_id,
             scaled,
             message='Re-transcribing {0}/{1}'.format(done, interval_total),
@@ -1385,7 +1814,7 @@ def _compute_speaker_retranscribe_with_boundaries(
         progress_callback=_on_progress,
     )
 
-    _server._set_job_progress(job_id, 96.0, message='Writing STT cache')
+    _set_compute_progress(job_id, 96.0, message='Writing STT cache')
     _write_stt_cache(
         speaker,
         str(audio_path),
@@ -1430,6 +1859,8 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     language = payload.get('language')
     language_str = str(language).strip() if isinstance(language, str) and language.strip() else None
     refine_payload = payload.get('refine_lexemes')
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    concept_ids = _server._payload_concept_ids(payload)
     canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
     legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
     if canonical_path.is_file():
@@ -1447,15 +1878,29 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     if isinstance(ortho_tier, dict):
         existing_intervals = [iv for iv in ortho_tier.get('intervals') or [] if isinstance(iv, dict)]
     has_existing_text = any((str(iv.get('text') or '').strip() for iv in existing_intervals))
+    if run_mode != 'full':
+        return _server._compute_speaker_ortho_concept_windows(
+            job_id,
+            speaker=speaker,
+            annotation_path=annotation_path,
+            canonical_path=canonical_path,
+            legacy_path=legacy_path,
+            annotation=annotation,
+            tiers=tiers,
+            run_mode=run_mode,
+            concept_ids=concept_ids,
+            language=language_str,
+            has_existing_text=has_existing_text,
+        )
     if has_existing_text and (not overwrite):
         return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals)}
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-    _server._set_job_progress(job_id, 2.0, message='Loading ortho model (razhan)')
+    _set_compute_progress(job_id, 2.0, message='Loading ortho model (razhan)')
     provider = _server.get_ortho_provider()
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
-        _server._set_job_progress(job_id, max(2.0, clamped), message='ORTH transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
+        _set_compute_progress(job_id, max(2.0, clamped), message='ORTH transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
     segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback)
     new_intervals: _server.List[_server.Dict[str, _server.Any]] = []
     for seg in segments:
@@ -1470,7 +1915,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
         ortho_tier = {'type': 'interval', 'display_order': 3, 'intervals': []}
     ortho_tier['intervals'] = new_intervals
     tiers['ortho'] = ortho_tier
-    _server._set_job_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
+    _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
     ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
     if refine_payload is None:
         refine_lexemes = bool(getattr(provider, 'refine_lexemes', False))
@@ -1481,7 +1926,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
         concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None
         concept_intervals = [iv for iv in (concept_tier.get('intervals') or [] if concept_tier else []) if isinstance(iv, dict)]
         if concept_intervals:
-            _server._set_job_progress(job_id, 97.0, message='ORTH refine_lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
+            _set_compute_progress(job_id, 97.0, message='ORTH refine_lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
             refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, job_id=job_id)
     merged_words = _server._merge_ortho_words(ortho_words, refined_additions)
     ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
@@ -1496,7 +1941,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
         _server._write_json_file(canonical_path, annotation)
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
-    _server._set_job_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
+    _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
     return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals)}
 
 def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
@@ -1543,6 +1988,8 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     overwrites = {str(k).strip().lower(): bool(v) for k, v in overwrites_raw.items()}
     language = payload.get('language')
     language_str = str(language).strip() if isinstance(language, str) and language.strip() else None
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    concept_ids = _server._payload_concept_ids(payload)
     import traceback as _traceback_module
     results: _server.Dict[str, _server.Any] = {}
     steps_run: _server.List[str] = []
@@ -1552,7 +1999,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
         return {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
     for idx, step in enumerate(selected):
         step_base_pct = 5.0 + idx / total * 90.0
-        _server._set_job_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
+        _set_compute_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
         try:
             if step == 'normalize':
                 source_rel = _server._annotation_primary_source_wav(speaker)
@@ -1574,23 +2021,35 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                 _server._reset_job_to_running(job_id)
                 steps_run.append(step)
             elif step == 'stt':
-                cached = _server._latest_stt_segments_for_speaker(speaker)
-                if cached and (not overwrites.get('stt', False)):
-                    results['stt'] = {'status': 'skipped', 'reason': 'STT cache already exists; overwrite=False', 'segments': len(cached)}
-                    steps_run.append(step)
-                    continue
-                try:
-                    audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-                except (RuntimeError, FileNotFoundError) as exc:
-                    raise RuntimeError('Cannot run STT for {0!r}: {1}'.format(speaker, exc))
-                try:
-                    stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
-                except Exception as exc:
-                    raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
-                results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}
+                if run_mode == 'full':
+                    cached = _server._latest_stt_segments_for_speaker(speaker)
+                    if cached and (not overwrites.get('stt', False)):
+                        results['stt'] = {'status': 'skipped', 'reason': 'STT cache already exists; overwrite=False', 'segments': len(cached)}
+                        steps_run.append(step)
+                        continue
+                    try:
+                        audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+                    except (RuntimeError, FileNotFoundError) as exc:
+                        raise RuntimeError('Cannot run STT for {0!r}: {1}'.format(speaker, exc))
+                    try:
+                        stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
+                    except Exception as exc:
+                        raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
+                    results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}
+                else:
+                    stt_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'run_mode': run_mode, 'language': language_str}
+                    if concept_ids is not None:
+                        stt_payload['concept_ids'] = list(concept_ids)
+                    sub_result = _server._compute_speaker_stt(job_id, stt_payload)
+                    if sub_result.get('skipped'):
+                        results['stt'] = {'status': 'skipped', **sub_result}
+                    else:
+                        results['stt'] = {'status': 'ok', **sub_result}
                 steps_run.append(step)
             elif step == 'ortho':
-                ortho_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ortho', False), 'language': language_str}
+                ortho_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ortho', False), 'language': language_str, 'run_mode': run_mode}
+                if concept_ids is not None:
+                    ortho_sub_payload['concept_ids'] = list(concept_ids)
                 if payload.get('refine_lexemes') is not None:
                     ortho_sub_payload['refine_lexemes'] = bool(payload.get('refine_lexemes'))
                 sub_result = _server._compute_speaker_ortho(job_id, ortho_sub_payload)
@@ -1600,7 +2059,10 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                     results['ortho'] = {'status': 'ok', **sub_result}
                 steps_run.append(step)
             elif step == 'ipa':
-                sub_result = _server._compute_speaker_ipa(job_id, {'speaker': speaker, 'overwrite': overwrites.get('ipa', False)})
+                ipa_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ipa', False), 'run_mode': run_mode}
+                if concept_ids is not None:
+                    ipa_sub_payload['concept_ids'] = list(concept_ids)
+                sub_result = _server._compute_speaker_ipa(job_id, ipa_sub_payload)
                 if 'message' in sub_result and sub_result.get('total', 0) == 0:
                     results['ipa'] = {'status': 'skipped', 'reason': sub_result['message'], **sub_result}
                 else:
@@ -1612,7 +2074,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
             results[step] = _capture_error(exc)
             steps_run.append(step)
             _server._reset_job_to_running(job_id)
-    _server._set_job_progress(job_id, 99.0, message='Pipeline complete')
+    _set_compute_progress(job_id, 99.0, message='Pipeline complete')
     summary = {'ok': sum((1 for r in results.values() if r.get('status') == 'ok')), 'skipped': sum((1 for r in results.values() if r.get('status') == 'skipped')), 'error': sum((1 for r in results.values() if r.get('status') == 'error'))}
     print('[PIPELINE] speaker={0} steps={1} summary={2}'.format(speaker, steps_run, summary), file=_server.sys.stderr, flush=True)
     for step_name, step_result in results.items():
@@ -1627,7 +2089,65 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
             tb = step_result.get('traceback')
             if tb:
                 print(tb, file=_server.sys.stderr, flush=True)
-    return {'speaker': speaker, 'steps_run': steps_run, 'results': results, 'summary': summary}
+    payload_out: _server.Dict[str, _server.Any] = {'speaker': speaker, 'steps_run': steps_run, 'results': results, 'summary': summary}
+    if run_mode != 'full':
+        payload_out['run_mode'] = run_mode
+        scoped_affected: _server.List[_server.Dict[str, _server.Any]] = []
+        for result in results.values():
+            if isinstance(result, dict) and isinstance(result.get('affected_concepts'), list):
+                scoped_affected = list(result.get('affected_concepts') or [])
+                break
+        payload_out['affected_concepts'] = scoped_affected
+    return payload_out
+
+
+def _compute_concept_scoped_noop_payload(compute_type: str, payload: _server.Dict[str, _server.Any]) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    """Return a no-job response when a scoped compute request has no windows.
+
+    The HTTP compute-start path calls this before allocating a background job so
+    edited-only requests with no manually adjusted concepts are cheap and
+    deterministic rather than spawning an immediate no-op worker.
+    """
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    if run_mode == 'full':
+        return None
+    normalized_type = str(compute_type or '').strip().lower()
+    scoped_types = {'stt', 'ortho', 'ortho_only', 'ortho-only', 'ipa', 'ipa_only', 'ipa-only'}
+    if normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
+        raw_steps = payload.get('steps')
+        if isinstance(raw_steps, (list, tuple)):
+            selected = {str(step or '').strip().lower() for step in raw_steps}
+        else:
+            selected = {'stt', 'ortho', 'ipa'}
+        if not (selected & {'stt', 'ortho', 'ipa'}):
+            return None
+        scoped_step = 'full_pipeline'
+    elif normalized_type in scoped_types:
+        scoped_step = normalized_type.replace('_only', '').replace('-only', '')
+    else:
+        return None
+    try:
+        speaker = _server._normalize_speaker_id(payload.get('speaker'))
+        concept_ids = _server._payload_concept_ids(payload)
+        annotation_path, _canonical_path, _legacy_path = _server._annotation_paths_for_speaker(speaker)
+        annotation = _server._read_json_file(annotation_path, {})
+        if not isinstance(annotation, dict):
+            return None
+        concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
+    except Exception:
+        return None
+    if concept_intervals:
+        return None
+    result = _server._concept_window_no_op_result(
+        speaker,
+        run_mode,
+        scoped_step,
+        _server._concept_windows_empty_reason(run_mode, concept_ids),
+    )
+    result['status'] = 'skipped'
+    result['jobId'] = None
+    result['computeType'] = normalized_type
+    return result
 
 def _offset_detect_timeout_sec() -> float:
     """Hard cap on offset-detection runtime. Defaults to 10 minutes.
@@ -1683,13 +2203,13 @@ def _compute_offset_detect(job_id: str, payload: _server.Dict[str, _server.Any])
     distribution_raw = str(payload.get('distribution') or payload.get('anchorDistribution') or 'quantile').strip().lower()
     if distribution_raw not in {'quantile', 'earliest'}:
         distribution_raw = 'quantile'
-    _server._set_job_progress(job_id, 10, message='Loading annotation')
+    _set_compute_progress(job_id, 10, message='Loading annotation')
     annotation_path = _server._annotation_read_path_for_speaker(speaker)
     annotation = _server._normalize_annotation_record(_server._read_json_any_file(annotation_path), speaker)
     intervals = _server._annotation_offset_anchor_intervals(annotation)
     if not intervals:
         raise ValueError("Speaker '{0}' has no annotated intervals to use as offset anchors".format(speaker))
-    _server._set_job_progress(job_id, 25, message='Resolving STT segments')
+    _set_compute_progress(job_id, 25, message='Resolving STT segments')
     stt_segments_payload = payload.get('sttSegments') or payload.get('stt_segments')
     stt_job_id = str(payload.get('sttJobId') or payload.get('stt_job_id') or '').strip()
     if stt_segments_payload is None and stt_job_id:
@@ -1707,28 +2227,28 @@ def _compute_offset_detect(job_id: str, payload: _server.Dict[str, _server.Any])
     if not stt_segments_payload:
         raise ValueError('No STT segments available. Run STT first or pass sttJobId / sttSegments.')
     from compare import anchors_from_intervals as _anchors_from_intervals, detect_offset_detailed as _detect_offset_detailed, load_rules_from_file as _load_rules, segments_from_raw as _segments_from_raw
-    _server._set_job_progress(job_id, 40, message='Loading phonetic rules')
+    _set_compute_progress(job_id, 40, message='Loading phonetic rules')
     rules_path = _server._project_root() / 'config' / 'phonetic_rules.json'
     try:
         rules = _load_rules(rules_path) if rules_path.exists() else []
     except Exception:
         rules = []
-    _server._set_job_progress(job_id, 55, message='Selecting anchors')
+    _set_compute_progress(job_id, 55, message='Selecting anchors')
     anchors = _anchors_from_intervals(intervals, n_anchors, distribution=distribution_raw)
     if not anchors:
         raise ValueError('No usable anchors with both timestamp and text in annotation')
-    _server._set_job_progress(job_id, 65, message='Parsing STT segments')
+    _set_compute_progress(job_id, 65, message='Parsing STT segments')
     segments = _segments_from_raw(stt_segments_payload)
     if not segments:
         raise ValueError('STT input contained no usable segments')
     _server._enforce_offset_deadline(deadline, 'pre-match')
-    _server._set_job_progress(job_id, 75, message='Computing timestamp offset')
+    _set_compute_progress(job_id, 75, message='Computing timestamp offset')
     try:
         detailed = _detect_offset_detailed(anchors=anchors, segments=segments, rules=rules, bucket_sec=bucket_sec, min_match_score=min_match_score)
     except ValueError as exc:
         raise ValueError('Offset detection failed: {0}'.format(exc)) from exc
     _server._enforce_offset_deadline(deadline, 'post-match')
-    _server._set_job_progress(job_id, 92, message='Finalizing result')
+    _set_compute_progress(job_id, 92, message='Finalizing result')
     return _server._offset_detect_payload(speaker=speaker, offset_sec=float(detailed.offset_sec), confidence=float(detailed.confidence), n_matched=int(detailed.n_matched), total_anchors=len(anchors), total_segments=len(segments), method=detailed.method, spread_sec=float(detailed.spread_sec), matches=detailed.matches, anchor_distribution=distribution_raw)
 
 def _compute_offset_detect_from_pair(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
@@ -1746,7 +2266,7 @@ def _compute_offset_detect_from_pair(job_id: str, payload: _server.Dict[str, _se
         raw_pairs = [{'audioTimeSec': payload.get('audioTimeSec') or payload.get('audio_time_sec'), 'csvTimeSec': payload.get('csvTimeSec') or payload.get('csv_time_sec'), 'conceptId': payload.get('conceptId') or payload.get('concept_id')}]
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValueError('pairs must be a non-empty list')
-    _server._set_job_progress(job_id, 20, message='Validating pairs')
+    _set_compute_progress(job_id, 20, message='Validating pairs')
     annotation_cache: _server.Optional[_server.Dict[str, _server.Any]] = None
 
     def _get_annotation() -> _server.Dict[str, _server.Any]:
@@ -1795,7 +2315,7 @@ def _compute_offset_detect_from_pair(job_id: str, payload: _server.Dict[str, _se
         offsets.append(pair_offset)
         matches.append({'anchor_index': -1, 'anchor_text': anchor_label or '', 'anchor_start': float(anchor_csv_time), 'segment_index': -1, 'segment_text': '(user-supplied audio time)', 'segment_start': float(audio_time), 'score': 1.0, 'offset_sec': pair_offset})
     _server._enforce_offset_deadline(deadline, 'pre-median')
-    _server._set_job_progress(job_id, 75, message='Computing median offset')
+    _set_compute_progress(job_id, 75, message='Computing median offset')
     import statistics as _statistics
     median_offset = round(_statistics.median(offsets), 3)
     if len(offsets) >= 2:
@@ -1806,7 +2326,7 @@ def _compute_offset_detect_from_pair(job_id: str, payload: _server.Dict[str, _se
     else:
         spread = 0.0
         confidence = 0.99
-    _server._set_job_progress(job_id, 92, message='Finalizing result')
+    _set_compute_progress(job_id, 92, message='Finalizing result')
     return _server._offset_detect_payload(speaker=speaker, offset_sec=median_offset, confidence=float(confidence), n_matched=len(matches), total_anchors=len(matches), total_segments=0, method='manual_pair', spread_sec=float(spread), matches=matches, anchor_distribution='manual')
 
 def _api_get_annotation(self, speaker: str) -> None:
@@ -1932,5 +2452,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_short_clip_refine_lexemes', '_merge_ortho_words', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_full_pipeline', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
