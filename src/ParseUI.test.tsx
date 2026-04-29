@@ -140,6 +140,7 @@ vi.mock("./hooks/useWaveSurfer", () => ({
       addRegion: mockAddRegion,
       setZoom: mockSetWaveZoom,
       setRate: mockSetRate,
+      setVolume: vi.fn(),
       wsRef: { current: mockWaveSurferInstance },
     };
   },

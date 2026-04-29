@@ -128,6 +128,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const duration = usePlaybackStore((s) => s.duration);
   const selectedRegion = usePlaybackStore((s) => s.selectedRegion);
   const pendingSeek = usePlaybackStore((s) => s.pendingSeek);
+  const volume = usePlaybackStore((s) => s.volume);
+  const setStoreVolume = usePlaybackStore((s) => s.setVolume);
   const annotated = Boolean(conceptInterval && ipaInterval);
 
   const storedIntervalRef = useRef<{ start: number; end: number } | null>(null);
@@ -161,6 +163,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     clearQuickRetimeSelection,
     setZoom: wsSetZoom,
     setRate,
+    setVolume: wsSetVolume,
     wsRef,
   } = useWaveSurfer({
     containerRef,
@@ -291,6 +294,13 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     addRegion(conceptInterval.start, conceptInterval.end);
     scrollToTimeAtFraction(conceptInterval.start, 0.33);
   }, [audioReady, readyAudioUrl, audioUrl, conceptInterval?.start, conceptInterval?.end, seek, addRegion, wsSetZoom, scrollToTimeAtFraction]);
+
+  // Mirror playbackRate pattern: apply persisted volume to the wavesurfer
+  // instance once audio is ready, and re-apply on volume changes.
+  useEffect(() => {
+    if (!audioReady) return;
+    wsSetVolume(volume);
+  }, [audioReady, volume, wsSetVolume]);
 
   useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
 
@@ -597,6 +607,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600" title={`Volume: ${Math.round(volume * 100)}%`}>
+              <span className="text-slate-500">Vol</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(volume * 100)}
+                onChange={(e) => setStoreVolume(Number(e.target.value) / 100)}
+                aria-label="Volume"
+                data-testid="annotate-volume"
+                className="h-1 w-20 cursor-pointer accent-slate-700"
+              />
+            </label>
             <select defaultValue="1" onChange={(e) => setRate(Number(e.target.value))} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 focus:border-indigo-300 focus:outline-none">
               <option value="0.5">0.5x</option>
               <option value="0.75">0.75x</option>
