@@ -86,6 +86,18 @@ function findBestOverlapIntervalIndex(intervals: AnnotationInterval[], start: nu
   return bestIdx;
 }
 
+function ensureAnnotationTier(record: AnnotationRecord, tierKey: string) {
+  if (!record.tiers[tierKey]) {
+    const fallbackOrder = Math.max(0, ...Object.values(record.tiers).map((tier) => tier.display_order)) + 1;
+    record.tiers[tierKey] = {
+      name: tierKey,
+      display_order: CANONICAL_TIER_ORDER[tierKey as keyof typeof CANONICAL_TIER_ORDER] ?? fallbackOrder,
+      intervals: [],
+    };
+  }
+  return record.tiers[tierKey];
+}
+
 function retimeOverlappingInterval(
   record: AnnotationRecord,
   tierKey: string,
@@ -96,17 +108,28 @@ function retimeOverlappingInterval(
   text?: string,
 ): boolean {
   const tier = record.tiers[tierKey];
-  if (!tier) return false;
-  const idx = findBestOverlapIntervalIndex(tier.intervals, oldStart, oldEnd);
-  if (idx < 0) return false;
-  tier.intervals[idx] = {
-    ...tier.intervals[idx],
+  const idx = tier ? findBestOverlapIntervalIndex(tier.intervals, oldStart, oldEnd) : -1;
+  if (tier && idx >= 0) {
+    tier.intervals[idx] = {
+      ...tier.intervals[idx],
+      start: newStart,
+      end: newEnd,
+      manuallyAdjusted: true,
+      ...(text !== undefined ? { text } : {}),
+    };
+    tier.intervals.sort((a, b) => a.start - b.start);
+    return true;
+  }
+
+  if (text === undefined || text.trim() === "") return false;
+  const writableTier = ensureAnnotationTier(record, tierKey);
+  writableTier.intervals.push({
     start: newStart,
     end: newEnd,
+    text,
     manuallyAdjusted: true,
-    ...(text !== undefined ? { text } : {}),
-  };
-  tier.intervals.sort((a, b) => a.start - b.start);
+  });
+  writableTier.intervals.sort((a, b) => a.start - b.start);
   return true;
 }
 
@@ -156,8 +179,8 @@ function applyLexemeRetime(
   newEnd: number,
   texts?: { conceptName?: string; ipaText?: string; orthoText?: string },
 ): number {
-  let moved = 0;
-  if (updateMatchingInterval(record, "concept", oldStart, oldEnd, newStart, newEnd, texts?.conceptName)) moved += 1;
+  if (!updateMatchingInterval(record, "concept", oldStart, oldEnd, newStart, newEnd, texts?.conceptName)) return 0;
+  let moved = 1;
   if (retimeOverlappingInterval(record, "ipa", oldStart, oldEnd, newStart, newEnd, texts?.ipaText)) moved += 1;
   if (retimeOverlappingInterval(record, "ortho", oldStart, oldEnd, newStart, newEnd, texts?.orthoText)) moved += 1;
   if (rescaleAssociatedIntervals(record, "ortho_words", oldStart, oldEnd, newStart, newEnd) > 0) moved += 1;

@@ -404,6 +404,41 @@ describe("annotationStore.saveLexemeAnnotation (real-shape data)", () => {
     expect(words[2].manuallyAdjusted).toBe(true);
   });
 
+  it("creates a missing IPA interval when saving typed IPA for a real lexeme", () => {
+    seedFail02RealShape();
+    useAnnotationStore.setState((state) => {
+      const rec = state.records["Fail02"];
+      return {
+        records: {
+          ...state.records,
+          Fail02: {
+            ...rec,
+            tiers: {
+              ...rec.tiers,
+              ipa: { ...rec.tiers.ipa, intervals: [] },
+            },
+          },
+        },
+      };
+    });
+
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Fail02",
+      oldStart: 100, oldEnd: 101,
+      newStart: 200, newEnd: 202,
+      ipaText: "created-ipa",
+      orthoText: "نوێ",
+      conceptName: "hair",
+    });
+
+    expect(result).toEqual({ ok: true, moved: 4 });
+    const rec = useAnnotationStore.getState().records["Fail02"];
+    expect(rec.tiers.ipa.intervals).toHaveLength(1);
+    expect(rec.tiers.ipa.intervals[0]).toMatchObject({
+      start: 200, end: 202, text: "created-ipa", manuallyAdjusted: true,
+    });
+  });
+
   it("returns moved=0 with a clean error when no concept interval matches", () => {
     seedFail02RealShape();
     const result = useAnnotationStore.getState().saveLexemeAnnotation({
