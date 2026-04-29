@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type WaveSurfer from "wavesurfer.js";
 import legacyFail01 from "./__fixtures__/Fail01.legacy-tier-split.json";
 import type { AnnotationRecord } from "../../api/types";
@@ -90,17 +90,22 @@ function makeRecord(): AnnotationRecord {
   };
 }
 
-function createMockWaveSurfer(): WaveSurfer {
+function createMockWaveSurfer({
+  duration = 10,
+  minPxPerSec = 120,
+  viewportScrollLeft = 0,
+}: { duration?: number; minPxPerSec?: number; viewportScrollLeft?: number } = {}): WaveSurfer {
   const viewport = document.createElement("div");
   Object.defineProperty(viewport, "clientWidth", { value: 640, configurable: true });
+  viewport.scrollLeft = viewportScrollLeft;
   const wrapper = document.createElement("div");
-  Object.defineProperty(wrapper, "clientWidth", { value: 640, configurable: true });
+  Object.defineProperty(wrapper, "clientWidth", { value: Math.max(640, duration * minPxPerSec), configurable: true });
   viewport.appendChild(wrapper);
 
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   return {
-    options: { minPxPerSec: 120 },
-    getDuration: () => 10,
+    options: { minPxPerSec },
+    getDuration: () => duration,
     getWrapper: () => wrapper,
     on: (event: string, handler: (...args: unknown[]) => void) => {
       if (!listeners.has(event)) listeners.set(event, new Set());
@@ -134,6 +139,10 @@ describe("TranscriptionLanes", () => {
         disconnect() {}
       },
     );
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("renders after waveform metrics initialize without triggering a hook-order crash", async () => {
@@ -188,5 +197,43 @@ describe("TranscriptionLanes", () => {
     expect(screen.getByRole('button', { name: 'BND 0.00s' })).toBeTruthy();
     expect(mockEnsureSttWordsTier).not.toHaveBeenCalled();
     expect((mockRecord?.tiers as Record<string, unknown>).stt_words).toBeUndefined();
+  });
+
+  it("virtualizes BND markers from the WaveSurfer viewport scroll position", async () => {
+    mockLanes.boundaries.visible = true;
+    mockLanes.ipa.visible = false;
+    mockLanes.ortho.visible = false;
+    mockRecord = makeRecord();
+    mockRecord.tiers.ortho_words = {
+      name: "ortho_words",
+      display_order: 4,
+      intervals: [
+        ...Array.from({ length: 220 }, (_, i) => ({
+          start: i * 2,
+          end: i * 2 + 0.2,
+          text: `early-${i}`,
+        })),
+        { start: 6207.686, end: 6207.736, text: "bnd-at-region", manuallyAdjusted: true },
+      ],
+    };
+
+    const wsRef = {
+      current: createMockWaveSurfer({
+        duration: 9118.263,
+        minPxPerSec: 400,
+        viewportScrollLeft: 6207.686 * 400 - 200,
+      }),
+    } as RefObject<WaveSurfer | null>;
+    render(
+      <TranscriptionLanes
+        speaker="Fail01"
+        wsRef={wsRef}
+        audioReady={true}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTitle("BND lane")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "BND 6207.69s" })).toBeTruthy();
   });
 });
