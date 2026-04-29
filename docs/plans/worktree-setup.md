@@ -61,6 +61,8 @@ MESSAGING_CWD: /home/lucas/gh/worktrees/parse/feat-example
 
 Each agent edits only its own checkout.
 
+Active feature-lane contract: [`concept-scoped-pipeline.md`](concept-scoped-pipeline.md) coordinates the current backend, frontend, and coordinator lanes for concept-windowed / edited-only pipeline reruns.
+
 ---
 
 ## Merge Strategy
