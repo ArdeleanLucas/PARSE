@@ -463,7 +463,7 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
     tiers_in = raw_record.get('tiers')
     if not isinstance(tiers_in, dict):
         tiers_in = {}
-    next_custom_display_order = 5
+    next_custom_display_order = max(_server.ANNOTATION_TIER_ORDER.values()) + 1
     for original_key, raw_tier in tiers_in.items():
         tier_key = _server._annotation_tier_key(original_key)
         if not tier_key:

@@ -202,7 +202,8 @@ def _looks_like_audition_csv(csv_path: _server.pathlib.Path) -> bool:
         reader = _csv.DictReader(_io.StringIO(sample), dialect=dialect) if dialect else _csv.DictReader(_io.StringIO(sample), delimiter='\t')
         fieldnames = {str(name or '').strip().lower() for name in (reader.fieldnames or [])}
         return 'name' in fieldnames and 'start' in fieldnames
-    except (OSError, UnicodeDecodeError, _csv.Error):
+    except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+        print('[audition-csv] detection failed for {0}: {1!r}'.format(csv_path, exc), file=_server.sys.stderr, flush=True)
         return False
 
 
@@ -213,8 +214,70 @@ def _audition_row_label(row: _server.Any) -> str:
     return str(getattr(row, 'raw_name', '') or '').strip()
 
 
-def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.Any], rows: _server.List[_server.Any]) -> int:
+def _audition_label_key(label: str) -> str:
+    return ' '.join(str(label or '').strip().split()).casefold()
+
+
+def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[_server.Dict[str, str]]:
+    """Resolve Audition cue labels to integer PARSE concept ids in CSV order."""
+    import csv as _csv
+
+    concepts_path = _server._project_root() / 'concepts.csv'
+    label_to_id: _server.Dict[str, str] = {}
+    max_id = 0
+    if concepts_path.exists():
+        try:
+            with open(concepts_path, newline='', encoding='utf-8') as handle:
+                reader = _csv.DictReader(handle)
+                for row in reader:
+                    cid = _server._normalize_concept_id(row.get('id'))
+                    label = str(row.get('concept_en') or '').strip()
+                    if not cid or not label:
+                        continue
+                    try:
+                        int_id = int(cid)
+                    except (TypeError, ValueError):
+                        continue
+                    if str(int_id) != cid:
+                        continue
+                    max_id = max(max_id, int_id)
+                    label_to_id.setdefault(_audition_label_key(label), cid)
+        except (OSError, _csv.Error):
+            pass
+
+    resolved: _server.List[_server.Dict[str, str]] = []
+    for row in rows:
+        label = _audition_row_label(row)
+        audition_prefix = _server._normalize_concept_id(getattr(row, 'concept_id', ''))
+        if not label or not audition_prefix:
+            continue
+        label_key = _audition_label_key(label)
+        cid = label_to_id.get(label_key)
+        if cid is None:
+            max_id += 1
+            cid = str(max_id)
+            label_to_id[label_key] = cid
+        resolved.append({'id': cid, 'label': label, 'audition_prefix': audition_prefix})
+    return resolved
+
+
+def _unique_resolved_concepts(resolved_concepts: _server.List[_server.Dict[str, str]]) -> _server.List[_server.Dict[str, str]]:
+    concepts: _server.List[_server.Dict[str, str]] = []
+    seen = set()
+    for item in resolved_concepts:
+        cid = _server._normalize_concept_id(item.get('id'))
+        label = str(item.get('label') or '').strip()
+        if not cid or not label or cid in seen:
+            continue
+        seen.add(cid)
+        concepts.append({'id': cid, 'label': label})
+    return concepts
+
+
+def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.Any], rows: _server.List[_server.Any], resolved_concepts: _server.Optional[_server.List[_server.Dict[str, str]]] = None) -> int:
     """Append Audition cue rows to concept + ortho_words tiers in CSV order."""
+    if resolved_concepts is None:
+        resolved_concepts = _resolve_audition_concepts(rows)
     tiers = annotation.get('tiers')
     if not isinstance(tiers, dict):
         tiers = {}
@@ -229,16 +292,23 @@ def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.An
         concept_tier['intervals'] = concept_intervals
     ortho_words_tier = tiers.get('ortho_words')
     if not isinstance(ortho_words_tier, dict):
-        ortho_words_tier = _server._annotation_empty_tier(5)
+        ortho_words_tier = _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['ortho_words'])
         tiers['ortho_words'] = ortho_words_tier
     ortho_words_intervals = ortho_words_tier.get('intervals')
     if not isinstance(ortho_words_intervals, list):
         ortho_words_intervals = []
         ortho_words_tier['intervals'] = ortho_words_intervals
 
+    try:
+        current_duration = float(annotation.get('source_audio_duration_sec') or 0.0)
+    except (TypeError, ValueError):
+        current_duration = 0.0
+    max_end = current_duration
     imported = 0
-    max_end = float(annotation.get('source_audio_duration_sec') or 0.0)
-    for row in rows:
+    for import_index, row in enumerate(rows):
+        if import_index >= len(resolved_concepts):
+            break
+        resolved = resolved_concepts[import_index]
         label = _audition_row_label(row)
         if not label:
             continue
@@ -247,26 +317,25 @@ def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.An
         if duration <= 0:
             duration = 1.0
         end = start + duration
-        interval = {'start': start, 'end': end, 'text': label}
+        interval = {
+            'start': start,
+            'end': end,
+            'text': label,
+            'concept_id': _server._normalize_concept_id(resolved.get('id')),
+            'import_index': int(import_index),
+            'audition_prefix': str(resolved.get('audition_prefix') or '').strip(),
+        }
         concept_intervals.append(interval)
         ortho_words_intervals.append(_server.copy.deepcopy(interval))
         max_end = max(max_end, end)
         imported += 1
-    annotation['source_audio_duration_sec'] = max_end
+    if current_duration <= 0.0 and imported:
+        annotation['source_audio_duration_sec'] = max_end
     return imported
 
 
 def _concepts_from_audition_rows(rows: _server.List[_server.Any]) -> _server.List[_server.Dict[str, str]]:
-    concepts: _server.List[_server.Dict[str, str]] = []
-    seen = set()
-    for row in rows:
-        label = _audition_row_label(row)
-        cid = _server._normalize_concept_id(getattr(row, 'concept_id', ''))
-        if not label or not cid or cid in seen:
-            continue
-        seen.add(cid)
-        concepts.append({'id': cid, 'label': label})
-    return concepts
+    return _unique_resolved_concepts(_resolve_audition_concepts(rows))
 
 
 def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path]) -> None:
@@ -317,11 +386,12 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                 csv_text = csv_dest.read_text(encoding='utf-8-sig')
                 comment_rows = _parse_comments(csv_text)
                 if comment_rows:
-                    lexemes_imported = _append_audition_rows_to_annotation(annotation, comment_rows)
+                    audition_resolved_concepts = _resolve_audition_concepts(comment_rows)
+                    lexemes_imported = _append_audition_rows_to_annotation(annotation, comment_rows, audition_resolved_concepts)
                     if lexemes_imported:
                         _server._annotation_touch_metadata(annotation, preserve_created=True)
                         _server._write_annotation_to_canonical_and_legacy(annotation_path, annotation_path, legacy_annotation_path, annotation)
-                        audition_concepts = _concepts_from_audition_rows(comment_rows)
+                        audition_concepts = _unique_resolved_concepts(audition_resolved_concepts)
                         concepts_added = len(audition_concepts)
                         if audition_concepts:
                             concept_total = _server._merge_concepts_into_root_csv(audition_concepts)
@@ -337,8 +407,8 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                         if not isinstance(speaker_block, dict):
                             speaker_block = {}
                             notes_block[speaker] = speaker_block
-                        for row in comment_rows:
-                            cid = _server._normalize_concept_id(row.concept_id)
+                        for row, resolved in zip(comment_rows, audition_resolved_concepts):
+                            cid = _server._normalize_concept_id(resolved.get('id'))
                             note = (row.remainder or '').strip()
                             if not cid or not note:
                                 continue

@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
+from server_routes import media
 
 
 def _make_wav(project_root: pathlib.Path, speaker: str, name: str = "source.wav") -> pathlib.Path:
@@ -40,6 +41,23 @@ def _write_audition_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
             payload = {"Time Format": "decimal", "Type": "Cue", "Description": ""}
             payload.update(row)
             writer.writerow(payload)
+
+
+def _read_concepts_csv(path: pathlib.Path) -> list[dict[str, str]]:
+    with open(path, newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _parse_audition_rows(rows: list[dict[str, str]]):
+    from lexeme_notes import parse_audition_csv
+
+    header = ["Name", "Start", "Duration", "Time Format", "Type", "Description"]
+    lines = ["\t".join(header)]
+    for row in rows:
+        payload = {"Time Format": "decimal", "Type": "Cue", "Description": ""}
+        payload.update(row)
+        lines.append("\t".join(payload.get(column, "") for column in header))
+    return parse_audition_csv("\n".join(lines) + "\n")
 
 
 def _stub_job(monkeypatch) -> None:
@@ -133,6 +151,13 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
         "_set_job_error",
         lambda job_id, message: (_ for _ in ()).throw(AssertionError(message)),
     )
+    _write_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "2", "concept_en": "forehead"},
+            {"id": "225", "concept_en": "nine"},
+        ],
+    )
 
     wav_dest = _make_wav(tmp_path, "SahaTest")
     csv_dest = wav_dest.parent / "cues.csv"
@@ -159,18 +184,117 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
     assert [interval["text"] for interval in concept_intervals] == ["forehead", "nine", "to listen to"]
     assert [interval["start"] for interval in concept_intervals] == pytest.approx([8347.403, 1212.776, 10091.681])
     assert [interval["end"] for interval in concept_intervals] == pytest.approx([8348.639, 1213.743, 10092.674])
+    assert [interval["concept_id"] for interval in concept_intervals] == ["2", "225", "226"]
+    assert [interval["import_index"] for interval in concept_intervals] == [0, 1, 2]
+    assert [interval["audition_prefix"] for interval in concept_intervals] == ["1.2", "9", "8.4"]
 
     ortho_words = annotation["tiers"]["ortho_words"]["intervals"]
     assert ortho_words == concept_intervals
+    assert [interval["import_index"] for interval in ortho_words] == [0, 1, 2]
     assert annotation["tiers"]["ipa"]["intervals"] == []
     assert annotation["tiers"]["ortho"]["intervals"] == []
     assert "bnd" not in annotation["tiers"]
 
-    with open(tmp_path / "concepts.csv", newline="", encoding="utf-8") as handle:
-        rows_by_id = {row["id"]: row["concept_en"] for row in csv.DictReader(handle)}
-    assert rows_by_id == {"1.2": "forehead", "9": "nine", "8.4": "to listen to"}
+    concept_rows = _read_concepts_csv(tmp_path / "concepts.csv")
+    for row in concept_rows:
+        int(row["id"])
+    rows_by_id = {row["id"]: row["concept_en"] for row in concept_rows}
+    assert rows_by_id == {"2": "forehead", "225": "nine", "226": "to listen to"}
     assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
     assert complete_calls[0][1]["lexemesImported"] == 3
+
+
+def test_audition_concept_resolver_reuses_casefold_labels_and_allocates_stably(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _write_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "2", "concept_en": "Forehead"},
+            {"id": "225", "concept_en": "nine"},
+        ],
+    )
+    rows = _parse_audition_rows(
+        [
+            {"Name": "(1.2)- forehead", "Start": "0", "Duration": "1"},
+            {"Name": "9- NINE", "Start": "1", "Duration": "1"},
+            {"Name": "(8.4)- to listen to", "Start": "2", "Duration": "1"},
+            {"Name": "(8.5)- TO LISTEN TO", "Start": "3", "Duration": "1"},
+        ]
+    )
+
+    resolved = media._resolve_audition_concepts(rows)
+
+    assert resolved == [
+        {"id": "2", "label": "forehead", "audition_prefix": "1.2"},
+        {"id": "225", "label": "NINE", "audition_prefix": "9"},
+        {"id": "226", "label": "to listen to", "audition_prefix": "8.4"},
+        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5"},
+    ]
+
+    media._merge_concepts_into_root_csv(resolved)
+    assert media._resolve_audition_concepts(rows) == resolved
+
+
+def test_onboard_audition_import_index_tracks_shuffled_physical_csv_order(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _stub_job(monkeypatch)
+    _write_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "2", "concept_en": "forehead"},
+            {"id": "225", "concept_en": "nine"},
+        ],
+    )
+
+    wav_dest = _make_wav(tmp_path, "ShuffleTest")
+    csv_dest = wav_dest.parent / "cues.csv"
+    _write_audition_csv(
+        csv_dest,
+        [
+            {"Name": "(8.4)- to listen to", "Start": "2", "Duration": "1"},
+            {"Name": "(1.2)- forehead", "Start": "0", "Duration": "1"},
+            {"Name": "9- nine", "Start": "1", "Duration": "1"},
+        ],
+    )
+
+    server._run_onboard_speaker_job("job-shuffle", "ShuffleTest", wav_dest, csv_dest)
+
+    annotation = json.loads((tmp_path / "annotations" / "ShuffleTest.parse.json").read_text(encoding="utf-8"))
+    concept_intervals = annotation["tiers"]["concept"]["intervals"]
+    assert [interval["text"] for interval in concept_intervals] == ["to listen to", "forehead", "nine"]
+    assert [interval["import_index"] for interval in concept_intervals] == [0, 1, 2]
+    assert [interval["audition_prefix"] for interval in concept_intervals] == ["8.4", "1.2", "9"]
+    assert [interval["concept_id"] for interval in concept_intervals] == ["226", "2", "225"]
+
+
+def test_append_audition_rows_preserves_existing_source_audio_duration(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _write_concepts_csv(tmp_path / "concepts.csv", [{"id": "10", "concept_en": "ash"}])
+    rows = _parse_audition_rows([
+        {"Name": "10- ash", "Start": "20", "Duration": "5"},
+    ])
+    resolved = media._resolve_audition_concepts(rows)
+    annotation = server._annotation_empty_record("DurationTest", "audio/original/DurationTest/source.wav", 12.0, None)
+
+    media._append_audition_rows_to_annotation(annotation, rows, resolved)
+
+    assert annotation["source_audio_duration_sec"] == 12.0
+
+
+def test_looks_like_audition_csv_logs_detection_failures(capsys) -> None:
+    class BrokenCsvPath:
+        def read_text(self, *args, **kwargs):
+            raise OSError("cannot read")
+
+        def __str__(self) -> str:
+            return "/broken/cues.csv"
+
+    assert media._looks_like_audition_csv(BrokenCsvPath()) is False
+    captured = capsys.readouterr()
+    assert "[audition-csv] detection failed for /broken/cues.csv:" in captured.err
 
 
 def test_onboard_is_idempotent_on_replay(tmp_path, monkeypatch) -> None:
