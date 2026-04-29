@@ -124,12 +124,14 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | Endpoint | Purpose | Notes |
 |---|---|---|
 | `POST /api/annotations/{speaker}` | Save one speaker annotation record | Writes normalized annotation JSON |
-| `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload |
+| `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows |
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
 | `POST /api/tags/import` | Import tags from CSV | Multipart form upload |
 | `POST /api/lexeme-notes` | Write or delete a lexeme note | Writes into `parse-enrichments.json` |
 | `POST /api/lexeme-notes/import` | Import lexeme notes/comments from CSV | Multipart form upload |
+
+Audition marker CSV import details live in [Audition CSV speaker import](runtime/audition-csv-import.md). It preserves CSV row order and cue timestamps, resolves labels to integer PARSE concept ids before allocating new ids, writes concept + `ortho_words` intervals with `import_index` / `audition_prefix` trace metadata, and deliberately leaves `ortho`, `ipa`, and `bnd` for downstream jobs.
 
 ### Audio, STT, and compute jobs
 
@@ -170,6 +172,9 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/offset/detect` | Detect a constant timestamp offset | Starts an async compute job with progress updates and crash-log capture |
 | `POST /api/offset/detect-from-pair` | Detect a timestamp offset from trusted manual pairs | STT-free async correction path |
 | `POST /api/offset/apply` | Apply a constant timestamp shift | Mutates the speaker annotation file while preserving manually adjusted / anchored lexemes |
+
+
+Offset-apply responses include both `shiftedIntervals` (tier-interval count) and `shiftedConcepts` (distinct concept count). UI and external agents should prefer `shiftedConcepts` for human-facing summaries while preserving `shiftedIntervals` for backend/audit totals.
 
 Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of forms, languages, concepts, and cache entries that would be removed. The request body is:
 
@@ -221,6 +226,16 @@ The compute dispatcher normalizes several named background workflows.
 | `boundaries` | `bnd`, `ortho_words`, `ortho-words` | Run standalone BND boundary refinement and write `tiers.ortho_words` |
 | `retranscribe_with_boundaries` | `retranscribe-with-boundaries`, `boundary_constrained_stt`, `boundary-constrained-stt`, `bnd_stt` | Re-run STT using saved BND windows as authoritative segment boundaries |
 | `full_pipeline` | `full-pipeline`, `pipeline` | Run the step-resilient full annotation pipeline |
+
+
+`POST /api/compute/{computeType}` accepts optional scoped-pipeline fields for STT, ORTH, IPA, and full-pipeline workflows:
+
+| Field | Shape | Notes |
+|---|---|---|
+| `run_mode` | `"full"` \| `"concept-windows"` \| `"edited-only"` | Optional; omitted means `"full"`. Non-full modes process concept-tier windows instead of the whole speaker. |
+| `concept_ids` | `string[]` | Optional explicit concept scope for non-full modes. `edited-only` additionally filters to concept intervals with `manuallyAdjusted === true`. |
+
+Non-full responses include `run_mode`, `concept_windows`, and `affected_concepts` (`[{ concept_id, start, end }]`) when concept rows were processed. An `edited-only` run with no matching concepts returns a structured no-op (`no_op: true`, `jobId: null`, `affected_concepts: []`) rather than starting an empty job.
 
 ## Example requests and responses
 
@@ -338,14 +353,16 @@ Example shape:
 }
 ```
 
-### Start a full pipeline run
+### Start a pipeline run (full or scoped)
 
 ```http
 POST /api/compute/full_pipeline
 Content-Type: application/json
 
 {
-  "speaker": "Fail02"
+  "speaker": "Fail02",
+  "run_mode": "concept-windows",
+  "concept_ids": ["1", "2"]
 }
 ```
 
@@ -388,6 +405,8 @@ Example shape:
 }
 ```
 
+For scoped runs, `result` also includes `run_mode`, `concept_windows`, and `affected_concepts`; full-speaker runs preserve the legacy response shape.
+
 ### Download exports
 
 ```http
@@ -424,8 +443,8 @@ Task 5 adds a discovery/execution bridge so external Python tooling can use the 
 
 `mode` query parameter accepts:
 - `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
-- `default` — force the curated MCP subset
-- `all` — force the full tool surface
+- `default` — force the shipped default 59-tool surface
+- `all` — force the full tool surface (currently also 59 tools unless a future explicit all-only surface diverges)
 
 ### Tool schema payload
 
@@ -555,7 +574,7 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 
 | Tool | Description |
 |---|---|
-| `run_full_annotation_pipeline` | Run STT → forced alignment → acoustic IPA for one speaker in one call |
+| `run_full_annotation_pipeline` | Run the annotation pipeline for one speaker; supports `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids` |
 | `prepare_compare_mode` | Resolve a concept slice across speakers and return a compare-ready preview bundle |
 | `export_complete_lingpy_dataset` | Export LingPy TSV + NEXUS, optionally refreshing contact lexeme references first |
 
@@ -599,7 +618,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 
 ## MCP usage notes
 
-The MCP surface is a curated subset of the low-level chat tools plus 3 high-level workflow macros.
+The shipped MCP default exposes the full safe 55-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
 
 Operational rules that remain important:
 - use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, and timestamp/application workflows

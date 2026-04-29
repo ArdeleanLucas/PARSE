@@ -86,6 +86,7 @@ Agents can now inspect execution risk and workflow semantics programmatically in
   - `export_complete_lingpy_dataset`
 - These wrap existing low-level handlers rather than duplicating business logic.
 - All three workflow tools support `dryRun` and publish machine-readable preconditions/postconditions.
+- `run_full_annotation_pipeline` also supports concept-scoped reruns through `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids`, with `affected_concepts` in scoped responses.
 
 **Why this matters:**
 External agents can invoke meaningful workstation-level tasks directly instead of hand-assembling every low-level call sequence themselves.

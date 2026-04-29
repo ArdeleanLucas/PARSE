@@ -320,7 +320,7 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - Store persistence regression coverage
   - API regression suite + CLEF integration coverage
 - **CLEF shipped and hardened**:
-  - Provider registry in `python/compare/providers/` with provenance-aware source reporting, provider warnings, exact doculect matching, and guided Configure CLEF UX
+  - Provider registry in `python/compare/providers/` with provenance-aware source reporting, provider warnings, exact doculect matching, guided Configure CLEF UX, Settings-tab reset controls, and Wiktionary translation-table extraction
   - Compare UI panel in `src/components/compare/ContactLexemePanel.tsx`
   - Server endpoints:
     - `POST /api/compute/contact-lexemes`
@@ -328,11 +328,28 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
     - `GET /api/clef/config`, `POST /api/clef/config`, `GET /api/clef/catalog`, `GET /api/clef/providers`, `GET /api/clef/sources-report`
     - `POST /api/clef/form-selections`
     - `POST /api/clef/clear` (dry-run-capable reference-form/cache clear; also exposed as MCP/chat tool `clef_clear_data`)
-  - Last-24h CLEF fixes: sources UX (#168), real tab targeting (#171), exact doculect matching (#174), clear endpoint/tool (#175), warning surfacing (#176), and xAI/Grok auth alignment (#177)
+  - 2026-04-29 CLEF fixes: sources UX (#168), real tab targeting (#171), exact doculect matching (#174), clear endpoint/tool (#175), warning surfacing (#176), xAI/Grok auth alignment (#177), and `grok_llm` rename + Wiktionary translation tables + Settings tab (#182)
 - **Annotate lexeme save/retime hardened**:
   - PR #172 bundled Save Annotation across concept/IPA/ORTH/`ortho_words` scope.
   - PR #179 changed save/drag retiming to use best-overlap matching for IPA/ORTH and midpoint rescaling for `ortho_words` so the derived BND lane follows lexeme bounds.
-  - Open PR #180 adds missing-IPA-interval creation on save; do not document that behavior as shipped until it merges.
+  - PR #180 creates a missing IPA interval on Save Annotation when the concept span matches and the typed IPA has no overlapping IPA interval.
+  - PR #188 refreshes saved lexeme bounds in local edit state; PR #195 unwraps the full server-normalized annotation response and reports distinct changed tier names from server state.
+  - Save Annotation and quick-retime success copy now derive from server-normalized tier changes (`concept`, `ipa`, `ortho`, `ortho_words`) so BND/Words visual state follows saved bounds.
+- **Concept-scoped pipeline reruns shipped**:
+  - PR #190 and PR #193 lock/repair the `run_mode`, `concept_ids`, and `affected_concepts` contract.
+  - PR #191 adds frontend full / concept-windows / edited-only controls in `TranscriptionRunModal`, edited-concepts preview, scoped step gating, and `applyConceptScopedRefresh`.
+  - PR #192 ships backend/MCP/`parse_mcp` support for `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids` across STT, ORTH, IPA, and `run_full_annotation_pipeline`.
+  - PR #196 removes English concept/gloss `initial_prompt` seeding from concept-window short clips and resolves transcription language from payload, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+- **Annotate review UX polished**:
+  - PRs #184/#185 add waveform drag-selection quick retime, a two-decimal waveform playhead chip, and cancel/Escape for transient retime selections.
+  - PRs #186/#187 add manual volume control with default 100%.
+  - PR #194 adds per-lexeme speaker notes, the generic `Orthographic` label, visible-list keyboard navigation, and removes the compute drawer tag filter.
+  - PR #197 removes duplicate Annotate drawer concept filters; `ConceptSidebar` remains the canonical concept filter.
+- **Speaker onboarding from Audition CSV shipped**:
+  - PR #198 teaches `POST /api/onboard/speaker` to detect Adobe Audition marker CSVs when concepts-style parsing finds no rows and `Name`/`Start` headers are present.
+  - PR #200 resolves Audition labels against existing `concepts.csv` `concept_en` values before allocating new integer ids, so the import path remains integer-id only while preserving duplicate/repeated elicitations as separate intervals.
+  - Imported Audition rows preserve CSV order and cue timestamps, append concept and `ortho_words` intervals, strip terminal variant markers from labels, add `import_index` + `audition_prefix` trace metadata, preserve existing `source_audio_duration_sec`, log CSV detection failures, and intentionally leave `ortho`, `ipa`, and `bnd` untouched for downstream jobs.
+  - Companion comments-file row-index joining remains follow-up work; do not claim comments import row joins as shipped until its own PR merges.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)
@@ -351,6 +368,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`
   - `export_complete_lingpy_dataset`
+- `run_full_annotation_pipeline` accepts optional `run_mode` (`full`, `concept-windows`, `edited-only`) and `concept_ids`; non-`full` responses include `affected_concepts` for scoped UI refresh, and empty `edited-only` runs return a structured no-op instead of starting a background job.
+- `apply_timestamp_offset` returns `shiftedConcepts` alongside legacy `shiftedIntervals`, so user-facing copy can report distinct concepts moved without breaking interval-count consumers.
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 - `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
 - Task 5 adds a parallel **HTTP MCP bridge** in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`):
@@ -559,8 +578,8 @@ New queued work for `parse-front-end`, `parse-back-end`, and `parse-coordinator`
 ## Safe Work Now (current priority)
 
 - Keep canonical PARSE docs aligned with the post-cutover repo, not archived rebuild/oracle language.
-- Harden CLEF provider quality and UX: provider warnings, deterministic doculect matching, clear/reset semantics, source provenance, and the queued Grok/Wiktionary follow-up in `.hermes/handoffs/parse-back-end/2026-04-29-clef-grok-llm-and-wiktionary-tables.md`.
-- Validate Annotate lexeme-save behavior after PR #179 and review/merge follow-up PR #180 before documenting missing-IPA interval creation as shipped behavior.
+- Treat concept-scoped pipeline run modes as shipped: preserve `run_mode`, `concept_ids`, `affected_concepts`, and no-op `edited-only` semantics across HTTP, MCP, and `parse_mcp` docs.
+- Treat the Audition CSV import path from PRs #198 and #200 as shipped: marker CSV detection, CSV-order concept/`ortho_words` interval seeding, integer-only concept-id resolution, `import_index`, and `audition_prefix` traceability are current behavior; comments-file row-index joining remains pending.
 - Maintain parity artifacts under `parity/` and keep C5/C6 browser/workstation validation explicit rather than implied by harness success.
 
 ## Do Not Touch
@@ -590,7 +609,7 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 10. **No `any` types** unless unavoidable. If you use `any`, add an inline comment explaining exactly why.
 11. **Prefer classes / Tailwind / CSS modules over inline styles.** Inline `style={{…}}` is allowed for values that are genuinely dynamic (computed widths, progress bars) — don't use it as a shortcut for static layout. Existing files with heavy inline styles (e.g. `ParseUI.tsx`, shared primitives) should migrate as they're touched, not via broad churn.
 12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
-13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The floor in Test Gates below (≥157 passing) is the enforced check; this rule is the target for new features.
+13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The current observed frontend floor in Test Gates below (≥485 passing as of PR #197) is the enforced check; this rule is the target for new features.
 
 ## Test Gates (pre-push)
 
@@ -601,7 +620,7 @@ npx vitest run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #179 validated at **81 files / 456 frontend tests**; if that count shifts, explain why in the PR.
+For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #197 validated at **82 files / 485 frontend tests**; PR #196 validated the full Python suite at **875 passed, 1 warning**; PR #198 validated the full Python suite at **878 passed, 1 warning** for onboarding/Audition CSV work; PR #200 revalidated Audition onboarding targets, `python/test_lexeme_notes.py`, the full Python suite, `npm run check`, `npm run build`, and `git diff --check`. If those counts shift, explain why in the PR.
 
 ## Baseline Architecture
 

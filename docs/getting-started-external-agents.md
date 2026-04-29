@@ -138,7 +138,7 @@ with:
 
 Examples:
 
-- “Run `run_full_annotation_pipeline` for speaker `Fail02` with `dryRun=true` first.”
+- “Run `run_full_annotation_pipeline` for speaker `Fail02` with `dryRun=true` first, then rerun only edited concepts with `run_mode="edited-only"` if the preview is clean.”
 - “Prepare compare mode for concepts `1-25` across `Fail01`, `Mand01`, and `Qasr01`.”
 - “List active jobs, then show logs for the stalled job.”
 - “Run `compute_boundaries_start` for one speaker, then `retranscribe_with_boundaries_start` after `tiers.ortho_words` is ready.”
@@ -281,7 +281,7 @@ For most local agent setups, the **stdio MCP adapter** is still the simplest pla
 
 After you are up and running:
 
-- inspect the full MCP surface from your client, or enable `expose_all_tools` if you need the broader PARSE tool set
+- inspect the default 59-tool MCP surface from your client; set `expose_all_tools=false` only when you intentionally need the legacy curated opt-out
 - try the workflow macros first: `run_full_annotation_pipeline`, `prepare_compare_mode`, and `export_complete_lingpy_dataset`
 - use `mcp_get_exposure_mode` to confirm which MCP surface the current project is publishing
 - move from this guide into the API and AI docs below when you need full schema and tool-reference detail

@@ -46,6 +46,12 @@ concept counts: `shiftedIntervals` remains the tier-interval total, while
 `shiftedConcepts` reports the distinct concepts moved. Use
 `ApplyTimestampOffsetResult.from_payload(...)` when you want a typed result object.
 
+
+`run_full_annotation_pipeline` accepts the same scoped-pipeline inputs as the
+HTTP/MCP bridge: `run_mode` (`full`, `concept-windows`, `edited-only`) and optional
+`concept_ids`. Non-full responses include `affected_concepts`; empty `edited-only`
+runs return a no-op payload rather than starting an empty background job.
+
 ## LangChain
 
 ```python

@@ -281,6 +281,16 @@ flowchart LR
 
 CLEF is intentionally separated from the main annotation store. It augments comparison with external evidence rather than overwriting the primary annotation record.
 
+## Concept-scoped pipeline reruns
+
+The annotation compute layer now supports three run modes across HTTP, frontend batch orchestration, MCP workflow macros, and the public `parse_mcp` typings:
+
+- `full` — whole-speaker behavior, preserved as the default.
+- `concept-windows` — process concept-tier windows, optionally narrowed by `concept_ids`.
+- `edited-only` — process only concept-tier rows marked `manuallyAdjusted`, optionally narrowed by `concept_ids`.
+
+Non-full backend results include `affected_concepts` so the React workstation can refresh only the rows touched by a scoped rerun. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect.
+
 ## Chat tool architecture
 
 The in-app assistant works through `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`).
@@ -295,7 +305,7 @@ Current counts:
 This separation matters architecturally:
 
 - the browser assistant can use the broader tool surface
-- external MCP clients get a curated subset
+- external MCP clients get the full safe task surface by default, with a legacy curated opt-out available through `expose_all_tools=false`
 - the system stays bounded to PARSE-specific workflows rather than arbitrary shell access
 
 ## Export architecture

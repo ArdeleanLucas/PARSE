@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-04-27
+> Last updated: 2026-04-29
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -55,7 +55,7 @@ The current Annotate surface includes:
 - A global **Space** play/pause hotkey
 - **Per-speaker undo/redo** controls in the Annotate playback bar, with `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+Y`
 - Concept display and sorting controls
-- Tag/filter controls for selective review
+- ConceptSidebar tag/filter controls for selective review (the duplicate Annotate right-drawer concept filter was removed)
 - The shared **AI chat dock**
 
 ### Annotate jobs and automation
@@ -77,7 +77,7 @@ Use it when:
 The speaker-level STT job (`/api/stt`) provides:
 
 - progress and error reporting
-- automatic language detection from project metadata when available
+- language resolution from request payload first, then `annotation.metadata.language_code`, before Whisper auto-detect
 - tunable task / VAD / beam-size settings through config
 - nested word-level timestamps in `segments[].words[]`
 - an editable STT lane in Annotate mode: the first manual STT edit lazily migrates cached STT segments into `record.tiers.stt`, after which STT supports the same inline edit / split / merge / delete affordances as IPA and ORTH
@@ -92,6 +92,7 @@ Current runtime truth:
 - `ortho.model_path` must be an explicit local CT2 directory
 - HuggingFace repo ids are rejected here; convert first with `ct2-transformers-converter`
 - ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=True`, `condition_on_previous_text=False`, and `compression_ratio_threshold=1.8`
+- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss `initial_prompt` seeding; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
 
 #### Forced alignment
 
@@ -155,6 +156,16 @@ A key detail is that preflight distinguishes **"has intervals"** from **"full WA
 
 That distinction matters in real fieldwork, where older runs may have seeded a tier without truly covering the full recording.
 
+#### Concept-scoped pipeline reruns
+
+The transcription run modal now supports three run modes for pipeline-style reruns:
+
+- **Full speaker** (`run_mode: "full"`) — preserves whole-speaker behavior.
+- **Concept windows** (`run_mode: "concept-windows"`) — reruns selected steps over concept-tier windows.
+- **Edited only** (`run_mode: "edited-only"`) — reruns selected steps only for concept intervals already marked `manuallyAdjusted`.
+
+Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexemes where they do not make sense, can preview the manually adjusted concepts, and use backend `affected_concepts` metadata to refresh only the processed rows when possible. If an edited-only run has no matching edited concepts, PARSE returns a structured no-op instead of starting an empty job.
+
 ### Manual review and timing correction
 
 Automation in PARSE is intentionally review-first.
@@ -163,9 +174,13 @@ Annotate mode supports:
 
 - inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions
 - per-speaker undo/redo with merge recovery and operation-labelled toasts
-- draggable lexeme timestamp editing
+- draggable lexeme timestamp editing plus waveform drag-select quick retime for the active concept
+- quick-retime cancel/Escape dismissal before commit
+- server-normalized Save Annotation refresh: success copy and visual bounds come back from the saved annotation, including `concept`, `ipa`, `ortho`, and `ortho_words`/BND changes
+- per-lexeme speaker notes saved as `(speaker, concept_id, user_note)`
+- transport-bar volume control with current default 100%
 - manual boundary correction
-- constant timestamp-offset detect/apply workflows for CSV↔audio misalignment
+- constant timestamp-offset detect/apply workflows for CSV↔audio misalignment; apply results report both shifted tier intervals and shifted concepts
 - manual fallback from a trusted single pair when automated offset detection is weak
 - optional boundary diagnostics through the **Words (Tier 1)** + **Boundaries (Tier 2)** lanes and the read-only corpus script `scripts/benchmark_tier1_boundaries.py`
 
@@ -228,7 +243,7 @@ Current ranking combines:
 - cross-speaker anchor evidence for the same `concept_id`
 - contact-language variant augmentation from `config/sil_contact_languages.json`
 
-When you choose **Confirm & Use**, PARSE writes the chosen candidate into `AnnotationRecord.confirmed_anchors[concept_id]`. Those confirmations survive Praat/TextGrid round-trips and improve the cross-speaker signal for later speakers. The Annotate control bar also exposes a numeric playhead readout (`m:ss.sss / m:ss.sss`), which makes anchor confirmation less dependent on eyeballing the waveform alone.
+When you choose **Confirm & Use**, PARSE writes the chosen candidate into `AnnotationRecord.confirmed_anchors[concept_id]`. Those confirmations survive Praat/TextGrid round-trips and improve the cross-speaker signal for later speakers. Annotate also exposes a numeric waveform playhead chip with two-decimal precision plus the transport readout, which makes anchor confirmation less dependent on eyeballing the waveform alone.
 
 ## Compare Mode (`/compare`)
 
@@ -392,8 +407,9 @@ Supported source artifacts currently include:
 - `peaks/<Speaker>.json`
 - optional `coarse_transcripts/<Speaker>.json`
 - optional legacy transcript CSV under `imports/legacy/<Speaker>/`
+- Adobe Audition marker CSV/TSV uploads to `POST /api/onboard/speaker`; when PARSE detects `Name`/`Start` headers after concepts-style parsing fails, it seeds CSV-order `concept` and `ortho_words` intervals with preserved cue timestamps, integer PARSE concept ids, and `import_index` / `audition_prefix` trace metadata. See [Audition CSV speaker import](./runtime/audition-csv-import.md).
 
-This matters for thesis workflows where the richest aligned source is an already processed speaker package, not a brand-new pipeline run.
+This matters for thesis workflows where the richest aligned source may be an already processed speaker package or an Audition cue export rather than a brand-new pipeline run.
 
 ## Recommended user path
 
