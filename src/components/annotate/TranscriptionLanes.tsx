@@ -179,10 +179,13 @@ export function TranscriptionLanes({
       setPxPerSec(opts?.minPxPerSec ?? 0);
       setDuration(ws.getDuration() ?? 0);
       if (wrapper) {
-        setScrollLeft(wrapper.scrollLeft ?? 0);
-        // Use the wrapper's parent (the visible viewport) for the rendered width,
-        // not the wrapper itself which expands to the full timeline pixel width.
-        setViewportWidth(wrapper.parentElement?.clientWidth ?? wrapper.clientWidth ?? 0);
+        const viewport = wrapper.parentElement;
+        // WaveSurfer scrolls the viewport (`part="scroll"`), while `getWrapper()`
+        // returns the full timeline element whose scrollLeft stays 0. Use the
+        // viewport for both scroll offset and visible width so virtualized lanes
+        // render intervals at the same timeline position as the beige region.
+        setScrollLeft(viewport?.scrollLeft ?? wrapper.scrollLeft ?? 0);
+        setViewportWidth(viewport?.clientWidth ?? wrapper.clientWidth ?? 0);
       }
     };
 
