@@ -7,6 +7,7 @@ import { usePlaybackStore } from "../../stores/playbackStore";
 
 import { loadWaveSurferAudio } from "./useWaveSurferPeaks";
 import { isInteractiveTarget, clamp } from "./useWaveSurferPlayback";
+import { isQuickRetimeRegion } from "./useWaveSurferRegions";
 import type { UseWaveSurferOptions, WaveSurferRefs } from "./types";
 
 export function useWaveSurferInstance(
@@ -101,11 +102,13 @@ export function useWaveSurferInstance(
     });
 
     regions.on("region-created", (region) => {
+      if (isQuickRetimeRegion(region)) return;
       if (activeRegionRef.current && activeRegionRef.current !== region) activeRegionRef.current.remove();
       activeRegionRef.current = region;
     });
 
     regions.on("region-updated", (region) => {
+      if (isQuickRetimeRegion(region)) return;
       activeRegionRef.current = region;
       callbacksRef.current.onRegionUpdate?.(region.start, region.end);
     });

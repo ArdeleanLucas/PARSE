@@ -103,7 +103,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [editStart, setEditStart] = useState<string>(conceptInterval ? conceptInterval.start.toFixed(3) : "");
   const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : "");
   const [timestampSaving, setTimestampSaving] = useState(false);
-  const [timestampMessage, setTimestampMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [timestampMessage, setTimestampMessage] = useState<{ kind: "ok"; text: string } | { kind: "err"; text: string } | null>(null);
+  const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
 
   useEffect(() => {
     setIpa(ipaInterval?.text ?? "");
@@ -111,6 +112,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : "");
     setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : "");
     setTimestampMessage(null);
+    setQuickRetimeMenu(null);
   }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval]);
 
   const [spectroOn, setSpectroOn] = useState(false);
@@ -135,6 +137,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       : null;
   }, [conceptInterval]);
 
+  const quickRetimeSelection = useMemo(() => (
+    conceptInterval
+      ? {
+          enabled: true,
+          label: `Update ${concept.name} timestamp`,
+          onContextMenu: (selection: { start: number; end: number }, event: MouseEvent) => {
+            event.preventDefault();
+            setQuickRetimeMenu({ x: event.clientX, y: event.clientY, start: selection.start, end: selection.end });
+          },
+        }
+      : null
+  ), [concept.name, conceptInterval]);
+
   const {
     playPause,
     playRange,
@@ -143,6 +158,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     scrollToTimeAtFraction,
     skip,
     addRegion,
+    clearQuickRetimeSelection,
     setZoom: wsSetZoom,
     setRate,
     wsRef,
@@ -176,7 +192,42 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         setTimestampMessage({ kind: "ok", text: `Saved · ${moved} tier${moved === 1 ? "" : "s"}` });
       }
     },
+    quickRetimeSelection,
   });
+
+  const commitQuickRetime = useCallback(async () => {
+    if (!conceptInterval || !quickRetimeMenu) return;
+    setTimestampSaving(true);
+    try {
+      const result = saveLexemeAnnotation({
+        speaker,
+        oldStart: conceptInterval.start,
+        oldEnd: conceptInterval.end,
+        newStart: quickRetimeMenu.start,
+        newEnd: quickRetimeMenu.end,
+        ipaText: ipa,
+        orthoText: ortho,
+        conceptName: concept.name,
+      });
+      if (!result.ok) {
+        setTimestampMessage({ kind: "err", text: result.error });
+        return;
+      }
+      await saveSpeaker(speaker);
+      storedIntervalRef.current = { start: quickRetimeMenu.start, end: quickRetimeMenu.end };
+      setEditStart(quickRetimeMenu.start.toFixed(3));
+      setEditEnd(quickRetimeMenu.end.toFixed(3));
+      setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
+      clearQuickRetimeSelection();
+      addRegion(quickRetimeMenu.start, quickRetimeMenu.end);
+      seek(quickRetimeMenu.start);
+      setQuickRetimeMenu(null);
+    } catch (err) {
+      setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTimestampSaving(false);
+    }
+  }, [addRegion, clearQuickRetimeSelection, concept.name, conceptInterval, ipa, ortho, quickRetimeMenu, saveLexemeAnnotation, saveSpeaker, seek, speaker]);
 
   const handlePlayToggle = useCallback(() => {
     if (isPlaying) {
@@ -323,6 +374,24 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 className="pointer-events-none absolute inset-y-0 right-0 rounded-lg"
                 style={{ left: LABEL_COL_PX, opacity: 0.6, mixBlendMode: "multiply" }}
               />
+            )}
+            {quickRetimeMenu && (
+              <div
+                role="menu"
+                aria-label="Waveform quick retime menu"
+                className="fixed z-50 min-w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                style={{ left: quickRetimeMenu.x, top: quickRetimeMenu.y }}
+                onContextMenu={(event) => event.preventDefault()}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                  onClick={() => void commitQuickRetime()}
+                >
+                  Update {concept.name} timestamp
+                </button>
+              </div>
             )}
           </div>
         </div>

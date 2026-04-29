@@ -7,6 +7,17 @@ export interface PeaksJson {
   channels?: number;
 }
 
+export interface QuickRetimeSelection {
+  start: number;
+  end: number;
+}
+
+export interface QuickRetimeSelectionOptions {
+  enabled: boolean;
+  label: string;
+  onContextMenu: (selection: QuickRetimeSelection, event: MouseEvent) => void;
+}
+
 export interface UseWaveSurferOptions {
   containerRef: RefObject<HTMLDivElement | null>;
   audioUrl: string;
@@ -18,12 +29,14 @@ export interface UseWaveSurferOptions {
   onTimeUpdate?: (time: number) => void;
   onReady?: (duration: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
+  quickRetimeSelection?: QuickRetimeSelectionOptions | null;
 }
 
 export interface WsRegion {
   id: string;
   start: number;
   end: number;
+  element?: HTMLElement | null;
   play: () => void;
   remove: () => void;
 }
@@ -54,6 +67,7 @@ export interface WaveSurferControls {
 export interface WaveSurferRegionsControls {
   addRegion: (start: number, end: number, id?: string) => void;
   clearRegions: () => void;
+  clearQuickRetimeSelection: () => void;
   playRegion: () => void;
 }
 

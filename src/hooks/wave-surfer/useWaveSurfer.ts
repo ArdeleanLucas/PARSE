@@ -18,7 +18,7 @@ export function useWaveSurfer(options: UseWaveSurferOptions): UseWaveSurferResul
   };
 
   const playback = useWaveSurferPlayback(refs);
-  const regions = useWaveSurferRegions(refs);
+  const regions = useWaveSurferRegions(refs, options.quickRetimeSelection);
   useWaveSurferInstance(options, refs);
 
   return { ...playback, ...regions, wsRef: refs.wsRef, regionsRef: refs.regionsRef };
