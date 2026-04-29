@@ -27,6 +27,16 @@ export function useWaveSurferRegions(
     quickRetimeRegionRef.current = null;
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !quickRetimeRegionRef.current) return;
+      event.preventDefault();
+      clearQuickRetimeSelection();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [clearQuickRetimeSelection]);
+
   const clearRegions = useCallback(() => {
     activeRegionRef.current?.remove();
     activeRegionRef.current = null;

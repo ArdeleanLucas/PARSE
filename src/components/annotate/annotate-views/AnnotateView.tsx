@@ -229,6 +229,22 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     }
   }, [addRegion, clearQuickRetimeSelection, concept.name, conceptInterval, ipa, ortho, quickRetimeMenu, saveLexemeAnnotation, saveSpeaker, seek, speaker]);
 
+  const cancelQuickRetime = useCallback(() => {
+    clearQuickRetimeSelection();
+    setQuickRetimeMenu(null);
+  }, [clearQuickRetimeSelection]);
+
+  useEffect(() => {
+    if (!quickRetimeMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cancelQuickRetime();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cancelQuickRetime, quickRetimeMenu]);
+
   const handlePlayToggle = useCallback(() => {
     if (isPlaying) {
       pause();
@@ -398,6 +414,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   onClick={() => void commitQuickRetime()}
                 >
                   Update {concept.name} timestamp
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full border-t border-slate-100 px-3 py-2 text-left text-slate-600 hover:bg-slate-50"
+                  onClick={cancelQuickRetime}
+                >
+                  Cancel selection
                 </button>
               </div>
             )}

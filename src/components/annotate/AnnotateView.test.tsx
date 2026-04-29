@@ -296,6 +296,57 @@ describe('AnnotateView', () => {
     expect(mockSeek).toHaveBeenCalledWith(1.75);
   });
 
+
+  it('cancels a quick-retime menu selection without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu({ start: 1.75, end: 2.75 }, contextEvent);
+
+    const cancel = await screen.findByRole('menuitem', { name: 'Cancel selection' });
+    fireEvent.click(cancel);
+
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu', { name: 'Waveform quick retime menu' })).toBeNull();
+  });
+
+  it('dismisses a quick-retime menu selection with Escape without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu({ start: 1.75, end: 2.75 }, contextEvent);
+    await screen.findByRole('menuitem', { name: 'Update water timestamp' });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Waveform quick retime menu' })).toBeNull());
+  });
+
   it('reloads the saved ipa and orthography after saving onto a new selected region', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 0.2, end: 0.8 }]);
     mockSelectedRegion = { start: 1.25, end: 2.5 };
