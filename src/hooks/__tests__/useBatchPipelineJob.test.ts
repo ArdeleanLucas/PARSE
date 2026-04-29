@@ -338,6 +338,35 @@ describe("useBatchPipelineJob", () => {
     expect(bodyFor("C")?.steps).toEqual(["normalize", "stt", "ortho", "ipa"]);
   });
 
+  it("forwards run_mode to the full_pipeline start body", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => {
+      bodies.push(body);
+      return { job_id: `job-${String(body.speaker)}` };
+    });
+    mockPoll.mockImplementation(async (_type: string, jobId: string) => {
+      const speaker = jobId.replace("job-", "");
+      return {
+        status: "complete",
+        progress: 1,
+        result: { speaker, steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } },
+      };
+    });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    await act(async () => {
+      await result.current.run({
+        speakers: ["A", "B", "C"],
+        steps: ["stt"],
+        overwrites: {},
+        runMode: "edited-only",
+      });
+    });
+
+    expect(bodies.map((body) => body.run_mode)).toEqual(["edited-only", "edited-only", "edited-only"]);
+  });
+
   it("stepsBySpeaker with empty array marks speaker cancelled without calling backend", async () => {
     const bodies: Record<string, unknown>[] = [];
     mockStart.mockImplementation(async (_type: string, body: Record<string, unknown>) => {

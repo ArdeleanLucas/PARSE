@@ -1,4 +1,5 @@
 import type { PipelineRunResult } from "../../api/client";
+import type { TranscriptionRunMode } from "../../components/shared/transcriptionRunShared";
 
 export type PipelineStepId = "normalize" | "stt" | "ortho" | "ipa";
 
@@ -9,6 +10,7 @@ export interface BatchRunRequest {
   language?: string;
   stepsBySpeaker?: Partial<Record<string, PipelineStepId[]>>;
   refineLexemes?: boolean;
+  runMode?: TranscriptionRunMode;
 }
 
 export interface BatchSpeakerOutcome {

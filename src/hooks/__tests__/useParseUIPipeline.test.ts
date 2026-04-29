@@ -37,6 +37,7 @@ describe('useParseUIPipeline', () => {
       steps: ['normalize', 'stt'],
       overwrites: { stt: true },
       refineLexemes: true,
+      runMode: 'concept-windows',
     };
 
     const { result } = renderHook(() =>
@@ -65,6 +66,7 @@ describe('useParseUIPipeline', () => {
       overwrites: { stt: true },
       language: 'ku',
       refineLexemes: true,
+      runMode: 'concept-windows',
     });
   });
 
@@ -114,6 +116,7 @@ describe('useParseUIPipeline', () => {
         speakers: ['Fail01', 'Kalh01'],
         steps: ['normalize', 'stt', 'ipa'],
         overwrites: {},
+        runMode: 'full',
       });
     });
     vi.mocked(batch.run).mockClear();
@@ -137,6 +140,68 @@ describe('useParseUIPipeline', () => {
       },
       language: 'ku',
     });
+  });
+
+  it('opens the batch report and selectively refreshes scoped concept-run rows when metadata is returned', async () => {
+    const openBatchReport = vi.fn();
+    const reloadStt = vi.fn();
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+    const refreshScopedConceptRows = vi.fn().mockResolvedValue(true);
+    const loadEnrichments = vi.fn().mockResolvedValue(undefined);
+
+    const runningBatch = makeBatchHandle({
+      status: 'running',
+      outcomes: [{ speaker: 'Fail01', status: 'running', error: null, result: null }],
+    });
+    const completedBatch = makeBatchHandle({
+      status: 'complete',
+      outcomes: [
+        {
+          speaker: 'Fail01',
+          status: 'complete',
+          error: null,
+          result: {
+            speaker: 'Fail01',
+            steps_run: ['stt', 'ortho'],
+            results: { stt: { status: 'ok' }, ortho: { status: 'ok' } },
+            summary: { ok: 2, skipped: 0, error: 0 },
+            run_mode: 'edited-only',
+            affected_concepts: [
+              { concept_id: '2', start: 5, end: 6 },
+              { concept_id: '7', start: 10, end: 11 },
+            ],
+          },
+        },
+      ],
+    });
+
+    const { rerender } = renderHook(
+      ({ batch }) =>
+        useParseUIPipeline({
+          batch,
+          closeRunModal: vi.fn(),
+          openBatchReport,
+          closeBatchReport: vi.fn(),
+          isBatchReportOpen: false,
+          getLanguage: () => undefined,
+          reloadSpeakerAnnotation,
+          reloadStt,
+          loadEnrichments,
+          refreshScopedConceptRows,
+        }),
+      { initialProps: { batch: runningBatch } },
+    );
+
+    rerender({ batch: completedBatch });
+
+    await waitFor(() => expect(openBatchReport).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refreshScopedConceptRows).toHaveBeenCalledWith('Fail01', [
+      { concept_id: '2', start: 5, end: 6 },
+      { concept_id: '7', start: 10, end: 11 },
+    ]));
+    expect(reloadSpeakerAnnotation).not.toHaveBeenCalled();
+    expect(reloadStt).toHaveBeenCalledWith('Fail01');
+    expect(loadEnrichments).toHaveBeenCalledOnce();
   });
 
   it('opens the batch report and refreshes completed speakers when the batch transitions from running to complete', async () => {

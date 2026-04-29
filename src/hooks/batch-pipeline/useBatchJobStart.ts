@@ -13,6 +13,7 @@ export async function startBatchSpeakerJob(
     overwrites: request.overwrites,
   };
   if (request.language) body.language = request.language;
+  if (request.runMode) body.run_mode = request.runMode;
   if (request.refineLexemes) body.refine_lexemes = true;
   const job = await startCompute("full_pipeline", body);
   const jobId = String(job.job_id || "").trim();

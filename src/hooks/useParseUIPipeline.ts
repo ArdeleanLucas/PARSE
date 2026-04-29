@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptionRunConfirm } from '../components/shared/TranscriptionRunModal';
 import { useBatchPipelineJob, type BatchSpeakerOutcome, type PipelineStepId, type UseBatchPipelineJobResult } from './useBatchPipelineJob';
 
+type ScopedConceptRefreshTarget = { concept_id?: string; conceptId?: string; id?: string; start?: number; end?: number };
+
+type ScopedPipelineResult = {
+  run_mode?: string;
+  runMode?: string;
+  affected_concepts?: ScopedConceptRefreshTarget[];
+  affectedConcepts?: ScopedConceptRefreshTarget[];
+};
+
 const PIPELINE_STEP_ORDER: PipelineStepId[] = ['normalize', 'stt', 'ortho', 'ipa'];
 
 export interface UseParseUIPipelineArgs {
@@ -11,6 +20,7 @@ export interface UseParseUIPipelineArgs {
   isBatchReportOpen: boolean;
   getLanguage: () => string | undefined;
   reloadSpeakerAnnotation: (speakerId: string) => Promise<void>;
+  refreshScopedConceptRows?: (speakerId: string, targets: ScopedConceptRefreshTarget[]) => Promise<boolean> | boolean;
   reloadStt: (speakerId: string) => void;
   loadEnrichments: () => Promise<unknown> | unknown;
   batch?: UseBatchPipelineJobResult;
@@ -64,6 +74,15 @@ function collectRetrySteps(
   );
 }
 
+function scopedConceptTargets(result: unknown): ScopedConceptRefreshTarget[] | null {
+  if (!result || typeof result !== 'object') return null;
+  const payload = result as ScopedPipelineResult;
+  const mode = payload.run_mode ?? payload.runMode;
+  if (mode !== 'concept-windows' && mode !== 'edited-only') return null;
+  const targets = payload.affected_concepts ?? payload.affectedConcepts;
+  return Array.isArray(targets) ? targets : [];
+}
+
 export function useParseUIPipeline({
   closeRunModal,
   openBatchReport,
@@ -71,6 +90,7 @@ export function useParseUIPipeline({
   isBatchReportOpen,
   getLanguage,
   reloadSpeakerAnnotation,
+  refreshScopedConceptRows,
   reloadStt,
   loadEnrichments,
   batch: injectedBatch,
@@ -87,14 +107,20 @@ export function useParseUIPipeline({
         for (const outcome of batch.state.outcomes) {
           if (outcome.status === 'complete') {
             reloadStt(outcome.speaker);
-            await reloadSpeakerAnnotation(outcome.speaker);
+            const targets = scopedConceptTargets(outcome.result);
+            if (targets && refreshScopedConceptRows) {
+              const refreshed = await refreshScopedConceptRows(outcome.speaker, targets);
+              if (!refreshed) await reloadSpeakerAnnotation(outcome.speaker);
+            } else {
+              await reloadSpeakerAnnotation(outcome.speaker);
+            }
           }
         }
         await loadEnrichments();
       })();
     }
     previousBatchStatusRef.current = batch.state.status;
-  }, [batch.state.status, batch.state.outcomes, loadEnrichments, openBatchReport, reloadSpeakerAnnotation, reloadStt]);
+  }, [batch.state.status, batch.state.outcomes, loadEnrichments, openBatchReport, refreshScopedConceptRows, reloadSpeakerAnnotation, reloadStt]);
 
   const handleRunConfirm = useCallback(async (confirm: TranscriptionRunConfirm) => {
     closeRunModal();
@@ -106,6 +132,7 @@ export function useParseUIPipeline({
       overwrites: confirm.overwrites,
       language: getLanguage(),
       refineLexemes: confirm.refineLexemes,
+      runMode: confirm.runMode,
     });
   }, [batch, closeRunModal, getLanguage]);
 
