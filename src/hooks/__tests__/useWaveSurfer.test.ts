@@ -305,6 +305,48 @@ describe("useWaveSurfer", () => {
     expect(mockWsInstance.seekTo).toHaveBeenCalledWith(0.2);
   });
 
+
+  it("Escape clears the transient quick-retime region without removing the active lexeme region", () => {
+    const { result, rerender } = renderHook(
+      (props: { enabled: boolean }) =>
+        useWaveSurfer({
+          containerRef: makeContainerRef(),
+          audioUrl: "/audio/test.wav",
+          quickRetimeSelection: props.enabled
+            ? {
+                enabled: true,
+                label: "Update water timestamp",
+                onContextMenu: vi.fn(),
+              }
+            : null,
+        }),
+      { initialProps: { enabled: false } },
+    );
+
+    act(() => result.current.addRegion(2, 4, "lexeme-active"));
+    mockRegionInstance.remove.mockClear();
+    rerender({ enabled: true });
+
+    const transientRegion = {
+      id: "quick-retime-selection-test",
+      start: 1.75,
+      end: 2.75,
+      element: document.createElement("div"),
+      play: vi.fn(),
+      remove: vi.fn(),
+    };
+    for (const [, handler] of mockRegionsPlugin.on.mock.calls.filter(([name]) => name === "region-created")) {
+      act(() => handler(transientRegion));
+    }
+
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(transientRegion.remove).toHaveBeenCalledTimes(1);
+    expect(mockRegionInstance.remove).not.toHaveBeenCalled();
+  });
+
   it("enables drag selection with a transient region that does not replace the active lexeme region", () => {
     const onContextMenu = vi.fn();
     const { result, rerender, unmount } = renderHook(

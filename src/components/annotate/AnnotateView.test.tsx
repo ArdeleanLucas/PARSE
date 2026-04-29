@@ -187,6 +187,39 @@ describe('AnnotateView', () => {
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
   });
 
+
+  it('renders a live waveform playhead chip from playback state with two-decimal precision', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+    mockCurrentTime = 5.125;
+
+    const view = (
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />
+    );
+
+    const { rerender } = render(view);
+    expect(screen.getByLabelText('Waveform playhead time').textContent).toBe('0:05.13');
+
+    mockCurrentTime = 65.1;
+    rerender(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+    expect(screen.getByLabelText('Waveform playhead time').textContent).toBe('1:05.10');
+  });
+
   it('saves annotation tiers for the selected region with one atomic store action', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', start: 1.25, end: 2.5 }]);
 
@@ -261,6 +294,57 @@ describe('AnnotateView', () => {
     expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
     expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
     expect(mockSeek).toHaveBeenCalledWith(1.75);
+  });
+
+
+  it('cancels a quick-retime menu selection without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu({ start: 1.75, end: 2.75 }, contextEvent);
+
+    const cancel = await screen.findByRole('menuitem', { name: 'Cancel selection' });
+    fireEvent.click(cancel);
+
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu', { name: 'Waveform quick retime menu' })).toBeNull();
+  });
+
+  it('dismisses a quick-retime menu selection with Escape without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu({ start: 1.75, end: 2.75 }, contextEvent);
+    await screen.findByRole('menuitem', { name: 'Update water timestamp' });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Waveform quick retime menu' })).toBeNull());
   });
 
   it('reloads the saved ipa and orthography after saving onto a new selected region', async () => {
