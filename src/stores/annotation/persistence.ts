@@ -7,6 +7,7 @@ import type {
   AnnotationStoreGet,
   AnnotationStorePersistenceSlice,
   AnnotationStoreSet,
+  SaveSpeakerResult,
   ScheduleAnnotationAutosave,
 } from "./types";
 
@@ -23,6 +24,25 @@ export function createAnnotationAutosaveScheduler(get: AnnotationStoreGet): Sche
       }
     }, 2000);
   };
+}
+
+
+function serializedIntervals(record: AnnotationRecord | null | undefined, tier: string): string {
+  return JSON.stringify(record?.tiers?.[tier]?.intervals ?? []);
+}
+
+function changedIntervalTiers(before: AnnotationRecord | null | undefined, after: AnnotationRecord): string[] {
+  const tierNames = new Set([
+    ...Object.keys(before?.tiers ?? {}),
+    ...Object.keys(after.tiers ?? {}),
+  ]);
+  return [...tierNames]
+    .filter((tier) => serializedIntervals(before, tier) !== serializedIntervals(after, tier))
+    .sort((left, right) => {
+      const leftOrder = after.tiers[left]?.display_order ?? before?.tiers?.[left]?.display_order ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = after.tiers[right]?.display_order ?? before?.tiers?.[right]?.display_order ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.localeCompare(right);
+    });
 }
 
 function resolveLocalFallbackRecord(speaker: string): AnnotationRecord {
@@ -68,19 +88,24 @@ export function createAnnotationPersistenceSlice(
       }
     },
 
-    saveSpeaker: async (speaker: string) => {
+    saveSpeaker: async (speaker: string, baseline?: AnnotationRecord | null): Promise<SaveSpeakerResult> => {
       const record = selectSpeakerRecord(get(), speaker);
       if (!record) throw new Error(`No record loaded for speaker: ${speaker}`);
 
-      await saveAnnotation(speaker, record);
-      set((s) => ({ dirty: { ...s.dirty, [speaker]: false } }));
+      const savedRecord = ensureCanonicalTiers((await saveAnnotation(speaker, record)) ?? record);
+      const changedTiers = changedIntervalTiers(baseline ?? record, savedRecord);
+      set((s) => ({
+        records: { ...s.records, [speaker]: savedRecord },
+        dirty: { ...s.dirty, [speaker]: false },
+      }));
 
       const lsKey = `parse-annotations-${speaker}`;
       try {
-        localStorage.setItem(lsKey, JSON.stringify(record));
+        localStorage.setItem(lsKey, JSON.stringify(savedRecord));
       } catch {
         // localStorage full or unavailable — ignore
       }
+      return { record: savedRecord, changedTiers };
     },
   };
 }

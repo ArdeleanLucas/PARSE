@@ -634,7 +634,7 @@ describe("ParseUI", () => {
       orthoText: "ئاو",
       conceptName: "water",
     });
-    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith("Fail01"));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith("Fail01", expect.anything()));
     expect(mockSetInterval).not.toHaveBeenCalled();
   });
 

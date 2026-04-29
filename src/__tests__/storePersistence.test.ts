@@ -115,3 +115,45 @@ describe("Cross-session persistence", () => {
     expect(state.currentTime).toBe(0); // must reset to 0
   });
 });
+
+
+describe("annotationStore.saveSpeaker server round-trip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAnnotationStore.setState({ records: {}, loading: {}, dirty: {}, histories: {} });
+  });
+
+  it("overwrites the local record with the full normalized annotation returned by the server", async () => {
+    const before = {
+      speaker: "Fail01",
+      source_wav: "Fail01.wav",
+      tiers: {
+        concept: { name: "concept", display_order: 1, intervals: [{ start: 1, end: 2, text: "water" }] },
+        ipa: { name: "ipa", display_order: 2, intervals: [{ start: 1, end: 2, text: "old-ipa" }] },
+        ortho: { name: "ortho", display_order: 3, intervals: [{ start: 1, end: 2, text: "old-ortho" }] },
+        ortho_words: { name: "ortho_words", display_order: 4, intervals: [{ start: 1, end: 1.5, text: "old" }] },
+      },
+      created_at: "2026-01-01T00:00:00Z",
+      modified_at: "2026-01-01T00:00:00Z",
+    };
+    const normalized = {
+      ...before,
+      tiers: {
+        concept: { name: "concept", display_order: 1, intervals: [{ start: 1.1, end: 2.1, text: "water" }] },
+        ipa: { name: "ipa", display_order: 2, intervals: [{ start: 1.1, end: 2.1, text: "new-ipa" }] },
+        ortho: { name: "ortho", display_order: 3, intervals: [{ start: 1.1, end: 2.1, text: "new-ortho" }] },
+        ortho_words: { name: "ortho_words", display_order: 4, intervals: [{ start: 1.1, end: 1.6, text: "new" }] },
+      },
+      modified_at: "2026-01-01T00:00:01Z",
+    };
+    useAnnotationStore.setState({ records: { Fail01: before }, dirty: { Fail01: true } });
+    mockSaveAnnotation.mockResolvedValueOnce(normalized);
+
+    const result = await useAnnotationStore.getState().saveSpeaker("Fail01", before);
+
+    expect(result.record).toMatchObject(normalized);
+    expect(result.changedTiers).toEqual(["concept", "ipa", "ortho", "ortho_words"]);
+    expect(useAnnotationStore.getState().records.Fail01).toBe(result.record);
+    expect(useAnnotationStore.getState().dirty.Fail01).toBe(false);
+  });
+});

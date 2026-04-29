@@ -223,21 +223,25 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         setTimestampMessage({ kind: "err", text: result.error });
         return;
       }
-      await saveSpeaker(speaker);
-      storedIntervalRef.current = { start: quickRetimeMenu.start, end: quickRetimeMenu.end };
-      setEditStart(quickRetimeMenu.start.toFixed(3));
-      setEditEnd(quickRetimeMenu.end.toFixed(3));
-      setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
+      const saveResult = await saveSpeaker(speaker, record);
+      const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+      const savedStart = savedConceptInterval?.start ?? quickRetimeMenu.start;
+      const savedEnd = savedConceptInterval?.end ?? quickRetimeMenu.end;
+      const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;
+      storedIntervalRef.current = { start: savedStart, end: savedEnd };
+      setEditStart(savedStart.toFixed(3));
+      setEditEnd(savedEnd.toFixed(3));
+      setTimestampMessage({ kind: "ok", text: `Saved (${changedTierCount} tier${changedTierCount === 1 ? "" : "s"} updated).` });
       clearQuickRetimeSelection();
-      addRegion(quickRetimeMenu.start, quickRetimeMenu.end);
-      seek(quickRetimeMenu.start);
+      addRegion(savedStart, savedEnd);
+      seek(savedStart);
       setQuickRetimeMenu(null);
     } catch (err) {
       setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
     } finally {
       setTimestampSaving(false);
     }
-  }, [addRegion, clearQuickRetimeSelection, concept.name, conceptInterval, ipa, ortho, quickRetimeMenu, saveLexemeAnnotation, saveSpeaker, seek, speaker]);
+  }, [addRegion, clearQuickRetimeSelection, concept, conceptInterval, ipa, ortho, quickRetimeMenu, record, saveLexemeAnnotation, saveSpeaker, seek, speaker]);
 
   const cancelQuickRetime = useCallback(() => {
     clearQuickRetimeSelection();
@@ -575,13 +579,17 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   if (!result.ok) {
                     setTimestampMessage({ kind: "err", text: result.error });
                   } else {
-                    await saveSpeaker(speaker);
-                    storedIntervalRef.current = { start: nextStart, end: nextEnd };
-                    setEditStart(nextStart.toFixed(3));
-                    setEditEnd(nextEnd.toFixed(3));
-                    setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
-                    addRegion(nextStart, nextEnd);
-                    seek(nextStart);
+                    const saveResult = await saveSpeaker(speaker, record);
+                    const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+                    const savedStart = savedConceptInterval?.start ?? nextStart;
+                    const savedEnd = savedConceptInterval?.end ?? nextEnd;
+                    const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;
+                    storedIntervalRef.current = { start: savedStart, end: savedEnd };
+                    setEditStart(savedStart.toFixed(3));
+                    setEditEnd(savedEnd.toFixed(3));
+                    setTimestampMessage({ kind: "ok", text: `Saved (${changedTierCount} tier${changedTierCount === 1 ? "" : "s"} updated).` });
+                    addRegion(savedStart, savedEnd);
+                    seek(savedStart);
                   }
                 } catch (err) {
                   setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
