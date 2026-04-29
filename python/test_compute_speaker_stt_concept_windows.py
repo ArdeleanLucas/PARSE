@@ -95,7 +95,7 @@ def test_compute_speaker_stt_concept_windows_transcribes_each_concept_window(tmp
     assert result["segments_written"] == 3
     assert len(stub.clip_calls) == 3
     assert all(call["language"] == "ku" for call in stub.clip_calls)
-    assert "1" in str(stub.clip_calls[0]["initial_prompt"])
+    assert all(call["initial_prompt"] is None for call in stub.clip_calls)
 
     cache = _load_stt_cache(tmp_path)
     assert cache["source"] == "concept-windows"
@@ -136,6 +136,7 @@ def test_compute_speaker_stt_concept_windows_respects_explicit_concept_ids(tmp_p
     assert result["concept_windows"] == 1
     assert result["affected_concepts"] == [{"concept_id": "2", "start": 2.0, "end": 2.4}]
     assert len(stub.clip_calls) == 1
+    assert stub.clip_calls[0]["language"] == "sdh"
     cache = _load_stt_cache(tmp_path)
     assert [(segment["conceptId"], segment["text"]) for segment in cache["segments"]] == [("2", "stt-window-1")]
 
