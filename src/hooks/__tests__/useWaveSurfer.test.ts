@@ -21,6 +21,7 @@ const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState, moc
       seekTo: vi.fn(),
       zoom: vi.fn(),
       setPlaybackRate: vi.fn(),
+      setVolume: vi.fn(),
       setScroll: vi.fn(),
       getDuration: vi.fn(() => 10),
       getCurrentTime: vi.fn(() => 0),
@@ -140,6 +141,21 @@ describe("useWaveSurfer", () => {
     });
 
     expect(mockWsInstance.seekTo).toHaveBeenCalledWith(0.5);
+  });
+
+  it("setVolume forwards to ws.setVolume", () => {
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    act(() => {
+      result.current.setVolume(0.5);
+    });
+
+    expect(mockWsInstance.setVolume).toHaveBeenCalledWith(0.5);
   });
 
   it("clearRegions() removes active region", () => {

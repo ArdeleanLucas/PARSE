@@ -7,6 +7,7 @@ interface PlaybackStore {
   duration: number;
   zoom: number;
   playbackRate: number;
+  volume: number;
   selectedRegion: { start: number; end: number } | null;
   loopEnabled: boolean;
   // Cross-component seek signal. Components outside AnnotateView (e.g. the
@@ -19,6 +20,7 @@ interface PlaybackStore {
   setDuration: (d: number) => void;
   setZoom: (z: number) => void;
   setPlaybackRate: (r: number) => void;
+  setVolume: (v: number) => void;
   setSelectedRegion: (r: { start: number; end: number } | null) => void;
   toggleLoop: () => void;
   togglePlay: () => void;
@@ -32,6 +34,7 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   duration: 0,
   zoom: 100,
   playbackRate: 1.0,
+  volume: 0.8,
   selectedRegion: null,
   loopEnabled: false,
   pendingSeek: null,
@@ -41,6 +44,7 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   setDuration: (d) => set({ duration: d }),
   setZoom: (z) => set({ zoom: z }),
   setPlaybackRate: (r) => set({ playbackRate: r }),
+  setVolume: (v) => set({ volume: Math.max(0, Math.min(1, v)) }),
   setSelectedRegion: (r) => set({ selectedRegion: r }),
   toggleLoop: () => set((s) => ({ loopEnabled: !s.loopEnabled })),
   // togglePlay is controlled externally by useWaveSurfer — this just syncs state

@@ -112,6 +112,7 @@ export function useWaveSurferPlayback(refs: WaveSurferRefs): WaveSurferControls 
 
   const setZoom = useCallback((minPxPerSec: number) => wsRef.current?.zoom(minPxPerSec), [wsRef]);
   const setRate = useCallback((rate: number) => wsRef.current?.setPlaybackRate(rate), [wsRef]);
+  const setVolume = useCallback((volume: number) => wsRef.current?.setVolume(volume), [wsRef]);
 
-  return { play, pause, playPause, playClip, playRange, seek, scrollToTimeAtFraction, skip, jump, setZoom, setRate };
+  return { play, pause, playPause, playClip, playRange, seek, scrollToTimeAtFraction, skip, jump, setZoom, setRate, setVolume };
 }

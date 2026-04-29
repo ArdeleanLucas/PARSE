@@ -62,6 +62,7 @@ export interface WaveSurferControls {
   jump: (delta: number) => void;
   setZoom: (minPxPerSec: number) => void;
   setRate: (rate: number) => void;
+  setVolume: (volume: number) => void;
 }
 
 export interface WaveSurferRegionsControls {
