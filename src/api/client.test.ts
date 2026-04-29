@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getConfig, runChat, startChatSession } from "./client";
+import { getConfig, runChat, saveAnnotation, startChatSession } from "./client";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -84,5 +84,36 @@ describe("getConfig / unwrapConfig schema-version guard", () => {
       json: async () => ({ project_name: "test", speakers: [] }),
     });
     await expect(getConfig()).rejects.toThrow(/outdated/i);
+  });
+});
+
+describe("annotation API client contracts", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("saveAnnotation unwraps the server-normalized annotation record", async () => {
+    const normalized = {
+      speaker: "Fail01",
+      source_wav: "Fail01.wav",
+      tiers: {
+        concept: { name: "concept", display_order: 1, intervals: [{ start: 2, end: 3, text: "water" }] },
+        ortho_words: { name: "ortho_words", display_order: 4, intervals: [{ start: 2, end: 2.5, text: "ئاو" }] },
+      },
+    };
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, speaker: "Fail01", annotation: normalized }),
+    });
+
+    await expect(saveAnnotation("Fail01", normalized)).resolves.toBe(normalized);
+    expect(fetchMock).toHaveBeenCalledWith("/api/annotations/Fail01", expect.objectContaining({ method: "POST" }));
   });
 });

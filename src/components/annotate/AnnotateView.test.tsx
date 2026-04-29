@@ -288,7 +288,7 @@ describe('AnnotateView', () => {
       orthoText: 'ئاو',
       conceptName: 'water',
     }));
-    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
     expect(mockSetInterval).not.toHaveBeenCalled();
   });
 
@@ -311,7 +311,7 @@ describe('AnnotateView', () => {
     fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'aβ' } });
     fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
 
-    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
     expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
     expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('1.750');
     expect((screen.getByTestId('lexeme-end') as HTMLInputElement).value).toBe('2.750');
@@ -364,7 +364,7 @@ describe('AnnotateView', () => {
       orthoText: 'edited-ortho',
       conceptName: 'water',
     }));
-    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
     expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
     expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
     expect(mockSeek).toHaveBeenCalledWith(1.75);
@@ -444,13 +444,52 @@ describe('AnnotateView', () => {
     fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'new-ipa' } });
     fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'new-ortho' } });
     fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
-    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01'));
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
 
     unmount();
     render(view);
 
     expect(screen.getByDisplayValue('new-ipa')).toBeTruthy();
     expect(screen.getByDisplayValue('new-ortho')).toBeTruthy();
+  });
+
+
+  it('uses the server-normalized annotation to report changed tiers and refresh saved bounds', async () => {
+    const before = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
+    const after = makeRecord([{ conceptText: 'water', ipa: 'new-ipa', ortho: 'new-ortho', start: 1.76, end: 2.76 }]);
+    after.tiers.ortho_words = {
+      name: 'ortho_words',
+      display_order: 4,
+      intervals: [{ start: 1.76, end: 2.11, text: 'new', manuallyAdjusted: true }],
+    };
+    mockRecord = before;
+    mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 1 });
+    mockSaveSpeaker.mockResolvedValueOnce({
+      record: after,
+      changedTiers: ['concept', 'ipa', 'ortho', 'ortho_words'],
+    });
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('lexeme-start'), { target: { value: '1.750' } });
+    fireEvent.change(screen.getByTestId('lexeme-end'), { target: { value: '2.750' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'new-ipa' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter orthographic form…'), { target: { value: 'new-ortho' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(screen.getByTestId('lexeme-timestamp-msg').textContent).toBe('Saved (4 tiers updated).'));
+    expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('1.760');
+    expect((screen.getByTestId('lexeme-end') as HTMLInputElement).value).toBe('2.760');
+    expect(mockAddRegion).toHaveBeenCalledWith(1.76, 2.76);
   });
 
   it('does not render Save timestamp, Reset, or Chat placeholder buttons', () => {

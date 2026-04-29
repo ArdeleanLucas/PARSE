@@ -13,9 +13,14 @@ export interface AnnotationStoreState {
   histories: Record<string, SpeakerHistory>;
 }
 
+export interface SaveSpeakerResult {
+  record: AnnotationRecord;
+  changedTiers: string[];
+}
+
 export interface AnnotationStorePersistenceSlice {
   loadSpeaker: (speaker: string) => Promise<void>;
-  saveSpeaker: (speaker: string) => Promise<void>;
+  saveSpeaker: (speaker: string, baseline?: AnnotationRecord | null) => Promise<SaveSpeakerResult>;
 }
 
 export interface SaveLexemeAnnotationPayload {
