@@ -34,7 +34,7 @@ export const usePlaybackStore = create<PlaybackStore>()((set) => ({
   duration: 0,
   zoom: 100,
   playbackRate: 1.0,
-  volume: 0.8,
+  volume: 1.0,
   selectedRegion: null,
   loopEnabled: false,
   pendingSeek: null,

@@ -7,14 +7,14 @@ import { usePlaybackStore } from "./playbackStore";
 const INITIAL_VOLUME = usePlaybackStore.getState().volume;
 
 describe("playbackStore.volume default", () => {
-  it("defaults to 0.8 at module-load time", () => {
-    expect(INITIAL_VOLUME).toBe(0.8);
+  it("defaults to 1.0 at module-load time", () => {
+    expect(INITIAL_VOLUME).toBe(1);
   });
 });
 
 describe("playbackStore.setVolume clamping", () => {
   beforeEach(() => {
-    usePlaybackStore.setState({ volume: 0.8 });
+    usePlaybackStore.setState({ volume: 1.0 });
   });
 
   it("clamps negative input to 0", () => {
