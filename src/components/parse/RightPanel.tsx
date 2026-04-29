@@ -78,8 +78,6 @@ export function RightPanel(props: RightPanelProps) {
           />
         ) : (
           <AnnotateTabContent
-            tagFilter={props.tagFilter}
-            onTagFilterChange={props.onTagFilterChange}
             activeActionSpeaker={props.activeActionSpeaker}
             offsetPhase={props.offsetPhase}
             onDetectOffset={props.onDetectOffset}

@@ -3,8 +3,6 @@ import type { CompareComputeJobStatus, CompareComputeMode, OffsetPhase } from '.
 
 export type AppMode = 'annotate' | 'compare' | 'tags';
 
-export type CompareTagFilter = 'all' | 'untagged' | 'review' | 'confirmed' | 'problematic' | string;
-
 export interface RightPanelProps {
   panelOpen: boolean;
   onTogglePanel: () => void;
@@ -28,8 +26,6 @@ export interface RightPanelProps {
   onOpenSourcesReport: () => void;
   onOpenClefConfig: () => void;
   onRefreshEnrichments: () => void;
-  tagFilter: CompareTagFilter;
-  onTagFilterChange: (filter: CompareTagFilter) => void;
   onOpenLoadDecisions: () => void;
   onSaveDecisions: () => void;
   onExportLingPy: () => void;

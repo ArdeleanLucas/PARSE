@@ -1,12 +1,9 @@
-import { Activity, Anchor, AudioLines, Filter, Layers, Mic, Save, Scissors, SlidersHorizontal, Video } from 'lucide-react';
+import { Activity, Anchor, AudioLines, Layers, Mic, Save, Scissors, SlidersHorizontal, Video } from 'lucide-react';
 
-import { tagFilterOptions } from './shared';
 import type { RightPanelProps } from './types';
 
 type AnnotateTabContentProps = Pick<
   RightPanelProps,
-  | 'tagFilter'
-  | 'onTagFilterChange'
   | 'activeActionSpeaker'
   | 'offsetPhase'
   | 'onDetectOffset'
@@ -25,8 +22,6 @@ const phoneticToolCards = [
 ] as const;
 
 export function AnnotateTabContent({
-  tagFilter,
-  onTagFilterChange,
   activeActionSpeaker,
   offsetPhase,
   onDetectOffset,
@@ -94,24 +89,6 @@ export function AnnotateTabContent({
                 <div className="truncate text-[11px] font-medium text-slate-700">{label}</div>
                 <div className="truncate text-[9px] text-slate-400">{hint}</div>
               </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <Filter className="h-3 w-3" /> Filter concepts
-        </h4>
-        <div className="space-y-1">
-          {tagFilterOptions.map(({ key, label, dot }) => (
-            <button
-              key={key}
-              onClick={() => onTagFilterChange(key)}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition ${tagFilter === key ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-              {label}
             </button>
           ))}
         </div>
