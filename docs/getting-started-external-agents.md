@@ -113,7 +113,7 @@ PARSE_API_PORT=8766
 
 ### Step 3: understand the exposed tool surface
 
-The adapter supports two exposure modes:
+The adapter ships with the full safe PARSE tool surface by default and supports an explicit legacy opt-out:
 
 | Mode | What you get |
 |---|---|
@@ -262,11 +262,11 @@ Set `PARSE_EXTERNAL_READ_ROOTS` to one or more absolute paths. Without that, the
 
 Keep only the essentials in the client config and move the rest into repo-local `.parse-env`. The adapter already knows how to load it.
 
-### I expected more tools than I see by default
+### I expected fewer or more tools than I see by default
 
-That is normal. The default MCP surface is curated. If you need the full PARSE tool surface, set `{"expose_all_tools": true}` in `config/mcp_config.json`.
+Current PARSE defaults to the full safe 59-tool adapter surface: 55 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 40-tool adapter surface.
 
-The default curated set already includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
+The default set includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data` tool for dry-run-capable CLEF reset workflows. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
 
 ### Can I use an official `parse_mcp` Python package or an HTTP MCP bridge?
 

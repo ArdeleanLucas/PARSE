@@ -282,7 +282,7 @@ Populate jobs now follow the same global-job pattern as other heavy PARSE workfl
 
 The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to Arabic/Persian, and the **Reference Forms** panel can render multiple forms per language.
 
-The local `lingpy_wordlist` provider now matches doculect identifiers by exact case-insensitive equality (with whitespace / dash / underscore folding), not substring containment. That prevents contact-language buckets such as Arabic from accidentally absorbing unrelated doculects like Avar, Karelian, or Hungarian simply because their identifiers contain `ar`.
+The local `lingpy_wordlist` / CLDF-family providers now match doculect identifiers by exact case-insensitive equality (with whitespace / dash / underscore folding), not substring containment. That prevents contact-language buckets such as Arabic from accidentally absorbing unrelated doculects like Avar, Karelian, or Hungarian simply because their identifiers contain `ar`.
 
 Each reference form row has a checkbox. Those selections persist to `sil_contact_languages.json._meta.form_selections`, and only the selected forms contribute to the similarity score.
 
@@ -293,6 +293,7 @@ On a fresh workspace, the first run of **Borrowing detection (CLEF)** now opens 
 - pick 1–2 primary contact languages
 - search a bundled SIL/ISO language catalog
 - enable or disable provider groups before auto-population
+- inspect provider coverage/warnings when a populate run returns partial or empty results
 - save the language setup only, or **Save & populate** immediately
 
 The saved config lives at `config/sil_contact_languages.json`; optional extra catalog entries can be provided through `config/sil_catalog_extra.json`.
@@ -303,16 +304,16 @@ If a workspace was populated before the 2026-04-25 exact-match fix in `lingpy_wo
 
 | Provider | Source type |
 |---|---|
+| `csv_override` | Local CSV overrides |
+| `lingpy_wordlist` | LingPy wordlist data |
+| `pycldf` | Local CLDF datasets via `pycldf` |
+| `pylexibank` | Installed Lexibank datasets via `pylexibank` |
 | `asjp` | ASJP database |
 | `cldf` | CLDF datasets |
-| `csv_override` | Local CSV overrides |
-| `grok_llm` | LLM-assisted lookup (xAI/Grok) |
-| `lingpy_wordlist` | LingPy wordlist data |
-| `literature` | Published literature references |
-| `pycldf_provider` | `pycldf` library |
-| `pylexibank_provider` | `pylexibank` library |
 | `wikidata` | Wikidata lexemes |
-| `wiktionary` | Wiktionary entries |
+| `wiktionary` | Wiktionary entries and translation tables |
+| `literature` | Published/workspace literature references |
+| `grok_llm` | Final LLM-assisted fallback (xAI/Grok, not Grokipedia.com) |
 
 ### Current CLEF endpoints
 
@@ -321,6 +322,7 @@ If a workspace was populated before the 2026-04-25 exact-match fix in `lingpy_wo
 - `GET /api/clef/sources-report` — read corpus-wide provider provenance for populated reference forms
 - `POST /api/clef/config` — save the CLEF language configuration
 - `POST /api/clef/form-selections` — persist which reference forms should count toward similarity scoring
+- `POST /api/clef/clear` — dry-run-capable clearing of selected CLEF reference forms and optional provider caches
 - `POST /api/compute/contact-lexemes` — start a contact-lexeme fetch job
 - `GET /api/contact-lexemes/coverage` — inspect current provider coverage
 

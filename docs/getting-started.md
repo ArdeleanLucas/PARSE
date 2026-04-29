@@ -316,6 +316,8 @@ On the first CLEF run, PARSE opens a guided **Configure CLEF** modal that lets y
 
 Catalog entries now include an ISO 15924 `script` hint, and PARSE persists that hint into the CLEF config so bare Reference Forms can be routed deterministically even when providers return unlabeled raw strings.
 
+Populate runs now surface provider warnings instead of treating empty/partial output as silent success. If you need to reset populated reference forms, use `POST /api/clef/clear` or the MCP/chat tool `clef_clear_data` with `dryRun=true` first; the clear path preserves language metadata and does not mutate `parse-enrichments.json`.
+
 The local `lingpy_wordlist` provider also now matches doculect identifiers by exact equality instead of substring containment. If a workspace was populated before that 2026-04-25 fix, rerun CLEF populate with overwrite so any previously misbucketed forms are replaced.
 
 The resulting config is written to:

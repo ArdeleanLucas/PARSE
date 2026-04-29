@@ -35,9 +35,9 @@ Fieldwork linguists, comparative phylogenetics researchers, and low-resource lan
 ## What Makes PARSE Different
 - Unified React shell for annotation and comparison in one workspace
 - Fieldwork-first design for long recordings, uneven metadata, and iterative review
-- Built-in AI workflow assistant powered by **54 PARSE-specific tools**
-- Full MCP server mode with a **54-tool** default task surface, **58** default adapter tools including workflow macros and `mcp_get_exposure_mode`, and an explicit legacy opt-out to the prior curated **36-tool** task surface / **40-tool** adapter surface via `config/mcp_config.json` → `{ "expose_all_tools": false }`
-- CLEF (Contact Lexeme Explorer Feature) for borrowing adjudication via a 10-provider contact-language lookup stack
+- Built-in AI workflow assistant powered by **55 PARSE-specific tools**
+- Full MCP server mode with a **55-tool** default task surface, **59** default adapter tools including workflow macros and `mcp_get_exposure_mode`, and an explicit legacy opt-out to the prior curated **36-tool** task surface / **40-tool** adapter surface via `config/mcp_config.json` → `{ "expose_all_tools": false }`
+- CLEF (Contact Lexeme Explorer Feature) for borrowing adjudication via a 10-provider contact-language lookup stack, provenance/source reports, provider-warning surfacing, and dry-run-capable data clearing
 - Export pipeline for LingPy TSV and NEXUS outputs used in downstream comparative workflows
 
 ## Quick Start
@@ -70,7 +70,7 @@ For full requirements, workspace setup, GPU/model configuration, and troubleshoo
 - Four annotation tiers: IPA, orthography, concept, and speaker
 - Audio normalization, speaker-level STT, ORTH transcription, acoustic IPA fill, and Tier 2 forced alignment
 - Boundary refinement controls with Tier 1/Tier 2 overlays for spotting drift and re-running constrained STT
-- Per-speaker undo/redo, draggable timestamp correction, and merge recovery
+- Per-speaker undo/redo, draggable timestamp correction, overlap-based lexeme save/retime, and merge recovery
 - Batch transcription, lexical anchor search, and shared tags inside the same workstation
 
 Full details in the [User Guide](docs/user-guide.md).
@@ -89,7 +89,7 @@ Full details in the [User Guide](docs/user-guide.md).
 PARSE includes a domain-specific chat dock powered by the configured LLM provider. It operates through `ParseChatTools`, so it can inspect project state, guide annotation workflows, trigger jobs, help interpret comparative results, and support onboarding, export, and troubleshooting inside the same workstation. Backend providers are split explicitly as `xai`, `openai`, `ollama`, and `local_whisper`, while local speech and alignment work continue through faster-whisper, Razhan, Silero VAD, and wav2vec2.
 
 ## MCP & External API
-PARSE exposes four machine-facing surfaces: a local HTTP API on `http://localhost:8766`, WebSocket job streaming on `ws://localhost:8767/ws/jobs/{jobId}`, an HTTP MCP bridge on the same server, and a stdio MCP adapter rooted at `python/adapters/mcp_adapter.py`. Together they let Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, and custom local automation call PARSE without going through the browser UI. The shipped counts are **54** built-in `ParseChatTools`, **54** default MCP task tools, and **58** total default adapter tools including 3 workflow macros plus `mcp_get_exposure_mode`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated **36**-tool parse task surface / **40**-tool adapter surface preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`; `expose_all_tools=true` is equivalent to the shipped default. OpenAPI docs stay available at `/openapi.json`, `/docs`, and `/redoc`. Full endpoint coverage, auth details, and `parse-mcp` usage live in the [MCP Guide](docs/mcp-guide.md).
+PARSE exposes four machine-facing surfaces: a local HTTP API on `http://localhost:8766`, WebSocket job streaming on `ws://localhost:8767/ws/jobs/{jobId}`, an HTTP MCP bridge on the same server, and a stdio MCP adapter rooted at `python/adapters/mcp_adapter.py`. Together they let Claude Code, Cursor, Cline, Hermes, Windsurf, Codex, and custom local automation call PARSE without going through the browser UI. The shipped counts are **55** built-in `ParseChatTools`, **55** default MCP task tools, and **59** total default adapter tools including 3 workflow macros plus `mcp_get_exposure_mode`; the newest write-capable default tool is `clef_clear_data`, a dry-run-capable wrapper around `POST /api/clef/clear`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated **36**-tool parse task surface / **40**-tool adapter surface preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`; `expose_all_tools=true` is equivalent to the shipped default. OpenAPI docs stay available at `/openapi.json`, `/docs`, and `/redoc`. Full endpoint coverage, auth details, and `parse-mcp` usage live in the [MCP Guide](docs/mcp-guide.md).
 
 ## Research Workflow
 1. Annotate one speaker: normalize audio, run STT/ORTH/IPA support jobs, and confirm timestamps and segments.
@@ -112,7 +112,7 @@ For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, GPU notes, and troubleshooting.
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — MCP stdio setup, HTTP bridge entry points, environment conventions, and agent-facing examples.
 - [User Guide](docs/user-guide.md) — detailed Annotate and Compare workflows, CLEF usage, lexical anchoring, and workspace hydration.
-- [AI Integration](docs/ai-integration.md) — providers, model configuration, the 54-tool chat surface, and workflow macros.
+- [AI Integration](docs/ai-integration.md) — providers, model configuration, the 55-tool chat surface, and workflow macros.
 - [MCP Guide](docs/mcp-guide.md) — the four external surfaces, authentication model, tool counts, and `parse-mcp` usage.
 - [MCP Schema](docs/mcp-schema.md) — raw schema/auth reference for the MCP surface.
 - [API Reference](docs/api-reference.md) — HTTP endpoints, job observability, OpenAPI docs, and examples.

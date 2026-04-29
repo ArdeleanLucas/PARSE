@@ -1,6 +1,6 @@
 # AI Integration
 
-> Last updated: 2026-04-27
+> Last updated: 2026-04-29
 >
 > This document consolidates the AI provider system, model roles, configuration expectations, and the full built-in PARSE chat tool surface currently described in the repository README and code.
 
@@ -227,9 +227,9 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (54 tools)
+## Full built-in chat tool surface (55 tools)
 
-The in-app assistant currently exposes **54 PARSE-specific tools**.
+The in-app assistant currently exposes **55 PARSE-specific tools**.
 
 ### Read-only / preview tools (15)
 

@@ -12,7 +12,7 @@ This repository — `ArdeleanLucas/PARSE` — became the canonical PARSE on 2026
 
 The repo-target rule below is updated post-cutover: PRs land on `ArdeleanLucas/PARSE`, NOT on the archived repos.
 
-> **Rebuild repo note (2026-04-25):** this repository is the isolated refactor/rebuild lane. The live/oracle PARSE repo remains `ArdeleanLucas/PARSE` at `/home/lucas/gh/ardeleanlucas/parse`. Do not treat this repo as the currently deployed thesis runtime.
+> **Post-cutover clone note (2026-04-29):** the physical checkout path `/home/lucas/gh/tarahassistant/PARSE-rebuild` is historical, but its `origin` is the canonical `git@github.com:ArdeleanLucas/PARSE.git`. Use PARSE terminology for current work; use "rebuild/oracle" only when discussing archived pre-cutover evidence.
 
 ## Repo-target rule (READ BEFORE OPENING ANY PR)
 
@@ -39,9 +39,9 @@ Before opening any PR for any task in this lane, verify all three:
    origin\tgit@github.com:ArdeleanLucas/PARSE.git (fetch)   # CORRECT
    origin\tgit@github.com:ArdeleanLucas/PARSE.git (push)
    ```
-   If the URL says `ArdeleanLucas/PARSE`, **stop**. Switch to `/home/lucas/gh/tarahassistant/PARSE-rebuild` (or create a worktree under `/home/lucas/gh/worktrees/PARSE-rebuild/...`) before doing anything else.
+   If the URL says `ArdeleanLucas/PARSE`, you are on the correct canonical remote. If it points to `PARSE-pre-rebuild-archive`, `TarahAssistant/PARSE-rebuild-archive`, or another archive/fork, **stop** and switch to `/home/lucas/gh/tarahassistant/PARSE-rebuild` (or a worktree created from it) before doing anything else.
 
-3. **PR-create command** explicitly targets the rebuild repo:
+3. **PR-create command** explicitly targets the canonical repo:
    ```
    $ gh pr create --repo ArdeleanLucas/PARSE --base main ...
    ```
@@ -78,7 +78,7 @@ Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/
 
 - `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) decomposition (env_config.py PR 1 + follow-ups)
-- The 54 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
+- The 55 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
 - Bug fixes that touch AIChat.tsx incidentally (e.g., the path-separator fix at PR #77 affected stt_start which AIChat consumes)
 
 **What's dropped:**
@@ -279,8 +279,8 @@ Update this table when:
 **Failing patterns to avoid:**
 
 ```markdown
-![alt](https://raw.githubusercontent.com/TarahAssistant/PARSE-rebuild/<branch>/docs/pr-assets/foo.png)
-![alt](https://github.com/TarahAssistant/PARSE-rebuild/blob/<branch>/docs/pr-assets/foo.png?raw=1)
+![alt](https://raw.githubusercontent.com/ArdeleanLucas/PARSE/<branch>/docs/pr-assets/foo.png)
+![alt](https://github.com/ArdeleanLucas/PARSE/blob/<branch>/docs/pr-assets/foo.png?raw=1)
 ```
 
 Both 404 in browsers. Verified 2026-04-26 — every screenshot embed in PRs #62, #63, #73, #79, #86 was failing silently. The screenshot rule had been doing nothing.
@@ -303,7 +303,7 @@ When the docs or older plans mention the historical monoliths, translate them th
 - `src/stores/annotationStore.ts` — barrel only; concrete annotation-store helpers live under `src/stores/annotation/`
 - compare/annotate/CLEF top-level `.tsx` files may now be barrels; check `docs/architecture/post-decomp-file-map.md` before adding new logic directly into an old top-level entrypoint
 
-## Current State (updated 2026-04-27)
+## Current State (updated 2026-04-29)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -319,12 +319,20 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - Cross-mode navigation (Annotate ↔ Compare)
   - Store persistence regression coverage
   - API regression suite + CLEF integration coverage
-- **CLEF shipped**:
-  - Provider registry in `python/compare/providers/`
+- **CLEF shipped and hardened**:
+  - Provider registry in `python/compare/providers/` with provenance-aware source reporting, provider warnings, exact doculect matching, and guided Configure CLEF UX
   - Compare UI panel in `src/components/compare/ContactLexemePanel.tsx`
   - Server endpoints:
     - `POST /api/compute/contact-lexemes`
     - `GET /api/contact-lexemes/coverage`
+    - `GET /api/clef/config`, `POST /api/clef/config`, `GET /api/clef/catalog`, `GET /api/clef/providers`, `GET /api/clef/sources-report`
+    - `POST /api/clef/form-selections`
+    - `POST /api/clef/clear` (dry-run-capable reference-form/cache clear; also exposed as MCP/chat tool `clef_clear_data`)
+  - Last-24h CLEF fixes: sources UX (#168), real tab targeting (#171), exact doculect matching (#174), clear endpoint/tool (#175), warning surfacing (#176), and xAI/Grok auth alignment (#177)
+- **Annotate lexeme save/retime hardened**:
+  - PR #172 bundled Save Annotation across concept/IPA/ORTH/`ortho_words` scope.
+  - PR #179 changed save/drag retiming to use best-overlap matching for IPA/ORTH and midpoint rescaling for `ortho_words` so the derived BND lane follows lexeme bounds.
+  - Open PR #180 adds missing-IPA-interval creation on save; do not document that behavior as shipped until it merges.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)
@@ -335,10 +343,10 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
-- Shipped default MCP adapter surface is **58 tools** total: **54** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- Shipped default MCP adapter surface is **59 tools** total: **55** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
 - `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **36**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **40**-tool published surface.
-- Setting `expose_all_tools=true` expands `active` mode back to the full **58**-tool adapter surface, which now matches the shipped default.
-- The curated default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **59**-tool adapter surface, which now matches the shipped default.
+- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data` tool; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`
@@ -439,10 +447,18 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 |---|---|---|
 | `getAnnotation()` | `GET /api/annotations/{speaker}` | ✅ |
 | `saveAnnotation()` | `POST /api/annotations/{speaker}` | ✅ |
+| `getSttSegments()` | `GET /api/stt-segments/{speaker}` | ✅ |
 | `getEnrichments()` | `GET /api/enrichments` | ✅ |
 | `saveEnrichments()` | `POST /api/enrichments` | ✅ |
+| `importConceptsCsv()` | `POST /api/concepts/import` | ✅ Multipart upload |
+| `importTagCsv()` | `POST /api/tags/import` | ✅ Multipart upload |
+| `getTags()` | `GET /api/tags` | ✅ |
+| `mergeTags()` | `POST /api/tags/merge` | ✅ |
+| `saveLexemeNote()` | `POST /api/lexeme-notes` | ✅ |
+| `importCommentsCsv()` | `POST /api/lexeme-notes/import` | ✅ Multipart upload |
 | `getConfig()` | `GET /api/config` | ✅ |
 | `updateConfig()` | `PUT /api/config` | ✅ |
+| `getPipelineState()` | `GET /api/pipeline/state/{speaker}` | ✅ |
 | `getAuthStatus()` | `GET /api/auth/status` | ✅ |
 | `startAuthFlow()` | `POST /api/auth/start` | ✅ |
 | `pollAuth()` | `POST /api/auth/poll` | ✅ (required to drive Codex device-token exchange; `getAuthStatus` only reads cached state) |
@@ -450,7 +466,15 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 | `logoutAuth()` | `POST /api/auth/logout` | ✅ |
 | `startSTT()` | `POST /api/stt` | ✅ |
 | `pollSTT()` | `POST /api/stt/status` | ✅ |
-| `requestIPA()` | `POST /api/ipa` | ✅ |
+| `startNormalize()` | `POST /api/normalize` | ✅ ffmpeg loudnorm pipeline |
+| `pollNormalize()` | `POST /api/normalize/status` | ✅ |
+| `onboardSpeaker()` | `POST /api/onboard/speaker` | ✅ Multipart upload, background job |
+| `pollOnboardSpeaker()` | `POST /api/onboard/speaker/status` | ✅ |
+| `detectTimestampOffset()` | `POST /api/offset/detect` | ✅ |
+| `detectTimestampOffsetFromPair()` / `detectTimestampOffsetFromPairs()` | `POST /api/offset/detect-from-pair` | ✅ |
+| `pollOffsetDetectJob()` | `POST /api/compute/{offset_detect or offset_detect_from_pair}/status` | ✅ typed compute poll via `pollCompute()` |
+| `applyTimestampOffset()` | `POST /api/offset/apply` | ✅ |
+| `searchLexeme()` | `GET /api/lexeme/search` | ✅ |
 | `requestSuggestions()` | `POST /api/suggest` | ✅ |
 | `startChatSession()` | `POST /api/chat/session` | ✅ |
 | `getChatSession()` | `GET /api/chat/session/{id}` | ✅ |
@@ -458,16 +482,20 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 | `pollChat()` | `POST /api/chat/run/status` | ✅ |
 | `startCompute()` | `POST /api/compute/{type}` | ✅ Dynamic dispatch |
 | `pollCompute()` | `POST /api/compute/{type}/status` | ✅ |
+| `listActiveJobs()` | `GET /api/jobs/active` | ✅ |
+| `getJobLogs()` | `GET /api/jobs/{jobId}/logs` | ✅ |
 | `getLingPyExport()` | `GET /api/export/lingpy` | ✅ |
-| `getNEXUSExport()` | `GET /api/export/nexus` | ⏳ Placeholder |
+| `getNEXUSExport()` | `GET /api/export/nexus` | ✅ placeholder/data-dependent output |
+| `spectrogramUrl()` | `GET /api/spectrogram` | ✅ URL builder for image endpoint |
 | `getContactLexemeCoverage()` | `GET /api/contact-lexemes/coverage` | ✅ |
 | `startContactLexemeFetch()` | `POST /api/compute/contact-lexemes` | ✅ |
-| `startNormalize()` | `POST /api/normalize` | ✅ ffmpeg loudnorm pipeline |
-| `pollNormalize()` | `POST /api/normalize/status` | ✅ |
-| `onboardSpeaker()` | `POST /api/onboard/speaker` | ✅ Multipart upload, background job |
-| `pollOnboardSpeaker()` | `POST /api/onboard/speaker/status` | ✅ |
-| `getTags()` | `GET /api/tags` | ✅ |
-| `mergeTags()` | `POST /api/tags/merge` | ✅ |
+| `getClefConfig()` | `GET /api/clef/config` | ✅ |
+| `saveClefConfig()` | `POST /api/clef/config` | ✅ |
+| `getClefCatalog()` | `GET /api/clef/catalog` | ✅ |
+| `getClefProviders()` | `GET /api/clef/providers` | ✅ |
+| `getClefSourcesReport()` | `GET /api/clef/sources-report` | ✅ |
+| `saveClefFormSelections()` | `POST /api/clef/form-selections` | ✅ |
+| No frontend helper yet | `POST /api/clef/clear` | ✅ Direct HTTP + MCP/chat tool `clef_clear_data`; add a `src/api/contracts/*` helper before any frontend UI calls it |
 
 **Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 
@@ -512,7 +540,7 @@ However, on current `main`, coordinate shared-surface edits carefully.
 
 ## Coordinator handoff convention (2026-04-26)
 
-New queued work for `parse-builder`, `parse-back-end`, and `parse-gpt` is now tracked under repo-local handoff files instead of merge-to-main queue-prompt PRs.
+New queued work for `parse-front-end`, `parse-back-end`, and `parse-coordinator` is tracked under repo-local handoff files instead of merge-to-main queue-prompt PRs. Historical on-disk directories remain `parse-builder/`, `parse-back-end/`, and `parse-gpt/` for compatibility.
 
 ### Canonical queue location
 
@@ -530,10 +558,10 @@ New queued work for `parse-builder`, `parse-back-end`, and `parse-gpt` is now tr
 
 ## Safe Work Now (current priority)
 
-- Freeze the rebuild-repo contract: oracle SHA, parity fixtures, and Phase 0 shared-contract checklist
-- Continue behavior-preserving refactor work here instead of landing refactor slices on the live PARSE repo
-- Port live refactor PRs here first when needed, then use narrow revert/sync PRs to keep `ArdeleanLucas/PARSE` stable
-- Maintain parity artifacts under `parity/` and keep deviations explicit when rebuild behavior temporarily differs from the oracle
+- Keep canonical PARSE docs aligned with the post-cutover repo, not archived rebuild/oracle language.
+- Harden CLEF provider quality and UX: provider warnings, deterministic doculect matching, clear/reset semantics, source provenance, and the queued Grok/Wiktionary follow-up in `.hermes/handoffs/parse-back-end/2026-04-29-clef-grok-llm-and-wiktionary-tables.md`.
+- Validate Annotate lexeme-save behavior after PR #179 and review/merge follow-up PR #180 before documenting missing-IPA interval creation as shipped behavior.
+- Maintain parity artifacts under `parity/` and keep C5/C6 browser/workstation validation explicit rather than implied by harness success.
 
 ## Do Not Touch
 
@@ -554,7 +582,7 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 6. **`tagStore.persist()` after every mutation.** A tag that is not persisted is lost on page reload.
 
 **Data invariants**
-7. **Timestamps are immutable.** `start` and `end` on `AnnotationInterval` are set once and never changed.
+7. **Timestamps are controlled data, not disposable AI output.** `start` and `end` on `AnnotationInterval` must not be normalized or silently rewritten. They may change only through explicit user-reviewed retime paths (`saveLexemeAnnotation`, scoped drag retime, offset correction) that mark affected intervals `manuallyAdjusted` and preserve concept IDs.
 8. **Concept IDs are stable identifiers.** Never normalize, trim, lowercase, or transform. The entire pipeline (annotations, enrichments, LingPy, BEAST2) breaks silently if IDs drift.
 
 **Code quality**
@@ -566,14 +594,14 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 
 ## Test Gates (pre-push)
 
-Run both before pushing PARSE changes:
+Run both before pushing PARSE frontend changes:
 
 ```bash
-npm run test -- --run
+npx vitest run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-Expected floor: **>=157 passing tests** and clean TypeScript compile.
+For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #179 validated at **81 files / 456 frontend tests**; if that count shifts, explain why in the PR.
 
 ## Baseline Architecture
 
