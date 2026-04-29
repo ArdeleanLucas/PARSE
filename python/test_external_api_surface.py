@@ -113,6 +113,10 @@ def test_build_openapi_document_keeps_lexeme_media_search_contract_honest() -> N
     assert import_schema["properties"]["speaker_id"] == {"type": "string"}
     assert import_schema["properties"]["csv"] == {"type": "string", "format": "binary"}
 
+    onboard_schema = spec["paths"]["/api/onboard/speaker"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    assert onboard_schema["required"] == ["speaker_id", "audio"]
+    assert onboard_schema["properties"]["commentsCsv"] == {"type": "string", "format": "binary"}
+
 
 def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp_path: pathlib.Path) -> None:
     catalog = build_mcp_http_catalog(project_root=tmp_path, mode="default")
