@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
 
 def _annotation_empty_tier(display_order: int) -> _server.Dict[str, _server.Any]:
     return {'type': 'interval', 'display_order': int(display_order), 'intervals': []}
@@ -400,6 +401,39 @@ def _annotation_touch_metadata(record: _server.Dict[str, _server.Any], preserve_
     if not language_code:
         metadata['language_code'] = _server._annotation_language_code(record)
 
+
+def _annotation_enforce_concept_ids(record: _server.Dict[str, _server.Any], speaker: str) -> None:
+    tiers = record.get('tiers') if isinstance(record, dict) else {}
+    if not isinstance(tiers, dict):
+        return
+    concept_tier = tiers.get('concept')
+    if not isinstance(concept_tier, dict):
+        return
+    intervals = concept_tier.get('intervals')
+    if not isinstance(intervals, list):
+        return
+    registry = None
+    registry_changed = False
+    speaker_name = str(speaker or record.get('speaker') or '').strip()
+    for index, interval in enumerate(intervals):
+        if not isinstance(interval, dict):
+            continue
+        if str(interval.get('concept_id') or '').strip():
+            continue
+        text = str(interval.get('text') or '').strip()
+        if not text:
+            print('[normalize] {0} concept-tier interval {1} has empty text; concept_id left blank'.format(speaker_name, index), file=_server.sys.stderr, flush=True)
+            continue
+        if registry is None:
+            registry = load_concept_registry(_server._project_root())
+        concept_id, was_allocated = resolve_or_allocate_concept_id(registry, text)
+        if concept_id:
+            interval['concept_id'] = concept_id
+        registry_changed = registry_changed or was_allocated
+    if registry is not None and registry_changed:
+        persist_concept_registry(_server._project_root(), registry)
+
+
 def _annotation_empty_record(speaker: str, source_audio: _server.Optional[str], duration_sec: _server.Optional[float], existing_record: _server.Optional[_server.Dict[str, _server.Any]]) -> _server.Dict[str, _server.Any]:
     now_iso = _server._utc_now_iso()
     speaker_text = str(speaker or '').strip()
@@ -459,6 +493,7 @@ def _annotation_record_from_flat_entries(raw_entries: _server.Any, speaker_hint:
         _server._annotation_upsert_interval(record['tiers']['ortho']['intervals'], normalized['startSec'], normalized['endSec'], str(normalized.get('ortho') or ''))
         _server._annotation_upsert_interval(record['tiers']['concept']['intervals'], normalized['startSec'], normalized['endSec'], concept_text)
     _server._annotation_sync_speaker_tier(record)
+    _annotation_enforce_concept_ids(record, speaker)
     _server._annotation_touch_metadata(record, preserve_created=True)
     return record
 
@@ -535,6 +570,7 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
         normalized['source_audio_duration_sec'] = float(source_index_duration)
     if not str(normalized.get('source_audio') or '').strip():
         normalized['source_audio'] = _server._annotation_primary_source_wav(speaker)
+    _annotation_enforce_concept_ids(normalized, speaker)
     _server._annotation_sync_speaker_tier(normalized)
     _server._annotation_sort_all_intervals(normalized)
     return normalized
