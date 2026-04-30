@@ -6,6 +6,9 @@ export interface AnnotationInterval {
   start: number; // seconds — IMMUTABLE once written
   end: number; // seconds — IMMUTABLE once written
   text: string;
+  concept_id?: string;
+  import_index?: number;
+  audition_prefix?: string;
   /** True once the user has manually set this lexeme's timing — via direct
    * start/end edit, or by capturing a manual-anchor offset pair for it.
    * Global offset application skips flagged intervals so previously-fixed

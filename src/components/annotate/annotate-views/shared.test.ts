@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { formatPlaybackTime, formatPlayhead } from "./shared";
+import type { AnnotationRecord } from "../../../api/types";
+import { findAnnotationForConcept, formatPlaybackTime, formatPlayhead } from "./shared";
+
+function makeRecordWithConceptIntervals(intervals: AnnotationRecord["tiers"][string]["intervals"]): AnnotationRecord {
+  return {
+    speaker: "Saha01",
+    tiers: {
+      concept: { name: "concept", display_order: 1, intervals },
+      ipa: { name: "ipa", display_order: 2, intervals: [] },
+      ortho: { name: "ortho", display_order: 3, intervals: [] },
+    },
+    source_wav: "",
+  };
+}
+
+describe("annotation concept lookup", () => {
+  it("prefers the later explicit concept-id interval over an earlier short-name substring collision", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 10091.681, end: 10092.674, text: "to listen to" },
+      { start: 1219.304, end: 1219.835, text: "ten", concept_id: "226", import_index: 144 } as AnnotationRecord["tiers"][string]["intervals"][number],
+    ]);
+
+    const lookup = findAnnotationForConcept(record, { id: 226, key: "JBIL_10.A", name: "ten" });
+
+    expect(lookup.conceptInterval?.start).toBe(1219.304);
+  });
+});
 
 describe("annotate view time formatting", () => {
   it("formats waveform playhead time with two decimals while preserving padding", () => {

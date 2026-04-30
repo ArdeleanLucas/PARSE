@@ -31,7 +31,7 @@ export function buildSpeakerForm(
   flagged: boolean,
   primaryContactCodes: readonly string[],
 ): SpeakerForm {
-  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.text));
+  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.text, interval.concept_id ?? null));
   const ipaIntervals = record?.tiers.ipa?.intervals ?? [];
   const matchingIpaIntervals = ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval)));
 
