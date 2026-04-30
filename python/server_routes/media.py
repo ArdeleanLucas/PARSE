@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from concept_registry import concept_label_key, load_concept_registry, resolve_or_allocate_concept_id
 
 def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _server.List[_server.Dict[str, _server.Any]]:
     suggestions_path = _server._project_root() / 'ai_suggestions.json'
@@ -215,36 +216,12 @@ def _audition_row_label(row: _server.Any) -> str:
 
 
 def _audition_label_key(label: str) -> str:
-    return ' '.join(str(label or '').strip().split()).casefold()
+    return concept_label_key(label)
 
 
 def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[_server.Dict[str, str]]:
     """Resolve Audition cue labels to integer PARSE concept ids in CSV order."""
-    import csv as _csv
-
-    concepts_path = _server._project_root() / 'concepts.csv'
-    label_to_id: _server.Dict[str, str] = {}
-    max_id = 0
-    if concepts_path.exists():
-        try:
-            with open(concepts_path, newline='', encoding='utf-8') as handle:
-                reader = _csv.DictReader(handle)
-                for row in reader:
-                    cid = _server._normalize_concept_id(row.get('id'))
-                    label = str(row.get('concept_en') or '').strip()
-                    if not cid or not label:
-                        continue
-                    try:
-                        int_id = int(cid)
-                    except (TypeError, ValueError):
-                        continue
-                    if str(int_id) != cid:
-                        continue
-                    max_id = max(max_id, int_id)
-                    label_to_id.setdefault(_audition_label_key(label), cid)
-        except (OSError, _csv.Error):
-            pass
-
+    registry = load_concept_registry(_server._project_root())
     resolved: _server.List[_server.Dict[str, str]] = []
     for import_index, row in enumerate(rows):
         label = _audition_row_label(row)
@@ -253,12 +230,7 @@ def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[
             continue
         if not audition_prefix:
             audition_prefix = 'row_{0}'.format(import_index)
-        label_key = _audition_label_key(label)
-        cid = label_to_id.get(label_key)
-        if cid is None:
-            max_id += 1
-            cid = str(max_id)
-            label_to_id[label_key] = cid
+        cid, _was_allocated = resolve_or_allocate_concept_id(registry, label)
         resolved.append({'id': cid, 'label': label, 'audition_prefix': audition_prefix})
     return resolved
 

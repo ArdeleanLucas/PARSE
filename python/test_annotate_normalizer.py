@@ -1,11 +1,14 @@
 """Regression coverage for annotation interval normalization metadata."""
 from __future__ import annotations
 
+import csv
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import server
 from server import _annotation_normalize_interval, _normalize_annotation_record
 
 
@@ -143,3 +146,178 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
     assert stone["audition_prefix"] == "8.4"
     assert stone["conceptId"] == "legacy-1"
     assert stone["source"] == "concept_window_ipa"
+
+
+def _write_concepts_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _read_concepts_csv(path: pathlib.Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _record_with_tiers(tiers: dict[str, object]) -> dict[str, object]:
+    return {
+        "speaker": "Khan01",
+        "source_audio": "audio/working/Khan01.wav",
+        "source_audio_duration_sec": 5.0,
+        "metadata": {"language_code": "sdh"},
+        "tiers": tiers,
+    }
+
+
+def test_normalizer_backfills_concept_id_when_label_matches_existing(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(concepts_path, [{"id": "2", "concept_en": "Forehead"}])
+    before_mtime = concepts_path.stat().st_mtime_ns
+    time.sleep(0.01)
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {
+                    "type": "interval",
+                    "intervals": [{"start": 0.0, "end": 1.0, "text": "  FOREHEAD  "}],
+                }
+            }
+        ),
+        "Khan01",
+    )
+
+    interval = normalized["tiers"]["concept"]["intervals"][0]
+    assert interval["concept_id"] == "2"
+    assert concepts_path.stat().st_mtime_ns == before_mtime
+    assert _read_concepts_csv(concepts_path) == [{"id": "2", "concept_en": "Forehead"}]
+
+
+def test_normalizer_allocates_new_concept_id_when_label_unknown_and_grows_concepts_csv(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(
+        concepts_path,
+        [
+            {"id": "2", "concept_en": "forehead"},
+            {"id": "225", "concept_en": "nine"},
+        ],
+    )
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {
+                    "type": "interval",
+                    "intervals": [{"start": 0.0, "end": 1.0, "text": "to listen to"}],
+                }
+            }
+        ),
+        "Khan01",
+    )
+
+    interval = normalized["tiers"]["concept"]["intervals"][0]
+    assert interval["concept_id"] == "226"
+    assert _read_concepts_csv(concepts_path) == [
+        {"id": "2", "concept_en": "forehead"},
+        {"id": "225", "concept_en": "nine"},
+        {"id": "226", "concept_en": "to listen to"},
+    ]
+
+
+def test_normalizer_leaves_existing_concept_id_untouched(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(concepts_path, [{"id": "2", "concept_en": "forehead"}])
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {
+                    "type": "interval",
+                    "intervals": [
+                        {"start": 0.0, "end": 1.0, "text": "unknown new label", "concept_id": "900"}
+                    ],
+                }
+            }
+        ),
+        "Khan01",
+    )
+
+    interval = normalized["tiers"]["concept"]["intervals"][0]
+    assert interval["concept_id"] == "900"
+    assert _read_concepts_csv(concepts_path) == [{"id": "2", "concept_en": "forehead"}]
+
+
+def test_normalizer_logs_warning_for_concept_interval_with_empty_text_and_leaves_id_empty(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {
+                    "type": "interval",
+                    "intervals": [{"start": 0.0, "end": 1.0, "text": "   ", "concept_id": ""}],
+                }
+            }
+        ),
+        "Khan01",
+    )
+
+    interval = normalized["tiers"]["concept"]["intervals"][0]
+    assert interval.get("concept_id", "") == ""
+    captured = capsys.readouterr()
+    assert "Khan01 concept-tier interval 0 has empty text" in captured.err
+    assert "concept_id left blank" in captured.err
+    assert not (tmp_path / "concepts.csv").exists()
+
+
+def test_normalizer_does_not_touch_ipa_or_ortho_or_ortho_words_tier_concept_ids(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(concepts_path, [{"id": "2", "concept_en": "forehead"}])
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {"type": "interval", "intervals": []},
+                "ipa": {
+                    "type": "interval",
+                    "intervals": [{"start": 0.0, "end": 1.0, "text": "forehead", "concept_id": ""}],
+                },
+                "ortho": {
+                    "type": "interval",
+                    "intervals": [{"start": 1.0, "end": 2.0, "text": "new label", "concept_id": ""}],
+                },
+                "ortho_words": {
+                    "type": "interval",
+                    "intervals": [{"start": 2.0, "end": 3.0, "text": "new label"}],
+                },
+            }
+        ),
+        "Khan01",
+    )
+
+    assert normalized["tiers"]["ipa"]["intervals"][0]["concept_id"] == ""
+    assert normalized["tiers"]["ortho"]["intervals"][0]["concept_id"] == ""
+    assert "concept_id" not in normalized["tiers"]["ortho_words"]["intervals"][0]
+    assert _read_concepts_csv(concepts_path) == [{"id": "2", "concept_en": "forehead"}]
