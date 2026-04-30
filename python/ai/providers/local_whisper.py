@@ -11,6 +11,25 @@ import ai.provider as provider_module
 if TYPE_CHECKING:
     from ai.provider import Segment, SegmentWithWords
 
+
+# Razhan SDH models (razhan/whisper-base-sdh, razhan/whisper-*-me) were fine-tuned
+# by Razhan Hameed and Sina Ahmadi et al. on the DOLMA-NLP/asr pipeline with
+# `--language="persian"`, so the decoder expects the `<|fa|>` language token at
+# inference even though the speech is Southern Kurdish. PARSE annotations carry
+# the linguistically-correct ISO 639-3 code `sdh`; this normalizer maps it (and
+# the Whisper-supported `sd` Sindhi code, which earlier configs used as a stand-in)
+# to `fa` so faster-whisper accepts the request. References:
+#   - https://huggingface.co/razhan/whisper-base-sdh
+#   - https://huggingface.co/razhan/whisper-small-me
+#   - https://github.com/DOLMA-NLP/asr (finetune_whisper.py uses --language="persian")
+_RAZHAN_SDH_LANGUAGE_ALIASES = frozenset({"sd", "sdh"})
+
+
+def _normalize_whisper_language(code: Optional[str]) -> Optional[str]:
+    if isinstance(code, str) and code.strip().lower() in _RAZHAN_SDH_LANGUAGE_ALIASES:
+        return "fa"
+    return code
+
 class LocalWhisperProvider(provider_module.AIProvider):
     """Local provider backed by faster-whisper.
 
@@ -275,7 +294,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
         # Auto-detect when the user hasn't forced a language (empty/None).
         # faster-whisper treats language=None as auto-detect; language=""
         # would error.
-        selected_language = (language or self.language) or None
+        selected_language = _normalize_whisper_language((language or self.language) or None)
 
         def _run_transcription(m: Any) -> List[Segment]:
             segs_out: List[Segment] = []
@@ -400,7 +419,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
             return []
 
         model = self._load_whisper_model()
-        selected_language = (language or self.language) or None
+        selected_language = _normalize_whisper_language((language or self.language) or None)
         kwargs: Dict[str, Any] = {
             "language": selected_language,
             "beam_size": self.beam_size,
@@ -508,7 +527,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
             return ("", 0.0)
 
         model = self._load_whisper_model()
-        selected_language = (language or self.language) or None
+        selected_language = _normalize_whisper_language((language or self.language) or None)
         prompt = initial_prompt if initial_prompt is not None else self.initial_prompt
 
         kwargs: Dict[str, Any] = {
