@@ -738,13 +738,13 @@ export function ParseUI() {
   // hook subscription at parent scope).
   const lookupConceptInterval = (
     speaker: string,
-    concept: { id?: number | string; name: string; key: string },
+    concept: { id: number | string; name: string; key: string },
   ): { start: number; end: number } | null => {
     const records = useAnnotationStore.getState().records;
     const record = records[speaker];
     if (!record) return null;
     const intervals = record.tiers?.concept?.intervals ?? [];
-    const interval = intervals.find((iv) => conceptMatchesIntervalText(concept, iv.text, iv.concept_id ?? null));
+    const interval = intervals.find((iv) => conceptMatchesIntervalText(concept, iv.concept_id ?? null));
     return interval ? { start: interval.start, end: interval.end } : null;
   };
 

@@ -29,7 +29,7 @@ describe('buildSpeakerForm', () => {
 
   it('builds a speaker row from matching concept/ipa intervals and language-specific similarity scores', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 10.5, text: 'hair' }],
+      concept: [{ start: 10, end: 10.5, text: 'hair', concept_id: '1' }],
       ipa: [{ start: 10.1, end: 10.4, text: 'muwi' }],
       ortho_words: [{ start: 10.15, end: 10.35, text: 'مووی' }],
       ortho: [{ start: 0, end: 100, text: 'coarse paragraph' }],
@@ -61,7 +61,7 @@ describe('buildSpeakerForm', () => {
 
   it('prefers manual cognate overrides and per-speaker flags over automatic enrichments', () => {
     const record = makeRecord({
-      concept: [{ start: 2, end: 2.4, text: 'hair' }],
+      concept: [{ start: 2, end: 2.4, text: 'hair', concept_id: '1' }],
       ipa: [{ start: 2.05, end: 2.3, text: 'muwi' }],
     });
 
