@@ -109,11 +109,14 @@ export function useParseUIPipeline({
             reloadStt(outcome.speaker);
             const targets = scopedConceptTargets(outcome.result);
             if (targets && refreshScopedConceptRows) {
-              const refreshed = await refreshScopedConceptRows(outcome.speaker, targets);
-              if (!refreshed) await reloadSpeakerAnnotation(outcome.speaker);
-            } else {
-              await reloadSpeakerAnnotation(outcome.speaker);
+              // Best-effort in-place patch for retiming-only outcomes; this
+              // cannot gate the disk reload because concept-window backends
+              // can return only affected_concepts boundary metadata without
+              // the new tier intervals, making no-op concept-tier rewrites
+              // look like a successful in-memory tier refresh.
+              await refreshScopedConceptRows(outcome.speaker, targets);
             }
+            await reloadSpeakerAnnotation(outcome.speaker);
           }
         }
         await loadEnrichments();
