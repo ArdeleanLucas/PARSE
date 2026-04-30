@@ -1185,6 +1185,86 @@ describe("ParseUI", () => {
     expect(button.getAttribute("title") ?? "").toMatch(/respects your manual boundary corrections/i);
   });
 
+  it("surfaces Refine Boundaries progress in the topbar chip instead of the Phonetic Tools button", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+      ]),
+    };
+    useTranscriptionLanesStore.setState({
+      sttBySpeaker: {
+        Fail01: [
+          {
+            start: 1.0,
+            end: 2.0,
+            text: "ئاو",
+            words: [{ word: "ئاو", start: 1.05, end: 1.85, prob: 0.92 }],
+          },
+        ],
+      },
+      sttStatus: { Fail01: "loaded" },
+      sttSourceBySpeaker: {},
+      selectedInterval: null,
+    });
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-refine-boundaries");
+    fireEvent.click(button);
+
+    const topbarStatus = await screen.findByTestId("topbar-action-statuses");
+    expect(within(topbarStatus).getByText("Refining word boundaries…")).toBeTruthy();
+    expect(button.textContent ?? "").not.toMatch(/\d+%/);
+    expect(button.parentElement?.textContent ?? "").not.toMatch(/~\d.*left/);
+  });
+
+  it("surfaces Re-run STT with Boundaries progress in the topbar chip instead of the Phonetic Tools button", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    const base = makeRecord("Fail01", [
+      { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+    ]);
+    mockRecords = {
+      Fail01: {
+        ...base,
+        tiers: {
+          ...base.tiers,
+          ortho_words: {
+            name: "ortho_words",
+            display_order: 4,
+            intervals: [{ start: 1.1, end: 1.4, text: "ئاو" }],
+          },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const button = await screen.findByTestId("phonetic-retranscribe-with-boundaries");
+    fireEvent.click(button);
+
+    const topbarStatus = await screen.findByTestId("topbar-action-statuses");
+    expect(within(topbarStatus).getByText("Re-transcribing with BND…")).toBeTruthy();
+    expect(button.textContent ?? "").not.toMatch(/\d+%/);
+    expect(button.parentElement?.textContent ?? "").not.toMatch(/~\d.*left/);
+  });
+
   it("supports renaming an existing tag in Tags mode", async () => {
     render(<ParseUI />);
 
