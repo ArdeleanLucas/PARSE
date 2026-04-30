@@ -6,7 +6,7 @@
 - Grounded repo: `/home/lucas/gh/tarahassistant/PARSE-rebuild`, remote `git@github.com:ArdeleanLucas/PARSE.git`, `origin/main` at `494a575` when this docs branch was first cut, `bdbf886` after rebase over PR #198, and `efff72b` after rebase over PR #200.
 - Merged PRs in original local-day window: **19** PRs (#180 through #198, with #183 merged into the #180 feature branch and shipped through #180). Explicit post-cutoff inclusion by request: **PR #200** (`2026-04-29T22:01:58Z`, local `2026-04-30T00:01:58+02:00`).
 - This pass updates active docs for shipped concept-scoped pipeline modes, Annotate save/retime and UX changes, ORTH/STT language safety, MCP/package contract details, Audition CSV onboarding, current validation counts, worktree grounding, and the prior same-day report's now-stale PR #180 pending note.
-- Open follow-up after the final freshness check: **comments-file row-index joining only**. PR #200 shipped integer-only concept-id resolution plus `import_index`/`audition_prefix` traceability for Audition imports, so those refinements are now documented as shipped behavior.
+- Open follow-up at that report's final freshness check: **comments-file row-index joining only**. This is now superseded by PR #201, which merged just after the 2026-04-29 report and shipped row-index companion comments import; see `docs/reports/2026-04-30-calendar-day-merged-pr-doc-refresh.md`.
 
 ## Grounding evidence
 
@@ -57,7 +57,7 @@ Tool-grounded checks used:
 
 | Scope | State at audit | Why it matters |
 |---|---|---|
-| Audition comments-file row-index joining | queued follow-up, no PR merged | PR #200 shipped integer-only concept-id resolution plus `import_index` / `audition_prefix` traceability for Audition marker imports; the separate comments CSV join still needs its own implementation before docs should claim it as shipped. |
+| Audition comments-file row-index joining | queued follow-up, no PR merged at 2026-04-29 cutoff; superseded by PR #201 on 2026-04-30 local day | PR #200 shipped integer-only concept-id resolution plus `import_index` / `audition_prefix` traceability for Audition marker imports; PR #201 later shipped companion comments CSV row-index joining, so this row is historical cutoff evidence rather than current pending work. |
 
 ## Files refreshed by this documentation pass
 
@@ -84,6 +84,6 @@ Tool-grounded checks used:
 ## Coordinator sign-off
 
 - Calendar-day merged PR coverage after rebase: **19/19 original-window merged PRs accounted for**, plus **1/1 explicit post-cutoff PR #200 update accounted for**.
-- Open PRs kept pending, not shipped: **yes** — Audition comments-file row-index joining remains pending, while PR #200's concept-id/traceability hardening is now documented as shipped.
+- Open PRs kept pending, not shipped: **yes at the 2026-04-29 cutoff** — Audition comments-file row-index joining was pending then, while PR #200's concept-id/traceability hardening was documented as shipped. PR #201 later shipped the comments import path and is covered by the 2026-04-30 report.
 - Contract fidelity: **current docs treat `run_mode`, `concept_ids`, `affected_concepts`, `shiftedConcepts`, server-normalized Save Annotation state, and Audition CSV interval seeding/concept-id/trace metadata as shipped behavior only where merged PR evidence supports it**.
 - Validation completed before push: `git diff --check` passed; changed Markdown relative-link scan checked **56** relative links across **16** changed Markdown files, found **0** missing links, and ignored only the known placeholder `docs/pr-assets/foo.png`.

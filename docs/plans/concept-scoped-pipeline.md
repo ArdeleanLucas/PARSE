@@ -9,7 +9,7 @@
 
 ## Why this exists
 
-PARSE needs a stable contract for rerunning STT, ORTH, and IPA on concept-sized windows instead of whole-speaker audio. The user workflow is: retime a small set of concepts, then rerun the pipeline for all concept windows or only the concepts already marked as manually adjusted. This document is now the shipped contract reference rather than an active multi-lane coordination plan.
+PARSE needs a stable contract for rerunning STT, ORTH, and IPA on concept-sized windows instead of whole-speaker audio. The user workflow is: retime a small set of concepts, then rerun the pipeline for all concept windows or only the concepts already marked as manually adjusted. This document is now the shipped contract reference rather than an active multi-lane coordination plan. After PR #215, scoped row refresh is explicitly advisory: compute completion must still trigger a speaker-annotation reload from disk so persisted IPA/ORTH/STT/BND intervals become canonical in the UI.
 
 ## Shipped HTTP request-body contract
 
@@ -54,7 +54,7 @@ Under this contract, concept scope is real execution scope. `concept_ids` is not
 
 PR #196 tightened the ORTH/STT behavior for concept-window short clips:
 
-- PARSE does **not** seed Whisper with English concept IDs or gloss labels as `initial_prompt` for concept-window clips.
+- PARSE does **not** seed Whisper with English concept IDs or gloss labels as `initial_prompt` for concept-window clips; after PR #216, those clips may still inherit the built-in Southern Kurdish Arabic-script ORTH decoder prime unless the config explicitly sets `"initial_prompt": ""`.
 - Transcription language resolves from payload first, then `annotation.metadata.language_code`.
 - If neither source supplies language, PARSE warns to stderr before allowing Whisper auto-detect.
 - The resolved ORTH language applies to full/concept-window ORTH and short-clip refine calls.
@@ -114,3 +114,6 @@ A future PR has contract drift if it changes any of the following without a coor
 - 2026-04-29 PR #192: shipped backend/MCP/public-package support.
 - 2026-04-29 PR #193: added `affected_concepts` to the response contract after confirming both implementation lanes shipped consistently.
 - 2026-04-29 PR #196: removed English concept/gloss `initial_prompt` seeding and added metadata-language fallback for safer short-clip transcription.
+- 2026-04-30 PR #215: made scoped row refresh advisory; every completed compute still reloads the speaker annotation from disk so persisted tier writes remain canonical.
+- 2026-04-30 PR #216: added the built-in Southern Kurdish Arabic-script ORTH decoder prime for omitted `initial_prompt` configs while preserving explicit empty-string opt-out.
+- 2026-04-30 PR #217: made the frontend run preview mode-aware for IPA so concept-window / edited-only cells can be runnable despite stale full-mode `ipa.can_run=false` when ORTH/concept-tier presence is observable.

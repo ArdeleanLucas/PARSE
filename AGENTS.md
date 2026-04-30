@@ -78,7 +78,7 @@ Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/
 
 - `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) decomposition (env_config.py PR 1 + follow-ups)
-- The 55 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
+- The 57 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
 - Bug fixes that touch AIChat.tsx incidentally (e.g., the path-separator fix at PR #77 affected stt_start which AIChat consumes)
 
 **What's dropped:**
@@ -352,22 +352,35 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #179 changed save/drag retiming to use best-overlap matching for IPA/ORTH and midpoint rescaling for `ortho_words` so the derived BND lane follows lexeme bounds.
   - PR #180 creates a missing IPA interval on Save Annotation when the concept span matches and the typed IPA has no overlapping IPA interval.
   - PR #188 refreshes saved lexeme bounds in local edit state; PR #195 unwraps the full server-normalized annotation response and reports distinct changed tier names from server state.
+  - PR #204 preserves Audition trace fields (`concept_id`, `import_index`, `audition_prefix`, `source`, `conceptId`) through annotation save/read normalization.
+  - PRs #205/#208 make frontend concept lookup identity-only: `concept_id` equality is the only match path; interval text is display metadata and legacy concept rows without `concept_id` fail loudly as unannotated.
+  - PR #207 adds the backend save-time gate that resolves non-empty concept-tier labels to integer `concept_id` values against `concepts.csv`, allocating new integer ids for unknown labels before writing annotations.
   - Save Annotation and quick-retime success copy now derive from server-normalized tier changes (`concept`, `ipa`, `ortho`, `ortho_words`) so BND/Words visual state follows saved bounds.
 - **Concept-scoped pipeline reruns shipped**:
   - PR #190 and PR #193 lock/repair the `run_mode`, `concept_ids`, and `affected_concepts` contract.
   - PR #191 adds frontend full / concept-windows / edited-only controls in `TranscriptionRunModal`, edited-concepts preview, scoped step gating, and `applyConceptScopedRefresh`.
   - PR #192 ships backend/MCP/`parse_mcp` support for `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids` across STT, ORTH, IPA, and `run_full_annotation_pipeline`.
   - PR #196 removes English concept/gloss `initial_prompt` seeding from concept-window short clips and resolves transcription language from payload, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+  - PR #212 makes full-mode IPA auto-route to concept-window processing when `ortho`/`ortho_words` are empty but concept intervals exist, preserving the legacy early return only when concept intervals are absent.
+  - PR #215 makes post-compute disk reload canonical: `affected_concepts` / scoped row refresh is an advisory optimization, and `reloadSpeakerAnnotation` must still run after IPA, ORTH, STT, or BND compute completion so disk-written intervals appear in the UI.
+  - PR #217 makes the Run Full Pipeline preview run-mode-aware for IPA: in `concept-windows` / `edited-only`, stale full-mode `ipa.can_run=false` no longer blocks the cell when ORTH/concept-tier presence is observable; full-mode IPA-without-ORTH and pure-empty concept-window speakers remain blocked.
 - **Annotate review UX polished**:
   - PRs #184/#185 add waveform drag-selection quick retime, a two-decimal waveform playhead chip, and cancel/Escape for transient retime selections.
   - PRs #186/#187 add manual volume control with default 100%.
   - PR #194 adds per-lexeme speaker notes, the generic `Orthographic` label, visible-list keyboard navigation, and removes the compute drawer tag filter.
   - PR #197 removes duplicate Annotate drawer concept filters; `ConceptSidebar` remains the canonical concept filter.
+  - PRs #209/#211 split header status into strict `Annotated` vs `Complete` badges: `Complete` requires concept + IPA + strict `ortho` overlap, and auto-imported `ortho_words` no longer count as human-reviewed orthography.
+  - PR #210 moves BND progress into the existing global header chip instead of duplicating progress text inside the drawer.
 - **Speaker onboarding from Audition CSV shipped**:
   - PR #198 teaches `POST /api/onboard/speaker` to detect Adobe Audition marker CSVs when concepts-style parsing finds no rows and `Name`/`Start` headers are present.
   - PR #200 resolves Audition labels against existing `concepts.csv` `concept_en` values before allocating new integer ids, so the import path remains integer-id only while preserving duplicate/repeated elicitations as separate intervals.
-  - Imported Audition rows preserve CSV order and cue timestamps, append concept and `ortho_words` intervals, strip terminal variant markers from labels, add `import_index` + `audition_prefix` trace metadata, preserve existing `source_audio_duration_sec`, log CSV detection failures, and intentionally leave `ortho`, `ipa`, and `bnd` untouched for downstream jobs.
-  - Companion comments-file row-index joining remains follow-up work; do not claim comments import row joins as shipped until its own PR merges.
+  - PR #201 adds companion comments CSV support via multipart `commentsCsv`; matching cue/comment rows are joined by zero-based row index into `parse-enrichments.json` lexeme notes with `import_note`, `import_raw`, `import_index`, `audition_prefix`, and `updated_at` trace fields.
+  - PR #203 accepts square-bracket prefixes such as `[5.1]- ...` and imports bare/malformed-prefix rows rather than dropping them, assigning opaque synthetic `audition_prefix="row_<import_index>"` values when no source prefix parses.
+  - Imported Audition rows preserve CSV order and cue timestamps, append concept and `ortho_words` intervals, strip terminal variant markers from labels, add `import_index` + `audition_prefix` trace metadata, preserve existing `source_audio_duration_sec`, log CSV detection/comment-alignment failures, and intentionally leave `ortho`, `ipa`, and `bnd` untouched for downstream jobs.
+- **Razhan ORTH language-token normalization shipped**:
+  - PR #213 maps provider-side Whisper language tokens `sd`/`sdh` to `fa` for Razhan/DOLMA models because their fine-tuning used `--language="persian"`; PARSE project/annotation metadata still preserves Southern Kurdish as `sdh`.
+  - PR #216 adds a built-in Southern Kurdish Arabic-script ORTH decoder prime when `ortho.initial_prompt` is omitted, preserves explicit `"initial_prompt": ""` as user opt-out, and logs one `[ORTH] loaded model: ... language=fa initial_prompt=...` line after successful faster-whisper model initialization.
+  - Cite Razhan model usage with Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*, Interspeech 2025, doi:10.21437/Interspeech.2025-2296, PDF: https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)
@@ -378,15 +391,15 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
-- Shipped default MCP adapter surface is **59 tools** total: **55** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
-- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **36**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **40**-tool published surface.
-- Setting `expose_all_tools=true` expands `active` mode back to the full **59**-tool adapter surface, which now matches the shipped default.
-- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data` tool; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
+- Shipped default MCP adapter surface is **61 tools** total: **57** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **38**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **42**-tool published surface.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **61**-tool adapter surface, which now matches the shipped default.
+- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`
   - `export_complete_lingpy_dataset`
-- `run_full_annotation_pipeline` accepts optional `run_mode` (`full`, `concept-windows`, `edited-only`) and `concept_ids`; non-`full` responses include `affected_concepts` for scoped UI refresh, and empty `edited-only` runs return a structured no-op instead of starting a background job.
+- `run_full_annotation_pipeline` accepts optional `run_mode` (`full`, `concept-windows`, `edited-only`) and `concept_ids`; non-`full` responses include `affected_concepts` for scoped UI refresh, and empty `edited-only` runs return a structured no-op instead of starting a background job. Frontend consumers must still reload the completed speaker annotation from disk after compute completion; scoped row refresh never gates the canonical reload.
 - `apply_timestamp_offset` returns `shiftedConcepts` alongside legacy `shiftedIntervals`, so user-facing copy can report distinct concepts moved without breaking interval-count consumers.
 - For backward compatibility, root-level `mcp_config.json` is also accepted when `config/mcp_config.json` is absent.
 - `ChatToolSpec` is the MCP metadata source of truth. MCP tools should forward the strict schema from `spec.parameters`, standard MCP annotations from `spec.mcp_annotations_payload()`, and PARSE-specific safety metadata from `meta["x-parse"] = spec.mcp_meta_payload()`.
@@ -609,8 +622,8 @@ A non-`main` HEAD means cleanup was skipped. A stale local worktree or feature b
 ## Safe Work Now (current priority)
 
 - Keep canonical PARSE docs aligned with the post-cutover repo, not archived rebuild/oracle language.
-- Treat concept-scoped pipeline run modes as shipped: preserve `run_mode`, `concept_ids`, `affected_concepts`, and no-op `edited-only` semantics across HTTP, MCP, and `parse_mcp` docs.
-- Treat the Audition CSV import path from PRs #198 and #200 as shipped: marker CSV detection, CSV-order concept/`ortho_words` interval seeding, integer-only concept-id resolution, `import_index`, and `audition_prefix` traceability are current behavior; comments-file row-index joining remains pending.
+- Treat concept-scoped pipeline run modes as shipped: preserve `run_mode`, `concept_ids`, `affected_concepts`, no-op `edited-only` semantics, and post-compute canonical disk reload across HTTP, MCP, React, and `parse_mcp` docs.
+- Treat the Audition CSV import path from PRs #198/#200/#201/#203/#204/#207/#208 as shipped: marker CSV detection, CSV-order concept/`ortho_words` interval seeding, integer-only concept-id resolution, `commentsCsv` row-index note import, bracket/bare-row parsing, trace-field round trips, save-time concept-id enforcement, and identity-only frontend concept matching are current behavior.
 - Maintain parity artifacts under `parity/` and keep C5/C6 browser/workstation validation explicit rather than implied by harness success.
 
 ## Do Not Touch

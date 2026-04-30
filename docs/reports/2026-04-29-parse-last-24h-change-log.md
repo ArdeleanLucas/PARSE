@@ -76,6 +76,6 @@ Tool-grounded checks used:
 
 - Last-24h doc drift found and corrected: **yes**.
 - Active queue ambiguity reduced: **yes** — the PR #179-completed frontend handoff moved to `done/`; the CLEF backend follow-up was executed by PR #182 and is now also under `done/`.
-- Current shipped MCP counts: **55** `ParseChatTools`, **55** default MCP task tools, **59** default adapter tools.
+- Shipped MCP counts at that audit time: **55** `ParseChatTools`, **55** default MCP task tools, **59** default adapter tools. Supersession note: PR #206 later raised current counts to **57** `ParseChatTools`, **57** default MCP task tools, and **61** default adapter tools; see `docs/reports/2026-04-30-calendar-day-merged-pr-doc-refresh.md`.
 - Current shipped Annotate behavior at original audit time: PR #179 overlap retime was merged and PR #180 was pending; later 2026-04-29 docs supersede this with PR #180/#188/#195 shipped save/retime behavior. Current shipped CLEF behavior also includes PR #182 `grok_llm` naming, Wiktionary translation-table extraction, and the CLEF Settings tab.
 - Superseded action: PR #180 has merged; use `2026-04-29-calendar-day-merged-pr-doc-refresh.md` for current same-day state.

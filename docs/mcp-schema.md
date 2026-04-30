@@ -49,7 +49,7 @@ Verified current counts from `python/ai/chat_tools.py`, `python/ai/workflow_tool
 - **38** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
 - **42** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
 
-The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
+The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
 
 ## Tool schema shape
 

@@ -86,13 +86,15 @@ This is the main starting point for locating lexical material in long recordings
 
 #### ORTH
 
-The speaker-level ORTH job (`computeType='ortho'`) is backed by a **local CTranslate2 conversion** of Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription.
+The speaker-level ORTH job (`computeType='ortho'`) is backed by a **local CTranslate2 conversion** of Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription; cite Razhan model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
 
 Current runtime truth:
 - `ortho.model_path` must be an explicit local CT2 directory
 - HuggingFace repo ids are rejected here; convert first with `ct2-transformers-converter`
 - ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=True`, `condition_on_previous_text=False`, and `compression_ratio_threshold=1.8`
-- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss `initial_prompt` seeding; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+- If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime; an explicit `"initial_prompt": ""` remains the opt-out.
+- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss `initial_prompt` seeding, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+- Runtime logs print one `[ORTH] loaded model: ... language=fa initial_prompt=...` line after successful faster-whisper initialization so field debugging can confirm the effective model/language/prompt.
 
 #### Forced alignment
 
@@ -164,7 +166,7 @@ The transcription run modal now supports three run modes for pipeline-style reru
 - **Concept windows** (`run_mode: "concept-windows"`) — reruns selected steps over concept-tier windows.
 - **Edited only** (`run_mode: "edited-only"`) — reruns selected steps only for concept intervals already marked `manuallyAdjusted`.
 
-Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexemes where they do not make sense, can preview the manually adjusted concepts, and use backend `affected_concepts` metadata to refresh only the processed rows when possible. If an edited-only run has no matching edited concepts, PARSE returns a structured no-op instead of starting an empty job.
+Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexemes where they do not make sense, can preview the manually adjusted concepts, and use backend `affected_concepts` metadata to refresh processed rows opportunistically. The run grid is mode-aware: in `concept-windows` or `edited-only`, an IPA cell can be shown as runnable when stale full-mode `pipeline_state.ipa.can_run` is false but ORTH/concept-tier presence is observable (`ortho.intervals > 0` or `ortho.can_run`); full-speaker IPA without ORTH and pure-empty concept-window speakers remain blocked. After IPA, ORTH, STT, or BND compute completion, PARSE still reloads the completed speaker annotation from disk so intervals written by concept-window or edited-only runs become visible even when the scoped row refresh succeeds. If an edited-only run has no matching edited concepts, PARSE returns a structured no-op instead of starting an empty job.
 
 ### Manual review and timing correction
 
@@ -176,7 +178,9 @@ Annotate mode supports:
 - per-speaker undo/redo with merge recovery and operation-labelled toasts
 - draggable lexeme timestamp editing plus waveform drag-select quick retime for the active concept
 - quick-retime cancel/Escape dismissal before commit
+- identity-only concept lookup: the active concept matches annotation rows by `concept_id` only, so legacy rows without `concept_id` remain visibly unannotated until reimported or saved through the concept-id gate
 - server-normalized Save Annotation refresh: success copy and visual bounds come back from the saved annotation, including `concept`, `ipa`, `ortho`, and `ortho_words`/BND changes
+- strict header status badges: `Annotated` means concept plus IPA or strict `ortho`, while `Complete` requires concept plus IPA plus strict `ortho`; auto-imported `ortho_words` can help display BND/word text but no longer counts as reviewed orthography
 - per-lexeme speaker notes saved as `(speaker, concept_id, user_note)`
 - transport-bar volume control with current default 100%
 - manual boundary correction
@@ -407,7 +411,7 @@ Supported source artifacts currently include:
 - `peaks/<Speaker>.json`
 - optional `coarse_transcripts/<Speaker>.json`
 - optional legacy transcript CSV under `imports/legacy/<Speaker>/`
-- Adobe Audition marker CSV/TSV uploads to `POST /api/onboard/speaker`; when PARSE detects `Name`/`Start` headers after concepts-style parsing fails, it seeds CSV-order `concept` and `ortho_words` intervals with preserved cue timestamps, integer PARSE concept ids, and `import_index` / `audition_prefix` trace metadata. See [Audition CSV speaker import](./runtime/audition-csv-import.md).
+- Adobe Audition marker CSV/TSV uploads to `POST /api/onboard/speaker`; when PARSE detects `Name`/`Start` headers after concepts-style parsing fails, it seeds CSV-order `concept` and `ortho_words` intervals with preserved cue timestamps, integer PARSE concept ids, and `import_index` / `audition_prefix` trace metadata. The same upload can include a companion `commentsCsv` file whose rows are joined by physical row index into per-lexeme import notes, and bracket/bare/malformed-prefix cue rows are imported rather than dropped. See [Audition CSV speaker import](./runtime/audition-csv-import.md).
 
 This matters for thesis workflows where the richest aligned source may be an already processed speaker package or an Audition cue export rather than a brand-new pipeline run.
 

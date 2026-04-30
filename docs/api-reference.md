@@ -124,14 +124,14 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | Endpoint | Purpose | Notes |
 |---|---|---|
 | `POST /api/annotations/{speaker}` | Save one speaker annotation record | Writes normalized annotation JSON |
-| `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows |
+| `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows; optional `commentsCsv` imports companion notes by row index |
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
 | `POST /api/tags/import` | Import tags from CSV | Multipart form upload |
 | `POST /api/lexeme-notes` | Write or delete a lexeme note | Writes into `parse-enrichments.json` |
 | `POST /api/lexeme-notes/import` | Import lexeme notes/comments from CSV | Multipart form upload |
 
-Audition marker CSV import details live in [Audition CSV speaker import](runtime/audition-csv-import.md). It preserves CSV row order and cue timestamps, resolves labels to integer PARSE concept ids before allocating new ids, writes concept + `ortho_words` intervals with `import_index` / `audition_prefix` trace metadata, and deliberately leaves `ortho`, `ipa`, and `bnd` for downstream jobs.
+Audition marker CSV import details live in [Audition CSV speaker import](runtime/audition-csv-import.md). It preserves CSV row order and cue timestamps, resolves labels to integer PARSE concept ids before allocating new ids, writes concept + `ortho_words` intervals with `import_index` / `audition_prefix` trace metadata, accepts bracket and bare/malformed-prefix rows, can join a companion `commentsCsv` upload into `parse-enrichments.json` lexeme notes by row index, and deliberately leaves `ortho`, `ipa`, and `bnd` for downstream jobs.
 
 ### Audio, STT, and compute jobs
 
@@ -235,7 +235,7 @@ The compute dispatcher normalizes several named background workflows.
 | `run_mode` | `"full"` \| `"concept-windows"` \| `"edited-only"` | Optional; omitted means `"full"`. Non-full modes process concept-tier windows instead of the whole speaker. |
 | `concept_ids` | `string[]` | Optional explicit concept scope for non-full modes. `edited-only` additionally filters to concept intervals with `manuallyAdjusted === true`. |
 
-Non-full responses include `run_mode`, `concept_windows`, and `affected_concepts` (`[{ concept_id, start, end }]`) when concept rows were processed. An `edited-only` run with no matching concepts returns a structured no-op (`no_op: true`, `jobId: null`, `affected_concepts: []`) rather than starting an empty job.
+Non-full responses include `run_mode`, `concept_windows`, and `affected_concepts` (`[{ concept_id, start, end }]`) when concept rows were processed. The React workstation treats those affected concepts as a best-effort scoped refresh hint, not the source of truth; after IPA, ORTH, STT, or BND compute completion, it reloads the completed speaker annotation from disk. Current `pipeline_state` is still conservative/full-mode-centric for some IPA preflight cases, so the run modal carries the selected `run_mode` into frontend cell computation: concept-window and edited-only IPA cells can be displayed runnable when ORTH/concept-tier presence is observable, but full-mode IPA without ORTH and pure-empty concept-window speakers remain blocked. An `edited-only` run with no matching concepts returns a structured no-op (`no_op: true`, `jobId: null`, `affected_concepts: []`) rather than starting an empty job.
 
 ## Example requests and responses
 
@@ -405,7 +405,7 @@ Example shape:
 }
 ```
 
-For scoped runs, `result` also includes `run_mode`, `concept_windows`, and `affected_concepts`; full-speaker runs preserve the legacy response shape.
+For scoped runs, `result` also includes `run_mode`, `concept_windows`, and `affected_concepts`; full-speaker runs preserve the legacy response shape. Frontend callers may use `affected_concepts` for a fast scoped repaint, but must still reload the finished speaker annotation from disk after compute completion.
 
 ### Download exports
 
@@ -568,6 +568,8 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `prepare_tag_import` | Preview and validate a tag import |
 | `onboard_speaker_import` | Import one speaker from on-disk audio/CSV into the workspace |
 | `import_processed_speaker` | Import one speaker from existing processed artifacts |
+| `csv_only_reimport` | Re-import an existing speaker from refreshed cue/comments CSV files using the registered WAV and a mandatory backup |
+| `revert_csv_reimport` | Restore the annotation/enrichment/concept files captured by a csv-only reimport backup |
 | `parse_memory_upsert_section` | Upsert a `## Section` block in `parse-memory.md` |
 
 ### Workflow macros
@@ -621,7 +623,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 The shipped MCP default exposes the full safe 57-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
 
 Operational rules that remain important:
-- use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, and timestamp/application workflows
+- use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, `csv_only_reimport`, `revert_csv_reimport`, and timestamp/application workflows
 - prefer `full_coverage` rather than bare `done` when making automation decisions about whether a tier really covers the full recording
 - onboarding remains **one speaker at a time**
 
