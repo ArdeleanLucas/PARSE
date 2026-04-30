@@ -141,6 +141,10 @@ def test_full_mode_auto_routes_to_concept_windows_when_ortho_empty(tmp_path, mon
     assert result["ortho_source"] == "concept"
     assert result["skip_breakdown"] == {"empty_ipa_from_model": 0}
     assert len(aligner.calls) == 2
+    assert result["filled"] == 2
+    assert result["skipped"] == 0
+    assert result["total"] == 2
+    assert "Auto-routed" in result["message"]
 
     ann = _load_canonical(tmp_path, "Csv01")
     ipa_by_concept = {

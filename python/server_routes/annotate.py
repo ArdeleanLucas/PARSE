@@ -1561,7 +1561,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 file=_server.sys.stderr,
                 flush=True,
             )
-            return _server._compute_speaker_ipa_concept_windows(
+            result = _server._compute_speaker_ipa_concept_windows(
                 job_id,
                 speaker=speaker,
                 annotation_path=annotation_path,
@@ -1572,6 +1572,11 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 run_mode='concept-windows',
                 concept_ids=concept_ids,
             )
+            result['message'] = (
+                'Auto-routed to concept-windows mode: no ortho/ortho_words '
+                'intervals; concept tier used as audio windows.'
+            )
+            return result
         print('[IPA] no ortho/ortho_words intervals — early return', file=_server.sys.stderr, flush=True)
         return {'speaker': speaker, 'filled': 0, 'skipped': 0, 'total': 0, 'message': 'No ortho intervals.'}
     ipa_tier = tiers.setdefault('ipa', {'type': 'interval', 'display_order': 1, 'intervals': []})
