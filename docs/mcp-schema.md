@@ -41,13 +41,13 @@ PARSE now exposes three closely related machine-facing surfaces:
 - `all` — expose the full tool surface
 
 Verified current counts from `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, and `python/adapters/mcp_adapter.py`:
-- **55** built-in `ParseChatTools`
-- **55** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **57** built-in `ParseChatTools`
+- **57** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `python/ai/workflow_tools.py`
-- **59** total default adapter tools including read-only `mcp_get_exposure_mode`
-- **59** total adapter tools when `expose_all_tools=true`
-- **36** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
-- **40** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
+- **61** total default adapter tools including read-only `mcp_get_exposure_mode`
+- **61** total adapter tools when `expose_all_tools=true`
+- **38** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
+- **42** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
 
 The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
 

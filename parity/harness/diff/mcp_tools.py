@@ -194,6 +194,42 @@ def _ensure_mcp_fixture_inputs(context: McpFixtureContext) -> None:
     )
     processed_csv.write_text("Name\tStart\tDuration\n(1)- ash\t0:00.000\t0:00.100\n", encoding="utf-8")
 
+    enrichments_path = context.workspace_root / "parse-enrichments.json"
+    if not enrichments_path.exists():
+        enrichments_path.write_text('{"lexeme_notes": {}}\n', encoding="utf-8")
+    backup_dir = context.workspace_root / "annotations" / "backups" / f"20260430T000000Z-{context.seed_speaker_id}-csv-reimport"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_files: list[str] = []
+    for filename, source_path in (
+        (f"{context.seed_speaker_id}.parse.json", context.workspace_root / "annotations" / f"{context.seed_speaker_id}.parse.json"),
+        ("parse-enrichments.json", enrichments_path),
+        ("concepts.csv", context.workspace_root / "concepts.csv"),
+    ):
+        if source_path.exists():
+            shutil.copy2(source_path, backup_dir / filename)
+            backup_files.append(filename)
+    (backup_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "createdAt": "2026-04-30T00:00:00Z",
+                "speaker": context.seed_speaker_id,
+                "operation": "csv_only_reimport",
+                "files": backup_files,
+                "input": {
+                    "sourceCsv": "<fixture>",
+                    "commentsCsv": None,
+                    "wavPath": f"audio/original/{context.seed_speaker_id}/source.wav",
+                },
+                "result": None,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
 
 
 def _copy_fixture_context(source: McpFixtureContext, destination_root: Path) -> McpFixtureContext:

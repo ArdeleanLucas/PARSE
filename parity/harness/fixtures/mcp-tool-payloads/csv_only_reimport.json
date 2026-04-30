@@ -1,0 +1,5 @@
+{
+  "speaker": "${SEED_SPEAKER}",
+  "sourceCsv": "${INPUT_ROOT}/onboard-concepts.csv",
+  "dryRun": true
+}

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
 import json
+import os
 import re
+import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from ..chat_tools import (
     ONBOARD_AUDIO_EXTENSIONS,
+    ChatToolExecutionError,
     ChatToolSpec,
     ChatToolValidationError,
     _coerce_float,
@@ -26,6 +31,8 @@ if TYPE_CHECKING:
 SPEAKER_IMPORT_TOOL_NAMES = (
     "onboard_speaker_import",
     "import_processed_speaker",
+    "csv_only_reimport",
+    "revert_csv_reimport",
 )
 
 
@@ -163,6 +170,65 @@ SPEAKER_IMPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                 "When dryRun=false, the processed speaker artifacts are copied into the workspace and project/source-index metadata are updated.",
                 kind="filesystem_write",
             ),
+        ),
+    ),
+    "csv_only_reimport": ChatToolSpec(
+        name="csv_only_reimport",
+        description=(
+            "Re-import an already-onboarded speaker from a refreshed Audition cue CSV (and optional comments CSV) "
+            "without accepting or copying a WAV. The speaker's existing primary WAV is resolved from source_index.json; "
+            "dryRun=true previews the resolved WAV and backup path, while dryRun=false first captures a mandatory backup "
+            "under annotations/backups/<timestamp>-<speaker>-csv-reimport/ and then reuses the server onboarding worker."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["speaker", "sourceCsv"],
+            "properties": {
+                "speaker": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Existing speaker ID to re-import."},
+                "sourceCsv": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "Path to the refreshed Audition cue CSV."},
+                "commentsCsv": {"type": "string", "maxLength": 1024, "description": "Optional path to the companion Audition comments CSV."},
+                "dryRun": {"type": "boolean", "description": "If true, validate and preview the backup path without writing or re-importing."},
+            },
+        },
+        mutability="mutating",
+        supports_dry_run=True,
+        dry_run_parameter="dryRun",
+        preconditions=(
+            _project_loaded_condition(),
+            _tool_condition("speaker_source_registered", "The speaker must already have a registered WAV in source_index.json.", kind="project_state"),
+            _tool_condition("csv_reimport_input_readable", "sourceCsv/commentsCsv must resolve to readable CSV files.", kind="file_presence"),
+        ),
+        postconditions=(
+            _tool_condition("csv_reimport_backup_captured", "When dryRun=false, a manifest-backed backup is captured before annotation/enrichment/concept files are rewritten.", kind="filesystem_write"),
+        ),
+    ),
+    "revert_csv_reimport": ChatToolSpec(
+        name="revert_csv_reimport",
+        description=(
+            "Restore the files captured by a csv_only_reimport backup for one speaker. If backupDir is omitted, "
+            "the latest annotations/backups/*-<speaker>-csv-reimport directory is selected. Revert restores only "
+            "the filenames listed in manifest.json."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["speaker"],
+            "properties": {
+                "speaker": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Speaker ID whose csv-reimport backup should be restored."},
+                "backupDir": {"type": "string", "maxLength": 1024, "description": "Optional backup directory name or relative path under annotations/backups/."},
+                "dryRun": {"type": "boolean", "description": "If true, preview which files would be restored without copying them."},
+            },
+        },
+        mutability="mutating",
+        supports_dry_run=True,
+        dry_run_parameter="dryRun",
+        preconditions=(
+            _project_loaded_condition(),
+            _tool_condition("csv_reimport_backup_available", "A manifest-backed csv-reimport backup must exist for the requested speaker.", kind="file_presence"),
+        ),
+        postconditions=(
+            _tool_condition("csv_reimport_backup_restored", "When dryRun=false, files listed in the backup manifest are copied back to their project locations.", kind="filesystem_write"),
         ),
     ),
 }
@@ -432,6 +498,334 @@ def _write_source_index_for_processed_import(
     tools.source_index_path.write_text(json.dumps(source_index, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _csv_reimport_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _project_relative_or_display(tools: "ParseChatTools", path: Optional[Path]) -> Optional[str]:
+    if path is None:
+        return None
+    try:
+        return path.resolve().relative_to(tools.project_root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _resolve_registered_primary_wav(tools: "ParseChatTools", speaker: str) -> tuple[Path, str]:
+    source_index = _read_json_file(tools.source_index_path, {})
+    speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
+    speaker_entry = speakers_block.get(speaker) if isinstance(speakers_block, dict) else None
+    source_wavs = speaker_entry.get("source_wavs") if isinstance(speaker_entry, dict) else None
+    sources = [entry for entry in (source_wavs or []) if isinstance(entry, dict) and _normalize_space(entry.get("path"))]
+    if not sources:
+        raise ChatToolValidationError(
+            "Speaker {0!r} has no registered WAV; use onboard_speaker_import for first-time imports.".format(speaker)
+        )
+    selected = next((entry for entry in sources if bool(entry.get("is_primary"))), sources[0])
+    raw_path = _normalize_space(selected.get("path"))
+    wav_path = Path(raw_path).expanduser()
+    if wav_path.is_absolute():
+        resolved = wav_path.resolve()
+    else:
+        resolved = (tools.project_root / wav_path).resolve()
+    try:
+        wav_rel = resolved.relative_to(tools.project_root).as_posix()
+    except ValueError as exc:
+        raise ChatToolValidationError("Registered WAV for {0!r} is outside the project workspace: {1}".format(speaker, raw_path)) from exc
+    if not resolved.exists() or not resolved.is_file():
+        raise ChatToolValidationError("Registered WAV for {0!r} does not exist: {1}".format(speaker, wav_rel))
+    return resolved, wav_rel
+
+
+def _csv_reimport_annotation_exists(tools: "ParseChatTools", speaker: str) -> bool:
+    return (tools.annotations_dir / (speaker + ".json")).exists() or (tools.annotations_dir / (speaker + ".parse.json")).exists()
+
+
+def _csv_reimport_backup_entries(tools: "ParseChatTools", speaker: str) -> List[tuple[str, Path]]:
+    return [
+        (speaker + ".json", tools.annotations_dir / (speaker + ".json")),
+        (speaker + ".parse.json", tools.annotations_dir / (speaker + ".parse.json")),
+        ("parse-enrichments.json", tools.project_root / "parse-enrichments.json"),
+        ("concepts.csv", tools.project_root / "concepts.csv"),
+    ]
+
+
+def _write_csv_reimport_manifest(
+    backup_dir: Path,
+    *,
+    created_at: str,
+    speaker: str,
+    files: Sequence[str],
+    input_payload: Dict[str, Any],
+    result: Optional[Dict[str, Any]],
+) -> None:
+    manifest = {
+        "version": 1,
+        "createdAt": created_at,
+        "speaker": speaker,
+        "operation": "csv_only_reimport",
+        "files": list(files),
+        "input": input_payload,
+        "result": result,
+    }
+    (backup_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _capture_csv_reimport_backup(
+    tools: "ParseChatTools",
+    speaker: str,
+    backup_dir: Path,
+    input_payload: Dict[str, Any],
+) -> List[str]:
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    captured: List[str] = []
+    for filename, source_path in _csv_reimport_backup_entries(tools, speaker):
+        if not source_path.exists():
+            print("[csv-reimport] backup skipped missing file: {0}".format(source_path), file=sys.stderr, flush=True)
+            continue
+        shutil.copy2(source_path, backup_dir / filename)
+        captured.append(filename)
+    _write_csv_reimport_manifest(
+        backup_dir,
+        created_at=_utc_now_iso(),
+        speaker=speaker,
+        files=captured,
+        input_payload=input_payload,
+        result=None,
+    )
+    return captured
+
+
+def _ensure_project_local_csv_for_worker(tools: "ParseChatTools", path: Path, speaker: str, timestamp: str) -> Path:
+    try:
+        path.resolve().relative_to(tools.project_root)
+        return path
+    except ValueError:
+        stage_dir = tools.project_root / "imports" / "csv-reimport" / speaker / timestamp
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        staged = stage_dir / path.name
+        shutil.copy2(path, staged)
+        return staged
+
+
+def _run_csv_reimport_worker(
+    project_root: Path,
+    speaker: str,
+    wav_dest: Path,
+    csv_dest: Path,
+    comments_csv_dest: Optional[Path],
+) -> Dict[str, Any]:
+    import server  # Local import keeps normal tool listing lightweight.
+
+    old_cwd = Path.cwd()
+    os.chdir(project_root)
+    try:
+        server._install_route_bindings()
+        job_id = server._create_job("onboard:speaker", {"speaker": speaker})
+        server._run_onboard_speaker_job(job_id, speaker, wav_dest, csv_dest, comments_csv_dest)
+        snapshot = server._get_job_snapshot(job_id)
+    finally:
+        os.chdir(old_cwd)
+    if not isinstance(snapshot, dict):
+        raise ChatToolExecutionError("CSV reimport worker did not return a job snapshot")
+    if snapshot.get("status") == "error":
+        raise ChatToolExecutionError("CSV reimport worker failed: {0}".format(snapshot.get("error") or "unknown error"))
+    result = snapshot.get("result")
+    if not isinstance(result, dict):
+        raise ChatToolExecutionError("CSV reimport worker completed without a result payload")
+    return result
+
+
+def _csv_reimport_backup_dir(tools: "ParseChatTools", speaker: str, timestamp: str) -> Path:
+    return tools.annotations_dir / "backups" / "{0}-{1}-csv-reimport".format(timestamp, speaker)
+
+
+def tool_csv_only_reimport(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    speaker = tools._normalize_speaker(args.get("speaker"))
+    source_csv_raw = str(args.get("sourceCsv") or "").strip()
+    if not source_csv_raw:
+        raise ChatToolValidationError("sourceCsv is required")
+    source_csv = _resolve_onboard_source(tools, source_csv_raw, must_be_audio=False)
+    comments_csv: Optional[Path] = None
+    comments_csv_raw = str(args.get("commentsCsv") or "").strip()
+    if comments_csv_raw:
+        comments_csv = _resolve_onboard_source(tools, comments_csv_raw, must_be_audio=False)
+    wav_path, wav_rel = _resolve_registered_primary_wav(tools, speaker)
+    if not _csv_reimport_annotation_exists(tools, speaker):
+        raise ChatToolValidationError(
+            "Speaker {0!r} has no annotation record; use onboard_speaker_import for first-time imports.".format(speaker)
+        )
+    dry_run = bool(args.get("dryRun"))
+    timestamp = _csv_reimport_timestamp()
+    backup_dir = _csv_reimport_backup_dir(tools, speaker, timestamp)
+    backup_rel = backup_dir.relative_to(tools.project_root).as_posix()
+    input_payload = {
+        "sourceCsv": _project_relative_or_display(tools, source_csv),
+        "commentsCsv": _project_relative_or_display(tools, comments_csv),
+        "wavPath": wav_rel,
+    }
+    empty_result = {
+        "lexemesImported": None,
+        "commentsImported": None,
+        "conceptsAdded": None,
+        "conceptTotal": None,
+        "annotationPath": None,
+        "wavPath": wav_rel,
+        "csvPath": _project_relative_or_display(tools, source_csv),
+        "commentsCsvPath": _project_relative_or_display(tools, comments_csv),
+    }
+    if dry_run:
+        return {
+            "ok": True,
+            "dryRun": True,
+            "speaker": speaker,
+            "backupDir": backup_rel,
+            **empty_result,
+            "message": "Preview only. Run again with dryRun=false to take the backup and re-import.",
+        }
+
+    captured = _capture_csv_reimport_backup(tools, speaker, backup_dir, input_payload)
+    worker_source_csv = _ensure_project_local_csv_for_worker(tools, source_csv, speaker, timestamp)
+    worker_comments_csv = (
+        _ensure_project_local_csv_for_worker(tools, comments_csv, speaker, timestamp)
+        if comments_csv is not None
+        else None
+    )
+    try:
+        result = _run_csv_reimport_worker(tools.project_root, speaker, wav_path, worker_source_csv, worker_comments_csv)
+    except Exception as exc:
+        _write_csv_reimport_manifest(
+            backup_dir,
+            created_at=_utc_now_iso(),
+            speaker=speaker,
+            files=captured,
+            input_payload=input_payload,
+            result={"error": str(exc)},
+        )
+        raise
+    _write_csv_reimport_manifest(
+        backup_dir,
+        created_at=_utc_now_iso(),
+        speaker=speaker,
+        files=captured,
+        input_payload=input_payload,
+        result=result,
+    )
+    lexemes = result.get("lexemesImported")
+    notes = result.get("commentsImported")
+    return {
+        "ok": True,
+        "dryRun": False,
+        "speaker": speaker,
+        "backupDir": backup_rel,
+        "lexemesImported": result.get("lexemesImported"),
+        "commentsImported": result.get("commentsImported"),
+        "conceptsAdded": result.get("conceptsAdded"),
+        "conceptTotal": result.get("conceptTotal"),
+        "annotationPath": result.get("annotationPath"),
+        "wavPath": result.get("wavPath"),
+        "csvPath": result.get("csvPath"),
+        "commentsCsvPath": result.get("commentsCsvPath"),
+        "message": "Re-imported {0!r}: {1} lexemes, {2} notes. Backup at {3}.".format(speaker, lexemes or 0, notes or 0, backup_rel),
+    }
+
+
+def _read_csv_reimport_manifest(backup_dir: Path, speaker: str) -> Dict[str, Any]:
+    manifest_path = backup_dir / "manifest.json"
+    manifest = _read_json_file(manifest_path, None)
+    if not isinstance(manifest, dict):
+        raise ChatToolValidationError("Backup manifest not found or invalid: {0}".format(manifest_path))
+    manifest_speaker = _normalize_space(manifest.get("speaker"))
+    if manifest_speaker != speaker:
+        raise ChatToolValidationError(
+            "Backup manifest speaker {0!r} does not match requested speaker {1!r}".format(manifest_speaker, speaker)
+        )
+    return manifest
+
+
+def _resolve_csv_reimport_backup_dir(tools: "ParseChatTools", speaker: str, raw_backup_dir: str) -> Path:
+    backups_root = (tools.annotations_dir / "backups").resolve()
+    if raw_backup_dir.strip():
+        raw_path = Path(raw_backup_dir.strip())
+        if raw_path.is_absolute():
+            raise ChatToolValidationError("backupDir must be relative under annotations/backups")
+        if len(raw_path.parts) >= 2 and raw_path.parts[0] == "annotations" and raw_path.parts[1] == "backups":
+            candidate = (tools.project_root / raw_path).resolve()
+        else:
+            candidate = (backups_root / raw_path).resolve()
+        try:
+            candidate.relative_to(backups_root)
+        except ValueError as exc:
+            raise ChatToolValidationError("backupDir must stay under annotations/backups") from exc
+        if not candidate.is_dir():
+            raise ChatToolValidationError("Backup directory not found: {0}".format(candidate))
+        _read_csv_reimport_manifest(candidate, speaker)
+        return candidate
+
+    if not backups_root.exists():
+        raise ChatToolValidationError("No csv-reimport backups found for {0!r}.".format(speaker))
+    matches = sorted(
+        (path for path in backups_root.glob("*-{0}-csv-reimport".format(speaker)) if path.is_dir()),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for candidate in matches:
+        try:
+            _read_csv_reimport_manifest(candidate, speaker)
+        except ChatToolValidationError:
+            continue
+        return candidate
+    raise ChatToolValidationError("No csv-reimport backups found for {0!r}.".format(speaker))
+
+
+def _restore_target_for_manifest_file(tools: "ParseChatTools", speaker: str, filename: str) -> Path:
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise ChatToolValidationError("Backup manifest file entries must be plain filenames: {0}".format(filename))
+    if safe_name in {speaker + ".json", speaker + ".parse.json"}:
+        return tools.annotations_dir / safe_name
+    if safe_name in {"parse-enrichments.json", "concepts.csv"}:
+        return tools.project_root / safe_name
+    raise ChatToolValidationError("Unsupported csv-reimport backup file: {0}".format(filename))
+
+
+def tool_revert_csv_reimport(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    speaker = tools._normalize_speaker(args.get("speaker"))
+    dry_run = bool(args.get("dryRun"))
+    backup_dir = _resolve_csv_reimport_backup_dir(tools, speaker, str(args.get("backupDir") or ""))
+    manifest = _read_csv_reimport_manifest(backup_dir, speaker)
+    files_raw = manifest.get("files")
+    if not isinstance(files_raw, list):
+        raise ChatToolValidationError("Backup manifest files must be a list")
+    restored: List[str] = []
+    skipped: List[str] = []
+    for raw_filename in files_raw:
+        filename = str(raw_filename or "").strip()
+        if not filename:
+            continue
+        source_path = backup_dir / filename
+        target_path = _restore_target_for_manifest_file(tools, speaker, filename)
+        if not source_path.exists() or not source_path.is_file():
+            print("[csv-reimport] revert skipped missing backup file: {0}".format(source_path), file=sys.stderr, flush=True)
+            skipped.append(filename)
+            continue
+        restored.append(filename)
+        if not dry_run:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target_path)
+    backup_rel = backup_dir.relative_to(tools.project_root).as_posix()
+    action = "Would restore" if dry_run else "Restored"
+    return {
+        "ok": True,
+        "dryRun": dry_run,
+        "speaker": speaker,
+        "backupDir": backup_rel,
+        "restoredFiles": restored,
+        "skippedFiles": skipped,
+        "message": "{0} {1} file(s) for {2!r} from {3}.".format(action, len(restored), speaker, backup_rel),
+    }
+
+
 def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
     import shutil
 
@@ -674,4 +1068,6 @@ def tool_onboard_speaker_import(tools: "ParseChatTools", args: Dict[str, Any]) -
 SPEAKER_IMPORT_TOOL_HANDLERS = {
     "onboard_speaker_import": tool_onboard_speaker_import,
     "import_processed_speaker": tool_import_processed_speaker,
+    "csv_only_reimport": tool_csv_only_reimport,
+    "revert_csv_reimport": tool_revert_csv_reimport,
 }
