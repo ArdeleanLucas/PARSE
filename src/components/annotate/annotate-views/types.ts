@@ -31,6 +31,7 @@ export interface AnnotationLookup {
   conceptInterval: AnnotationInterval | null;
   ipaInterval: AnnotationInterval | null;
   orthoInterval: AnnotationInterval | null;
+  directOrthoInterval: AnnotationInterval | null;
 }
 
 export interface SegmentSelection {

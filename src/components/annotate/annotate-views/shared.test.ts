@@ -37,6 +37,22 @@ describe("annotation concept lookup", () => {
 
     expect(lookup.conceptInterval?.start).toBe(200);
   });
+
+  it("keeps display ortho_words separate from strict ortho-tier annotation status", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 100, end: 110, text: "one", concept_id: "217" },
+    ]);
+    record.tiers.ortho_words = {
+      name: "ortho_words",
+      display_order: 4,
+      intervals: [{ start: 100, end: 110, text: "one", concept_id: "217" }],
+    };
+
+    const lookup = findAnnotationForConcept(record, { id: 217, key: "one", name: "one" });
+
+    expect(lookup.orthoInterval?.text).toBe("one");
+    expect(lookup.directOrthoInterval).toBeNull();
+  });
 });
 
 describe("annotate view time formatting", () => {

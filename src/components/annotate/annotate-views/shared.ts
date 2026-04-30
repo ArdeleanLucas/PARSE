@@ -22,20 +22,21 @@ export function findAnnotationForConcept(
   concept: Concept,
 ): AnnotationLookup {
   if (!record) {
-    return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
+    return { conceptInterval: null, ipaInterval: null, orthoInterval: null, directOrthoInterval: null };
   }
 
   const conceptIntervals = record.tiers.concept?.intervals ?? [];
   const conceptInterval = conceptIntervals.find((interval) => conceptMatchesIntervalText(concept, interval.concept_id ?? null)) ?? null;
 
   if (!conceptInterval) {
-    return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
+    return { conceptInterval: null, ipaInterval: null, orthoInterval: null, directOrthoInterval: null };
   }
 
   const ipaInterval = (record.tiers.ipa?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
   const orthoInterval = pickOrthoIntervalForConcept(record, conceptInterval);
+  const directOrthoInterval = (record.tiers.ortho?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
 
-  return { conceptInterval, ipaInterval, orthoInterval };
+  return { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval };
 }
 
 export function formatPlayhead(sec: number): string {

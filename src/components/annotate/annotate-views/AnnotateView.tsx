@@ -95,7 +95,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   const tagConcept = useTagStore((s) => s.tagConcept);
 
-  const { conceptInterval, ipaInterval, orthoInterval } = useMemo(
+  const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
     () => findAnnotationForConcept(record, concept),
     [record, concept],
   );
@@ -137,8 +137,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const pendingSeek = usePlaybackStore((s) => s.pendingSeek);
   const volume = usePlaybackStore((s) => s.volume);
   const setStoreVolume = usePlaybackStore((s) => s.setVolume);
-  const annotated = Boolean(conceptInterval && (ipaInterval || orthoInterval));
-  const complete = Boolean(conceptInterval && ipaInterval && orthoInterval);
+  const annotated = Boolean(conceptInterval && (ipaInterval || directOrthoInterval));
+  const complete = Boolean(conceptInterval && ipaInterval && directOrthoInterval);
 
   const storedIntervalRef = useRef<{ start: number; end: number } | null>(null);
   useEffect(() => {

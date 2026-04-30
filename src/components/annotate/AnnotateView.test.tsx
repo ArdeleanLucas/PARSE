@@ -124,7 +124,7 @@ vi.mock('./TranscriptionLanes', () => ({
 
 import { AnnotateView } from './AnnotateView';
 
-function makeRecord(concepts: Array<{ conceptText: string; ipa?: string; ortho?: string; start: number; end: number }>): AnnotationRecord {
+function makeRecord(concepts: Array<{ conceptText: string; ipa?: string; ortho?: string; orthoWords?: string; start: number; end: number }>): AnnotationRecord {
   const tier = (intervals: AnnotationInterval[]) => ({
     name: 'tier',
     display_order: 1,
@@ -138,7 +138,7 @@ function makeRecord(concepts: Array<{ conceptText: string; ipa?: string; ortho?:
       concept: tier(concepts.map((item) => ({ start: item.start, end: item.end, text: item.conceptText, concept_id: '1' }))),
       ipa: tier(concepts.filter((item) => item.ipa).map((item) => ({ start: item.start, end: item.end, text: item.ipa ?? '' }))),
       ortho: tier(concepts.filter((item) => item.ortho).map((item) => ({ start: item.start, end: item.end, text: item.ortho ?? '' }))),
-      ortho_words: tier([]),
+      ortho_words: tier(concepts.filter((item) => item.orthoWords).map((item) => ({ start: item.start, end: item.end, text: item.orthoWords ?? '', concept_id: '1' }))),
     },
   } as AnnotationRecord;
 }
@@ -211,6 +211,17 @@ describe('AnnotateView', () => {
 
     renderWaterAnnotateView();
 
+    expect(screen.queryByText('Annotated')).toBeNull();
+    expect(screen.queryByText('Complete')).toBeNull();
+    expect(screen.queryByText('Missing')).toBeNull();
+  });
+
+  it('renders no badge when only auto-imported ortho_words exists for the concept', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByDisplayValue('water')).toBeTruthy();
     expect(screen.queryByText('Annotated')).toBeNull();
     expect(screen.queryByText('Complete')).toBeNull();
     expect(screen.queryByText('Missing')).toBeNull();
