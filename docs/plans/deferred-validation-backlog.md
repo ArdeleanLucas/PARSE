@@ -11,14 +11,14 @@
 
 ---
 
-## Current automated baseline (refreshed 2026-04-29)
+## Current automated baseline (refreshed 2026-04-30)
 
 | Gate | Command | Result |
 |---|---|---|
-| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #197: 82 files, 485 tests passed |
-| TypeScript | `./node_modules/.bin/tsc --noEmit` or `npm run typecheck` | ✅ clean in PR #197 validation |
-| Build | `npm run build` | ✅ clean in PR #197 validation |
-| API regression / backend gates | CI lightweight backend + parity harness; targeted/full `PYTHONPATH=python:python/packages/parse_mcp/src python -m pytest -q` for backend work | ✅ PR #196 full Python suite: 875 passed, 1 warning; PR #198 onboarding/Audition CSV full suite: 878 passed, 1 warning; PR #200 revalidated Audition onboarding targets, `python/test_lexeme_notes.py`, full `python3 -m pytest -q`, `npm run check`, `npm run build`, and `git diff --check` |
+| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #217: 83 files, 503 tests passed; PR #215 scoped refresh regression proves `reloadSpeakerAnnotation` still fires after concept-row refresh; PR #217 focused run-modal coverage passes 2 files / 7 tests for IPA concept-window preview gating |
+| TypeScript | `./node_modules/.bin/tsc --noEmit` or `npm run typecheck` | ✅ clean in PR #217 validation |
+| Build | `npm run build` | ✅ clean in PR #217 validation; existing Vite chunk/dynamic-import warnings only |
+| API regression / backend gates | CI lightweight backend + parity harness; targeted/full `PYTHONPATH=python:python/packages/parse_mcp/src python -m pytest -q` for backend work | ✅ PR #203 Audition no-row-left-behind full suite: 891 passed, 1 warning; PR #206 MCP csv-only reimport/revert full suite: 903 passed, 1 warning; PR #207 save-time concept-id gate full suite: 911 passed, 1 warning; PR #216 ORTH/faster-whisper config targeted tests: 28 passed, broad backend selection: 924 passed, 2 deselected, 1 warning, plus `uvx ruff check python/ --select E9,F63,F7,F82` |
 
 ### Non-blocking warnings observed during automated checks
 

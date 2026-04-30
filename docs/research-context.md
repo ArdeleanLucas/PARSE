@@ -98,7 +98,7 @@ PARSE sits in an ecosystem of existing libraries, models, and downstream tools.
 
 The current README explicitly calls out these as major external components materially shaping PARSE's runtime behavior or outputs:
 
-- `razhan/whisper-base-sdh`
+- `razhan/whisper-base-sdh` (cite with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296))
 - `facebook/wav2vec2-xlsr-53-espeak-cv-ft`
 - Silero VAD
 - faster-whisper

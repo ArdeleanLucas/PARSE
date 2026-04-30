@@ -56,13 +56,18 @@ That last dependency is the most fragile one in the file.
 ## Tool exposure layers
 
 ### Verified counts
-Runtime verification on this audit branch produced:
-- total PARSE chat tools: **50**
-- curated default parse MCP subset: **32**
+
+> Historical note: the original 2026-04-26 audit measured 50 chat tools, a 32-tool curated default subset, and 54 tools when `expose_all_tools=true`. Those figures are superseded by the current 2026-04-30 MCP surface after PR #206.
+
+Current code-truth count after PR #206:
+- total PARSE chat tools: **57**
+- default parse MCP subset: **57**
+- legacy curated opt-out parse MCP subset: **38**
 - workflow tools: **3**
 - adapter-only introspection tool: **1** (`mcp_get_exposure_mode`)
-- default MCP total: **36** (`32 + 3 + 1`)
-- `expose_all_tools=true` total: **54** (`50 + 3 + 1`)
+- default MCP total: **61** (`57 + 3 + 1`)
+- `expose_all_tools=true` total: **61** (`57 + 3 + 1`)
+- `expose_all_tools=false` legacy total: **42** (`38 + 3 + 1`)
 
 ### Where each layer is built
 1. **50 total PARSE chat tools**

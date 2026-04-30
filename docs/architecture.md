@@ -289,7 +289,7 @@ The annotation compute layer now supports three run modes across HTTP, frontend 
 - `concept-windows` — process concept-tier windows, optionally narrowed by `concept_ids`.
 - `edited-only` — process only concept-tier rows marked `manuallyAdjusted`, optionally narrowed by `concept_ids`.
 
-Non-full backend results include `affected_concepts` so the React workstation can refresh only the rows touched by a scoped rerun. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect.
+Non-full backend results include `affected_concepts` so the React workstation can refresh rows touched by a scoped rerun without repainting unrelated concept rows. This scoped refresh is advisory: after IPA, ORTH, STT, or BND compute completion, the workstation still reloads the completed speaker annotation from disk so persisted tier writes are canonical. The frontend run preview also carries `runMode` into its cell computation: concept-window and edited-only IPA cells may be runnable despite stale full-mode `ipa.can_run=false` when ORTH/concept-tier presence is observable, while full mode and pure-empty concept-window speakers stay blocked. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect.
 
 ## Chat tool architecture
 

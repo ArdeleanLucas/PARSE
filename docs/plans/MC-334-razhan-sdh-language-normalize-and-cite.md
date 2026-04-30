@@ -7,6 +7,7 @@ Fix ORTH/faster-whisper failures for Southern Kurdish annotation metadata (`sdh`
 - Add a test-first `_normalize_whisper_language()` helper in `python/ai/providers/local_whisper.py`.
 - Wire `transcribe`, `transcribe_window`, and `transcribe_clip` through the helper.
 - Change the example ORTH default from `sd` to `fa` and cite Razhan/DOLMA sources.
+- Cite Razhan model usage together with Hameed, Ahmadi, Hadi, and Sennrich (2025), *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*, Interspeech 2025, doi:10.21437/Interspeech.2025-2296, PDF: https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf.
 - Add README and CLI help citations/rationale.
 
 ## Out of scope
@@ -21,3 +22,7 @@ Fix ORTH/faster-whisper failures for Southern Kurdish annotation metadata (`sdh`
 - Ruff: `uvx ruff check python/ --select E9,F63,F7,F82`
 - Boot smoke: start `python python/server.py`, wait for listening line, send SIGTERM, confirm clean exit.
 - Sanity greps from handoff.
+
+## Follow-up: PR #216 ORTH decoder prime
+
+PR #216 keeps the PR #213 `sd`/`sdh` → `fa` provider-side language mapping and adds a built-in Southern Kurdish Arabic-script `ortho.initial_prompt` default for configs that omit the key. Explicit `"initial_prompt": ""` remains the opt-out, and faster-whisper model initialization now logs section/model/device/compute/language/prompt after load for runtime diagnosis.

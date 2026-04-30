@@ -176,7 +176,7 @@ This configures the orthographic transcription path. The tracked example keeps *
 "ortho": {
   "provider": "faster-whisper",
   "model_path": "/path/to/razhan-whisper-base-sdh-ct2",
-  "language": "sd",
+  "language": "fa",
   "device": "cuda",
   "compute_type": "float16",
   "beam_size": 5,
@@ -187,7 +187,7 @@ This configures the orthographic transcription path. The tracked example keeps *
   },
   "condition_on_previous_text": false,
   "compression_ratio_threshold": 1.8,
-  "initial_prompt": "",
+  "initial_prompt": "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە.",
   "refine_lexemes": false
 }
 ```
@@ -195,10 +195,13 @@ This configures the orthographic transcription path. The tracked example keeps *
 The template also explains the current ORTH runtime contract:
 
 - `ortho.model_path` must point at a **local CT2 conversion directory**. PARSE will not accept a HuggingFace repo id here.
-- To keep using Razhan, convert `razhan/whisper-base-sdh` first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`.
+- To keep using Razhan, convert `razhan/whisper-base-sdh` first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-whisper-base-sdh-ct2`. Cite Razhan/DOLMA model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
+- `ortho.language` should be `fa` for provider-side Whisper decoding because DOLMA/Razhan fine-tuning used `--language="persian"`; PARSE project and annotation metadata should still keep Southern Kurdish as `sdh`.
 - ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=true`, `condition_on_previous_text=false`, and `compression_ratio_threshold=1.8`.
-- Full-speaker ORTH can still use an explicit configured `initial_prompt`, but concept-window short clips do not seed Whisper with English PARSE concept IDs or glosses.
+- If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; set `"initial_prompt": ""` explicitly to opt out.
+- Concept-window short clips do not seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out.
 - STT/ORTH language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing Whisper auto-detect.
+- Successful faster-whisper model loads emit one `[STT]`/`[ORTH] loaded model: ... language=... initial_prompt=...` stderr line so runtime logs expose the effective model, device, compute type, language token, and prompt.
 - `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime and using the same language-resolution guard.
 
 #### `ipa` and `wav2vec2`
@@ -350,7 +353,7 @@ The current PARSE model stack documented in the repo centers on these components
 
 - **faster-whisper** — local STT / ORTH inference backend
 - **CTranslate2** — optimized runtime for Whisper-family models
-- **Razhan** (`razhan/whisper-base-sdh`) — Southern Kurdish orthographic transcription
+- **Razhan** (`razhan/whisper-base-sdh`) — Southern Kurdish orthographic transcription; cite with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296)
 - **Silero VAD** — segmentation for long recordings in Whisper-style decoding
 - **wav2vec2** (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`) — Tier 2 forced alignment and Tier 3 acoustic IPA
 
