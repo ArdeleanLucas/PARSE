@@ -16,15 +16,26 @@ function makeRecordWithConceptIntervals(intervals: AnnotationRecord["tiers"][str
 }
 
 describe("annotation concept lookup", () => {
-  it("prefers the later explicit concept-id interval over an earlier short-name substring collision", () => {
+  it("returns no concept interval when matching concept lacks concept_id on every candidate row", () => {
     const record = makeRecordWithConceptIntervals([
-      { start: 10091.681, end: 10092.674, text: "to listen to" },
-      { start: 1219.304, end: 1219.835, text: "ten", concept_id: "226", import_index: 144 } as AnnotationRecord["tiers"][string]["intervals"][number],
+      { start: 100, end: 110, text: "ten" },
+      { start: 200, end: 210, text: "to listen to" },
     ]);
 
     const lookup = findAnnotationForConcept(record, { id: 226, key: "JBIL_10.A", name: "ten" });
 
-    expect(lookup.conceptInterval?.start).toBe(1219.304);
+    expect(lookup.conceptInterval).toBeNull();
+  });
+
+  it("matches the cid-bearing row even when an earlier text-substring would have matched under the old regex path", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 100, end: 110, text: "to listen to" },
+      { start: 200, end: 210, text: "ten", concept_id: "226", import_index: 144 } as AnnotationRecord["tiers"][string]["intervals"][number],
+    ]);
+
+    const lookup = findAnnotationForConcept(record, { id: 226, key: "JBIL_10.A", name: "ten" });
+
+    expect(lookup.conceptInterval?.start).toBe(200);
   });
 });
 
