@@ -571,7 +571,7 @@ describe("ParseUI", () => {
     expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
   });
 
-  it("pre-populates annotate fields from stored intervals and shows Annotated badge", async () => {
+  it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
     mockRecords = {
       Fail01: makeRecord("Fail01", [
         { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
@@ -587,7 +587,9 @@ describe("ParseUI", () => {
 
     expect(await screen.findByDisplayValue("aw")).toBeTruthy();
     expect(screen.getByDisplayValue("ئاو")).toBeTruthy();
-    expect(screen.getByText("Annotated")).toBeTruthy();
+    expect(screen.getByText("Complete")).toBeTruthy();
+    expect(screen.queryByText("Annotated")).toBeNull();
+    expect(screen.queryByText("Missing")).toBeNull();
   });
 
   it("switches Compare → Annotate without crashing when TranscriptionLanes initializes waveform metrics", async () => {

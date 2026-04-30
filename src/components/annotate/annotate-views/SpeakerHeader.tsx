@@ -2,6 +2,7 @@ import type { Concept } from "./types";
 
 interface SpeakerHeaderProps {
   annotated: boolean;
+  complete: boolean;
   concept: Concept;
   speaker: string;
   totalConcepts: number;
@@ -9,7 +10,7 @@ interface SpeakerHeaderProps {
   onNext: () => void;
 }
 
-export function SpeakerHeader({ annotated, concept, speaker, totalConcepts, onPrev, onNext }: SpeakerHeaderProps) {
+export function SpeakerHeader({ annotated, complete, concept, speaker, totalConcepts, onPrev, onNext }: SpeakerHeaderProps) {
   return (
     <section className="px-8 pt-6">
       <div className="mx-auto max-w-4xl">
@@ -30,15 +31,15 @@ export function SpeakerHeader({ annotated, concept, speaker, totalConcepts, onPr
               <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
                 {speaker}
               </span>
-              {annotated ? (
+              {complete ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-200">
+                  Complete
+                </span>
+              ) : annotated ? (
                 <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
                   Annotated
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600 ring-1 ring-rose-200">
-                  Missing
-                </span>
-              )}
+              ) : null}
             </div>
             <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
               <span className="text-[9px] uppercase tracking-wider text-slate-400">Source</span>
