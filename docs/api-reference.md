@@ -443,8 +443,8 @@ Task 5 adds a discovery/execution bridge so external Python tooling can use the 
 
 `mode` query parameter accepts:
 - `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
-- `default` — force the shipped default 59-tool surface
-- `all` — force the full tool surface (currently also 59 tools unless a future explicit all-only surface diverges)
+- `default` — force the shipped default 61-tool surface
+- `all` — force the full tool surface (currently also 61 tools unless a future explicit all-only surface diverges)
 
 ### Tool schema payload
 
@@ -468,7 +468,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing the shipped **55-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **59 tools** total and the `expose_all_tools=true` surface is also **59**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 36-tool subset, which still becomes **40** adapter tools once the 3 workflow macros and adapter helper are included.
+PARSE can also run as a stdio MCP server by exposing the shipped **57-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **61 tools** total and the `expose_all_tools=true` surface is also **61**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 36-tool subset, which still becomes **40** adapter tools once the 3 workflow macros and adapter helper are included.
 
 ### Start the adapter
 
@@ -504,7 +504,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Legacy curated MCP task surface (36 `ParseChatTools` + 3 workflow macros; 40 adapter tools including `mcp_get_exposure_mode`)
+## Legacy curated MCP task surface (38 `ParseChatTools` + 3 workflow macros; 42 adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -618,7 +618,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 
 ## MCP usage notes
 
-The shipped MCP default exposes the full safe 55-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
+The shipped MCP default exposes the full safe 57-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
 
 Operational rules that remain important:
 - use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, and timestamp/application workflows

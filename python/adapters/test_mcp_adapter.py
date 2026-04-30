@@ -238,7 +238,7 @@ def test_job_observability_tools_are_allowlisted(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_55_parse_tools_by_default_without_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_57_parse_tools_by_default_without_config(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -249,7 +249,7 @@ def test_create_mcp_server_exposes_55_parse_tools_by_default_without_config(tmp_
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 59
+    assert len(mcp_tools) == 61
     assert "mcp_get_exposure_mode" in tool_names
     assert "run_full_annotation_pipeline" in tool_names
     assert "prepare_compare_mode" in tool_names
@@ -262,6 +262,8 @@ def test_create_mcp_server_exposes_55_parse_tools_by_default_without_config(tmp_
     assert "audio_normalize_status" in tool_names
     assert "clef_clear_data" in tool_names
     assert "export_annotations_csv" in tool_names
+    assert "csv_only_reimport" in tool_names
+    assert "revert_csv_reimport" in tool_names
     assert "transcript_reformat" in tool_names
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
@@ -269,8 +271,8 @@ def test_create_mcp_server_exposes_55_parse_tools_by_default_without_config(tmp_
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] is None
-    assert payload["result"]["mcpToolCount"] == 59
-    assert payload["result"]["parseChatToolCount"] == 55
+    assert payload["result"]["mcpToolCount"] == 61
+    assert payload["result"]["parseChatToolCount"] == 57
     assert payload["result"]["workflowToolCount"] == 3
 
 
@@ -290,9 +292,11 @@ def test_create_mcp_server_explicit_false_config_preserves_legacy_curated_surfac
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 40
+    assert len(mcp_tools) == 42
     assert "annotation_read" in tool_names
     assert "jobs_list" in tool_names
+    assert "csv_only_reimport" in tool_names
+    assert "revert_csv_reimport" in tool_names
     assert "audio_normalize_start" not in tool_names
     assert "clef_clear_data" not in tool_names
     assert "export_annotations_csv" not in tool_names
@@ -303,8 +307,8 @@ def test_create_mcp_server_explicit_false_config_preserves_legacy_curated_surfac
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] == str(config_dir / "mcp_config.json")
-    assert payload["result"]["mcpToolCount"] == 40
-    assert payload["result"]["defaultParseMcpToolCount"] == 55
+    assert payload["result"]["mcpToolCount"] == 42
+    assert payload["result"]["defaultParseMcpToolCount"] == 57
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
@@ -324,14 +328,14 @@ def test_create_mcp_server_exposes_all_55_tools_when_enabled_in_config_dir(tmp_p
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 59
+    assert len(mcp_tools) == 61
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is True
-    assert payload["result"]["mcpToolCount"] == 59
-    assert payload["result"]["parseChatToolCount"] == 55
+    assert payload["result"]["mcpToolCount"] == 61
+    assert payload["result"]["parseChatToolCount"] == 57
     assert payload["result"]["workflowToolCount"] == 3
 
 
@@ -350,7 +354,7 @@ def test_create_mcp_server_exposes_all_55_tools_when_enabled_in_root_config(tmp_
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 59
+    assert len(mcp_tools) == 61
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
@@ -553,10 +557,10 @@ def test_no_duplicate_tool_specs_or_handlers() -> None:
     for tool in [
         "annotation_read", "audio_normalize_start", "cognate_compute_preview", "contact_lexeme_lookup",
         "cross_speaker_match_preview", "detect_timestamp_offset", "detect_timestamp_offset_from_pair",
-        "apply_timestamp_offset", "forced_align_start", "import_processed_speaker", "import_tag_csv",
+        "apply_timestamp_offset", "csv_only_reimport", "forced_align_start", "import_processed_speaker", "import_tag_csv",
         "ipa_transcribe_acoustic_start", "onboard_speaker_import", "parse_memory_read",
         "parse_memory_upsert_section", "pipeline_run", "pipeline_state_batch", "pipeline_state_read",
-        "prepare_tag_import", "project_context_read", "read_csv_preview", "spectrogram_preview",
+        "prepare_tag_import", "project_context_read", "read_csv_preview", "revert_csv_reimport", "spectrogram_preview",
         "stt_start", "stt_status", "stt_word_level_start",
     ]:
         spec_count = len(re.findall(r'"{0}":\s*ChatToolSpec'.format(re.escape(tool)), combined_specs_text))
@@ -592,6 +596,14 @@ def test_first_batch_mutators_publish_machine_readable_safety_metadata(tmp_path)
         "import_processed_speaker": {
             "dry_run": True,
             "postcondition": "processed_speaker_imported",
+        },
+        "csv_only_reimport": {
+            "dry_run": True,
+            "postcondition": "csv_reimport_backup_captured",
+        },
+        "revert_csv_reimport": {
+            "dry_run": True,
+            "postcondition": "csv_reimport_backup_restored",
         },
         "export_annotations_csv": {
             "dry_run": True,
