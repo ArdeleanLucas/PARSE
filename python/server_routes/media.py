@@ -246,11 +246,13 @@ def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[
             pass
 
     resolved: _server.List[_server.Dict[str, str]] = []
-    for row in rows:
+    for import_index, row in enumerate(rows):
         label = _audition_row_label(row)
         audition_prefix = _server._normalize_concept_id(getattr(row, 'concept_id', ''))
-        if not label or not audition_prefix:
+        if not label:
             continue
+        if not audition_prefix:
+            audition_prefix = 'row_{0}'.format(import_index)
         label_key = _audition_label_key(label)
         cid = label_to_id.get(label_key)
         if cid is None:
