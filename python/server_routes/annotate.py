@@ -6,7 +6,19 @@ import server as _server
 def _annotation_empty_tier(display_order: int) -> _server.Dict[str, _server.Any]:
     return {'type': 'interval', 'display_order': int(display_order), 'intervals': []}
 
+_OPTIONAL_INTERVAL_PASSTHROUGH_FIELDS = (
+    'concept_id',
+    'import_index',
+    'audition_prefix',
+    'conceptId',
+    'source',
+)
+
+
 def _annotation_sort_intervals(intervals: _server.List[_server.Dict[str, _server.Any]]) -> None:
+    # Sorts by (start, end). CSV row order is preserved separately via the
+    # `import_index` field on each interval (PR #200); clients that need
+    # original CSV order should reconstruct it from import_index, not position.
     intervals.sort(key=lambda interval: (float(interval.get('start', 0.0)), float(interval.get('end', 0.0))))
 
 def _annotation_normalize_interval(raw_interval: _server.Any) -> _server.Optional[_server.Dict[str, _server.Any]]:
@@ -18,7 +30,19 @@ def _annotation_normalize_interval(raw_interval: _server.Any) -> _server.Optiona
         return None
     if end < start:
         return None
-    return {'start': float(start), 'end': float(end), 'text': '' if raw_interval.get('text') is None else str(raw_interval.get('text')), 'manuallyAdjusted': bool(raw_interval.get('manuallyAdjusted'))}
+    normalized = {'start': float(start), 'end': float(end), 'text': '' if raw_interval.get('text') is None else str(raw_interval.get('text')), 'manuallyAdjusted': bool(raw_interval.get('manuallyAdjusted'))}
+    for field in _OPTIONAL_INTERVAL_PASSTHROUGH_FIELDS:
+        value = raw_interval.get(field)
+        if value is None:
+            continue
+        if field == 'import_index':
+            try:
+                normalized[field] = int(value)
+            except (TypeError, ValueError):
+                continue
+        else:
+            normalized[field] = str(value)
+    return normalized
 
 def _annotation_tier_key(raw_name: _server.Any) -> str:
     tier_name = str(raw_name or '').strip()
