@@ -135,7 +135,7 @@ function makeRecord(concepts: Array<{ conceptText: string; ipa?: string; ortho?:
     source_wav: 'Fail01.wav',
     source_audio: 'Fail01.wav',
     tiers: {
-      concept: tier(concepts.map((item) => ({ start: item.start, end: item.end, text: item.conceptText }))),
+      concept: tier(concepts.map((item) => ({ start: item.start, end: item.end, text: item.conceptText, concept_id: '1' }))),
       ipa: tier(concepts.filter((item) => item.ipa).map((item) => ({ start: item.start, end: item.end, text: item.ipa ?? '' }))),
       ortho: tier(concepts.filter((item) => item.ortho).map((item) => ({ start: item.start, end: item.end, text: item.ortho ?? '' }))),
       ortho_words: tier([]),

@@ -331,7 +331,7 @@ function makeRecord(
       concept: {
         name: "concept",
         display_order: 3,
-        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText })),
+        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: '1' })),
       },
       speaker: { name: "speaker", display_order: 4, intervals: [] },
     },

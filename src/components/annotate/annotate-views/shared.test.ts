@@ -27,7 +27,7 @@ describe("annotation concept lookup", () => {
     expect(lookup.conceptInterval).toBeNull();
   });
 
-  it("matches the cid-bearing row even when an earlier text-substring would have matched under the old regex path", () => {
+  it("matches the cid-bearing row even when an earlier text fallback would have matched before", () => {
     const record = makeRecordWithConceptIntervals([
       { start: 100, end: 110, text: "to listen to" },
       { start: 200, end: 210, text: "ten", concept_id: "226", import_index: 144 } as AnnotationRecord["tiers"][string]["intervals"][number],

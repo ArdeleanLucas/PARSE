@@ -26,7 +26,7 @@ export function findAnnotationForConcept(
   }
 
   const conceptIntervals = record.tiers.concept?.intervals ?? [];
-  const conceptInterval = conceptIntervals.find((interval) => conceptMatchesIntervalText(concept, interval.text, interval.concept_id ?? null)) ?? null;
+  const conceptInterval = conceptIntervals.find((interval) => conceptMatchesIntervalText(concept, interval.concept_id ?? null)) ?? null;
 
   if (!conceptInterval) {
     return { conceptInterval: null, ipaInterval: null, orthoInterval: null };
