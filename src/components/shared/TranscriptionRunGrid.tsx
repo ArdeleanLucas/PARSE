@@ -9,6 +9,7 @@ import {
   type PipelineStepId,
   type RunScope,
   type SpeakerLoadEntry,
+  type TranscriptionRunMode,
 } from "./transcriptionRunShared";
 
 export function TranscriptionRunGrid({
@@ -17,6 +18,7 @@ export function TranscriptionRunGrid({
   selectedSpeakers,
   stateBySpeaker,
   scopeByStep,
+  runMode,
   onToggleSpeaker,
   onSetAllSpeakers,
   onSetStepScope,
@@ -26,6 +28,7 @@ export function TranscriptionRunGrid({
   selectedSpeakers: Set<string>;
   stateBySpeaker: Record<string, SpeakerLoadEntry>;
   scopeByStep: Record<PipelineStepId, RunScope>;
+  runMode: TranscriptionRunMode;
   onToggleSpeaker: (speaker: string) => void;
   onSetAllSpeakers: (next: Set<string>) => void;
   onSetStepScope: (step: PipelineStepId, scope: RunScope) => void;
@@ -45,7 +48,10 @@ export function TranscriptionRunGrid({
     for (const speaker of speakers) {
       const entry = stateBySpeaker[speaker];
       if (!entry || entry.status !== "ready" || !entry.state) continue;
-      const anyRunnable = gridStepColumns.some((step) => entry.state![step].can_run);
+      const anyRunnable = gridStepColumns.some((step) => {
+        const info = computeCell(step, entry, true, scopeByStep[step], runMode);
+        return info.kind === "ok" || info.kind === "keep" || info.kind === "overwrite";
+      });
       if (anyRunnable) next.add(speaker);
     }
     onSetAllSpeakers(next);
@@ -210,7 +216,7 @@ export function TranscriptionRunGrid({
                     </label>
                   </td>
                   {gridStepColumns.map((step) => {
-                    const info = computeCell(step, entry, speakerSelected, scopeByStep[step]);
+                    const info = computeCell(step, entry, speakerSelected, scopeByStep[step], runMode);
                     const tooltip = (() => {
                       if (info.kind === "blocked") return info.reason ?? "Blocked by backend";
                       if (info.kind === "skip") {
