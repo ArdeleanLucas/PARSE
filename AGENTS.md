@@ -156,15 +156,33 @@ git checkout -b <branch-name>
 # do the work, commit, push, open PR with --repo ArdeleanLucas/PARSE
 ```
 
+**Hard rule — never branch in the canonical clone:**
+
+The canonical clone at `/home/lucas/gh/tarahassistant/PARSE-rebuild` MUST stay on `main` at all times. It is what `parse-run` boots Vite from on Lucas's PC; if it sits on any other branch, the dev server warns ("canonical clone is on '...', not main. Frontend may be stale.") and may serve stale UI. Therefore:
+
+- DO NOT run `git checkout -b <branch>` inside the canonical clone for any reason. Always `git worktree add` first, then `git checkout -b` inside the worktree.
+- DO NOT amend, rebase, or commit inside the canonical clone. The canonical clone only fast-forwards `origin/main`.
+- Even tiny docs-only PRs go through a worktree. There is no "small enough to skip" escape hatch.
+
 **Recipe — clean up after PR merges:**
 
 ```bash
 cd /home/lucas/gh/tarahassistant/PARSE-rebuild
 git fetch origin --quiet --prune
+# Verify canonical clone is on main; if it drifted, restore it.
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$current_branch" != "main" ]; then
+  git checkout main
+  git pull --ff-only origin main
+  git branch -D "$current_branch" 2>/dev/null || true
+fi
 git worktree remove -f /home/lucas/gh/worktrees/<agent>-<slug>
+git branch -D <branch-name> 2>/dev/null || true
+# Verify clean state:
+git status --short --branch  # should print: ## main...origin/main
 ```
 
-GitHub auto-cleans the remote branch on merge; the local feature branch can be deleted when the worktree is removed.
+GitHub auto-cleans the remote branch on merge; remove both the local worktree and its local feature branch before declaring the handoff complete.
 
 **Constraints:**
 
@@ -538,6 +556,8 @@ The following validation items remain important, but they are **not hard blocker
 ### Active development rule
 - New work branches from `origin/main` in the canonical clone, in a worktree under `/home/lucas/gh/worktrees/<agent>-<slug>/` (full recipe in §Parallel work via worktrees above).
 - Use `parse-worktree-new <slug>` to create worktrees; use `parse-worktree-clean` to remove merged ones.
+- The canonical clone at `/home/lucas/gh/tarahassistant/PARSE-rebuild` MUST stay on `main`. Never `git checkout -b` inside it; always create a worktree first. See §Parallel work via worktrees for the recipe and rationale (`parse-run` reads from this clone).
+- After your PR merges, the post-merge cleanup recipe in §Parallel work via worktrees is mandatory, not optional. If the canonical clone is on any branch other than `main` when you declare done, the handoff is incomplete.
 - Do not branch from pre-cutover archive bundles or stale local refs without an explicit reason; cutover-era history is read-only.
 
 ## Ownership + Coordination
@@ -574,6 +594,17 @@ New queued work for `parse-front-end`, `parse-back-end`, and `parse-coordinator`
 - Lifecycle is file-based: `queued` → `in-progress` → `done` (move completed items into `.hermes/handoffs/<agent>/done/`).
 - Historical queue-prompt PRs remain part of the audit trail, but they are no longer the preferred mechanism for staging the next task.
 - Current open queue PRs that predate this convention can finish their immediate lifecycle, but future queue churn should not go through main-branch docs PRs.
+
+### Closeout precondition
+
+Before any agent (any lane) declares a handoff done, they MUST verify the canonical clone at `/home/lucas/gh/tarahassistant/PARSE-rebuild` is on `main` and synchronized with `origin/main`:
+
+```bash
+cd /home/lucas/gh/tarahassistant/PARSE-rebuild && git status --short --branch
+# Expected output: ## main...origin/main
+```
+
+A non-`main` HEAD means cleanup was skipped. A stale local worktree or feature branch for the just-merged PR means cleanup is incomplete. Finish the cleanup before reporting completion.
 
 ## Safe Work Now (current priority)
 
