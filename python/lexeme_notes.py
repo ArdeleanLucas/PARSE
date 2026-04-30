@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence
 
 
-# Match leading Audition cue ids in either "(1.1)- label" or "9- label" form.
+# Match leading Audition cue ids in "(1.1)- label", "[1.1]- label", or "9- label" form.
 _PAREN_ID_PATTERN = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014:]?\s*(.*)$")
+_BRACKET_ID_PATTERN = re.compile(r"^\s*\[\s*([0-9]+(?:\.[0-9]+)*)\s*\]\s*[-\u2013\u2014:]?\s*(.*)$")
 _PLAIN_ID_PATTERN = re.compile(r"^\s*([0-9]+)\s*[-\u2013\u2014:]\s*(.*)$")
 _TRAILING_VARIANT_PATTERN = re.compile(r"\s+([A-D])\s*$")
 
@@ -83,7 +84,7 @@ def _record_value(record: dict, *names: str) -> str:
 def _parse_name_prefix(name: str) -> Optional[tuple[str, str, str]]:
     """Return (concept_id, label/comment remainder, variant) for Audition Name."""
     text = (name or "").strip()
-    match = _PAREN_ID_PATTERN.match(text) or _PLAIN_ID_PATTERN.match(text)
+    match = _PAREN_ID_PATTERN.match(text) or _BRACKET_ID_PATTERN.match(text) or _PLAIN_ID_PATTERN.match(text)
     if not match:
         return None
     concept_id = match.group(1).strip()
@@ -123,9 +124,9 @@ def parse_audition_csv(text: str) -> List[CommentRow]:
 
         parsed_name = _parse_name_prefix(name)
         if parsed_name is None:
-            continue
-
-        concept_id, remainder, variant = parsed_name
+            concept_id, remainder, variant = "", name, ""
+        else:
+            concept_id, remainder, variant = parsed_name
         start_sec = _parse_time(start_raw) or 0.0
         duration_sec = _parse_time(duration_raw) or 0.0
 

@@ -344,6 +344,53 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
     assert complete_calls[0][1]["lexemesImported"] == 3
 
 
+def test_onboard_audition_csv_imports_bracket_and_bare_rows_without_drops(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    complete_calls = []
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_set_job_complete", lambda job_id, result, **kwargs: complete_calls.append((job_id, result, kwargs)))
+    monkeypatch.setattr(
+        server,
+        "_set_job_error",
+        lambda job_id, message: (_ for _ in ()).throw(AssertionError(message)),
+    )
+
+    wav_dest = _make_wav(tmp_path, "NoDropTest")
+    csv_dest = wav_dest.parent / "cues.csv"
+    cue_rows = [
+        {"Name": "[5.1]- The boy cut the rope with a knife !", "Start": "1", "Duration": "0.5"},
+        {"Name": "He saw me", "Start": "2", "Duration": "0.5"},
+        {"Name": "(2.29- child of one's son)-", "Start": "3", "Duration": "0.5"},
+    ]
+    _write_audition_csv(csv_dest, cue_rows)
+
+    server._run_onboard_speaker_job("job-no-drop", "NoDropTest", wav_dest, csv_dest)
+
+    annotation = json.loads((tmp_path / "annotations" / "NoDropTest.parse.json").read_text(encoding="utf-8"))
+    concept_intervals = annotation["tiers"]["concept"]["intervals"]
+    assert len(concept_intervals) == len(cue_rows)
+    assert [interval["text"] for interval in concept_intervals] == [
+        "The boy cut the rope with a knife !",
+        "He saw me",
+        "(2.29- child of one's son)-",
+    ]
+    assert [interval["concept_id"] for interval in concept_intervals] == ["1", "2", "3"]
+    assert [interval["import_index"] for interval in concept_intervals] == [0, 1, 2]
+    assert [interval["audition_prefix"] for interval in concept_intervals] == ["5.1", "row_1", "row_2"]
+
+    concept_rows = _read_concepts_csv(tmp_path / "concepts.csv")
+    for row in concept_rows:
+        int(row["id"])
+    assert {row["id"]: row["concept_en"] for row in concept_rows} == {
+        "1": "The boy cut the rope with a knife !",
+        "2": "He saw me",
+        "3": "(2.29- child of one's son)-",
+    }
+    assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
+    assert complete_calls[0][1]["lexemesImported"] == 3
+
+
 def test_onboard_audition_comments_csv_writes_import_notes_by_row_index(tmp_path, monkeypatch) -> None:
     server._install_route_bindings()
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
