@@ -509,23 +509,20 @@ export function ParseUI() {
     },
   });
 
-  const activeJobs = [
-    ...(crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : []),
-    ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
-  ];
-
   const boundariesJob = useActionJob({
     start: () => {
-      if (!boundariesSpeaker) {
+      const speaker = boundariesSpeaker ?? selectedSpeakers[0] ?? null;
+      if (!speaker) {
         return Promise.reject(new Error('Pick a speaker before refining boundaries.'));
       }
-      return startCompute('boundaries', { speaker: boundariesSpeaker });
+      return startCompute('boundaries', { speaker });
     },
     poll: (jobId) => pollCompute('boundaries', jobId),
     label: 'Refining word boundaries…',
     onComplete: async () => {
-      if (boundariesSpeaker) {
-        await loadSpeaker(boundariesSpeaker);
+      const speaker = boundariesSpeaker ?? selectedSpeakers[0] ?? null;
+      if (speaker) {
+        await loadSpeaker(speaker);
       }
     },
     autoDismissMs: 4000,
@@ -533,24 +530,33 @@ export function ParseUI() {
 
   const bndSttJob = useActionJob({
     start: () => {
-      if (!bndSttSpeaker) {
+      const speaker = bndSttSpeaker ?? selectedSpeakers[0] ?? null;
+      if (!speaker) {
         return Promise.reject(new Error('Pick a speaker before re-transcribing with boundaries.'));
       }
       return startCompute('retranscribe_with_boundaries', {
-        speaker: bndSttSpeaker,
+        speaker,
         language: sttLanguageRef.current || undefined,
       });
     },
     poll: (jobId) => pollCompute('retranscribe_with_boundaries', jobId),
     label: 'Re-transcribing with BND…',
     onComplete: async () => {
-      if (bndSttSpeaker) {
-        await useTranscriptionLanesStore.getState().reloadStt(bndSttSpeaker);
-        await loadSpeaker(bndSttSpeaker);
+      const speaker = bndSttSpeaker ?? selectedSpeakers[0] ?? null;
+      if (speaker) {
+        await useTranscriptionLanesStore.getState().reloadStt(speaker);
+        await loadSpeaker(speaker);
       }
     },
     autoDismissMs: 4000,
   });
+
+  const activeJobs = [
+    ...(crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : []),
+    ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
+    ...(boundariesJob.state.status !== 'idle' ? [boundariesJob] : []),
+    ...(bndSttJob.state.status !== 'idle' ? [bndSttJob] : []),
+  ];
 
   // Drawer "Run" button. ``contact-lexemes`` (Borrowing detection / CLEF)
   // routes through ``crossSpeakerJob`` so progress / ETA / completion
@@ -666,25 +672,7 @@ export function ParseUI() {
           <span className="flex-1 text-left">
             {boundariesJob.state.status === 'running' ? 'Refining boundaries…' : 'Refine Boundaries (BND)'}
           </span>
-          {boundariesJob.state.status === 'running' ? (
-            <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-amber-700">
-              {Math.round(boundariesJob.state.progress * 100)}%
-            </span>
-          ) : null}
         </button>
-        {boundariesJob.state.status === 'running' && boundariesJob.state.etaMs !== null && boundariesJob.state.etaMs > 0 ? (
-          <div className="mb-1 text-[10px] text-amber-700">~{formatEta(boundariesJob.state.etaMs)} left</div>
-        ) : null}
-        {boundariesJob.state.status === 'complete' ? (
-          <div className="mb-1 text-[10px] text-emerald-700">Boundaries refreshed.</div>
-        ) : null}
-        {boundariesJob.state.status === 'error' ? (
-          <div className="mb-1 text-[10px] text-rose-700">
-            {boundariesJob.state.error?.includes('Run STT first')
-              ? 'Please run STT first before refining boundaries.'
-              : (boundariesJob.state.error ?? 'Boundary refinement failed.')}
-          </div>
-        ) : null}
 
         <button
           data-testid="phonetic-retranscribe-with-boundaries"
@@ -708,25 +696,7 @@ export function ParseUI() {
           <span className="flex-1 text-left">
             {bndSttJob.state.status === 'running' ? 'Re-transcribing with BND…' : 'Re-run STT with Boundaries'}
           </span>
-          {bndSttJob.state.status === 'running' ? (
-            <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-amber-700">
-              {Math.round(bndSttJob.state.progress * 100)}%
-            </span>
-          ) : null}
         </button>
-        {bndSttJob.state.status === 'running' && bndSttJob.state.etaMs !== null && bndSttJob.state.etaMs > 0 ? (
-          <div className="mt-1 text-[10px] text-amber-700">~{formatEta(bndSttJob.state.etaMs)} left</div>
-        ) : null}
-        {bndSttJob.state.status === 'complete' ? (
-          <div className="mt-1 text-[10px] text-emerald-700">STT re-transcribed using BND boundaries.</div>
-        ) : null}
-        {bndSttJob.state.status === 'error' ? (
-          <div className="mt-1 text-[10px] text-rose-700">
-            {bndSttJob.state.error?.includes('No BND intervals')
-              ? 'Refine boundaries (BND) first before re-running STT.'
-              : (bndSttJob.state.error ?? 'BND-constrained STT failed.')}
-          </div>
-        ) : null}
       </div>
 
       <LexemeSearchBlock speaker={selectedSpeakers[0]} conceptId={conceptId} />
