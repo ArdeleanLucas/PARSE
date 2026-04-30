@@ -40,7 +40,7 @@ class _EmptyAligner:
 
 
 class _FakeTensor:
-    """Minimal torch.Tensor stand-in for the slicing path in transcribe_slice."""
+    """Minimal torch.Tensor stand-in for full-speaker and concept-window IPA paths."""
 
     def __init__(self, n: int = 16000 * 60) -> None:
         self._n = n
@@ -48,6 +48,20 @@ class _FakeTensor:
     def __getitem__(self, key: slice) -> "_FakeTensor":
         start, stop, _ = key.indices(self._n)
         return _FakeTensor(max(0, stop - start))
+
+    def squeeze(self) -> "_FakeTensor":
+        return self
+
+    def detach(self) -> "_FakeTensor":
+        return self
+
+    def cpu(self) -> "_FakeTensor":
+        return self
+
+    def numpy(self):
+        import numpy as np
+
+        return np.zeros(self._n, dtype=np.float32)
 
     def numel(self) -> int:
         return self._n
@@ -63,12 +77,13 @@ def _seed_annotation(
     ortho: list,
     ipa: list,
     ortho_words: list | None = None,
+    concept: list | None = None,
 ):
     (tmp_path / "annotations").mkdir(exist_ok=True)
     tiers = {
         "ipa":     {"type": "interval", "display_order": 1, "intervals": ipa},
         "ortho":   {"type": "interval", "display_order": 2, "intervals": ortho},
-        "concept": {"type": "interval", "display_order": 3, "intervals": []},
+        "concept": {"type": "interval", "display_order": 3, "intervals": concept or []},
         "speaker": {"type": "interval", "display_order": 4, "intervals": []},
     }
     if ortho_words is not None:
@@ -103,6 +118,72 @@ def _install_stubs(monkeypatch, tmp_path: pathlib.Path, aligner) -> None:
     monkeypatch.setattr(server, "_get_ipa_aligner", lambda: aligner)
     from ai import forced_align as fa
     monkeypatch.setattr(fa, "_load_audio_mono_16k", lambda path: _FakeTensor())
+
+
+def test_full_mode_auto_routes_to_concept_windows_when_ortho_empty(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+
+    concepts = [
+        {"start": 1.0, "end": 1.5, "text": "head", "concept_id": "101"},
+        {"start": 2.0, "end": 2.5, "text": "arm", "concept_id": "102"},
+    ]
+    _seed_annotation(tmp_path, "Csv01", [], [], ortho_words=[], concept=concepts)
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Csv01", "run_mode": "full"})
+
+    assert result["run_mode"] == "concept-windows"
+    assert result["concept_windows"] == 2
+    assert result["affected_concepts"] == [
+        {"concept_id": "101", "start": 1.0, "end": 1.5},
+        {"concept_id": "102", "start": 2.0, "end": 2.5},
+    ]
+    assert result["ortho_source"] == "concept"
+    assert result["skip_breakdown"] == {"empty_ipa_from_model": 0}
+    assert len(aligner.calls) == 2
+
+    ann = _load_canonical(tmp_path, "Csv01")
+    ipa_by_concept = {
+        interval["conceptId"]: interval["text"]
+        for interval in ann["tiers"]["ipa"]["intervals"]
+    }
+    assert ipa_by_concept == {"101": "IPA_1", "102": "IPA_2"}
+
+
+def test_full_mode_no_ortho_and_no_concepts_preserves_early_return(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+    _seed_annotation(tmp_path, "Empty01", [], [], ortho_words=[], concept=[])
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Empty01", "run_mode": "full"})
+
+    assert result == {
+        "speaker": "Empty01",
+        "filled": 0,
+        "skipped": 0,
+        "total": 0,
+        "message": "No ortho intervals.",
+    }
+    assert aligner.calls == []
+
+
+def test_full_mode_ortho_words_present_does_not_auto_route(tmp_path, monkeypatch):
+    aligner = _StubAligner()
+    _install_stubs(monkeypatch, tmp_path, aligner)
+
+    concepts = [{"start": 1.0, "end": 1.5, "text": "head", "concept_id": "101"}]
+    ortho_words = [{"start": 1.0, "end": 1.4, "text": "one"}]
+    _seed_annotation(tmp_path, "Words01", [], [], ortho_words=ortho_words, concept=concepts)
+
+    result = server._compute_speaker_ipa("j1", {"speaker": "Words01", "run_mode": "full"})
+
+    assert result["ortho_source"] == "ortho_words"
+    assert result["filled"] == 1
+    assert result["skipped"] == 0
+    assert result["total"] == 1
+    assert "concept_windows" not in result
+    assert "affected_concepts" not in result
+    assert len(aligner.calls) == 1
 
 
 def test_fills_empty_ipa_slots_from_audio(tmp_path, monkeypatch):

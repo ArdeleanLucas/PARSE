@@ -1500,6 +1500,11 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     ``overwrite=True`` — so this can be re-run safely without clobbering
     manual edits.
 
+    When ``run_mode='full'`` is requested but ortho/ortho_words is empty AND
+    concept-tier intervals exist, the call is auto-routed to
+    ``_compute_speaker_ipa_concept_windows(run_mode='concept-windows')`` so
+    CSV-imported workflows don't require ORTH first.
+
     Payload: ``{ "speaker": "Fail02", "overwrite": false }``.
     """
     _server._compute_checkpoint('IPA.enter', payload=payload)
@@ -1549,6 +1554,24 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         ortho_intervals = list(ortho_tier.get('intervals') or [])
         ortho_source = 'ortho'
     if not ortho_intervals:
+        concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None
+        if bool(concept_tier and concept_tier.get('intervals')):
+            print(
+                '[IPA] no ortho/ortho_words intervals; auto-routing to concept-windows mode',
+                file=_server.sys.stderr,
+                flush=True,
+            )
+            return _server._compute_speaker_ipa_concept_windows(
+                job_id,
+                speaker=speaker,
+                annotation_path=annotation_path,
+                canonical_path=canonical_path,
+                legacy_path=legacy_path,
+                annotation=annotation,
+                tiers=tiers,
+                run_mode='concept-windows',
+                concept_ids=concept_ids,
+            )
         print('[IPA] no ortho/ortho_words intervals — early return', file=_server.sys.stderr, flush=True)
         return {'speaker': speaker, 'filled': 0, 'skipped': 0, 'total': 0, 'message': 'No ortho intervals.'}
     ipa_tier = tiers.setdefault('ipa', {'type': 'interval', 'display_order': 1, 'intervals': []})
