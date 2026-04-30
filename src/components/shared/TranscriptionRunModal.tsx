@@ -216,7 +216,7 @@ export function TranscriptionRunModal({
     for (const speaker of selectedSpeakers) {
       const entry = stateBySpeaker[speaker];
       for (const step of stepsToRender) {
-        const info = computeCell(step, entry, true, scopeByStep[step]);
+        const info = computeCell(step, entry, true, scopeByStep[step], runMode);
         if (info.kind === "ok") ok++;
         else if (info.kind === "keep") keep++;
         else if (info.kind === "overwrite") overwrite++;
@@ -224,7 +224,7 @@ export function TranscriptionRunModal({
       }
     }
     return { ok, keep, overwrite, blocked };
-  }, [selectedSpeakers, stepsToRender, stateBySpeaker, scopeByStep]);
+  }, [selectedSpeakers, stepsToRender, stateBySpeaker, scopeByStep, runMode]);
 
   const hasAnySpeaker = selectedSpeakers.size > 0;
   const hasAnyStep = stepsToRender.length > 0;
@@ -381,6 +381,7 @@ export function TranscriptionRunModal({
           selectedSpeakers={selectedSpeakers}
           stateBySpeaker={stateBySpeaker}
           scopeByStep={scopeByStep}
+          runMode={runMode}
           onToggleSpeaker={(speaker) => {
             setSelectedSpeakers((prev) => {
               const next = new Set(prev);

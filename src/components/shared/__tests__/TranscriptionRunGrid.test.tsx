@@ -62,12 +62,14 @@ function GridHarness({
   stateBySpeaker,
   initialSelectedSpeakers,
   initialScopeByStep,
+  runMode = "full",
 }: {
   speakers: string[];
   gridStepColumns: PipelineStepId[];
   stateBySpeaker: Record<string, SpeakerLoadEntry>;
   initialSelectedSpeakers: string[];
   initialScopeByStep?: Partial<Record<PipelineStepId, RunScope>>;
+  runMode?: "full" | "concept-windows" | "edited-only";
 }) {
   const [selectedSpeakers, setSelectedSpeakers] = useState<Set<string>>(
     () => new Set(initialSelectedSpeakers),
@@ -86,6 +88,7 @@ function GridHarness({
       selectedSpeakers={selectedSpeakers}
       stateBySpeaker={stateBySpeaker}
       scopeByStep={scopeByStep}
+      runMode={runMode}
       onToggleSpeaker={(speaker) => {
         setSelectedSpeakers((prev) => {
           const next = new Set(prev);
@@ -184,6 +187,36 @@ describe("TranscriptionRunGrid", () => {
     });
     expect((screen.getByTestId("transcription-run-speaker-Alpha") as HTMLInputElement).checked).toBe(true);
     expect((screen.getByTestId("transcription-run-speaker-Beta") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("renders stale IPA can_run=false as ok in concept-windows mode when concept-tier presence exists", () => {
+    const stateBySpeaker: Record<string, SpeakerLoadEntry> = {
+      Saha01: {
+        status: "ready",
+        state: makeState({
+          speaker: "Saha01",
+          ipaCanRun: false,
+          ipaReason: "No ORTH tier",
+          orthoIntervals: 523,
+          orthoCanRun: true,
+        }),
+        error: null,
+      },
+    };
+
+    render(
+      <GridHarness
+        speakers={["Saha01"]}
+        gridStepColumns={["ipa"]}
+        stateBySpeaker={stateBySpeaker}
+        initialSelectedSpeakers={["Saha01"]}
+        runMode="concept-windows"
+      />,
+    );
+
+    const ipaCell = screen.getByTestId("transcription-run-cell-Saha01-ipa");
+    expect(ipaCell.getAttribute("data-cell-kind")).toBe("ok");
+    expect(ipaCell.textContent).toContain("ok");
   });
 
   it("scope toggles update the rendered cell kind from keep to overwrite", () => {

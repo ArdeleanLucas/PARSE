@@ -83,6 +83,7 @@ export function computeCell(
   entry: SpeakerLoadEntry | undefined,
   speakerSelected: boolean,
   scope: RunScope,
+  runMode: TranscriptionRunMode,
 ): CellInfo {
   if (!entry) return { kind: "unknown", count: 0, reason: null };
   if (entry.status === "loading") return { kind: "loading", count: 0, reason: null };
@@ -93,7 +94,29 @@ export function computeCell(
   const stepState = entry.state[step];
   const count = stepCount(step, entry.state);
 
-  if (!stepState.can_run) return { kind: "blocked", count, reason: stepState.reason };
+  if (!stepState.can_run) {
+    // PR #212 auto-routes IPA to concept windows when full-mode prerequisites
+    // are stale, so concept-windowed previews can be runnable even when the
+    // backend's full-mode-centric can_run flag still says false.
+    if (step === "ipa" && runMode !== "full") {
+      const orthoState = entry.state.ortho;
+      const conceptTierObservable = orthoState.intervals > 0 || orthoState.can_run;
+      if (conceptTierObservable) {
+        if (stepState.done) {
+          if (speakerSelected) {
+            return {
+              kind: scope === "overwrite" ? "overwrite" : "keep",
+              count,
+              reason: null,
+            };
+          }
+          return { kind: "skip", count, reason: null };
+        }
+        return { kind: "ok", count, reason: null };
+      }
+    }
+    return { kind: "blocked", count, reason: stepState.reason };
+  }
   if (stepState.done) {
     if (speakerSelected) {
       return {
