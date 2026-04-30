@@ -177,10 +177,8 @@ describe('AnnotateView', () => {
     cleanup();
   });
 
-  it('renders stored annotate fields, speaker notes, and annotated badge', () => {
-    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
-
-    render(
+  function renderWaterAnnotateView() {
+    return render(
       <AnnotateView
         concept={{ id: 1, key: 'water', name: 'water' }}
         speaker="Fail01"
@@ -190,14 +188,52 @@ describe('AnnotateView', () => {
         audioUrl="/Fail01.wav"
       />,
     );
+  }
+
+  it('renders stored annotate fields, speaker notes, and complete badge', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
 
     expect(screen.getByDisplayValue('aw')).toBeTruthy();
     expect(screen.getByDisplayValue('ئاو')).toBeTruthy();
     expect(screen.getByText('Orthographic')).toBeTruthy();
     expect(screen.queryByText('Orthographic (Kurdish)')).toBeNull();
     expect(screen.getByTestId('lexeme-user-note-Fail01-water')).toBeTruthy();
-    expect(screen.getByText('Annotated')).toBeTruthy();
+    expect(screen.getByText('Complete')).toBeTruthy();
+    expect(screen.queryByText('Annotated')).toBeNull();
+    expect(screen.queryByText('Missing')).toBeNull();
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
+  });
+
+  it('renders no badge for a boundary-only concept', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.queryByText('Annotated')).toBeNull();
+    expect(screen.queryByText('Complete')).toBeNull();
+    expect(screen.queryByText('Missing')).toBeNull();
+  });
+
+  it('renders Annotated for a boundary plus ortho-only concept', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByText('Annotated')).toBeTruthy();
+    expect(screen.queryByText('Complete')).toBeNull();
+    expect(screen.queryByText('Missing')).toBeNull();
+  });
+
+  it('renders Annotated for a boundary plus ipa-only concept', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByText('Annotated')).toBeTruthy();
+    expect(screen.queryByText('Complete')).toBeNull();
+    expect(screen.queryByText('Missing')).toBeNull();
   });
 
   it('saves speaker notes for the active speaker and concept on blur', async () => {

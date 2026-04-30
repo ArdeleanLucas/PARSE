@@ -137,7 +137,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const pendingSeek = usePlaybackStore((s) => s.pendingSeek);
   const volume = usePlaybackStore((s) => s.volume);
   const setStoreVolume = usePlaybackStore((s) => s.setVolume);
-  const annotated = Boolean(conceptInterval && ipaInterval);
+  const annotated = Boolean(conceptInterval && (ipaInterval || orthoInterval));
+  const complete = Boolean(conceptInterval && ipaInterval && orthoInterval);
 
   const storedIntervalRef = useRef<{ start: number; end: number } | null>(null);
   useEffect(() => {
@@ -466,6 +467,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
       <SpeakerHeader
         annotated={annotated}
+        complete={complete}
         concept={concept}
         speaker={speaker}
         totalConcepts={totalConcepts}
