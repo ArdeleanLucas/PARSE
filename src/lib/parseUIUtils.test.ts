@@ -64,13 +64,29 @@ describe('parseUIUtils', () => {
     expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: true, apiTarget: 'http://127.0.0.1:8866/' })).toBe('http://127.0.0.1:8866/audio/working/Fail02/foo.wav');
   });
 
-  it('matches concept intervals by concept name, key, or embedded name text', () => {
+  it('matches concept intervals by exact name, key, or whole-word expanded name text', () => {
     const concept = { key: '1.1', name: 'Hair' };
 
     expect(conceptMatchesIntervalText(concept, 'hair')).toBe(true);
     expect(conceptMatchesIntervalText(concept, '1.1')).toBe(true);
     expect(conceptMatchesIntervalText(concept, 'hair (speaker repeated prompt)')).toBe(true);
+    expect(conceptMatchesIntervalText(concept, 'long hair')).toBe(true);
+    expect(conceptMatchesIntervalText({ key: 'JBIL_10.A', name: 'ten' }, "ten o'clock")).toBe(true);
     expect(conceptMatchesIntervalText(concept, 'water')).toBe(false);
+  });
+
+  it('refuses short-name substring collisions in longer interval text', () => {
+    expect(conceptMatchesIntervalText({ id: 226, key: 'JBIL_10.A', name: 'ten' }, 'to listen to')).toBe(false);
+    expect(conceptMatchesIntervalText({ key: '1.2', name: 'ear' }, 'earlobe')).toBe(false);
+    expect(conceptMatchesIntervalText({ key: '1.3', name: 'arm' }, 'armpit')).toBe(false);
+    expect(conceptMatchesIntervalText({ key: '1.4', name: 'rib' }, 'ribbon')).toBe(false);
+  });
+
+  it('trusts explicit interval concept ids over text matching', () => {
+    const concept = { id: 226, key: 'JBIL_10.A', name: 'ten' };
+
+    expect(conceptMatchesIntervalText(concept, 'to listen to', '226')).toBe(true);
+    expect(conceptMatchesIntervalText(concept, 'ten', '98')).toBe(false);
   });
 
   it('prioritizes problematic then confirmed then review tags when deriving concept status', () => {

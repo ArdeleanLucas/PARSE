@@ -3,6 +3,7 @@ import type { AnnotationInterval, AnnotationRecord, Tag as StoreTag } from '../a
 export type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 
 const REVIEW_TAG_IDS = new Set(['review', 'review-needed']);
+const REGEX_SPECIAL_CHARS = new Set(["\\", ".", "*", "+", "?", "^", "$", "{", "}", "(", ")", "|", "[", "]"]);
 
 /** Render a number of seconds as ``MM:SS.cs`` — the same format the
  *  Annotate playback bar shows under the waveform. Lifted to module
@@ -52,14 +53,25 @@ export function deriveAudioUrl(
   return resolveAssetUrl('/' + cleaned, options);
 }
 
-export function conceptMatchesIntervalText(concept: { name: string; key: string }, text: string): boolean {
+export function conceptMatchesIntervalText(
+  concept: { id?: number | string; name: string; key: string },
+  text: string,
+  intervalConceptId?: string | number | null,
+): boolean {
+  if (intervalConceptId != null && intervalConceptId !== '' && concept.id != null) {
+    return String(intervalConceptId) === String(concept.id);
+  }
+
   const normalizedText = text.trim().toLowerCase();
   const normalizedName = concept.name.trim().toLowerCase();
   const normalizedKey = concept.key.trim().toLowerCase();
 
-  return normalizedText === normalizedName
-    || normalizedText === normalizedKey
-    || normalizedText.includes(normalizedName);
+  if (normalizedText === normalizedName) return true;
+  if (normalizedText === normalizedKey) return true;
+  if (!normalizedName) return false;
+
+  const escapedName = Array.from(normalizedName, (char) => REGEX_SPECIAL_CHARS.has(char) ? `\\${char}` : char).join('');
+  return new RegExp(`\\b${escapedName}\\b`).test(normalizedText);
 }
 
 export function getConceptStatus(tags: StoreTag[]): ConceptTag {
