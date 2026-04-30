@@ -15,10 +15,10 @@
     "model_only": true
   },
   "ortho": {
-    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH source model, but ortho.model_path must point at a local CTranslate2 conversion directory — do NOT put a HuggingFace repo id here. Convert razhan/whisper-base-sdh first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-ct2`, then set model_path to that output directory. The defaults below keep the anti-cascade guard enabled: tuned VAD on, condition_on_previous_text=false, compression_ratio_threshold=1.8. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds extra runtime but yields cleaner per-lexeme text in tiers.ortho_words.",
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). Razhan is the canonical SDH source model, but ortho.model_path must point at a local CTranslate2 conversion directory — do NOT put a HuggingFace repo id here. Convert razhan/whisper-base-sdh first with `ct2-transformers-converter --model razhan/whisper-base-sdh --output_dir /path/to/razhan-ct2`, then set model_path to that output directory. Razhan Hameed and Sina Ahmadi et al. publish the Southern Kurdish ASR models at https://huggingface.co/razhan/whisper-base-sdh and https://huggingface.co/razhan/whisper-small-me, with training code at https://github.com/DOLMA-NLP/asr; whisper-small-me reports WER 0.4930 / CER 0.1718 on SDH. DOLMA's Whisper fine-tuning uses `--language=\"persian\"`, so the correct Whisper inference token for these Razhan SDH models is `fa`, not `sdh`/`sd`; LocalWhisperProvider defensively maps existing `sd`/`sdh` configs to `fa`. The defaults below keep the anti-cascade guard enabled: tuned VAD on, condition_on_previous_text=false, compression_ratio_threshold=1.8. initial_prompt primes the Whisper decoder — useful on elicited word-list recordings. refine_lexemes=true enables a short-clip Whisper pass over every concept after Tier-2 forced alignment; adds extra runtime but yields cleaner per-lexeme text in tiers.ortho_words.",
     "provider": "faster-whisper",
     "model_path": "",
-    "language": "sd",
+    "language": "fa",
     "device": "cuda",
     "compute_type": "float16",
     "beam_size": 5,

@@ -245,7 +245,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Input WAV/audio path")
     parser.add_argument("--speaker", required=True, help="Speaker ID for the STT artifact")
     parser.add_argument("--output", required=True, help="Output JSON path for STT artifact")
-    parser.add_argument("--language", default=None, help="Language override (e.g., sd, sdh)")
+    parser.add_argument(
+        "--language",
+        default=None,
+        help=(
+            "Language override (Whisper code, e.g., 'fa'). For Razhan SDH models "
+            "(razhan/whisper-base-sdh) use 'fa' — DOLMA-NLP/asr fine-tuned with "
+            "`--language=\"persian\"`. The provider auto-maps 'sd' and 'sdh' to 'fa'."
+        ),
+    )
     parser.add_argument("--device", default=None, help="Inference device override (cuda or cpu)")
     parser.add_argument(
         "--compute-type",
