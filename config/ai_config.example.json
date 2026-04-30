@@ -29,7 +29,7 @@
     },
     "condition_on_previous_text": false,
     "compression_ratio_threshold": 1.8,
-    "initial_prompt": "",
+    "initial_prompt": "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە.",
     "refine_lexemes": false
   },
   "llm": {

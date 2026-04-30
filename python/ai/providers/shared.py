@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_ORTH_DEFAULT_INITIAL_PROMPT = (
+    "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە."
+)
+
 _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     "stt": {
         "provider": "faster-whisper",
@@ -84,9 +88,9 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         # back to higher temperature (or drops the segment) earlier
         # when it detects repetition.
         "compression_ratio_threshold": 1.8,
-        # Optional decoder priming string for elicited word-list recordings.
-        # Empty = not passed to faster-whisper.
-        "initial_prompt": "",
+        # Decoder prime for elicited word-list recordings. Existing user configs
+        # can still opt out by setting an explicit empty string.
+        "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
         # When True the ORTH compute runner will also do a short-clip
         # Whisper pass per concept after Tier-2 forced alignment. Off by
         # default — opt in per speaker via the compute payload or per
@@ -598,6 +602,7 @@ def _audio_duration_seconds(audio_path: Path) -> float:
 
 __all__ = [
     "_DEFAULT_AI_CONFIG",
+    "_ORTH_DEFAULT_INITIAL_PROMPT",
     "_CHAT_PROVIDER_BASE_URLS",
     "_CHAT_PROVIDER_DEFAULT_MODELS",
     "_LEGACY_OPENAI_MODEL_NAMES",
