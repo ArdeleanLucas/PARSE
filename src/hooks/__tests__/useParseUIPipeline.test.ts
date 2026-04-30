@@ -142,7 +142,7 @@ describe('useParseUIPipeline', () => {
     });
   });
 
-  it('opens the batch report and selectively refreshes scoped concept-run rows when metadata is returned', async () => {
+  it('reloads speaker annotation even when scoped concept-row refresh succeeds', async () => {
     const openBatchReport = vi.fn();
     const reloadStt = vi.fn();
     const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
@@ -199,7 +199,10 @@ describe('useParseUIPipeline', () => {
       { concept_id: '2', start: 5, end: 6 },
       { concept_id: '7', start: 10, end: 11 },
     ]));
-    expect(reloadSpeakerAnnotation).not.toHaveBeenCalled();
+    await waitFor(() => expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Fail01'));
+    expect(refreshScopedConceptRows.mock.invocationCallOrder[0]).toBeLessThan(
+      reloadSpeakerAnnotation.mock.invocationCallOrder[0],
+    );
     expect(reloadStt).toHaveBeenCalledWith('Fail01');
     expect(loadEnrichments).toHaveBeenCalledOnce();
   });
