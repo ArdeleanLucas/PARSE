@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import ai.provider as provider_module
 
+from .shared import _ORTH_DEFAULT_INITIAL_PROMPT
+
 if TYPE_CHECKING:
     from ai.provider import Segment, SegmentWithWords
 
@@ -24,7 +26,11 @@ if TYPE_CHECKING:
 #   - https://github.com/DOLMA-NLP/asr (finetune_whisper.py uses --language="persian")
 _RAZHAN_SDH_LANGUAGE_ALIASES = frozenset({"sd", "sdh"})
 
-
+# Default initial_prompt for the ORTH config_section. Razhan/whisper-base-sdh is
+# only 74M params; even with language="fa" the multilingual decoder can drift
+# into Chinese / Cyrillic / Latin on short, low-SNR concept-windows. A compact
+# Southern Kurdish Arabic-script prime anchors the decoder for legacy configs
+# that omit initial_prompt entirely while preserving explicit user opt-outs.
 def _normalize_whisper_language(code: Optional[str]) -> Optional[str]:
     if isinstance(code, str) and code.strip().lower() in _RAZHAN_SDH_LANGUAGE_ALIASES:
         return "fa"
@@ -150,12 +156,15 @@ class LocalWhisperProvider(provider_module.AIProvider):
         except (TypeError, ValueError):
             self.compression_ratio_threshold = ratio_default
 
-        # initial_prompt: optional Whisper decoder priming string. Useful for
-        # ORTH on elicited word-list recordings to bias decoding toward known
-        # concepts and spellings. Empty string = not passed to faster-whisper.
-        prompt_raw = section_config.get("initial_prompt", "")
+        # initial_prompt: Whisper decoder priming string. ORTH on Razhan SDH
+        # defaults to a built-in Southern Kurdish prime when the section config
+        # omits the key entirely; users can opt out by setting an explicit "" or
+        # override with their own string. Other sections (STT, etc.) default to
+        # "" — no prime — preserving prior behavior.
+        default_prompt = _ORTH_DEFAULT_INITIAL_PROMPT if self.config_section == "ortho" else ""
+        prompt_raw = section_config.get("initial_prompt", default_prompt)
         self.initial_prompt: str = (
-            str(prompt_raw).strip() if isinstance(prompt_raw, str) else ""
+            str(prompt_raw).strip() if isinstance(prompt_raw, str) else default_prompt
         )
 
         # refine_lexemes: ORTH-only hook read by the compute runner. When True,
@@ -179,6 +188,33 @@ class LocalWhisperProvider(provider_module.AIProvider):
         self._model_source: Optional[str] = None
         self._effective_device: Optional[str] = None
         self._effective_compute_type: Optional[str] = None
+
+    def _log_model_init(self) -> None:
+        if self.config_section == "ortho":
+            section_tag = "ORTH"
+        else:
+            section_tag = self.config_section.upper() if self.config_section else "WHISPER"
+        prompt = self.initial_prompt or ""
+        if len(prompt) > 80:
+            prompt_repr = repr(prompt[:77] + "...")
+        elif prompt:
+            prompt_repr = repr(prompt)
+        else:
+            prompt_repr = "<empty>"
+        resolved_language = _normalize_whisper_language(self.language) or "<auto-detect>"
+        print(
+            "[{0}] loaded model: {1} device={2} compute_type={3} "
+            "language={4} initial_prompt={5}".format(
+                section_tag,
+                self._model_source or "<unknown>",
+                self._effective_device or self.device,
+                self._effective_compute_type or self.compute_type,
+                resolved_language,
+                prompt_repr,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
 
     def warm_up(self) -> None:
         """Force the faster-whisper model to load now.
@@ -235,6 +271,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
             )
             self._effective_device = self.device
             self._effective_compute_type = self.compute_type
+            self._log_model_init()
             return self._whisper_model
         except Exception as exc:
             message = str(exc)
@@ -266,6 +303,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
                 )
                 self._effective_device = "cpu"
                 self._effective_compute_type = "int8"
+                self._log_model_init()
             except Exception as cpu_exc:
                 print(
                     "[ERROR] CPU fallback for faster-whisper also failed: {0}".format(cpu_exc),
