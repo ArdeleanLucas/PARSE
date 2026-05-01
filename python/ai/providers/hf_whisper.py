@@ -377,6 +377,7 @@ class HFWhisperProvider(provider_module.AIProvider):
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
         segment_callback: Optional[Callable[["Segment"], None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> List["Segment"]:
         path = Path(audio_path).expanduser().resolve()
         if not path.exists():
@@ -395,6 +396,19 @@ class HFWhisperProvider(provider_module.AIProvider):
         segments: List[Segment] = []
         for chunk_index, start_sample in enumerate(range(0, total_samples, chunk_samples), start=1):
             end_sample = min(total_samples, start_sample + chunk_samples)
+            if should_cancel is not None and should_cancel():
+                print(
+                    "[ORTH] cancel requested at chunk {0}/{1} ({2:.2f}-{3:.2f}s); returning {4} partial segments".format(
+                        chunk_index,
+                        total_chunks,
+                        float(start_sample) / float(sample_rate),
+                        float(end_sample) / float(sample_rate),
+                        len(segments),
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+                break
             window = audio_np[start_sample:end_sample]
             text, confidence = self._transcribe_audio_payload(
                 self._audio_payload(window, sample_rate),
@@ -449,6 +463,7 @@ class HFWhisperProvider(provider_module.AIProvider):
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
         sample_rate: int = 16000,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> List["SegmentWithWords"]:
         if audio_array is None or not intervals:
             return []
@@ -476,6 +491,19 @@ class HFWhisperProvider(provider_module.AIProvider):
                 continue
 
             window = audio_np[start_sample:end_sample]
+            if should_cancel is not None and should_cancel():
+                print(
+                    "[ORTH] cancel requested at interval {0}/{1} ({2:.2f}-{3:.2f}s); returning {4} partial segments".format(
+                        index,
+                        total_intervals,
+                        start_sec_f,
+                        end_sec_f,
+                        len(segments_out),
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+                break
             try:
                 text, confidence = self._transcribe_audio_payload(
                     self._audio_payload(window, sample_rate_i),

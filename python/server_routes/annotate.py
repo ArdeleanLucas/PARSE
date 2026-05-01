@@ -1,6 +1,8 @@
 """PARSE server route-domain module: annotate."""
 from __future__ import annotations
 
+from typing import Callable
+
 import server as _server
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
 
@@ -1095,6 +1097,7 @@ def _run_step_on_concept_windows(
     *,
     language: _server.Optional[str] = None,
     pad_sec: float = 0.8,
+    should_cancel: _server.Optional[Callable[[], bool]] = None,
 ) -> _server.List[_server.Dict[str, _server.Any]]:
     """Run one provider over ±pad_sec short clips around concept intervals.
 
@@ -1148,6 +1151,20 @@ def _run_step_on_concept_windows(
             continue
         if c_end <= c_start:
             continue
+        if should_cancel is not None and should_cancel():
+            print(
+                "[{0}] cancel requested at concept window {1}/{2} ({3:.2f}-{4:.2f}s); returning {5} partial rows".format(
+                    step_name.upper(),
+                    idx + 1,
+                    total,
+                    c_start,
+                    c_end,
+                    len(rows),
+                ),
+                file=_server.sys.stderr,
+                flush=True,
+            )
+            break
         slice_start = max(0.0, c_start - pad_sec)
         slice_end = min(duration_sec, c_end + pad_sec)
         if slice_end <= slice_start:
@@ -1403,14 +1420,23 @@ def _compute_speaker_ortho_concept_windows(
         )
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
     provider = _server.get_ortho_provider()
-    rows = _server._run_step_on_concept_windows(
-        audio_path=audio_path,
-        concept_intervals=concept_intervals,
-        provider=provider,
-        step='ortho',
-        job_id=job_id,
-        language=language,
-    )
+    from ai.job_cancel import clear_cancel, make_should_cancel
+
+    should_cancel = make_should_cancel(job_id)
+    cancelled_requested = False
+    try:
+        rows = _server._run_step_on_concept_windows(
+            audio_path=audio_path,
+            concept_intervals=concept_intervals,
+            provider=provider,
+            step='ortho',
+            job_id=job_id,
+            language=language,
+            should_cancel=should_cancel,
+        )
+        cancelled_requested = should_cancel()
+    finally:
+        clear_cancel(job_id)
     ortho_tier = tiers.get('ortho') if isinstance(tiers.get('ortho'), dict) else None
     if ortho_tier is None:
         ortho_tier = {'type': 'interval', 'display_order': 3, 'intervals': []}
@@ -1420,7 +1446,7 @@ def _compute_speaker_ortho_concept_windows(
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
-    return {
+    result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,
         'concept_windows': len(concept_intervals),
@@ -1431,6 +1457,10 @@ def _compute_speaker_ortho_concept_windows(
         'audio_path': str(audio_path),
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
     }
+    if cancelled_requested and len(rows) < len(concept_intervals):
+        result_payload['status'] = 'partial_cancelled' if rows else 'cancelled'
+        result_payload['cancelled_at_interval'] = len(rows)
+    return result_payload
 
 
 def _compute_speaker_ipa_concept_windows(
@@ -2035,7 +2065,20 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
         _set_compute_progress(job_id, max(2.0, clamped), message='ORTH transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
-    segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback)
+    from ai.job_cancel import clear_cancel, make_should_cancel
+
+    should_cancel = make_should_cancel(job_id)
+    cancelled_requested = False
+    try:
+        try:
+            segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback, should_cancel=should_cancel)
+        except TypeError as exc:
+            if 'should_cancel' not in str(exc):
+                raise
+            segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback)
+        cancelled_requested = should_cancel()
+    finally:
+        clear_cancel(job_id)
     new_intervals: _server.List[_server.Dict[str, _server.Any]] = []
     for seg in segments:
         start = float(seg.get('start', 0.0) or 0.0)
@@ -2049,12 +2092,40 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
         ortho_tier = {'type': 'interval', 'display_order': 3, 'intervals': []}
     ortho_tier['intervals'] = new_intervals
     tiers['ortho'] = ortho_tier
-    _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
-    ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
     if refine_payload is None:
         refine_lexemes = bool(getattr(provider, 'refine_lexemes', False))
     else:
         refine_lexemes = bool(refine_payload)
+    if cancelled_requested:
+        ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
+        if ortho_words_tier is None:
+            ortho_words_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
+        ortho_words_tier['intervals'] = []
+        tiers['ortho_words'] = ortho_words_tier
+        annotation['tiers'] = tiers
+        _server._annotation_touch_metadata(annotation, preserve_created=True)
+        _server._write_json_file(annotation_path, annotation)
+        if canonical_path != annotation_path:
+            _server._write_json_file(canonical_path, annotation)
+        if legacy_path != annotation_path:
+            _server._write_json_file(legacy_path, annotation)
+        result_payload = {
+            'speaker': speaker,
+            'filled': len(new_intervals),
+            'ortho_words': 0,
+            'refined_lexemes': 0,
+            'refine_lexemes_enabled': refine_lexemes,
+            'skipped': False,
+            'replaced_existing': has_existing_text,
+            'audio_path': str(audio_path),
+            'total': len(new_intervals),
+            'status': 'partial_cancelled' if new_intervals else 'cancelled',
+            'cancelled_at_interval': len(new_intervals),
+        }
+        _set_compute_progress(job_id, 99.0, message='ORTH cancelled after {0} intervals'.format(len(new_intervals)))
+        return result_payload
+    _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
+    ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
     refined_additions: _server.List[_server.Dict[str, _server.Any]] = []
     if refine_lexemes:
         concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None

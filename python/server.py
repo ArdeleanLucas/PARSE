@@ -1005,7 +1005,6 @@ def _resolve_http_port() -> int:
     return PORT
 
 
-
 def _resolve_ws_port() -> int:
     raw = str(os.environ.get("PARSE_WS_PORT") or "").strip()
     if not raw:
@@ -1576,7 +1575,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_post_annotation(parts[2])
             return
-
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "compute" and parts[3] == "cancel":
+            self._api_post_compute_cancel(parts[2])
+            return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "compute" and parts[2] == "status":
             self._api_post_compute_status(None)
             return
@@ -1728,11 +1729,11 @@ def _install_route_bindings() -> None:
 
 
 def _require_route_export(name: str) -> Any:
-    _install_route_bindings()
-    if name in globals():
-        return globals()[name]
+    _install_route_bindings(); export = globals().get(name)
+    if export is not None and (getattr(export, "__module__", None), getattr(export, "__name__", None)) != (__name__, name): return export
+    for module in (sys.modules.get("server_routes.{0}".format(module_name)) for module_name in _ROUTE_MODULE_NAMES):
+        if module is not None and name in getattr(module, "__all__", ()): export = getattr(module, name); globals()[name] = export; name.startswith("_api_") and setattr(RangeRequestHandler, name, export); return export
     raise AttributeError("module {0!r} has no attribute {1!r}".format(__name__, name))
-
 
 def _set_job_progress(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_set_job_progress")(*args, **kwargs)
@@ -1815,6 +1816,7 @@ def _get_local_ips() -> List[str]:
     ips: List[str] = []
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.25)
             sock.connect(("8.8.8.8", 80))
             ips.append(sock.getsockname()[0])
     except OSError:
