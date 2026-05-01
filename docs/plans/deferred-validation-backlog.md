@@ -11,14 +11,14 @@
 
 ---
 
-## Current automated baseline (refreshed 2026-04-30)
+## Current automated baseline (refreshed 2026-05-01)
 
 | Gate | Command | Result |
 |---|---|---|
-| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #217: 83 files, 503 tests passed; PR #215 scoped refresh regression proves `reloadSpeakerAnnotation` still fires after concept-row refresh; PR #217 focused run-modal coverage passes 2 files / 7 tests for IPA concept-window preview gating |
-| TypeScript | `./node_modules/.bin/tsc --noEmit` or `npm run typecheck` | ✅ clean in PR #217 validation |
-| Build | `npm run build` | ✅ clean in PR #217 validation; existing Vite chunk/dynamic-import warnings only |
-| API regression / backend gates | CI lightweight backend + parity harness; targeted/full `PYTHONPATH=python:python/packages/parse_mcp/src python -m pytest -q` for backend work | ✅ PR #203 Audition no-row-left-behind full suite: 891 passed, 1 warning; PR #206 MCP csv-only reimport/revert full suite: 903 passed, 1 warning; PR #207 save-time concept-id gate full suite: 911 passed, 1 warning; PR #216 ORTH/faster-whisper config targeted tests: 28 passed, broad backend selection: 924 passed, 2 deselected, 1 warning, plus `uvx ruff check python/ --select E9,F63,F7,F82` |
+| Frontend/unit/integration tests | `npx vitest run` | ✅ Current main after PR #224: 83 files, 514 tests passed. PR #221 proved batch polling stops on cancel; PR #223 direct-ORTH editor priority added Annotate/ParseUI coverage; PR #224 proved the frontend calls `cancelComputeJob()` from batch cancel while preserving frontend-only cancellation fallback. |
+| TypeScript | `./node_modules/.bin/tsc --noEmit` or `npm run typecheck` | ✅ clean in PR #224 validation |
+| Build | `npm run build` | ✅ clean in PR #223/#224 validation; existing Vite chunk/dynamic-import warnings only |
+| API regression / backend gates | CI lightweight backend + parity harness; targeted/full `PYTHONPATH=python:python/packages/parse_mcp/src python -m pytest -q` for backend work | ✅ PR #225 cooperative cancel targeted set: 66 passed, broad backend selection: 950 passed, 2 deselected, 1 warning; PR #227 GPU lifecycle targeted set: 62 passed, broad selection: 959 passed, 2 deselected, 1 warning; PR #228 stale-lock cleanup targeted set: 12 passed, broad selection: 973 passed, 2 deselected, 1 warning; PR #229 provider-lifecycle broad selection: 977 passed, 2 deselected, 1 warning; all included clean `uvx ruff check python/ --select E9,F63,F7,F82` where applicable. |
 
 ### Non-blocking warnings observed during automated checks
 

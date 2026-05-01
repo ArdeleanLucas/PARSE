@@ -143,8 +143,14 @@ Audition marker CSV import details live in [Audition CSV speaker import](runtime
 | `POST /api/stt/status` | Poll STT status | Accepts `jobId` or `job_id` |
 | `POST /api/compute/{computeType}` | Start a compute job | Main dispatcher for ORTH, IPA, full pipeline, contact lexemes, etc. |
 | `POST /api/compute/{computeType}/status` | Poll a typed compute job | Verifies the job matches the compute type |
+| `POST /api/compute/{jobId}/cancel` | Request cooperative cancellation | Returns `{ cancelled, job_id, reason? }`; ORTH observes it between chunks/windows and may return `partial_cancelled` |
 | `POST /api/compute/status` | Poll a compute job without specifying a type | Generic polling alias |
 | `POST /api/{computeType}/status` | Compatibility alias for compute status | Used for compute-style status endpoints other than STT |
+| `POST /api/locks/cleanup` | Clean stale speaker lock files | Admin/recovery endpoint; startup cleanup also runs server-side without killing processes |
+
+Cancellation semantics: `POST /api/compute/{jobId}/cancel` returns HTTP 404 with `cancelled=false` when the job id is unknown, and HTTP 200 with `cancelled=true` for a known job. The current backend cancellation registry is cooperative: HF ORTH checks the flag between full-file chunks and concept windows, persists any completed ORTH intervals, and reports `status: partial_cancelled` plus `cancelled_at_interval` when work was already written. The React batch runner stops polling immediately on user cancel and treats late backend completions as discarded.
+
+Stale-lock cleanup semantics: startup and `POST /api/locks/cleanup` scan direct `*.lock` files inside `PARSE_LOCKS_DIR` (or the configured default), delete dead-PID / metadata-less legacy locks, skip live-PID locks, and leave old live-PID locks in place with a manual-review reason controlled by `PARSE_STALE_LOCK_AGE_SEC`. Cleanup never kills processes.
 
 ### Suggestions, chat, and auth
 

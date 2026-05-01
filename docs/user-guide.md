@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-04-29
+> Last updated: 2026-05-01
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -86,15 +86,17 @@ This is the main starting point for locating lexical material in long recordings
 
 #### ORTH
 
-The speaker-level ORTH job (`computeType='ortho'`) is backed by a **local CTranslate2 conversion** of Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription; cite Razhan model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
+The speaker-level ORTH job (`computeType='ortho'`) now defaults to the Hugging Face Transformers `HFWhisperProvider` on Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription; cite Razhan model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
 
 Current runtime truth:
-- `ortho.model_path` must be an explicit local CT2 directory
-- HuggingFace repo ids are rejected here; convert first with `ct2-transformers-converter`
-- ORTH defaults now keep the anti-cascade guard enabled: tuned `vad_filter=True`, `condition_on_previous_text=False`, and `compression_ratio_threshold=1.8`
+- `ortho.backend` defaults to `"hf"`; `ortho.model_path` should be a HF repo id such as `razhan/whisper-base-sdh` or a local HF-format directory.
+- Legacy ORTH through faster-whisper/CTranslate2 remains available with `ortho.backend="faster-whisper"` plus an explicit local CT2 directory. CT2-looking directories are rejected by `backend="hf"` with an actionable error.
+- Provider-side Whisper decoding maps Razhan/DOLMA `sd`/`sdh` requests to `fa`; PARSE project and annotation metadata should still keep Southern Kurdish as `sdh`.
+- HF ORTH uses 30-second low-level `WhisperForConditionalGeneration.generate()` chunks for whole-file transcription, resamples non-16 kHz in-memory clips, keeps concept-window timing from caller-supplied windows, and avoids `return_timestamps=True` in concept-window generation.
+- HF ORTH applies decode-level anti-cascade guards: `condition_on_previous_text=False`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and prompt ids from `initial_prompt`; legacy `compute_type`/VAD options are logged as ignored by HF.
 - If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime; an explicit `"initial_prompt": ""` remains the opt-out.
 - Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss `initial_prompt` seeding, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
-- Runtime logs print one `[ORTH] loaded model: ... language=fa initial_prompt=...` line after successful faster-whisper initialization so field debugging can confirm the effective model/language/prompt.
+- Long ORTH jobs observe backend cancellation cooperatively. When cancellation arrives after some windows were written, PARSE can persist partial ORTH output and return `status: partial_cancelled` with `cancelled_at_interval` metadata.
 
 #### Forced alignment
 
@@ -146,8 +148,11 @@ The current batch flow includes:
 - explicit **empty-step detection** for runs that technically completed but wrote no intervals
 - skip-breakdown counters and exception samples for steps that ran but still produced no usable output
 - preserved backend `jobId` + `errorPhase` metadata when a speaker started successfully but the UI later lost `/api` connectivity while polling
+- cancellation that immediately stops frontend polling, marks the current speaker cancelled and later speakers skipped, and fire-and-forget posts `POST /api/compute/{jobId}/cancel` so backend ORTH can exit cooperatively when it reaches a cancellation check
 
 If a batch report row says **Lost contact after start**, PARSE is telling you that the backend job was created and the browser lost transport later. Use the preserved backend job id to reattach or reconcile before treating that row as a true speaker-level pipeline failure.
+
+If a batch is manually cancelled, treat the browser state as authoritative for queue control: the UI stops polling immediately and discards late success payloads, while backend ORTH may still finish its current chunk/window before returning `cancelled` or `partial_cancelled`. For full-pipeline runs, PARSE unloads HF ORTH before wav2vec2 IPA and checks available GPU memory before starting IPA, reducing the long-audio VRAM collision that previously crashed batches.
 A key detail is that preflight distinguishes **"has intervals"** from **"full WAV coverage"** via fields such as:
 
 - `duration_sec`
@@ -174,7 +179,7 @@ Automation in PARSE is intentionally review-first.
 
 Annotate mode supports:
 
-- inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions
+- inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions; the ORTHOGRAPHIC editor prefers direct `tiers.ortho` text before falling back to imported/derived `ortho_words`, and saves still write through the reviewed `tiers.ortho` path
 - per-speaker undo/redo with merge recovery and operation-labelled toasts
 - draggable lexeme timestamp editing plus waveform drag-select quick retime for the active concept
 - quick-retime cancel/Escape dismissal before commit

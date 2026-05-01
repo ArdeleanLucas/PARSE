@@ -88,10 +88,11 @@ For the canonical "where does code live now?" reference, use [Post-decomp File M
 
 ### AI / speech stack
 
-- faster-whisper
-- CTranslate2
+- faster-whisper for STT and legacy CT2 ORTH opt-in
+- Hugging Face Transformers for default Razhan ORTH (`HFWhisperProvider`)
+- CTranslate2 for faster-whisper-backed STT / legacy ORTH
 - Razhan (`razhan/whisper-base-sdh`)
-- Silero VAD
+- Silero VAD for faster-whisper-era segmentation
 - wav2vec2 (`facebook/wav2vec2-xlsr-53-espeak-cv-ft`)
 - OpenAI and xAI for workflow chat
 
@@ -193,6 +194,8 @@ Relevant knobs and files:
 - `PARSE_USE_PERSISTENT_WORKER=true` for the persistent-worker path
 - `GET /api/worker/status` for persistent-worker health checks
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
+- `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`
+- `POST /api/locks/cleanup` plus startup cleanup for stale speaker-lock recovery; cleanup deletes stale `*.lock` files only and never kills processes
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.
 

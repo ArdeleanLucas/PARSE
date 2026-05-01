@@ -321,7 +321,7 @@ When the docs or older plans mention the historical monoliths, translate them th
 - `src/stores/annotationStore.ts` — barrel only; concrete annotation-store helpers live under `src/stores/annotation/`
 - compare/annotate/CLEF top-level `.tsx` files may now be barrels; check `docs/architecture/post-decomp-file-map.md` before adding new logic directly into an old top-level entrypoint
 
-## Current State (updated 2026-04-29)
+## Current State (updated 2026-05-01)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -364,6 +364,7 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #212 makes full-mode IPA auto-route to concept-window processing when `ortho`/`ortho_words` are empty but concept intervals exist, preserving the legacy early return only when concept intervals are absent.
   - PR #215 makes post-compute disk reload canonical: `affected_concepts` / scoped row refresh is an advisory optimization, and `reloadSpeakerAnnotation` must still run after IPA, ORTH, STT, or BND compute completion so disk-written intervals appear in the UI.
   - PR #217 makes the Run Full Pipeline preview run-mode-aware for IPA: in `concept-windows` / `edited-only`, stale full-mode `ipa.can_run=false` no longer blocks the cell when ORTH/concept-tier presence is observable; full-mode IPA-without-ORTH and pure-empty concept-window speakers remain blocked.
+  - PRs #221/#224/#225 add cancellation across the batch/UI/backend boundary: Cancel stops frontend polling immediately, fire-and-forget posts `POST /api/compute/{jobId}/cancel`, and HF ORTH cooperatively exits with `status: partial_cancelled` / `cancelled_at_interval` when work already produced intervals.
 - **Annotate review UX polished**:
   - PRs #184/#185 add waveform drag-selection quick retime, a two-decimal waveform playhead chip, and cancel/Escape for transient retime selections.
   - PRs #186/#187 add manual volume control with default 100%.
@@ -371,16 +372,24 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #197 removes duplicate Annotate drawer concept filters; `ConceptSidebar` remains the canonical concept filter.
   - PRs #209/#211 split header status into strict `Annotated` vs `Complete` badges: `Complete` requires concept + IPA + strict `ortho` overlap, and auto-imported `ortho_words` no longer count as human-reviewed orthography.
   - PR #210 moves BND progress into the existing global header chip instead of duplicating progress text inside the drawer.
+  - PR #223 makes the ORTHOGRAPHIC editor prefer direct `tiers.ortho` text before falling back to imported/derived `ortho_words`, preserving existing save flow into `tiers.ortho`.
 - **Speaker onboarding from Audition CSV shipped**:
   - PR #198 teaches `POST /api/onboard/speaker` to detect Adobe Audition marker CSVs when concepts-style parsing finds no rows and `Name`/`Start` headers are present.
   - PR #200 resolves Audition labels against existing `concepts.csv` `concept_en` values before allocating new integer ids, so the import path remains integer-id only while preserving duplicate/repeated elicitations as separate intervals.
   - PR #201 adds companion comments CSV support via multipart `commentsCsv`; matching cue/comment rows are joined by zero-based row index into `parse-enrichments.json` lexeme notes with `import_note`, `import_raw`, `import_index`, `audition_prefix`, and `updated_at` trace fields.
   - PR #203 accepts square-bracket prefixes such as `[5.1]- ...` and imports bare/malformed-prefix rows rather than dropping them, assigning opaque synthetic `audition_prefix="row_<import_index>"` values when no source prefix parses.
   - Imported Audition rows preserve CSV order and cue timestamps, append concept and `ortho_words` intervals, strip terminal variant markers from labels, add `import_index` + `audition_prefix` trace metadata, preserve existing `source_audio_duration_sec`, log CSV detection/comment-alignment failures, and intentionally leave `ortho`, `ipa`, and `bnd` untouched for downstream jobs.
-- **Razhan ORTH language-token normalization shipped**:
+- **Razhan / HF ORTH runtime shipped and hardened**:
   - PR #213 maps provider-side Whisper language tokens `sd`/`sdh` to `fa` for Razhan/DOLMA models because their fine-tuning used `--language="persian"`; PARSE project/annotation metadata still preserves Southern Kurdish as `sdh`.
-  - PR #216 adds a built-in Southern Kurdish Arabic-script ORTH decoder prime when `ortho.initial_prompt` is omitted, preserves explicit `"initial_prompt": ""` as user opt-out, and logs one `[ORTH] loaded model: ... language=fa initial_prompt=...` line after successful faster-whisper model initialization.
+  - PR #216 adds a built-in Southern Kurdish Arabic-script ORTH decoder prime when `ortho.initial_prompt` is omitted and preserves explicit `"initial_prompt": ""` as user opt-out.
+  - PR #218 changes ORTH default backend to Hugging Face Transformers `HFWhisperProvider` on `razhan/whisper-base-sdh`; STT remains faster-whisper, and legacy ORTH uses `ortho.backend="faster-whisper"` plus a local CTranslate2 model path.
+  - PRs #219/#220/#222 restore HF transcription fidelity with low-level `WhisperProcessor` + `WhisperForConditionalGeneration.generate()`, 30-second full-file chunks, generated-token logprob confidence, non-16 kHz in-memory resampling, and concept-window decoding without `return_timestamps=True`.
+  - PR #226 restores HF decode-level repetition guards: `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_previous_text`, `temperature=0.0`, `do_sample=false`, and `initial_prompt` prompt ids. `compute_type` and VAD remain legacy faster-whisper options and are logged as ignored by HF.
   - Cite Razhan model usage with Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*, Interspeech 2025, doi:10.21437/Interspeech.2025-2296, PDF: https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf.
+- **Full-pipeline resource lifecycle and stale-lock recovery shipped**:
+  - PR #227 unloads the HF ORTH model/processor and clears/synchronizes CUDA cache before wav2vec2 IPA, adds `Aligner.release()`, and enforces a tunable 4 GiB low-VRAM guard before IPA in full-pipeline runs.
+  - PR #228 adds non-destructive stale `*.lock` cleanup on server startup and `POST /api/locks/cleanup`, with JSON metadata (`creator_pid`, `created_at_unix`, `speaker`), live-PID skip/manual-review semantics, legacy touch-file cleanup, and no process killing.
+  - PR #229 removes the global `_LAST_ORTHO_PROVIDER` lifecycle hook and threads the ORTH provider explicitly through full-pipeline / ORTH / concept-window calls so IPA-only full-pipeline selections do not instantiate ORTH and cleanup stays locally owned.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)
@@ -532,6 +541,7 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 | `pollChat()` | `POST /api/chat/run/status` | ✅ |
 | `startCompute()` | `POST /api/compute/{type}` | ✅ Dynamic dispatch |
 | `pollCompute()` | `POST /api/compute/{type}/status` | ✅ |
+| `cancelComputeJob()` | `POST /api/compute/{jobId}/cancel` | ✅ Cooperative cancel registry; ORTH can return `partial_cancelled` |
 | `listActiveJobs()` | `GET /api/jobs/active` | ✅ |
 | `getJobLogs()` | `GET /api/jobs/{jobId}/logs` | ✅ |
 | `getLingPyExport()` | `GET /api/export/lingpy` | ✅ |
@@ -546,6 +556,7 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 | `getClefSourcesReport()` | `GET /api/clef/sources-report` | ✅ |
 | `saveClefFormSelections()` | `POST /api/clef/form-selections` | ✅ |
 | No frontend helper yet | `POST /api/clef/clear` | ✅ Direct HTTP + MCP/chat tool `clef_clear_data`; add a `src/api/contracts/*` helper before any frontend UI calls it |
+| No frontend helper yet | `POST /api/locks/cleanup` | ✅ Admin/stale-lock cleanup route; startup cleanup also runs server-side |
 
 **Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 
@@ -624,6 +635,7 @@ A non-`main` HEAD means cleanup was skipped. A stale local worktree or feature b
 - Keep canonical PARSE docs aligned with the post-cutover repo, not archived rebuild/oracle language.
 - Treat concept-scoped pipeline run modes as shipped: preserve `run_mode`, `concept_ids`, `affected_concepts`, no-op `edited-only` semantics, and post-compute canonical disk reload across HTTP, MCP, React, and `parse_mcp` docs.
 - Treat the Audition CSV import path from PRs #198/#200/#201/#203/#204/#207/#208 as shipped: marker CSV detection, CSV-order concept/`ortho_words` interval seeding, integer-only concept-id resolution, `commentsCsv` row-index note import, bracket/bare-row parsing, trace-field round trips, save-time concept-id enforcement, and identity-only frontend concept matching are current behavior.
+- Treat the 2026-05-01 HF ORTH/default-runtime wave as shipped: ORTH defaults to HF Transformers Razhan, STT stays faster-whisper, HF concept windows resample/decode without timestamp-return drift, decode repetition guards are active, batch cancel posts backend cancel, cooperative ORTH cancel may persist `partial_cancelled`, full-pipeline ORTH unloads before IPA, and stale speaker-lock cleanup is server/admin-side.
 - Maintain parity artifacts under `parity/` and keep C5/C6 browser/workstation validation explicit rather than implied by harness success.
 
 ## Do Not Touch
@@ -653,7 +665,7 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 10. **No `any` types** unless unavoidable. If you use `any`, add an inline comment explaining exactly why.
 11. **Prefer classes / Tailwind / CSS modules over inline styles.** Inline `style={{…}}` is allowed for values that are genuinely dynamic (computed widths, progress bars) — don't use it as a shortcut for static layout. Existing files with heavy inline styles (e.g. `ParseUI.tsx`, shared primitives) should migrate as they're touched, not via broad churn.
 12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
-13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The current observed frontend floor in Test Gates below (≥485 passing as of PR #197) is the enforced check; this rule is the target for new features.
+13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The current observed frontend floor in Test Gates below (≥514 passing as of PR #224) is the enforced check; this rule is the target for new features.
 
 ## Test Gates (pre-push)
 
@@ -664,7 +676,7 @@ npx vitest run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #197 validated at **82 files / 485 frontend tests**; PR #196 validated the full Python suite at **875 passed, 1 warning**; PR #198 validated the full Python suite at **878 passed, 1 warning** for onboarding/Audition CSV work; PR #200 revalidated Audition onboarding targets, `python/test_lexeme_notes.py`, the full Python suite, `npm run check`, `npm run build`, and `git diff --check`. If those counts shift, explain why in the PR.
+For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #224 validated at **83 files / 514 frontend tests** with clean TypeScript and build; current backend broad selection after PR #229 validated at **977 passed, 2 deselected, 1 warning** plus clean `uvx ruff check python/ --select E9,F63,F7,F82`. If those counts shift, explain why in the PR.
 
 ## Baseline Architecture
 
