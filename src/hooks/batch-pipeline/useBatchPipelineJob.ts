@@ -107,10 +107,27 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
           outcomes: prev.outcomes.map((outcome, index) => index === i ? { ...outcome, jobId, errorPhase: undefined } : outcome),
         }));
 
-        const { pollErrored, pollResult, pollErrorMessage } = await pollBatchSpeakerJob(jobId, isActive, (progress, message) => {
+        const { pollErrored, pollResult, pollErrorMessage, pollCancelled } = await pollBatchSpeakerJob(jobId, isActive, (progress, message) => {
           setStateIfMounted((prev) => ({ ...prev, currentProgress: progress, currentMessage: message }));
-        });
+        }, () => cancelRequestedRef.current);
         if (!isActive()) return;
+
+        if (pollCancelled) {
+          setStateIfMounted((prev) => {
+            const outcomes = markPendingSpeakersCancelled(prev.outcomes, i + 1).map((outcome, index) => index === i
+              ? { ...outcome, status: "cancelled" as const, jobId }
+              : outcome);
+            return {
+              ...prev,
+              completedSpeakers: prev.completedSpeakers + 1,
+              currentSubJobId: null,
+              currentProgress: 0,
+              currentMessage: null,
+              outcomes,
+            };
+          });
+          break;
+        }
 
         setStateIfMounted((prev) => ({
           ...prev,
