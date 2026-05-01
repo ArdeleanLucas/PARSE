@@ -15,7 +15,7 @@
     "model_only": true
   },
   "ortho": {
-    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). backend='hf' is the default because HF Transformers FP32 on razhan/whisper-base-sdh eliminated the Saha01 CT2 contamination observed with faster-whisper/CTranslate2. First use may download about 280 MB into the normal HuggingFace cache under ~/.cache/huggingface/. To opt back into the legacy CT2 path, set backend='faster-whisper' and model_path to a local CTranslate2 directory; decoder-side knobs below are accepted only by that legacy path and are ignored by the HF backend.",
+    "_comment": "Orthographic transcription (e.g. Kurdish Arabic script). backend='hf' is the default because HF Transformers FP32 on razhan/whisper-base-sdh eliminated the Saha01 CT2 contamination observed with faster-whisper/CTranslate2. First use may download about 280 MB into the normal HuggingFace cache under ~/.cache/huggingface/. To opt back into the legacy CT2 path, set backend='faster-whisper' and model_path to a local CTranslate2 directory. HF consumes the decode-level guard knobs below (condition_on_previous_text, compression_ratio_threshold, no_repeat_ngram_size, repetition_penalty, initial_prompt); compute_type/VAD remain legacy faster-whisper options and are logged as ignored by HF.",
     "backend": "hf",
     "model_path": "razhan/whisper-base-sdh",
     "language": "sd",
@@ -29,6 +29,8 @@
     },
     "condition_on_previous_text": false,
     "compression_ratio_threshold": 1.8,
+    "no_repeat_ngram_size": 3,
+    "repetition_penalty": 1.2,
     "initial_prompt": "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە.",
     "refine_lexemes": false
   },

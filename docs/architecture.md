@@ -196,6 +196,18 @@ but it is no longer recommended for Razhan SDH ORTH: on Lucas's RTX 5090,
 HF Transformers was 16x faster on Saha01 and eliminated the 35.7% Latin /
 Cyrillic / CJK contamination seen in the CT2 path.
 
+The shipped HF provider uses low-level `WhisperProcessor` +
+`WhisperForConditionalGeneration.generate()` rather than the high-level
+pipeline. Full-file ORTH is chunked into 30-second windows; in-memory/concept
+clips carry explicit sample rates and are resampled to 16 kHz when needed;
+concept-window timing comes from the caller-supplied concept interval rather
+than Whisper timestamp returns. Generated-token logprobs feed confidence, while
+`compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`,
+`condition_on_previous_text`, deterministic sampling flags, and prompt ids from
+`initial_prompt` provide the anti-cascade guard surface. Legacy `compute_type`
+and VAD keys remain accepted in config for CT2 compatibility but are logged as
+ignored by HF.
+
 This separation is important conceptually:
 
 - speech recognition is not conflated with orthographic transcription
@@ -302,6 +314,32 @@ The annotation compute layer now supports three run modes across HTTP, frontend 
 - `edited-only` — process only concept-tier rows marked `manuallyAdjusted`, optionally narrowed by `concept_ids`.
 
 Non-full backend results include `affected_concepts` so the React workstation can refresh rows touched by a scoped rerun without repainting unrelated concept rows. This scoped refresh is advisory: after IPA, ORTH, STT, or BND compute completion, the workstation still reloads the completed speaker annotation from disk so persisted tier writes are canonical. The frontend run preview also carries `runMode` into its cell computation: concept-window and edited-only IPA cells may be runnable despite stale full-mode `ipa.can_run=false` when ORTH/concept-tier presence is observable, while full mode and pure-empty concept-window speakers stay blocked. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect.
+
+## Compute cancellation, GPU lifecycle, and lock recovery
+
+The compute layer now separates user-visible queue cancellation from backend
+resource cleanup:
+
+- `POST /api/compute/{jobId}/cancel` sets a thread-safe cooperative cancel flag.
+  HF ORTH checks the flag between full-file chunks and concept windows. If some
+  windows have already written intervals, the result can be `partial_cancelled`
+  with `cancelled_at_interval` metadata; if no intervals were written, it can be
+  `cancelled`.
+- The React batch runner stops polling immediately when the user cancels, marks
+  the current speaker cancelled, skips remaining speakers, and fire-and-forget
+  posts the backend cancel request. Late successful poll payloads are discarded.
+- Full-pipeline ORTH provider ownership is explicit: `_compute_full_pipeline`
+  threads the provider into ORTH/concept-window calls instead of relying on a
+  global `_LAST_ORTHO_PROVIDER`. IPA-only full-pipeline selections do not create
+  ORTH, and cleanup stays in local `try/finally` ownership.
+- Before IPA starts in a full-pipeline run, HF ORTH unloads its model/processor,
+  clears/synchronizes CUDA cache, and a tunable 4 GiB free-memory guard protects
+  wav2vec2 IPA from colliding with a still-resident Whisper model. `Aligner.release()`
+  frees wav2vec2 state after IPA.
+- Startup and `POST /api/locks/cleanup` perform non-destructive stale `*.lock`
+  cleanup using JSON lock metadata (`creator_pid`, `created_at_unix`, `speaker`).
+  Dead or legacy metadata-less locks can be deleted; live-PID locks are skipped;
+  old live-PID locks get a manual-review reason; no cleanup path kills processes.
 
 ## Chat tool architecture
 
