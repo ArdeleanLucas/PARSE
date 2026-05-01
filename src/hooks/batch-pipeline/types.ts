@@ -46,6 +46,7 @@ export interface BatchPollOutcome {
   pollErrored: boolean;
   pollResult: PipelineRunResult | null;
   pollErrorMessage: string | null;
+  pollCancelled: boolean;
 }
 
 export const IDLE_STATE: BatchState = {

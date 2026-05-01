@@ -1151,7 +1151,7 @@ export function ParseUI() {
                   onClick={() => batch.cancel()}
                   className="rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
                   data-testid="topbar-batch-cancel"
-                  title="Stop after the current speaker finishes. Current speaker's compute continues — razhan/whisper can't be aborted mid-transcription."
+                  title="Cancel the batch immediately. Back-end GPU will finish its current chunk in the background and the UI will discard the result."
                 >
                   Cancel
                 </button>

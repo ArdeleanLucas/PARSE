@@ -8,6 +8,7 @@ vi.mock("../../api/client", () => ({
 }));
 
 import { startCompute, pollCompute } from "../../api/client";
+import { pollBatchSpeakerJob } from "../batch-pipeline/useBatchJobPoll";
 import { useBatchPipelineJob } from "../useBatchPipelineJob";
 import type { BatchRunRequest } from "../useBatchPipelineJob";
 
@@ -37,7 +38,23 @@ describe("useBatchPipelineJob", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
+  });
+
+  it("pollBatchSpeakerJob returns cancelled without fetching when cancellation is already requested", async () => {
+    const onProgress = vi.fn();
+
+    const outcome = await pollBatchSpeakerJob("job-A", () => true, onProgress, () => true);
+
+    expect(outcome).toEqual({
+      pollErrored: false,
+      pollResult: null,
+      pollErrorMessage: null,
+      pollCancelled: true,
+    });
+    expect(mockPoll).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
   });
 
   it("runs speakers sequentially in request order", async () => {
@@ -250,7 +267,7 @@ describe("useBatchPipelineJob", () => {
     expect(result.current.state.cancelled).toBe(false);
   });
 
-  it("cancel() stops the batch after the current speaker, marks rest cancelled", async () => {
+  it("cancel() marks the current speaker cancelled instead of complete", async () => {
     // Control A's poll completion manually so we can cancel while A is mid-run.
     const releases: Record<string, () => void> = {};
     const pending: Record<string, Promise<void>> = {};
@@ -290,7 +307,8 @@ describe("useBatchPipelineJob", () => {
     });
     expect(result.current.state.status).toBe("cancelling");
 
-    // A completes server-side — batch must not launch B or C.
+    // A completes server-side after cancellation — the UI must discard that
+    // successful late result and mark A cancelled, then skip B/C.
     await act(async () => {
       releases["A"]();
       await runPromise;
@@ -299,9 +317,48 @@ describe("useBatchPipelineJob", () => {
     expect(mockStart).toHaveBeenCalledTimes(1); // ONLY A got started
     expect(result.current.state.status).toBe("complete");
     expect(result.current.state.cancelled).toBe(true);
-    expect(result.current.state.outcomes[0].status).toBe("complete");
+    expect(result.current.state.outcomes[0].status).toBe("cancelled");
     expect(result.current.state.outcomes[1].status).toBe("cancelled");
     expect(result.current.state.outcomes[2].status).toBe("cancelled");
+  });
+
+  it("cancel() short-circuits the polling loop on the next poll tick", async () => {
+    vi.useFakeTimers();
+    mockStart.mockResolvedValue({ job_id: "job-A" });
+    mockPoll.mockResolvedValue({ status: "running", progress: 0.2, message: "Still running" });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.run(baseRequest(["A", "B", "C"]));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockPoll).toHaveBeenCalledTimes(1);
+    expect(result.current.state.currentSpeaker).toBe("A");
+
+    await act(async () => {
+      result.current.cancel();
+      await Promise.resolve();
+    });
+    expect(result.current.state.status).toBe("cancelling");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+      await runPromise;
+    });
+
+    expect(mockPoll).toHaveBeenCalledTimes(1);
+    expect(mockStart).toHaveBeenCalledTimes(1);
+    expect(result.current.state.status).toBe("complete");
+    expect(result.current.state.cancelled).toBe(true);
+    expect(result.current.state.outcomes.map((outcome) => outcome.status)).toEqual([
+      "cancelled",
+      "cancelled",
+      "cancelled",
+    ]);
   });
 
   it("stepsBySpeaker overrides the default steps for that speaker", async () => {
