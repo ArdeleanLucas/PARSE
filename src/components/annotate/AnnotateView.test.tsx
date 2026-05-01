@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../../api/types';
 
@@ -12,6 +12,7 @@ let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, e
 let mockCurrentTime = 0;
 let mockDuration = 4;
 let mockIsPlaying = false;
+let mockTags: Array<{ id: string; concepts: string[] }> = [];
 
 const applyIntervalToMockRecord = (tier: string, interval: AnnotationInterval) => {
   if (!mockRecord) {
@@ -43,7 +44,13 @@ const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockUndo = vi.fn();
 const mockRedo = vi.fn();
-const mockTagConcept = vi.fn();
+const mockTagConcept = vi.fn((tagId: string, conceptId: string) => {
+  mockTags = mockTags.map((tag) =>
+    tag.id === tagId && !tag.concepts.includes(conceptId)
+      ? { ...tag, concepts: [...tag.concepts, conceptId] }
+      : tag,
+  );
+});
 const mockSeek = vi.fn();
 const mockAddRegion = vi.fn();
 const mockScrollToTimeAtFraction = vi.fn();
@@ -90,6 +97,7 @@ vi.mock('../../stores/playbackStore', () => {
 
 vi.mock('../../stores/tagStore', () => ({
   useTagStore: (selector: (state: unknown) => unknown) => selector({
+    tags: mockTags,
     tagConcept: mockTagConcept,
   }),
 }));
@@ -150,9 +158,21 @@ describe('AnnotateView', () => {
     mockCurrentTime = 0;
     mockDuration = 4;
     mockIsPlaying = false;
+    mockTags = [
+      { id: 'review-needed', concepts: [] },
+      { id: 'confirmed', concepts: [] },
+      { id: 'problematic', concepts: [] },
+    ];
     mockSetInterval.mockClear();
     mockSaveLexemeAnnotation.mockReset();
     mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
+    mockTagConcept.mockImplementation((tagId: string, conceptId: string) => {
+      mockTags = mockTags.map((tag) =>
+        tag.id === tagId && !tag.concepts.includes(conceptId)
+          ? { ...tag, concepts: [...tag.concepts, conceptId] }
+          : tag,
+      );
+    });
     mockMoveIntervalAcrossTiers.mockClear();
     mockSaveSpeaker.mockClear();
     mockUndo.mockClear();
@@ -175,6 +195,7 @@ describe('AnnotateView', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   function renderWaterAnnotateView() {
@@ -244,6 +265,31 @@ describe('AnnotateView', () => {
     expect(screen.queryByText('Annotated')).toBeNull();
     expect(screen.queryByText('Complete')).toBeNull();
     expect(screen.queryByText('Missing')).toBeNull();
+  });
+
+  it('flips Mark Done to confirmed, emits a transient toast, and ignores repeat clicks', async () => {
+    vi.useFakeTimers();
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    const markDone = screen.getByRole('button', { name: /Mark Done/i });
+    expect(markDone.getAttribute('aria-pressed')).toBe('false');
+    expect(markDone.className).toContain('bg-white');
+
+    fireEvent.click(markDone);
+
+    expect(markDone.getAttribute('aria-pressed')).toBe('true');
+    expect(markDone.className).toContain('bg-emerald-700');
+    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done.');
+
+    fireEvent.click(markDone);
+    expect(mockTagConcept).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1700);
+    });
+    expect(screen.queryByTestId('annotate-mark-done-toast')).toBeNull();
   });
 
   it('renders no badge when only auto-imported ortho_words exists for the concept', () => {

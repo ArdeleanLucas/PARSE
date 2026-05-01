@@ -94,6 +94,22 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [speaker, handleUndo, handleRedo]);
 
   const tagConcept = useTagStore((s) => s.tagConcept);
+  const tags = useTagStore((s) => s.tags);
+  const isConfirmed = useMemo(
+    () => tags.some((tag) => tag.id === "confirmed" && tag.concepts.includes(concept.key)),
+    [tags, concept.key],
+  );
+  const [doneToast, setDoneToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!doneToast) return;
+    const timeout = window.setTimeout(() => setDoneToast(null), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [doneToast]);
+  const handleMarkDone = useCallback(() => {
+    if (isConfirmed) return;
+    tagConcept("confirmed", concept.key);
+    setDoneToast("Marked done.");
+  }, [concept.key, isConfirmed, tagConcept]);
 
   const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
     () => findAnnotationForConcept(record, concept),
@@ -603,12 +619,30 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             >
               <Save className="h-4 w-4" /> Save Annotation
             </button>
-            <button
-              onClick={() => tagConcept("confirmed", concept.key)}
-              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
-            >
-              <Check className="h-4 w-4" /> Mark Done
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                data-testid="annotate-mark-done"
+                aria-pressed={isConfirmed}
+                onClick={handleMarkDone}
+                className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-sm transition ${
+                  isConfirmed
+                    ? "bg-emerald-700 text-white hover:bg-emerald-700"
+                    : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                }`}
+              >
+                <Check className="h-4 w-4" /> {isConfirmed ? "Confirmed" : "Mark Done"}
+              </button>
+              {doneToast && (
+                <div
+                  role="status"
+                  data-testid="annotate-mark-done-toast"
+                  className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                >
+                  {doneToast}
+                </div>
+              )}
+            </div>
             {onCaptureOffsetAnchor && (
               <div className="relative">
                 <button
