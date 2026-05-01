@@ -77,6 +77,13 @@ export async function getTags(): Promise<TagsResponse> {
   return apiFetch<TagsResponse>("/api/tags");
 }
 
+export async function putTags(tags: Tag[]): Promise<void> {
+  await apiFetch<void>("/api/tags", {
+    method: "PUT",
+    body: JSON.stringify({ tags }),
+  });
+}
+
 export async function mergeTags(tags: Tag[]): Promise<{ ok: boolean; tagCount: number }> {
   return apiFetch<{ ok: boolean; tagCount: number }>("/api/tags/merge", {
     method: "POST",

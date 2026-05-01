@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // Mock API client so tests don't need a live server
 const mockGetAnnotation = vi.fn();
 const mockSaveAnnotation = vi.fn();
+const mockPutTags = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../api/client", () => ({
   getConfig: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock("../api/client", () => ({
   saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   getEnrichments: vi.fn(),
   saveEnrichments: vi.fn(),
+  putTags: (...args: unknown[]) => mockPutTags(...args),
 }));
 
 vi.mock("@/api/client", () => ({
@@ -19,6 +21,7 @@ vi.mock("@/api/client", () => ({
   saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   getEnrichments: vi.fn(),
   saveEnrichments: vi.fn(),
+  putTags: (...args: unknown[]) => mockPutTags(...args),
 }));
 
 // Must import stores AFTER mock is declared

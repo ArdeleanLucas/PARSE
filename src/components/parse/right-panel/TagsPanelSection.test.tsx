@@ -2,23 +2,20 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useConceptTagsStore, type ConceptTag } from '@/state/conceptTags';
+import { useTagStore } from '@/stores/tagStore';
+import type { Tag } from '@/api/types';
 import { TagsPanelSection } from './TagsPanelSection';
 
-const archaic: ConceptTag = { id: 't1', name: 'Archaic', color: '#3554B8', createdAt: '2026-05-01T00:00:00.000Z' };
-const dialectal: ConceptTag = { id: 't2', name: 'Dialectal', color: '#0f766e', createdAt: '2026-05-01T00:00:00.000Z' };
+const archaic: Tag = { id: 't1', label: 'Archaic', color: '#3554B8', concepts: ['sister', 'water'], lexemeTargets: [] };
+const dialectal: Tag = { id: 't2', label: 'Dialectal', color: '#0f766e', concepts: ['fire'], lexemeTargets: [] };
 
 function resetStore() {
-  useConceptTagsStore.setState(useConceptTagsStore.getInitialState(), true);
+  useTagStore.setState(useTagStore.getInitialState(), true);
 }
 
 beforeEach(() => {
   resetStore();
-  useConceptTagsStore.setState({
-    loaded: true,
-    tags: [archaic, dialectal],
-    attachmentsByConcept: { sister: ['t1'], water: ['t1'], fire: ['t2'] },
-  });
+  useTagStore.setState({ tags: [archaic, dialectal] });
 });
 
 afterEach(() => {
@@ -41,24 +38,24 @@ describe('TagsPanelSection', () => {
     expect(dot.style.backgroundColor).toBe('rgb(53, 84, 184)');
   });
 
-  it('clicking an unchecked row calls attachTag for the current concept', async () => {
-    const attachTag = vi.fn().mockResolvedValue(undefined);
-    useConceptTagsStore.setState({ attachTag });
+  it('clicking an unchecked row calls tagConcept for the current concept', () => {
+    const tagConcept = vi.fn();
+    useTagStore.setState({ tagConcept });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Dialectal/i }));
 
-    expect(attachTag).toHaveBeenCalledWith('sister', 't2');
+    expect(tagConcept).toHaveBeenCalledWith('t2', 'sister');
   });
 
-  it('clicking a checked row calls detachTag for the current concept', () => {
-    const detachTag = vi.fn().mockResolvedValue(undefined);
-    useConceptTagsStore.setState({ detachTag });
+  it('clicking a checked row calls untagConcept for the current concept', () => {
+    const untagConcept = vi.fn();
+    useTagStore.setState({ untagConcept });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Archaic/i }));
 
-    expect(detachTag).toHaveBeenCalledWith('sister', 't1');
+    expect(untagConcept).toHaveBeenCalledWith('t1', 'sister');
   });
 
   it('search filters visible rows by case-insensitive substring', () => {
@@ -70,24 +67,22 @@ describe('TagsPanelSection', () => {
     expect(screen.getByText('Dialectal')).toBeTruthy();
   });
 
-  it('Create tag expands and submits to createTag', async () => {
-    const createTag = vi.fn().mockResolvedValue({ id: 't3', name: 'Compound', color: '#7c3aed', createdAt: '2026-05-01T00:00:00.000Z' });
-    useConceptTagsStore.setState({ createTag });
+  it('Create tag expands and submits to addTag', async () => {
+    const addTag = vi.fn().mockReturnValue({ id: 't3', label: 'Compound', color: '#7c3aed', concepts: [], lexemeTargets: [] });
+    useTagStore.setState({ addTag });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Create tag/i }));
     fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'Compound' } });
     fireEvent.click(screen.getByRole('button', { name: /^Create$/i }));
 
-    await waitFor(() => expect(createTag).toHaveBeenCalledWith('Compound', '#3554B8'));
+    await waitFor(() => expect(addTag).toHaveBeenCalledWith('Compound', '#3554B8'));
   });
 
-  it('shows an inline error when createTag rejects with a 409 conflict', async () => {
-    const createTag = vi.fn().mockRejectedValue(
-      new Error('API POST /api/tags failed 409: Tag already exists'),
-    );
+  it('shows an inline error when addTag rejects with a 409 conflict', async () => {
+    const addTag = vi.fn(() => { throw new Error('409: tag name already exists'); });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    useConceptTagsStore.setState({ createTag });
+    useTagStore.setState({ addTag });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Create tag/i }));
@@ -96,11 +91,28 @@ describe('TagsPanelSection', () => {
 
     await waitFor(() => expect(screen.getByText('Name already exists')).toBeTruthy());
     expect(screen.getByLabelText('Tag name').getAttribute('aria-invalid')).toBe('true');
-    expect(warn).toHaveBeenCalledWith('[conceptTags] create failed', expect.any(Error));
+    expect(warn).toHaveBeenCalledWith('[tags] create failed', expect.any(Error));
+  });
+
+  it('typing in the name input clears the conflict error', async () => {
+    const addTag = vi.fn(() => { throw new Error('409: tag name already exists'); });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useTagStore.setState({ addTag });
+    render(<TagsPanelSection conceptId="sister" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Create tag/i }));
+    fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'Archaic' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Create$/i }));
+    await waitFor(() => expect(screen.getByText('Name already exists')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'Archaic 2' } });
+
+    expect(screen.queryByText('Name already exists')).toBeNull();
+    expect(screen.getByLabelText('Tag name').getAttribute('aria-invalid')).toBeNull();
   });
 
   it('empty registry shows the create affordance and empty-state hint', () => {
-    useConceptTagsStore.setState({ tags: [], attachmentsByConcept: {} });
+    useTagStore.setState({ tags: [] });
     render(<TagsPanelSection conceptId="sister" />);
 
     expect(screen.getByText('No tags yet. Create one below.')).toBeTruthy();

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Check, Plus, Search, Tag as TagIcon } from 'lucide-react';
 
-import { useConceptTagsForConcept, useConceptTagsStore, useConceptTagUsageCounts, type ConceptTag } from '@/state/conceptTags';
+import { useTagStore } from '@/stores/tagStore';
+import type { Tag } from '@/api/types';
 
 const COLOR_SWATCHES = ['#3554B8', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#475569'] as const;
 
@@ -10,19 +11,25 @@ interface TagsPanelSectionProps {
 }
 
 export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
-  const tags = useConceptTagsStore((state) => state.tags);
-  const attachTag = useConceptTagsStore((state) => state.attachTag);
-  const detachTag = useConceptTagsStore((state) => state.detachTag);
-  const createTag = useConceptTagsStore((state) => state.createTag);
-  const conceptTagIds = useConceptTagsForConcept(conceptId);
-  const counts = useConceptTagUsageCounts();
+  const tags = useTagStore((state) => state.tags);
+  const tagConcept = useTagStore((state) => state.tagConcept);
+  const untagConcept = useTagStore((state) => state.untagConcept);
+  const addTag = useTagStore((state) => state.addTag);
   const [search, setSearch] = useState('');
 
-  const appliedIds = useMemo(() => new Set(conceptTagIds), [conceptTagIds]);
+  const appliedIds = useMemo(
+    () => new Set(tags.filter((tag) => tag.concepts.includes(conceptId)).map((tag) => tag.id)),
+    [tags, conceptId],
+  );
+  const counts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const tag of tags) out[tag.id] = tag.concepts.length;
+    return out;
+  }, [tags]);
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return tags;
-    return tags.filter((tag) => tag.name.toLowerCase().includes(needle));
+    return tags.filter((tag) => tag.label.toLowerCase().includes(needle));
   }, [search, tags]);
 
   return (
@@ -62,8 +69,8 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
                 checked={checked}
                 count={counts[tag.id] ?? 0}
                 onToggle={() => {
-                  const action = checked ? detachTag(conceptId, tag.id) : attachTag(conceptId, tag.id);
-                  void action.catch((error: unknown) => console.warn('[tags] update failed', error));
+                  if (checked) untagConcept(tag.id, conceptId);
+                  else tagConcept(tag.id, conceptId);
                 }}
               />
             );
@@ -75,13 +82,13 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
         )}
       </div>
 
-      <CreateTagInline onCreate={createTag} />
+      <CreateTagInline onCreate={addTag} />
     </section>
   );
 }
 
 function TagRow({ tag, checked, count, onToggle }: {
-  tag: ConceptTag;
+  tag: Tag;
   checked: boolean;
   count: number;
   onToggle: () => void;
@@ -97,13 +104,13 @@ function TagRow({ tag, checked, count, onToggle }: {
         {checked ? <Check className="h-2.5 w-2.5" /> : null}
       </span>
       <span className="tag-dot h-2.5 w-2.5 rounded-full ring-1 ring-black/10" style={{ backgroundColor: tag.color }} aria-hidden="true" />
-      <span className="tag-name min-w-0 flex-1 truncate text-[11px] font-medium">{tag.name}</span>
+      <span className="tag-name min-w-0 flex-1 truncate text-[11px] font-medium">{tag.label}</span>
       <span className="tag-count rounded bg-white/80 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{count}</span>
     </button>
   );
 }
 
-function CreateTagInline({ onCreate }: { onCreate: (name: string, color: string) => Promise<ConceptTag> }) {
+function CreateTagInline({ onCreate }: { onCreate: (label: string, color: string) => Tag }) {
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState('');
   const [color, setColor] = useState<string>(COLOR_SWATCHES[0]);
@@ -116,13 +123,13 @@ function CreateTagInline({ onCreate }: { onCreate: (name: string, color: string)
     setBusy(true);
     setError(null);
     try {
-      await onCreate(trimmed, color);
+      onCreate(trimmed, color);
       setName('');
       setColor(COLOR_SWATCHES[0]);
       setExpanded(false);
     } catch (err) {
       setError(err instanceof Error && /409/.test(err.message) ? 'Name already exists' : 'Could not create tag');
-      console.warn('[conceptTags] create failed', err);
+      console.warn('[tags] create failed', err);
     } finally {
       setBusy(false);
     }
