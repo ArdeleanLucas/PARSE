@@ -183,9 +183,7 @@ _ROUTE_MODULE_NAMES = (
     "jobs",
     "exports",
     "config",
-    "clef",
-    "chat",
-    "media",
+    "clef", "locks", "chat", "media",
 )
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
@@ -250,7 +248,6 @@ class JobResourceConflictError(Exception):
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
 
 
 def _utc_iso_from_ts(timestamp: float) -> str:
@@ -1458,6 +1455,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
+        if request_path == "/api/locks/cleanup": self._api_post_locks_cleanup(); return
         if request_path == "/api/onboard/speaker":
             self._api_post_onboard_speaker()
             return
@@ -1950,7 +1948,7 @@ def main() -> None:
         print("=" * 60, file=sys.stderr)
         sys.exit(1)
 
-    os.chdir(serve_dir)
+    os.chdir(serve_dir); _require_route_export("_cleanup_stale_locks_on_startup")()
 
     _install_route_bindings()
 
