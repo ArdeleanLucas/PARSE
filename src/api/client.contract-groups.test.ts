@@ -55,7 +55,7 @@ const contractGroups = [
   },
   {
     modulePath: "./contracts/chat-and-generic-compute",
-    exports: ["startChatSession", "getChatSession", "runChat", "pollChat", "startCompute", "pollCompute"],
+    exports: ["startChatSession", "getChatSession", "runChat", "pollChat", "startCompute", "pollCompute", "cancelComputeJob"],
   },
   {
     modulePath: "./contracts/job-observability",

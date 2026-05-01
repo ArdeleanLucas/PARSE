@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getConfig, runChat, saveAnnotation, startChatSession } from "./client";
+import { cancelComputeJob, getConfig, runChat, saveAnnotation, startChatSession } from "./client";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -37,6 +37,53 @@ describe("chat API client contracts", () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
     await expect(runChat("chat_123", "hello")).rejects.toThrow(/127\.0\.0\.1:8866/);
+  });
+});
+
+describe("cancelComputeJob API client contract", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts to the compute cancel endpoint and returns a successful body", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ cancelled: true, job_id: "abc" }),
+    });
+
+    await expect(cancelComputeJob("abc")).resolves.toEqual({ cancelled: true, job_id: "abc" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/compute/abc/cancel", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("resolves with a 404 body instead of throwing", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ cancelled: false, job_id: "abc", reason: "not found" }),
+    });
+
+    await expect(cancelComputeJob("abc")).resolves.toEqual({
+      cancelled: false,
+      job_id: "abc",
+      reason: "not found",
+    });
+  });
+
+  it("resolves network errors instead of throwing", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(cancelComputeJob("abc")).resolves.toEqual({
+      cancelled: false,
+      job_id: "abc",
+      reason: "Failed to fetch",
+    });
   });
 });
 

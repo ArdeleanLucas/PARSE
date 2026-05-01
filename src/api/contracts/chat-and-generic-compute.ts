@@ -100,3 +100,25 @@ export async function pollCompute(computeType: string, jobId: string): Promise<C
     result: payload.result,
   };
 }
+
+export interface CancelComputeJobResult {
+  cancelled: boolean;
+  job_id: string;
+  reason?: string;
+}
+
+export async function cancelComputeJob(jobId: string): Promise<CancelComputeJobResult> {
+  try {
+    const response = await fetch(`/api/compute/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return await response.json() as CancelComputeJobResult;
+  } catch (error) {
+    return {
+      cancelled: false,
+      job_id: jobId,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 
+import { cancelComputeJob } from "../../api/client";
 import { startBatchSpeakerJob } from "./useBatchJobStart";
 import { pollBatchSpeakerJob } from "./useBatchJobPoll";
 import { createRunningState, markPendingSpeakersCancelled, resolveStepsForSpeaker } from "./useBatchJobResults";
@@ -34,8 +35,12 @@ export function useBatchPipelineJob(): UseBatchPipelineJobResult {
 
   const cancel = useCallback(() => {
     if (!runningRef.current) return;
+    const activeJobId = stateRef.current.currentSubJobId;
     cancelRequestedRef.current = true;
     setStateIfMounted((prev) => ({ ...prev, status: "cancelling" }));
+    if (activeJobId) {
+      void cancelComputeJob(activeJobId).catch(() => undefined);
+    }
   }, [setStateIfMounted]);
 
   const run = useCallback(async (request: BatchRunRequest): Promise<void> => {
