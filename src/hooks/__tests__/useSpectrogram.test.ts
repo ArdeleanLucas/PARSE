@@ -2,6 +2,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSpectrogram } from "../useSpectrogram";
+import type { SpectrogramParams } from "../../workers/spectrogram-worker";
 
 type MockWorker = {
   postMessage: ReturnType<typeof vi.fn>;
@@ -19,6 +20,15 @@ function makeAudioBufferLike() {
     getChannelData: () => new Float32Array(4410),
   };
 }
+
+const PARAMS: SpectrogramParams = {
+  windowLengthSec: 0.005,
+  windowShape: "gaussian",
+  maxFrequencyHz: 5500,
+  dynamicRangeDb: 50,
+  preEmphasisHz: 50,
+  colorScheme: "praat",
+};
 
 describe("useSpectrogram", () => {
   let clearRect: ReturnType<typeof vi.fn>;
@@ -43,6 +53,9 @@ describe("useSpectrogram", () => {
           return {
             clearRect,
             drawImage,
+            putImageData: vi.fn(),
+            imageSmoothingEnabled: false,
+            imageSmoothingQuality: "low",
           } as unknown as CanvasRenderingContext2D;
         }
         return null;
@@ -75,6 +88,7 @@ describe("useSpectrogram", () => {
         enabled: false,
         wsRef: wsRef as never,
         canvasRef: canvasRef as never,
+        params: PARAMS,
       }),
     );
 
@@ -83,7 +97,7 @@ describe("useSpectrogram", () => {
     expect(clearRect).toHaveBeenCalledWith(0, 0, 640, 120);
   });
 
-  it("when enabled=true, creates worker and posts compute payload", () => {
+  it("when enabled=true, creates worker and posts compute payload with params", () => {
     const canvas = document.createElement("canvas");
     const wsMock = {
       getDecodedData: vi.fn(() => makeAudioBufferLike()),
@@ -97,7 +111,7 @@ describe("useSpectrogram", () => {
         enabled: true,
         wsRef: wsRef as never,
         canvasRef: canvasRef as never,
-        windowSize: 256,
+        params: PARAMS,
       }),
     );
 
@@ -112,20 +126,16 @@ describe("useSpectrogram", () => {
         type: string;
         audioData: Float32Array;
         sampleRate: number;
-        windowSize: number;
-        startSec: number;
-        endSec: number;
+        params: SpectrogramParams;
       },
-      Transferable[]
+      Transferable[],
     ];
 
     expect(payload.type).toBe("compute");
     expect(payload.audioData).toBeInstanceOf(Float32Array);
     expect(payload.audioData.length).toBe(4410);
     expect(payload.sampleRate).toBe(44100);
-    expect(payload.windowSize).toBe(256);
-    expect(payload.startSec).toBe(0);
-    expect(payload.endSec).toBe(0.1);
+    expect(payload.params).toEqual(PARAMS);
   });
 
   it("transfers audioData buffer in postMessage second argument", () => {
@@ -142,18 +152,46 @@ describe("useSpectrogram", () => {
         enabled: true,
         wsRef: wsRef as never,
         canvasRef: canvasRef as never,
+        params: PARAMS,
       }),
     );
 
     const worker = workerInstances[0];
     const [payload, transfer] = vi.mocked(worker.postMessage).mock.calls[0] as [
       { audioData: Float32Array },
-      Transferable[]
+      Transferable[],
     ];
 
     expect(Array.isArray(transfer)).toBe(true);
     expect(transfer).toHaveLength(1);
     expect(transfer[0]).toBe(payload.audioData.buffer);
+  });
+
+  it("snaps canvas pixel dimensions to bounding rect × devicePixelRatio", () => {
+    const canvas = document.createElement("canvas");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      value: () => ({ width: 640, height: 180, top: 0, left: 0, right: 640, bottom: 180, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true });
+
+    const wsRef = {
+      current: {
+        getDecodedData: vi.fn(() => makeAudioBufferLike()),
+      },
+    };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+      }),
+    );
+
+    expect(canvas.width).toBe(1280);
+    expect(canvas.height).toBe(360);
   });
 
   it("terminates worker when enabled flips from true to false", () => {
@@ -166,17 +204,18 @@ describe("useSpectrogram", () => {
     const canvasRef = { current: canvas };
 
     const { rerender } = renderHook(
-      (enabled: boolean) =>
+      ({ enabled }: { enabled: boolean }) =>
         useSpectrogram({
           enabled,
           wsRef: wsRef as never,
           canvasRef: canvasRef as never,
+          params: PARAMS,
         }),
-      { initialProps: true },
+      { initialProps: { enabled: true } },
     );
 
     const worker = workerInstances[0];
-    rerender(false);
+    rerender({ enabled: false });
 
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
@@ -195,6 +234,7 @@ describe("useSpectrogram", () => {
         enabled: true,
         wsRef: wsRef as never,
         canvasRef: canvasRef as never,
+        params: PARAMS,
       }),
     );
 

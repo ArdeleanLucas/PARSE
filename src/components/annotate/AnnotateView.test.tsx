@@ -651,4 +651,27 @@ describe('AnnotateView', () => {
     fireEvent.click(screen.getByRole('button', { name: /mark done/i }));
     expect(mockTagConcept).toHaveBeenCalledWith('confirmed', 'water');
   });
+
+  it('left-click on the Spectrogram button shows the spectrogram row beneath the waveform', () => {
+    mockRecord = makeRecord([]);
+    renderWaterAnnotateView();
+
+    expect(screen.queryByTestId('spectrogram-row')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    expect(screen.getByTestId('spectrogram-row')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    expect(screen.queryByTestId('spectrogram-row')).toBeNull();
+  });
+
+  it('right-click on the Spectrogram button opens the settings popover', () => {
+    mockRecord = makeRecord([]);
+    renderWaterAnnotateView();
+
+    expect(screen.queryByTestId('spectrogram-settings')).toBeNull();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /spectrogram/i }));
+    expect(screen.getByTestId('spectrogram-settings')).toBeTruthy();
+  });
 });

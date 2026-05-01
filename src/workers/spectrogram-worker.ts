@@ -1,77 +1,55 @@
 /**
- * spectrogram-worker.ts — Web Worker for STFT-based spectrogram computation
+ * Praat-style STFT spectrogram worker.
  *
- * TypeScript port of js/shared/spectrogram-worker.js.  All DSP logic is
- * identical; this file adds explicit types for the message protocol and all
- * internal functions so the rest of the React codebase can import the types
- * without importing the worker itself.
- *
- * DSP Pipeline:
- *   1. Receive Float32Array of mono PCM audio + analysis parameters
- *   2. Pre-compute a Hann window of length `windowSize`
- *   3. Step through audio in hops of (windowSize / 4) — 75% overlap
- *   4. For each frame: apply Hann window, zero-pad to next power-of-2, run FFT
- *   5. Compute magnitude spectrum (positive frequencies, DC to Nyquist)
- *   6. Convert magnitudes to decibel scale (20 * log10)
- *   7. Clip to frequency range 0–8000 Hz (or Nyquist if lower)
- *   8. Across all frames: find global dB min/max, normalise to 0–255 grayscale
- *   9. Write pixel rows: low frequency at bottom, high at top (row 0 = highest bin)
- *  10. Post result back to main thread as Uint8ClampedArray (transferred)
- *
- * Protocol (INTERFACES.md §Spectrogram Worker):
- *   In:  { type: "compute", audioData: Float32Array, sampleRate: number,
- *           windowSize: 256 | 2048, startSec: number, endSec: number }
- *   Out: { type: "result", imageData: Uint8ClampedArray, width: number,
- *           height: number, startSec: number, endSec: number }
- *   Err: { type: "error", message: string }
+ * DSP pipeline (matches Praat defaults):
+ *   1. Apply pre-emphasis filter (1st-order IIR, default cutoff 50 Hz, 6 dB/oct shelf)
+ *   2. Step through audio with hop = max(1, round(windowLen / 8))
+ *   3. Window each frame with Gaussian (or Hann/Hamming) shape
+ *   4. Zero-pad to next power-of-2 and run radix-2 FFT
+ *   5. Magnitude → dB (20 log10)
+ *   6. Map dB to [0,1] with cutoff: gray = clamp((dB - (max - dynamicRange)) / dynamicRange)
+ *   7. Apply color scheme (Praat: dark = loud on white) and emit RGBA
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 declare const self: Worker;
 
-const MAX_COMPUTE_DURATION_SEC = 30;
-const MAX_FREQ_HZ = 8000;
+export type WindowShape = "gaussian" | "hann" | "hamming";
+export type ColorScheme = "praat" | "inverted" | "viridis";
 
-// ─── Message Protocol Types ───────────────────────────────────────────────────
+export interface SpectrogramParams {
+  windowLengthSec: number;
+  windowShape: WindowShape;
+  maxFrequencyHz: number;
+  dynamicRangeDb: number;
+  preEmphasisHz: number;
+  colorScheme: ColorScheme;
+}
 
 export interface SpectrogramComputeMessage {
-  type: 'compute';
+  type: "compute";
   audioData: Float32Array;
   sampleRate: number;
-  windowSize: 256 | 2048;
-  startSec: number;
-  endSec: number;
+  params: SpectrogramParams;
 }
 
 export interface SpectrogramResultMessage {
-  type: 'result';
-  imageData: Uint8ClampedArray;
+  type: "result";
+  rgba: Uint8ClampedArray;
   width: number;
   height: number;
-  startSec: number;
-  endSec: number;
 }
 
 export interface SpectrogramErrorMessage {
-  type: 'error';
+  type: "error";
   message: string;
 }
 
 export type SpectrogramOutMessage = SpectrogramResultMessage | SpectrogramErrorMessage;
 
-// ─── FFT (Cooley-Tukey radix-2, iterative in-place) ──────────────────────────
+const HARD_CAP_SEC = 30;
 
-/**
- * Compute the Discrete Fourier Transform of a complex signal in-place.
- * Accepts arrays whose length is a power of 2.
- *
- * @param re — real parts (length N, must be power-of-2)
- * @param im — imaginary parts (same length)
- */
 function fft(re: Float64Array, im: Float64Array): void {
   const N = re.length;
-
-  // Bit-reversal permutation — reorders samples so butterfly stages work correctly.
   let j = 0;
   for (let i = 1; i < N; i++) {
     let bit = N >> 1;
@@ -81,206 +59,192 @@ function fft(re: Float64Array, im: Float64Array): void {
     }
     j ^= bit;
     if (i < j) {
-      let tmp = re[i]; re[i] = re[j]; re[j] = tmp;
-      tmp = im[i]; im[i] = im[j]; im[j] = tmp;
+      let t = re[i];
+      re[i] = re[j];
+      re[j] = t;
+      t = im[i];
+      im[i] = im[j];
+      im[j] = t;
     }
   }
-
   for (let len = 2; len <= N; len <<= 1) {
     const ang = (-2 * Math.PI) / len;
     const wRe = Math.cos(ang);
     const wIm = Math.sin(ang);
-
     for (let i = 0; i < N; i += len) {
-      let curRe = 1.0;
-      let curIm = 0.0;
-
-      for (let k = 0; k < len / 2; k++) {
+      let curRe = 1;
+      let curIm = 0;
+      const half = len >> 1;
+      for (let k = 0; k < half; k++) {
         const uRe = re[i + k];
         const uIm = im[i + k];
-        const vRe = re[i + k + len / 2] * curRe - im[i + k + len / 2] * curIm;
-        const vIm = re[i + k + len / 2] * curIm + im[i + k + len / 2] * curRe;
-
-        re[i + k]           = uRe + vRe;
-        im[i + k]           = uIm + vIm;
-        re[i + k + len / 2] = uRe - vRe;
-        im[i + k + len / 2] = uIm - vIm;
-
+        const vRe = re[i + k + half] * curRe - im[i + k + half] * curIm;
+        const vIm = re[i + k + half] * curIm + im[i + k + half] * curRe;
+        re[i + k] = uRe + vRe;
+        im[i + k] = uIm + vIm;
+        re[i + k + half] = uRe - vRe;
+        im[i + k + half] = uIm - vIm;
         const nextRe = curRe * wRe - curIm * wIm;
-        curIm        = curRe * wIm + curIm * wRe;
-        curRe        = nextRe;
+        curIm = curRe * wIm + curIm * wRe;
+        curRe = nextRe;
       }
     }
   }
 }
 
-/** Returns the next power of 2 >= n.  FFT requires power-of-2 array lengths. */
 function nextPow2(n: number): number {
-  if (n <= 1) return 1;
   let p = 1;
   while (p < n) p <<= 1;
   return p;
 }
 
-// ─── Hann Window ─────────────────────────────────────────────────────────────
-
-/**
- * Generate a Hann window of length N.
- * w[n] = 0.5 * (1 − cos(2π·n / (N−1)))
- */
-function hannWindow(N: number): Float64Array {
+export function makeWindow(N: number, shape: WindowShape): Float64Array {
   const w = new Float64Array(N);
-  for (let n = 0; n < N; n++) {
-    w[n] = 0.5 * (1.0 - Math.cos((2 * Math.PI * n) / (N - 1)));
+  if (shape === "hann") {
+    for (let n = 0; n < N; n++) w[n] = 0.5 * (1 - Math.cos((2 * Math.PI * n) / (N - 1)));
+  } else if (shape === "hamming") {
+    for (let n = 0; n < N; n++) w[n] = 0.54 - 0.46 * Math.cos((2 * Math.PI * n) / (N - 1));
+  } else {
+    const center = (N - 1) / 2;
+    const denom = (N - 1) * (N - 1);
+    for (let n = 0; n < N; n++) {
+      const d = n - center;
+      w[n] = Math.exp((-12 * d * d) / denom);
+    }
   }
   return w;
 }
 
-// ─── STFT ────────────────────────────────────────────────────────────────────
-
-interface STFTResult {
-  magnitudesDB: Float32Array[];
-  numBins: number;
-  numFrames: number;
+export function preEmphasize(samples: Float32Array, sampleRate: number, cutoffHz: number): Float32Array {
+  if (cutoffHz <= 0) return samples;
+  const alpha = Math.exp((-2 * Math.PI * cutoffHz) / sampleRate);
+  const out = new Float32Array(samples.length);
+  out[0] = samples[0];
+  for (let i = 1; i < samples.length; i++) out[i] = samples[i] - alpha * samples[i - 1];
+  return out;
 }
 
-/**
- * Short-Time Fourier Transform of a mono audio signal.
- *
- * @param samples    — mono PCM, values in [-1, 1]
- * @param sampleRate — e.g. 44100
- * @param windowSize — analysis window length (256 or 2048)
- * @param maxFreqHz  — upper frequency limit (typically 8000)
- */
-function computeSTFT(
-  samples: Float32Array,
+const VIRIDIS: Array<[number, number, number]> = [
+  [68, 1, 84],
+  [59, 82, 139],
+  [33, 145, 140],
+  [94, 201, 98],
+  [253, 231, 37],
+];
+
+export function applyColor(value: number, scheme: ColorScheme): [number, number, number] {
+  const v = Math.max(0, Math.min(1, value));
+  if (scheme === "praat") {
+    const g = Math.round((1 - v) * 255);
+    return [g, g, g];
+  }
+  if (scheme === "inverted") {
+    const g = Math.round(v * 255);
+    return [g, g, g];
+  }
+  const t = v * (VIRIDIS.length - 1);
+  const i = Math.floor(t);
+  const f = t - i;
+  const a = VIRIDIS[i];
+  const b = VIRIDIS[Math.min(VIRIDIS.length - 1, i + 1)];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
+export function computeSpectrogram(
+  audio: Float32Array,
   sampleRate: number,
-  windowSize: number,
-  maxFreqHz: number,
-): STFTResult {
-  const hopSize  = Math.floor(windowSize / 4);
-  const fftSize  = nextPow2(windowSize);
-  const hann     = hannWindow(windowSize);
+  params: SpectrogramParams,
+): { rgba: Uint8ClampedArray; width: number; height: number } {
+  const winLen = Math.max(8, Math.round(params.windowLengthSec * sampleRate));
+  const fftSize = nextPow2(winLen);
+  const hop = Math.max(1, Math.round(winLen / 8));
+  const win = makeWindow(winLen, params.windowShape);
 
-  const totalBins   = Math.floor(fftSize / 2) + 1;
-  const nyquist     = sampleRate / 2;
-  const freqCeiling = Math.min(maxFreqHz, nyquist);
-  const maxBin      = Math.min(totalBins - 1, Math.floor((freqCeiling * fftSize) / sampleRate));
-  const numBins     = maxBin + 1;
+  const nyquist = sampleRate / 2;
+  const fCeil = Math.min(params.maxFrequencyHz, nyquist);
+  const totalBins = (fftSize >> 1) + 1;
+  const numBins = Math.min(totalBins, Math.max(1, Math.floor((fCeil * fftSize) / sampleRate) + 1));
 
-  // Enough left-aligned windows to cover the tail with zero-padding.
-  const numFrames = Math.max(1, Math.ceil((samples.length - windowSize) / hopSize) + 1);
+  const emphasized = preEmphasize(audio, sampleRate, params.preEmphasisHz);
+  const numFrames = Math.max(1, Math.floor((emphasized.length - winLen) / hop) + 1);
 
   const re = new Float64Array(fftSize);
   const im = new Float64Array(fftSize);
-  const magnitudesDB: Float32Array[] = new Array(numFrames);
+  const dbFrames: Float32Array[] = new Array(numFrames);
+  let dbMax = -Infinity;
 
-  for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-    const startSample = frameIdx * hopSize;
-
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * hop;
     for (let i = 0; i < fftSize; i++) {
-      if (i < windowSize) {
-        const sampleIdx = startSample + i;
-        re[i] = (sampleIdx < samples.length ? samples[sampleIdx] : 0.0) * hann[i];
+      if (i < winLen) {
+        const idx = start + i;
+        re[i] = idx < emphasized.length ? emphasized[idx] * win[i] : 0;
       } else {
-        re[i] = 0.0;
+        re[i] = 0;
       }
-      im[i] = 0.0;
+      im[i] = 0;
     }
-
     fft(re, im);
-
-    const dbFrame = new Float32Array(numBins);
-    const FLOOR   = 1e-10;
-    for (let bin = 0; bin < numBins; bin++) {
-      const mag    = Math.sqrt(re[bin] * re[bin] + im[bin] * im[bin]);
-      dbFrame[bin] = 20.0 * Math.log10(Math.max(mag, FLOOR));
+    const frame = new Float32Array(numBins);
+    for (let b = 0; b < numBins; b++) {
+      const mag = Math.sqrt(re[b] * re[b] + im[b] * im[b]);
+      const db = 20 * Math.log10(Math.max(mag, 1e-10));
+      frame[b] = db;
+      if (db > dbMax) dbMax = db;
     }
-    magnitudesDB[frameIdx] = dbFrame;
+    dbFrames[f] = frame;
   }
 
-  return { magnitudesDB, numBins, numFrames };
+  const dbFloor = dbMax - params.dynamicRangeDb;
+  const range = params.dynamicRangeDb > 0 ? params.dynamicRangeDb : 1;
+  const width = numFrames;
+  const height = numBins;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+
+  for (let f = 0; f < numFrames; f++) {
+    const frame = dbFrames[f];
+    for (let b = 0; b < numBins; b++) {
+      const norm = Math.max(0, Math.min(1, (frame[b] - dbFloor) / range));
+      const row = numBins - 1 - b;
+      const idx = (row * width + f) * 4;
+      const [r, g, bl] = applyColor(norm, params.colorScheme);
+      rgba[idx] = r;
+      rgba[idx + 1] = g;
+      rgba[idx + 2] = bl;
+      rgba[idx + 3] = 255;
+    }
+  }
+
+  return { rgba, width, height };
 }
 
-// ─── Message Handler ─────────────────────────────────────────────────────────
+// Module-load guard: register the worker listener only when running inside a
+// Worker context. Lets the same module be imported in node-environment tests.
+if (typeof self !== "undefined" && typeof (self as Worker).addEventListener === "function") {
+  (self as Worker).addEventListener("message", (evt: MessageEvent<SpectrogramComputeMessage>) => {
+    const msg = evt.data;
+    if (!msg || msg.type !== "compute") return;
+    try {
+      const { audioData, sampleRate, params } = msg;
+      if (!(audioData instanceof Float32Array)) throw new Error("audioData must be Float32Array");
+      if (audioData.length === 0) throw new Error("audioData empty");
+      if (audioData.length / sampleRate > HARD_CAP_SEC) throw new Error(`exceeds ${HARD_CAP_SEC}s cap`);
+      if (params.windowLengthSec <= 0) throw new Error("windowLengthSec must be > 0");
+      if (params.dynamicRangeDb <= 0) throw new Error("dynamicRangeDb must be > 0");
 
-self.addEventListener('message', (evt: MessageEvent<SpectrogramComputeMessage>) => {
-  const msg = evt.data;
-  if (!msg || msg.type !== 'compute') return;
-
-  try {
-    const { audioData, sampleRate, windowSize, startSec, endSec } = msg;
-
-    if (!(audioData instanceof Float32Array))
-      throw new Error('audioData must be a Float32Array');
-    if (!Number.isFinite(sampleRate) || sampleRate <= 0)
-      throw new Error('sampleRate must be a positive finite number');
-    if (windowSize !== 256 && windowSize !== 2048)
-      throw new Error('windowSize must be 256 or 2048');
-    if (audioData.length === 0)
-      throw new Error('audioData is empty');
-    if (!Number.isFinite(startSec) || !Number.isFinite(endSec))
-      throw new Error('startSec and endSec must be finite numbers');
-    if (startSec < 0 || endSec < 0)
-      throw new Error('startSec and endSec must be >= 0');
-    if (endSec <= startSec)
-      throw new Error('endSec must be > startSec');
-
-    const requestedDurationSec = endSec - startSec;
-    if (requestedDurationSec > MAX_COMPUTE_DURATION_SEC)
-      throw new Error('STFT request exceeds hard 30 s cap');
-
-    const maxSamples = Math.ceil(sampleRate * MAX_COMPUTE_DURATION_SEC);
-    if (audioData.length > maxSamples)
-      throw new Error('audioData exceeds hard 30 s cap');
-
-    const representedDurationSec  = audioData.length / sampleRate;
-    const durationToleranceSec    = Math.max(1 / sampleRate, 0.01);
-    if (Math.abs(representedDurationSec - requestedDurationSec) > durationToleranceSec)
-      throw new Error('audioData length does not match requested duration');
-
-    const { magnitudesDB, numBins, numFrames } = computeSTFT(
-      audioData,
-      sampleRate,
-      windowSize,
-      MAX_FREQ_HZ,
-    );
-
-    // Global normalisation
-    let dbMin =  Infinity;
-    let dbMax = -Infinity;
-    for (let f = 0; f < numFrames; f++) {
-      const frame = magnitudesDB[f];
-      for (let b = 0; b < numBins; b++) {
-        const v = frame[b];
-        if (v < dbMin) dbMin = v;
-        if (v > dbMax) dbMax = v;
-      }
+      const { rgba, width, height } = computeSpectrogram(audioData, sampleRate, params);
+      const out: SpectrogramOutMessage = { type: "result", rgba, width, height };
+      (self as Worker).postMessage(out, [rgba.buffer]);
+    } catch (err) {
+      const out: SpectrogramOutMessage = {
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      };
+      (self as Worker).postMessage(out);
     }
-    const safeRange = (dbMax - dbMin) > 0 ? dbMax - dbMin : 1.0;
-
-    const width     = numFrames;
-    const height    = numBins;
-    const imageData = new Uint8ClampedArray(width * height);
-
-    for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-      const frame = magnitudesDB[frameIdx];
-      for (let bin = 0; bin < numBins; bin++) {
-        const normalised     = (frame[bin] - dbMin) / safeRange;
-        const gray           = Math.round(normalised * 255);
-        const row            = (numBins - 1) - bin; // low freq at bottom → high row index
-        imageData[row * width + frameIdx] = gray;
-      }
-    }
-
-    const out: SpectrogramOutMessage = { type: 'result', imageData, width, height, startSec, endSec };
-    self.postMessage(out, [imageData.buffer]);
-
-  } catch (err: unknown) {
-    const out: SpectrogramOutMessage = {
-      type: 'error',
-      message: err instanceof Error ? err.message : String(err),
-    };
-    self.postMessage(out);
-  }
-});
+  });
+}
