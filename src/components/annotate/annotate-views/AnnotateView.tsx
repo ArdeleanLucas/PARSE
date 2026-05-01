@@ -361,6 +361,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     wsSetVolume(volume);
   }, [audioReady, volume, wsSetVolume]);
 
+  // Spectrogram time window: pad the active concept's interval by ±0.5 s so the
+  // user sees a bit of context. PARSE recordings are 1–2+ h, so without slicing
+  // here the worker hits its 30 s hard cap and renders a blank canvas.
+  const spectrogramTimeRange = useMemo(() => {
+    if (!conceptInterval) return undefined;
+    const padding = 0.5;
+    const start = Math.max(0, conceptInterval.start - padding);
+    const end = duration > 0
+      ? Math.min(duration, conceptInterval.end + padding)
+      : conceptInterval.end + padding;
+    return { startSec: start, endSec: end };
+  }, [conceptInterval, duration]);
+
   useSpectrogram({
     enabled: spectroOn && audioReady,
     wsRef,
@@ -373,6 +386,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       preEmphasisHz: spectrogramParams.preEmphasisHz,
       colorScheme: spectrogramParams.colorScheme,
     },
+    timeRange: spectrogramTimeRange,
   });
 
   useEffect(() => {
