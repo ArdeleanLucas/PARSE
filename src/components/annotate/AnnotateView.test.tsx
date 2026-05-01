@@ -700,7 +700,7 @@ describe('AnnotateView', () => {
     expect(screen.getByTestId('spectrogram-settings')).toBeTruthy();
   });
 
-  it('renders a spectrogram playhead at currentTime / duration when the spectrogram is on', () => {
+  it('renders a spectrogram playhead positioned within the rendered slice (no concept => first 30 s)', () => {
     mockRecord = makeRecord([]);
     mockCurrentTime = 1.5;
     mockDuration = 4;
@@ -708,7 +708,34 @@ describe('AnnotateView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
     const playhead = screen.getByTestId('spectrogram-playhead') as HTMLElement;
+    // No concept interval → effective slice = [0, min(duration, 30)] = [0, 4].
+    // 1.5 / 4 = 37.5%.
     expect(playhead.style.left).toBe('37.5%');
+  });
+
+  it('positions the playhead relative to the concept slice on a long recording', () => {
+    // Long audio (e.g. 8500 s) with a concept at 1530.0–1531.0. The pre-slice
+    // playhead bug computed currentTime/duration on the full file and was
+    // visually static; the fix maps currentTime into [start-0.5, end+0.5].
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'a', start: 1530, end: 1531 }]);
+    mockCurrentTime = 1530.5;
+    mockDuration = 8500;
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    const playhead = screen.getByTestId('spectrogram-playhead') as HTMLElement;
+    // Slice = [1529.5, 1531.5]; (1530.5 − 1529.5) / 2.0 = 50%.
+    expect(playhead.style.left).toBe('50%');
+  });
+
+  it('hides the spectrogram playhead when currentTime is outside the slice', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'a', start: 1530, end: 1531 }]);
+    mockCurrentTime = 1600; // far past the [1529.5, 1531.5] slice
+    mockDuration = 8500;
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    expect(screen.queryByTestId('spectrogram-playhead')).toBeNull();
   });
 
   it('hides the spectrogram playhead when duration is zero', () => {
