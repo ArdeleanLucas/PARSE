@@ -69,8 +69,6 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/export/nexus",
         "/api/contact-lexemes/coverage",
         "/api/tags",
-        "/api/tags/{tagId}",
-        "/api/concepts/{conceptId}/tags/{tagId}",
         "/api/spectrogram",
         "/api/lexeme/search",
         "/api/onboard/speaker",
@@ -99,6 +97,18 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/mcp/tools",
         "/api/mcp/tools/{toolName}",
     }
+
+
+def test_build_openapi_document_restores_old_tags_shape_and_put_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    tags_path = spec["paths"]["/api/tags"]
+
+    assert set(tags_path) == {"get", "put"}
+    assert tags_path["get"]["summary"] == "Read global concept tags"
+    assert tags_path["get"]["operationId"] == "getTags"
+    assert tags_path["put"]["summary"] == "Replace global concept tags"
+    assert tags_path["put"]["operationId"] == "replaceTags"
+    assert "requestBody" in tags_path["put"]
 
 
 def test_build_openapi_document_keeps_lexeme_media_search_contract_honest() -> None:

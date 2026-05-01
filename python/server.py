@@ -1528,9 +1528,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/auth/logout":
             self._api_auth_logout()
             return
-        if request_path == "/api/tags":
-            self._api_post_concept_tag()
-            return
         if request_path == "/api/tags/merge":
             self._api_post_tags_merge()
             return
@@ -1569,9 +1566,6 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_mcp_tool(parts[3])
             return
 
-        if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags":
-            self._api_post_concept_tag_attachment(parts[2], parts[4])
-            return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_post_annotation(parts[2])
             return
@@ -1603,7 +1597,13 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/config":
             self._api_update_config()
             return
+        if request_path == "/api/tags":
+            self._api_put_concept_tags()
+            return
 
+        raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
+
+    def _dispatch_api_delete(self, request_path: str) -> None:
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
 def _parse_single_range(self, range_header: str, file_size: int) -> Tuple[int, int]:

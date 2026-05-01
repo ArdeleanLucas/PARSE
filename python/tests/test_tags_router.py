@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 from http import HTTPStatus
@@ -13,6 +14,22 @@ if str(PYTHON_DIR) not in sys.path:
 
 import server
 from storage import tags_store
+
+
+def _tag(
+    tag_id: str = "tag_archaic",
+    label: str = "archaic",
+    color: str = "#3554B8",
+    concepts: list[str] | None = None,
+    lexeme_targets: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": tag_id,
+        "label": label,
+        "color": color,
+        "concepts": [] if concepts is None else concepts,
+        "lexemeTargets": [] if lexeme_targets is None else lexeme_targets,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -51,119 +68,97 @@ class _HandlerHarness(server.RangeRequestHandler):
         self.ended += 1
 
 
-def test_get_tags_returns_empty_store() -> None:
+def test_get_tags_returns_empty_old_shape() -> None:
     handler = _HandlerHarness("/api/tags")
 
     assert handler._handle_api("GET") is True
 
-    assert handler.sent_json == [(HTTPStatus.OK, {"tags": [], "attachments": {}})]
+    assert handler.sent_json == [(HTTPStatus.OK, {"tags": []})]
     assert handler.sent_errors == []
 
 
-def test_post_tags_creates_tag_with_201() -> None:
+def test_put_tags_replaces_full_list_and_echoes_validated_old_shape() -> None:
+    tag = _tag(concepts=["water"], lexeme_targets=["Saha01::sister"])
+    handler = _HandlerHarness("/api/tags", {"tags": [tag]})
+
+    assert handler._handle_api("PUT") is True
+
+    assert handler.sent_json == [(HTTPStatus.OK, {"tags": [tag]})]
+    assert tags_store.fetch_all() == {"version": 2, "tags": [tag]}
+
+
+def test_put_tags_is_idempotent() -> None:
+    payload = {"tags": [_tag(), _tag("tag_uncertain", "uncertain", "#aabbcc")]}
+
+    first = _HandlerHarness("/api/tags", payload)
+    second = _HandlerHarness("/api/tags", payload)
+    assert first._handle_api("PUT") is True
+    assert second._handle_api("PUT") is True
+
+    assert first.sent_json == second.sent_json == [(HTTPStatus.OK, payload)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"tags": "not-a-list"},
+        {"tags": [{"id": "tag_bad", "label": "bad", "color": "blue", "concepts": [], "lexemeTargets": []}]},
+        {"tags": [_tag("tag_same", "one"), _tag("tag_same", "two")]},
+        {"tags": [_tag("tag_one", "archaic"), _tag("tag_two", "ARCHAIC")]},
+        {"tags": [{"id": "tag_bad", "label": "bad", "color": "#3554B8", "concepts": [], "lexemeTargets": ["bad"]}]},
+    ],
+)
+def test_put_tags_rejects_schema_violations(body: dict[str, Any]) -> None:
+    handler = _HandlerHarness("/api/tags", body)
+
+    assert handler._handle_api("PUT") is True
+
+    assert handler.sent_json == []
+    assert handler.sent_errors
+    assert handler.sent_errors[0][0] == HTTPStatus.BAD_REQUEST
+
+
+def test_post_tags_endpoint_added_by_pr239_is_removed() -> None:
     handler = _HandlerHarness("/api/tags", {"name": "archaic", "color": "#3554B8"})
 
     assert handler._handle_api("POST") is True
 
-    assert len(handler.sent_json) == 1
-    status, payload = handler.sent_json[0]
-    assert status == HTTPStatus.CREATED
-    assert payload["id"].startswith("tag_")
-    assert payload["name"] == "archaic"
-    assert payload["color"] == "#3554B8"
-    assert tags_store.fetch_all()["tags"] == [payload]
+    assert handler.sent_json == []
+    assert handler.sent_errors == [(HTTPStatus.NOT_FOUND, "Unknown API endpoint")]
+    assert tags_store.fetch_all() == {"version": 2, "tags": []}
 
 
-def test_post_tags_returns_409_on_case_insensitive_name_conflict() -> None:
-    tags_store.create_tag("archaic", "#3554B8")
-    handler = _HandlerHarness("/api/tags", {"name": "ARCHAIC", "color": "#aabbcc"})
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("DELETE", "/api/tags/tag_archaic"),
+        ("POST", "/api/concepts/water/tags/tag_archaic"),
+        ("DELETE", "/api/concepts/water/tags/tag_archaic"),
+    ],
+)
+def test_per_tag_and_per_concept_attachment_endpoints_added_by_pr239_are_removed(method: str, path: str) -> None:
+    handler = _HandlerHarness(path)
 
-    assert handler._handle_api("POST") is True
+    assert handler._handle_api(method) is True
 
     assert handler.sent_json == []
-    assert handler.sent_errors == [(HTTPStatus.CONFLICT, "Tag 'ARCHAIC' already exists")]
+    assert handler.sent_errors == [(HTTPStatus.NOT_FOUND, "Unknown API endpoint")]
 
 
-@pytest.mark.parametrize("color", ["#3554B8", "#aabbcc"])
-def test_post_tags_accepts_valid_hex_colors(color: str) -> None:
-    handler = _HandlerHarness("/api/tags", {"name": f"tag-{color[-2:]}", "color": color})
+def test_get_tags_loads_migrated_v1_file_without_attachments_key(isolated_tags_path: pathlib.Path) -> None:
+    isolated_tags_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tags": [{"id": "tag_archaic", "name": "archaic", "color": "#3554B8", "createdAt": "2026-05-01T00:00:00Z"}],
+                "attachments": {"water": ["tag_archaic"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    handler = _HandlerHarness("/api/tags")
 
-    assert handler._handle_api("POST") is True
+    assert handler._handle_api("GET") is True
 
-    assert handler.sent_json[0][0] == HTTPStatus.CREATED
-    assert handler.sent_json[0][1]["color"] == color
-    assert handler.sent_errors == []
-
-
-@pytest.mark.parametrize("color", ["3554B8", "#3554B", "#3554B88", "#zzzzzz", "blue"])
-def test_post_tags_rejects_invalid_hex_colors(color: str) -> None:
-    handler = _HandlerHarness("/api/tags", {"name": "bad-color", "color": color})
-
-    assert handler._handle_api("POST") is True
-
-    assert handler.sent_json == []
-    assert handler.sent_errors == [(HTTPStatus.BAD_REQUEST, "Tag color must be a six-digit hex color like #3554B8")]
-
-
-def test_delete_tag_returns_204_and_cascades_attachments() -> None:
-    tag = tags_store.create_tag("archaic", "#3554B8")
-    other = tags_store.create_tag("uncertain", "#aabbcc")
-    tags_store.attach("concept_a", tag["id"])
-    tags_store.attach("concept_a", other["id"])
-    tags_store.attach("concept_b", tag["id"])
-    handler = _HandlerHarness(f"/api/tags/{tag['id']}")
-
-    assert handler._handle_api("DELETE") is True
-
-    assert handler.response_codes == [HTTPStatus.NO_CONTENT]
-    assert ("Content-Length", "0") in handler.headers_sent
-    assert handler.ended == 1
-    assert tags_store.fetch_all()["attachments"] == {"concept_a": [other["id"]]}
-
-
-def test_delete_tag_returns_204_even_when_tag_missing() -> None:
-    handler = _HandlerHarness("/api/tags/tag_does_not_exist")
-
-    assert handler._handle_api("DELETE") is True
-
-    assert handler.response_codes == [HTTPStatus.NO_CONTENT]
-    assert ("Content-Length", "0") in handler.headers_sent
-    assert handler.ended == 1
-
-
-def test_post_concept_tag_attach_is_idempotent() -> None:
-    tag = tags_store.create_tag("archaic", "#3554B8")
-    path = f"/api/concepts/concept_a/tags/{tag['id']}"
-
-    first = _HandlerHarness(path)
-    second = _HandlerHarness(path)
-    assert first._handle_api("POST") is True
-    assert second._handle_api("POST") is True
-
-    assert first.response_codes == [HTTPStatus.NO_CONTENT]
-    assert second.response_codes == [HTTPStatus.NO_CONTENT]
-    assert tags_store.fetch_all()["attachments"] == {"concept_a": [tag["id"]]}
-
-
-def test_post_concept_tag_attach_returns_404_for_unknown_tag() -> None:
-    handler = _HandlerHarness("/api/concepts/concept_a/tags/tag_does_not_exist")
-
-    assert handler._handle_api("POST") is True
-
-    assert handler.sent_json == []
-    assert handler.sent_errors == [(HTTPStatus.NOT_FOUND, "Unknown tag 'tag_does_not_exist'")]
-
-
-def test_delete_concept_tag_detach_is_idempotent() -> None:
-    tag = tags_store.create_tag("archaic", "#3554B8")
-    tags_store.attach("concept_a", tag["id"])
-    path = f"/api/concepts/concept_a/tags/{tag['id']}"
-
-    first = _HandlerHarness(path)
-    second = _HandlerHarness(path)
-    assert first._handle_api("DELETE") is True
-    assert second._handle_api("DELETE") is True
-
-    assert first.response_codes == [HTTPStatus.NO_CONTENT]
-    assert second.response_codes == [HTTPStatus.NO_CONTENT]
-    assert tags_store.fetch_all()["attachments"] == {}
+    assert handler.sent_json == [(HTTPStatus.OK, {"tags": [_tag(concepts=["water"])]})]
