@@ -11,13 +11,31 @@ type MockWorker = {
   onerror: ((evt: ErrorEvent) => void) | null;
 };
 
-function makeAudioBufferLike() {
+function makeAudioBufferLike(samples?: Float32Array) {
+  const length = samples?.length ?? 4410;
+  const data = samples ?? new Float32Array(length);
   return {
     numberOfChannels: 1,
-    length: 4410,
+    length,
     sampleRate: 44100,
-    duration: 0.1,
-    getChannelData: () => new Float32Array(4410),
+    duration: length / 44100,
+    getChannelData: () => data,
+  };
+}
+
+function makeLongAudioBufferLike(durationSec: number) {
+  // Don't allocate the actual array — `useSpectrogram` will slice the channel
+  // and only the slice gets read. Return a thin object that still answers
+  // `getChannelData` with a typed array spanning the requested length.
+  const sr = 44100;
+  const length = Math.floor(durationSec * sr);
+  const data = new Float32Array(length);
+  return {
+    numberOfChannels: 1,
+    length,
+    sampleRate: sr,
+    duration: durationSec,
+    getChannelData: () => data,
   };
 }
 
@@ -242,5 +260,102 @@ describe("useSpectrogram", () => {
     unmount();
 
     expect(worker.terminate).toHaveBeenCalled();
+  });
+
+  it("slices audio to the provided timeRange before posting", () => {
+    const canvas = document.createElement("canvas");
+    // 10 s at 44100 Hz = 441000 samples
+    const audioBuf = makeLongAudioBufferLike(10);
+    const wsRef = { current: { getDecodedData: vi.fn(() => audioBuf) } };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+        timeRange: { startSec: 2, endSec: 5 },
+      }),
+    );
+
+    const worker = workerInstances[0];
+    const [payload] = vi.mocked(worker.postMessage).mock.calls[0] as [
+      { audioData: Float32Array; sampleRate: number },
+      Transferable[],
+    ];
+    // 3 seconds at 44100 Hz = 132300 samples
+    expect(payload.audioData.length).toBe(132300);
+    expect(payload.sampleRate).toBe(44100);
+  });
+
+  it("clamps timeRange to the audio duration when endSec exceeds it", () => {
+    const canvas = document.createElement("canvas");
+    const audioBuf = makeLongAudioBufferLike(2);
+    const wsRef = { current: { getDecodedData: vi.fn(() => audioBuf) } };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+        timeRange: { startSec: 0, endSec: 100 },
+      }),
+    );
+
+    const worker = workerInstances[0];
+    const [payload] = vi.mocked(worker.postMessage).mock.calls[0] as [
+      { audioData: Float32Array },
+      Transferable[],
+    ];
+    // 2 s at 44100 Hz = 88200 samples (entire buffer)
+    expect(payload.audioData.length).toBe(88200);
+  });
+
+  it("defaults to the first 30 s of audio when no timeRange is provided", () => {
+    const canvas = document.createElement("canvas");
+    // 600 s of audio (10 minutes) — must NOT be passed in full
+    const audioBuf = makeLongAudioBufferLike(600);
+    const wsRef = { current: { getDecodedData: vi.fn(() => audioBuf) } };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+      }),
+    );
+
+    const worker = workerInstances[0];
+    const [payload] = vi.mocked(worker.postMessage).mock.calls[0] as [
+      { audioData: Float32Array },
+      Transferable[],
+    ];
+    // Cap = 30 s × 44100 = 1323000 samples; not the full 26.46 M.
+    expect(payload.audioData.length).toBe(1323000);
+  });
+
+  it("skips computation when the timeRange is empty (end <= start)", () => {
+    const canvas = document.createElement("canvas");
+    const wsRef = {
+      current: { getDecodedData: vi.fn(() => makeAudioBufferLike()) },
+    };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+        timeRange: { startSec: 5, endSec: 5 },
+      }),
+    );
+
+    expect(WorkerMock).not.toHaveBeenCalled();
   });
 });
