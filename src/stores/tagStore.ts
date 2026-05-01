@@ -1,3 +1,4 @@
+// Per-speaker annotation tags. NOT the global concept-tag registry — see src/state/conceptTags.ts.
 import { create } from "zustand";
 import type { Tag } from "../api/types";
 

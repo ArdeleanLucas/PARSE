@@ -1,8 +1,8 @@
 import { apiFetch } from './contracts/shared';
-import type { Tag } from '@/state/tags';
+import type { ConceptTag } from '@/state/conceptTags';
 
 export interface FetchAllTagsResponse {
-  tags: Tag[];
+  tags: ConceptTag[];
   attachments: Record<string, string[]>;
 }
 
@@ -10,8 +10,8 @@ export const tagsApi = {
   fetchAll: (): Promise<FetchAllTagsResponse> =>
     apiFetch<FetchAllTagsResponse>('/api/tags'),
 
-  create: (input: { name: string; color: string }): Promise<Tag> =>
-    apiFetch<Tag>('/api/tags', { method: 'POST', body: JSON.stringify(input) }),
+  create: (input: { name: string; color: string }): Promise<ConceptTag> =>
+    apiFetch<ConceptTag>('/api/tags', { method: 'POST', body: JSON.stringify(input) }),
 
   delete: (id: string): Promise<void> =>
     apiFetch<void>(`/api/tags/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined),
