@@ -4,7 +4,21 @@ from __future__ import annotations
 from typing import Callable
 
 import server as _server
+from ai.provider import AIProvider
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
+
+
+def _release_registered_ipa_aligner() -> None:
+    aligner = getattr(_server, '_IPA_ALIGNER', None)
+    setattr(_server, '_IPA_ALIGNER', None)
+    release = getattr(aligner, 'release', None)
+    if callable(release):
+        release()
+
+
+if not callable(_server.__dict__.get('_release_ipa_aligner')):
+    setattr(_server, '_release_ipa_aligner', _release_registered_ipa_aligner)
+
 
 def _annotation_empty_tier(display_order: int) -> _server.Dict[str, _server.Any]:
     return {'type': 'interval', 'display_order': int(display_order), 'intervals': []}
@@ -1407,6 +1421,7 @@ def _compute_speaker_ortho_concept_windows(
     concept_ids: _server.Optional[_server.Sequence[str]],
     language: _server.Optional[str],
     has_existing_text: bool,
+    provider: _server.Optional[AIProvider] = None,
 ) -> _server.Dict[str, _server.Any]:
     if not language:
         language = _transcription_language_from_payload_or_annotation({}, annotation, speaker=speaker, step='ortho')
@@ -1419,8 +1434,8 @@ def _compute_speaker_ortho_concept_windows(
             _server._concept_windows_empty_reason(run_mode, concept_ids),
         )
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-    provider = _server.get_ortho_provider()
-    setattr(_server, '_LAST_ORTHO_PROVIDER', provider)
+    if provider is None:
+        provider = _server.get_ortho_provider()
     from ai.job_cancel import clear_cancel, make_should_cancel
 
     should_cancel = make_should_cancel(job_id)
@@ -1997,7 +2012,12 @@ def _compute_speaker_retranscribe_with_boundaries(
     }
 
 
-def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+def _compute_speaker_ortho(
+    job_id: str,
+    payload: _server.Dict[str, _server.Any],
+    *,
+    provider: _server.Optional[AIProvider] = None,
+) -> _server.Dict[str, _server.Any]:
     """Generate an orthographic transcript for a speaker using the razhan model.
 
     Runs the ORTH provider (faster-whisper with razhan/whisper-base-sdh)
@@ -2056,13 +2076,14 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
             concept_ids=concept_ids,
             language=language_str,
             has_existing_text=has_existing_text,
+            provider=provider,
         )
     if has_existing_text and (not overwrite):
         return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals)}
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
     _set_compute_progress(job_id, 2.0, message='Loading ortho model (razhan)')
-    provider = _server.get_ortho_provider()
-    setattr(_server, '_LAST_ORTHO_PROVIDER', provider)
+    if provider is None:
+        provider = _server.get_ortho_provider()
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
@@ -2168,33 +2189,6 @@ def _gpu_free_memory_gb() -> _server.Optional[float]:
         return None
 
 
-def _cleanup_full_pipeline_ortho_provider() -> None:
-    try:
-        provider = getattr(_server, '_LAST_ORTHO_PROVIDER', None)
-        if provider is None:
-            return
-        unload = getattr(provider, 'unload_model', None)
-        if callable(unload):
-            unload()
-    except Exception:
-        pass
-
-
-def _cleanup_full_pipeline_ipa_aligner() -> None:
-    try:
-        release = getattr(_server, '_release_ipa_aligner', None)
-        if callable(release):
-            release()
-            return
-        aligner = getattr(_server, '_IPA_ALIGNER', None)
-        setattr(_server, '_IPA_ALIGNER', None)
-        release_aligner = getattr(aligner, 'release', None)
-        if callable(release_aligner):
-            release_aligner()
-    except Exception:
-        pass
-
-
 def _ensure_free_gpu_memory_for_ipa() -> None:
     free_gb = _gpu_free_memory_gb()
     if free_gb is not None and free_gb < _MIN_FREE_GB_FOR_IPA:
@@ -2256,105 +2250,127 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     results: _server.Dict[str, _server.Any] = {}
     steps_run: _server.List[str] = []
     total = len(selected)
-    cleanup_ortho = False
-    cleanup_ipa = False
+    ortho_provider: _server.Optional[AIProvider] = None
 
     def _capture_error(exc: BaseException) -> _server.Dict[str, _server.Any]:
         return {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
-    for idx, step in enumerate(selected):
-        step_base_pct = 5.0 + idx / total * 90.0
-        _set_compute_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
+
+    def _unload_ortho_provider() -> None:
+        nonlocal ortho_provider
+        provider = ortho_provider
+        if provider is None:
+            return
         try:
-            if step == 'normalize':
-                source_rel = _server._annotation_primary_source_wav(speaker)
-                if not source_rel:
-                    raise RuntimeError('Cannot normalize {0!r}: no source_audio on annotation'.format(speaker))
-                audio_path = _server._resolve_project_path(source_rel)
-                working_dir = _server._project_root() / 'audio' / 'working' / speaker
-                normalized_path = _server.build_normalized_output_path(audio_path, working_dir)
-                if normalized_path.exists() and (not overwrites.get('normalize', False)):
-                    results['normalize'] = {'status': 'skipped', 'reason': 'normalized output already exists; overwrite=False', 'path': str(normalized_path.relative_to(_server._project_root()))}
-                    steps_run.append(step)
-                    continue
-                _server._run_normalize_job(job_id, speaker, source_rel)
-                snapshot = _server._get_job_snapshot(job_id) or {}
-                if str(snapshot.get('status') or '') == 'error':
-                    raise RuntimeError('normalize step failed: {0}'.format(snapshot.get('error') or 'unknown error'))
-                sub_result = snapshot.get('result') if isinstance(snapshot.get('result'), dict) else {}
-                results['normalize'] = {'status': 'ok', **(dict(sub_result) if sub_result else {'done': True})}
-                _server._reset_job_to_running(job_id)
-                steps_run.append(step)
-            elif step == 'stt':
-                if run_mode == 'full':
-                    cached = _server._latest_stt_segments_for_speaker(speaker)
-                    if cached and (not overwrites.get('stt', False)):
-                        results['stt'] = {'status': 'skipped', 'reason': 'STT cache already exists; overwrite=False', 'segments': len(cached)}
+            unload = getattr(provider, 'unload_model', None)
+            if callable(unload):
+                unload()
+        except Exception:
+            pass
+        finally:
+            ortho_provider = None
+
+    def _release_full_pipeline_ipa_aligner() -> None:
+        try:
+            release = getattr(_server, '_release_ipa_aligner', None)
+            if callable(release):
+                release()
+        except Exception:
+            pass
+
+    try:
+        for idx, step in enumerate(selected):
+            step_base_pct = 5.0 + idx / total * 90.0
+            _set_compute_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
+            try:
+                if step == 'normalize':
+                    source_rel = _server._annotation_primary_source_wav(speaker)
+                    if not source_rel:
+                        raise RuntimeError('Cannot normalize {0!r}: no source_audio on annotation'.format(speaker))
+                    audio_path = _server._resolve_project_path(source_rel)
+                    working_dir = _server._project_root() / 'audio' / 'working' / speaker
+                    normalized_path = _server.build_normalized_output_path(audio_path, working_dir)
+                    if normalized_path.exists() and (not overwrites.get('normalize', False)):
+                        results['normalize'] = {'status': 'skipped', 'reason': 'normalized output already exists; overwrite=False', 'path': str(normalized_path.relative_to(_server._project_root()))}
                         steps_run.append(step)
                         continue
-                    try:
-                        audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-                    except (RuntimeError, FileNotFoundError) as exc:
-                        raise RuntimeError('Cannot run STT for {0!r}: {1}'.format(speaker, exc))
-                    try:
-                        stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
-                    except Exception as exc:
-                        raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
-                    results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}
-                else:
-                    stt_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'run_mode': run_mode, 'language': language_str}
-                    if concept_ids is not None:
-                        stt_payload['concept_ids'] = list(concept_ids)
-                    sub_result = _server._compute_speaker_stt(job_id, stt_payload)
-                    if sub_result.get('skipped'):
-                        results['stt'] = {'status': 'skipped', **sub_result}
+                    _server._run_normalize_job(job_id, speaker, source_rel)
+                    snapshot = _server._get_job_snapshot(job_id) or {}
+                    if str(snapshot.get('status') or '') == 'error':
+                        raise RuntimeError('normalize step failed: {0}'.format(snapshot.get('error') or 'unknown error'))
+                    sub_result = snapshot.get('result') if isinstance(snapshot.get('result'), dict) else {}
+                    results['normalize'] = {'status': 'ok', **(dict(sub_result) if sub_result else {'done': True})}
+                    _server._reset_job_to_running(job_id)
+                    steps_run.append(step)
+                elif step == 'stt':
+                    if run_mode == 'full':
+                        cached = _server._latest_stt_segments_for_speaker(speaker)
+                        if cached and (not overwrites.get('stt', False)):
+                            results['stt'] = {'status': 'skipped', 'reason': 'STT cache already exists; overwrite=False', 'segments': len(cached)}
+                            steps_run.append(step)
+                            continue
+                        try:
+                            audio_path = _server._pipeline_audio_path_for_speaker(speaker)
+                        except (RuntimeError, FileNotFoundError) as exc:
+                            raise RuntimeError('Cannot run STT for {0!r}: {1}'.format(speaker, exc))
+                        try:
+                            stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
+                        except Exception as exc:
+                            raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
+                        results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}
                     else:
-                        results['stt'] = {'status': 'ok', **sub_result}
-                steps_run.append(step)
-            elif step == 'ortho':
-                ortho_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ortho', False), 'language': language_str, 'run_mode': run_mode}
-                if concept_ids is not None:
-                    ortho_sub_payload['concept_ids'] = list(concept_ids)
-                if payload.get('refine_lexemes') is not None:
-                    ortho_sub_payload['refine_lexemes'] = bool(payload.get('refine_lexemes'))
-                sub_result = _server._compute_speaker_ortho(job_id, ortho_sub_payload)
-                if sub_result.get('skipped'):
-                    results['ortho'] = {'status': 'skipped', **sub_result}
+                        stt_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'run_mode': run_mode, 'language': language_str}
+                        if concept_ids is not None:
+                            stt_payload['concept_ids'] = list(concept_ids)
+                        sub_result = _server._compute_speaker_stt(job_id, stt_payload)
+                        if sub_result.get('skipped'):
+                            results['stt'] = {'status': 'skipped', **sub_result}
+                        else:
+                            results['stt'] = {'status': 'ok', **sub_result}
+                    steps_run.append(step)
+                elif step == 'ortho':
+                    if ortho_provider is None:
+                        ortho_provider = _server.get_ortho_provider()
+                    ortho_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ortho', False), 'language': language_str, 'run_mode': run_mode}
+                    if concept_ids is not None:
+                        ortho_sub_payload['concept_ids'] = list(concept_ids)
+                    if payload.get('refine_lexemes') is not None:
+                        ortho_sub_payload['refine_lexemes'] = bool(payload.get('refine_lexemes'))
+                    sub_result = _server._compute_speaker_ortho(job_id, ortho_sub_payload, provider=ortho_provider)
+                    if sub_result.get('skipped'):
+                        results['ortho'] = {'status': 'skipped', **sub_result}
+                    else:
+                        results['ortho'] = {'status': 'ok', **sub_result}
+                    steps_run.append(step)
+                    if 'ipa' in selected:
+                        _unload_ortho_provider()
+                elif step == 'ipa':
+                    if 'ortho' in selected:
+                        _ensure_free_gpu_memory_for_ipa()
+                    ipa_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ipa', False), 'run_mode': run_mode}
+                    if concept_ids is not None:
+                        ipa_sub_payload['concept_ids'] = list(concept_ids)
+                    sub_result = _server._compute_speaker_ipa(job_id, ipa_sub_payload)
+                    if 'message' in sub_result and sub_result.get('total', 0) == 0:
+                        results['ipa'] = {'status': 'skipped', 'reason': sub_result['message'], **sub_result}
+                    else:
+                        results['ipa'] = {'status': 'ok', **sub_result}
+                    steps_run.append(step)
+                    _release_full_pipeline_ipa_aligner()
                 else:
-                    results['ortho'] = {'status': 'ok', **sub_result}
+                    results[step] = {'status': 'error', 'error': 'Unknown pipeline step: {0}'.format(step), 'traceback': None}
+            except Exception as exc:
+                results[step] = _capture_error(exc)
                 steps_run.append(step)
-                cleanup_ortho = True
-                if 'ipa' in selected:
-                    _cleanup_full_pipeline_ortho_provider()
-            elif step == 'ipa':
-                if 'ortho' in selected:
-                    _ensure_free_gpu_memory_for_ipa()
-                ipa_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ipa', False), 'run_mode': run_mode}
-                if concept_ids is not None:
-                    ipa_sub_payload['concept_ids'] = list(concept_ids)
-                sub_result = _server._compute_speaker_ipa(job_id, ipa_sub_payload)
-                if 'message' in sub_result and sub_result.get('total', 0) == 0:
-                    results['ipa'] = {'status': 'skipped', 'reason': sub_result['message'], **sub_result}
-                else:
-                    results['ipa'] = {'status': 'ok', **sub_result}
-                steps_run.append(step)
-                cleanup_ipa = True
-                _cleanup_full_pipeline_ipa_aligner()
-            else:
-                results[step] = {'status': 'error', 'error': 'Unknown pipeline step: {0}'.format(step), 'traceback': None}
-        except Exception as exc:
-            results[step] = _capture_error(exc)
-            steps_run.append(step)
-            if step == 'ortho':
-                cleanup_ortho = True
-                _cleanup_full_pipeline_ortho_provider()
-            elif step == 'ipa':
-                cleanup_ipa = True
-                _cleanup_full_pipeline_ipa_aligner()
-            _server._reset_job_to_running(job_id)
-    if cleanup_ortho:
-        _cleanup_full_pipeline_ortho_provider()
-    if cleanup_ipa or 'ipa' in selected:
-        _cleanup_full_pipeline_ipa_aligner()
+                if step == 'ortho' and 'ipa' in selected:
+                    _unload_ortho_provider()
+                elif step == 'ipa':
+                    _release_full_pipeline_ipa_aligner()
+                _server._reset_job_to_running(job_id)
+    finally:
+        _unload_ortho_provider()
+        if 'ipa' in selected:
+            _release_full_pipeline_ipa_aligner()
+
     _set_compute_progress(job_id, 99.0, message='Pipeline complete')
     summary = {'ok': sum((1 for r in results.values() if r.get('status') == 'ok')), 'skipped': sum((1 for r in results.values() if r.get('status') == 'skipped')), 'error': sum((1 for r in results.values() if r.get('status') == 'error'))}
     print('[PIPELINE] speaker={0} steps={1} summary={2}'.format(speaker, steps_run, summary), file=_server.sys.stderr, flush=True)

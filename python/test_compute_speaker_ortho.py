@@ -361,8 +361,10 @@ def test_full_pipeline_runs_only_selected_steps(tmp_path, monkeypatch):
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
 
     called: list[str] = []
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: type("P", (), {"unload_model": lambda self: None})())
 
-    def fake_ortho(job_id, payload):
+    def fake_ortho(job_id, payload, *, provider=None):
+        assert provider is not None
         called.append("ortho")
         return {"speaker": payload["speaker"], "filled": 3, "skipped": False}
 
@@ -535,10 +537,36 @@ class _CleanupRecorder:
         self.events.append("release")
 
 
-def _patch_pipeline_cleanup(monkeypatch, recorder: _CleanupRecorder, *, free_gb: float | None = 8.0) -> None:
+class _PipelineProvider:
+    def __init__(self, recorder: _CleanupRecorder, ordered_events: list[str] | None = None) -> None:
+        self.recorder = recorder
+        self.ordered_events = ordered_events
+
+    def unload_model(self) -> None:
+        if self.ordered_events is not None:
+            self.ordered_events.append("unload")
+        self.recorder.unload()
+
+
+def _patch_pipeline_cleanup(
+    monkeypatch,
+    recorder: _CleanupRecorder,
+    *,
+    free_gb: float | None = 8.0,
+    provider: _PipelineProvider | None = None,
+) -> tuple[_PipelineProvider, list[_PipelineProvider]]:
     monkeypatch.setitem(server._compute_full_pipeline.__globals__, "_gpu_free_memory_gb", lambda: free_gb)
-    monkeypatch.setattr(server, "_LAST_ORTHO_PROVIDER", type("P", (), {"unload_model": recorder.unload})(), raising=False)
+    if provider is None:
+        provider = _PipelineProvider(recorder)
+    provider_calls: list[_PipelineProvider] = []
+
+    def get_provider() -> _PipelineProvider:
+        provider_calls.append(provider)
+        return provider
+
+    monkeypatch.setattr(server, "get_ortho_provider", get_provider)
     monkeypatch.setattr(server, "_release_ipa_aligner", recorder.release, raising=False)
+    return provider, provider_calls
 
 
 def test_full_pipeline_unloads_ortho_between_ortho_and_ipa(tmp_path, monkeypatch):
@@ -547,30 +575,28 @@ def test_full_pipeline_unloads_ortho_between_ortho_and_ipa(tmp_path, monkeypatch
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
     events: list[str] = []
+    provider = _PipelineProvider(recorder, events)
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder, provider=provider)
 
-    def fake_ortho(*a, **kw):
+    def fake_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
         events.append("ortho")
         return {"speaker": "Fail02", "filled": 1, "skipped": False}
 
-    def fake_ipa(*a, **kw):
+    def fake_ipa(*_args, **_kwargs):
         events.append("ipa")
         return {"speaker": "Fail02", "filled": 1, "skipped": 0, "total": 1}
-
-    def unload(_self=None) -> None:
-        events.append("unload")
-        recorder.unload()
 
     monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", fake_ipa)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder)
-    monkeypatch.setattr(server, "_LAST_ORTHO_PROVIDER", type("P", (), {"unload_model": unload})(), raising=False)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert events[:3] == ["ortho", "unload", "ipa"]
     assert result["results"]["ipa"]["status"] == "ok"
-    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("unload") == 1
     assert recorder.events.count("release") >= 1
 
 
@@ -580,18 +606,23 @@ def test_full_pipeline_pre_ipa_vram_check_records_error_when_insufficient(tmp_pa
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
     ipa_called = {"count": 0}
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=2.0)
 
-    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    def fake_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
+        return {"speaker": "Fail02", "filled": 1}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"filled": 1})
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=2.0)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert ipa_called["count"] == 0
     assert result["results"]["ipa"]["status"] == "error"
     assert "Insufficient free GPU memory for IPA step" in result["results"]["ipa"]["error"]
-    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("unload") == 1
     assert recorder.events.count("release") >= 1
 
 
@@ -601,14 +632,19 @@ def test_full_pipeline_pre_ipa_vram_check_passes_when_sufficient(tmp_path, monke
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
     ipa_called = {"count": 0}
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=8.0)
 
-    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    def fake_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
+        return {"speaker": "Fail02", "filled": 1}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"speaker": "Fail02", "filled": 1, "total": 1})
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=8.0)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert ipa_called["count"] == 1
     assert result["results"]["ipa"]["status"] == "ok"
 
@@ -618,19 +654,21 @@ def test_full_pipeline_cleanup_runs_on_ortho_failure(tmp_path, monkeypatch):
     _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder)
 
-    def broken_ortho(*a, **kw):
+    def broken_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
         raise RuntimeError("ortho exploded")
 
     monkeypatch.setattr(server, "_compute_speaker_ortho", broken_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: {"speaker": "Fail02", "filled": 1, "total": 1})
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert result["results"]["ortho"]["status"] == "error"
-    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("unload") == 1
     assert recorder.events.count("release") >= 1
 
 
@@ -639,20 +677,102 @@ def test_full_pipeline_cleanup_runs_on_ipa_failure(tmp_path, monkeypatch):
     _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder)
+
+    def fake_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
+        return {"speaker": "Fail02", "filled": 1}
 
     def broken_ipa(*a, **kw):
         raise RuntimeError("ipa exploded")
 
-    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", broken_ipa)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert result["results"]["ipa"]["status"] == "error"
-    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("unload") == 1
     assert recorder.events.count("release") >= 1
+
+
+def test_full_pipeline_skips_ortho_provider_when_only_ipa_selected(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+    ipa_called = {"count": 0}
+
+    def fail_get_ortho_provider():
+        raise AssertionError("ipa-only full pipeline must not build ORTH provider")
+
+    monkeypatch.setattr(server, "get_ortho_provider", fail_get_ortho_provider)
+    monkeypatch.setattr(server, "_release_ipa_aligner", recorder.release, raising=False)
+    monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"speaker": "Fail02", "filled": 1, "total": 1})
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ipa"]})
+
+    assert ipa_called["count"] == 1
+    assert result["results"]["ipa"]["status"] == "ok"
+    assert recorder.events.count("release") >= 1
+
+
+def test_compute_speaker_ortho_with_explicit_provider_uses_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    explicit_provider = _StubOrthoProvider()
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: (_ for _ in ()).throw(AssertionError("factory should not be called")))
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    monkeypatch.setattr(server, "_ortho_tier2_align_to_words", lambda *a, **kw: [])
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho("j1", {"speaker": "Fail02"}, provider=explicit_provider)
+
+    assert result["filled"] == 2
+    assert len(explicit_provider.calls) == 1
+
+
+def test_compute_speaker_ortho_without_provider_creates_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    implicit_provider = _StubOrthoProvider()
+    provider_calls = []
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: provider_calls.append(implicit_provider) or implicit_provider)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    monkeypatch.setattr(server, "_ortho_tier2_align_to_words", lambda *a, **kw: [])
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho("j1", {"speaker": "Fail02"})
+
+    assert result["filled"] == 2
+    assert provider_calls == [implicit_provider]
+
+
+def test_compute_speaker_ortho_threads_explicit_provider_to_concept_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    explicit_provider = _StubOrthoProvider()
+    captured = {}
+
+    def fake_concept_windows(*_args, **kwargs):
+        captured["provider"] = kwargs.get("provider")
+        return {"speaker": "Fail02", "filled": 1, "skipped": False}
+
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: (_ for _ in ()).throw(AssertionError("factory should not be called")))
+    monkeypatch.setattr(server, "_compute_speaker_ortho_concept_windows", fake_concept_windows)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+
+    result = server._compute_speaker_ortho(
+        "j1",
+        {"speaker": "Fail02", "run_mode": "concept-windows"},
+        provider=explicit_provider,
+    )
+
+    assert result["filled"] == 1
+    assert captured["provider"] is explicit_provider
 
 
 def test_full_pipeline_torch_unavailable_skips_vram_check(tmp_path, monkeypatch):
@@ -661,14 +781,19 @@ def test_full_pipeline_torch_unavailable_skips_vram_check(tmp_path, monkeypatch)
     _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
     recorder = _CleanupRecorder()
     ipa_called = {"count": 0}
+    provider, provider_calls = _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=None)
 
-    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    def fake_ortho(_job_id, _payload, *, provider=None):
+        assert provider is provider_calls[0]
+        return {"speaker": "Fail02", "filled": 1}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"speaker": "Fail02", "filled": 1, "total": 1})
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=None)
 
     result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
 
+    assert provider_calls == [provider]
     assert ipa_called["count"] == 1
     assert result["results"]["ipa"]["status"] == "ok"
 
