@@ -100,7 +100,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     [record, concept],
   );
   const [ipa, setIpa] = useState(ipaInterval?.text ?? "");
-  const [ortho, setOrtho] = useState(orthoInterval?.text ?? "");
+  const [ortho, setOrtho] = useState(directOrthoInterval?.text || orthoInterval?.text || "");
   const [editStart, setEditStart] = useState<string>(conceptInterval ? conceptInterval.start.toFixed(3) : "");
   const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : "");
   const [timestampSaving, setTimestampSaving] = useState(false);
@@ -112,7 +112,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   useEffect(() => {
     setIpa(ipaInterval?.text ?? "");
-    setOrtho(orthoInterval?.text ?? "");
+    setOrtho(directOrthoInterval?.text || orthoInterval?.text || "");
     setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : "");
     setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : "");
     setTimestampMessage(null);
@@ -120,7 +120,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
-  }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval]);
+  }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval, directOrthoInterval]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);

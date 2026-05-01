@@ -137,8 +137,8 @@ function makeRecord(concepts: Array<{ conceptText: string; ipa?: string; ortho?:
     tiers: {
       concept: tier(concepts.map((item) => ({ start: item.start, end: item.end, text: item.conceptText, concept_id: '1' }))),
       ipa: tier(concepts.filter((item) => item.ipa).map((item) => ({ start: item.start, end: item.end, text: item.ipa ?? '' }))),
-      ortho: tier(concepts.filter((item) => item.ortho).map((item) => ({ start: item.start, end: item.end, text: item.ortho ?? '' }))),
-      ortho_words: tier(concepts.filter((item) => item.orthoWords).map((item) => ({ start: item.start, end: item.end, text: item.orthoWords ?? '', concept_id: '1' }))),
+      ortho: tier(concepts.filter((item) => item.ortho !== undefined).map((item) => ({ start: item.start, end: item.end, text: item.ortho ?? '' }))),
+      ortho_words: tier(concepts.filter((item) => item.orthoWords !== undefined).map((item) => ({ start: item.start, end: item.end, text: item.orthoWords ?? '', concept_id: '1' }))),
     },
   } as AnnotationRecord;
 }
@@ -190,6 +190,10 @@ describe('AnnotateView', () => {
     );
   }
 
+  function getOrthographicInput() {
+    return screen.getByPlaceholderText('Enter orthographic form…') as HTMLInputElement;
+  }
+
   it('renders stored annotate fields, speaker notes, and complete badge', () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
 
@@ -204,6 +208,32 @@ describe('AnnotateView', () => {
     expect(screen.queryByText('Annotated')).toBeNull();
     expect(screen.queryByText('Missing')).toBeNull();
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
+  });
+
+  it('pre-fills ORTHOGRAPHIC editor from tiers.ortho when both ortho and ortho_words have entries for the concept window', () => {
+    mockRecord = makeRecord([{ conceptText: 'one', ipa: 'jɛk', ortho: 'یەک', orthoWords: 'one', start: 18.5, end: 19.5 }]);
+
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('یەک');
+    expect(getOrthographicInput().value).not.toBe('one');
+    expect(screen.getByDisplayValue('jɛk')).toBeTruthy();
+  });
+
+  it('falls back to ortho_words pre-fill when tiers.ortho has no overlapping interval', () => {
+    mockRecord = makeRecord([{ conceptText: 'one', orthoWords: 'refined-word', start: 18.5, end: 19.5 }]);
+
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('refined-word');
+  });
+
+  it('falls back to ortho_words pre-fill when tiers.ortho overlap interval has empty text', () => {
+    mockRecord = makeRecord([{ conceptText: 'one', ortho: '', orthoWords: 'fallback-word', start: 18.5, end: 19.5 }]);
+
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('fallback-word');
   });
 
   it('renders no badge for a boundary-only concept', () => {
