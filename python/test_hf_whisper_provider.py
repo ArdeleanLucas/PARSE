@@ -67,6 +67,12 @@ class _RecordingModel:
         return self.generated.pop(0)
 
 
+class _FailingGenerateModel(_RecordingModel):
+    def generate(self, **kwargs: Any) -> Any:
+        self.generate_calls.append(kwargs)
+        raise ValueError("synthetic generate failure")
+
+
 def _generated_result(*, selected_token: int, score_row: list[float]) -> Any:
     return types.SimpleNamespace(
         sequences=np.asarray([[0, selected_token]], dtype=np.int64),
@@ -215,7 +221,6 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
             "input_features": "features-1",
             "return_dict_in_generate": True,
             "output_scores": True,
-            "return_timestamps": True,
             "language": "fa",
             "task": "transcribe",
         }
@@ -299,6 +304,29 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     assert second_window.shape == (20000,)
     assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"} for call in processor.calls)
     assert progress == [(50.0, 1), (100.0, 2)]
+
+
+def test_transcribe_segments_in_memory_logs_exception_class_on_generate_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=["unused"]),
+        model=_FailingGenerateModel(),
+    )
+    provider = HFWhisperProvider(config=_config(language="sd"))
+
+    result = provider.transcribe_segments_in_memory(
+        np.zeros(16000, dtype=np.float32),
+        [(0.0, 1.0)],
+        sample_rate=16000,
+    )
+
+    assert result == []
+    stderr = capsys.readouterr().err
+    assert "ValueError" in stderr
+    assert "synthetic generate failure" in stderr
 
 
 def test_transcribe_segments_in_memory_passes_sampling_rate(
