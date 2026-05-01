@@ -310,8 +310,27 @@ def test_transcribe_segments_in_memory_passes_sampling_rate(
 
     provider.transcribe_segments_in_memory(audio, [(0.0, 1.0)], sample_rate=22050)
 
-    assert processor.calls[0]["kwargs"]["sampling_rate"] == 22050
-    assert processor.calls[0]["audio"].shape == (22050,)
+    assert processor.calls[0]["kwargs"]["sampling_rate"] == 16000
+    expected_samples = int(round(22050 * 16000 / 22050))
+    assert processor.calls[0]["audio"].shape == (expected_samples,)
+
+
+def test_transcribe_segments_in_memory_resamples_non_16k_to_16k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processor, _model = _install_transformers_stub(
+        monkeypatch, processor=_RecordingProcessor(texts=["یەک"])
+    )
+    provider = HFWhisperProvider(config=_config(language="sd"))
+    audio = np.zeros(22050, dtype=np.float32)
+
+    provider.transcribe_segments_in_memory(audio, [(0.0, 1.0)], sample_rate=22050)
+
+    forwarded = processor.calls[0]
+    assert forwarded["kwargs"]["sampling_rate"] == 16000
+    assert forwarded["audio"].shape == (16000,)
+    assert forwarded["audio"].dtype == np.float32
+    assert forwarded["audio"].flags["C_CONTIGUOUS"]
 
 
 def test_transcribe_clip_accepts_sampling_rate_payload(
@@ -322,8 +341,9 @@ def test_transcribe_clip_accepts_sampling_rate_payload(
 
     provider.transcribe_clip({"raw": np.zeros(22050, dtype=np.float32), "sampling_rate": 22050})
 
-    assert processor.calls[0]["kwargs"]["sampling_rate"] == 22050
-    assert processor.calls[0]["audio"].shape == (22050,)
+    assert processor.calls[0]["kwargs"]["sampling_rate"] == 16000
+    expected_samples = int(round(22050 * 16000 / 22050))
+    assert processor.calls[0]["audio"].shape == (expected_samples,)
 
 
 def test_transcribe_clip_returns_real_confidence_not_placeholder(

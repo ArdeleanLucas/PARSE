@@ -343,6 +343,9 @@ class HFWhisperProvider(provider_module.AIProvider):
         processor, model = self._load_model()
         sample_rate = int(audio_payload.get("sampling_rate") or _HF_WHISPER_SAMPLE_RATE)
         raw_audio = audio_payload.get("raw")
+        if sample_rate != _HF_WHISPER_SAMPLE_RATE:
+            raw_audio = self._resample_audio(raw_audio, sample_rate, _HF_WHISPER_SAMPLE_RATE)
+            sample_rate = _HF_WHISPER_SAMPLE_RATE
         inputs = processor(raw_audio, sampling_rate=sample_rate, return_tensors="pt")
         move_inputs = getattr(inputs, "to", None)
         if callable(move_inputs):
