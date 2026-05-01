@@ -29,6 +29,7 @@ from ai.forced_align import (
     Aligner,
     align_segments,
     align_word,
+    normalize_acoustic_ipa_for_sdh,
     _proportional_fallback,
 )
 from ai.provider import WordSpan
@@ -83,6 +84,24 @@ class _StubAligner:
         # Return one span per phoneme token; truncate if fewer spans configured.
         n = min(len(phoneme_tokens), len(self._phoneme_spans))
         return self._phoneme_spans[:n], self._score
+
+
+# ---------------------------------------------------------------------------
+# Acoustic IPA post-decode inventory constraint
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_acoustic_ipa_for_sdh_maps_american_english_tokens() -> None:
+    """Reject the AmE fallback phones seen in Fail01 probe output, not all wav2vec2 IPA."""
+    assert normalize_acoustic_ipa_for_sdh("bleɪnsoʊf") == "blensof"
+    assert normalize_acoustic_ipa_for_sdh("tɪŋlaftiːb") == "tinlaftiːb"
+    assert normalize_acoustic_ipa_for_sdh("pɑːtʌmɡɚsɪɔɹ") == "pɑːtamɡərsior"
+
+
+def test_normalize_acoustic_ipa_for_sdh_keeps_kurdish_like_probe_outputs() -> None:
+    assert normalize_acoustic_ipa_for_sdh("jak") == "jak"
+    assert normalize_acoustic_ipa_for_sdh("saharvakhɔtaxɔrvaɡermeːmi") == "saharvakhotaxorvaɡermeːmi"
+    assert normalize_acoustic_ipa_for_sdh("xaraː") == "xaraː"
 
 
 # ---------------------------------------------------------------------------

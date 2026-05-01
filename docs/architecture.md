@@ -182,8 +182,21 @@ flowchart LR
     ORTH -. legacy opt-in .-> CT2[faster-whisper / CT2]
     Align[Forced alignment] --> W2V[wav2vec2-xlsr-53-espeak-cv-ft]
     IPA[Acoustic IPA] --> W2V
+    IPA --> IPAConstraint[SDH IPA inventory constraint]
     Chat[AI chat dock] --> LLM[OpenAI or xAI]
 ```
+
+### IPA decoder constraint (2026-05-01)
+
+Tier 3 IPA still runs acoustically through wav2vec2 CTC; no text-derived IPA
+fallback is reintroduced. The `wav2vec2.model` field in `config/ai_config.json`
+is now honored by the backend loader so model swaps can be tested opt-in while
+the default remains `facebook/wav2vec2-xlsr-53-espeak-cv-ft`. A live probe on
+Saha01 and Fail01 showed the default model can decode Kurdish windows (`jak`,
+`xaraː`) but leaks English-heavy phones on prompt-contaminated/low-context Fail01
+windows (`bleɪnsoʊf`, `tɪŋlaftiːb`). PARSE therefore folds known AmE fallback
+phones (`oʊ`, `eɪ`, `ɚ`, `ɹ`, `ʌ`, `æ`, `ɪ`, `ɔ`, `ŋ`) into the SDH-facing IPA
+surface before persisting `tiers.ipa.intervals[].text`.
 
 ### ORTH backend choice (2026-05-01)
 

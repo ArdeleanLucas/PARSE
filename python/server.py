@@ -1140,26 +1140,27 @@ def _get_ipa_aligner() -> Any:
     from ai.forced_align import Aligner, DEFAULT_MODEL_NAME
     _compute_checkpoint("ALIGNER.import_done", model=DEFAULT_MODEL_NAME)
 
-    t0 = _time.time()
-    print(
-        "[IPA] Loading wav2vec2 aligner model={0}…".format(DEFAULT_MODEL_NAME),
-        file=sys.stderr,
-        flush=True,
-    )
-    # Honour wav2vec2.force_cpu from ai_config.json, or auto-detect via
-    # resolve_device() which forces CPU on WSL to avoid GPU driver crashes.
+    # Honour wav2vec2.model/device/force_cpu from ai_config.json, or auto-detect
+    # via resolve_device() which forces CPU on WSL to avoid GPU driver crashes.
     try:
         import json as _json
         _ai_cfg = _json.loads((_project_root() / "config" / "ai_config.json").read_text())
         _w2v = _ai_cfg.get("wav2vec2", {})
+        _ipa_model = str(_w2v.get("model") or DEFAULT_MODEL_NAME)
         if _w2v.get("force_cpu"):
             _ipa_device: Optional[str] = "cpu"
         else:
             _ipa_device = _w2v.get("device") or None
     except Exception:
-        _ai_cfg = {}
-        _w2v = {}
+        _ipa_model = DEFAULT_MODEL_NAME
         _ipa_device = None
+
+    t0 = _time.time()
+    print(
+        "[IPA] Loading wav2vec2 aligner model={0}…".format(_ipa_model),
+        file=sys.stderr,
+        flush=True,
+    )
 
     from ai.forced_align import _is_wsl as _fa_is_wsl
     if _fa_is_wsl():
@@ -1169,7 +1170,7 @@ def _get_ipa_aligner() -> Any:
 
     try:
         _compute_checkpoint("ALIGNER.load_begin")
-        _IPA_ALIGNER = Aligner.load(device=_ipa_device)
+        _IPA_ALIGNER = Aligner.load(model_name=_ipa_model, device=_ipa_device)
         _compute_checkpoint("ALIGNER.load_done", elapsed=round(_time.time() - t0, 2))
     except Exception as exc:
         elapsed = _time.time() - t0

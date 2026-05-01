@@ -130,6 +130,42 @@ DEFAULT_PAD_MS = 100
 DEFAULT_G2P_LANGUAGE = "ku"  # espeak-ng Kurmanji; closest supported for Southern Kurdish
 FALLBACK_G2P_LANGUAGE = "fa"  # Persian if Kurdish voice missing in local espeak-ng
 
+# Tier 3 acoustic IPA currently has no language-conditioning channel. The
+# espeak Common-Voice fine-tune can therefore emit English allophones on noisy
+# or prompt-contaminated Fail01 windows even when the same model handles Kurdish
+# Saha01/Fail01 speech cleanly. Keep the CTC model unchanged, but constrain the
+# persisted string to PARSE's SDH/Sorani-facing IPA inventory at the frontend
+# boundary: English diphthongs/allophones are folded to the closest Kurdish-ish
+# monophthong/rhotic form instead of leaking AmE symbols into annotations.
+_SDH_IPA_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+    ("oʊ", "o"),
+    ("eɪ", "e"),
+    ("ɚ", "ər"),
+    ("ɝ", "ər"),
+    ("ɹ", "r"),
+    ("ʌ", "a"),
+    ("æ", "a"),
+    ("ɪ", "i"),
+    ("ɔ", "o"),
+    ("ŋ", "n"),
+)
+
+
+def normalize_acoustic_ipa_for_sdh(ipa: str) -> str:
+    """Fold AmE wav2vec2 fallback symbols into the SDH/Sorani IPA surface.
+
+    This is intentionally conservative: it does not invent phonemes from text
+    or change tier schema. It only post-processes the acoustic model's decoded
+    string to prevent known English-specific phones from being persisted when
+    the unconditioned CTC model falls back to its English-heavy distribution.
+    """
+    normalized = str(ipa or "").strip()
+    if not normalized:
+        return ""
+    for old, new in _SDH_IPA_REPLACEMENTS:
+        normalized = normalized.replace(old, new)
+    return normalized
+
 
 class PhonemeSpan(TypedDict, total=False):
     """IPA phoneme with refined start/end (seconds, absolute to full audio)."""
@@ -361,7 +397,7 @@ class Aligner:
                 file=sys.stderr,
             )
             return ""
-        return str(ipa or "").strip()
+        return normalize_acoustic_ipa_for_sdh(str(ipa or ""))
 
     # ------------------------------------------------------------------
     # Core alignment call

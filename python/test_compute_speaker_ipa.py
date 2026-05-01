@@ -39,6 +39,11 @@ class _EmptyAligner:
         return ""
 
 
+class _LoadedAligner:
+    device = "cpu"
+    vocab = {"<pad>": 0, "j": 1}
+
+
 class _FakeTensor:
     """Minimal torch.Tensor stand-in for full-speaker and concept-window IPA paths."""
 
@@ -118,6 +123,30 @@ def _install_stubs(monkeypatch, tmp_path: pathlib.Path, aligner) -> None:
     monkeypatch.setattr(server, "_get_ipa_aligner", lambda: aligner)
     from ai import forced_align as fa
     monkeypatch.setattr(fa, "_load_audio_mono_16k", lambda path: _FakeTensor())
+
+
+def test_get_ipa_aligner_loads_model_from_wav2vec2_config(monkeypatch, tmp_path) -> None:
+    """ai_config.json wav2vec2.model is the opt-in point for IPA model swaps."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "ai_config.json").write_text(
+        json.dumps({"wav2vec2": {"model": "example/sdh-ipa", "device": "cpu"}}),
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+
+    def _fake_load(*, model_name=None, device=None):
+        calls.append({"model_name": model_name, "device": device})
+        return _LoadedAligner()
+
+    from ai import forced_align as fa
+
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(fa.Aligner, "load", _fake_load)
+    monkeypatch.setattr(server, "_IPA_ALIGNER", None)
+
+    assert server._get_ipa_aligner() is not None
+    assert calls == [{"model_name": "example/sdh-ipa", "device": "cpu"}]
+    monkeypatch.setattr(server, "_IPA_ALIGNER", None)
 
 
 def test_full_mode_auto_routes_to_concept_windows_when_ortho_empty(tmp_path, monkeypatch):
