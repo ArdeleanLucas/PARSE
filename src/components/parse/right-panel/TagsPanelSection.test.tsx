@@ -2,19 +2,19 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useTagsStore, type Tag } from '@/state/tags';
+import { useConceptTagsStore, type ConceptTag } from '@/state/conceptTags';
 import { TagsPanelSection } from './TagsPanelSection';
 
-const archaic: Tag = { id: 't1', name: 'Archaic', color: '#3554B8', createdAt: '2026-05-01T00:00:00.000Z' };
-const dialectal: Tag = { id: 't2', name: 'Dialectal', color: '#0f766e', createdAt: '2026-05-01T00:00:00.000Z' };
+const archaic: ConceptTag = { id: 't1', name: 'Archaic', color: '#3554B8', createdAt: '2026-05-01T00:00:00.000Z' };
+const dialectal: ConceptTag = { id: 't2', name: 'Dialectal', color: '#0f766e', createdAt: '2026-05-01T00:00:00.000Z' };
 
 function resetStore() {
-  useTagsStore.setState(useTagsStore.getInitialState(), true);
+  useConceptTagsStore.setState(useConceptTagsStore.getInitialState(), true);
 }
 
 beforeEach(() => {
   resetStore();
-  useTagsStore.setState({
+  useConceptTagsStore.setState({
     loaded: true,
     tags: [archaic, dialectal],
     attachmentsByConcept: { sister: ['t1'], water: ['t1'], fire: ['t2'] },
@@ -31,7 +31,7 @@ describe('TagsPanelSection', () => {
   it('renders tag rows with name, color dot, usage count, and header trailing', () => {
     render(<TagsPanelSection conceptId="sister" />);
 
-    expect(screen.getByText('Concept tags')).toBeTruthy();
+    expect(screen.getByText('Concept Tags')).toBeTruthy();
     expect(screen.getByLabelText('Applied concept tags').textContent).toBe('1 of 2');
     expect(screen.getByText('Archaic')).toBeTruthy();
     expect(screen.getByText('Dialectal')).toBeTruthy();
@@ -43,7 +43,7 @@ describe('TagsPanelSection', () => {
 
   it('clicking an unchecked row calls attachTag for the current concept', async () => {
     const attachTag = vi.fn().mockResolvedValue(undefined);
-    useTagsStore.setState({ attachTag });
+    useConceptTagsStore.setState({ attachTag });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Dialectal/i }));
@@ -53,7 +53,7 @@ describe('TagsPanelSection', () => {
 
   it('clicking a checked row calls detachTag for the current concept', () => {
     const detachTag = vi.fn().mockResolvedValue(undefined);
-    useTagsStore.setState({ detachTag });
+    useConceptTagsStore.setState({ detachTag });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Archaic/i }));
@@ -72,7 +72,7 @@ describe('TagsPanelSection', () => {
 
   it('Create tag expands and submits to createTag', async () => {
     const createTag = vi.fn().mockResolvedValue({ id: 't3', name: 'Compound', color: '#7c3aed', createdAt: '2026-05-01T00:00:00.000Z' });
-    useTagsStore.setState({ createTag });
+    useConceptTagsStore.setState({ createTag });
     render(<TagsPanelSection conceptId="sister" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Create tag/i }));
@@ -83,7 +83,7 @@ describe('TagsPanelSection', () => {
   });
 
   it('empty registry shows the create affordance and empty-state hint', () => {
-    useTagsStore.setState({ tags: [], attachmentsByConcept: {} });
+    useConceptTagsStore.setState({ tags: [], attachmentsByConcept: {} });
     render(<TagsPanelSection conceptId="sister" />);
 
     expect(screen.getByText('No tags yet. Create one below.')).toBeTruthy();

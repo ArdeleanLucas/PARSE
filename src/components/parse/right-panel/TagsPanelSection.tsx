@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Check, Plus, Search, Tag as TagIcon } from 'lucide-react';
 
-import { useConceptTagIds, useTagsStore, useTagUsageCounts, type Tag } from '@/state/tags';
+import { useConceptTagsForConcept, useConceptTagsStore, useConceptTagUsageCounts, type ConceptTag } from '@/state/conceptTags';
 
 const COLOR_SWATCHES = ['#3554B8', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#475569'] as const;
 
@@ -10,12 +10,12 @@ interface TagsPanelSectionProps {
 }
 
 export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
-  const tags = useTagsStore((state) => state.tags);
-  const attachTag = useTagsStore((state) => state.attachTag);
-  const detachTag = useTagsStore((state) => state.detachTag);
-  const createTag = useTagsStore((state) => state.createTag);
-  const conceptTagIds = useConceptTagIds(conceptId);
-  const counts = useTagUsageCounts();
+  const tags = useConceptTagsStore((state) => state.tags);
+  const attachTag = useConceptTagsStore((state) => state.attachTag);
+  const detachTag = useConceptTagsStore((state) => state.detachTag);
+  const createTag = useConceptTagsStore((state) => state.createTag);
+  const conceptTagIds = useConceptTagsForConcept(conceptId);
+  const counts = useConceptTagUsageCounts();
   const [search, setSearch] = useState('');
 
   const appliedIds = useMemo(() => new Set(conceptTagIds), [conceptTagIds]);
@@ -29,14 +29,14 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
     <section className="border-b border-slate-100 p-4" aria-labelledby="concept-tags-title">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h4 id="concept-tags-title" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <TagIcon className="h-3 w-3" /> Concept tags
+          <TagIcon className="h-3 w-3" /> Concept Tags
         </h4>
         <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Applied concept tags">
           {appliedIds.size} of {tags.length}
         </span>
       </div>
       <p className="mb-3 text-[10px] leading-snug text-slate-400">
-        Tags travel with the concept across speakers. Counts show usage in this dataset.
+        Tags travel with the concept across speakers. Counts show usage across all workspaces.
       </p>
 
       <label className="mb-2 flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-500 focus-within:border-indigo-300 focus-within:ring-1 focus-within:ring-indigo-100">
@@ -81,7 +81,7 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
 }
 
 function TagRow({ tag, checked, count, onToggle }: {
-  tag: Tag;
+  tag: ConceptTag;
   checked: boolean;
   count: number;
   onToggle: () => void;
@@ -103,23 +103,26 @@ function TagRow({ tag, checked, count, onToggle }: {
   );
 }
 
-function CreateTagInline({ onCreate }: { onCreate: (name: string, color: string) => Promise<Tag> }) {
+function CreateTagInline({ onCreate }: { onCreate: (name: string, color: string) => Promise<ConceptTag> }) {
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState('');
   const [color, setColor] = useState<string>(COLOR_SWATCHES[0]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
     const trimmed = name.trim();
     if (!trimmed || busy) return;
     setBusy(true);
+    setError(null);
     try {
       await onCreate(trimmed, color);
       setName('');
       setColor(COLOR_SWATCHES[0]);
       setExpanded(false);
-    } catch (error) {
-      console.warn('[tags] create failed', error);
+    } catch (err) {
+      setError(err instanceof Error && /409/.test(err.message) ? 'Name already exists' : 'Could not create tag');
+      console.warn('[conceptTags] create failed', err);
     } finally {
       setBusy(false);
     }
@@ -143,9 +146,14 @@ function CreateTagInline({ onCreate }: { onCreate: (name: string, color: string)
         className="mb-2 w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
         placeholder="Tag name"
         value={name}
-        onChange={(event) => setName(event.target.value)}
+        onChange={(event) => {
+          setName(event.target.value);
+          setError(null);
+        }}
         aria-label="Tag name"
+        aria-invalid={error ? 'true' : undefined}
       />
+      {error ? <p className="mb-2 text-[10px] font-medium text-rose-600">{error}</p> : null}
       <div className="mb-2 flex flex-wrap gap-1" aria-label="Tag color">
         {COLOR_SWATCHES.map((swatch) => (
           <button

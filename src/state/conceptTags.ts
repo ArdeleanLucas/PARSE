@@ -1,34 +1,38 @@
+// Global concept-tag registry + per-concept attachments. Hydrated from /api/tags. NOT per-speaker annotation tags — see src/stores/tagStore.ts.
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { tagsApi } from '@/api/tags';
 
-export interface Tag {
+export interface ConceptTag {
   id: string;
   name: string;
   color: string;
   createdAt: string;
 }
 
-interface TagsState {
-  tags: Tag[];
+interface ConceptTagsState {
+  tags: ConceptTag[];
   attachmentsByConcept: Record<string, string[]>;
   loaded: boolean;
+  warnedLoadFailure: boolean;
   load: () => Promise<void>;
-  createTag: (name: string, color: string) => Promise<Tag>;
+  createTag: (name: string, color: string) => Promise<ConceptTag>;
   deleteTag: (id: string) => Promise<void>;
   attachTag: (conceptId: string, tagId: string) => Promise<void>;
   detachTag: (conceptId: string, tagId: string) => Promise<void>;
 }
 
-let warnedLoadFailure = false;
+const EMPTY_ATTACHMENT_LIST: readonly string[] = Object.freeze([]);
 
 function withoutEmptyAttachmentKeys(attachments: Record<string, string[]>): Record<string, string[]> {
   return Object.fromEntries(Object.entries(attachments).filter(([, ids]) => ids.length > 0));
 }
 
-export const useTagsStore = create<TagsState>()((set, get) => ({
+export const useConceptTagsStore = create<ConceptTagsState>()((set, get) => ({
   tags: [],
   attachmentsByConcept: {},
   loaded: false,
+  warnedLoadFailure: false,
 
   load: async () => {
     if (get().loaded) return;
@@ -36,11 +40,10 @@ export const useTagsStore = create<TagsState>()((set, get) => ({
       const data = await tagsApi.fetchAll();
       set({ tags: data.tags, attachmentsByConcept: data.attachments, loaded: true });
     } catch (error) {
-      if (!warnedLoadFailure) {
-        console.warn('[tags] load failed; backend may be pending', error);
-        warnedLoadFailure = true;
+      if (!get().warnedLoadFailure) {
+        console.warn('[conceptTags] load failed; backend may be pending', error);
       }
-      set({ loaded: true });
+      set({ loaded: true, warnedLoadFailure: true });
     }
   },
 
@@ -66,7 +69,6 @@ export const useTagsStore = create<TagsState>()((set, get) => ({
   },
 
   attachTag: async (conceptId, tagId) => {
-    const previous = get().attachmentsByConcept[conceptId] ?? [];
     set((state) => ({
       attachmentsByConcept: {
         ...state.attachmentsByConcept,
@@ -76,18 +78,20 @@ export const useTagsStore = create<TagsState>()((set, get) => ({
     try {
       await tagsApi.attach(conceptId, tagId);
     } catch (error) {
-      set((state) => ({
-        attachmentsByConcept: withoutEmptyAttachmentKeys({
-          ...state.attachmentsByConcept,
-          [conceptId]: previous,
-        }),
-      }));
+      set((state) => {
+        const next = (state.attachmentsByConcept[conceptId] ?? []).filter((id) => id !== tagId);
+        return {
+          attachmentsByConcept: withoutEmptyAttachmentKeys({
+            ...state.attachmentsByConcept,
+            [conceptId]: next,
+          }),
+        };
+      });
       throw error;
     }
   },
 
   detachTag: async (conceptId, tagId) => {
-    const previous = get().attachmentsByConcept[conceptId] ?? [];
     set((state) => ({
       attachmentsByConcept: withoutEmptyAttachmentKeys({
         ...state.attachmentsByConcept,
@@ -98,26 +102,28 @@ export const useTagsStore = create<TagsState>()((set, get) => ({
       await tagsApi.detach(conceptId, tagId);
     } catch (error) {
       set((state) => ({
-        attachmentsByConcept: withoutEmptyAttachmentKeys({
+        attachmentsByConcept: {
           ...state.attachmentsByConcept,
-          [conceptId]: previous,
-        }),
+          [conceptId]: Array.from(new Set([...(state.attachmentsByConcept[conceptId] ?? []), tagId])),
+        },
       }));
       throw error;
     }
   },
 }));
 
-export const useConceptTagIds = (conceptId: string): string[] =>
-  useTagsStore((state) => state.attachmentsByConcept[conceptId] ?? []);
+export const useConceptTagsForConcept = (conceptId: string): readonly string[] =>
+  useConceptTagsStore((state) => state.attachmentsByConcept[conceptId] ?? EMPTY_ATTACHMENT_LIST);
 
-export const useTagUsageCounts = (): Record<string, number> =>
-  useTagsStore((state) => {
-    const counts: Record<string, number> = {};
-    for (const ids of Object.values(state.attachmentsByConcept)) {
-      for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
-    }
-    return counts;
-  });
+export const useConceptTagUsageCounts = (): Record<string, number> =>
+  useConceptTagsStore(
+    useShallow((state) => {
+      const counts: Record<string, number> = {};
+      for (const ids of Object.values(state.attachmentsByConcept)) {
+        for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
+      }
+      return counts;
+    }),
+  );
 
-export type { TagsState };
+export type { ConceptTagsState };
