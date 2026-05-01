@@ -1420,6 +1420,7 @@ def _compute_speaker_ortho_concept_windows(
         )
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
     provider = _server.get_ortho_provider()
+    setattr(_server, '_LAST_ORTHO_PROVIDER', provider)
     from ai.job_cancel import clear_cancel, make_should_cancel
 
     should_cancel = make_should_cancel(job_id)
@@ -2061,6 +2062,7 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
     _set_compute_progress(job_id, 2.0, message='Loading ortho model (razhan)')
     provider = _server.get_ortho_provider()
+    setattr(_server, '_LAST_ORTHO_PROVIDER', provider)
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
@@ -2149,6 +2151,61 @@ def _compute_speaker_ortho(job_id: str, payload: _server.Dict[str, _server.Any])
     _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
     return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals)}
 
+
+_MIN_FREE_GB_FOR_IPA = 4.0  # Conservative, tunable guard before wav2vec2 loads.
+
+
+def _gpu_free_memory_gb() -> _server.Optional[float]:
+    """Return free CUDA memory in GiB, or None when CUDA is unavailable."""
+    try:
+        import torch  # type: ignore
+
+        if not torch.cuda.is_available():
+            return None
+        free, _total = torch.cuda.mem_get_info()
+        return float(free) / float(1024 ** 3)
+    except (ImportError, RuntimeError, AttributeError, TypeError, ValueError):
+        return None
+
+
+def _cleanup_full_pipeline_ortho_provider() -> None:
+    try:
+        provider = getattr(_server, '_LAST_ORTHO_PROVIDER', None)
+        if provider is None:
+            return
+        unload = getattr(provider, 'unload_model', None)
+        if callable(unload):
+            unload()
+    except Exception:
+        pass
+
+
+def _cleanup_full_pipeline_ipa_aligner() -> None:
+    try:
+        release = getattr(_server, '_release_ipa_aligner', None)
+        if callable(release):
+            release()
+            return
+        aligner = getattr(_server, '_IPA_ALIGNER', None)
+        setattr(_server, '_IPA_ALIGNER', None)
+        release_aligner = getattr(aligner, 'release', None)
+        if callable(release_aligner):
+            release_aligner()
+    except Exception:
+        pass
+
+
+def _ensure_free_gpu_memory_for_ipa() -> None:
+    free_gb = _gpu_free_memory_gb()
+    if free_gb is not None and free_gb < _MIN_FREE_GB_FOR_IPA:
+        raise RuntimeError(
+            'Insufficient free GPU memory for IPA step: {0:.1f} GB free, need {1:.1f} GB. '
+            'Run ortho and ipa as separate jobs, or close other GPU consumers.'.format(
+                free_gb,
+                _MIN_FREE_GB_FOR_IPA,
+            )
+        )
+
 def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run a user-selected subset of the speaker pipeline sequentially.
 
@@ -2199,6 +2256,8 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     results: _server.Dict[str, _server.Any] = {}
     steps_run: _server.List[str] = []
     total = len(selected)
+    cleanup_ortho = False
+    cleanup_ipa = False
 
     def _capture_error(exc: BaseException) -> _server.Dict[str, _server.Any]:
         return {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
@@ -2263,7 +2322,12 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                 else:
                     results['ortho'] = {'status': 'ok', **sub_result}
                 steps_run.append(step)
+                cleanup_ortho = True
+                if 'ipa' in selected:
+                    _cleanup_full_pipeline_ortho_provider()
             elif step == 'ipa':
+                if 'ortho' in selected:
+                    _ensure_free_gpu_memory_for_ipa()
                 ipa_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ipa', False), 'run_mode': run_mode}
                 if concept_ids is not None:
                     ipa_sub_payload['concept_ids'] = list(concept_ids)
@@ -2273,12 +2337,24 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                 else:
                     results['ipa'] = {'status': 'ok', **sub_result}
                 steps_run.append(step)
+                cleanup_ipa = True
+                _cleanup_full_pipeline_ipa_aligner()
             else:
                 results[step] = {'status': 'error', 'error': 'Unknown pipeline step: {0}'.format(step), 'traceback': None}
         except Exception as exc:
             results[step] = _capture_error(exc)
             steps_run.append(step)
+            if step == 'ortho':
+                cleanup_ortho = True
+                _cleanup_full_pipeline_ortho_provider()
+            elif step == 'ipa':
+                cleanup_ipa = True
+                _cleanup_full_pipeline_ipa_aligner()
             _server._reset_job_to_running(job_id)
+    if cleanup_ortho:
+        _cleanup_full_pipeline_ortho_provider()
+    if cleanup_ipa or 'ipa' in selected:
+        _cleanup_full_pipeline_ipa_aligner()
     _set_compute_progress(job_id, 99.0, message='Pipeline complete')
     summary = {'ok': sum((1 for r in results.values() if r.get('status') == 'ok')), 'skipped': sum((1 for r in results.values() if r.get('status') == 'skipped')), 'error': sum((1 for r in results.values() if r.get('status') == 'error'))}
     print('[PIPELINE] speaker={0} steps={1} summary={2}'.format(speaker, steps_run, summary), file=_server.sys.stderr, flush=True)
@@ -2657,5 +2733,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
