@@ -101,6 +101,7 @@ export const useConceptTagsStore = create<ConceptTagsState>()((set, get) => ({
     try {
       await tagsApi.detach(conceptId, tagId);
     } catch (error) {
+      // Rollback re-adds the tagId, so the array is guaranteed non-empty — no withoutEmptyAttachmentKeys wrap needed.
       set((state) => ({
         attachmentsByConcept: {
           ...state.attachmentsByConcept,

@@ -82,6 +82,23 @@ describe('TagsPanelSection', () => {
     await waitFor(() => expect(createTag).toHaveBeenCalledWith('Compound', '#3554B8'));
   });
 
+  it('shows an inline error when createTag rejects with a 409 conflict', async () => {
+    const createTag = vi.fn().mockRejectedValue(
+      new Error('API POST /api/tags failed 409: Tag already exists'),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useConceptTagsStore.setState({ createTag });
+    render(<TagsPanelSection conceptId="sister" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Create tag/i }));
+    fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'Archaic' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Create$/i }));
+
+    await waitFor(() => expect(screen.getByText('Name already exists')).toBeTruthy());
+    expect(screen.getByLabelText('Tag name').getAttribute('aria-invalid')).toBe('true');
+    expect(warn).toHaveBeenCalledWith('[conceptTags] create failed', expect.any(Error));
+  });
+
   it('empty registry shows the create affordance and empty-state hint', () => {
     useConceptTagsStore.setState({ tags: [], attachmentsByConcept: {} });
     render(<TagsPanelSection conceptId="sister" />);
