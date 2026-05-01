@@ -21,15 +21,19 @@ import { useWaveSurfer } from "../../../hooks/useWaveSurfer";
 import { LEXEME_SCOPE_TIERS } from "../../../stores/annotation/actions";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
+import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
 import { useTagStore } from "../../../stores/tagStore";
 import { saveLexemeNote } from "../../../api/client";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
+import { SpectrogramSettings } from "../SpectrogramSettings";
 
 import { SpeakerHeader } from "./SpeakerHeader";
 import { findAnnotationForConcept, formatPlaybackTime, formatPlayhead, pickOrthoIntervalForConcept } from "./shared";
 import type { AnnotateViewProps } from "./types";
 
 export { pickOrthoIntervalForConcept };
+
+const SPEC_HEIGHT = 180;
 
 export const AnnotateView: React.FC<AnnotateViewProps> = ({
   concept,
@@ -142,9 +146,21 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [audioReady, setAudioReady] = useState(false);
   const [readyAudioUrl, setReadyAudioUrl] = useState("");
   const [zoom, setZoom] = useState(10);
+  const [settingsAnchor, setSettingsAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const spectroCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spectroButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const spectrogramParams = useSpectrogramSettings();
+  const onSpectroContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    const rect = spectroButtonRef.current?.getBoundingClientRect();
+    setSettingsAnchor({
+      x: rect ? rect.right : event.clientX,
+      y: rect ? rect.bottom + 6 : event.clientY,
+    });
+  }, []);
 
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const currentTime = usePlaybackStore((s) => s.currentTime);
@@ -342,7 +358,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     wsSetVolume(volume);
   }, [audioReady, volume, wsSetVolume]);
 
-  useSpectrogram({ enabled: spectroOn && audioReady, wsRef, canvasRef: spectroCanvasRef });
+  useSpectrogram({
+    enabled: spectroOn && audioReady,
+    wsRef,
+    canvasRef: spectroCanvasRef,
+    params: {
+      windowLengthSec: spectrogramParams.windowLengthSec,
+      windowShape: spectrogramParams.windowShape,
+      maxFrequencyHz: spectrogramParams.maxFrequencyHz,
+      dynamicRangeDb: spectrogramParams.dynamicRangeDb,
+      preEmphasisHz: spectrogramParams.preEmphasisHz,
+      colorScheme: spectrogramParams.colorScheme,
+    },
+  });
 
   useEffect(() => {
     if (!pendingSeek) return;
@@ -418,8 +446,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
           <div className="flex items-center gap-1.5">
             <button
+              ref={spectroButtonRef}
               onClick={() => setSpectroOn((value) => !value)}
-              title="Toggle spectrogram"
+              onContextMenu={onSpectroContextMenu}
+              title="Toggle spectrogram (right-click for settings)"
               className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold transition ${spectroOn ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
             >
               <Activity className="h-3 w-3" /> Spectrogram
@@ -443,11 +473,16 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
               </span>
             </div>
             {spectroOn && (
-              <canvas
-                ref={spectroCanvasRef}
-                className="pointer-events-none absolute inset-y-0 right-0 rounded-lg"
-                style={{ left: LABEL_COL_PX, opacity: 0.6, mixBlendMode: "multiply" }}
-              />
+              <div
+                data-testid="spectrogram-row"
+                className="relative mt-1 overflow-hidden rounded-lg ring-1 ring-slate-100 bg-white"
+                style={{ height: SPEC_HEIGHT }}
+              >
+                <canvas
+                  ref={spectroCanvasRef}
+                  className="block h-full w-full"
+                />
+              </div>
             )}
             {quickRetimeMenu && (
               <div
@@ -739,6 +774,12 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
         )}
       </section>
+      {settingsAnchor && (
+        <SpectrogramSettings
+          anchor={settingsAnchor}
+          onClose={() => setSettingsAnchor(null)}
+        />
+      )}
     </main>
   );
 };
