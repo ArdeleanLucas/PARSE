@@ -1957,13 +1957,12 @@ describe("Actions menu — transcription run flow", () => {
     confirmSpy.mockRestore();
   });
 
-  it("prefills Orthographic from ortho_words word when coarse ortho is a monolithic segment", async () => {
-    // Simulates the Fail102 regression: razhan produces one giant coarse
-    // ortho interval covering minutes of narrative. Without ortho_words, the
-    // whole paragraph text would land in the lexeme field. With ortho_words
-    // (from Tier-2 forced alignment), the single-word entry wins.
+  it("prefills Orthographic from direct ortho when both direct ortho and ortho_words overlap", async () => {
+    // Direct tiers.ortho now wins for editor pre-fill when both tiers overlap.
+    // This keeps Saha01's refined Arabic-script concept-window text visible
+    // even if ortho_words still contains stale import-time English names.
     const COARSE_TEXT = "زور جوان بووین ئاو دەگڕێ";  // monolithic paragraph
-    const WORD_TEXT = "ئاو";  // expected: just the Kurdish word for water
+    const WORD_TEXT = "ئاو";
 
     mockConfig = {
       project_name: "PARSE",
@@ -1997,12 +1996,11 @@ describe("Actions menu — transcription run flow", () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
-    // After mode switch the annotate view renders and findAnnotationForConcept
-    // preferring ortho_words populates the ortho input with the single word.
+    // After mode switch the annotate view renders and the editor prefers the
+    // direct ortho interval over the ortho_words helper result.
     await waitFor(() => {
-      expect(screen.getByDisplayValue(WORD_TEXT)).toBeTruthy();
+      expect(screen.getByDisplayValue(COARSE_TEXT)).toBeTruthy();
     });
-    // The coarse paragraph must NOT appear as the pre-filled value.
-    expect(screen.queryByDisplayValue(COARSE_TEXT)).toBeNull();
+    expect(screen.queryByDisplayValue(WORD_TEXT)).toBeNull();
   });
 });
