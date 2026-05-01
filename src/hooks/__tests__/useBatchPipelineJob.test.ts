@@ -5,15 +5,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../../api/client", () => ({
   startCompute: vi.fn(),
   pollCompute: vi.fn(),
+  cancelComputeJob: vi.fn(),
 }));
 
-import { startCompute, pollCompute } from "../../api/client";
+import { startCompute, pollCompute, cancelComputeJob } from "../../api/client";
 import { pollBatchSpeakerJob } from "../batch-pipeline/useBatchJobPoll";
 import { useBatchPipelineJob } from "../useBatchPipelineJob";
 import type { BatchRunRequest } from "../useBatchPipelineJob";
 
 const mockStart = startCompute as unknown as ReturnType<typeof vi.fn>;
 const mockPoll = pollCompute as unknown as ReturnType<typeof vi.fn>;
+const mockCancelComputeJob = cancelComputeJob as unknown as ReturnType<typeof vi.fn>;
 
 function baseRequest(speakers: string[]): BatchRunRequest {
   return {
@@ -35,6 +37,7 @@ async function flushAsync(times = 20) {
 describe("useBatchPipelineJob", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCancelComputeJob.mockResolvedValue({ cancelled: true, job_id: "job-A" });
   });
 
   afterEach(() => {
@@ -320,6 +323,113 @@ describe("useBatchPipelineJob", () => {
     expect(result.current.state.outcomes[0].status).toBe("cancelled");
     expect(result.current.state.outcomes[1].status).toBe("cancelled");
     expect(result.current.state.outcomes[2].status).toBe("cancelled");
+  });
+
+  it("cancel() fires backend cancel when a compute job is active", async () => {
+    let releasePoll!: () => void;
+    const pollPending = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    mockStart.mockResolvedValue({ job_id: "job-A" });
+    mockPoll.mockImplementation(async () => {
+      await pollPending;
+      return { status: "complete", progress: 1, result: { speaker: "A", steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } } };
+    });
+    mockCancelComputeJob.mockResolvedValue({ cancelled: true, job_id: "job-A" });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.run(baseRequest(["A"]));
+      await flushAsync(5);
+    });
+
+    expect(result.current.state.currentSubJobId).toBe("job-A");
+
+    await act(async () => {
+      result.current.cancel();
+      await flushAsync(2);
+    });
+
+    expect(mockCancelComputeJob).toHaveBeenCalledTimes(1);
+    expect(mockCancelComputeJob).toHaveBeenCalledWith("job-A");
+
+    await act(async () => {
+      releasePoll();
+      await runPromise;
+    });
+  });
+
+  it("cancel() skips backend cancel when no compute job is active", async () => {
+    let releaseStart!: () => void;
+    const startPending = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    mockStart.mockImplementation(async () => {
+      await startPending;
+      return { job_id: "job-A" };
+    });
+    mockPoll.mockResolvedValue({ status: "complete", progress: 1, result: { speaker: "A", steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } } });
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.run(baseRequest(["A"]));
+      await flushAsync(2);
+    });
+
+    expect(result.current.state.currentSubJobId).toBeNull();
+
+    await act(async () => {
+      result.current.cancel();
+      await flushAsync(2);
+    });
+
+    expect(mockCancelComputeJob).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseStart();
+      await runPromise;
+    });
+  });
+
+  it("cancel() survives backend cancel helper rejection", async () => {
+    let releasePoll!: () => void;
+    const pollPending = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    mockStart.mockResolvedValue({ job_id: "job-A" });
+    mockPoll.mockImplementation(async () => {
+      await pollPending;
+      return { status: "complete", progress: 1, result: { speaker: "A", steps_run: [], results: {}, summary: { ok: 0, skipped: 0, error: 0 } } };
+    });
+    mockCancelComputeJob.mockRejectedValue(new Error("cancel endpoint unavailable"));
+
+    const { result } = renderHook(() => useBatchPipelineJob());
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.run(baseRequest(["A", "B"]));
+      await flushAsync(5);
+    });
+
+    await act(async () => {
+      expect(() => result.current.cancel()).not.toThrow();
+      await flushAsync(2);
+    });
+
+    expect(result.current.state.status).toBe("cancelling");
+
+    await act(async () => {
+      releasePoll();
+      await runPromise;
+    });
+
+    expect(result.current.state.status).toBe("complete");
+    expect(result.current.state.cancelled).toBe(true);
+    expect(result.current.state.outcomes.map((outcome) => outcome.status)).toEqual(["cancelled", "cancelled"]);
   });
 
   it("cancel() short-circuits the polling loop on the next poll tick", async () => {
