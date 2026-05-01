@@ -20,7 +20,12 @@ vi.mock('@/api/tags', () => ({
   },
 }));
 
-import { useConceptTagUsageCounts, useConceptTagsStore, type ConceptTag } from './conceptTags';
+import {
+  useConceptTagsForConcept,
+  useConceptTagUsageCounts,
+  useConceptTagsStore,
+  type ConceptTag,
+} from './conceptTags';
 
 const archaic: ConceptTag = { id: 't1', name: 'archaic', color: '#3554B8', createdAt: '2026-05-01T00:00:00.000Z' };
 const dialectal: ConceptTag = { id: 't2', name: 'dialectal', color: '#0f766e', createdAt: '2026-05-01T00:00:00.000Z' };
@@ -208,5 +213,34 @@ describe('useConceptTagsStore', () => {
     rerender();
 
     expect(result.current).toBe(first);
+  });
+
+  it('load defaults attachmentsByConcept to {} when the API omits the attachments field', async () => {
+    mocks.fetchAll.mockResolvedValue({ tags: [archaic] });
+
+    await act(async () => {
+      await useConceptTagsStore.getState().load();
+    });
+
+    expect(useConceptTagsStore.getState().attachmentsByConcept).toEqual({});
+    expect(useConceptTagsStore.getState().tags).toEqual([archaic]);
+  });
+
+  it('useConceptTagsForConcept returns the empty list when attachmentsByConcept is undefined', () => {
+    useConceptTagsStore.setState({
+      attachmentsByConcept: undefined as unknown as Record<string, string[]>,
+    });
+
+    const { result } = renderHook(() => useConceptTagsForConcept('1'));
+    expect(result.current).toEqual([]);
+  });
+
+  it('useConceptTagUsageCounts returns {} when attachmentsByConcept is undefined', () => {
+    useConceptTagsStore.setState({
+      attachmentsByConcept: undefined as unknown as Record<string, string[]>,
+    });
+
+    const { result } = renderHook(() => useConceptTagUsageCounts());
+    expect(result.current).toEqual({});
   });
 });

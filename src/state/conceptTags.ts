@@ -38,7 +38,15 @@ export const useConceptTagsStore = create<ConceptTagsState>()((set, get) => ({
     if (get().loaded) return;
     try {
       const data = await tagsApi.fetchAll();
-      set({ tags: data.tags, attachmentsByConcept: data.attachments, loaded: true });
+      // Defensive: a backend that doesn't yet implement /api/tags can return
+      // a partial shape (e.g. `{tags:[]}` with no `attachments` field). Falling
+      // through with `attachments: undefined` previously crashed the selector
+      // at `state.attachmentsByConcept[conceptId]`.
+      set({
+        tags: data?.tags ?? [],
+        attachmentsByConcept: data?.attachments ?? {},
+        loaded: true,
+      });
     } catch (error) {
       if (!get().warnedLoadFailure) {
         console.warn('[conceptTags] load failed; backend may be pending', error);
@@ -113,13 +121,15 @@ export const useConceptTagsStore = create<ConceptTagsState>()((set, get) => ({
 }));
 
 export const useConceptTagsForConcept = (conceptId: string): readonly string[] =>
-  useConceptTagsStore((state) => state.attachmentsByConcept[conceptId] ?? EMPTY_ATTACHMENT_LIST);
+  useConceptTagsStore((state) => state.attachmentsByConcept?.[conceptId] ?? EMPTY_ATTACHMENT_LIST);
 
 export const useConceptTagUsageCounts = (): Record<string, number> =>
   useConceptTagsStore(
     useShallow((state) => {
       const counts: Record<string, number> = {};
-      for (const ids of Object.values(state.attachmentsByConcept)) {
+      const attachments = state.attachmentsByConcept ?? {};
+      for (const ids of Object.values(attachments)) {
+        if (!Array.isArray(ids)) continue;
         for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
       }
       return counts;
