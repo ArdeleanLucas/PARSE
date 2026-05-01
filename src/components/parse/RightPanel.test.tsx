@@ -42,6 +42,7 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       offsetPhase="idle"
       onDetectOffset={vi.fn()}
       onOpenManualOffset={vi.fn()}
+      currentConceptId="c1"
       onSaveAnnotations={vi.fn()}
       {...overrides}
     />,
@@ -203,6 +204,7 @@ describe('RightPanel', () => {
         offsetPhase="idle"
         onDetectOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
+        currentConceptId="c1"
         onSaveAnnotations={vi.fn()}
       />,
     );

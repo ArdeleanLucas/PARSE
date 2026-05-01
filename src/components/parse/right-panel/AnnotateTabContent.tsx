@@ -1,6 +1,7 @@
 import { Activity, Anchor, AudioLines, Layers, Mic, Save, Scissors, SlidersHorizontal, Video } from 'lucide-react';
 
 import type { RightPanelProps } from './types';
+import { TagsPanelSection } from './TagsPanelSection';
 
 type AnnotateTabContentProps = Pick<
   RightPanelProps,
@@ -8,6 +9,7 @@ type AnnotateTabContentProps = Pick<
   | 'offsetPhase'
   | 'onDetectOffset'
   | 'onOpenManualOffset'
+  | 'currentConceptId'
   | 'annotateSpeakerTools'
   | 'annotateAuxTools'
   | 'onSaveAnnotations'
@@ -26,6 +28,7 @@ export function AnnotateTabContent({
   offsetPhase,
   onDetectOffset,
   onOpenManualOffset,
+  currentConceptId,
   annotateSpeakerTools,
   annotateAuxTools,
   onSaveAnnotations,
@@ -63,6 +66,8 @@ export function AnnotateTabContent({
           </button>
         </div>
       </div>
+
+      <TagsPanelSection conceptId={currentConceptId} />
 
       <div className="border-b border-slate-100 p-4">
         <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">

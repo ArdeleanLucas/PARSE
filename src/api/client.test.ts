@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelComputeJob, getConfig, runChat, saveAnnotation, startChatSession } from "./client";
+import { cancelComputeJob, getConfig, runChat, saveAnnotation, startChatSession, tagsApi } from "./client";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -162,5 +162,67 @@ describe("annotation API client contracts", () => {
 
     await expect(saveAnnotation("Fail01", normalized)).resolves.toBe(normalized);
     expect(fetchMock).toHaveBeenCalledWith("/api/annotations/Fail01", expect.objectContaining({ method: "POST" }));
+  });
+});
+
+
+describe("concept tags API client contracts", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the global tag registry and concept attachments", async () => {
+    const payload = {
+      tags: [{ id: "t1", name: "archaic", color: "#3554B8", createdAt: "2026-05-01T00:00:00.000Z" }],
+      attachments: { sister: ["t1"] },
+    };
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => payload,
+    });
+
+    await expect(tagsApi.fetchAll()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({ headers: expect.any(Object) }));
+  });
+
+  it("creates tags through POST /api/tags", async () => {
+    const tag = { id: "t2", name: "dialectal", color: "#0f766e", createdAt: "2026-05-01T00:00:00.000Z" };
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => tag,
+    });
+
+    await expect(tagsApi.create({ name: "dialectal", color: "#0f766e" })).resolves.toEqual(tag);
+    expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ name: "dialectal", color: "#0f766e" }),
+    }));
+  });
+
+  it("treats 204 attach/detach/delete responses as void", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: new Headers(),
+      json: vi.fn(),
+    });
+
+    await expect(tagsApi.attach("sister", "t1")).resolves.toBeUndefined();
+    await expect(tagsApi.detach("sister", "t1")).resolves.toBeUndefined();
+    await expect(tagsApi.delete("t1")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/concepts/sister/tags/t1", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/concepts/sister/tags/t1", expect.objectContaining({ method: "DELETE" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/tags/t1", expect.objectContaining({ method: "DELETE" }));
   });
 });

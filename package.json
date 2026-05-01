@@ -32,6 +32,7 @@
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "npm run check",
+    "lint": "npm run check",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "check": "./node_modules/.bin/tsc --noEmit",
