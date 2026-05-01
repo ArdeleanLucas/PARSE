@@ -266,10 +266,24 @@ def _build_stt_provider(config: Optional[Dict[str, Any]]) -> AIProvider:
     return _build_provider(provider_name, merged)
 
 
-def _build_ortho_provider(config: Optional[Dict[str, Any]]) -> LocalWhisperProvider:
+def _build_ortho_provider(config: Optional[Dict[str, Any]]) -> AIProvider:
     override = config or {}
     merged = _deep_merge_dicts(load_ai_config(), override)
-    return LocalWhisperProvider(config=merged, config_section="ortho")
+    ortho_config = merged.get("ortho", {})
+    if not isinstance(ortho_config, dict):
+        ortho_config = {}
+    backend = str(ortho_config.get("backend", "hf") or "hf").strip().lower()
+    if backend == "hf":
+        from .providers.hf_whisper import HFWhisperProvider
+
+        return HFWhisperProvider(config=merged, config_section="ortho")
+    if backend in {"faster-whisper", "fasterwhisper", "ct2"}:
+        return LocalWhisperProvider(config=merged, config_section="ortho")
+    raise ValueError(
+        "Unknown ortho.backend: {0!r}; expected 'hf' or 'faster-whisper'".format(
+            backend
+        )
+    )
 
 
 def get_stt_provider(config: Optional[Dict[str, Any]] = None) -> AIProvider:

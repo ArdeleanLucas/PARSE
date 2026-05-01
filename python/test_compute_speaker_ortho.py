@@ -7,6 +7,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server  # noqa: E402
+from ai.provider import get_ortho_provider  # noqa: E402
+from ai.providers.local_whisper import LocalWhisperProvider  # noqa: E402
 
 
 class _StubOrthoProvider:
@@ -181,6 +183,33 @@ def test_run_compute_job_dispatches_ortho(tmp_path, monkeypatch):
     server._run_compute_job("j1", "ortho", {"speaker": "Fail02"})
     assert "error" not in captured
     assert captured["result"]["filled"] == 2
+
+
+def test_ortho_backend_factory_selects_hf_by_default() -> None:
+    from ai.providers.hf_whisper import HFWhisperProvider
+
+    provider = get_ortho_provider(config={"ortho": {}})
+
+    assert isinstance(provider, HFWhisperProvider)
+    assert provider.model_path == "razhan/whisper-base-sdh"
+
+
+def test_ortho_backend_factory_selects_legacy_faster_whisper() -> None:
+    provider = get_ortho_provider(
+        config={
+            "ortho": {
+                "backend": "faster-whisper",
+                "model_path": "/tmp/razhan-sdh-ct2",
+            }
+        }
+    )
+
+    assert isinstance(provider, LocalWhisperProvider)
+
+
+def test_ortho_backend_factory_rejects_unknown_backend() -> None:
+    with pytest.raises(ValueError, match="Unknown ortho.backend"):
+        get_ortho_provider(config={"ortho": {"backend": "mystery"}})
 
 
 # --------------------------------------------------------------------------
