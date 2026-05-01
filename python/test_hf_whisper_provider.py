@@ -154,6 +154,35 @@ def _install_soundfile_stub(
     return calls
 
 
+def test_unload_model_drops_loaded_objects_and_clears_cuda(monkeypatch, capsys):
+    _processor, model = _install_transformers_stub(monkeypatch)
+    cuda_calls: list[str] = []
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True,
+                empty_cache=lambda: cuda_calls.append("empty_cache"),
+                synchronize=lambda: cuda_calls.append("synchronize"),
+            )
+        ),
+    )
+
+    provider = HFWhisperProvider(config=_config())
+    provider._load_model()
+
+    provider.unload_model()
+    provider.unload_model()
+
+    assert provider._processor is None
+    assert provider._model is None
+    assert "cpu" in model.to_devices
+    assert cuda_calls == ["empty_cache", "synchronize", "empty_cache", "synchronize"]
+    assert "HFWhisperProvider unloaded model + cleared CUDA cache" in capsys.readouterr().err
+
+
 def test_module_import_does_not_require_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "transformers", None)
 

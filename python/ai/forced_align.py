@@ -272,6 +272,33 @@ class Aligner:
             frame_stride_seconds=frame_stride_seconds,
         )
 
+    def release(self) -> None:
+        """Idempotently release wav2vec2 references and clear CUDA cache."""
+        model = self.model
+        if model is not None:
+            to_device = getattr(model, "to", None)
+            if callable(to_device):
+                try:
+                    to_device("cpu")
+                except Exception:
+                    pass
+        self.model = None
+        self.processor = None
+        self.vocab = {}
+        try:
+            import torch  # type: ignore
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+        print(
+            "[IPA] wav2vec2 aligner released + cleared CUDA cache",
+            file=sys.stderr,
+            flush=True,
+        )
+
     # ------------------------------------------------------------------
     # Phoneme tokenisation helpers
     # ------------------------------------------------------------------

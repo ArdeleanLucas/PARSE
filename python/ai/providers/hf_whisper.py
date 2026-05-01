@@ -205,6 +205,32 @@ class HFWhisperProvider(provider_module.AIProvider):
         """Eagerly load the HF Whisper processor/model pair."""
         self._load_model()
 
+    def unload_model(self) -> None:
+        """Idempotently free the loaded HF model/processor and CUDA cache."""
+        model = self._model
+        self._processor = None
+        if model is not None:
+            to_device = getattr(model, "to", None)
+            if callable(to_device):
+                try:
+                    to_device("cpu")
+                except Exception:
+                    pass
+        self._model = None
+        try:
+            import torch  # type: ignore
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+        print(
+            "[ORTH] HFWhisperProvider unloaded model + cleared CUDA cache",
+            file=sys.stderr,
+            flush=True,
+        )
+
     def _load_model(self) -> Tuple[Any, Any]:
         if self._processor is not None and self._model is not None:
             return self._processor, self._model

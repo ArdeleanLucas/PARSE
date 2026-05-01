@@ -2,6 +2,7 @@
 import json
 import pathlib
 import sys
+import types
 
 import pytest
 
@@ -520,6 +521,188 @@ def test_full_pipeline_step_failure_is_captured_not_raised(tmp_path, monkeypatch
     # Summary roll-up reflects the outcome.
     assert result["summary"]["error"] == 1
     assert result["summary"]["ok"] + result["summary"]["skipped"] == 1
+
+
+
+class _CleanupRecorder:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def unload(self) -> None:
+        self.events.append("unload")
+
+    def release(self) -> None:
+        self.events.append("release")
+
+
+def _patch_pipeline_cleanup(monkeypatch, recorder: _CleanupRecorder, *, free_gb: float | None = 8.0) -> None:
+    monkeypatch.setitem(server._compute_full_pipeline.__globals__, "_gpu_free_memory_gb", lambda: free_gb)
+    monkeypatch.setattr(server, "_LAST_ORTHO_PROVIDER", type("P", (), {"unload_model": recorder.unload})(), raising=False)
+    monkeypatch.setattr(server, "_release_ipa_aligner", recorder.release, raising=False)
+
+
+def test_full_pipeline_unloads_ortho_between_ortho_and_ipa(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+    events: list[str] = []
+
+    def fake_ortho(*a, **kw):
+        events.append("ortho")
+        return {"speaker": "Fail02", "filled": 1, "skipped": False}
+
+    def fake_ipa(*a, **kw):
+        events.append("ipa")
+        return {"speaker": "Fail02", "filled": 1, "skipped": 0, "total": 1}
+
+    def unload(_self=None) -> None:
+        events.append("unload")
+        recorder.unload()
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
+    monkeypatch.setattr(server, "_compute_speaker_ipa", fake_ipa)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder)
+    monkeypatch.setattr(server, "_LAST_ORTHO_PROVIDER", type("P", (), {"unload_model": unload})(), raising=False)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert events[:3] == ["ortho", "unload", "ipa"]
+    assert result["results"]["ipa"]["status"] == "ok"
+    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("release") >= 1
+
+
+def test_full_pipeline_pre_ipa_vram_check_records_error_when_insufficient(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+    ipa_called = {"count": 0}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"filled": 1})
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=2.0)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert ipa_called["count"] == 0
+    assert result["results"]["ipa"]["status"] == "error"
+    assert "Insufficient free GPU memory for IPA step" in result["results"]["ipa"]["error"]
+    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("release") >= 1
+
+
+def test_full_pipeline_pre_ipa_vram_check_passes_when_sufficient(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+    ipa_called = {"count": 0}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"speaker": "Fail02", "filled": 1, "total": 1})
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=8.0)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert ipa_called["count"] == 1
+    assert result["results"]["ipa"]["status"] == "ok"
+
+
+def test_full_pipeline_cleanup_runs_on_ortho_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+
+    def broken_ortho(*a, **kw):
+        raise RuntimeError("ortho exploded")
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", broken_ortho)
+    monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: {"speaker": "Fail02", "filled": 1, "total": 1})
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert result["results"]["ortho"]["status"] == "error"
+    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("release") >= 1
+
+
+def test_full_pipeline_cleanup_runs_on_ipa_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+
+    def broken_ipa(*a, **kw):
+        raise RuntimeError("ipa exploded")
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    monkeypatch.setattr(server, "_compute_speaker_ipa", broken_ipa)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert result["results"]["ipa"]["status"] == "error"
+    assert recorder.events.count("unload") >= 1
+    assert recorder.events.count("release") >= 1
+
+
+def test_full_pipeline_torch_unavailable_skips_vram_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_annotation(tmp_path, "Fail02", source_audio="raw/Fail02.wav")
+    _write_fake_source_wav(tmp_path, "raw/Fail02.wav")
+    recorder = _CleanupRecorder()
+    ipa_called = {"count": 0}
+
+    monkeypatch.setattr(server, "_compute_speaker_ortho", lambda *a, **kw: {"speaker": "Fail02", "filled": 1})
+    monkeypatch.setattr(server, "_compute_speaker_ipa", lambda *a, **kw: ipa_called.__setitem__("count", 1) or {"speaker": "Fail02", "filled": 1, "total": 1})
+    monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
+    _patch_pipeline_cleanup(monkeypatch, recorder, free_gb=None)
+
+    result = server._compute_full_pipeline("j1", {"speaker": "Fail02", "steps": ["ortho", "ipa"]})
+
+    assert ipa_called["count"] == 1
+    assert result["results"]["ipa"]["status"] == "ok"
+
+
+def test_gpu_free_memory_gb_uses_torch_cuda_mem_get_info(monkeypatch):
+    gpu_free_memory_gb = server._compute_full_pipeline.__globals__["_gpu_free_memory_gb"]
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True,
+                mem_get_info=lambda: (2 * 1024**3, 8 * 1024**3),
+            )
+        ),
+    )
+
+    assert gpu_free_memory_gb() == 2.0
+
+
+def test_gpu_free_memory_gb_returns_none_when_cuda_unavailable(monkeypatch):
+    gpu_free_memory_gb = server._compute_full_pipeline.__globals__["_gpu_free_memory_gb"]
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: False,
+                mem_get_info=lambda: (_ for _ in ()).throw(AssertionError("should not query memory")),
+            )
+        ),
+    )
+
+    assert gpu_free_memory_gb() is None
 
 
 # --------------------------------------------------------------------------
