@@ -674,4 +674,25 @@ describe('AnnotateView', () => {
     fireEvent.contextMenu(screen.getByRole('button', { name: /spectrogram/i }));
     expect(screen.getByTestId('spectrogram-settings')).toBeTruthy();
   });
+
+  it('renders a spectrogram playhead at currentTime / duration when the spectrogram is on', () => {
+    mockRecord = makeRecord([]);
+    mockCurrentTime = 1.5;
+    mockDuration = 4;
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    const playhead = screen.getByTestId('spectrogram-playhead') as HTMLElement;
+    expect(playhead.style.left).toBe('37.5%');
+  });
+
+  it('hides the spectrogram playhead when duration is zero', () => {
+    mockRecord = makeRecord([]);
+    mockCurrentTime = 0;
+    mockDuration = 0;
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
+    expect(screen.queryByTestId('spectrogram-playhead')).toBeNull();
+  });
 });

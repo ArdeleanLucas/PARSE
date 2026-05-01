@@ -482,6 +482,16 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   ref={spectroCanvasRef}
                   className="block h-full w-full"
                 />
+                {duration > 0 && (
+                  <div
+                    data-testid="spectrogram-playhead"
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-0 bottom-0 w-px bg-indigo-500"
+                    style={{
+                      left: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%`,
+                    }}
+                  />
+                )}
               </div>
             )}
             {quickRetimeMenu && (
