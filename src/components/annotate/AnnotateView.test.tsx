@@ -292,6 +292,31 @@ describe('AnnotateView', () => {
     expect(screen.queryByTestId('annotate-mark-done-toast')).toBeNull();
   });
 
+  it('clears the Marked done toast when navigating to a different concept', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    const { rerender } = renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /Mark Done/i }));
+    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done.');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 2, key: 'fire', name: 'fire' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    expect(screen.queryByTestId('annotate-mark-done-toast')).toBeNull();
+    const markDone = screen.getByRole('button', { name: /Mark Done/i });
+    expect(markDone.getAttribute('aria-pressed')).toBe('false');
+    expect(markDone.className).toContain('bg-white');
+  });
+
   it('renders no badge when only auto-imported ortho_words exists for the concept', () => {
     mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'water', start: 1, end: 2 }]);
 

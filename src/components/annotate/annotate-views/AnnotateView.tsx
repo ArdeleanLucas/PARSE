@@ -105,6 +105,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     const timeout = window.setTimeout(() => setDoneToast(null), 1600);
     return () => window.clearTimeout(timeout);
   }, [doneToast]);
+  useEffect(() => {
+    setDoneToast(null);
+  }, [concept.key]);
   const handleMarkDone = useCallback(() => {
     if (isConfirmed) return;
     tagConcept("confirmed", concept.key);
