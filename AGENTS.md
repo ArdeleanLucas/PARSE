@@ -121,6 +121,25 @@ Report what `gh` returned, not what you remember from earlier. If the result sur
 
 Skip the refetch only if you are ABSOLUTELY certain main hasn't moved since your last fetch in the same session. If in doubt, refetch — it's a 1-second operation.
 
+## PR base discipline (post-cutover)
+
+Every `gh pr create` MUST pass `--base main` explicitly. After creation, the agent MUST verify with `gh pr view <N> --repo ArdeleanLucas/PARSE --json baseRefName` returning `"baseRefName":"main"` BEFORE announcing the PR. If the base is anything else (a feature branch, a stale fix branch, a docs branch from another PR, etc.), abort and either retarget via `gh pr edit <N> --base main` or close + reopen with the correct base.
+
+```bash
+$ gh pr create --repo ArdeleanLucas/PARSE --base main \
+    --title "..." --body "..."
+https://github.com/ArdeleanLucas/PARSE/pull/N
+
+$ gh pr view N --repo ArdeleanLucas/PARSE --json baseRefName
+{"baseRefName":"main"}        # <-- must say exactly "main"; abort if not
+```
+
+**Failure mode this prevents:** 2026-05-01 — PR #234 was opened with `base: fix/annotate-arrow-key-concept-nav` (PR #231's branch) instead of `base: main`. The handoff said to *branch off* that branch so the work would stack regardless of merge order. The agent did that for the source branch but ALSO inferred the PR base from the source branch instead of explicitly setting it to main. When merged, commit 67976a0c landed in the obsolete side branch only — `main` was never updated, and the bug the PR was supposed to fix stayed in production. Lucas had to cherry-pick the fix into a fresh branch off main and ship it as PR #235.
+
+**The two decisions are independent.** Stacking source branches off feature branches is a legitimate technique when an upstream PR is in flight (it lets your work apply cleanly regardless of merge order). Setting PR bases off feature branches is NOT — the PR base controls where the merge lands, period. Always pass `--base main` even when the source branch is stacked elsewhere.
+
+**When in doubt, base = main. Always.**
+
 ## Agent identities and parallel worktrees (added 2026-04-27)
 
 The three implementation lanes are:
