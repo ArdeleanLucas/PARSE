@@ -781,7 +781,7 @@ export function ParseUI() {
       surveyItem: c.survey_item,
       customOrder: c.custom_order,
     }));
-  }, [rawConcepts, getTagsForConcept]);
+  }, [rawConcepts, getTagsForConcept, storeTags]);
 
   const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
   const markLexemeManuallyAdjusted = useAnnotationStore((s) => s.markLexemeManuallyAdjusted);

@@ -24,7 +24,14 @@ const mockSetInterval = vi.fn();
 const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockMarkLexemeManuallyAdjusted = vi.fn();
-const mockTagConcept = vi.fn();
+const mockGetTagsForConcept = (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId));
+const mockTagConcept = vi.fn((tagId: string, conceptId: string) => {
+  mockTags = mockTags.map((tag) =>
+    tag.id === tagId && !tag.concepts.includes(conceptId)
+      ? { ...tag, concepts: [...tag.concepts, conceptId] }
+      : tag,
+  );
+});
 const mockUntagConcept = vi.fn();
 const mockUpdateTag = vi.fn();
 const mockSetSelectedRegion = vi.fn();
@@ -71,7 +78,7 @@ vi.mock("./stores/tagStore", () => {
       updateTag: mockUpdateTag,
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
-      getTagsForConcept: (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId)),
+      getTagsForConcept: mockGetTagsForConcept,
     });
   (useTagStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockTagSetState(...args);
@@ -499,6 +506,13 @@ beforeEach(() => {
   mockSaveSpeaker.mockClear();
   mockMarkLexemeManuallyAdjusted.mockClear();
   mockTagConcept.mockClear();
+  mockTagConcept.mockImplementation((tagId: string, conceptId: string) => {
+    mockTags = mockTags.map((tag) =>
+      tag.id === tagId && !tag.concepts.includes(conceptId)
+        ? { ...tag, concepts: [...tag.concepts, conceptId] }
+        : tag,
+    );
+  });
   mockUpdateTag.mockClear();
   mockUntagConcept.mockClear();
   mockSetSelectedRegion.mockClear();
@@ -650,6 +664,30 @@ describe("ParseUI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
     expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+  });
+
+  it("turns the sidebar dot green after Mark Done", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", []),
+    };
+
+    const { rerender } = render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const waterButton = () =>
+      within(screen.getByTestId("concept-sidebar"))
+        .getAllByRole("button")
+        .find((button) => button.textContent?.includes("water"));
+    const dotForWater = () => waterButton()?.querySelector("span");
+
+    expect(dotForWater()?.className).toContain("bg-slate-300");
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
+    rerender(<ParseUI />);
+
+    await waitFor(() => {
+      expect(dotForWater()?.className).toContain("bg-emerald-500");
+    });
   });
 
   it("waits for the newly selected speaker audio to become ready before seeking and drawing a region", async () => {
