@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import csv
+import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+
+_LABEL_SEPARATOR_RE = re.compile(r"[\W_]+", flags=re.UNICODE)
 
 
 @dataclass
@@ -14,7 +19,8 @@ class ConceptRegistry:
 
 
 def concept_label_key(label: str) -> str:
-    return " ".join(str(label or "").strip().split()).casefold()
+    cleaned = _LABEL_SEPARATOR_RE.sub(" ", str(label or ""))
+    return " ".join(cleaned.split()).casefold()
 
 
 def _normalize_integer_concept_id(value: object) -> str:
@@ -51,15 +57,30 @@ def load_concept_registry(project_root: Path) -> ConceptRegistry:
             if not {"id", "concept_en"}.issubset(fields):
                 return registry
             seen_ids: set[str] = set()
+            dropped_duplicates: list[tuple[str, str, str]] = []
             for row in reader:
                 cid = _normalize_integer_concept_id(_row_value(row, "id"))
                 label = _row_value(row, "concept_en")
-                if not cid or not label or cid in seen_ids:
+                key = concept_label_key(label)
+                if not cid or not label or not key or cid in seen_ids:
                     continue
                 seen_ids.add(cid)
                 registry.max_id = max(registry.max_id, int(cid))
+                existing_id = registry.label_to_id.get(key)
+                if existing_id:
+                    if existing_id != cid:
+                        dropped_duplicates.append((cid, existing_id, label))
+                    continue
                 registry.raw_rows.append({"id": cid, "concept_en": label})
-                registry.label_to_id.setdefault(concept_label_key(label), cid)
+                registry.label_to_id[key] = cid
+            if dropped_duplicates:
+                dropped = ", ".join(
+                    f"{dropped_id} -> {kept_id} ({label})" for dropped_id, kept_id, label in dropped_duplicates
+                )
+                print(
+                    f"[concept_registry] duplicate concept label keys in concepts.csv; dropped {dropped}",
+                    file=sys.stderr,
+                )
     except (OSError, csv.Error, UnicodeDecodeError):
         return ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[])
     return registry
