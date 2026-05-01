@@ -35,6 +35,7 @@ export interface RightPanelProps {
   offsetPhase: OffsetPhase;
   onDetectOffset: () => void;
   onOpenManualOffset: () => void;
+  currentConceptId: string;
   annotateSpeakerTools?: ReactNode;
   annotateAuxTools?: ReactNode;
   onSaveAnnotations: () => void;

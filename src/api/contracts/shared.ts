@@ -70,6 +70,13 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     const text = await response.text().catch(() => response.statusText);
     throw new Error(`API ${options?.method ?? "GET"} ${path} failed ${response.status}: ${text}`);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  const contentLength = response.headers?.get("content-length");
+  if (contentLength === "0") {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 

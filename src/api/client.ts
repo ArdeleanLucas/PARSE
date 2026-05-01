@@ -16,3 +16,4 @@ export * from "./contracts/chat-and-generic-compute";
 export * from "./contracts/job-observability";
 export * from "./contracts/export-and-media";
 export * from "./contracts/clef-contact-lexeme";
+export * from "./tags";

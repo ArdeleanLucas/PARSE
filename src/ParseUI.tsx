@@ -54,6 +54,7 @@ import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
+import { useTagsStore } from './state/tags';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
 import {
@@ -141,6 +142,7 @@ export function ParseUI() {
   // — Bootstrap —
   useEffect(() => {
     loadConfig().catch(console.error);
+    useTagsStore.getState().load().catch(console.error);
     hydrateTagStore();
     syncTagStoreFromServer().catch(console.error);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -726,6 +728,7 @@ export function ParseUI() {
     useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
     useEnrichmentStore.setState({ data: {}, loading: false });
     useTagStore.setState({ tags: [] });
+    useTagsStore.setState(useTagsStore.getInitialState(), true);
     usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
     useConfigStore.setState({ config: null, loading: false, error: null });
     crossSpeakerJob.reset();
@@ -2095,6 +2098,7 @@ export function ParseUI() {
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
           onOpenManualOffset={openManualOffset}
+          currentConceptId={concept.key}
           annotateSpeakerTools={annotatePhoneticTools}
           annotateAuxTools={<TranscriptionLanesControls />}
           onSaveAnnotations={() => {
