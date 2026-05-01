@@ -160,6 +160,57 @@ def test_job_error_dispatches_callback_payload(monkeypatch) -> None:
 
 
 
+def test_compute_cancel_route_returns_404_for_unknown_job() -> None:
+    from ai.job_cancel import clear_cancel, is_cancelled
+
+    server._jobs.clear()
+    clear_cancel("missing-job")
+    handler = _HandlerHarness("/api/compute/missing-job/cancel")
+
+    handler._dispatch_api_post("/api/compute/missing-job/cancel")
+
+    status, payload = handler.sent[-1]
+    assert status == HTTPStatus.NOT_FOUND
+    assert payload == {"cancelled": False, "job_id": "missing-job", "reason": "not found"}
+    assert is_cancelled("missing-job") is False
+
+
+def test_compute_cancel_route_returns_200_for_known_job() -> None:
+    from ai.job_cancel import clear_cancel, is_cancelled
+
+    server._jobs.clear()
+    job_id = server._create_job("compute:ortho", {"speaker": "Fail01"})
+    clear_cancel(job_id)
+    handler = _HandlerHarness("/api/compute/{0}/cancel".format(job_id))
+
+    handler._dispatch_api_post("/api/compute/{0}/cancel".format(job_id))
+
+    status, payload = handler.sent[-1]
+    assert status == HTTPStatus.OK
+    assert payload == {"cancelled": True, "job_id": job_id}
+    assert is_cancelled(job_id) is True
+    clear_cancel(job_id)
+
+
+def test_compute_cancel_route_is_idempotent_for_known_job() -> None:
+    from ai.job_cancel import clear_cancel, is_cancelled
+
+    server._jobs.clear()
+    job_id = server._create_job("compute:ortho", {"speaker": "Fail01"})
+    clear_cancel(job_id)
+    handler = _HandlerHarness("/api/compute/{0}/cancel".format(job_id))
+
+    handler._dispatch_api_post("/api/compute/{0}/cancel".format(job_id))
+    handler._dispatch_api_post("/api/compute/{0}/cancel".format(job_id))
+
+    assert handler.sent[-2:] == [
+        (HTTPStatus.OK, {"cancelled": True, "job_id": job_id}),
+        (HTTPStatus.OK, {"cancelled": True, "job_id": job_id}),
+    ]
+    assert is_cancelled(job_id) is True
+    clear_cancel(job_id)
+
+
 def test_api_get_jobs_and_job_logs_return_generic_observability_payloads() -> None:
     server._jobs.clear()
 

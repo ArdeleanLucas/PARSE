@@ -269,6 +269,42 @@ def test_transcribe_emits_multi_segment_for_long_audio(
     assert progress == [(pytest.approx(100.0 / 3.0), 1), (pytest.approx(200.0 / 3.0), 2), (100.0, 3)]
 
 
+def test_transcribe_breaks_on_should_cancel_chunked_full_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    audio_path = tmp_path / "long.wav"
+    audio_path.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
+    _install_soundfile_stub(monkeypatch, samples=16000 * 90, sample_rate=16000)
+    _processor, model = _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=["first chunk", "second chunk", "third chunk"]),
+        model=_RecordingModel(
+            generated=[
+                _generated_result(selected_token=1, score_row=[0.0, 1.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+                _generated_result(selected_token=0, score_row=[2.0, 0.0]),
+            ]
+        ),
+    )
+    provider = HFWhisperProvider(config=_config(language="sd"))
+    cancel_checks = 0
+
+    def should_cancel() -> bool:
+        nonlocal cancel_checks
+        cancel_checks += 1
+        return cancel_checks >= 3
+
+    result = provider.transcribe(audio_path, should_cancel=should_cancel)
+
+    assert [seg["text"] for seg in result] == ["first chunk", "second chunk"]
+    assert len(model.generate_calls) == 2
+    stderr = capsys.readouterr().err
+    assert "[ORTH] cancel requested at chunk 3/3" in stderr
+    assert "returning 2 partial segments" in stderr
+
+
 def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -304,6 +340,72 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     assert second_window.shape == (20000,)
     assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"} for call in processor.calls)
     assert progress == [(50.0, 1), (100.0, 2)]
+
+
+def test_transcribe_segments_in_memory_breaks_on_should_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _processor, model = _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=["یەک", "دوو", "سێ", "چوار", "پێنج"]),
+        model=_RecordingModel(
+            generated=[
+                _generated_result(selected_token=1, score_row=[0.0, 1.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+            ]
+        ),
+    )
+    provider = HFWhisperProvider(config=_config(language="sd"))
+    audio = np.arange(16000 * 6, dtype=np.float32)
+    cancel_checks = 0
+
+    def should_cancel() -> bool:
+        nonlocal cancel_checks
+        cancel_checks += 1
+        return cancel_checks >= 3
+
+    result = provider.transcribe_segments_in_memory(
+        audio,
+        [(0.0, 0.5), (1.0, 1.5), (2.0, 2.5), (3.0, 3.5), (4.0, 4.5)],
+        sample_rate=16000,
+        should_cancel=should_cancel,
+    )
+
+    assert [seg["text"] for seg in result] == ["یەک", "دوو"]
+    assert len(model.generate_calls) == 2
+    stderr = capsys.readouterr().err
+    assert "[ORTH] cancel requested at interval 3/5 (2.00-2.50s)" in stderr
+    assert "returning 2 partial segments" in stderr
+
+
+def test_transcribe_segments_in_memory_should_cancel_default_none_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _processor, model = _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=["یەک", "دوو"]),
+        model=_RecordingModel(
+            generated=[
+                _generated_result(selected_token=1, score_row=[0.0, 1.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+            ]
+        ),
+    )
+    provider = HFWhisperProvider(config=_config(language="sd"))
+
+    result = provider.transcribe_segments_in_memory(
+        np.zeros(16000 * 2, dtype=np.float32),
+        [(0.0, 0.5), (1.0, 1.5)],
+        sample_rate=16000,
+        should_cancel=None,
+    )
+
+    assert [seg["text"] for seg in result] == ["یەک", "دوو"]
+    assert len(model.generate_calls) == 2
 
 
 def test_transcribe_segments_in_memory_logs_exception_class_on_generate_failure(

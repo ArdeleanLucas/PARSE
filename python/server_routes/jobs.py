@@ -820,6 +820,21 @@ def _api_get_worker_status(self) -> None:
     response = _server._app_build_worker_status_response(resolve_compute_mode=_server._resolve_compute_mode, persistent_worker_handle=_server._PERSISTENT_WORKER_HANDLE)
     self._send_json(response.status, response.payload)
 
+
+def _api_post_compute_cancel(self, job_id_part: str) -> None:
+    job_id = str(job_id_part or '').strip()
+    if not job_id or _server._get_job_snapshot(job_id) is None:
+        self._send_json(
+            _server.HTTPStatus.NOT_FOUND,
+            {'cancelled': False, 'job_id': job_id, 'reason': 'not found'},
+        )
+        return
+    from ai.job_cancel import request_cancel
+
+    request_cancel(job_id)
+    self._send_json(_server.HTTPStatus.OK, {'cancelled': True, 'job_id': job_id})
+
+
 def _api_post_compute_start(self, compute_type: str) -> None:
     normalized_type = str(compute_type or '').strip().lower()
     if not normalized_type or normalized_type == 'status':
@@ -845,5 +860,5 @@ def _api_post_compute_status(self, compute_type: _server.Optional[str]) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_resolve_compute_mode', '_launch_compute_runner', '_launch_compute_subprocess', '_compute_subprocess_entry', '_launch_compute_persistent', '_cleanup_old_jobs', '_job_log_limit', '_infer_job_error_code', '_job_log_entry', '_append_job_log_locked', '_job_lock_resources', '_expire_job_locks_locked', '_find_job_resource_conflict_locked', '_refresh_job_locks_locked', '_release_job_locks_locked', '_job_locks_payload', '_normalize_job_callback_url', '_job_callback_payload', '_post_job_callback', '_dispatch_job_callback', '_dispatch_job_callback_async', '_create_job', '_tail_log_file', '_set_job_running', '_set_job_progress', '_set_job_complete', '_set_job_error', '_get_job_snapshot', '_job_logs_payload', '_job_detail_payload', '_list_jobs_snapshots', '_job_response_payload', '_list_active_jobs_snapshots', '_reset_job_to_running', '_run_compute_job', '_api_get_jobs', '_api_get_job', '_api_get_job_logs', '_api_get_jobs_active', '_api_get_job_error_logs', '_api_get_worker_status', '_api_post_compute_start', '_api_post_compute_status']
+__all__ = ['_resolve_compute_mode', '_launch_compute_runner', '_launch_compute_subprocess', '_compute_subprocess_entry', '_launch_compute_persistent', '_cleanup_old_jobs', '_job_log_limit', '_infer_job_error_code', '_job_log_entry', '_append_job_log_locked', '_job_lock_resources', '_expire_job_locks_locked', '_find_job_resource_conflict_locked', '_refresh_job_locks_locked', '_release_job_locks_locked', '_job_locks_payload', '_normalize_job_callback_url', '_job_callback_payload', '_post_job_callback', '_dispatch_job_callback', '_dispatch_job_callback_async', '_create_job', '_tail_log_file', '_set_job_running', '_set_job_progress', '_set_job_complete', '_set_job_error', '_get_job_snapshot', '_job_logs_payload', '_job_detail_payload', '_list_jobs_snapshots', '_job_response_payload', '_list_active_jobs_snapshots', '_reset_job_to_running', '_run_compute_job', '_api_get_jobs', '_api_get_job', '_api_get_job_logs', '_api_get_jobs_active', '_api_get_job_error_logs', '_api_get_worker_status', '_api_post_compute_cancel', '_api_post_compute_start', '_api_post_compute_status']
 
