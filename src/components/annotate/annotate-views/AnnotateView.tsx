@@ -361,10 +361,76 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     wsSetVolume(volume);
   }, [audioReady, volume, wsSetVolume]);
 
-  // Spectrogram time window: pad the active concept's interval by ±0.5 s so the
-  // user sees a bit of context. PARSE recordings are 1–2+ h, so without slicing
-  // here the worker hits its 30 s hard cap and renders a blank canvas.
-  const spectrogramTimeRange = useMemo(() => {
+  // Spectrogram time window — primary source: the waveform's currently visible
+  // range (so the spectrogram aligns with what's drawn above and follows
+  // playback as wavesurfer auto-scrolls). Throttled to 150 ms to keep worker
+  // recompute frequency reasonable.
+  const [waveformVisibleRange, setWaveformVisibleRange] =
+    useState<{ startSec: number; endSec: number } | null>(null);
+
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || !audioReady) return;
+
+    const THROTTLE_MS = 150;
+    let lastUpdate = 0;
+    let timeoutId: number | null = null;
+    let pendingStart = 0;
+    let pendingEnd = 0;
+
+    const flush = () => {
+      timeoutId = null;
+      lastUpdate = Date.now();
+      // Round to a 0.05 s grid so sub-pixel scroll noise doesn't churn React.
+      const startSec = Math.max(0, Math.round(pendingStart * 20) / 20);
+      const endSec = Math.max(startSec, Math.round(pendingEnd * 20) / 20);
+      setWaveformVisibleRange((prev) => {
+        if (prev && prev.startSec === startSec && prev.endSec === endSec) return prev;
+        return { startSec, endSec };
+      });
+    };
+
+    const handleScroll = (visibleStart: number, visibleEnd: number) => {
+      pendingStart = visibleStart;
+      pendingEnd = visibleEnd;
+      const now = Date.now();
+      if (now - lastUpdate >= THROTTLE_MS) {
+        flush();
+      } else if (timeoutId === null) {
+        timeoutId = window.setTimeout(flush, THROTTLE_MS - (now - lastUpdate));
+      }
+    };
+
+    // Seed from the DOM in case `scroll` hasn't fired yet (initial mount).
+    type WaveSurferInternals = {
+      options?: { minPxPerSec?: number };
+      getWrapper?: () => HTMLElement | null | undefined;
+    };
+    const internals = ws as unknown as WaveSurferInternals;
+    const minPxPerSec = internals.options?.minPxPerSec;
+    const wrapper = internals.getWrapper?.();
+    if (wrapper && typeof minPxPerSec === "number" && minPxPerSec > 0) {
+      pendingStart = wrapper.scrollLeft / minPxPerSec;
+      pendingEnd = (wrapper.scrollLeft + wrapper.clientWidth) / minPxPerSec;
+      flush();
+    }
+
+    // wavesurfer v7's `on()` returns an unsubscribe; some mocks (and older
+    // wavesurfer builds) don't, so fall back to `un()`.
+    const off = ws.on("scroll", handleScroll);
+    return () => {
+      if (typeof off === "function") {
+        off();
+      } else {
+        (ws as unknown as { un: typeof ws.on }).un?.("scroll", handleScroll);
+      }
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [audioReady, wsRef]);
+
+  // Concept-based fallback (used briefly until `scroll` fires, or in tests
+  // where there's no real wavesurfer instance).
+  const conceptTimeRange = useMemo(() => {
     if (!conceptInterval) return undefined;
     const padding = 0.5;
     const start = Math.max(0, conceptInterval.start - padding);
@@ -374,13 +440,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     return { startSec: start, endSec: end };
   }, [conceptInterval, duration]);
 
-  // The hook falls back to "first 30 s of audio" when no timeRange is given;
-  // mirror that here so the playhead lines up with the rendered spectrogram.
+  // Cascade: prefer the live waveform window, fall back to concept ± padding,
+  // finally fall back to the first 30 s of audio (mirrors the hook's default).
   const effectiveSpectrogramRange = useMemo(() => {
-    if (spectrogramTimeRange) return spectrogramTimeRange;
+    if (waveformVisibleRange) return waveformVisibleRange;
+    if (conceptTimeRange) return conceptTimeRange;
     if (duration <= 0) return null;
     return { startSec: 0, endSec: Math.min(duration, 30) };
-  }, [spectrogramTimeRange, duration]);
+  }, [waveformVisibleRange, conceptTimeRange, duration]);
 
   const spectrogramPlayheadPercent = useMemo(() => {
     if (!effectiveSpectrogramRange) return null;
@@ -403,7 +470,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       preEmphasisHz: spectrogramParams.preEmphasisHz,
       colorScheme: spectrogramParams.colorScheme,
     },
-    timeRange: spectrogramTimeRange,
+    timeRange: waveformVisibleRange ?? conceptTimeRange,
   });
 
   useEffect(() => {
