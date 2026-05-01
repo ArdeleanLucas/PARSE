@@ -121,6 +121,16 @@ def test_delete_tag_returns_204_and_cascades_attachments() -> None:
     assert tags_store.fetch_all()["attachments"] == {"concept_a": [other["id"]]}
 
 
+def test_delete_tag_returns_204_even_when_tag_missing() -> None:
+    handler = _HandlerHarness("/api/tags/tag_does_not_exist")
+
+    assert handler._handle_api("DELETE") is True
+
+    assert handler.response_codes == [HTTPStatus.NO_CONTENT]
+    assert ("Content-Length", "0") in handler.headers_sent
+    assert handler.ended == 1
+
+
 def test_post_concept_tag_attach_is_idempotent() -> None:
     tag = tags_store.create_tag("archaic", "#3554B8")
     path = f"/api/concepts/concept_a/tags/{tag['id']}"
@@ -133,6 +143,15 @@ def test_post_concept_tag_attach_is_idempotent() -> None:
     assert first.response_codes == [HTTPStatus.NO_CONTENT]
     assert second.response_codes == [HTTPStatus.NO_CONTENT]
     assert tags_store.fetch_all()["attachments"] == {"concept_a": [tag["id"]]}
+
+
+def test_post_concept_tag_attach_returns_404_for_unknown_tag() -> None:
+    handler = _HandlerHarness("/api/concepts/concept_a/tags/tag_does_not_exist")
+
+    assert handler._handle_api("POST") is True
+
+    assert handler.sent_json == []
+    assert handler.sent_errors == [(HTTPStatus.NOT_FOUND, "Unknown tag 'tag_does_not_exist'")]
 
 
 def test_delete_concept_tag_detach_is_idempotent() -> None:

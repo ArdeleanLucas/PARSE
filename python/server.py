@@ -1209,7 +1209,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         return str(_resolve_static_request_path(path))
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("_api_") or name in {"_parse_single_range", "_serve_range", "_send_416"}:
+        if name.startswith("_api_") or name in {"_dispatch_api_delete", "_parse_single_range", "_serve_range", "_send_416"}:
             _install_route_bindings()
             attr = getattr(type(self), name, None)
             if attr is not None:
@@ -1259,8 +1259,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_DELETE(self) -> None:
-        if not self._handle_api("DELETE"): self._send_json_error(HTTPStatus.NOT_FOUND, "Not found")
-
+        if self._handle_api("DELETE"):
+            return
+        self._send_json_error(HTTPStatus.NOT_FOUND, "Not found")
     def end_headers(self) -> None:
         self._add_cors_headers()
         super().end_headers()
@@ -1338,7 +1339,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self._dispatch_api_post(request_path)
             elif method == "PUT":
                 self._dispatch_api_put(request_path)
-            elif method == "DELETE": self._api_delete_concept_tag_dispatch(request_path)
+            elif method == "DELETE":
+                self._dispatch_api_delete(request_path)
             else:
                 raise ApiError(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
         except ApiError as exc:
@@ -1436,9 +1438,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/clef/sources-report":
             self._api_get_clef_sources_report()
             return
-
-        if request_path == "/api/tags": self._api_get_concept_tags(); return
-
+        if request_path == "/api/tags":
+            self._api_get_concept_tags()
+            return
         if request_path == "/api/spectrogram":
             self._api_get_spectrogram()
             return
@@ -1526,9 +1528,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/auth/logout":
             self._api_auth_logout()
             return
-
-        if request_path == "/api/tags": self._api_post_concept_tag(); return
-
+        if request_path == "/api/tags":
+            self._api_post_concept_tag()
+            return
         if request_path == "/api/tags/merge":
             self._api_post_tags_merge()
             return
@@ -1567,8 +1569,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_mcp_tool(parts[3])
             return
 
-        if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags": self._api_post_concept_tag_attachment(parts[2], parts[4]); return
-
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags":
+            self._api_post_concept_tag_attachment(parts[2], parts[4])
+            return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_post_annotation(parts[2])
             return
@@ -1716,7 +1719,7 @@ def _install_route_bindings() -> None:
             for export_name in getattr(module, "__all__", ()):
                 export = getattr(module, export_name)
                 globals()[export_name] = export
-                if export_name.startswith("_api_"):
+                if export_name.startswith("_api_") or export_name == "_dispatch_api_delete":
                     setattr(RangeRequestHandler, export_name, export)
 
         RangeRequestHandler._parse_single_range = _parse_single_range

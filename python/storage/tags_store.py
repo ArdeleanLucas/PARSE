@@ -7,6 +7,7 @@ Set ``PARSE_TAGS_PATH`` in tests or isolated runtimes to redirect storage.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -43,6 +44,7 @@ class UnknownTagError(KeyError):
 
 DEFAULT_PATH = Path.home() / ".parse" / "tags.json"
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_LOGGER = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 
 
@@ -79,26 +81,36 @@ def _validate_id(value: Any, label: str) -> str:
     return value.strip()
 
 
+def _warn_dropped(reason: str) -> None:
+    _LOGGER.warning("Dropped malformed tags-store entry: %s", reason)
+
+
 def _normalize_data(raw: Any) -> TagsData:
     if not isinstance(raw, dict):
+        _warn_dropped("root payload is not an object")
         return _empty()
 
     tags: list[Tag] = []
     seen_tag_ids: set[str] = set()
     for entry in raw.get("tags", []):
         if not isinstance(entry, dict):
+            _warn_dropped("tag entry is not an object")
             continue
         tag_id = entry.get("id")
         name = entry.get("name")
         color = entry.get("color")
         created_at = entry.get("createdAt")
         if not isinstance(tag_id, str) or not tag_id or tag_id in seen_tag_ids:
+            _warn_dropped("tag entry has an invalid or duplicate id")
             continue
         if not isinstance(name, str) or not name.strip():
+            _warn_dropped("tag entry has an invalid name")
             continue
         if not isinstance(color, str) or not _COLOR_RE.fullmatch(color):
+            _warn_dropped("tag entry has an invalid color")
             continue
         if not isinstance(created_at, str) or not created_at.strip():
+            _warn_dropped("tag entry has an invalid createdAt")
             continue
         seen_tag_ids.add(tag_id)
         tags.append({"id": tag_id, "name": name, "color": color, "createdAt": created_at})
@@ -108,13 +120,18 @@ def _normalize_data(raw: Any) -> TagsData:
     if isinstance(raw_attachments, dict):
         for concept_id, tag_ids in raw_attachments.items():
             if not isinstance(concept_id, str) or not concept_id.strip() or not isinstance(tag_ids, list):
+                _warn_dropped("attachment entry has an invalid concept id or tag list")
                 continue
             cleaned_ids: list[str] = []
             for tag_id in tag_ids:
                 if isinstance(tag_id, str) and tag_id in seen_tag_ids and tag_id not in cleaned_ids:
                     cleaned_ids.append(tag_id)
+                else:
+                    _warn_dropped("attachment references an invalid, unknown, or duplicate tag id")
             if cleaned_ids:
                 attachments[concept_id] = cleaned_ids
+    else:
+        _warn_dropped("attachments payload is not an object")
 
     return {"version": 1, "tags": tags, "attachments": attachments}
 

@@ -75,6 +75,19 @@ def test_delete_tag_cascades_attachments_and_prunes_empty_concepts() -> None:
     }
 
 
+def test_delete_tag_is_idempotent_for_unknown_id() -> None:
+    tag = tags_store.create_tag("archaic", "#3554B8")
+    tags_store.attach("concept_a", tag["id"])
+
+    tags_store.delete_tag("tag_does_not_exist")
+
+    assert tags_store.fetch_all() == {
+        "version": 1,
+        "tags": [tag],
+        "attachments": {"concept_a": [tag["id"]]},
+    }
+
+
 def test_attach_is_idempotent() -> None:
     tag = tags_store.create_tag("archaic", "#3554B8")
 
@@ -125,3 +138,45 @@ def test_atomic_write_failure_leaves_original_file_untouched(
 
     assert isolated_tags_path.read_text(encoding="utf-8") == original_text
     assert tags_store.fetch_all()["tags"] == [original_tag]
+
+
+def test_load_drops_malformed_entries_with_warnings(
+    isolated_tags_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    isolated_tags_path.parent.mkdir(parents=True, exist_ok=True)
+    isolated_tags_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tags": [
+                    {
+                        "id": "tag_good",
+                        "name": "archaic",
+                        "color": "#3554B8",
+                        "createdAt": "2026-05-01T00:00:00Z",
+                    },
+                    {
+                        "id": "tag_bad_color",
+                        "name": "broken",
+                        "color": "not-a-hex",
+                        "createdAt": "2026-05-01T00:00:00Z",
+                    },
+                    {"id": "", "name": "empty-id", "color": "#aabbcc", "createdAt": "2026-05-01T00:00:00Z"},
+                    "not-a-dict",
+                ],
+                "attachments": {
+                    "concept_a": ["tag_good", "tag_bad_color", "tag_does_not_exist"],
+                    "": ["tag_good"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        data = tags_store.fetch_all()
+
+    assert [t["id"] for t in data["tags"]] == ["tag_good"]
+    assert data["attachments"] == {"concept_a": ["tag_good"]}
+    assert any("dropped" in record.message.lower() for record in caplog.records)

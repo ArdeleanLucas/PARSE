@@ -49,11 +49,15 @@ def _api_delete_concept_tag_attachment(self, concept_id: str, tag_id: str) -> No
         _raise_api_error(exc)
 
 
-def _api_delete_concept_tag_dispatch(self, request_path: str) -> None:
-    """DELETE router for global tags endpoints."""
+def _dispatch_api_delete(self, request_path: str) -> None:
+    """DELETE router. Currently handles global concept-tag endpoints."""
     parts = self._path_parts(request_path)
-    if len(parts) == 3 and parts[0] == "api" and parts[1] == "tags": self._api_delete_concept_tag(parts[2]); return
-    if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags": self._api_delete_concept_tag_attachment(parts[2], parts[4]); return
+    if len(parts) == 3 and parts[0] == "api" and parts[1] == "tags":
+        self._api_delete_concept_tag(parts[2])
+        return
+    if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags":
+        self._api_delete_concept_tag_attachment(parts[2], parts[4])
+        return
     raise _server.ApiError(_server.HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
 
@@ -63,5 +67,5 @@ __all__ = [
     "_api_delete_concept_tag",
     "_api_post_concept_tag_attachment",
     "_api_delete_concept_tag_attachment",
-    "_api_delete_concept_tag_dispatch",
+    "_dispatch_api_delete",
 ]
