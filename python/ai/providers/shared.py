@@ -46,50 +46,23 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
     },
     "ortho": {
-        "provider": "faster-whisper",
-        # Intentionally empty — the ORTH pipeline hard-fails if this is not
-        # set to a local CT2 model path. Users converting razhan/whisper-base-sdh
-        # (the historical default) should run:
-        #   ct2-transformers-converter --model razhan/whisper-base-sdh \
-        #     --output_dir /path/to/razhan-ct2
-        # and point this at the output directory. A HuggingFace repo id is
-        # explicitly rejected — faster-whisper only reads CT2 format and we
-        # refuse to silently fall back to stt.model_path.
-        "model_path": "",
+        "backend": "hf",
+        # ORTH defaults to the original HF Transformers Razhan SDH model. The
+        # legacy CT2/faster-whisper backend remains selectable via
+        # ortho.backend="faster-whisper" with a CT2 directory model_path.
+        "model_path": "razhan/whisper-base-sdh",
         "language": "sd",
         "device": "cuda",
+        # The following keys are accepted for legacy faster-whisper/CT2 ORTH
+        # configs but are intentionally not applied by the HF FP32 backend.
         "compute_type": "float16",
-        # ORTH: VAD on with TUNED Silero parameters that don't
-        # collapse coverage. Flipped from ``vad_filter=False`` on
-        # 2026-04-23 after Fail02 regressed from 131 full-coverage
-        # intervals to 38 intervals truncating at 06:31 with classic
-        # whisper repetition-loop hallucination ("ئە ئە ئە ئە ئە ...").
-        # Root cause was faster-whisper's ``condition_on_previous_text``
-        # default carrying a poisoned segment forward into every
-        # subsequent segment; tuned VAD gating silence gaps prevents
-        # the decoder from entering that state in the first place.
-        # Untuned Silero is too conservative for fieldwork recordings,
-        # hence the explicit params below. See provider __init__ for
-        # the full back-story.
         "vad_filter": True,
         "vad_parameters": {
-            # Require 500 ms of silence before gating (leaves
-            # inter-word pauses to Whisper). Stock Silero uses
-            # 2000 ms which misses short Kurdish utterance gaps.
             "min_silence_duration_ms": 500,
-            # 0.35 voice-probability threshold (stock 0.5). Catches
-            # quieter elicitation speech that the default misses.
             "threshold": 0.35,
         },
-        # Keep one bad segment from poisoning the entire downstream
-        # decode — this is THE fix for the repetition cascade.
         "condition_on_previous_text": False,
-        # Stricter than Whisper's 2.4 default so the decoder falls
-        # back to higher temperature (or drops the segment) earlier
-        # when it detects repetition.
         "compression_ratio_threshold": 1.8,
-        # Decoder prime for elicited word-list recordings. Existing user configs
-        # can still opt out by setting an explicit empty string.
         "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
         # When True the ORTH compute runner will also do a short-clip
         # Whisper pass per concept after Tier-2 forced alignment. Off by

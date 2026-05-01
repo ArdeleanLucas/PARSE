@@ -178,11 +178,23 @@ PARSE routes different tasks to different provider families.
 ```mermaid
 flowchart LR
     STT[STT request] --> FW[faster-whisper / Whisper API]
-    ORTH[ORTH request] --> Razhan[razhan/whisper-base-sdh]
+    ORTH[ORTH request] --> HF[HF Transformers FP32\nrazhan/whisper-base-sdh]
+    ORTH -. legacy opt-in .-> CT2[faster-whisper / CT2]
     Align[Forced alignment] --> W2V[wav2vec2-xlsr-53-espeak-cv-ft]
     IPA[Acoustic IPA] --> W2V
     Chat[AI chat dock] --> LLM[OpenAI or xAI]
 ```
+
+### ORTH backend choice (2026-05-01)
+
+ORTH now defaults to `ortho.backend = "hf"` ([PR #218](https://github.com/ArdeleanLucas/PARSE/pull/218)), implemented by `HFWhisperProvider`
+with Hugging Face Transformers FP32 PyTorch on `razhan/whisper-base-sdh`. The
+first load may download roughly 280 MB into the standard Hugging Face cache at
+`~/.cache/huggingface/`. The legacy CT2 path remains selectable with
+`ortho.backend = "faster-whisper"` and a local CTranslate2 `ortho.model_path`,
+but it is no longer recommended for Razhan SDH ORTH: on Lucas's RTX 5090,
+HF Transformers was 16x faster on Saha01 and eliminated the 35.7% Latin /
+Cyrillic / CJK contamination seen in the CT2 path.
 
 This separation is important conceptually:
 
