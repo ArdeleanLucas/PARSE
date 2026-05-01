@@ -53,8 +53,9 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "model_path": "razhan/whisper-base-sdh",
         "language": "sd",
         "device": "cuda",
-        # The following keys are accepted for legacy faster-whisper/CT2 ORTH
-        # configs but are intentionally not applied by the HF FP32 backend.
+        # HF ORTH applies the decode-level repetition guards below. The legacy
+        # CT2/faster-whisper backend also consumes the compatible keys where
+        # supported; compute_type/VAD remain CT2-specific.
         "compute_type": "float16",
         "vad_filter": True,
         "vad_parameters": {
@@ -63,6 +64,8 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         },
         "condition_on_previous_text": False,
         "compression_ratio_threshold": 1.8,
+        "no_repeat_ngram_size": 3,
+        "repetition_penalty": 1.2,
         "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
         # When True the ORTH compute runner will also do a short-clip
         # Whisper pass per concept after Tier-2 forced alignment. Off by

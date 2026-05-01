@@ -23,6 +23,16 @@ class _RecordingInputs(dict):
         return self
 
 
+class _RecordingPromptIds:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.to_devices: list[str] = []
+
+    def to(self, device: str) -> "_RecordingPromptIds":
+        self.to_devices.append(device)
+        return self
+
+
 class _RecordingProcessor:
     def __init__(self, texts: list[str] | None = None) -> None:
         self.texts = texts or [" دەنگ "]
@@ -30,6 +40,8 @@ class _RecordingProcessor:
         self.decode_calls: list[dict[str, Any]] = []
         self.from_pretrained_calls: list[str] = []
         self.inputs: list[_RecordingInputs] = []
+        self.prompt_ids_calls: list[dict[str, Any]] = []
+        self.prompt_ids: list[_RecordingPromptIds] = []
 
     def __call__(self, audio: Any, **kwargs: Any) -> _RecordingInputs:
         self.calls.append({"audio": audio, "kwargs": kwargs})
@@ -42,6 +54,12 @@ class _RecordingProcessor:
         if not self.texts:
             return [""]
         return [self.texts.pop(0)]
+
+    def get_prompt_ids(self, text: str, *, return_tensors: str) -> _RecordingPromptIds:
+        self.prompt_ids_calls.append({"text": text, "return_tensors": return_tensors})
+        prompt_ids = _RecordingPromptIds(text)
+        self.prompt_ids.append(prompt_ids)
+        return prompt_ids
 
 
 class _RecordingModel:
@@ -85,6 +103,19 @@ def _expected_confidence(score_row: list[float], selected_token: int) -> float:
     log_denom = math.log(sum(math.exp(value) for value in score_row))
     avg_logprob = float(score_row[selected_token]) - log_denom
     return _confidence_from_logprob(avg_logprob)
+
+
+def _guard_kwargs(**overrides: Any) -> dict[str, Any]:
+    kwargs = {
+        "compression_ratio_threshold": 1.8,
+        "no_repeat_ngram_size": 3,
+        "repetition_penalty": 1.2,
+        "condition_on_prev_tokens": False,
+        "temperature": 0.0,
+        "do_sample": False,
+    }
+    kwargs.update(overrides)
+    return kwargs
 
 
 def _config(**overrides: Any) -> dict[str, Any]:
@@ -216,11 +247,16 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
     assert processor.calls[0]["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"}
     assert processor.calls[0]["audio"].shape == (16000,)
     assert processor.inputs[0].to_devices == ["cuda:0"]
+    assert processor.prompt_ids_calls == [{"text": "ignored by hf", "return_tensors": "pt"}]
+    assert len(processor.prompt_ids) == 1
+    assert processor.prompt_ids[0].to_devices == ["cuda:0"]
     assert model.generate_calls == [
         {
             "input_features": "features-1",
             "return_dict_in_generate": True,
             "output_scores": True,
+            **_guard_kwargs(),
+            "prompt_ids": processor.prompt_ids[0],
             "language": "fa",
             "task": "transcribe",
         }
@@ -267,6 +303,60 @@ def test_transcribe_emits_multi_segment_for_long_audio(
         {"start": 60.0, "end": 90.0, "text": "third chunk", "confidence": pytest.approx(_expected_confidence([2.0, 0.0], 0))},
     ]
     assert progress == [(pytest.approx(100.0 / 3.0), 1), (pytest.approx(200.0 / 3.0), 2), (100.0, 3)]
+
+
+def test_repetition_guards_passed_to_generate(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(
+        config=_config(
+            compression_ratio_threshold=2.0,
+            no_repeat_ngram_size=4,
+            repetition_penalty=1.35,
+            condition_on_previous_text=True,
+            initial_prompt="ABC",
+        )
+    )
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert processor.prompt_ids_calls == [{"text": "ABC", "return_tensors": "pt"}]
+    assert len(processor.prompt_ids) == 1
+    assert processor.prompt_ids[0].to_devices == ["cuda:0"]
+    assert model.generate_calls == [
+        {
+            "input_features": "features-1",
+            "return_dict_in_generate": True,
+            "output_scores": True,
+            **_guard_kwargs(
+                compression_ratio_threshold=2.0,
+                no_repeat_ngram_size=4,
+                repetition_penalty=1.35,
+                condition_on_prev_tokens=True,
+            ),
+            "prompt_ids": processor.prompt_ids[0],
+            "language": "fa",
+            "task": "transcribe",
+        }
+    ]
+
+
+def test_initial_prompt_empty_skips_prompt_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt=""))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert processor.prompt_ids_calls == []
+    assert "prompt_ids" not in model.generate_calls[0]
+
+
+def test_legacy_config_keys_still_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    _processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt="", condition_on_previous_text=False))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert model.generate_calls[0]["condition_on_prev_tokens"] is False
 
 
 def test_transcribe_breaks_on_should_cancel_chunked_full_file(
@@ -339,6 +429,31 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     assert first_window.shape == (8000,)
     assert second_window.shape == (20000,)
     assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"} for call in processor.calls)
+    assert processor.prompt_ids_calls == [
+        {"text": "ignored by hf", "return_tensors": "pt"},
+        {"text": "ignored by hf", "return_tensors": "pt"},
+    ]
+    assert [prompt_ids.to_devices for prompt_ids in processor.prompt_ids] == [["cuda:0"], ["cuda:0"]]
+    assert _model.generate_calls == [
+        {
+            "input_features": "features-1",
+            "return_dict_in_generate": True,
+            "output_scores": True,
+            **_guard_kwargs(),
+            "prompt_ids": processor.prompt_ids[0],
+            "language": "fa",
+            "task": "transcribe",
+        },
+        {
+            "input_features": "features-2",
+            "return_dict_in_generate": True,
+            "output_scores": True,
+            **_guard_kwargs(),
+            "prompt_ids": processor.prompt_ids[1],
+            "language": "fa",
+            "task": "transcribe",
+        },
+    ]
     assert progress == [(50.0, 1), (100.0, 2)]
 
 

@@ -136,9 +136,8 @@ class HFWhisperProvider(provider_module.AIProvider):
     """ORTH provider backed by Hugging Face Transformers Whisper FP32.
 
     This provider intentionally accepts the same section knobs as the legacy
-    faster-whisper ORTH config, but decoder-side CT2 mitigations are not applied
-    on the HF path. Empirical Saha01 runs showed FP32 Transformers avoids the
-    CT2 contamination without VAD/temperature/prompt workarounds.
+    faster-whisper ORTH config and applies HF equivalents for the CT2
+    repetition guards that prevent long-audio Whisper cascades.
     """
 
     def __init__(
@@ -169,15 +168,27 @@ class HFWhisperProvider(provider_module.AIProvider):
         self.refine_lexemes: bool = provider_module._coerce_bool(
             section_config.get("refine_lexemes", False), default=False
         )
+        self.compression_ratio_threshold = provider_module._coerce_float(
+            section_config.get("compression_ratio_threshold", 1.8), 1.8
+        )
+        self.no_repeat_ngram_size = provider_module._coerce_int(
+            section_config.get("no_repeat_ngram_size", 3), 3, minimum=0
+        )
+        self.repetition_penalty = provider_module._coerce_float(
+            section_config.get("repetition_penalty", 1.2), 1.2
+        )
+        self.condition_on_prev_tokens = provider_module._coerce_bool(
+            section_config.get("condition_on_previous_text", False), default=False
+        )
+        initial_prompt = section_config.get("initial_prompt", "")
+        self.initial_prompt = str(initial_prompt).strip() if isinstance(initial_prompt, str) else None
+        self.initial_prompt = self.initial_prompt or None
         self.ignored_legacy_options: Dict[str, Any] = {
             key: section_config.get(key)
             for key in (
                 "compute_type",
                 "vad_filter",
                 "vad_parameters",
-                "condition_on_previous_text",
-                "compression_ratio_threshold",
-                "initial_prompt",
             )
             if key in section_config
         }
@@ -351,12 +362,25 @@ class HFWhisperProvider(provider_module.AIProvider):
         if callable(move_inputs):
             inputs = move_inputs(self._effective_device)
         model_inputs = self._model_input_dict(inputs)
-        generated = model.generate(
+        generate_kwargs = {
             **model_inputs,
-            return_dict_in_generate=True,
-            output_scores=True,
+            "return_dict_in_generate": True,
+            "output_scores": True,
+            "compression_ratio_threshold": self.compression_ratio_threshold,
+            "no_repeat_ngram_size": self.no_repeat_ngram_size,
+            "repetition_penalty": self.repetition_penalty,
+            "condition_on_prev_tokens": self.condition_on_prev_tokens,
+            "temperature": 0.0,
+            "do_sample": False,
             **self._generate_kwargs(language),
-        )
+        }
+        if self.initial_prompt:
+            prompt_ids = processor.get_prompt_ids(
+                self.initial_prompt,
+                return_tensors="pt",
+            ).to(self._effective_device)
+            generate_kwargs["prompt_ids"] = prompt_ids
+        generated = model.generate(**generate_kwargs)
         decoded = processor.batch_decode(
             getattr(generated, "sequences", []),
             skip_special_tokens=True,
