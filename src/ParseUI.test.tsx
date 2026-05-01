@@ -1381,7 +1381,7 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
-  it("uses arrow keys to change annotate concepts even when an annotation field has focus", async () => {
+  it("uses ArrowUp/Down to change annotate concepts from focused fields, but preserves Left/Right for caret movement", async () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
@@ -1392,10 +1392,14 @@ describe("ParseUI", () => {
     fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
     expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
 
-    const nextIpaInput = screen.getByPlaceholderText("Enter IPA…");
-    fireEvent.focus(nextIpaInput);
-    fireEvent.keyDown(nextIpaInput, { key: "ArrowLeft" });
-    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+    const focusedIpa = screen.getByPlaceholderText("Enter IPA…");
+    fireEvent.focus(focusedIpa);
+    fireEvent.keyDown(focusedIpa, { key: "ArrowLeft" });
+    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "water" })).toBeNull();
+
+    fireEvent.keyDown(focusedIpa, { key: "ArrowRight" });
+    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
   });
 
   it("uses arrow keys to follow the sorted annotate concept list selection path", async () => {
