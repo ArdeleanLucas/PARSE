@@ -1017,11 +1017,16 @@ export function ParseUI() {
       if (e.defaultPrevented) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const isPrevConceptKey = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
-      const isNextConceptKey = e.key === 'ArrowRight' || e.key === 'ArrowDown';
-      if (currentMode === 'annotate' && navigationTotal > 1 && (isPrevConceptKey || isNextConceptKey)) {
+      const isVerticalArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+      const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      const inInteractiveField = isInteractiveHotkeyTarget(e.target);
+      if (
+        currentMode === 'annotate'
+        && navigationTotal > 1
+        && (isVerticalArrow || (isHorizontalArrow && !inInteractiveField))
+      ) {
         e.preventDefault();
-        if (isPrevConceptKey) {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           goPrev();
         } else {
           goNext();
@@ -1029,7 +1034,7 @@ export function ParseUI() {
         return;
       }
 
-      if (isInteractiveHotkeyTarget(e.target)) return;
+      if (inInteractiveField) return;
 
       const key = e.key.toLowerCase();
       if (key === 'a') {
