@@ -3,6 +3,7 @@
 __all__ = [
     "annotate",
     "compare",
+    "tags",
     "jobs",
     "exports",
     "config",

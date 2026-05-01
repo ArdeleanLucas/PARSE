@@ -145,7 +145,7 @@ CONFIG_SCHEMA_VERSION = 1
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Range, Content-Type",
-    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS, POST, PUT",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS, POST, PUT, DELETE",
     "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
     "Accept-Ranges": "bytes",
 }
@@ -177,14 +177,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = (
-    "annotate",
-    "compare",
-    "jobs",
-    "exports",
-    "config",
-    "clef", "locks", "chat", "media",
-)
+_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "jobs", "exports", "config", "clef", "locks", "chat", "media")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -1244,7 +1237,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_HEAD(self) -> None:
         if self._is_api_path(self.path):
             self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
-            self.send_header("Allow", "GET, POST, PUT, OPTIONS")
+            self.send_header("Allow", "GET, POST, PUT, DELETE, OPTIONS")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -1264,6 +1257,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if self._handle_api("PUT"):
             return
         self._send_json_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def do_DELETE(self) -> None:
+        if not self._handle_api("DELETE"): self._send_json_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def end_headers(self) -> None:
         self._add_cors_headers()
@@ -1342,6 +1338,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self._dispatch_api_post(request_path)
             elif method == "PUT":
                 self._dispatch_api_put(request_path)
+            elif method == "DELETE": self._api_delete_concept_tag_dispatch(request_path)
             else:
                 raise ApiError(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
         except ApiError as exc:
@@ -1440,9 +1437,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_clef_sources_report()
             return
 
-        if request_path == "/api/tags":
-            self._api_get_tags()
-            return
+        if request_path == "/api/tags": self._api_get_concept_tags(); return
 
         if request_path == "/api/spectrogram":
             self._api_get_spectrogram()
@@ -1532,6 +1527,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_auth_logout()
             return
 
+        if request_path == "/api/tags": self._api_post_concept_tag(); return
+
         if request_path == "/api/tags/merge":
             self._api_post_tags_merge()
             return
@@ -1569,6 +1566,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "mcp" and parts[2] == "tools":
             self._api_post_mcp_tool(parts[3])
             return
+
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "tags": self._api_post_concept_tag_attachment(parts[2], parts[4]); return
 
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_post_annotation(parts[2])
