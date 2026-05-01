@@ -69,6 +69,8 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/export/nexus",
         "/api/contact-lexemes/coverage",
         "/api/tags",
+        "/api/tags/{tagId}",
+        "/api/concepts/{conceptId}/tags/{tagId}",
         "/api/spectrogram",
         "/api/lexeme/search",
         "/api/onboard/speaker",

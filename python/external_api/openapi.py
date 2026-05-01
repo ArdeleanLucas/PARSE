@@ -194,7 +194,15 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
             "get": {"tags": ["Compare"], "summary": "Read CLEF provider coverage", "operationId": "getContactLexemeCoverage", "responses": {"200": _response("CLEF coverage payload", _schema_ref("GenericObject"))}},
         },
         "/api/tags": {
-            "get": {"tags": ["Tags"], "summary": "Read tag definitions and assignments", "operationId": "getTags", "responses": {"200": _response("Tags payload", _schema_ref("GenericObject"))}},
+            "get": {"tags": ["Tags"], "summary": "Read global concept tags and attachments", "operationId": "getTags", "responses": {"200": _response("Tags payload", _schema_ref("GenericObject"))}},
+            "post": {"tags": ["Tags"], "summary": "Create a global concept tag", "operationId": "createTag", "requestBody": {"required": True, "content": _json_content({"type": "object", "properties": {"name": {"type": "string"}, "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}}, "required": ["name", "color"], "additionalProperties": False})}, "responses": {"201": _response("Created tag", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse")), "409": _response("Name conflict", _schema_ref("ErrorResponse"))}},
+        },
+        "/api/tags/{tagId}": {
+            "delete": {"tags": ["Tags"], "summary": "Delete a global concept tag and cascade detachments", "operationId": "deleteTag", "parameters": [_parameter("tagId", "path", {"type": "string"}, required=True)], "responses": {"204": {"description": "Deleted or already absent"}}},
+        },
+        "/api/concepts/{conceptId}/tags/{tagId}": {
+            "post": {"tags": ["Tags"], "summary": "Attach a tag to a concept", "operationId": "attachConceptTag", "parameters": [_parameter("conceptId", "path", {"type": "string"}, required=True), _parameter("tagId", "path", {"type": "string"}, required=True)], "responses": {"204": {"description": "Attached or already attached"}, "404": _response("Unknown tag", _schema_ref("ErrorResponse"))}},
+            "delete": {"tags": ["Tags"], "summary": "Detach a tag from a concept", "operationId": "detachConceptTag", "parameters": [_parameter("conceptId", "path", {"type": "string"}, required=True), _parameter("tagId", "path", {"type": "string"}, required=True)], "responses": {"204": {"description": "Detached or already absent"}}},
         },
         "/api/spectrogram": {
             "get": {"tags": ["Media"], "summary": "Generate or read spectrogram PNG", "operationId": "getSpectrogram", "parameters": [_parameter("speaker", "query", {"type": "string"}), _parameter("start", "query", {"type": "number"}), _parameter("end", "query", {"type": "number"}), _parameter("audio", "query", {"type": "string"}), _parameter("force", "query", {"type": "string"})], "responses": {"200": {"description": "Spectrogram image", "content": _binary_content("image/png")}}},
