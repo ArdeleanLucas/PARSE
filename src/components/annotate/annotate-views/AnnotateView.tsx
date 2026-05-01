@@ -374,6 +374,23 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     return { startSec: start, endSec: end };
   }, [conceptInterval, duration]);
 
+  // The hook falls back to "first 30 s of audio" when no timeRange is given;
+  // mirror that here so the playhead lines up with the rendered spectrogram.
+  const effectiveSpectrogramRange = useMemo(() => {
+    if (spectrogramTimeRange) return spectrogramTimeRange;
+    if (duration <= 0) return null;
+    return { startSec: 0, endSec: Math.min(duration, 30) };
+  }, [spectrogramTimeRange, duration]);
+
+  const spectrogramPlayheadPercent = useMemo(() => {
+    if (!effectiveSpectrogramRange) return null;
+    const { startSec, endSec } = effectiveSpectrogramRange;
+    const sliceLen = endSec - startSec;
+    if (sliceLen <= 0) return null;
+    if (currentTime < startSec || currentTime > endSec) return null;
+    return ((currentTime - startSec) / sliceLen) * 100;
+  }, [effectiveSpectrogramRange, currentTime]);
+
   useSpectrogram({
     enabled: spectroOn && audioReady,
     wsRef,
@@ -499,14 +516,12 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   ref={spectroCanvasRef}
                   className="block h-full w-full"
                 />
-                {duration > 0 && (
+                {spectrogramPlayheadPercent !== null && (
                   <div
                     data-testid="spectrogram-playhead"
                     aria-hidden="true"
                     className="pointer-events-none absolute top-0 bottom-0 w-px bg-indigo-500"
-                    style={{
-                      left: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%`,
-                    }}
+                    style={{ left: `${spectrogramPlayheadPercent}%` }}
                   />
                 )}
               </div>
