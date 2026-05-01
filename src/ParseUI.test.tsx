@@ -1343,6 +1343,23 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
+  it("uses arrow keys to change annotate concepts even when an annotation field has focus", async () => {
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const ipaInput = screen.getByPlaceholderText("Enter IPA…");
+    fireEvent.focus(ipaInput);
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+
+    fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
+    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+
+    const nextIpaInput = screen.getByPlaceholderText("Enter IPA…");
+    fireEvent.focus(nextIpaInput);
+    fireEvent.keyDown(nextIpaInput, { key: "ArrowLeft" });
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+  });
+
   it("uses arrow keys to follow the sorted annotate concept list selection path", async () => {
     mockConfig = {
       ...mockConfig!,

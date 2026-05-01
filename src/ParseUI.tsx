@@ -1016,6 +1016,19 @@ export function ParseUI() {
     function onGlobalKeyDown(e: KeyboardEvent) {
       if (e.defaultPrevented) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const isPrevConceptKey = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+      const isNextConceptKey = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+      if (currentMode === 'annotate' && navigationTotal > 1 && (isPrevConceptKey || isNextConceptKey)) {
+        e.preventDefault();
+        if (isPrevConceptKey) {
+          goPrev();
+        } else {
+          goNext();
+        }
+        return;
+      }
+
       if (isInteractiveHotkeyTarget(e.target)) return;
 
       const key = e.key.toLowerCase();
