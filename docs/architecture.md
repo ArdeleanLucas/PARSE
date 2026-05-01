@@ -187,7 +187,7 @@ flowchart LR
 
 ### ORTH backend choice (2026-05-01)
 
-ORTH now defaults to `ortho.backend = "hf"`, implemented by `HFWhisperProvider`
+ORTH now defaults to `ortho.backend = "hf"` ([PR #218](https://github.com/ArdeleanLucas/PARSE/pull/218)), implemented by `HFWhisperProvider`
 with Hugging Face Transformers FP32 PyTorch on `razhan/whisper-base-sdh`. The
 first load may download roughly 280 MB into the standard Hugging Face cache at
 `~/.cache/huggingface/`. The legacy CT2 path remains selectable with
