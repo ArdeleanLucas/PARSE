@@ -355,7 +355,6 @@ class HFWhisperProvider(provider_module.AIProvider):
             **model_inputs,
             return_dict_in_generate=True,
             output_scores=True,
-            return_timestamps=True,
             **self._generate_kwargs(language),
         )
         decoded = processor.batch_decode(
@@ -433,7 +432,10 @@ class HFWhisperProvider(provider_module.AIProvider):
                 language=language,
             )
         except Exception as exc:
-            print("[WARN] HF transcribe_window failed: {0}".format(exc), file=sys.stderr)
+            print(
+                "[WARN] HF transcribe_window failed: {0}: {1}".format(type(exc).__name__, exc),
+                file=sys.stderr,
+            )
             return []
         if not text:
             return []
@@ -481,9 +483,10 @@ class HFWhisperProvider(provider_module.AIProvider):
                 )
             except Exception as exc:
                 print(
-                    "[WARN] HF transcribe_segments_in_memory: interval {0:.2f}-{1:.2f}s failed: {2}".format(
+                    "[WARN] HF transcribe_segments_in_memory: interval {0:.2f}-{1:.2f}s failed: {2}: {3}".format(
                         start_sec_f,
                         end_sec_f,
+                        type(exc).__name__,
                         exc,
                     ),
                     file=sys.stderr,
@@ -525,7 +528,10 @@ class HFWhisperProvider(provider_module.AIProvider):
                 language=language,
             )
         except Exception as exc:
-            print("[WARN] HF transcribe_clip failed: {0}".format(exc), file=sys.stderr)
+            print(
+                "[WARN] HF transcribe_clip failed: {0}: {1}".format(type(exc).__name__, exc),
+                file=sys.stderr,
+            )
             return ("", 0.0)
 
 
