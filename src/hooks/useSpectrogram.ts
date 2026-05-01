@@ -99,6 +99,18 @@ export function useSpectrogram({
       return;
     }
 
+    // Cap the slice at MAX_DEFAULT_DURATION_SEC so a zoomed-out waveform
+    // window (>30 s visible) doesn't trip the worker's hard cap. Center the
+    // capped slice on the requested midpoint so the playhead stays roughly
+    // in view.
+    const maxSliceSamples = Math.ceil(MAX_DEFAULT_DURATION_SEC * sampleRate);
+    if (endSample - startSample > maxSliceSamples) {
+      const center = Math.floor((startSample + endSample) / 2);
+      startSample = Math.max(0, center - Math.floor(maxSliceSamples / 2));
+      endSample = Math.min(totalSamples, startSample + maxSliceSamples);
+      startSample = Math.max(0, endSample - maxSliceSamples);
+    }
+
     // Snap canvas pixel dims to its rendered size before computing — fixes the
     // prior 300×150 default that produced a barely-visible blur.
     const rect = canvas.getBoundingClientRect();

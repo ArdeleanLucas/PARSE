@@ -358,4 +358,30 @@ describe("useSpectrogram", () => {
 
     expect(WorkerMock).not.toHaveBeenCalled();
   });
+
+  it("caps an explicit timeRange wider than 30 s and centres the cap on the requested midpoint", () => {
+    const canvas = document.createElement("canvas");
+    // 120 s buffer; ask for the full 0–120 window. Cap = 30 s, centred on 60 s
+    // → slice should be [45, 75]. At 44100 Hz that's 30*44100 = 1323000 samples.
+    const audioBuf = makeLongAudioBufferLike(120);
+    const wsRef = { current: { getDecodedData: vi.fn(() => audioBuf) } };
+    const canvasRef = { current: canvas };
+
+    renderHook(() =>
+      useSpectrogram({
+        enabled: true,
+        wsRef: wsRef as never,
+        canvasRef: canvasRef as never,
+        params: PARAMS,
+        timeRange: { startSec: 0, endSec: 120 },
+      }),
+    );
+
+    const worker = workerInstances[0];
+    const [payload] = vi.mocked(worker.postMessage).mock.calls[0] as [
+      { audioData: Float32Array },
+      Transferable[],
+    ];
+    expect(payload.audioData.length).toBe(1323000);
+  });
 });
