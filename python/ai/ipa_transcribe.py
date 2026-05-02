@@ -28,7 +28,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Sequence, TypedDict
+from typing import Any, Iterable, List, NotRequired, Optional, Sequence, TypedDict
 
 try:
     from .forced_align import (
@@ -48,13 +48,13 @@ except ImportError:  # pragma: no cover - CLI invocation
     )
 
 
-class IpaResult(TypedDict, total=False):
+class IpaResult(TypedDict):
     """One interval's acoustic IPA output."""
 
     start: float
     end: float
     ipa: str
-    ipa_candidate: dict[str, Any]
+    ipa_candidate: NotRequired[dict[str, Any]]
 
 
 @dataclass

@@ -1354,7 +1354,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_get_annotation(parts[2])
             return
-        if len(parts) == 4 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-candidates": self._api_get_ipa_candidates(parts[2]); return
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-candidates":
+            self._api_get_ipa_candidates(parts[2])
+            return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "stt-segments":
             self._api_get_stt_segments(parts[2])
             return
@@ -1599,7 +1601,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/tags":
             self._api_put_concept_tags()
             return
-        if len(parts := self._path_parts(request_path)) == 5 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-review": self._api_put_ipa_review(parts[2], parts[4]); return
+        parts = self._path_parts(request_path)
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-review":
+            self._api_put_ipa_review(parts[2], parts[4])
+            return
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_delete(self, request_path: str) -> None:
@@ -1737,18 +1742,14 @@ def _require_route_export(name: str) -> Any:
 def _set_job_progress(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_set_job_progress")(*args, **kwargs)
 
-
 def _set_job_complete(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_set_job_complete")(*args, **kwargs)
-
 
 def _set_job_error(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_set_job_error")(*args, **kwargs)
 
-
 def _chat_docs_root(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_chat_docs_root")(*args, **kwargs)
-
 
 def _chat_external_read_roots(*args: Any, **kwargs: Any) -> Any:
     return _require_route_export("_chat_external_read_roots")(*args, **kwargs)
