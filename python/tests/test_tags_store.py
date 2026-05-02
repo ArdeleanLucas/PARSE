@@ -52,6 +52,22 @@ def test_replace_all_round_trips_old_shape_and_writes_version_2(isolated_tags_pa
     assert json.loads(isolated_tags_path.read_text(encoding="utf-8")) == result
 
 
+def test_replace_all_dedupes_concepts_preserving_first_occurrence_order() -> None:
+    tag = _tag(concepts=["water", "fire", "water", "earth", "fire"])
+
+    result = tags_store.replace_all([tag])
+
+    assert result["tags"][0]["concepts"] == ["water", "fire", "earth"]
+
+
+def test_replace_all_dedupes_lexeme_targets_preserving_first_occurrence_order() -> None:
+    tag = _tag(lexeme_targets=["Saha01::sister", "Khan01::sister", "Saha01::sister"])
+
+    result = tags_store.replace_all([tag])
+
+    assert result["tags"][0]["lexemeTargets"] == ["Saha01::sister", "Khan01::sister"]
+
+
 def test_replace_all_is_idempotent() -> None:
     tags = [_tag(), _tag("tag_uncertain", "uncertain", "#aabbcc")]
 

@@ -114,7 +114,14 @@ def _validate_string_list(value: Any, field: str) -> list[str]:
         raise TagValidationError(f"Tag {field} must be a list of strings")
     if not all(isinstance(item, str) for item in value):
         raise TagValidationError(f"Tag {field} must be a list of strings")
-    return list(value)
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in value:
+        if item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
 
 
 def _validate_lexeme_targets(value: Any) -> list[str]:
@@ -149,6 +156,11 @@ def _clean_tag(entry: Any, seen_ids: set[str], seen_labels: set[str]) -> Tag:
     return tag
 
 
+# Validation asymmetry: replace_all() raises hard on any malformed entry to
+# prevent writing corrupt state via PUT. _normalize_data (called by _load) is
+# lenient — it silently drops invalid entries with a logging.warning so a
+# hand-edited or older-version file with one bad row doesn't break load.
+# Do not unify these without thinking through both code paths.
 def _normalize_data(raw: Any) -> TagsData:
     if not isinstance(raw, dict):
         _warn_dropped("root payload is not an object")
