@@ -2,6 +2,7 @@ import type {
   AnnotationInterval,
   AnnotationRecord,
   ConfirmedAnchor,
+  IpaReviewState,
   SttSegment,
 } from "../../api/types";
 import type { SpeakerHistory } from "../annotationStoreHistory";
@@ -59,6 +60,7 @@ export interface AnnotationStoreActionsSlice {
     conceptId: string,
     anchor: ConfirmedAnchor | null,
   ) => void;
+  setIpaReview: (speaker: string, key: string, review: IpaReviewState | null) => void;
   moveIntervalAcrossTiers: (
     speaker: string,
     oldStart: number,

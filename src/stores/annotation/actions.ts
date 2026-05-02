@@ -2,6 +2,7 @@ import type {
   AnnotationInterval,
   AnnotationRecord,
   ConfirmedAnchor,
+  IpaReviewState,
   SttSegment,
 } from "../../api/types";
 import {
@@ -417,6 +418,22 @@ export function createAnnotationActionsSlice(
         clone,
         anchor === null ? "clear concept anchor" : "confirm concept anchor",
       );
+    },
+
+    setIpaReview: (speaker: string, key: string, review: IpaReviewState | null) => {
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return;
+
+      const clone = deepClone(pre);
+      const existing = { ...(clone.ipa_review ?? {}) };
+      if (review === null) {
+        delete existing[key];
+      } else {
+        existing[key] = { ...review };
+      }
+      clone.ipa_review = existing;
+      clone.modified_at = nowIsoUtc();
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "set IPA review");
     },
 
     moveIntervalAcrossTiers: (speaker, oldStart, oldEnd, newStart, newEnd, tierScope) => {

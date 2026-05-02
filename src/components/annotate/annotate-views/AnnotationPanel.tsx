@@ -7,6 +7,7 @@ import { useTranscriptionLanesStore } from "../../../stores/transcriptionLanesSt
 import { useUIStore } from "../../../stores/uiStore";
 import { Button } from "../../shared/Button";
 import { Input } from "../../shared/Input";
+import { IpaCandidatePanel } from "../IpaCandidatePanel";
 import { LexemeSearchPanel } from "../LexemeSearchPanel";
 
 import { IntervalEditor } from "./IntervalEditor";
@@ -95,6 +96,11 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
   }, [activeConcept]);
 
   const ipaIntervals = record?.tiers?.ipa?.intervals ?? [];
+  const selectedIpaIntervalKey =
+    activeSpeaker && activeConcept && selectedInterval?.speaker === activeSpeaker &&
+      (selectedInterval.tier === "ipa" || selectedInterval.tier === "ipa_phone")
+      ? `${activeConcept}::${selectedInterval.tier}::${selectedInterval.index}`
+      : null;
 
   return (
     <div
@@ -172,6 +178,10 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
         }}
         onClearSelection={() => setSelectedInterval(null)}
       />
+
+      {activeSpeaker && selectedIpaIntervalKey && (
+        <IpaCandidatePanel speaker={activeSpeaker} intervalKey={selectedIpaIntervalKey} />
+      )}
 
       <div
         style={{

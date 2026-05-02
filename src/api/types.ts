@@ -42,12 +42,50 @@ export interface ConfirmedAnchor {
   variants_used?: string[];
 }
 
+export type IpaReviewStatus = "needs_review" | "auto_accepted" | "accepted" | "rejected";
+
+export type IpaTimingBasis =
+  | "audition_cue"
+  | "manual_anchor"
+  | "forced_aligned"
+  | "silence_split"
+  | "approximate"
+  | "stt_segment";
+
+export interface IpaCandidate {
+  candidate_id: string;
+  model: string;
+  model_version: string;
+  raw_ipa: string;
+  decoded_at: string;
+  timing_basis: IpaTimingBasis;
+  confidence: number | null;
+}
+
+export interface IpaReviewState {
+  status: IpaReviewStatus;
+  suggested_ipa: string;
+  resolution_type: string;
+  evidence_sources: string[];
+  notes: string;
+}
+
+export type IpaReviewUpdate = Partial<IpaReviewState> & { status: IpaReviewStatus };
+
+export interface IpaCandidatesPayload {
+  candidates: Record<string, IpaCandidate[]>;
+  review: Record<string, IpaReviewState>;
+}
+
 export interface AnnotationRecord {
   speaker: string;
   tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, ortho_words, stt, concept, sentence, speaker
   /** Keyed by concept id (string). Seeded by the Search & Anchor Lexeme
    * flow; surfaces as cross-speaker signal in other speakers' searches. */
   confirmed_anchors?: Record<string, ConfirmedAnchor>;
+  /** Keyed by `<concept_id>::ipa::<interval_index>` or `<concept_id>::ipa_phone::<interval_index>`. */
+  ipa_candidates?: Record<string, IpaCandidate[]>;
+  ipa_review?: Record<string, IpaReviewState>;
   created_at?: string;
   modified_at?: string;
   source_wav?: string;
