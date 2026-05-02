@@ -24,6 +24,7 @@ vi.mock("../../api/client", () => ({
 import { IpaCandidatePanel } from "./IpaCandidatePanel";
 
 const key = "12::ipa::0";
+const nextKey = "13::ipa::0";
 
 function candidate(overrides: Partial<IpaCandidate> = {}): IpaCandidate {
   return {
@@ -47,8 +48,17 @@ function record(candidates: IpaCandidate[] | undefined, review?: IpaReviewState)
   };
 }
 
-function renderPanel() {
-  return render(<IpaCandidatePanel speaker="Fail01" intervalKey={key} />);
+function recordByKey(candidateMap: Record<string, IpaCandidate[]>, reviewMap: Record<string, IpaReviewState> = {}): AnnotationRecord {
+  return {
+    speaker: "Fail01",
+    tiers: {},
+    ipa_candidates: candidateMap,
+    ipa_review: reviewMap,
+  };
+}
+
+function renderPanel(intervalKey = key) {
+  return render(<IpaCandidatePanel speaker="Fail01" intervalKey={intervalKey} />);
 }
 
 beforeEach(() => {
@@ -123,6 +133,38 @@ describe("IpaCandidatePanel", () => {
       resolution_type: "human_review_edited",
       evidence_sources: ["user_edit"],
     });
+  });
+
+  it("switching intervalKey resets edit state", () => {
+    mocks.records = {
+      Fail01: recordByKey({
+        [key]: [candidate({ candidate_id: "cand-a", raw_ipa: "ipa-a" })],
+        [nextKey]: [candidate({ candidate_id: "cand-b", raw_ipa: "ipa-b" })],
+      }),
+    };
+
+    const { rerender } = renderPanel(key);
+    fireEvent.click(screen.getByRole("button", { name: "Edit & Accept" }));
+    fireEvent.change(screen.getByLabelText("Edited IPA"), { target: { value: "stale-typed-ipa" } });
+
+    rerender(<IpaCandidatePanel speaker="Fail01" intervalKey={nextKey} />);
+
+    expect(screen.queryByLabelText("Edited IPA")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit & Accept" }));
+    expect((screen.getByLabelText("Edited IPA") as HTMLInputElement).value).toBe("ipa-b");
+  });
+
+  it("Cancel discards edit and closes input", () => {
+    mocks.records = { Fail01: record([candidate()]) };
+
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Edit & Accept" }));
+    fireEvent.change(screen.getByLabelText("Edited IPA"), { target: { value: "junk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Edited IPA")).toBeNull();
+    expect(screen.queryByText("Could not save IPA review. Restored previous state.")).toBeNull();
+    expect(mocks.putIpaReview).not.toHaveBeenCalled();
   });
 
   it("Reject writes a human_rejected review", async () => {
