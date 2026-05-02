@@ -1,5 +1,6 @@
-// Per-speaker annotation tags. NOT the global concept-tag registry — see src/state/conceptTags.ts.
+// Unified PARSE tag registry for concept-level and per-lexeme tags.
 import { create } from "zustand";
+import { putTags } from "../api/client";
 import type { Tag } from "../api/types";
 
 const STORAGE_KEY_V2 = "parse-tags-v2";
@@ -10,6 +11,17 @@ const DEFAULT_TAGS: Omit<Tag, "concepts" | "lexemeTargets">[] = [
   { id: "confirmed", label: "Confirmed", color: "#10b981" },
   { id: "problematic", label: "Problematic", color: "#ef4444" },
 ];
+
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleServerWrite(get: () => TagStore): void {
+  if (writeTimer) clearTimeout(writeTimer);
+  writeTimer = setTimeout(() => {
+    putTags(get().tags).catch((error) => {
+      console.warn("[tagStore] server write failed; localStorage retains", error);
+    });
+  }, 500);
+}
 
 export function lexemeKey(speaker: string, conceptId: string): string {
   return `${speaker}::${conceptId}`;
@@ -49,9 +61,14 @@ export const useTagStore = create<TagStore>()((set, get) => ({
   tags: [],
 
   addTag: (label: string, color: string): Tag => {
+    const trimmed = label.trim();
+    const normalizedLabel = trimmed.toLowerCase();
+    if (get().tags.some((tag) => tag.label.trim().toLowerCase() === normalizedLabel)) {
+      throw new Error("409: tag name already exists");
+    }
     const newTag: Tag = normalizeTag({
       id: crypto.randomUUID(),
-      label: label.trim(),
+      label: trimmed,
       color: color || "#6b7280",
       concepts: [],
       lexemeTargets: [],
@@ -199,6 +216,7 @@ export const useTagStore = create<TagStore>()((set, get) => ({
     } catch (error) {
       console.warn("[tagStore] persist failed:", error);
     }
+    scheduleServerWrite(get);
   },
 
   hydrate: () => {

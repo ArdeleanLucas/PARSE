@@ -3,7 +3,7 @@ import { surveyBadgePrefix } from '../../lib/surveySort';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
-type ConceptTagFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings' | 'untagged' | 'review' | 'confirmed' | 'problematic' | string;
+export type ConceptStatusFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 
 interface SidebarConcept {
   id: number;
@@ -25,8 +25,10 @@ interface ConceptSidebarProps {
   onSortModeChange: (mode: ConceptSortMode) => void;
   hasSurveyItems: boolean;
   filteredConcepts: SidebarConcept[];
-  tagFilter: ConceptTagFilter;
-  onTagFilterChange: (filter: ConceptTagFilter) => void;
+  statusFilter: ConceptStatusFilter;
+  onStatusFilterChange: (filter: ConceptStatusFilter) => void;
+  selectedTagIds: Set<string>;
+  onTagSelectionChange: (selected: Set<string>) => void;
   tags: SidebarTag[];
   activeConceptId: number;
   onConceptSelect: (conceptId: number) => void;
@@ -46,12 +48,24 @@ export function ConceptSidebar({
   onSortModeChange,
   hasSurveyItems,
   filteredConcepts,
-  tagFilter,
-  onTagFilterChange,
+  statusFilter,
+  onStatusFilterChange,
+  selectedTagIds,
+  onTagSelectionChange,
   tags,
   activeConceptId,
   onConceptSelect,
 }: ConceptSidebarProps) {
+  const toggleStatus = (filter: ConceptStatusFilter) => {
+    onStatusFilterChange(statusFilter === filter ? 'all' : filter);
+  };
+  const toggleTag = (tagId: string) => {
+    const next = new Set(selectedTagIds);
+    if (next.has(tagId)) next.delete(tagId);
+    else next.add(tagId);
+    onTagSelectionChange(next);
+  };
+
   return (
     <aside className="w-[250px] shrink-0 border-r border-slate-200/80 bg-white flex flex-col" data-testid="concept-sidebar">
       <div className="p-4 shrink-0">
@@ -96,50 +110,56 @@ export function ConceptSidebar({
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
           <button
-            onClick={() => onTagFilterChange('all')}
+            onClick={() => {
+              onStatusFilterChange('all');
+              onTagSelectionChange(new Set());
+            }}
             data-testid="tagfilter-all"
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${statusFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
           >
             All
           </button>
           <button
-            onClick={() => onTagFilterChange(tagFilter === 'unreviewed' ? 'all' : 'unreviewed')}
+            onClick={() => toggleStatus('unreviewed')}
             title="Concepts not yet confirmed and without a cognate assignment"
             data-testid="tagfilter-unreviewed"
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'unreviewed' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${statusFilter === 'unreviewed' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'unreviewed' ? 'bg-white' : 'bg-amber-400'}`} />
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusFilter === 'unreviewed' ? 'bg-white' : 'bg-amber-400'}`} />
             Unreviewed
           </button>
           <button
-            onClick={() => onTagFilterChange(tagFilter === 'flagged' ? 'all' : 'flagged')}
+            onClick={() => toggleStatus('flagged')}
             title="Concepts tagged problematic, or with a flagged speaker utterance"
             data-testid="tagfilter-flagged"
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'flagged' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${statusFilter === 'flagged' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'flagged' ? 'bg-white' : 'bg-rose-400'}`} />
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusFilter === 'flagged' ? 'bg-white' : 'bg-rose-400'}`} />
             Flagged
           </button>
           <button
-            onClick={() => onTagFilterChange(tagFilter === 'borrowings' ? 'all' : 'borrowings')}
+            onClick={() => toggleStatus('borrowings')}
             title="Concepts with at least one borrowing"
             data-testid="tagfilter-borrowings"
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === 'borrowings' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${statusFilter === 'borrowings' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagFilter === 'borrowings' ? 'bg-white' : 'bg-violet-400'}`} />
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusFilter === 'borrowings' ? 'bg-white' : 'bg-violet-400'}`} />
             Borrowings
           </button>
-          {tags.map((tag) => (
-            <button
-              key={tag.id}
-              onClick={() => onTagFilterChange(tagFilter === tag.id ? 'all' : tag.id)}
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${tagFilter === tag.id ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              style={tagFilter === tag.id ? { background: tag.color } : {}}
-            >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tag.color }} />
-              {tag.name}
-            </button>
-          ))}
+          {tags.map((tag) => {
+            const selected = selectedTagIds.has(tag.id);
+            return (
+              <button
+                key={tag.id}
+                onClick={() => toggleTag(tag.id)}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${selected ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                style={selected ? { background: tag.color } : {}}
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: selected ? '#fff' : tag.color }} />
+                {tag.name}
+              </button>
+            );
+          })}
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 pb-6">

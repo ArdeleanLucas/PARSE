@@ -54,7 +54,6 @@ import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
-import { useConceptTagsStore } from './state/conceptTags';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
 import {
@@ -74,7 +73,7 @@ import { TranscriptionLanesControls } from './components/annotate/TranscriptionL
 import { ClefConfigModal } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner, type PopulateSummary } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
-import { ConceptSidebar } from './components/parse/ConceptSidebar';
+import { ConceptSidebar, type ConceptStatusFilter } from './components/parse/ConceptSidebar';
 import { RightPanel } from './components/parse/RightPanel';
 import {
   type CompareComputeMode,
@@ -142,7 +141,6 @@ export function ParseUI() {
   // — Bootstrap —
   useEffect(() => {
     loadConfig().catch(console.error);
-    void useConceptTagsStore.getState().load();
     hydrateTagStore();
     syncTagStoreFromServer().catch(console.error);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -156,7 +154,8 @@ export function ParseUI() {
     error: conceptImportError,
     importFile: importConceptTagFile,
   } = useTagImport();
-  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<ConceptStatusFilter>('all');
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(() => new Set());
   const [conceptId, setConceptId] = useState(1);
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
@@ -728,7 +727,6 @@ export function ParseUI() {
     useAnnotationStore.setState({ records: {}, dirty: {}, loading: {} });
     useEnrichmentStore.setState({ data: {}, loading: false });
     useTagStore.setState({ tags: [] });
-    useConceptTagsStore.setState(useConceptTagsStore.getInitialState(), true);
     usePlaybackStore.setState({ activeSpeaker: null, currentTime: 0 });
     useConfigStore.setState({ config: null, loading: false, error: null });
     crossSpeakerJob.reset();
@@ -927,21 +925,23 @@ export function ParseUI() {
     };
 
     let list = concepts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
-    if (tagFilter === 'untagged') {
-      list = list.filter(c => c.tag === 'untagged');
-    } else if (tagFilter === 'review') {
-      list = list.filter(c => c.tag === 'review');
-    } else if (tagFilter === 'unreviewed') {
+    if (statusFilter === 'unreviewed') {
       // Unreviewed ≡ not yet confirmed AND no cognate assignment yet.
       // Formerly lived as a separate header tab; now a left-panel pill.
       list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
-    } else if (tagFilter === 'flagged') {
+    } else if (statusFilter === 'flagged') {
       list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
-    } else if (tagFilter === 'borrowings') {
+    } else if (statusFilter === 'borrowings') {
       list = list.filter(c => hasBorrowing(c.key));
-    } else if (tagFilter !== 'all') {
-      const storeTag = storeTags.find(t => t.id === tagFilter);
-      if (storeTag) list = list.filter(c => storeTag.concepts.includes(c.key));
+    }
+    if (selectedTagIds.size > 0) {
+      list = list.filter(c => {
+        for (const tagId of selectedTagIds) {
+          const storeTag = storeTags.find(t => t.id === tagId);
+          if (!storeTag || !storeTag.concepts.includes(c.key)) return false;
+        }
+        return true;
+      });
     }
     // In annotate mode, show all concepts for the selected speaker (filter by real data when available)
     if (currentMode === 'annotate') {
@@ -964,7 +964,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, tagFilter, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
+  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
 
   const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
 
@@ -1578,8 +1578,10 @@ export function ParseUI() {
           onSortModeChange={setSortMode}
           hasSurveyItems={hasSurveyItems}
           filteredConcepts={filtered}
-          tagFilter={tagFilter}
-          onTagFilterChange={setTagFilter}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          selectedTagIds={selectedTagIds}
+          onTagSelectionChange={setSelectedTagIds}
           tags={tagsList}
           activeConceptId={conceptId}
           onConceptSelect={setConceptId}

@@ -50,6 +50,7 @@ export interface ImportTagCsvResult {
   missedCount: number;
   missedLabels: string[];
   totalTagsInFile: number;
+  skippedExistingCount?: number;
 }
 
 export async function importTagCsv(
@@ -75,6 +76,13 @@ export async function importTagCsv(
 
 export async function getTags(): Promise<TagsResponse> {
   return apiFetch<TagsResponse>("/api/tags");
+}
+
+export async function putTags(tags: Tag[]): Promise<void> {
+  await apiFetch<void>("/api/tags", {
+    method: "PUT",
+    body: JSON.stringify({ tags }),
+  });
 }
 
 export async function mergeTags(tags: Tag[]): Promise<{ ok: boolean; tagCount: number }> {

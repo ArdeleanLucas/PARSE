@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelComputeJob, getConfig, runChat, saveAnnotation, startChatSession, tagsApi } from "./client";
+import { cancelComputeJob, getConfig, getTags, putTags, runChat, saveAnnotation, startChatSession } from "./client";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -166,7 +166,7 @@ describe("annotation API client contracts", () => {
 });
 
 
-describe("concept tags API client contracts", () => {
+describe("tags API client contracts", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -178,10 +178,9 @@ describe("concept tags API client contracts", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fetches the global tag registry and concept attachments", async () => {
+  it("fetches the unified tag registry", async () => {
     const payload = {
-      tags: [{ id: "t1", name: "archaic", color: "#3554B8", createdAt: "2026-05-01T00:00:00.000Z" }],
-      attachments: { sister: ["t1"] },
+      tags: [{ id: "t1", label: "archaic", color: "#3554B8", concepts: ["sister"], lexemeTargets: [] }],
     };
     fetchMock.mockResolvedValue({
       ok: true,
@@ -190,27 +189,12 @@ describe("concept tags API client contracts", () => {
       json: async () => payload,
     });
 
-    await expect(tagsApi.fetchAll()).resolves.toEqual(payload);
+    await expect(getTags()).resolves.toEqual(payload);
     expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({ headers: expect.any(Object) }));
   });
 
-  it("creates tags through POST /api/tags", async () => {
-    const tag = { id: "t2", name: "dialectal", color: "#0f766e", createdAt: "2026-05-01T00:00:00.000Z" };
-    fetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      json: async () => tag,
-    });
-
-    await expect(tagsApi.create({ name: "dialectal", color: "#0f766e" })).resolves.toEqual(tag);
-    expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ name: "dialectal", color: "#0f766e" }),
-    }));
-  });
-
-  it("treats 204 attach/detach/delete responses as void", async () => {
+  it("replaces the unified tag registry through PUT /api/tags", async () => {
+    const tags = [{ id: "t2", label: "dialectal", color: "#0f766e", concepts: ["water"], lexemeTargets: [] }];
     fetchMock.mockResolvedValue({
       ok: true,
       status: 204,
@@ -218,11 +202,10 @@ describe("concept tags API client contracts", () => {
       json: vi.fn(),
     });
 
-    await expect(tagsApi.attach("sister", "t1")).resolves.toBeUndefined();
-    await expect(tagsApi.detach("sister", "t1")).resolves.toBeUndefined();
-    await expect(tagsApi.delete("t1")).resolves.toBeUndefined();
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/concepts/sister/tags/t1", expect.objectContaining({ method: "POST" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/concepts/sister/tags/t1", expect.objectContaining({ method: "DELETE" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/tags/t1", expect.objectContaining({ method: "DELETE" }));
+    await expect(putTags(tags)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ tags }),
+    }));
   });
 });
