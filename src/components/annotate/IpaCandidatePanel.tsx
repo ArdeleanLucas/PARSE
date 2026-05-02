@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { putIpaReview } from "../../api/client";
 import type { IpaCandidate, IpaReviewState, IpaReviewUpdate } from "../../api/types";
@@ -40,6 +40,12 @@ export function IpaCandidatePanel({ speaker, intervalKey }: IpaCandidatePanelPro
   const [editedIpa, setEditedIpa] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setEditing(false);
+    setEditedIpa("");
+    setError("");
+  }, [intervalKey]);
 
   const hasCandidates = candidates.length > 0;
 
@@ -85,6 +91,12 @@ export function IpaCandidatePanel({ speaker, intervalKey }: IpaCandidatePanelPro
       resolution_type: "human_review_edited",
       evidence_sources: ["user_edit"],
     });
+  };
+
+  const handleEditCancel = () => {
+    setEditing(false);
+    setEditedIpa("");
+    setError("");
   };
 
   const handleReject = () => {
@@ -177,9 +189,12 @@ export function IpaCandidatePanel({ speaker, intervalKey }: IpaCandidatePanelPro
           {editing && (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <Input label="Edited IPA" value={editedIpa} onChange={(event) => setEditedIpa(event.target.value)} />
-              <div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
                 <Button size="sm" variant="primary" disabled={saving} onClick={handleEditSubmit}>
                   Save edited IPA
+                </Button>
+                <Button size="sm" variant="secondary" disabled={saving} onClick={handleEditCancel}>
+                  Cancel
                 </Button>
               </div>
             </div>
