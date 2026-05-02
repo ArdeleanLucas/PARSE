@@ -63,6 +63,41 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 "properties": {"tags": {"type": "array", "items": _schema_ref("Tag")}},
                 "additionalProperties": False,
             },
+            "IpaCandidate": {
+                "type": "object",
+                "required": ["candidate_id", "model", "model_version", "raw_ipa", "decoded_at", "timing_basis", "confidence"],
+                "properties": {
+                    "candidate_id": {"type": "string"},
+                    "model": {"type": "string"},
+                    "model_version": {"type": "string"},
+                    "raw_ipa": {"type": "string", "description": "Verbatim wav2vec2 IPA decode; not normalized or filtered."},
+                    "decoded_at": {"type": "string", "format": "date-time"},
+                    "timing_basis": {"type": "string", "enum": ["audition_cue", "manual_anchor", "forced_aligned", "silence_split", "approximate", "stt_segment"]},
+                    "confidence": {"type": ["number", "null"]},
+                },
+                "additionalProperties": True,
+            },
+            "IpaReviewState": {
+                "type": "object",
+                "required": ["status", "suggested_ipa", "resolution_type", "evidence_sources", "notes"],
+                "properties": {
+                    "status": {"type": "string", "enum": ["needs_review", "auto_accepted", "accepted", "rejected"]},
+                    "suggested_ipa": {"type": "string"},
+                    "resolution_type": {"type": "string"},
+                    "evidence_sources": {"type": "array", "items": {"type": "string"}},
+                    "notes": {"type": "string"},
+                },
+                "additionalProperties": True,
+            },
+            "IpaCandidatesPayload": {
+                "type": "object",
+                "required": ["candidates", "review"],
+                "properties": {
+                    "candidates": {"type": "object", "additionalProperties": {"type": "array", "items": _schema_ref("IpaCandidate")}},
+                    "review": {"type": "object", "additionalProperties": _schema_ref("IpaReviewState")},
+                },
+                "additionalProperties": False,
+            },
             "ErrorResponse": {
                 "type": "object",
                 "required": ["error"],
@@ -158,6 +193,12 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         "/api/annotations/{speaker}": {
             "get": {"tags": ["Annotations"], "summary": "Read one speaker annotation record", "operationId": "getAnnotation", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True)], "responses": {"200": _response("Normalized annotation payload", _schema_ref("GenericObject")), "400": _response("Invalid speaker", _schema_ref("ErrorResponse")), "404": _response("Missing annotation", _schema_ref("ErrorResponse"))}},
             "post": {"tags": ["Annotations"], "summary": "Save one speaker annotation record", "operationId": "saveAnnotation", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True)], "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("Saved annotation payload", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
+        },
+        "/api/annotations/{speaker}/ipa-candidates": {
+            "get": {"tags": ["Annotations"], "summary": "Read IPA candidate and review sidecars for one speaker", "operationId": "getIpaCandidates", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True)], "responses": {"200": _response("IPA candidate/review sidecars", _schema_ref("IpaCandidatesPayload")), "400": _response("Invalid speaker", _schema_ref("ErrorResponse")), "404": _response("Missing annotation", _schema_ref("ErrorResponse"))}},
+        },
+        "/api/annotations/{speaker}/ipa-review/{key}": {
+            "put": {"tags": ["Annotations"], "summary": "Persist IPA candidate review state", "operationId": "putIpaReview", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True), _parameter("key", "path", {"type": "string"}, required=True, description="<concept_id>::<tier>::<interval_index>")], "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("Persisted review state", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse")), "404": _response("Missing annotation", _schema_ref("ErrorResponse"))}},
         },
         "/api/stt-segments/{speaker}": {
             "get": {"tags": ["STT"], "summary": "Read cached STT segments", "operationId": "getSttSegments", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True)], "responses": {"200": _response("Cached STT segments", _schema_ref("GenericObject"))}},

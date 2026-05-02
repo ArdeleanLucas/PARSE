@@ -27,7 +27,6 @@ from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_O
 from ai.chat_tools import ParseChatTools
 from ai.workflow_tools import WorkflowTools
 from ai.provider import get_chat_config, get_llm_provider, get_ortho_provider, get_stt_provider, load_ai_config, resolve_context_window
-from ai.ipa_transcribe import transcribe_slice as _acoustic_transcribe_slice
 from app.http.auth_handlers import (
     AuthHandlerError as _app_AuthHandlerError,
     build_auth_key_response as _app_build_auth_key_response,
@@ -177,7 +176,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "jobs", "exports", "config", "clef", "locks", "chat", "media")
+_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -1355,7 +1354,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "annotations":
             self._api_get_annotation(parts[2])
             return
-
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-candidates": self._api_get_ipa_candidates(parts[2]); return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "stt-segments":
             self._api_get_stt_segments(parts[2])
             return
@@ -1600,7 +1599,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/tags":
             self._api_put_concept_tags()
             return
-
+        if len(parts := self._path_parts(request_path)) == 5 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-review": self._api_put_ipa_review(parts[2], parts[4]); return
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_delete(self, request_path: str) -> None:

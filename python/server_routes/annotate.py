@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+import hashlib
 import server as _server
 from ai.provider import AIProvider
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
@@ -86,6 +87,33 @@ def _annotation_normalize_tier(raw_tier: _server.Any, default_display_order: int
                 intervals_out.append(interval)
     _server._annotation_sort_intervals(intervals_out)
     return {'type': 'interval', 'display_order': display_order, 'intervals': intervals_out}
+
+
+def _annotation_normalize_ipa_candidates(raw_candidates: _server.Any) -> _server.Optional[_server.Dict[str, _server.List[_server.Dict[str, _server.Any]]]]:
+    """Round-trip IPA candidate sidecars without changing model output text."""
+    if not isinstance(raw_candidates, dict):
+        return None
+    normalized: _server.Dict[str, _server.List[_server.Dict[str, _server.Any]]] = {}
+    for raw_key, raw_list in raw_candidates.items():
+        if not isinstance(raw_list, list):
+            continue
+        candidates: _server.List[_server.Dict[str, _server.Any]] = []
+        for candidate in raw_list:
+            if isinstance(candidate, dict):
+                candidates.append(dict(candidate))
+        normalized[str(raw_key)] = candidates
+    return normalized
+
+
+def _annotation_normalize_ipa_review(raw_review: _server.Any) -> _server.Optional[_server.Dict[str, _server.Dict[str, _server.Any]]]:
+    if not isinstance(raw_review, dict):
+        return None
+    normalized: _server.Dict[str, _server.Dict[str, _server.Any]] = {}
+    for raw_key, review_state in raw_review.items():
+        if isinstance(review_state, dict):
+            normalized[str(raw_key)] = dict(review_state)
+    return normalized
+
 
 def _annotation_max_end(record: _server.Dict[str, _server.Any]) -> float:
     tiers = record.get('tiers') if isinstance(record, dict) else {}
@@ -570,6 +598,14 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
                 entry['variants_used'] = [str(x) for x in variants_used]
             clean_anchors[str(key)] = entry
         normalized['confirmed_anchors'] = clean_anchors
+    raw_ipa_candidates = raw_record.get('ipa_candidates')
+    clean_ipa_candidates = _annotation_normalize_ipa_candidates(raw_ipa_candidates)
+    if clean_ipa_candidates is not None:
+        normalized['ipa_candidates'] = clean_ipa_candidates
+    raw_ipa_review = raw_record.get('ipa_review')
+    clean_ipa_review = _annotation_normalize_ipa_review(raw_ipa_review)
+    if clean_ipa_review is not None:
+        normalized['ipa_review'] = clean_ipa_review
     metadata_in = raw_record.get('metadata')
     if not isinstance(metadata_in, dict):
         metadata_in = {}
@@ -1004,6 +1040,66 @@ def _concept_id_from_interval(interval: _server.Dict[str, _server.Any]) -> str:
     return ''
 
 
+def _ipa_candidate_key(interval: _server.Dict[str, _server.Any], tier: str, interval_index: int) -> str:
+    concept_id = ''
+    for key in ('conceptId', 'concept_id', 'id'):
+        raw = interval.get(key)
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value:
+            concept_id = value
+            break
+    if not concept_id and tier == 'concept':
+        concept_id = str(interval.get('text') or '').strip()
+    if not concept_id:
+        concept_id = str(interval_index)
+    return '{0}::{1}::{2}'.format(concept_id, tier, interval_index)
+
+
+def _ipa_candidate_from_structured(structured: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    raw_value = structured.get('raw_ipa')
+    raw_ipa = raw_value if isinstance(raw_value, str) else str(raw_value or '')
+    decoded_at = str(structured.get('decoded_at') or _server._utc_now_iso())
+    digest = hashlib.sha256((raw_ipa + decoded_at).encode('utf-8')).hexdigest()[:8]
+    return {
+        'candidate_id': 'cand_xlsr_{0}'.format(digest),
+        'model': str(structured.get('model') or 'wav2vec2-xlsr-53-espeak-cv-ft'),
+        'model_version': str(structured.get('model_version') or 'facebook/wav2vec2-xlsr-53-espeak-cv-ft'),
+        'raw_ipa': raw_ipa,
+        'decoded_at': decoded_at,
+        'timing_basis': 'audition_cue',
+        'confidence': None,
+    }
+
+
+def _transcribe_ipa_window_structured(provider: _server.Any, window: _server.Any) -> _server.Dict[str, _server.Any]:
+    structured_fn = getattr(provider, 'transcribe_window_structured', None)
+    if callable(structured_fn):
+        structured = structured_fn(window)
+        if isinstance(structured, dict):
+            return dict(structured)
+    raw_ipa = provider.transcribe_window(window)
+    return {
+        'raw_ipa': raw_ipa,
+        'model': 'wav2vec2-xlsr-53-espeak-cv-ft',
+        'model_version': 'facebook/wav2vec2-xlsr-53-espeak-cv-ft',
+        'decoded_at': _server._utc_now_iso(),
+    }
+
+
+def _annotation_append_ipa_candidate(annotation: _server.Dict[str, _server.Any], key: str, candidate: _server.Dict[str, _server.Any]) -> None:
+    candidates = annotation.get('ipa_candidates')
+    if not isinstance(candidates, dict):
+        candidates = {}
+        annotation['ipa_candidates'] = candidates
+    candidate_list = candidates.get(key)
+    if not isinstance(candidate_list, list):
+        candidate_list = []
+        candidates[key] = candidate_list
+    candidate_list.append(candidate)
+
+
 def _concept_intervals_for_run_mode(
     annotation: _server.Dict[str, _server.Any],
     run_mode: str,
@@ -1189,12 +1285,17 @@ def _run_step_on_concept_windows(
             continue
         concept_id = _concept_id_from_interval(concept_iv)
         confidence: _server.Optional[float] = None
+        ipa_candidate: _server.Optional[_server.Dict[str, _server.Any]] = None
+        ipa_candidate_key = ''
         if step_name == 'ipa':
             try:
                 clip_for_ipa = tensor[s0:s1]
             except Exception:
                 clip_for_ipa = audio_np[s0:s1]
-            text = provider.transcribe_window(clip_for_ipa)
+            structured_ipa = _transcribe_ipa_window_structured(provider, clip_for_ipa)
+            text = structured_ipa.get('raw_ipa')
+            ipa_candidate = _ipa_candidate_from_structured(structured_ipa)
+            ipa_candidate_key = _ipa_candidate_key(concept_iv, 'concept', idx)
         else:
             clip_np = audio_np[s0:s1]
             if clip_np.size == 0:
@@ -1233,6 +1334,9 @@ def _run_step_on_concept_windows(
             row['conceptId'] = concept_id
         if confidence is not None:
             row['confidence'] = confidence
+        if ipa_candidate is not None and ipa_candidate_key:
+            row['_ipa_candidate_key'] = ipa_candidate_key
+            row['_ipa_candidate'] = ipa_candidate
         rows.append(row)
         print("[{0}] concept-window {1}/{2} concept='{3}' → '{4}'".format(step_name.upper(), idx + 1, total, concept_id[:40], text[:40]), file=_server.sys.stderr, flush=True)
         if job_id:
@@ -1513,7 +1617,15 @@ def _compute_speaker_ipa_concept_windows(
         step='ipa',
         job_id=job_id,
     )
-    ipa_tier['intervals'] = _server._merge_concept_window_rows(existing, rows, concept_intervals)
+    clean_rows: _server.List[_server.Dict[str, _server.Any]] = []
+    for row in rows:
+        clean_row = dict(row)
+        candidate_key = clean_row.pop('_ipa_candidate_key', '')
+        candidate = clean_row.pop('_ipa_candidate', None)
+        if isinstance(candidate_key, str) and candidate_key and isinstance(candidate, dict):
+            _annotation_append_ipa_candidate(annotation, candidate_key, candidate)
+        clean_rows.append(clean_row)
+    ipa_tier['intervals'] = _server._merge_concept_window_rows(existing, clean_rows, concept_intervals)
     tiers['ipa'] = ipa_tier
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
@@ -1682,10 +1794,21 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             _chunk_size = int(_ai_cfg2.get('wav2vec2', {}).get('chunk_size', 150))
         except Exception:
             _chunk_size = 150
-        word_results = transcribe_words_with_forced_align(audio_path, stt_segments, aligner=aligner, progress_callback=_word_progress, chunk_size=_chunk_size)
+        word_results = transcribe_words_with_forced_align(audio_path, stt_segments, aligner=aligner, progress_callback=_word_progress, chunk_size=_chunk_size, include_candidates=True)
         _server._compute_checkpoint('IPA.forced_align_done', word_count=len(word_results))
         print('[IPA] forced-align IPA: {0} word intervals'.format(len(word_results)), file=_server.sys.stderr, flush=True)
-        ipa_intervals = [{'start': r['start'], 'end': r['end'], 'text': r['ipa']} for r in word_results]
+        ipa_intervals = []
+        for idx, result in enumerate(word_results):
+            ipa_text = str(result.get('ipa') or '').strip()
+            interval = {'start': result['start'], 'end': result['end'], 'text': ipa_text}
+            ipa_intervals.append(interval)
+            structured_candidate = result.get('ipa_candidate')
+            if ipa_text and isinstance(structured_candidate, dict):
+                _annotation_append_ipa_candidate(
+                    annotation,
+                    _ipa_candidate_key(interval, 'ortho_words', idx),
+                    _ipa_candidate_from_structured(structured_candidate),
+                )
         filled = sum((1 for r in word_results if r['ipa']))
         skipped_empty_ipa = sum((1 for r in word_results if not r['ipa']))
         skipped = skipped_empty_ipa
@@ -1726,7 +1849,9 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             if _trace_iv:
                 _server._compute_checkpoint('IPA.iv_begin', idx=idx, start=start_sec, end=end_sec)
             try:
-                new_ipa = _server._acoustic_transcribe_slice(audio_tensor, start_sec, end_sec, aligner)
+                from ai.ipa_transcribe import transcribe_slice_structured
+                structured_ipa = transcribe_slice_structured(audio_tensor, start_sec, end_sec, aligner)
+                new_ipa = structured_ipa.get('raw_ipa')
             except Exception as exc:
                 skipped += 1
                 skipped_exception += 1
@@ -1748,6 +1873,11 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 new_interval = {'start': ortho['start'], 'end': ortho['end'], 'text': new_ipa}
                 ipa_intervals.append(new_interval)
                 ipa_by_key[key] = new_interval
+            _annotation_append_ipa_candidate(
+                annotation,
+                _ipa_candidate_key(ortho, ortho_source, idx),
+                _ipa_candidate_from_structured(structured_ipa),
+            )
             filled += 1
             progress = 5.0 + (idx + 1) / total * 90.0
             _set_compute_progress(job_id, progress, message='IPA {0}/{1}'.format(idx + 1, total))
