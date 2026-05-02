@@ -1303,6 +1303,34 @@ describe("ParseUI", () => {
     expect(button.parentElement?.textContent ?? "").not.toMatch(/~\d.*left/);
   });
 
+  it("multi-select user tag filter narrows concepts by AND across selected tags", async () => {
+    mockConfig = {
+      ...mockConfig,
+      concepts: [
+        { id: "c1", label: "water" },
+        { id: "c2", label: "fire" },
+        { id: "c3", label: "stone" },
+        { id: "c4", label: "wind" },
+      ],
+    } as ProjectConfig;
+    mockTags = [
+      { id: "t1", label: "Core", color: "#2563eb", concepts: ["c1", "c2"] },
+      { id: "t2", label: "Fieldwork", color: "#16a34a", concepts: ["c1", "c3"] },
+      { id: "t3", label: "Later", color: "#9333ea", concepts: ["c4"] },
+    ];
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByRole("button", { name: /Core/i }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: /Fieldwork/i }));
+
+    expect(within(sidebar).getByRole("button", { name: /water/i })).toBeTruthy();
+    expect(within(sidebar).queryByRole("button", { name: /fire/i })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /stone/i })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /wind/i })).toBeNull();
+  });
+
   it("supports renaming an existing tag in Tags mode", async () => {
     render(<ParseUI />);
 

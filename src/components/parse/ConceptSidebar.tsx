@@ -110,7 +110,10 @@ export function ConceptSidebar({
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
           <button
-            onClick={() => onStatusFilterChange('all')}
+            onClick={() => {
+              onStatusFilterChange('all');
+              onTagSelectionChange(new Set());
+            }}
             data-testid="tagfilter-all"
             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold transition ${statusFilter === 'all' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
           >

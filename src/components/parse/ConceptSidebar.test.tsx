@@ -146,4 +146,37 @@ describe('ConceptSidebar', () => {
     expect(screen.getByTestId('tagfilter-flagged').className).toContain('bg-rose-500');
     expect(screen.getByTestId('tagfilter-unreviewed').className).not.toContain('bg-amber-500');
   });
+
+  it('clears selected user tags when All is clicked', () => {
+    function Harness() {
+      const [statusFilter, setStatusFilter] = useState<ConceptStatusFilter>('flagged');
+      const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set(['review-needed']));
+      return (
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSurveyItems
+          filteredConcepts={baseConcepts}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          selectedTagIds={selectedTagIds}
+          onTagSelectionChange={setSelectedTagIds}
+          tags={baseTags}
+          activeConceptId={1}
+          onConceptSelect={vi.fn()}
+        />
+      );
+    }
+
+    render(<Harness />);
+    expect(screen.getByRole('button', { name: /review needed/i }).className).toContain('text-white');
+    expect(screen.getByTestId('tagfilter-flagged').className).toContain('bg-rose-500');
+
+    fireEvent.click(screen.getByTestId('tagfilter-all'));
+
+    expect(screen.getByTestId('tagfilter-all').className).toContain('bg-slate-600');
+    expect(screen.getByRole('button', { name: /review needed/i }).className).not.toContain('text-white');
+  });
 });

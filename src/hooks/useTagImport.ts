@@ -10,9 +10,12 @@ function defaultPromptForTagName(defaultName: string): string | null {
   return window.prompt('Tag name for this concept list:', defaultName);
 }
 
-function formatImportSummary(result: { tagName: string; matchedCount: number; missedCount: number }): string {
+function formatImportSummary(result: { tagName: string; matchedCount: number; missedCount: number; skippedExistingCount?: number }): string {
   const missedNote = result.missedCount > 0 ? `, ${result.missedCount} unmatched` : '';
-  return `Tag "${result.tagName}": ${result.matchedCount} concepts assigned${missedNote}`;
+  const skippedNote = result.skippedExistingCount && result.skippedExistingCount > 0
+    ? `, skipped: ${result.skippedExistingCount} tags already existed`
+    : '';
+  return `Tag "${result.tagName}": ${result.matchedCount} concepts assigned${missedNote}${skippedNote}`;
 }
 
 export function useTagImport(options: UseTagImportOptions = {}) {

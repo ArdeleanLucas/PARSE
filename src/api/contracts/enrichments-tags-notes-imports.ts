@@ -50,6 +50,7 @@ export interface ImportTagCsvResult {
   missedCount: number;
   missedLabels: string[];
   totalTagsInFile: number;
+  skippedExistingCount?: number;
 }
 
 export async function importTagCsv(

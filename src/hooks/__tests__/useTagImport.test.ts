@@ -78,4 +78,29 @@ describe('useTagImport', () => {
     expect(result.current.summary).toBeNull();
     expect(result.current.error).toBe('bad csv');
   });
+
+  it('includes rows skipped because tag names already existed in the import summary', async () => {
+    mockImportTagCsv.mockResolvedValue({
+      ok: true,
+      tagId: 'custom-sk-concept-list',
+      tagName: 'custom-sk-concept-list',
+      color: '#6366f1',
+      matchedCount: 4,
+      missedCount: 0,
+      missedLabels: [],
+      totalTagsInFile: 3,
+      skippedExistingCount: 2,
+    });
+    const promptForTagName = vi.fn().mockReturnValue('custom-sk-concept-list');
+    const file = new File(['tag,concept\nReview,water\nreview,fire\nCore,stone\n'], 'custom-sk-concept-list.csv', { type: 'text/csv' });
+
+    const { result } = renderHook(() => useTagImport({ promptForTagName }));
+
+    await act(async () => {
+      await result.current.importFile(file);
+    });
+
+    expect(result.current.summary).toBe('Tag "custom-sk-concept-list": 4 concepts assigned, skipped: 2 tags already existed');
+    expect(result.current.error).toBeNull();
+  });
 });
