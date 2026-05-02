@@ -50,6 +50,8 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     assert set(spec["paths"].keys()) == {
         "/api/config",
         "/api/annotations/{speaker}",
+        "/api/annotations/{speaker}/ipa-candidates",
+        "/api/annotations/{speaker}/ipa-review/{key}",
         "/api/stt-segments/{speaker}",
         "/api/pipeline/state/{speaker}",
         "/api/chat/session/{sessionId}",

@@ -26,6 +26,7 @@ import gc
 import json
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, TypedDict
 
@@ -47,12 +48,13 @@ except ImportError:  # pragma: no cover - CLI invocation
     )
 
 
-class IpaResult(TypedDict):
+class IpaResult(TypedDict, total=False):
     """One interval's acoustic IPA output."""
 
     start: float
     end: float
     ipa: str
+    ipa_candidate: dict[str, Any]
 
 
 @dataclass
@@ -69,6 +71,41 @@ class IntervalSpec:
 # ---------------------------------------------------------------------------
 
 
+def _fallback_structured_decode(raw_ipa: Any) -> dict[str, Any]:
+    return {
+        "raw_ipa": raw_ipa,
+        "model": "wav2vec2-xlsr-53-espeak-cv-ft",
+        "model_version": DEFAULT_MODEL_NAME,
+        "decoded_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+
+
+def transcribe_slice_structured(
+    audio_16k: Any,
+    start_sec: float,
+    end_sec: float,
+    aligner: Aligner,
+) -> dict[str, Any]:
+    """Run wav2vec2 CTC on one [start, end] window and keep decode metadata."""
+    if end_sec <= start_sec:
+        return _fallback_structured_decode("")
+    total = int(audio_16k.shape[0])
+    start_sample = max(0, int(round(float(start_sec) * DEFAULT_SAMPLE_RATE)))
+    end_sample = min(total, int(round(float(end_sec) * DEFAULT_SAMPLE_RATE)))
+    if end_sample <= start_sample:
+        return _fallback_structured_decode("")
+    window = audio_16k[start_sample:end_sample]
+    structured_fn = getattr(aligner, "transcribe_window_structured", None)
+    if callable(structured_fn):
+        structured = structured_fn(window)
+        if isinstance(structured, dict):
+            return dict(structured)
+    return _fallback_structured_decode(aligner.transcribe_window(window))
+
+
 def transcribe_slice(
     audio_16k: Any,
     start_sec: float,
@@ -80,15 +117,8 @@ def transcribe_slice(
     The caller owns the loaded mono-16 kHz tensor so that the full-file
     load happens once per speaker rather than once per interval.
     """
-    if end_sec <= start_sec:
-        return ""
-    total = int(audio_16k.shape[0])
-    start_sample = max(0, int(round(float(start_sec) * DEFAULT_SAMPLE_RATE)))
-    end_sample = min(total, int(round(float(end_sec) * DEFAULT_SAMPLE_RATE)))
-    if end_sample <= start_sample:
-        return ""
-    window = audio_16k[start_sample:end_sample]
-    return aligner.transcribe_window(window)
+    structured = transcribe_slice_structured(audio_16k, start_sec, end_sec, aligner)
+    return str(structured.get("raw_ipa") or "").strip()
 
 
 def transcribe_intervals(
@@ -152,6 +182,7 @@ def transcribe_words_with_forced_align(
     progress_callback: Optional[Any] = None,
     segment_batch_size: int = 5,
     chunk_size: int = 150,
+    include_candidates: bool = False,
 ) -> List[IpaResult]:
     """Full 3-tier IPA: G2P + torchaudio forced alignment → word windows → wav2vec2 CTC.
 
@@ -262,8 +293,13 @@ def transcribe_words_with_forced_align(
         chunk = word_intervals[chunk_start: chunk_start + chunk_size]
         for idx_in_chunk, spec in enumerate(chunk):
             global_idx = chunk_start + idx_in_chunk
-            ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
-            out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+            if include_candidates:
+                structured = transcribe_slice_structured(audio, spec.start, spec.end, local_aligner)
+                ipa = str(structured.get("raw_ipa") or "").strip()
+                out.append({"start": spec.start, "end": spec.end, "ipa": ipa, "ipa_candidate": structured})
+            else:
+                ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+                out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
             if progress_callback is not None:
                 try:
                     # Tier 3 occupies the 50-100% range (Tier 2 took 0-50%).

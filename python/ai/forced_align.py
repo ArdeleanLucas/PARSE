@@ -34,6 +34,7 @@ import platform
 import sys
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
@@ -362,6 +363,23 @@ class Aligner:
             )
             return ""
         return str(ipa or "").strip()
+
+    def transcribe_window_structured(self, audio_16k: Any) -> Dict[str, Any]:
+        """Return the verbatim wav2vec2 IPA decode plus review metadata.
+
+        This intentionally wraps :meth:`transcribe_window` without altering its
+        output. Review/canonicalisation layers live outside the acoustic model;
+        this method only captures enough provenance for the annotation sidecar.
+        """
+        return {
+            "raw_ipa": self.transcribe_window(audio_16k),
+            "model": "wav2vec2-xlsr-53-espeak-cv-ft",
+            "model_version": DEFAULT_MODEL_NAME,
+            "decoded_at": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
 
     # ------------------------------------------------------------------
     # Core alignment call
