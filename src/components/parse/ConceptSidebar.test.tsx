@@ -6,7 +6,7 @@ import { ConceptSidebar, type ConceptStatusFilter } from './ConceptSidebar';
 
 const baseConcepts = [
   { id: 1, name: 'water', tag: 'untagged' as const },
-  { id: 2, name: 'fire', tag: 'confirmed' as const, surveyItem: '2.1' },
+  { id: 2, name: 'fire', tag: 'confirmed' as const, sourceItem: '2.1' },
 ];
 
 const baseTags = [
@@ -25,7 +25,7 @@ describe('ConceptSidebar', () => {
         onQueryChange={vi.fn()}
         sortMode="az"
         onSortModeChange={vi.fn()}
-        hasSurveyItems
+        hasSourceItems
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -41,7 +41,7 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
     const active = screen.getByRole('button', { name: /fire/i });
     expect(active.className).toContain('bg-indigo-50');
-    expect(active.textContent ?? '').toContain('2');
+    expect(active.textContent ?? '').toContain('2.1');
   });
 
   it('forwards search, status filter, tag selection, and concept-selection callbacks', () => {
@@ -56,7 +56,7 @@ describe('ConceptSidebar', () => {
         onQueryChange={onQueryChange}
         sortMode="survey"
         onSortModeChange={vi.fn()}
-        hasSurveyItems
+        hasSourceItems
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={onStatusFilterChange}
@@ -89,7 +89,7 @@ describe('ConceptSidebar', () => {
           onQueryChange={vi.fn()}
           sortMode="az"
           onSortModeChange={vi.fn()}
-          hasSurveyItems
+          hasSourceItems
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -127,7 +127,7 @@ describe('ConceptSidebar', () => {
           onQueryChange={vi.fn()}
           sortMode="az"
           onSortModeChange={vi.fn()}
-          hasSurveyItems
+          hasSourceItems
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -157,7 +157,7 @@ describe('ConceptSidebar', () => {
           onQueryChange={vi.fn()}
           sortMode="az"
           onSortModeChange={vi.fn()}
-          hasSurveyItems
+          hasSourceItems
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -178,5 +178,123 @@ describe('ConceptSidebar', () => {
 
     expect(screen.getByTestId('tagfilter-all').className).toContain('bg-slate-600');
     expect(screen.getByRole('button', { name: /review needed/i }).className).not.toContain('text-white');
+  });
+
+  it('shows source survey plus source item as the concept badge when both are present', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2', sourceSurvey: 'KLQ' }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={42}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('KLQ 1.2');
+  });
+
+  it('shows bare source item as the concept badge without a prefix when source survey is absent', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="az"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2' }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={42}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    const text = screen.getByRole('button', { name: /forehead/i }).textContent ?? '';
+    expect(text).toContain('1.2');
+    expect(text).not.toContain('#1.2');
+  });
+
+  it('falls back to a #id badge when no source item is present', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="survey"
+        onSortModeChange={vi.fn()}
+        hasSourceItems={false}
+        filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={42}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('#42');
+  });
+
+  it('labels the source-aware sort tab as Source', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Source')).toBeTruthy();
+    expect(screen.queryByText('Survey')).toBeNull();
+  });
+
+  it('renders mixed source and #id badges and enables Source sorting when any source item exists', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[
+          { id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2', sourceSurvey: 'KLQ' },
+          { id: 43, name: 'hair', tag: 'confirmed' as const },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={42}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('KLQ 1.2');
+    expect(screen.getByRole('button', { name: /hair/i }).textContent ?? '').toContain('#43');
+    expect(screen.getByTestId('concept-sort-survey').hasAttribute('disabled')).toBe(false);
   });
 });

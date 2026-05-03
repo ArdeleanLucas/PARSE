@@ -8,7 +8,7 @@ import { compareSurveyKeys, surveyBadgePrefix, surveyKey } from "../lib/surveySo
 // future branch that reverts those helpers will fail these cases.
 
 describe("survey-item natural sort", () => {
-  it("tokenises survey_item into letter-runs and integer-runs", () => {
+  it("tokenises source item strings into letter-runs and integer-runs", () => {
     expect(surveyKey("KLQ_1.10.A")).toEqual(["klq", 1, 10, "a"]);
     expect(surveyKey("JBIL_100.A")).toEqual(["jbil", 100, "a"]);
   });
@@ -56,7 +56,7 @@ describe("survey-item natural sort", () => {
 });
 
 describe("survey-mode badge prefix", () => {
-  it("emits no extra letter in Survey mode — survey_item carries its own source tag", () => {
+  it("emits no extra letter in Survey mode because source item carries its own source tag", () => {
     // This is the half of the regression that slipped past the old tests.
     // Specifically blocks re-introducing the "Q" prefix seen in the
     // user-reported regression where the sidebar read "QJBIL_1.A" instead

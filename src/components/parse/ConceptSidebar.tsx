@@ -1,5 +1,4 @@
 import { Search } from 'lucide-react';
-import { surveyBadgePrefix } from '../../lib/surveySort';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
@@ -9,7 +8,8 @@ interface SidebarConcept {
   id: number;
   name: string;
   tag: ConceptTag;
-  surveyItem?: string;
+  sourceItem?: string;
+  sourceSurvey?: string;
 }
 
 interface SidebarTag {
@@ -23,7 +23,7 @@ interface ConceptSidebarProps {
   onQueryChange: (query: string) => void;
   sortMode: ConceptSortMode;
   onSortModeChange: (mode: ConceptSortMode) => void;
-  hasSurveyItems: boolean;
+  hasSourceItems: boolean;
   filteredConcepts: SidebarConcept[];
   statusFilter: ConceptStatusFilter;
   onStatusFilterChange: (filter: ConceptStatusFilter) => void;
@@ -46,7 +46,7 @@ export function ConceptSidebar({
   onQueryChange,
   sortMode,
   onSortModeChange,
-  hasSurveyItems,
+  hasSourceItems,
   filteredConcepts,
   statusFilter,
   onStatusFilterChange,
@@ -99,11 +99,11 @@ export function ConceptSidebar({
             <button
               data-testid="concept-sort-survey"
               onClick={() => onSortModeChange('survey')}
-              disabled={!hasSurveyItems}
-              title={hasSurveyItems ? 'Sort by original survey item (section.item)' : 'No survey_item values present in concepts.csv'}
-              className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode === 'survey' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'} ${!hasSurveyItems ? 'cursor-not-allowed opacity-40' : ''}`}
+              disabled={!hasSourceItems}
+              title={hasSourceItems ? 'Sort by original source item (section.item)' : 'No source_item values present in concepts.csv'}
+              className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode === 'survey' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'} ${!hasSourceItems ? 'cursor-not-allowed opacity-40' : ''}`}
             >
-              Survey
+              Source
             </button>
           </div>
           <span className="ml-auto text-[10px] text-slate-400">{filteredConcepts.length} concepts</span>
@@ -165,8 +165,10 @@ export function ConceptSidebar({
       <nav className="flex-1 overflow-y-auto px-2 pb-6">
         {filteredConcepts.map((concept) => {
           const active = concept.id === activeConceptId;
-          const badge = sortMode === 'survey' && concept.surveyItem ? concept.surveyItem : String(concept.id);
-          const badgePrefix = surveyBadgePrefix(sortMode);
+          const sourceLabel = concept.sourceSurvey && concept.sourceItem
+            ? `${concept.sourceSurvey} ${concept.sourceItem}`
+            : concept.sourceItem;
+          const badge = sourceLabel ?? `#${concept.id}`;
           return (
             <button
               key={concept.id}
@@ -175,7 +177,7 @@ export function ConceptSidebar({
             >
               <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
               <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}</span>
-              <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badgePrefix}{badge}</span>
+              <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
             </button>
           );
         })}

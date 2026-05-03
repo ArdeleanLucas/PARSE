@@ -7,7 +7,8 @@ export interface Concept {
   key: string;
   name: string;
   tag: ConceptTag;
-  surveyItem?: string;
+  sourceItem?: string;
+  sourceSurvey?: string;
   customOrder?: number;
 }
 
