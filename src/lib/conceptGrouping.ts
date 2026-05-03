@@ -55,6 +55,14 @@ function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: Re
   };
 }
 
+export function findConceptByUnderlyingKey(concepts: readonly Concept[], underlyingKey: string): Concept | undefined {
+  return concepts.find((concept) => {
+    if (concept.mergedKeys?.includes(underlyingKey)) return true;
+    if (concept.variants?.some((variant) => variant.conceptKey === underlyingKey)) return true;
+    return concept.key === underlyingKey;
+  });
+}
+
 export function groupConceptEntries(
   rawConcepts: readonly ConceptEntry[],
   resolveTag: ResolveConceptTag,
@@ -114,10 +122,6 @@ export function groupConceptEntries(
   const activeMerges = Object.entries(conceptMerges ?? {}).filter(([, absorbed]) => absorbed.length > 0);
   if (activeMerges.length === 0) return grouped;
 
-  const findByUnderlyingKey = (key: string): Concept | undefined => grouped.find((concept) => {
-    if (concept.key === key) return true;
-    return concept.variants?.some((variant) => variant.conceptKey === key) ?? false;
-  });
   const underlyingKeys = (concept: Concept): string[] => concept.variants?.map((variant) => variant.conceptKey) ?? [concept.key];
   const underlyingVariants = (concept: Concept, startIndex: number): ConceptVariant[] => {
     if (concept.variants?.length) return concept.variants;
@@ -126,10 +130,10 @@ export function groupConceptEntries(
 
   const absorbedConcepts = new Set<Concept>();
   for (const [primaryKey, absorbedKeys] of activeMerges) {
-    const primary = findByUnderlyingKey(primaryKey);
+    const primary = findConceptByUnderlyingKey(grouped, primaryKey);
     if (!primary) continue;
     const absorbed = absorbedKeys
-      .map((key) => findByUnderlyingKey(key))
+      .map((key) => findConceptByUnderlyingKey(grouped, key))
       .filter((concept): concept is Concept => !!concept && concept !== primary);
     if (absorbed.length === 0) continue;
 

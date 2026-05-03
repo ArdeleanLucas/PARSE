@@ -33,7 +33,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
-import { groupConceptEntries } from './lib/conceptGrouping';
+import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { fmtTime } from './lib/fmtTime';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
@@ -821,11 +821,12 @@ export function ParseUI() {
   // — Derived: real concepts with live tag state —
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
+    const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
     return groupConceptEntries(rawConcepts, (conceptKeys) => {
       const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey));
       return getConceptStatus(tags);
-    }, conceptMerges);
-  }, [rawConcepts, getTagsForConcept, storeTags, conceptMerges]);
+    }, mergesForCurrentMode);
+  }, [rawConcepts, getTagsForConcept, storeTags, conceptMerges, currentMode]);
 
   const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
 
@@ -836,6 +837,25 @@ export function ParseUI() {
   }, [hasSourceItems]);
 
   const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
+  const activeRawKey = useMemo<string | null>(() => {
+    if (!selectedConcept) return null;
+    // Mode switches collapse/expand concept rows; first underlying key is the deterministic tie-breaker.
+    if (selectedConcept.mergedKeys?.length) return selectedConcept.mergedKeys[0] ?? selectedConcept.key;
+    if (selectedConcept.variants?.length) return selectedConcept.variants[0]?.conceptKey ?? selectedConcept.key;
+    return selectedConcept.key;
+  }, [selectedConcept]);
+  const previousActiveRawKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const rawKeyToResolve = previousActiveRawKeyRef.current ?? activeRawKey;
+    if (!rawKeyToResolve) return;
+    const next = findConceptByUnderlyingKey(concepts, rawKeyToResolve);
+    if (next && next.id !== conceptId) setConceptId(next.id);
+  }, [concepts, currentMode]);
+
+  useEffect(() => {
+    previousActiveRawKeyRef.current = activeRawKey;
+  }, [activeRawKey]);
   const markLexemeManuallyAdjusted = useAnnotationStore((s) => s.markLexemeManuallyAdjusted);
   const {
     offsetState,

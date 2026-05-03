@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConceptEntry } from '../api/types';
-import { groupConceptEntries } from './conceptGrouping';
+import { findConceptByUnderlyingKey, groupConceptEntries } from './conceptGrouping';
 
 const untagged = () => 'untagged' as const;
 
@@ -150,4 +150,43 @@ describe('groupConceptEntries', () => {
     expect(grouped.map((concept) => concept.key)).toEqual(['primary', 'absorbed']);
   });
 
+});
+
+describe('findConceptByUnderlyingKey', () => {
+  it('returns the singleton concept when key matches concept.key', () => {
+    const concepts = groupConceptEntries([
+      { id: '527', label: 'head' },
+      { id: '600', label: 'water' },
+    ], untagged);
+
+    expect(findConceptByUnderlyingKey(concepts, '600')?.name).toBe('water');
+  });
+
+  it('returns the source-item grouped concept when key matches any variant conceptKey', () => {
+    const concepts = groupConceptEntries([
+      { id: '247', label: 'head A', source_item: '2.47', source_survey: 'KLQ' },
+      { id: '248', label: 'head B', source_item: '2.47', source_survey: 'KLQ' },
+      { id: '600', label: 'water' },
+    ], untagged);
+
+    expect(findConceptByUnderlyingKey(concepts, '248')?.key).toBe('2.47');
+  });
+
+  it('returns the merged primary when key matches any mergedKey', () => {
+    const concepts = groupConceptEntries([
+      { id: '247', label: 'head (A)' },
+      { id: '248', label: 'head (B)' },
+      { id: '527', label: 'head' },
+    ], untagged, { '527': ['247', '248'] });
+
+    expect(findConceptByUnderlyingKey(concepts, '248')?.key).toBe('527');
+  });
+
+  it('returns undefined when key matches nothing', () => {
+    const concepts = groupConceptEntries([
+      { id: '527', label: 'head' },
+    ], untagged);
+
+    expect(findConceptByUnderlyingKey(concepts, 'missing')).toBeUndefined();
+  });
 });
