@@ -17,6 +17,9 @@ export interface Concept {
   sourceSurvey?: string;
   customOrder?: number;
   variants?: ConceptVariant[];
+  mergedKeys?: string[];
+  mergedVariants?: ConceptVariant[];
+  mergeAbsorbedNames?: string[];
 }
 
 export interface Realization {
@@ -39,7 +42,7 @@ export interface SpeakerForm {
   endSec: number | null;
   realizations: Realization[];
   selectedIdx: number;
-  realizationsSource: 'source-item' | 'auto-detect' | 'single';
+  realizationsSource: 'source-item' | 'auto-detect' | 'merged' | 'single';
 }
 
 function emptyRealization(): Realization {
@@ -79,6 +82,9 @@ function conceptIntervalsForKey(record: AnnotationRecord | null | undefined, con
 
 function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: AnnotationInterval): boolean {
   const intervalConceptId = String(interval.concept_id ?? '');
+  if (concept.mergedKeys?.length) {
+    return concept.mergedKeys.includes(intervalConceptId);
+  }
   if (concept.variants?.length) {
     return concept.variants.some((variant) => variant.conceptKey === intervalConceptId);
   }
@@ -197,6 +203,27 @@ export function buildSpeakerForm(
   const canonicalOverrides = overrides && isRecord(overrides.canonical_realizations)
     ? overrides.canonical_realizations as Record<string, unknown>
     : null;
+
+  if (concept.mergedKeys && concept.mergedKeys.length > 1) {
+    const realizations = concept.mergedKeys.map((key) => buildSingleRealizationForVariant(record, key));
+    const selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
+    const canonical = realizations[selectedIdx];
+    return {
+      speaker,
+      ipa: canonical?.ipa ?? '',
+      ortho: canonical?.ortho ?? orthoText,
+      utterances,
+      variantCount: realizations.length,
+      similarityByLang,
+      cognate,
+      flagged: speakerFlagged || flagged,
+      startSec: canonical?.startSec ?? null,
+      endSec: canonical?.endSec ?? null,
+      realizations,
+      selectedIdx,
+      realizationsSource: 'merged',
+    };
+  }
 
   if (concept.sourceItem && concept.variants && concept.variants.length >= 2) {
     const realizations = concept.variants.map((variant) => buildSingleRealizationForVariant(record, variant.conceptKey));

@@ -297,4 +297,67 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /hair/i }).textContent ?? '').toContain('#43');
     expect(screen.getByTestId('concept-sort-survey').hasAttribute('disabled')).toBe(false);
   });
+
+  it('opens a context menu on right-click with merge and unmerge actions', () => {
+    const onMergeRequest = vi.fn();
+    const onUnmerge = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="az"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{ id: 1, name: 'head', tag: 'untagged' as const, mergedKeys: ['527', '247'], key: '527' }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        onMergeRequest={onMergeRequest}
+        onUnmergeConcept={onUnmerge}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /head/i }));
+
+    expect(screen.getByRole('menu')).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: /merge with/i }));
+    expect(onMergeRequest).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'head' }));
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /head/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /unmerge/i }));
+    expect(onUnmerge).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'head' }));
+  });
+
+  it('shows a merge-count badge with absorbed names in the tooltip', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="az"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{
+          id: 1,
+          name: 'head',
+          tag: 'untagged' as const,
+          mergedKeys: ['527', '247', '248'],
+          mergeAbsorbedNames: ['head (A)', 'head (B)'],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('+2').getAttribute('title')).toContain('head (A)');
+  });
+
 });

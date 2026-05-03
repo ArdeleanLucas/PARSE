@@ -92,4 +92,62 @@ describe('groupConceptEntries', () => {
     expect(grouped[1].sourceItem).toBeUndefined();
     expect(grouped[2].sourceItem).toBe('3.1');
   });
+
+  it('applies explicit concept merges across singleton concepts and preserves contiguous ids', () => {
+    const entries: ConceptEntry[] = [
+      { id: '247', label: 'head (A)' },
+      { id: '248', label: 'head (B)' },
+      { id: '527', label: 'head' },
+      { id: '600', label: 'water' },
+    ];
+
+    const grouped = groupConceptEntries(entries, untagged, { '527': ['247', '248'] });
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0]).toMatchObject({ id: 1, key: '527', name: 'head' });
+    expect(grouped[0].mergedKeys).toEqual(['527', '247', '248']);
+    expect(grouped[0].mergeAbsorbedNames).toEqual(['head (A)', 'head (B)']);
+    expect(grouped.map((concept) => concept.id)).toEqual([1, 2]);
+    expect(grouped.map((concept) => concept.key)).toEqual(['527', '600']);
+  });
+
+  it('merges a source-item grouped concept with a bare-stem singleton concept', () => {
+    const entries: ConceptEntry[] = [
+      { id: '247', label: 'head A', source_item: '2.47', source_survey: 'KLQ' },
+      { id: '248', label: 'head B', source_item: '2.47', source_survey: 'KLQ' },
+      { id: '527', label: 'head' },
+    ];
+
+    const grouped = groupConceptEntries(entries, untagged, { '2.47': ['527'] });
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].key).toBe('2.47');
+    expect(grouped[0].mergedKeys).toEqual(['247', '248', '527']);
+    expect(grouped[0].mergeAbsorbedNames).toEqual(['head']);
+    expect(grouped[0].variants?.map((variant) => variant.conceptKey)).toEqual(['247', '248']);
+  });
+
+  it('silently skips stale absorbed concept keys while applying the rest of a merge', () => {
+    const grouped = groupConceptEntries([
+      { id: 'primary', label: 'head' },
+      { id: 'absorbed', label: 'head (A)' },
+      { id: 'water', label: 'water' },
+    ], untagged, { primary: ['missing', 'absorbed'] });
+
+    expect(grouped.map((concept) => concept.key)).toEqual(['primary', 'water']);
+    expect(grouped[0].mergedKeys).toEqual(['primary', 'absorbed']);
+    expect(grouped[0].mergeAbsorbedNames).toEqual(['head (A)']);
+  });
+
+  it('ignores empty merge override arrays', () => {
+    const grouped = groupConceptEntries([
+      { id: 'primary', label: 'head' },
+      { id: 'absorbed', label: 'head (A)' },
+    ], untagged, { primary: [] });
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].mergedKeys).toBeUndefined();
+    expect(grouped.map((concept) => concept.key)).toEqual(['primary', 'absorbed']);
+  });
+
 });

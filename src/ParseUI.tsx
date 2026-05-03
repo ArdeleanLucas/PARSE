@@ -76,6 +76,7 @@ import { ClefConfigModal } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner, type PopulateSummary } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar, type ConceptStatusFilter } from './components/parse/ConceptSidebar';
+import { ConceptMergePicker } from './components/parse/sidebar/ConceptMergePicker';
 import { RightPanel } from './components/parse/RightPanel';
 import {
   type CompareComputeMode,
@@ -365,6 +366,16 @@ export function ParseUI() {
     const store = useEnrichmentStore.getState();
     const patch = { manual_overrides: { auto_detect_dismissed: { [conceptKey]: { [speaker]: true } } } };
     void store.save(patch);
+  };
+
+  const setConceptMerge = (primaryKey: string, absorbedKeys: readonly string[]) => {
+    const patch = { manual_overrides: { concept_merges: { [primaryKey]: [...absorbedKeys] } } };
+    void useEnrichmentStore.getState().save(patch);
+  };
+
+  const unmergeConcept = (primaryKey: string) => {
+    const patch = { manual_overrides: { concept_merges: { [primaryKey]: [] } } };
+    void useEnrichmentStore.getState().save(patch);
   };
 
   // Auto-select speakers when config loads and we have none selected
@@ -777,6 +788,7 @@ export function ParseUI() {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [tagConceptSearch, setTagConceptSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
+  const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -795,14 +807,25 @@ export function ParseUI() {
   // — Derived: real speakers (no fallback — empty until workspace provides them) —
   const speakers = rawSpeakers;
 
+  const conceptMerges = useMemo(() => {
+    const overrides = isRecord(enrichmentData.manual_overrides) ? enrichmentData.manual_overrides as Record<string, unknown> : null;
+    const rawMerges = overrides && isRecord(overrides.concept_merges) ? overrides.concept_merges as Record<string, unknown> : null;
+    if (!rawMerges) return undefined;
+    const out: Record<string, string[]> = {};
+    for (const [primary, absorbed] of Object.entries(rawMerges)) {
+      if (Array.isArray(absorbed)) out[primary] = absorbed.filter((key): key is string => typeof key === 'string');
+    }
+    return out;
+  }, [enrichmentData]);
+
   // — Derived: real concepts with live tag state —
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
     return groupConceptEntries(rawConcepts, (conceptKeys) => {
       const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey));
       return getConceptStatus(tags);
-    });
-  }, [rawConcepts, getTagsForConcept, storeTags]);
+    }, conceptMerges);
+  }, [rawConcepts, getTagsForConcept, storeTags, conceptMerges]);
 
   const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
 
@@ -1594,6 +1617,19 @@ export function ParseUI() {
         </div>
       )}
 
+      {mergePickerPrimary && (
+        <ConceptMergePicker
+          key={mergePickerPrimary.key}
+          primary={mergePickerPrimary}
+          concepts={concepts}
+          onCancel={() => setMergePickerPrimary(null)}
+          onConfirm={(absorbedKeys) => {
+            setConceptMerge(mergePickerPrimary.key, absorbedKeys);
+            setMergePickerPrimary(null);
+          }}
+        />
+      )}
+
       {/* ============ BODY: left sidebar / main / right panel ============ */}
       <div className="flex min-h-0 flex-1">
         {/* LEFT SIDEBAR */}
@@ -1611,6 +1647,14 @@ export function ParseUI() {
           tags={tagsList}
           activeConceptId={conceptId}
           onConceptSelect={setConceptId}
+          onMergeRequest={(sidebarConcept) => {
+            const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
+            setMergePickerPrimary(target);
+          }}
+          onUnmergeConcept={(sidebarConcept) => {
+            const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
+            if (target) unmergeConcept(target.key);
+          }}
         />
 
         {/* MAIN + AI STACK */}
@@ -1934,7 +1978,9 @@ export function ParseUI() {
                                 {f.realizations.map((r, i) => {
                                   const label = f.realizationsSource === 'source-item'
                                     ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                    : String.fromCharCode(65 + i);
+                                    : f.realizationsSource === 'merged'
+                                      ? concept.mergedVariants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
+                                      : String.fromCharCode(65 + i);
                                   const isCanonical = f.selectedIdx === i;
                                   return (
                                     <button
@@ -2022,7 +2068,9 @@ export function ParseUI() {
                                     const isCanonical = f.selectedIdx === i;
                                     const label = f.realizationsSource === 'source-item'
                                       ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                      : String.fromCharCode(65 + i);
+                                      : f.realizationsSource === 'merged'
+                                        ? concept.mergedVariants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
+                                        : String.fromCharCode(65 + i);
                                     return (
                                       <div
                                         key={i}
