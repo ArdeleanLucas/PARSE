@@ -316,7 +316,7 @@ A new tool should follow this pattern:
    - alignment / correction
    - tag-related
    - write / export / merge
-4. Update `docs/ai-integration.md` to keep the 57-tool list current
+4. Update `docs/ai-integration.md` to keep the 58-tool list current
 5. If the tool should also be exposed externally, update the MCP adapter modules and `docs/api-reference.md`
 
 ### Why this matters

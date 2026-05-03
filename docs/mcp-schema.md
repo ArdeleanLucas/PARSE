@@ -41,8 +41,8 @@ PARSE now exposes three closely related machine-facing surfaces:
 - `all` — expose the full tool surface
 
 Verified current counts from `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, and `python/adapters/mcp_adapter.py`:
-- **57** built-in `ParseChatTools`
-- **57** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **58** built-in `ParseChatTools`
+- **58** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `python/ai/workflow_tools.py`
 - **61** total default adapter tools including read-only `mcp_get_exposure_mode`
 - **61** total adapter tools when `expose_all_tools=true`

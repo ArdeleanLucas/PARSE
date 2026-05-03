@@ -228,9 +228,9 @@ def test_normalizer_allocates_new_concept_id_when_label_unknown_and_grows_concep
     interval = normalized["tiers"]["concept"]["intervals"][0]
     assert interval["concept_id"] == "226"
     assert _read_concepts_csv(concepts_path) == [
-        {"id": "2", "concept_en": "forehead"},
-        {"id": "225", "concept_en": "nine"},
-        {"id": "226", "concept_en": "to listen to"},
+        {"id": "2", "concept_en": "forehead", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "225", "concept_en": "nine", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "226", "concept_en": "to listen to", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
 

@@ -1,0 +1,7 @@
+{
+  "field": "source_survey",
+  "value": "KLQ",
+  "filter": {
+    "ids": ["1", "2"]
+  }
+}

@@ -15,8 +15,8 @@ This guide is the narrative overview of PARSE's machine-facing surfaces. For the
 
 These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, `python/external_api/catalog.py`, and the MCP adapter tests:
 
-- **57** built-in `ParseChatTools`
-- **57** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **58** built-in `ParseChatTools`
+- **58** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `DEFAULT_MCP_WORKFLOW_TOOL_NAMES`
 - **61** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
 - **61** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
@@ -77,8 +77,8 @@ Core endpoints:
 The `mode` query parameter accepts:
 
 - `active` — obey `config/mcp_config.json` or the legacy root-level `mcp_config.json`
-- `default` — expose the shipped default 61-tool surface
-- `all` — expose the full tool surface (currently also 61 tools unless a future all-only surface diverges)
+- `default` — expose the shipped default 62-tool surface
+- `all` — expose the full tool surface (currently also 62 tools unless a future all-only surface diverges)
 
 Each listed tool includes standard MCP schema fields plus `meta.x-parse` safety metadata such as `mutability`, `supports_dry_run`, `dry_run_parameter`, `preconditions`, and `postconditions`.
 
@@ -115,7 +115,7 @@ The adapter does not add a separate network protocol. It launches as a local pro
 - `PARSE_API_PORT`
 - `PARSE_PORT`
 
-Use the shipped default 61-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
+Use the shipped default 62-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
 
 ## Authentication Model
 

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, BinaryIO, Callable, Dict, List
 
+from concept_source_item import normalize_concept_csv_row, row_value, write_concepts_csv_rows
+
 from .job_observability_handlers import JsonResponseSpec
 
 
@@ -135,7 +137,7 @@ def build_concepts_import_response(
     existing: List[Dict[str, str]] = []
     if concepts_path.exists():
         with open(concepts_path, newline="", encoding="utf-8") as handle:
-            existing = list(_csv.DictReader(handle))
+            existing = [normalize_concept_csv_row(row) for row in _csv.DictReader(handle)]
 
     by_id: Dict[str, int] = {}
     by_label: Dict[str, int] = {}
@@ -149,7 +151,8 @@ def build_concepts_import_response(
 
     if replace_mode:
         for row in existing:
-            row["survey_item"] = ""
+            row["source_item"] = ""
+            row["source_survey"] = ""
             row["custom_order"] = ""
 
     matched = 0
@@ -163,8 +166,9 @@ def build_concepts_import_response(
         elif up_label and up_label.lower() in by_label:
             target_idx = by_label[up_label.lower()]
 
-        survey_raw = str(up.get("survey_item") or "").strip() if "survey_item" in up else ""
-        custom_raw = str(up.get("custom_order") or "").strip() if "custom_order" in up else ""
+        source_item_raw = row_value(up, "source_item", "survey_item")
+        source_survey_raw = row_value(up, "source_survey")
+        custom_raw = row_value(up, "custom_order")
 
         if target_idx is None:
             if not up_label:
@@ -178,7 +182,8 @@ def build_concepts_import_response(
             row = {
                 "id": up_id,
                 "concept_en": up_label,
-                "survey_item": survey_raw,
+                "source_item": source_item_raw,
+                "source_survey": source_survey_raw,
                 "custom_order": custom_raw,
             }
             existing.append(row)
@@ -187,19 +192,15 @@ def build_concepts_import_response(
             added += 1
         else:
             row = existing[target_idx]
-            if survey_raw:
-                row["survey_item"] = survey_raw
+            if source_item_raw:
+                row["source_item"] = source_item_raw
+            if source_survey_raw:
+                row["source_survey"] = source_survey_raw
             if custom_raw:
                 row["custom_order"] = custom_raw
             matched += 1
 
-    fieldnames_out = ["id", "concept_en", "survey_item", "custom_order"]
-    concepts_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(concepts_path, "w", newline="", encoding="utf-8") as handle:
-        writer = _csv.DictWriter(handle, fieldnames=fieldnames_out)
-        writer.writeheader()
-        for row in existing:
-            writer.writerow({key: row.get(key, "") or "" for key in fieldnames_out})
+    write_concepts_csv_rows(concepts_path, existing)
 
     return JsonResponseSpec(
         status=HTTPStatus.OK,

@@ -237,8 +237,8 @@ def test_onboard_merges_concepts_csv_when_format_matches(tmp_path, monkeypatch) 
     with open(concepts_path, newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows == [
-        {"id": "1", "concept_en": "ash"},
-        {"id": "2", "concept_en": "bark"},
+        {"id": "1", "concept_en": "ash", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "2", "concept_en": "bark", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
 
@@ -338,8 +338,11 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
     concept_rows = _read_concepts_csv(tmp_path / "concepts.csv")
     for row in concept_rows:
         int(row["id"])
-    rows_by_id = {row["id"]: row["concept_en"] for row in concept_rows}
-    assert rows_by_id == {"2": "forehead", "225": "nine", "226": "to listen to"}
+    rows_by_id = {row["id"]: row for row in concept_rows}
+    assert {cid: row["concept_en"] for cid, row in rows_by_id.items()} == {"2": "forehead", "225": "nine", "226": "to listen to"}
+    assert rows_by_id["2"]["source_item"] == "1.2"
+    assert rows_by_id["225"]["source_item"] == "9"
+    assert rows_by_id["226"]["source_item"] == "8.4"
     assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
     assert complete_calls[0][1]["lexemesImported"] == 3
 
@@ -472,10 +475,10 @@ def test_audition_concept_resolver_reuses_casefold_labels_and_allocates_stably(t
     resolved = media._resolve_audition_concepts(rows)
 
     assert resolved == [
-        {"id": "2", "label": "forehead", "audition_prefix": "1.2"},
-        {"id": "225", "label": "NINE", "audition_prefix": "9"},
-        {"id": "226", "label": "to listen to", "audition_prefix": "8.4"},
-        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5"},
+        {"id": "2", "label": "forehead", "audition_prefix": "1.2", "source_item": "1.2"},
+        {"id": "225", "label": "NINE", "audition_prefix": "9", "source_item": "9"},
+        {"id": "226", "label": "to listen to", "audition_prefix": "8.4", "source_item": "8.4"},
+        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5", "source_item": "8.5"},
     ]
 
     media._merge_concepts_into_root_csv(resolved)
@@ -556,7 +559,7 @@ def test_onboard_is_idempotent_on_replay(tmp_path, monkeypatch) -> None:
 
     with open(tmp_path / "concepts.csv", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert rows == [{"id": "1", "concept_en": "ash"}]
+    assert rows == [{"id": "1", "concept_en": "ash", "source_item": "", "source_survey": "", "custom_order": ""}]
 
     project = json.loads((tmp_path / "project.json").read_text())
     assert list(project["speakers"].keys()) == ["Fail02"]

@@ -118,13 +118,13 @@ def test_build_update_config_response_deep_merges_and_writes() -> None:
 def test_build_concepts_import_response_merges_matching_rows(tmp_path: pathlib.Path) -> None:
     concepts_path = tmp_path / "concepts.csv"
     with open(concepts_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "survey_item", "custom_order"])
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
         writer.writeheader()
-        writer.writerow({"id": "1", "concept_en": "hair", "survey_item": "", "custom_order": ""})
-        writer.writerow({"id": "2", "concept_en": "forehead", "survey_item": "", "custom_order": ""})
+        writer.writerow({"id": "1", "concept_en": "hair", "source_item": "", "source_survey": "", "custom_order": ""})
+        writer.writerow({"id": "2", "concept_en": "forehead", "source_item": "", "source_survey": "", "custom_order": ""})
 
     body, boundary = _make_concepts_multipart(
-        "id,concept_en,survey_item,custom_order\n1,hair,1.1,10\n2,forehead,1.2,20\n"
+        "id,concept_en,source_item,source_survey,custom_order\n1,hair,1.1,KLQ,10\n2,forehead,1.2,KLQ,20\n"
     )
     response = build_concepts_import_response(
         headers=_multipart_headers(body, boundary),
@@ -140,18 +140,20 @@ def test_build_concepts_import_response_merges_matching_rows(tmp_path: pathlib.P
 
     assert response.status == HTTPStatus.OK
     assert response.payload == {"ok": True, "matched": 2, "added": 0, "total": 2, "mode": "merge"}
-    assert rows_by_id["1"]["survey_item"] == "1.1"
+    assert rows_by_id["1"]["source_item"] == "1.1"
+    assert rows_by_id["1"]["source_survey"] == "KLQ"
     assert rows_by_id["1"]["custom_order"] == "10"
-    assert rows_by_id["2"]["survey_item"] == "1.2"
+    assert rows_by_id["2"]["source_item"] == "1.2"
+    assert rows_by_id["2"]["source_survey"] == "KLQ"
 
 
 def test_build_concepts_import_response_replace_mode_clears_unmatched_rows(tmp_path: pathlib.Path) -> None:
     concepts_path = tmp_path / "concepts.csv"
     with open(concepts_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "survey_item", "custom_order"])
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
         writer.writeheader()
-        writer.writerow({"id": "1", "concept_en": "hair", "survey_item": "1.1", "custom_order": "10"})
-        writer.writerow({"id": "2", "concept_en": "forehead", "survey_item": "1.2", "custom_order": "20"})
+        writer.writerow({"id": "1", "concept_en": "hair", "source_item": "1.1", "source_survey": "KLQ", "custom_order": "10"})
+        writer.writerow({"id": "2", "concept_en": "forehead", "source_item": "1.2", "source_survey": "KLQ", "custom_order": "20"})
 
     body, boundary = _make_concepts_multipart("id,custom_order\n1,1\n", mode="replace")
     response = build_concepts_import_response(
@@ -168,9 +170,11 @@ def test_build_concepts_import_response_replace_mode_clears_unmatched_rows(tmp_p
 
     assert response.payload["mode"] == "replace"
     assert rows_by_id["1"]["custom_order"] == "1"
-    assert rows_by_id["1"]["survey_item"] == ""
+    assert rows_by_id["1"]["source_item"] == ""
+    assert rows_by_id["1"]["source_survey"] == ""
     assert rows_by_id["2"]["custom_order"] == ""
-    assert rows_by_id["2"]["survey_item"] == ""
+    assert rows_by_id["2"]["source_item"] == ""
+    assert rows_by_id["2"]["source_survey"] == ""
 
 
 def test_build_tags_import_response_defaults_tag_name_from_filename_and_writes_tag_file(tmp_path: pathlib.Path) -> None:

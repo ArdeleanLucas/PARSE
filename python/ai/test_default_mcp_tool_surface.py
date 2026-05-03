@@ -15,7 +15,7 @@ from ai.chat_tools import (
 
 def test_default_mcp_tool_names_lock_full_safe_surface() -> None:
     assert len(LEGACY_CURATED_MCP_TOOL_NAMES) == 38
-    assert len(DEFAULT_MCP_TOOL_NAMES) == 57
+    assert len(DEFAULT_MCP_TOOL_NAMES) == 58
     assert set(LEGACY_CURATED_MCP_TOOL_NAMES) < set(DEFAULT_MCP_TOOL_NAMES)
     assert len(set(DEFAULT_MCP_TOOL_NAMES)) == len(DEFAULT_MCP_TOOL_NAMES)
 

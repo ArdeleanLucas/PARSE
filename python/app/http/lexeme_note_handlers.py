@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, BinaryIO, Callable, Dict
 
+from concept_source_item import row_value
+
 from .job_observability_handlers import JsonResponseSpec
 
 
@@ -136,15 +138,14 @@ def _load_concept_metadata(project_root: pathlib.Path, normalize_concept_id: Con
                 for row in _csv.DictReader(handle):
                     concept_id = normalize_concept_id(row.get("id"))
                     label = str(row.get("concept_en") or "").strip()
-                    survey = str(row.get("survey_item") or "").strip()
+                    survey = row_value(row, "source_item", "survey_item")
                     if concept_id and label:
                         concept_labels[concept_id] = label
                     if concept_id and survey:
-                        match = re.match(r"^[A-Za-z]+_([0-9]+(?:\.[0-9]+)?)", survey)
-                        if match:
-                            key = match.group(1)
-                            survey_to_id.setdefault(key, concept_id)
-                            concept_labels.setdefault(key, label)
+                        match = re.match(r"^(?:[A-Za-z]+_)?([0-9]+(?:\.[0-9]+)?)", survey)
+                        key = match.group(1) if match else survey
+                        survey_to_id.setdefault(key, concept_id)
+                        concept_labels.setdefault(key, label)
     except Exception:
         return {}, {}
 
