@@ -24,6 +24,11 @@
 #                           Empty (default) defers to config/ai_config.json.
 #   PARSE_API_PORT   API server port (default: 8766)
 #   PARSE_VITE_PORT  Vite dev server port (default: 5173)
+#   PARSE_USE_PERSISTENT_WORKER  Set true to route compute through the persistent worker shortcut.
+#   PARSE_COMPUTE_MODE  Explicit compute launcher mode: thread, subprocess, or persistent.
+#                       If unset, the backend keeps its legacy thread default; this script warns loudly.
+#   PARSE_FULL_PIPELINE_MIN_MEM_GB  Host RAM preflight threshold for full_pipeline jobs (backend default: 12).
+#   PARSE_JOB_SNAPSHOT_DIR  Optional durable job-snapshot directory (default: workspace .parse/jobs).
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
 #   PARSE_PULL_MODE  How to integrate origin/main (default: "auto")
 #                      auto   — try fast-forward; on divergence fall back
@@ -89,12 +94,42 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_PULL_MODE:=auto}"
 : "${PARSE_USE_PERSISTENT_WORKER:=}"
 : "${PARSE_COMPUTE_MODE:=}"
+: "${PARSE_FULL_PIPELINE_MIN_MEM_GB:=}"
+: "${PARSE_JOB_SNAPSHOT_DIR:=}"
 
 API_STDOUT_LOG="/tmp/parse_api_stdout.log"
 API_STDERR_LOG="/tmp/parse_api_stderr.log"
 VITE_LOG="/tmp/parse_vite.log"
 
 log() { printf '[parse-run] %s\n' "$*"; }
+
+persistent_worker_env_enabled() {
+  case "$(printf '%s' "${PARSE_USE_PERSISTENT_WORKER}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+warn_if_compute_mode_unset() {
+  if [ -n "${PARSE_COMPUTE_MODE}" ]; then
+    return 0
+  fi
+  if persistent_worker_env_enabled; then
+    return 0
+  fi
+  log "════════════════════════════════════════════════════════════════════"
+  log "WARNING: PARSE_COMPUTE_MODE is unset."
+  log "  The backend will use its legacy in-process thread runner for compute jobs."
+  log "  Long full-pipeline runs can be safer with PARSE_COMPUTE_MODE=subprocess"
+  log "  or PARSE_COMPUTE_MODE=persistent after validating the worker on this machine."
+  log "  This launcher warns only; it does not change the default automatically."
+  log "════════════════════════════════════════════════════════════════════"
+}
+
+if [ "${PARSE_RUN_WARNING_ONLY:-0}" = "1" ]; then
+  warn_if_compute_mode_unset
+  exit 0
+fi
 
 # ---------- Windows-aware process cleanup --------------------------------
 #
@@ -337,6 +372,12 @@ start_api() {
   if [ -n "${PARSE_COMPUTE_MODE}" ]; then
     log "Compute mode (env): ${PARSE_COMPUTE_MODE}"
   fi
+  if [ -n "${PARSE_FULL_PIPELINE_MIN_MEM_GB}" ]; then
+    log "Full-pipeline min host memory: ${PARSE_FULL_PIPELINE_MIN_MEM_GB} GiB"
+  fi
+  if [ -n "${PARSE_JOB_SNAPSHOT_DIR}" ]; then
+    log "Job snapshot dir: ${PARSE_JOB_SNAPSHOT_DIR}"
+  fi
   # -u = unbuffered stdout (so logs appear immediately; critical for remote debugging).
   (
     cd "${PARSE_WORKSPACE_ROOT}" || exit 1
@@ -346,6 +387,8 @@ start_api() {
       PARSE_CHAT_READ_ONLY="${PARSE_CHAT_READ_ONLY}" \
       PARSE_USE_PERSISTENT_WORKER="${PARSE_USE_PERSISTENT_WORKER}" \
       PARSE_COMPUTE_MODE="${PARSE_COMPUTE_MODE}" \
+      PARSE_FULL_PIPELINE_MIN_MEM_GB="${PARSE_FULL_PIPELINE_MIN_MEM_GB}" \
+      PARSE_JOB_SNAPSHOT_DIR="${PARSE_JOB_SNAPSHOT_DIR}" \
       "${PARSE_PY}" -u "${PARSE_ROOT}/python/server.py" \
       >"${API_STDOUT_LOG}" 2>"${API_STDERR_LOG}"
   ) &
@@ -417,6 +460,7 @@ main() {
   fi
 
   pull_main
+  warn_if_compute_mode_unset
   stop_servers
   preflight_api_port || return 1
   start_api || return 1
