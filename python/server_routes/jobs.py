@@ -21,6 +21,187 @@ def _resolve_compute_mode() -> str:
     env = _server.os.environ.get('PARSE_COMPUTE_MODE', '').strip().lower()
     return env or 'thread'
 
+
+def _job_snapshot_dir(*, create: bool=True) -> _server.pathlib.Path:
+    raw_path = str(_server.os.environ.get('PARSE_JOB_SNAPSHOT_DIR') or '').strip()
+    workspace_raw = str(_server.os.environ.get('PARSE_WORKSPACE_DIR') or '').strip()
+    if raw_path:
+        path = _server.pathlib.Path(raw_path).expanduser()
+    elif workspace_raw:
+        path = _server.pathlib.Path(workspace_raw).expanduser() / '.parse-jobs'
+    else:
+        path = _server._project_root() / '.parse' / 'jobs'
+    if create:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print('[JOBS] WARNING: unable to create job snapshot dir {0}: {1}'.format(path, exc), file=_server.sys.stderr, flush=True)
+    return path
+
+
+def _job_snapshot_safe_name(job_id: str) -> str:
+    value = str(job_id or '').strip()
+    safe = _server.re.sub(r'[^A-Za-z0-9_.-]+', '_', value)
+    return safe or 'job'
+
+
+def _job_snapshot_path(job_id: str) -> _server.pathlib.Path:
+    return _server._job_snapshot_dir(create=True) / '{0}.json'.format(_server._job_snapshot_safe_name(job_id))
+
+
+def _persist_job_snapshot(job_snapshot: _server.Dict[str, _server.Any]) -> None:
+    job_id = str(job_snapshot.get('jobId') or '').strip() if isinstance(job_snapshot, dict) else ''
+    if not job_id:
+        return
+    try:
+        path = _server._job_snapshot_path(job_id)
+        payload = _server.copy.deepcopy(job_snapshot)
+        payload['snapshot_version'] = 1
+        tmp_path = path.with_name('.{0}.{1}.tmp'.format(path.name, _server.os.getpid()))
+        with open(tmp_path, 'w', encoding='utf-8') as handle:
+            _server.json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            handle.write('\n')
+        _server.os.replace(tmp_path, path)
+    except Exception as exc:
+        print('[JOBS] WARNING: unable to persist job snapshot {0}: {1}'.format(job_id, exc), file=_server.sys.stderr, flush=True)
+
+
+def _delete_job_snapshot(job_id: str) -> None:
+    try:
+        _server._job_snapshot_path(job_id).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _coerce_loaded_job_snapshot(raw_job: _server.Any) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    if not isinstance(raw_job, dict):
+        return None
+    job = _server.copy.deepcopy(raw_job)
+    job.pop('snapshot_version', None)
+    job_id = str(job.get('jobId') or '').strip()
+    if not job_id:
+        return None
+    now_ts = _server.time.time()
+    now_iso = _server._utc_iso_from_ts(now_ts)
+    job['jobId'] = job_id
+    job['type'] = str(job.get('type') or 'unknown')
+    job['status'] = str(job.get('status') or 'error').strip().lower() or 'error'
+    try:
+        job['progress'] = _server._clamp_progress(job.get('progress', 0.0))
+    except Exception:
+        job['progress'] = 0.0
+    for key in ('segmentsProcessed', 'totalSegments'):
+        try:
+            job[key] = max(0, int(job.get(key, 0) or 0))
+        except (TypeError, ValueError):
+            job[key] = 0
+    if not isinstance(job.get('meta'), dict):
+        job['meta'] = {}
+    if not isinstance(job.get('logs'), list):
+        job['logs'] = []
+    if not isinstance(job.get('locks'), dict):
+        job['locks'] = _server._empty_job_locks_payload()
+    job.setdefault('created_at', now_iso)
+    job.setdefault('created_ts', now_ts)
+    job.setdefault('updated_at', now_iso)
+    job.setdefault('updated_ts', now_ts)
+    job.setdefault('completed_at', None)
+    job.setdefault('completed_ts', None)
+    return job
+
+
+def _empty_job_locks_payload() -> _server.Dict[str, _server.Any]:
+    return {'active': False, 'resources': [], 'heartbeat_at': None, 'heartbeat_ts': None, 'expires_at': None, 'expires_ts': None, 'released_at': None, 'released_ts': None, 'released_reason': None, 'ttl_seconds': _server.JOB_LOCK_TTL_SECONDS}
+
+
+def _mark_loaded_job_interrupted(job: _server.Dict[str, _server.Any]) -> None:
+    now_ts = _server.time.time()
+    now_iso = _server._utc_iso_from_ts(now_ts)
+    previous_status = str(job.get('status') or 'running')
+    job['status'] = 'error'
+    job['error'] = 'Server restarted before this job reached a terminal state; the in-flight worker was interrupted. Re-run the job after checking logs and system memory.'
+    job['error_code'] = 'server_restarted'
+    job['recovered_from_disk'] = True
+    job['updated_at'] = now_iso
+    job['updated_ts'] = now_ts
+    job['completed_at'] = now_iso
+    job['completed_ts'] = now_ts
+    locks = job.get('locks') if isinstance(job.get('locks'), dict) else _server._empty_job_locks_payload()
+    locks['active'] = False
+    locks['released_at'] = now_iso
+    locks['released_ts'] = now_ts
+    locks['released_reason'] = 'server_restarted'
+    locks['expires_at'] = None
+    locks['expires_ts'] = None
+    job['locks'] = locks
+    logs = job.get('logs') if isinstance(job.get('logs'), list) else []
+    logs.append(_server._job_log_entry(level='error', event='job.recovered_after_restart', message='Recovered non-terminal job snapshot as interrupted after server restart', source='job_snapshot', progress=_server._clamp_progress(job.get('progress', 0.0)), data={'previous_status': previous_status}))
+    log_limit = _server._job_log_limit()
+    if len(logs) > log_limit:
+        del logs[:-log_limit]
+    job['logs'] = logs
+
+
+def _load_job_snapshots() -> int:
+    directory = _server._job_snapshot_dir(create=False)
+    if not directory.exists():
+        return 0
+    loaded_jobs: _server.List[_server.Dict[str, _server.Any]] = []
+    recovered_job_ids: _server.List[str] = []
+    snapshot_entries: _server.List[_server.Tuple[float, _server.pathlib.Path]] = []
+    for path in directory.glob('*.json'):
+        try:
+            snapshot_entries.append((float(path.stat().st_mtime), path))
+        except OSError:
+            snapshot_entries.append((0.0, path))
+    snapshot_entries.sort(key=lambda item: (item[0], str(item[1])), reverse=True)
+    for _mtime, stale_path in snapshot_entries[200:]:
+        try:
+            stale_path.unlink()
+        except OSError:
+            pass
+    for _mtime, path in snapshot_entries[:200]:
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                raw_job = _server.json.load(handle)
+        except Exception as exc:
+            print('[JOBS] WARNING: unable to read job snapshot {0}: {1}'.format(path, exc), file=_server.sys.stderr, flush=True)
+            continue
+        job = _server._coerce_loaded_job_snapshot(raw_job)
+        if job is None:
+            continue
+        if str(job.get('status') or '').strip().lower() not in {'complete', 'error'}:
+            _server._mark_loaded_job_interrupted(job)
+            recovered_job_ids.append(str(job.get('jobId') or ''))
+        loaded_jobs.append(job)
+    if not loaded_jobs:
+        return 0
+    with _server._jobs_lock:
+        for job in loaded_jobs:
+            _server._jobs[str(job.get('jobId'))] = job
+    for job in loaded_jobs:
+        if str(job.get('jobId') or '') in recovered_job_ids:
+            _server._persist_job_snapshot(job)
+    return len(loaded_jobs)
+
+
+def _subprocess_missing_result_message(exit_code: _server.Any, result_path: str) -> str:
+    try:
+        code_int = int(exit_code)
+    except (TypeError, ValueError):
+        code_int = 0
+    if code_int in {-9, 137}:
+        return (
+            'Compute subprocess exited code={0} (SIGKILL) without writing result file {1}; '
+            'this is OOM-suspect because the OS may have killed the worker under memory pressure.'
+        ).format(exit_code, result_path)
+    return 'Compute subprocess exited code={0} without writing result file {1}'.format(exit_code, result_path)
+
+
+def _copy_job_for_snapshot(job: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    return _server.copy.deepcopy(job)
+
+
 def _launch_compute_runner(job_id: str, compute_type: str, payload: _server.Dict[str, _server.Any]) -> None:
     """Start the backing worker for a compute job.
 
@@ -113,7 +294,7 @@ def _launch_compute_subprocess(job_id: str, compute_type: str, payload: _server.
         exit_code = child.exitcode
         _server._compute_checkpoint('SUBPROCESS.exited', job_id=job_id, exit_code=exit_code)
         if not _server.os.path.exists(result_path):
-            _server._set_job_error(job_id, 'Compute subprocess exited code={0} without writing result file {1}'.format(exit_code, result_path))
+            _server._set_job_error(job_id, _server._subprocess_missing_result_message(exit_code, result_path))
             return
         try:
             with open(result_path, 'r', encoding='utf-8') as f:
@@ -225,6 +406,8 @@ def _cleanup_old_jobs() -> None:
                 stale_ids.append(job_id)
         for job_id in stale_ids:
             _server._jobs.pop(job_id, None)
+    for job_id in stale_ids:
+        _server._delete_job_snapshot(job_id)
 
 def _job_log_limit() -> int:
     raw = str(_server.os.environ.get('PARSE_JOB_LOG_MAX_ENTRIES') or '').strip()
@@ -240,6 +423,10 @@ def _infer_job_error_code(error_message: _server.Any) -> str:
     text = str(error_message or '').strip().lower()
     if not text:
         return 'job_failed'
+    if 'server restarted before this job reached a terminal state' in text:
+        return 'server_restarted'
+    if 'oom' in text or 'out of memory' in text or 'insufficient host memory' in text or 'sigkill' in text or 'exit code=-9' in text or 'exit code 137' in text or 'code=137' in text:
+        return 'oom_suspect'
     if 'unknown jobid' in text or 'unknown job_id' in text:
         return 'job_not_found'
     if 'not a' in text and 'job' in text:
@@ -424,6 +611,8 @@ def _create_job(job_type: str, metadata: _server.Optional[_server.Dict[str, _ser
         if resources:
             _server._append_job_log_locked(job, level='info', event='job.lock_acquired', message='Acquired job resource lock', progress=0.0, data={'resources': _server.copy.deepcopy(resources)})
         _server._jobs[job_id] = job
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    _server._persist_job_snapshot(snapshot_to_persist)
     return job_id
 
 def _tail_log_file(path: str, max_lines: int=200, max_bytes: int=256 * 1024) -> _server.Optional[str]:
@@ -458,6 +647,7 @@ def _tail_log_file(path: str, max_lines: int=200, max_bytes: int=256 * 1024) -> 
 
 def _set_job_running(job_id: str, message: _server.Optional[str]=None) -> None:
     stream_payload: _server.Optional[_server.Dict[str, _server.Any]] = None
+    snapshot_to_persist: _server.Optional[_server.Dict[str, _server.Any]] = None
     job_type = ''
     with _server._jobs_lock:
         job = _server._jobs.get(job_id)
@@ -467,6 +657,8 @@ def _set_job_running(job_id: str, message: _server.Optional[str]=None) -> None:
             return
         now_ts = _server.time.time()
         job['status'] = 'running'
+        if job.get('recovered_from_disk'):
+            job['recovered_from_disk'] = False
         job['updated_at'] = _server._utc_iso_from_ts(now_ts)
         job['updated_ts'] = now_ts
         _server._refresh_job_locks_locked(job, now_ts)
@@ -475,11 +667,15 @@ def _set_job_running(job_id: str, message: _server.Optional[str]=None) -> None:
         _server._append_job_log_locked(job, level='info', event='job.started', message=str(job.get('message') or message or 'Job started'), progress=_server._clamp_progress(job.get('progress', 0.0)))
         job_type = str(job.get('type') or '')
         stream_payload = _server._job_response_payload(job)
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    if snapshot_to_persist is not None:
+        _server._persist_job_snapshot(snapshot_to_persist)
     if stream_payload is not None and job_type:
         _server._publish_job_stream_event('job.progress', job_id=job_id, job_type=job_type, payload=stream_payload)
 
 def _set_job_progress(job_id: str, progress: float, message: _server.Optional[str]=None, segments_processed: _server.Optional[int]=None, total_segments: _server.Optional[int]=None) -> None:
     stream_payload: _server.Optional[_server.Dict[str, _server.Any]] = None
+    snapshot_to_persist: _server.Optional[_server.Dict[str, _server.Any]] = None
     job_type = ''
     with _server._jobs_lock:
         job = _server._jobs.get(job_id)
@@ -512,12 +708,16 @@ def _set_job_progress(job_id: str, progress: float, message: _server.Optional[st
             _server._append_job_log_locked(job, level='info', event='job.progress', message='Progress updated', progress=current_progress)
         job_type = str(job.get('type') or '')
         stream_payload = _server._job_response_payload(job)
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    if snapshot_to_persist is not None:
+        _server._persist_job_snapshot(snapshot_to_persist)
     if stream_payload is not None and job_type:
         _server._publish_job_stream_event('job.progress', job_id=job_id, job_type=job_type, payload=stream_payload)
 
 def _set_job_complete(job_id: str, result: _server.Any, message: _server.Optional[str]=None, segments_processed: _server.Optional[int]=None, total_segments: _server.Optional[int]=None) -> None:
     callback_snapshot: _server.Optional[_server.Dict[str, _server.Any]] = None
     stream_payload: _server.Optional[_server.Dict[str, _server.Any]] = None
+    snapshot_to_persist: _server.Optional[_server.Dict[str, _server.Any]] = None
     job_type = ''
     with _server._jobs_lock:
         job = _server._jobs.get(job_id)
@@ -551,18 +751,22 @@ def _set_job_complete(job_id: str, result: _server.Any, message: _server.Optiona
         callback_snapshot = _server.copy.deepcopy(job)
         job_type = str(job.get('type') or '')
         stream_payload = _server._job_response_payload(job)
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    if snapshot_to_persist is not None:
+        _server._persist_job_snapshot(snapshot_to_persist)
     if stream_payload is not None and job_type:
         _server._publish_job_stream_event('job.complete', job_id=job_id, job_type=job_type, payload=stream_payload)
     if callback_snapshot is not None:
         _server._dispatch_job_callback_async(callback_snapshot)
 
-def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optional[str]=None) -> None:
+def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optional[str]=None, *, error_code: _server.Optional[str]=None, details: _server.Optional[_server.Dict[str, _server.Any]]=None) -> None:
     """Mark a job as errored. ``traceback_str`` is stored separately from
     the short error message so the UI's crash-log modal can render the
     one-line reason on top and the full Python traceback below without
     having to split-on-newline."""
     callback_snapshot: _server.Optional[_server.Dict[str, _server.Any]] = None
     stream_payload: _server.Optional[_server.Dict[str, _server.Any]] = None
+    snapshot_to_persist: _server.Optional[_server.Dict[str, _server.Any]] = None
     job_type = ''
     with _server._jobs_lock:
         job = _server._jobs.get(job_id)
@@ -574,7 +778,15 @@ def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optio
         job['error'] = str(error_message)
         if traceback_str:
             job['traceback'] = str(traceback_str)
-        job['error_code'] = _server._infer_job_error_code(error_message)
+        job['error_code'] = str(error_code) if error_code else _server._infer_job_error_code(error_message)
+        if isinstance(details, dict):
+            for key in ('mem_available_gb', 'required_gb', 'swap_total_gb'):
+                if key not in details or details.get(key) is None:
+                    continue
+                try:
+                    job[key] = float(details.get(key))
+                except (TypeError, ValueError):
+                    continue
         job['updated_at'] = now_iso
         job['updated_ts'] = now_ts
         job['completed_at'] = now_iso
@@ -584,6 +796,9 @@ def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optio
         callback_snapshot = _server.copy.deepcopy(job)
         job_type = str(job.get('type') or '')
         stream_payload = _server._job_response_payload(job)
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    if snapshot_to_persist is not None:
+        _server._persist_job_snapshot(snapshot_to_persist)
     if stream_payload is not None and job_type:
         _server._publish_job_stream_event('job.error', job_id=job_id, job_type=job_type, payload=stream_payload)
     if callback_snapshot is not None:
@@ -662,6 +877,11 @@ def _job_response_payload(job: _server.Dict[str, _server.Any]) -> _server.Dict[s
     payload['locks'] = _server._job_locks_payload(job.get('locks'))
     if job.get('error_code'):
         payload['errorCode'] = str(job.get('error_code'))
+    for detail_key in ('mem_available_gb', 'required_gb', 'swap_total_gb'):
+        if detail_key in job:
+            payload[detail_key] = job.get(detail_key)
+    if job.get('recovered_from_disk') is True:
+        payload['recovered_from_disk'] = True
     if job_type == 'chat:run':
         payload['runId'] = job_id
         payload.update(_server._chat_public_policy_payload())
@@ -702,6 +922,7 @@ def _reset_job_to_running(job_id: str) -> None:
     from the full-pipeline sequencer we need to undo that so the outer job stays
     in a ``running`` state for the next step.
     """
+    snapshot_to_persist: _server.Optional[_server.Dict[str, _server.Any]] = None
     with _server._jobs_lock:
         job = _server._jobs.get(job_id)
         if not isinstance(job, dict):
@@ -709,8 +930,15 @@ def _reset_job_to_running(job_id: str) -> None:
         job['status'] = 'running'
         job['result'] = None
         job['error'] = None
+        job['error_code'] = None
+        job.pop('traceback', None)
         job['completed_at'] = None
         job['completed_ts'] = None
+        job['updated_at'] = _server._utc_now_iso()
+        job['updated_ts'] = _server.time.time()
+        snapshot_to_persist = _server._copy_job_for_snapshot(job)
+    if snapshot_to_persist is not None:
+        _server._persist_job_snapshot(snapshot_to_persist)
 
 def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, _server.Any]) -> None:
     _server._compute_checkpoint('COMPUTE.entry', job_id=job_id, compute_type=compute_type)
@@ -754,7 +982,12 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             raise RuntimeError('Unsupported compute type: {0}'.format(normalized_type))
         _server._set_job_complete(job_id, result, message='Compute complete')
     except Exception as exc:
-        _server._set_job_error(job_id, str(exc))
+        _server._set_job_error(
+            job_id,
+            str(exc),
+            error_code=getattr(exc, 'error_code', None),
+            details=getattr(exc, 'details', None),
+        )
 
 def _api_get_jobs(self) -> None:
     try:
@@ -860,5 +1093,4 @@ def _api_post_compute_status(self, compute_type: _server.Optional[str]) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_resolve_compute_mode', '_launch_compute_runner', '_launch_compute_subprocess', '_compute_subprocess_entry', '_launch_compute_persistent', '_cleanup_old_jobs', '_job_log_limit', '_infer_job_error_code', '_job_log_entry', '_append_job_log_locked', '_job_lock_resources', '_expire_job_locks_locked', '_find_job_resource_conflict_locked', '_refresh_job_locks_locked', '_release_job_locks_locked', '_job_locks_payload', '_normalize_job_callback_url', '_job_callback_payload', '_post_job_callback', '_dispatch_job_callback', '_dispatch_job_callback_async', '_create_job', '_tail_log_file', '_set_job_running', '_set_job_progress', '_set_job_complete', '_set_job_error', '_get_job_snapshot', '_job_logs_payload', '_job_detail_payload', '_list_jobs_snapshots', '_job_response_payload', '_list_active_jobs_snapshots', '_reset_job_to_running', '_run_compute_job', '_api_get_jobs', '_api_get_job', '_api_get_job_logs', '_api_get_jobs_active', '_api_get_job_error_logs', '_api_get_worker_status', '_api_post_compute_cancel', '_api_post_compute_start', '_api_post_compute_status']
-
+__all__ = ['_resolve_compute_mode', '_job_snapshot_dir', '_job_snapshot_safe_name', '_job_snapshot_path', '_persist_job_snapshot', '_delete_job_snapshot', '_coerce_loaded_job_snapshot', '_empty_job_locks_payload', '_mark_loaded_job_interrupted', '_load_job_snapshots', '_subprocess_missing_result_message', '_copy_job_for_snapshot', '_launch_compute_runner', '_launch_compute_subprocess', '_compute_subprocess_entry', '_launch_compute_persistent', '_cleanup_old_jobs', '_job_log_limit', '_infer_job_error_code', '_job_log_entry', '_append_job_log_locked', '_job_lock_resources', '_expire_job_locks_locked', '_find_job_resource_conflict_locked', '_refresh_job_locks_locked', '_release_job_locks_locked', '_job_locks_payload', '_normalize_job_callback_url', '_job_callback_payload', '_post_job_callback', '_dispatch_job_callback', '_dispatch_job_callback_async', '_create_job', '_tail_log_file', '_set_job_running', '_set_job_progress', '_set_job_complete', '_set_job_error', '_get_job_snapshot', '_job_logs_payload', '_job_detail_payload', '_list_jobs_snapshots', '_job_response_payload', '_list_active_jobs_snapshots', '_reset_job_to_running', '_run_compute_job', '_api_get_jobs', '_api_get_job', '_api_get_job_logs', '_api_get_jobs_active', '_api_get_job_error_logs', '_api_get_worker_status', '_api_post_compute_cancel', '_api_post_compute_start', '_api_post_compute_status']
