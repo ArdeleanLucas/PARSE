@@ -148,6 +148,12 @@ export function ParseUI() {
 
   const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<ConceptSortMode>('1n');
+  const sortModeUserTouchedRef = useRef(false);
+  const sourceSortAutoPromotedRef = useRef(false);
+  const handleConceptSortModeChange = useCallback((mode: ConceptSortMode) => {
+    sortModeUserTouchedRef.current = true;
+    setSortMode(mode);
+  }, []);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
   const { exportLingPyTSV } = useExport();
   const {
@@ -787,10 +793,19 @@ export function ParseUI() {
       key: c.id,
       name: c.label,
       tag: getConceptStatus(getTagsForConcept(c.id)),
-      surveyItem: c.survey_item,
+      sourceItem: c.source_item,
+      sourceSurvey: c.source_survey,
       customOrder: c.custom_order,
     }));
   }, [rawConcepts, getTagsForConcept, storeTags]);
+
+  const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
+
+  useEffect(() => {
+    if (!hasSourceItems || sourceSortAutoPromotedRef.current || sortModeUserTouchedRef.current) return;
+    sourceSortAutoPromotedRef.current = true;
+    setSortMode('survey');
+  }, [hasSourceItems]);
 
   const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
   const markLexemeManuallyAdjusted = useAnnotationStore((s) => s.markLexemeManuallyAdjusted);
@@ -962,8 +977,8 @@ export function ParseUI() {
       // regression tests import, so any future branch that reverts the
       // sidebar sort will fail CI instead of landing silently.
       list = [...list].sort((a, b) => {
-        const av = a.surveyItem ?? '';
-        const bv = b.surveyItem ?? '';
+        const av = a.sourceItem ?? '';
+        const bv = b.sourceItem ?? '';
         if (av && !bv) return -1;
         if (!av && bv) return 1;
         return compareSurveyKeys(av, bv);
@@ -973,8 +988,6 @@ export function ParseUI() {
     }
     return list;
   }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
-
-  const hasSurveyItems = useMemo(() => concepts.some(c => !!c.surveyItem), [concepts]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceFormLists = useMemo(
@@ -1583,8 +1596,8 @@ export function ParseUI() {
           query={query}
           onQueryChange={setQuery}
           sortMode={sortMode}
-          onSortModeChange={setSortMode}
-          hasSurveyItems={hasSurveyItems}
+          onSortModeChange={handleConceptSortModeChange}
+          hasSourceItems={hasSourceItems}
           filteredConcepts={filtered}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}

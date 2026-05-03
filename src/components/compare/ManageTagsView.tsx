@@ -16,7 +16,8 @@ export interface ManageTagsConcept {
   key: string;
   name: string;
   tag: 'untagged' | 'review' | 'confirmed' | 'problematic';
-  surveyItem?: string;
+  sourceItem?: string;
+  sourceSurvey?: string;
   customOrder?: number;
 }
 

@@ -1,4 +1,4 @@
-// Shared natural-sort helpers for survey_item values in the concept sidebar.
+// Shared natural-sort helpers for source item values in the concept sidebar.
 //
 // This module is the single source of truth for how survey items compare —
 // both ParseUI.tsx and the regression tests import from here. Any future
@@ -7,7 +7,7 @@
 // exact code path.
 
 /**
- * Tokenise a survey_item into alternating letter-runs and integer-runs so
+ * Tokenise a source item into alternating letter-runs and integer-runs so
  * that "KLQ_1.10.A" yields ["klq", 1, 10, "a"]. Dots and underscores act as
  * delimiters only — they are not part of any token. Consumed for ordering
  * only, not for display.

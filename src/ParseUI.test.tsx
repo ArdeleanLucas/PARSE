@@ -617,6 +617,27 @@ describe("ParseUI", () => {
     expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
   });
 
+  it("auto-promotes the default concept sort to Source when loaded concepts include source values", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [
+        { id: "2", label: "forehead", source_item: "1.2", source_survey: "KLQ" },
+        { id: "1", label: "water" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("concept-sort-survey").className).toContain("bg-white");
+    });
+    expect(screen.getByRole("button", { name: /forehead/i }).textContent ?? "").toContain("KLQ 1.2");
+  });
+
   it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
     mockRecords = {
       Fail01: makeRecord("Fail01", [
