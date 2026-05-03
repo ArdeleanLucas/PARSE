@@ -30,7 +30,7 @@ describe('buildSpeakerForm', () => {
 
   it('builds a speaker row from matching concept/ipa intervals and language-specific similarity scores', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 10.5, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 10.5, text: 'hair', concept_id: 'hair' }],
       ipa: [{ start: 10.1, end: 10.4, text: 'muwi' }],
       ortho_words: [{ start: 10.15, end: 10.35, text: 'مووی' }],
       ortho: [{ start: 0, end: 100, text: 'coarse paragraph' }],
@@ -66,9 +66,27 @@ describe('buildSpeakerForm', () => {
     });
   });
 
+  it('matches singleton concept intervals by key, not by sequential id', () => {
+    const singletonConcept: Concept = {
+      id: 5,
+      key: 'concept-d',
+      name: 'water',
+      tag: 'untagged',
+    };
+    const record = makeRecord({
+      concept: [{ start: 1, end: 2, text: 'water', concept_id: 'concept-d' }],
+      ipa: [{ start: 1.1, end: 1.4, text: 'aw' }],
+    });
+
+    const form = buildSpeakerForm(record, singletonConcept, 'Fail01', {}, false, []);
+
+    expect(form.utterances).toBe(1);
+    expect(form.ipa).toBe('aw');
+  });
+
   it('surfaces every IPA realization and defaults the canonical fields to realization A', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: 'hair' }],
       ipa: [
         { start: 10.1, end: 10.4, text: 'muwi' },
         { start: 11.1, end: 11.4, text: 'muː' },
@@ -100,7 +118,7 @@ describe('buildSpeakerForm', () => {
 
   it('selects the canonical realization from manual overrides', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: 'hair' }],
       ipa: [
         { start: 10.1, end: 10.4, text: 'muwi' },
         { start: 11.1, end: 11.4, text: 'muː' },
@@ -125,7 +143,7 @@ describe('buildSpeakerForm', () => {
 
   it('clamps stale canonical overrides to the last available realization', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: 'hair' }],
       ipa: [
         { start: 10.1, end: 10.4, text: 'muwi' },
         { start: 11.1, end: 11.4, text: 'muː' },
@@ -142,7 +160,7 @@ describe('buildSpeakerForm', () => {
 
   it('coerces negative or non-integer canonical overrides to realization A', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: 'hair' }],
       ipa: [
         { start: 10.1, end: 10.4, text: 'muwi' },
         { start: 11.1, end: 11.4, text: 'muː' },
@@ -159,7 +177,7 @@ describe('buildSpeakerForm', () => {
 
   it('prefers manual cognate overrides and per-speaker flags over automatic enrichments', () => {
     const record = makeRecord({
-      concept: [{ start: 2, end: 2.4, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 2, end: 2.4, text: 'hair', concept_id: 'hair' }],
       ipa: [{ start: 2.05, end: 2.3, text: 'muwi' }],
     });
 
@@ -288,7 +306,7 @@ describe('buildSpeakerForm', () => {
 
   it('collapses per-IPA auto-detection when the speaker dismiss flag is set', () => {
     const record = makeRecord({
-      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: 'hair' }],
       ipa: [
         { start: 10.1, end: 10.4, text: 'muwi' },
         { start: 11.1, end: 12.4, text: 'muː-long' },
