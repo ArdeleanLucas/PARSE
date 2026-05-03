@@ -74,9 +74,14 @@ def _dict_reader_for_text(text: str) -> csv.DictReader:
     return csv.DictReader(io.StringIO(text), delimiter="\t")
 
 
-def _source_maps_from_csvs(paths: Iterable[Path], summary: BackfillSummary) -> tuple[dict[str, str], dict[str, str]]:
+def _source_maps_from_csvs(
+    paths: Iterable[Path],
+    summary: BackfillSummary,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
     by_label: dict[str, str] = {}
     by_id: dict[str, str] = {}
+    by_label_survey: dict[str, str] = {}
+    by_id_survey: dict[str, str] = {}
     for path in paths:
         try:
             text = path.read_text(encoding="utf-8-sig")
@@ -90,13 +95,16 @@ def _source_maps_from_csvs(paths: Iterable[Path], summary: BackfillSummary) -> t
             continue
         for record in reader:
             cue_name = row_value(record, "Name")
-            source_item, label = parse_cue_name(cue_name)
+            source_item, source_survey, label = parse_cue_name(cue_name)
             if not source_item or not label:
                 continue
             label_key = concept_label_key(label)
             by_label.setdefault(label_key, source_item)
             by_id.setdefault(source_item, source_item)
-    return by_label, by_id
+            survey = source_survey or ""
+            by_label_survey.setdefault(label_key, survey)
+            by_id_survey.setdefault(source_item, survey)
+    return by_label, by_id, by_label_survey, by_id_survey
 
 
 def backfill_source_items(
@@ -116,30 +124,41 @@ def backfill_source_items(
         return summary
 
     csv_paths = _iter_candidate_csvs(workspace, source_root_paths)
-    by_label, by_id = _source_maps_from_csvs(csv_paths, summary)
+    by_label, by_id, by_label_survey, by_id_survey = _source_maps_from_csvs(csv_paths, summary)
     if not by_label and not by_id:
         return summary
 
     for row in rows:
         cid = str(row.get("id") or "").strip()
         label = str(row.get("concept_en") or "").strip()
-        target = by_id.get(cid) or by_label.get(concept_label_key(label))
+        label_key = concept_label_key(label)
+        matched_by_id = cid in by_id
+        target = by_id.get(cid) or by_label.get(label_key)
         if not target:
             continue
+        target_survey = (by_id_survey.get(cid) if matched_by_id else by_label_survey.get(label_key)) or ""
         summary.matched += 1
         current = str(row.get("source_item") or "").strip()
-        if current == target:
-            summary.skipped += 1
-            summary.decisions.append("skip {0} {1}: already {2}".format(cid, label, target))
-            continue
+        current_survey = str(row.get("source_survey") or "").strip()
         if current and current != target:
             summary.skipped += 1
             summary.decisions.append("skip {0} {1}: existing {2} != {3}".format(cid, label, current, target))
             continue
+        if current_survey and current_survey != target_survey:
+            summary.skipped += 1
+            summary.decisions.append(
+                "skip {0} {1}: existing source_survey {2} != {3}".format(cid, label, current_survey, target_survey)
+            )
+            continue
+        if current == target and current_survey == target_survey:
+            summary.skipped += 1
+            summary.decisions.append("skip {0} {1}: already {2}".format(cid, label, target))
+            continue
         summary.added += 1
-        summary.decisions.append("add {0} {1}: {2}".format(cid, label, target))
+        summary.decisions.append("add {0} {1}: {2} {3}".format(cid, label, target, target_survey).rstrip())
         if not dry_run:
             row["source_item"] = target
+            row["source_survey"] = target_survey
 
     if not dry_run and summary.added:
         write_concepts_csv_rows(concepts_path, rows, atomic=True)

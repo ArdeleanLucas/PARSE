@@ -341,8 +341,11 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
     rows_by_id = {row["id"]: row for row in concept_rows}
     assert {cid: row["concept_en"] for cid, row in rows_by_id.items()} == {"2": "forehead", "225": "nine", "226": "to listen to"}
     assert rows_by_id["2"]["source_item"] == "1.2"
+    assert rows_by_id["2"]["source_survey"] == "KLQ"
     assert rows_by_id["225"]["source_item"] == "9"
+    assert rows_by_id["225"]["source_survey"] == "JBIL"
     assert rows_by_id["226"]["source_item"] == "8.4"
+    assert rows_by_id["226"]["source_survey"] == "KLQ"
     assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
     assert complete_calls[0][1]["lexemesImported"] == 3
 
@@ -390,6 +393,13 @@ def test_onboard_audition_csv_imports_bracket_and_bare_rows_without_drops(tmp_pa
         "2": "He saw me",
         "3": "(2.29- child of one's son)-",
     }
+    rows_by_id = {row["id"]: row for row in concept_rows}
+    assert rows_by_id["1"]["source_item"] == "5.1"
+    assert rows_by_id["1"]["source_survey"] == "EXT"
+    assert rows_by_id["2"]["source_item"] == ""
+    assert rows_by_id["2"]["source_survey"] == ""
+    assert rows_by_id["3"]["source_item"] == ""
+    assert rows_by_id["3"]["source_survey"] == ""
     assert complete_calls[0][2]["message"] == "Imported 3 lexemes from cues.csv"
     assert complete_calls[0][1]["lexemesImported"] == 3
 
@@ -475,10 +485,10 @@ def test_audition_concept_resolver_reuses_casefold_labels_and_allocates_stably(t
     resolved = media._resolve_audition_concepts(rows)
 
     assert resolved == [
-        {"id": "2", "label": "forehead", "audition_prefix": "1.2", "source_item": "1.2"},
-        {"id": "225", "label": "NINE", "audition_prefix": "9", "source_item": "9"},
-        {"id": "226", "label": "to listen to", "audition_prefix": "8.4", "source_item": "8.4"},
-        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5", "source_item": "8.5"},
+        {"id": "2", "label": "forehead", "audition_prefix": "1.2", "source_item": "1.2", "source_survey": "KLQ"},
+        {"id": "225", "label": "NINE", "audition_prefix": "9", "source_item": "9", "source_survey": "JBIL"},
+        {"id": "226", "label": "to listen to", "audition_prefix": "8.4", "source_item": "8.4", "source_survey": "KLQ"},
+        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5", "source_item": "8.5", "source_survey": "KLQ"},
     ]
 
     media._merge_concepts_into_root_csv(resolved)

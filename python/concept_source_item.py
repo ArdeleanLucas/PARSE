@@ -22,22 +22,30 @@ OPTIONAL_CONCEPT_FIELDNAMES: tuple[str, ...] = (
 )
 LEGACY_SOURCE_ITEM_FIELDNAMES: tuple[str, ...] = ("survey_item",)
 
-_CUE_RE = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014]?\s*(.+?)\s*$")
+_KLQ_RE = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014]?\s*(.+?)\s*$")
+_EXT_RE = re.compile(r"^\s*\[\s*([0-9]+(?:\.[0-9]+)*)\s*\]\s*[-\u2013\u2014]?\s*(.+?)\s*$")
+# JBIL is flat-number-only; match order is KLQ -> EXT -> JBIL -> fallback.
+_JBIL_RE = re.compile(r"^\s*([0-9]+)\s*[-\u2013\u2014]\s*(.+?)\s*$")
 
 
-def parse_cue_name(cue: str) -> tuple[str | None, str]:
-    """Return ``(source_item, label)`` for an Audition cue name.
+def parse_cue_name(cue: str) -> tuple[str | None, str | None, str]:
+    """Return ``(source_item, source_survey, label)`` for an Audition cue name.
 
-    ``source_item`` is the leading ``(N.M)`` key when present.  Legacy/free-form
-    cue names are returned as ``(None, stripped_cue)`` so callers can still match
-    rows by label without dropping data.
+    Recognized formats:
+        KLQ:  ``(1.2)- forehead``       -> ("1.2", "KLQ", "forehead")
+        EXT:  ``[5.1]- The boy cut...`` -> ("5.1", "EXT", "The boy cut...")
+        JBIL: ``324- we``               -> ("324", "JBIL", "we")
+
+    Unrecognized free-form labels return ``(None, None, stripped_cue)`` so
+    callers can still match rows by label without dropping data.
     """
 
     text = str(cue or "").strip()
-    match = _CUE_RE.match(text)
-    if not match:
-        return None, text
-    return match.group(1), match.group(2).strip()
+    for regex, survey in ((_KLQ_RE, "KLQ"), (_EXT_RE, "EXT"), (_JBIL_RE, "JBIL")):
+        match = regex.match(text)
+        if match:
+            return match.group(1), survey, match.group(2).strip()
+    return None, None, text
 
 
 def row_value(row: Mapping[str, object], *names: str) -> str:
@@ -117,14 +125,14 @@ def write_concepts_csv_rows(
             os.close(directory_fd)
 
 
-def source_item_from_audition_row(row: object) -> str:
-    """Extract a source item from a parsed Audition row when possible."""
+def source_item_from_audition_row(row: object) -> tuple[str, str]:
+    """Return ``(source_item, source_survey)`` for a parsed Audition row."""
 
     raw_name = str(getattr(row, "raw_name", "") or "")
-    source_item, _label = parse_cue_name(raw_name)
+    source_item, source_survey, _label = parse_cue_name(raw_name)
     if source_item:
-        return source_item
-    return str(getattr(row, "concept_id", "") or "").strip()
+        return source_item, (source_survey or "")
+    return str(getattr(row, "concept_id", "") or "").strip(), ""
 
 
 def ensure_concept_fieldnames(rows: Iterable[Mapping[str, object]]) -> list[dict[str, str]]:
