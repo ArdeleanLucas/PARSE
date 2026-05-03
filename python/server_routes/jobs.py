@@ -24,7 +24,13 @@ def _resolve_compute_mode() -> str:
 
 def _job_snapshot_dir(*, create: bool=True) -> _server.pathlib.Path:
     raw_path = str(_server.os.environ.get('PARSE_JOB_SNAPSHOT_DIR') or '').strip()
-    path = _server.pathlib.Path(raw_path).expanduser() if raw_path else _server._project_root() / '.parse' / 'jobs'
+    workspace_raw = str(_server.os.environ.get('PARSE_WORKSPACE_DIR') or '').strip()
+    if raw_path:
+        path = _server.pathlib.Path(raw_path).expanduser()
+    elif workspace_raw:
+        path = _server.pathlib.Path(workspace_raw).expanduser() / '.parse-jobs'
+    else:
+        path = _server._project_root() / '.parse' / 'jobs'
     if create:
         try:
             path.mkdir(parents=True, exist_ok=True)
@@ -115,6 +121,7 @@ def _mark_loaded_job_interrupted(job: _server.Dict[str, _server.Any]) -> None:
     job['status'] = 'error'
     job['error'] = 'Server restarted before this job reached a terminal state; the in-flight worker was interrupted. Re-run the job after checking logs and system memory.'
     job['error_code'] = 'server_restarted'
+    job['recovered_from_disk'] = True
     job['updated_at'] = now_iso
     job['updated_ts'] = now_ts
     job['completed_at'] = now_iso
@@ -141,7 +148,19 @@ def _load_job_snapshots() -> int:
         return 0
     loaded_jobs: _server.List[_server.Dict[str, _server.Any]] = []
     recovered_job_ids: _server.List[str] = []
-    for path in sorted(directory.glob('*.json')):
+    snapshot_entries: _server.List[_server.Tuple[float, _server.pathlib.Path]] = []
+    for path in directory.glob('*.json'):
+        try:
+            snapshot_entries.append((float(path.stat().st_mtime), path))
+        except OSError:
+            snapshot_entries.append((0.0, path))
+    snapshot_entries.sort(key=lambda item: (item[0], str(item[1])), reverse=True)
+    for _mtime, stale_path in snapshot_entries[200:]:
+        try:
+            stale_path.unlink()
+        except OSError:
+            pass
+    for _mtime, path in snapshot_entries[:200]:
         try:
             with open(path, 'r', encoding='utf-8') as handle:
                 raw_job = _server.json.load(handle)
@@ -406,7 +425,7 @@ def _infer_job_error_code(error_message: _server.Any) -> str:
         return 'job_failed'
     if 'server restarted before this job reached a terminal state' in text:
         return 'server_restarted'
-    if 'oom' in text or 'out of memory' in text or 'sigkill' in text or 'exit code=-9' in text or 'exit code 137' in text or 'code=137' in text:
+    if 'oom' in text or 'out of memory' in text or 'insufficient host memory' in text or 'sigkill' in text or 'exit code=-9' in text or 'exit code 137' in text or 'code=137' in text:
         return 'oom_suspect'
     if 'unknown jobid' in text or 'unknown job_id' in text:
         return 'job_not_found'
@@ -638,6 +657,8 @@ def _set_job_running(job_id: str, message: _server.Optional[str]=None) -> None:
             return
         now_ts = _server.time.time()
         job['status'] = 'running'
+        if job.get('recovered_from_disk'):
+            job['recovered_from_disk'] = False
         job['updated_at'] = _server._utc_iso_from_ts(now_ts)
         job['updated_ts'] = now_ts
         _server._refresh_job_locks_locked(job, now_ts)
@@ -738,7 +759,7 @@ def _set_job_complete(job_id: str, result: _server.Any, message: _server.Optiona
     if callback_snapshot is not None:
         _server._dispatch_job_callback_async(callback_snapshot)
 
-def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optional[str]=None) -> None:
+def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optional[str]=None, *, error_code: _server.Optional[str]=None, details: _server.Optional[_server.Dict[str, _server.Any]]=None) -> None:
     """Mark a job as errored. ``traceback_str`` is stored separately from
     the short error message so the UI's crash-log modal can render the
     one-line reason on top and the full Python traceback below without
@@ -757,7 +778,15 @@ def _set_job_error(job_id: str, error_message: str, traceback_str: _server.Optio
         job['error'] = str(error_message)
         if traceback_str:
             job['traceback'] = str(traceback_str)
-        job['error_code'] = _server._infer_job_error_code(error_message)
+        job['error_code'] = str(error_code) if error_code else _server._infer_job_error_code(error_message)
+        if isinstance(details, dict):
+            for key in ('mem_available_gb', 'required_gb', 'swap_total_gb'):
+                if key not in details or details.get(key) is None:
+                    continue
+                try:
+                    job[key] = float(details.get(key))
+                except (TypeError, ValueError):
+                    continue
         job['updated_at'] = now_iso
         job['updated_ts'] = now_ts
         job['completed_at'] = now_iso
@@ -848,6 +877,11 @@ def _job_response_payload(job: _server.Dict[str, _server.Any]) -> _server.Dict[s
     payload['locks'] = _server._job_locks_payload(job.get('locks'))
     if job.get('error_code'):
         payload['errorCode'] = str(job.get('error_code'))
+    for detail_key in ('mem_available_gb', 'required_gb', 'swap_total_gb'):
+        if detail_key in job:
+            payload[detail_key] = job.get(detail_key)
+    if job.get('recovered_from_disk') is True:
+        payload['recovered_from_disk'] = True
     if job_type == 'chat:run':
         payload['runId'] = job_id
         payload.update(_server._chat_public_policy_payload())
@@ -948,7 +982,12 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             raise RuntimeError('Unsupported compute type: {0}'.format(normalized_type))
         _server._set_job_complete(job_id, result, message='Compute complete')
     except Exception as exc:
-        _server._set_job_error(job_id, str(exc))
+        _server._set_job_error(
+            job_id,
+            str(exc),
+            error_code=getattr(exc, 'error_code', None),
+            details=getattr(exc, 'details', None),
+        )
 
 def _api_get_jobs(self) -> None:
     try:

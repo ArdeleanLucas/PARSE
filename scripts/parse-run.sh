@@ -102,6 +102,7 @@ API_STDERR_LOG="/tmp/parse_api_stderr.log"
 VITE_LOG="/tmp/parse_vite.log"
 
 log() { printf '[parse-run] %s\n' "$*"; }
+warn() { printf '[parse-run] %s\n' "$*" >&2; }
 
 persistent_worker_env_enabled() {
   case "$(printf '%s' "${PARSE_USE_PERSISTENT_WORKER}" | tr '[:upper:]' '[:lower:]')" in
@@ -117,13 +118,13 @@ warn_if_compute_mode_unset() {
   if persistent_worker_env_enabled; then
     return 0
   fi
-  log "════════════════════════════════════════════════════════════════════"
-  log "WARNING: PARSE_COMPUTE_MODE is unset."
-  log "  The backend will use its legacy in-process thread runner for compute jobs."
-  log "  Long full-pipeline runs can be safer with PARSE_COMPUTE_MODE=subprocess"
-  log "  or PARSE_COMPUTE_MODE=persistent after validating the worker on this machine."
-  log "  This launcher warns only; it does not change the default automatically."
-  log "════════════════════════════════════════════════════════════════════"
+  warn "════════════════════════════════════════════════════════════════════"
+  warn "WARNING: PARSE_COMPUTE_MODE is unset."
+  warn "  The backend will use its legacy in-process thread runner for compute jobs."
+  warn "  Long full-pipeline runs can be safer with PARSE_COMPUTE_MODE=subprocess"
+  warn "  or PARSE_COMPUTE_MODE=persistent after validating the worker on this machine."
+  warn "  This launcher warns only; it does not change the default automatically."
+  warn "════════════════════════════════════════════════════════════════════"
 }
 
 if [ "${PARSE_RUN_WARNING_ONLY:-0}" = "1" ]; then

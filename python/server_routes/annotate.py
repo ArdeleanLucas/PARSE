@@ -2308,6 +2308,33 @@ _DEFAULT_FULL_PIPELINE_MIN_MEM_GB = 12.0
 _FULL_PIPELINE_HOST_MEMORY_STEPS = {'stt', 'ortho', 'ipa'}
 
 
+class FullPipelineMemoryPreflightError(RuntimeError):
+    """Structured full-pipeline host-memory preflight failure."""
+
+    error_code = 'oom_suspect'
+
+    def __init__(self, *, mem_available_gb: float, required_gb: float, swap_total_gb: float) -> None:
+        self.mem_available_gb = float(mem_available_gb)
+        self.required_gb = float(required_gb)
+        self.swap_total_gb = float(swap_total_gb)
+        super().__init__(
+            'Insufficient host memory for full pipeline: {0:.1f} GiB available, {1:.1f} GiB required. '
+            'Close other memory-heavy processes, run smaller step subsets, or adjust PARSE_FULL_PIPELINE_MIN_MEM_GB '
+            'only if you have validated this machine can survive the run.'.format(
+                self.mem_available_gb,
+                self.required_gb,
+            )
+        )
+
+    @property
+    def details(self) -> _server.Dict[str, float]:
+        return {
+            'mem_available_gb': self.mem_available_gb,
+            'required_gb': self.required_gb,
+            'swap_total_gb': self.swap_total_gb,
+        }
+
+
 def _full_pipeline_min_host_memory_gb() -> float:
     raw_value = str(_server.os.environ.get('PARSE_FULL_PIPELINE_MIN_MEM_GB') or '').strip()
     if not raw_value:
@@ -2318,8 +2345,8 @@ def _full_pipeline_min_host_memory_gb() -> float:
         return _DEFAULT_FULL_PIPELINE_MIN_MEM_GB
 
 
-def _host_available_memory_gb() -> _server.Optional[float]:
-    """Return currently available host RAM in GiB using Linux /proc data.
+def _host_memory_info() -> _server.Optional[_server.Dict[str, float]]:
+    """Return currently available host RAM and total swap in GiB.
 
     ``MemAvailable`` is the right field for this guard: it estimates memory
     reclaimable without swapping, which is what matters before loading the
@@ -2327,18 +2354,32 @@ def _host_available_memory_gb() -> _server.Optional[float]:
     report it, the preflight degrades open rather than blocking compute.
     """
     try:
+        mem_available_gb: _server.Optional[float] = None
+        swap_total_gb = 0.0
         with open('/proc/meminfo', 'r', encoding='utf-8') as handle:
             for line in handle:
-                if not line.startswith('MemAvailable:'):
+                if not (line.startswith('MemAvailable:') or line.startswith('SwapTotal:')):
                     continue
                 parts = line.split()
                 if len(parts) < 2:
-                    return None
+                    continue
                 kib = float(parts[1])
-                return kib / float(1024 ** 2)
+                if line.startswith('MemAvailable:'):
+                    mem_available_gb = kib / float(1024 ** 2)
+                elif line.startswith('SwapTotal:'):
+                    swap_total_gb = kib / float(1024 ** 2)
+        if mem_available_gb is None:
+            return None
+        return {'mem_available_gb': mem_available_gb, 'swap_total_gb': swap_total_gb}
     except (OSError, ValueError, TypeError):
         return None
-    return None
+
+
+def _host_available_memory_gb() -> _server.Optional[float]:
+    info = _host_memory_info()
+    if info is None:
+        return None
+    return float(info.get('mem_available_gb', 0.0))
 
 
 def _ensure_host_memory_for_full_pipeline(selected_steps: _server.Sequence[str]) -> None:
@@ -2348,13 +2389,15 @@ def _ensure_host_memory_for_full_pipeline(selected_steps: _server.Sequence[str])
     required_gb = _server._full_pipeline_min_host_memory_gb()
     if required_gb <= 0:
         return
+    info = _server._host_memory_info()
+    swap_total_gb = float(info.get('swap_total_gb', 0.0)) if isinstance(info, dict) else 0.0
     available_gb = _server._host_available_memory_gb()
     if available_gb is None or available_gb >= required_gb:
         return
-    raise RuntimeError(
-        'Insufficient host memory for full pipeline: {0:.1f} GiB available, {1:.1f} GiB required. '
-        'Close other memory-heavy processes, run smaller step subsets, or adjust PARSE_FULL_PIPELINE_MIN_MEM_GB '
-        'only if you have validated this machine can survive the run.'.format(available_gb, required_gb)
+    raise FullPipelineMemoryPreflightError(
+        mem_available_gb=float(available_gb),
+        required_gb=float(required_gb),
+        swap_total_gb=swap_total_gb,
     )
 
 
@@ -2421,7 +2464,11 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     if not selected:
         return {'speaker': speaker, 'steps_run': [], 'results': {}, 'message': 'No steps selected'}
     _set_compute_progress(job_id, 1.0, message='Full pipeline host-memory preflight')
-    _server._ensure_host_memory_for_full_pipeline(selected)
+    try:
+        _server._ensure_host_memory_for_full_pipeline(selected)
+    except FullPipelineMemoryPreflightError as exc:
+        _server._set_job_error(job_id, str(exc), error_code=exc.error_code, details=exc.details)
+        raise
     overwrites_raw = payload.get('overwrites') or {}
     if not isinstance(overwrites_raw, dict):
         overwrites_raw = {}
@@ -2933,5 +2980,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
