@@ -33,6 +33,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
+import { groupConceptEntries } from './lib/conceptGrouping';
 import { fmtTime } from './lib/fmtTime';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
@@ -350,10 +351,19 @@ export function ParseUI() {
     void store.save(patch);
   };
 
-  const setCanonicalRealization = (conceptKey: string, speaker: string, idx: number) => {
+  const setCanonicalRealization = (conceptForOverride: Concept, speaker: string, idx: number) => {
     const store = useEnrichmentStore.getState();
     const safeIdx = Math.max(0, Math.floor(idx));
-    const patch = { manual_overrides: { canonical_realizations: { [conceptKey]: { [speaker]: safeIdx } } } };
+    const overrideKey = conceptForOverride.sourceItem && conceptForOverride.variants && conceptForOverride.variants.length >= 2
+      ? conceptForOverride.sourceItem
+      : conceptForOverride.key;
+    const patch = { manual_overrides: { canonical_realizations: { [overrideKey]: { [speaker]: safeIdx } } } };
+    void store.save(patch);
+  };
+
+  const dismissAutoDetect = (conceptKey: string, speaker: string) => {
+    const store = useEnrichmentStore.getState();
+    const patch = { manual_overrides: { auto_detect_dismissed: { [conceptKey]: { [speaker]: true } } } };
     void store.save(patch);
   };
 
@@ -788,15 +798,10 @@ export function ParseUI() {
   // — Derived: real concepts with live tag state —
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
-    return rawConcepts.map((c, i) => ({
-      id: i + 1,
-      key: c.id,
-      name: c.label,
-      tag: getConceptStatus(getTagsForConcept(c.id)),
-      sourceItem: c.source_item,
-      sourceSurvey: c.source_survey,
-      customOrder: c.custom_order,
-    }));
+    return groupConceptEntries(rawConcepts, (conceptKeys) => {
+      const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey));
+      return getConceptStatus(tags);
+    });
   }, [rawConcepts, getTagsForConcept, storeTags]);
 
   const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
@@ -1927,13 +1932,15 @@ export function ParseUI() {
                             {f.realizations.length > 1 ? (
                               <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 {f.realizations.map((r, i) => {
-                                  const label = String.fromCharCode(65 + i);
+                                  const label = f.realizationsSource === 'source-item'
+                                    ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
+                                    : String.fromCharCode(65 + i);
                                   const isCanonical = f.selectedIdx === i;
                                   return (
                                     <button
                                       key={i}
                                       data-testid={`realization-pill-${f.speaker}-${label}`}
-                                      onClick={() => setCanonicalRealization(concept.key, f.speaker, i)}
+                                      onClick={() => setCanonicalRealization(concept, f.speaker, i)}
                                       title={`Realization ${label}: /${r.ipa}/${isCanonical ? ' (canonical)' : ' — click to set canonical'}`}
                                       aria-label={`Realization ${label}`}
                                       aria-pressed={isCanonical}
@@ -1996,11 +2003,26 @@ export function ParseUI() {
                                 <div className="mb-3 ml-4 space-y-1.5 border-l-2 border-indigo-200 pl-4">
                                   <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
                                     <AudioLines className="h-3 w-3 text-indigo-500" />
-                                    Realizations · pick one as canonical for BEAST2 export
+                                    {f.realizationsSource === 'auto-detect' ? (
+                                      <>
+                                        <span>Auto-detected realizations · pick one as canonical, or</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => dismissAutoDetect(concept.key, f.speaker)}
+                                          className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-600 hover:bg-indigo-50"
+                                        >
+                                          Dismiss auto-detection
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span>Realizations · pick one as canonical for BEAST2 export</span>
+                                    )}
                                   </div>
                                   {f.realizations.map((r, i) => {
                                     const isCanonical = f.selectedIdx === i;
-                                    const label = String.fromCharCode(65 + i);
+                                    const label = f.realizationsSource === 'source-item'
+                                      ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
+                                      : String.fromCharCode(65 + i);
                                     return (
                                       <div
                                         key={i}
@@ -2032,7 +2054,7 @@ export function ParseUI() {
                                             type="radio"
                                             name={`canonical-${f.speaker}`}
                                             checked={isCanonical}
-                                            onChange={() => setCanonicalRealization(concept.key, f.speaker, i)}
+                                            onChange={() => setCanonicalRealization(concept, f.speaker, i)}
                                             className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
                                           />
                                           <span className={`text-[10px] uppercase tracking-wider ${
