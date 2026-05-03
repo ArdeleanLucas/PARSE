@@ -8,6 +8,8 @@ import json
 import pathlib
 from typing import Any, Dict, List, Optional
 
+from concept_source_item import row_value
+
 
 def _read_json_dict(path: pathlib.Path) -> Dict[str, Any]:
     if not path.exists():
@@ -50,9 +52,13 @@ def _load_concepts(project_root: pathlib.Path) -> List[Dict[str, Any]]:
                 continue
 
             entry: Dict[str, Any] = {"id": cid, "label": label}
-            survey_item = str(row.get("survey_item") or "").strip()
-            if survey_item:
-                entry["survey_item"] = survey_item
+            source_item = row_value(row, "source_item", "survey_item")
+            if source_item:
+                entry["source_item"] = source_item
+
+            source_survey = row_value(row, "source_survey")
+            if source_survey:
+                entry["source_survey"] = source_survey
 
             custom_order_raw = str(row.get("custom_order") or "").strip()
             if custom_order_raw:

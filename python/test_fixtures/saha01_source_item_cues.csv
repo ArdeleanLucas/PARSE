@@ -1,0 +1,7 @@
+﻿Name	Start	Duration	Time Format	Type	Description
+(1.2)- forehead	0:01.000	0:00.500	decimal	Cue	
+(2.10)- maternal uncle	0:02.000	0:00.500	decimal	Cue	
+(1.10)- the baby is in the uterus	0:03.000	0:00.500	decimal	Cue	
+(2.13)- paternal uncle’s son	0:04.000	0:00.500	decimal	Cue	
+   (3.4)- leading whitespace	0:05.000	0:00.500	decimal	Cue	
+(4.5)-no space after dash	0:06.000	0:00.500	decimal	Cue	

@@ -130,6 +130,9 @@ export interface SttSegmentsPayload {
 export interface ConceptEntry {
   id: string;
   label: string;
+  source_item?: string;
+  source_survey?: string;
+  /** Deprecated transition alias until the paired FE source-display PR lands. */
   survey_item?: string;
   custom_order?: number;
 }

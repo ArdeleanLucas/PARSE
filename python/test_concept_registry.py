@@ -64,9 +64,9 @@ def test_registry_allocates_next_integer_id_and_persists_integer_only_csv(tmp_pa
     assert concept_id == "226"
     assert was_allocated is True
     assert _read_concepts_csv(tmp_path / "concepts.csv") == [
-        {"id": "2", "concept_en": "forehead"},
-        {"id": "225", "concept_en": "nine"},
-        {"id": "226", "concept_en": "to listen to"},
+        {"id": "2", "concept_en": "forehead", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "225", "concept_en": "nine", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "226", "concept_en": "to listen to", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
 
@@ -83,5 +83,5 @@ def test_registry_persist_keeps_existing_row_for_duplicate_id(tmp_path: pathlib.
     persist_concept_registry(tmp_path, registry)
 
     assert _read_concepts_csv(tmp_path / "concepts.csv") == [
-        {"id": "1", "concept_en": "existing"},
+        {"id": "1", "concept_en": "existing", "source_item": "", "source_survey": "", "custom_order": ""},
     ]

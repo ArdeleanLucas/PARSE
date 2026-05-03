@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from concept_source_item import concept_row_from_item, source_item_from_audition_row, write_concepts_csv_rows
 from concept_registry import concept_label_key, load_concept_registry, resolve_or_allocate_concept_id
 
 def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _server.List[_server.Dict[str, _server.Any]]:
@@ -139,7 +140,14 @@ def _parse_concepts_csv(csv_path: _server.pathlib.Path) -> _server.List[_server.
                 cid = _server._normalize_concept_id(row.get('id'))
                 label = str(row.get('concept_en') or '').strip()
                 if cid and label:
-                    concepts.append({'id': cid, 'label': label})
+                    normalized = concept_row_from_item(row)
+                    concepts.append({
+                        'id': cid,
+                        'label': label,
+                        'source_item': normalized.get('source_item', ''),
+                        'source_survey': normalized.get('source_survey', ''),
+                        'custom_order': normalized.get('custom_order', ''),
+                    })
             return concepts
     except (OSError, UnicodeDecodeError, _csv.Error):
         return []
@@ -148,7 +156,7 @@ def _merge_concepts_into_root_csv(new_concepts: _server.List[_server.Dict[str, s
     """Merge new concepts into root concepts.csv. Existing rows win on id collision. Returns total."""
     import csv as _csv
     concepts_path = _server._project_root() / 'concepts.csv'
-    merged: _server.Dict[str, str] = {}
+    merged: _server.Dict[str, _server.Dict[str, str]] = {}
     if concepts_path.exists():
         try:
             with open(concepts_path, newline='', encoding='utf-8') as handle:
@@ -157,21 +165,29 @@ def _merge_concepts_into_root_csv(new_concepts: _server.List[_server.Dict[str, s
                     cid = _server._normalize_concept_id(row.get('id'))
                     label = str(row.get('concept_en') or '').strip()
                     if cid and label:
-                        merged[cid] = label
+                        normalized = concept_row_from_item(row)
+                        normalized['id'] = cid
+                        normalized['concept_en'] = label
+                        merged[cid] = normalized
         except (OSError, _csv.Error):
             pass
     for item in new_concepts:
         cid = _server._normalize_concept_id(item.get('id'))
         label = str(item.get('label') or '').strip()
-        if cid and label and (cid not in merged):
-            merged[cid] = label
-    ordered = sorted(merged.items(), key=lambda kv: _server._concept_sort_key(kv[0]))
-    concepts_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(concepts_path, 'w', newline='', encoding='utf-8') as handle:
-        writer = _csv.DictWriter(handle, fieldnames=['id', 'concept_en'])
-        writer.writeheader()
-        for cid, label in ordered:
-            writer.writerow({'id': cid, 'concept_en': label})
+        if not (cid and label):
+            continue
+        incoming = concept_row_from_item({**item, 'concept_en': label})
+        incoming['id'] = cid
+        incoming['concept_en'] = label
+        if cid not in merged:
+            merged[cid] = incoming
+            continue
+        existing = merged[cid]
+        for key in ('source_item', 'source_survey', 'custom_order'):
+            if not existing.get(key) and incoming.get(key):
+                existing[key] = incoming[key]
+    ordered = [row for _cid, row in sorted(merged.items(), key=lambda kv: _server._concept_sort_key(kv[0]))]
+    write_concepts_csv_rows(concepts_path, ordered)
     return len(ordered)
 
 def _register_speaker_in_project_json(speaker: str) -> None:
@@ -231,7 +247,7 @@ def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[
         if not audition_prefix:
             audition_prefix = 'row_{0}'.format(import_index)
         cid, _was_allocated = resolve_or_allocate_concept_id(registry, label)
-        resolved.append({'id': cid, 'label': label, 'audition_prefix': audition_prefix})
+        resolved.append({'id': cid, 'label': label, 'audition_prefix': audition_prefix, 'source_item': source_item_from_audition_row(row)})
     return resolved
 
 
@@ -244,7 +260,13 @@ def _unique_resolved_concepts(resolved_concepts: _server.List[_server.Dict[str, 
         if not cid or not label or cid in seen:
             continue
         seen.add(cid)
-        concepts.append({'id': cid, 'label': label})
+        concepts.append({
+            'id': cid,
+            'label': label,
+            'source_item': str(item.get('source_item') or '').strip(),
+            'source_survey': str(item.get('source_survey') or '').strip(),
+            'custom_order': str(item.get('custom_order') or '').strip(),
+        })
     return concepts
 
 

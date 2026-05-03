@@ -78,7 +78,7 @@ Per Lucas decision 2026-04-26: the in-app AI chat panel (`src/components/shared/
 
 - `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`) decomposition (PRs 2/3/4 — foundation for internal programmatic tool use AND MCP exposure, not chat-UI-specific)
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) decomposition (env_config.py PR 1 + follow-ups)
-- The 57 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
+- The 58 chat tools themselves (they're the internal tool surface; PARSE uses them programmatically beyond just the chat UI)
 - Bug fixes that touch AIChat.tsx incidentally (e.g., the path-separator fix at PR #77 affected stt_start which AIChat consumes)
 
 **What's dropped:**
@@ -419,9 +419,9 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
-- Shipped default MCP adapter surface is **61 tools** total: **57** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- Shipped default MCP adapter surface is **62 tools** total: **58** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
 - `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **38**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **42**-tool published surface.
-- Setting `expose_all_tools=true` expands `active` mode back to the full **61**-tool adapter surface, which now matches the shipped default.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **62**-tool adapter surface, which now matches the shipped default.
 - The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`

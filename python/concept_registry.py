@@ -5,6 +5,8 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+from concept_source_item import concept_row_from_item, row_value, write_concepts_csv_rows
+
 
 @dataclass
 class ConceptRegistry:
@@ -33,10 +35,7 @@ def _normalize_integer_concept_id(value: object) -> str:
 
 
 def _row_value(row: dict[str, object], name: str) -> str:
-    for key, value in row.items():
-        if str(key or "").strip().lower() == name:
-            return str(value or "").strip()
-    return ""
+    return row_value(row, name)
 
 
 def load_concept_registry(project_root: Path) -> ConceptRegistry:
@@ -58,7 +57,10 @@ def load_concept_registry(project_root: Path) -> ConceptRegistry:
                     continue
                 seen_ids.add(cid)
                 registry.max_id = max(registry.max_id, int(cid))
-                registry.raw_rows.append({"id": cid, "concept_en": label})
+                normalized = concept_row_from_item(row)
+                normalized["id"] = cid
+                normalized["concept_en"] = label
+                registry.raw_rows.append(normalized)
                 registry.label_to_id.setdefault(concept_label_key(label), cid)
     except (OSError, csv.Error, UnicodeDecodeError):
         return ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[])
@@ -76,7 +78,7 @@ def resolve_or_allocate_concept_id(registry: ConceptRegistry, label: str) -> tup
     registry.max_id += 1
     concept_id = str(registry.max_id)
     registry.label_to_id[key] = concept_id
-    registry.raw_rows.append({"id": concept_id, "concept_en": clean_label})
+    registry.raw_rows.append({"id": concept_id, "concept_en": clean_label, "source_item": "", "source_survey": "", "custom_order": ""})
     return concept_id, True
 
 
@@ -89,11 +91,10 @@ def persist_concept_registry(project_root: Path, registry: ConceptRegistry) -> N
         if not cid or not label or cid in seen_ids:
             continue
         seen_ids.add(cid)
-        rows.append({"id": cid, "concept_en": label})
+        normalized = concept_row_from_item(row)
+        normalized["id"] = cid
+        normalized["concept_en"] = label
+        rows.append(normalized)
     rows.sort(key=lambda item: int(item["id"]))
     path = Path(project_root) / "concepts.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en"])
-        writer.writeheader()
-        writer.writerows(rows)
+    write_concepts_csv_rows(path, rows)

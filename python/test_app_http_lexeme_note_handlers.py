@@ -117,7 +117,7 @@ def test_build_post_lexeme_notes_import_response_imports_notes_and_matches_inter
     annotations_dir = tmp_path / "annotations"
     annotations_dir.mkdir()
     (tmp_path / "concepts.csv").write_text(
-        "id,concept_en,survey_item\n1,hair,SK_1\n",
+        "id,concept_en,source_item,source_survey,custom_order\n1,hair,1.1,KLQ,\n",
         encoding="utf-8",
     )
     annotation_path = annotations_dir / "Fail01.parse.json"

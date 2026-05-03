@@ -100,6 +100,7 @@ DEFAULT_MCP_TOOL_NAMES = LEGACY_CURATED_MCP_TOOL_NAMES + (
     "phonetic_rules_apply",
     "read_audio_info",
     "read_text_preview",
+    "set_concept_field",
     "source_index_validate",
     "transcript_reformat",
 )
@@ -120,6 +121,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "import_processed_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
+    "set_concept_field",
     "lexeme_notes_write",
     "onboard_speaker_import",
     "parse_memory_upsert_section",
@@ -448,6 +450,10 @@ from ai.tools.comparative_tools import (
     cross_speaker_match_preview as tool_cross_speaker_match_preview,
     segments_from_payload,
 )
+from ai.concept_field_tools import (
+    CONCEPT_FIELD_TOOL_SPECS,
+    tool_set_concept_field,
+)
 from ai.tools.contact_lexeme_tools import (
     CONTACT_LEXEME_TOOL_SPECS,
     clef_clear_data as tool_clef_clear_data,
@@ -555,6 +561,7 @@ REGISTRY: Dict[str, ChatToolSpec] = {
     **SPEAKER_IMPORT_TOOL_SPECS,
     **MEMORY_TOOL_SPECS,
     **COMPARATIVE_TOOL_SPECS,
+    **CONCEPT_FIELD_TOOL_SPECS,
     **CONTACT_LEXEME_TOOL_SPECS,
     **ENRICHMENT_TOOL_SPECS,
     **EXPORT_TOOL_SPECS,
@@ -661,6 +668,7 @@ class ParseChatTools:
             **SPEAKER_IMPORT_TOOL_SPECS,
             **MEMORY_TOOL_SPECS,
             **COMPARATIVE_TOOL_SPECS,
+            **CONCEPT_FIELD_TOOL_SPECS,
             **CONTACT_LEXEME_TOOL_SPECS,
             **ENRICHMENT_TOOL_SPECS,
             **EXPORT_TOOL_SPECS,
@@ -1281,6 +1289,9 @@ class ParseChatTools:
 
     def _tool_contact_lexeme_lookup(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_contact_lexeme_lookup(self, args)
+
+    def _tool_set_concept_field(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_set_concept_field(self, args)
 
     def _tool_clef_clear_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_clef_clear_data(self, args)

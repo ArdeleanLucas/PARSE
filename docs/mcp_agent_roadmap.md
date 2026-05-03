@@ -8,8 +8,8 @@ This document is now primarily a **status record**, not a speculative roadmap. T
 
 PARSE now ships a full workstation-local external-agent surface:
 
-- **57** in-app `ParseChatTools`
-- **57** default MCP task tools
+- **58** in-app `ParseChatTools`
+- **58** default MCP task tools
 - **3** workflow macros
 - **61** tools on the default adapter surface including `mcp_get_exposure_mode`
 - **61** tools on the full adapter surface when `expose_all_tools=true`
@@ -29,7 +29,7 @@ In other words: PARSE is already usable as an agent-facing workstation API, not 
 **Status:** ✅ Complete
 
 **Shipped on `main`:**
-- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) exposes the shipped **57-tool** default task surface from `DEFAULT_MCP_TOOL_NAMES`.
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) exposes the shipped **58-tool** default task surface from `DEFAULT_MCP_TOOL_NAMES`.
 - `python/ai/workflow_tools.py` adds **3** workflow macros on top of that base.
 - `mcp_get_exposure_mode` is always available so clients can inspect the active exposure mode.
 - `config/mcp_config.json` (or fallback root `mcp_config.json`) can opt into the legacy curated surface or explicitly force full exposure:
