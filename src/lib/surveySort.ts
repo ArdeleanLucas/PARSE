@@ -45,13 +45,3 @@ export function compareSurveyKeys(a: string, b: string): number {
   }
   return 0;
 }
-
-/**
- * Badge prefix shown next to the concept name in the sidebar. Survey items
- * already carry their own source tag (JBIL / KLQ / …), so no extra letter
- * should be prepended. Numeric-id mode uses "#" (e.g. "#14"). Kept here so
- * the same constant applies wherever the sidebar badge is rendered.
- */
-export function surveyBadgePrefix(sortMode: string): string {
-  return sortMode === "survey" ? "" : "#";
-}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compareSurveyKeys, surveyBadgePrefix, surveyKey } from "../lib/surveySort";
+import { compareSurveyKeys, surveyKey } from "../lib/surveySort";
 
 // Regression guard for the concept sidebar's Survey sort. PR #113 introduced
 // the natural-sort behavior; PR #114 accidentally reverted it because the
@@ -52,22 +52,5 @@ describe("survey-item natural sort", () => {
     const items = ["10", "100", "11", "1", "2"];
     const sorted = [...items].sort(compareSurveyKeys);
     expect(sorted).toEqual(["1", "2", "10", "11", "100"]);
-  });
-});
-
-describe("survey-mode badge prefix", () => {
-  it("emits no extra letter in Survey mode because source item carries its own source tag", () => {
-    // This is the half of the regression that slipped past the old tests.
-    // Specifically blocks re-introducing the "Q" prefix seen in the
-    // user-reported regression where the sidebar read "QJBIL_1.A" instead
-    // of "JBIL_1.A".
-    expect(surveyBadgePrefix("survey")).toBe("");
-    expect(surveyBadgePrefix("survey")).not.toBe("Q");
-  });
-
-  it("uses # for numeric-id sort modes", () => {
-    expect(surveyBadgePrefix("1n")).toBe("#");
-    expect(surveyBadgePrefix("az")).toBe("#");
-    expect(surveyBadgePrefix("")).toBe("#");
   });
 });
