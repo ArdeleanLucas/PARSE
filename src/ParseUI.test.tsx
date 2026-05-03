@@ -384,6 +384,11 @@ async function switchToAnnotateMode() {
   fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
 }
 
+async function switchToCompareMode() {
+  fireEvent.click(screen.getByRole("button", { name: "Annotate" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Compare\s*C/i }));
+}
+
 function getCompareComputeModePicker() {
   const rightPanel = screen.getByTestId('right-panel');
   return within(rightPanel).getAllByRole('combobox')[1] as HTMLSelectElement;
@@ -1215,6 +1220,117 @@ describe("ParseUI", () => {
   });
 
 
+  const configureHeadMergeWorkspace = () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "247", label: "head (A)" },
+        { id: "248", label: "head (B)" },
+        { id: "527", label: "head" },
+        { id: "600", label: "water" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head (A)", conceptId: "247", ipa: "sær-a", start: 1, end: 2 },
+        { conceptText: "head (B)", conceptId: "248", ipa: "sær-b", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "sar", start: 5, end: 6 },
+      ]),
+    };
+    mockEnrichmentData = { manual_overrides: { concept_merges: { "527": ["247", "248"] } } };
+  };
+
+  it("keeps saved concept merges out of the annotate sidebar so raw concept ids stay navigable", async () => {
+    configureHeadMergeWorkspace();
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    expect(within(sidebar).getByText("4 concepts")).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /head \(A\).*#1/i })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /head \(B\).*#2/i })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /head.*#3/i })).toBeTruthy();
+    expect(within(sidebar).queryByText("+2")).toBeNull();
+  });
+
+  it("applies saved concept merges in compare mode only", () => {
+    configureHeadMergeWorkspace();
+
+    render(<ParseUI />);
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    expect(within(sidebar).getByText("2 concepts")).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /head \+2 #1/i })).toBeTruthy();
+    expect(within(sidebar).getByText("+2").getAttribute("title")).toContain("head (A)");
+    expect(within(sidebar).queryByRole("button", { name: /head \(A\)/i })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /head \(B\)/i })).toBeNull();
+  });
+
+  it("maps an annotate raw absorbed concept to its merged primary when switching to compare", async () => {
+    configureHeadMergeWorkspace();
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    let sidebar = screen.getByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByRole("button", { name: /head \(B\).*#2/i }));
+    await switchToCompareMode();
+
+    await waitFor(() => {
+      sidebar = screen.getByTestId("concept-sidebar");
+      expect(within(sidebar).getByRole("button", { name: /head \+2 #1/i }).className).toContain("bg-indigo-50");
+    });
+  });
+
+  it("maps a compare merged primary to the primary raw concept when switching to annotate", async () => {
+    configureHeadMergeWorkspace();
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    await waitFor(() => {
+      const sidebar = screen.getByTestId("concept-sidebar");
+      expect(within(sidebar).getByRole("button", { name: /head.*#3/i }).className).toContain("bg-indigo-50");
+    });
+  });
+
+  it("preserves the active concept id across mode switches when no concept merges are active", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+        { id: "3", label: "earth" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", [{ conceptText: "fire", conceptId: "2", ipa: "agir", start: 1, end: 2 }]) };
+
+    render(<ParseUI />);
+
+    let sidebar = screen.getByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByRole("button", { name: /fire #2/i }));
+    await switchToAnnotateMode();
+
+    await waitFor(() => {
+      sidebar = screen.getByTestId("concept-sidebar");
+      expect(within(sidebar).getByRole("button", { name: /fire #2/i }).className).toContain("bg-indigo-50");
+    });
+
+    await switchToCompareMode();
+    await waitFor(() => {
+      sidebar = screen.getByTestId("concept-sidebar");
+      expect(within(sidebar).getByRole("button", { name: /fire #2/i }).className).toContain("bg-indigo-50");
+    });
+  });
 
   it("opens the concept merge picker from the sidebar context menu with stem matches preselected", () => {
     mockConfig = {
