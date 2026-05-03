@@ -79,6 +79,7 @@ vi.mock("./stores/tagStore", () => {
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
       getTagsForConcept: mockGetTagsForConcept,
+      getTagsForLexeme: vi.fn(() => []),
     });
   (useTagStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockTagSetState(...args);
@@ -927,8 +928,94 @@ describe("ParseUI", () => {
 
     expect(screen.getByText("/aw/")).toBeTruthy();
     expect(screen.getByText("/awa/")).toBeTruthy();
-    expect(screen.getByText("2 utterances")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Fail01-A")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Fail01-B")).toBeTruthy();
+    expect(screen.getByText("1 utterance")).toBeTruthy();
+    expect(screen.queryByTestId("realization-pill-Kzn03-A")).toBeNull();
     expect(screen.queryByText("/ramaːd/")).toBeNull();
+  });
+
+  it("saves canonical realization overrides from compare pills without expanding the row", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("realization-pill-Fail01-B"));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { canonical_realizations: { "1": { Fail01: 1 } } },
+    });
+    expect(screen.queryByTestId("lexeme-detail-row-Fail01")).toBeNull();
+  });
+
+  it("renders the expanded realization picker above lexeme detail", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("lexeme-chevron-Fail01"));
+
+    const detailRow = screen.getByTestId("lexeme-detail-row-Fail01");
+    expect(within(detailRow).getByText(/Realizations · pick one as canonical for BEAST2 export/i)).toBeTruthy();
+    const realizationA = within(detailRow).getByTestId("realization-row-Fail01-A");
+    expect(realizationA.textContent ?? "").toContain("/aw/");
+    expect(realizationA.textContent ?? "").toContain('"ئاو"');
+    expect(realizationA.textContent ?? "").toContain("0:01.0–0:02.0");
+    expect(within(detailRow).getByTestId("realization-play-Fail01-A")).toBeTruthy();
+    expect((within(detailRow).getByLabelText("Canonical") as HTMLInputElement).checked).toBe(true);
+    expect((within(detailRow).getByLabelText("Set canonical") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("marks the canonical realization pill with filled indigo styling", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+    mockEnrichmentData = {
+      manual_overrides: { canonical_realizations: { "1": { Fail01: 1 } } },
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByTestId("realization-pill-Fail01-B").className).toContain("bg-indigo-600");
+    expect(screen.getByTestId("realization-pill-Fail01-A").className).toContain("ring-slate-200");
+    expect(screen.getByText("/aːw/")).toBeTruthy();
   });
 
   it("wires compare Flag and Accept concept buttons to tag actions", () => {

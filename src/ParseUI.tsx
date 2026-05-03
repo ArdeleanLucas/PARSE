@@ -9,7 +9,7 @@ import {
   Workflow, Network, Trash2, ChevronDown as CDown,
   Download,
   Anchor,
-  Sun, Moon, XCircle,
+  Sun, Moon, XCircle, Play,
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
@@ -33,6 +33,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
+import { fmtTime } from './lib/fmtTime';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
   applyCanonicalDecisionImport,
@@ -340,6 +341,26 @@ export function ParseUI() {
     const conceptBlock: Record<string, boolean> = { ...(prevFlags[conceptKey] ?? {}) };
     conceptBlock[speaker] = !current;
     const patch = { manual_overrides: { speaker_flags: { [conceptKey]: conceptBlock } } };
+    void store.save(patch);
+  };
+
+  const setCanonicalRealization = (conceptKey: string, speaker: string, idx: number) => {
+    const store = useEnrichmentStore.getState();
+    const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
+    const prevCanonical = isRecord(overrides.canonical_realizations)
+      ? overrides.canonical_realizations as Record<string, unknown>
+      : {};
+    const prevConceptBlock = isRecord(prevCanonical[conceptKey])
+      ? prevCanonical[conceptKey] as Record<string, unknown>
+      : {};
+    const conceptBlock: Record<string, number> = {};
+    for (const [existingSpeaker, value] of Object.entries(prevConceptBlock)) {
+      if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+        conceptBlock[existingSpeaker] = value;
+      }
+    }
+    conceptBlock[speaker] = idx;
+    const patch = { manual_overrides: { canonical_realizations: { [conceptKey]: conceptBlock } } };
     void store.save(patch);
   };
 
@@ -1902,11 +1923,40 @@ export function ParseUI() {
                               >
                                 /{f.ipa || '—'}/
                               </span>
-                              <ChevronDown
-                                className={`h-3 w-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                              />
                             </div>
-                            <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
+                            {f.realizations.length > 1 ? (
+                              <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                {f.realizations.map((r, i) => {
+                                  const label = String.fromCharCode(65 + i);
+                                  const isCanonical = f.selectedIdx === i;
+                                  return (
+                                    <button
+                                      key={i}
+                                      data-testid={`realization-pill-${f.speaker}-${label}`}
+                                      onClick={() => setCanonicalRealization(concept.key, f.speaker, i)}
+                                      title={`Realization ${label}: /${r.ipa}/${isCanonical ? ' (canonical)' : ' — click to set canonical'}`}
+                                      className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded px-1 font-mono text-[9px] font-bold transition ${
+                                        isCanonical
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200 hover:bg-slate-200'
+                                      }`}
+                                    >
+                                      {label}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  data-testid={`lexeme-chevron-${f.speaker}`}
+                                  onClick={() => toggleLexemeExpanded(f.speaker)}
+                                  className="ml-0.5 inline-grid h-4 w-4 place-items-center text-slate-400 hover:text-indigo-600"
+                                  title={isExpanded ? 'Hide realizations' : 'Show realizations'}
+                                >
+                                  <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
+                            )}
                           </td>
                           {primaryContactCodes.map((code) => (
                             <td
@@ -1940,6 +1990,57 @@ export function ParseUI() {
                           <tr data-testid={`lexeme-detail-row-${f.speaker}`}>
                             {/* Speaker + IPA + N sim columns + Cognate + Flag. */}
                             <td colSpan={4 + primaryContactCodes.length} className="bg-slate-50 p-2">
+                              {f.realizations.length > 1 && (
+                                <div className="mb-3 ml-4 space-y-1.5 border-l-2 border-indigo-200 pl-4">
+                                  <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+                                    <AudioLines className="h-3 w-3 text-indigo-500" />
+                                    Realizations · pick one as canonical for BEAST2 export
+                                  </div>
+                                  {f.realizations.map((r, i) => {
+                                    const isCanonical = f.selectedIdx === i;
+                                    const label = String.fromCharCode(65 + i);
+                                    return (
+                                      <div
+                                        key={i}
+                                        data-testid={`realization-row-${f.speaker}-${label}`}
+                                        className={`flex items-center gap-3 rounded-md px-2.5 py-1.5 ring-1 transition ${
+                                          isCanonical
+                                            ? 'bg-white ring-indigo-300 shadow-sm'
+                                            : 'bg-white/60 ring-slate-200 hover:bg-white'
+                                        }`}
+                                      >
+                                        <span className={`inline-flex h-5 w-5 items-center justify-center rounded font-mono text-[10px] font-bold ${
+                                          isCanonical ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
+                                        }`}>{label}</span>
+                                        <button
+                                          data-testid={`realization-play-${f.speaker}-${label}`}
+                                          className="inline-grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                          title={`Play ${fmtTime(r.startSec)}–${fmtTime(r.endSec)}`}
+                                        >
+                                          <Play className="h-3 w-3 fill-current" />
+                                        </button>
+                                        <div className="min-w-[110px] font-mono text-[12px] text-slate-800">/{r.ipa}/</div>
+                                        <div className="min-w-[100px] text-[11px] italic text-slate-500">"{r.ortho}"</div>
+                                        <div className="font-mono text-[10px] tabular-nums text-slate-400">
+                                          {fmtTime(r.startSec)}–{fmtTime(r.endSec)}
+                                        </div>
+                                        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5">
+                                          <input
+                                            type="radio"
+                                            name={`canonical-${f.speaker}`}
+                                            checked={isCanonical}
+                                            onChange={() => setCanonicalRealization(concept.key, f.speaker, i)}
+                                            className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                                          />
+                                          <span className={`text-[10px] uppercase tracking-wider ${
+                                            isCanonical ? 'font-semibold text-indigo-700' : 'text-slate-500'
+                                          }`}>{isCanonical ? 'Canonical' : 'Set canonical'}</span>
+                                        </label>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               <LexemeDetail
                                 speaker={f.speaker}
                                 conceptId={concept.key}
