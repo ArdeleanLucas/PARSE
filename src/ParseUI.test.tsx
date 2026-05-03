@@ -1214,6 +1214,131 @@ describe("ParseUI", () => {
     expect(screen.getByText("/aːw/")).toBeTruthy();
   });
 
+
+
+  it("opens the concept merge picker from the sidebar context menu with stem matches preselected", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "247", label: "head (A)" },
+        { id: "248", label: "head (B)" },
+        { id: "527", label: "head" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 }]) };
+
+    render(<ParseUI />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /head #3/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /merge with/i }));
+
+    expect(screen.getByRole("dialog", { name: /merge into head/i })).toBeTruthy();
+    expect((screen.getAllByLabelText(/head \(A\)/i)[0] as HTMLInputElement).checked).toBe(true);
+    expect((screen.getAllByLabelText(/head \(B\)/i)[0] as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /merge 2 concepts/i }));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { concept_merges: { "527": ["247", "248"] } },
+    });
+  });
+
+  it("collapses merged concepts in the sidebar and shows an absorbed-count badge", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "247", label: "head (A)" },
+        { id: "248", label: "head (B)" },
+        { id: "527", label: "head" },
+        { id: "600", label: "water" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 }]) };
+    mockEnrichmentData = { manual_overrides: { concept_merges: { "527": ["247", "248"] } } };
+
+    render(<ParseUI />);
+
+    expect(screen.getByText("2 concepts")).toBeTruthy();
+    expect(screen.getByText("+2").getAttribute("title")).toContain("head (A)");
+    expect(screen.queryByRole("button", { name: /head \(A\)/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /head \(B\)/i })).toBeNull();
+  });
+
+  it("unmerges a merged primary from the sidebar context menu", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "247", label: "head (A)" },
+        { id: "248", label: "head (B)" },
+        { id: "527", label: "head" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 }]) };
+    mockEnrichmentData = { manual_overrides: { concept_merges: { "527": ["247", "248"] } } };
+
+    render(<ParseUI />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /head \+2 #1/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /unmerge/i }));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { concept_merges: { "527": [] } },
+    });
+  });
+
+  it("preserves sibling manual_overrides when saving concept merge overrides through deep merge", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "247", label: "head (A)" },
+        { id: "248", label: "head (B)" },
+        { id: "527", label: "head" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 }]) };
+    mockEnrichmentData = {
+      manual_overrides: {
+        cognate_sets: { "527": { A: ["Fail01"] } },
+        speaker_flags: { "527": { Fail01: true } },
+        canonical_realizations: { "527": { Fail01: 0 } },
+        auto_detect_dismissed: { "527": { Fail01: true } },
+      },
+    };
+    mockEnrichmentSaveUsesDeepMerge = true;
+
+    render(<ParseUI />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /head #3/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /merge with/i }));
+    fireEvent.click(screen.getByRole("button", { name: /merge 2 concepts/i }));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: {
+        cognate_sets: { "527": { A: ["Fail01"] } },
+        speaker_flags: { "527": { Fail01: true } },
+        canonical_realizations: { "527": { Fail01: 0 } },
+        auto_detect_dismissed: { "527": { Fail01: true } },
+        concept_merges: { "527": ["247", "248"] },
+      },
+    });
+  });
+
   it("wires compare Flag and Accept concept buttons to tag actions", () => {
     render(<ParseUI />);
 

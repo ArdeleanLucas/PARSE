@@ -375,4 +375,128 @@ describe('buildSpeakerForm', () => {
     expect(form.realizations).toEqual([]);
     expect(form.selectedIdx).toBe(0);
   });
+
+  it('builds merged concept realizations from every merged key and marks the source as merged', () => {
+    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head', concept_id: '527' },
+        { start: 3, end: 4, text: 'head (A)', concept_id: '247' },
+        { start: 5, end: 6, text: 'head (B)', concept_id: '248' },
+        { start: 7, end: 9, text: 'head (B)', concept_id: '248' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'sar' },
+        { start: 3.1, end: 3.4, text: 'sar-a' },
+        { start: 5.1, end: 5.4, text: 'sar-b-short' },
+        { start: 7.1, end: 8.8, text: 'sar-b-long' },
+      ],
+      ortho_words: [
+        { start: 1.15, end: 1.35, text: 'سەر' },
+        { start: 3.15, end: 3.35, text: 'سەر ئا' },
+        { start: 7.15, end: 8.7, text: 'سەر ب' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+
+    expect(form.realizationsSource).toBe('merged');
+    expect(form.realizations).toEqual([
+      { ipa: 'sar', ortho: 'سەر', startSec: 1.1, endSec: 1.4 },
+      { ipa: 'sar-a', ortho: 'سەر ئا', startSec: 3.1, endSec: 3.4 },
+      { ipa: 'sar-b-long', ortho: 'سەر ب', startSec: 7.1, endSec: 8.8 },
+    ]);
+    expect(form.utterances).toBe(4);
+    expect(form.variantCount).toBe(3);
+    expect(form.ipa).toBe('sar');
+  });
+
+  it('uses the merged primary key for canonical realization overrides', () => {
+    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head', concept_id: '527' },
+        { start: 3, end: 4, text: 'head (A)', concept_id: '247' },
+        { start: 5, end: 6, text: 'head (B)', concept_id: '248' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'sar' },
+        { start: 3.1, end: 3.4, text: 'sar-a' },
+        { start: 5.1, end: 5.4, text: 'sar-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { '527': { Fail02: 2 } } },
+    }, false, []);
+
+    expect(form.realizationsSource).toBe('merged');
+    expect(form.selectedIdx).toBe(2);
+    expect(form.ipa).toBe('sar-b');
+  });
+
+  it('keeps empty merged realization slots visible when a speaker lacks absorbed-key IPA', () => {
+    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
+    const record = makeRecord({
+      concept: [{ start: 1, end: 2, text: 'head', concept_id: '527' }],
+      ipa: [{ start: 1.1, end: 1.4, text: 'sar' }],
+    });
+
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+
+    expect(form.realizationsSource).toBe('merged');
+    expect(form.realizations).toEqual([
+      { ipa: 'sar', ortho: '', startSec: 1.1, endSec: 1.4 },
+      { ipa: '', ortho: '', startSec: null, endSec: null },
+      { ipa: '', ortho: '', startSec: null, endSec: null },
+    ]);
+  });
+
+  it('matches utterance intervals tagged with any merged key', () => {
+    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247'] };
+    const record = makeRecord({
+      concept: [{ start: 3, end: 4, text: 'head (A)', concept_id: '247' }],
+      ipa: [{ start: 3.1, end: 3.4, text: 'sar-a' }],
+    });
+
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+
+    expect(form.utterances).toBe(1);
+    expect(form.ipa).toBe('');
+    expect(form.realizations[1]).toEqual({ ipa: 'sar-a', ortho: '', startSec: 3.1, endSec: 3.4 });
+  });
+
+  it('uses the merged branch before source-item branch when both are present', () => {
+    const mergedSourceConcept: Concept = {
+      id: 1,
+      key: '2.47',
+      name: 'head',
+      tag: 'untagged',
+      sourceItem: '2.47',
+      variants: [
+        { conceptKey: '247', conceptEn: 'head A', variantLabel: 'A' },
+        { conceptKey: '248', conceptEn: 'head B', variantLabel: 'B' },
+      ],
+      mergedKeys: ['247', '248', '527'],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head A', concept_id: '247' },
+        { start: 3, end: 4, text: 'head B', concept_id: '248' },
+        { start: 5, end: 6, text: 'head', concept_id: '527' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'sar-a' },
+        { start: 3.1, end: 3.4, text: 'sar-b' },
+        { start: 5.1, end: 5.4, text: 'sar-bare' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, mergedSourceConcept, 'Fail02', {}, false, []);
+
+    expect(form.realizationsSource).toBe('merged');
+    expect(form.realizations).toHaveLength(3);
+    expect(form.realizations[2].ipa).toBe('sar-bare');
+  });
+
 });

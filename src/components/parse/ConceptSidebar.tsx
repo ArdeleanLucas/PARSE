@@ -1,15 +1,19 @@
+import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
 export type ConceptStatusFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 
-interface SidebarConcept {
+export interface SidebarConcept {
   id: number;
+  key?: string;
   name: string;
   tag: ConceptTag;
   sourceItem?: string;
   sourceSurvey?: string;
+  mergedKeys?: string[];
+  mergeAbsorbedNames?: string[];
 }
 
 interface SidebarTag {
@@ -32,6 +36,8 @@ interface ConceptSidebarProps {
   tags: SidebarTag[];
   activeConceptId: number;
   onConceptSelect: (conceptId: number) => void;
+  onMergeRequest?: (concept: SidebarConcept) => void;
+  onUnmergeConcept?: (concept: SidebarConcept) => void;
 }
 
 const tagDot: Record<ConceptTag, string> = {
@@ -55,7 +61,21 @@ export function ConceptSidebar({
   tags,
   activeConceptId,
   onConceptSelect,
+  onMergeRequest,
+  onUnmergeConcept,
 }: ConceptSidebarProps) {
+  const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setContextMenu(null);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [contextMenu]);
   const toggleStatus = (filter: ConceptStatusFilter) => {
     onStatusFilterChange(statusFilter === filter ? 'all' : filter);
   };
@@ -173,15 +193,54 @@ export function ConceptSidebar({
             <button
               key={concept.id}
               onClick={() => onConceptSelect(concept.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ concept, x: event.clientX, y: event.clientY });
+              }}
               className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
               <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}</span>
+              {concept.mergedKeys && concept.mergedKeys.length > 1 && (
+                <span
+                  title={(concept.mergeAbsorbedNames ?? []).join(', ')}
+                  className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                >
+                  +{concept.mergedKeys.length - 1}
+                </span>
+              )}
               <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
             </button>
           );
         })}
       </nav>
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="fixed z-50 min-w-[130px] rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+            onClick={() => { onMergeRequest?.(contextMenu.concept); setContextMenu(null); }}
+          >
+            Merge with…
+          </button>
+          {contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+              onClick={() => { onUnmergeConcept?.(contextMenu.concept); setContextMenu(null); }}
+            >
+              Unmerge
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

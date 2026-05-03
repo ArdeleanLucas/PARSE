@@ -15,7 +15,7 @@ function fallbackVariantLabel(index: number): string {
 }
 
 function variantLabelFor(conceptEn: string, index: number): string {
-  const match = conceptEn.match(/\s+([A-Z])\s*$/);
+  const match = conceptEn.match(/(?:\s+|\s*\()([A-Z])\)?\s*$/);
   return match?.[1] ?? fallbackVariantLabel(index);
 }
 
@@ -58,6 +58,7 @@ function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: Re
 export function groupConceptEntries(
   rawConcepts: readonly ConceptEntry[],
   resolveTag: ResolveConceptTag,
+  conceptMerges?: Record<string, readonly string[]>,
 ): Concept[] {
   const sourceBuckets = new Map<string, number[]>();
   rawConcepts.forEach((entry, index) => {
@@ -109,5 +110,46 @@ export function groupConceptEntries(
     });
   });
 
-  return grouped;
+
+  const activeMerges = Object.entries(conceptMerges ?? {}).filter(([, absorbed]) => absorbed.length > 0);
+  if (activeMerges.length === 0) return grouped;
+
+  const findByUnderlyingKey = (key: string): Concept | undefined => grouped.find((concept) => {
+    if (concept.key === key) return true;
+    return concept.variants?.some((variant) => variant.conceptKey === key) ?? false;
+  });
+  const underlyingKeys = (concept: Concept): string[] => concept.variants?.map((variant) => variant.conceptKey) ?? [concept.key];
+  const underlyingVariants = (concept: Concept, startIndex: number): ConceptVariant[] => {
+    if (concept.variants?.length) return concept.variants;
+    return [{ conceptKey: concept.key, conceptEn: concept.name, variantLabel: variantLabelFor(concept.name, startIndex) }];
+  };
+
+  const absorbedConcepts = new Set<Concept>();
+  for (const [primaryKey, absorbedKeys] of activeMerges) {
+    const primary = findByUnderlyingKey(primaryKey);
+    if (!primary) continue;
+    const absorbed = absorbedKeys
+      .map((key) => findByUnderlyingKey(key))
+      .filter((concept): concept is Concept => !!concept && concept !== primary);
+    if (absorbed.length === 0) continue;
+
+    const mergedKeys = [...underlyingKeys(primary)];
+    const mergedVariants = [...underlyingVariants(primary, 0)];
+    const mergeAbsorbedNames: string[] = [];
+    for (const concept of absorbed) {
+      const startIndex = mergedKeys.length;
+      mergedKeys.push(...underlyingKeys(concept));
+      mergedVariants.push(...underlyingVariants(concept, startIndex));
+      mergeAbsorbedNames.push(concept.name);
+      absorbedConcepts.add(concept);
+    }
+    primary.mergedKeys = mergedKeys;
+    primary.mergedVariants = mergedVariants;
+    primary.mergeAbsorbedNames = mergeAbsorbedNames;
+  }
+
+  let nextId = 0;
+  return grouped
+    .filter((concept) => !absorbedConcepts.has(concept))
+    .map((concept) => ({ ...concept, id: ++nextId }));
 }
