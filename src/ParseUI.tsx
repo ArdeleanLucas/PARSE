@@ -346,21 +346,8 @@ export function ParseUI() {
 
   const setCanonicalRealization = (conceptKey: string, speaker: string, idx: number) => {
     const store = useEnrichmentStore.getState();
-    const overrides = (isRecord(store.data.manual_overrides) ? store.data.manual_overrides : {}) as Record<string, unknown>;
-    const prevCanonical = isRecord(overrides.canonical_realizations)
-      ? overrides.canonical_realizations as Record<string, unknown>
-      : {};
-    const prevConceptBlock = isRecord(prevCanonical[conceptKey])
-      ? prevCanonical[conceptKey] as Record<string, unknown>
-      : {};
-    const conceptBlock: Record<string, number> = {};
-    for (const [existingSpeaker, value] of Object.entries(prevConceptBlock)) {
-      if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
-        conceptBlock[existingSpeaker] = value;
-      }
-    }
-    conceptBlock[speaker] = idx;
-    const patch = { manual_overrides: { canonical_realizations: { [conceptKey]: conceptBlock } } };
+    const safeIdx = Math.max(0, Math.floor(idx));
+    const patch = { manual_overrides: { canonical_realizations: { [conceptKey]: { [speaker]: safeIdx } } } };
     void store.save(patch);
   };
 
@@ -1935,6 +1922,8 @@ export function ParseUI() {
                                       data-testid={`realization-pill-${f.speaker}-${label}`}
                                       onClick={() => setCanonicalRealization(concept.key, f.speaker, i)}
                                       title={`Realization ${label}: /${r.ipa}/${isCanonical ? ' (canonical)' : ' — click to set canonical'}`}
+                                      aria-label={`Realization ${label}`}
+                                      aria-pressed={isCanonical}
                                       className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded px-1 font-mono text-[9px] font-bold transition ${
                                         isCanonical
                                           ? 'bg-indigo-600 text-white'
@@ -2016,6 +2005,7 @@ export function ParseUI() {
                                           data-testid={`realization-play-${f.speaker}-${label}`}
                                           className="inline-grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                                           title={`Play ${fmtTime(r.startSec)}–${fmtTime(r.endSec)}`}
+                                          aria-label={`Play realization ${label}`}
                                         >
                                           <Play className="h-3 w-3 fill-current" />
                                         </button>

@@ -55,6 +55,22 @@ const mockLoadEnrichments = vi.fn().mockResolvedValue(undefined);
 const mockSaveEnrichments = vi.fn();
 const mockReplaceEnrichments = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
+let mockEnrichmentSaveUsesDeepMerge = false;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepMergeRecords(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    const current = merged[key];
+    merged[key] = isPlainRecord(current) && isPlainRecord(value)
+      ? deepMergeRecords(current, value)
+      : value;
+  }
+  return merged;
+}
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
 let mockChatError: string | null = null;
@@ -160,7 +176,14 @@ vi.mock("./stores/enrichmentStore", () => {
       data: mockEnrichmentData,
       loading: false,
       load: mockLoadEnrichments,
-      save: mockSaveEnrichments,
+      save: (patch: Record<string, unknown>) => {
+        if (mockEnrichmentSaveUsesDeepMerge) {
+          const merged = deepMergeRecords(mockEnrichmentData, patch);
+          mockEnrichmentData = merged;
+          return mockSaveEnrichments(merged);
+        }
+        return mockSaveEnrichments(patch);
+      },
       replace: mockReplaceEnrichments,
     });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
@@ -173,14 +196,21 @@ vi.mock("./stores/enrichmentStore", () => {
       data: Record<string, unknown>;
       loading: boolean;
       load: () => Promise<void>;
-      save: typeof mockSaveEnrichments;
+      save: (patch: Record<string, unknown>) => unknown;
       replace: typeof mockReplaceEnrichments;
     };
   }).getState = () => ({
     data: mockEnrichmentData,
     loading: false,
     load: mockLoadEnrichments,
-    save: mockSaveEnrichments,
+    save: (patch: Record<string, unknown>) => {
+      if (mockEnrichmentSaveUsesDeepMerge) {
+        const merged = deepMergeRecords(mockEnrichmentData, patch);
+        mockEnrichmentData = merged;
+        return mockSaveEnrichments(merged);
+      }
+      return mockSaveEnrichments(patch);
+    },
     replace: mockReplaceEnrichments,
   });
   return { useEnrichmentStore };
@@ -477,6 +507,7 @@ beforeEach(() => {
   ];
   mockRecords = {};
   mockEnrichmentData = {};
+  mockEnrichmentSaveUsesDeepMerge = false;
   mockSelectedRegion = { start: 1.25, end: 2.5 };
   mockCurrentTime = 0;
   mockChatMessages = [];
@@ -959,6 +990,44 @@ describe("ParseUI", () => {
       manual_overrides: { canonical_realizations: { "1": { Fail01: 1 } } },
     });
     expect(screen.queryByTestId("lexeme-detail-row-Fail01")).toBeNull();
+  });
+
+
+  it("preserves existing manual_overrides when saving a canonical realization through enrichment deep merge", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+    mockEnrichmentData = {
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+      },
+    };
+
+    mockEnrichmentSaveUsesDeepMerge = true;
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("realization-pill-Fail01-B"));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+        canonical_realizations: { "1": { Fail01: 1 } },
+      },
+    });
   });
 
   it("renders the expanded realization picker above lexeme detail", () => {

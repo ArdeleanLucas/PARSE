@@ -97,6 +97,7 @@ export function buildSpeakerForm(
     ? pickOrthoIntervalForConcept(record, primaryConceptInterval)?.text ?? ''
     : '';
 
+  // pickOrthoIntervalForConcept is strict to the passed interval, so each realization only shows IPA-aligned ortho.
   const realizations: Realization[] = matchingIpaIntervals.map((ipaInterval) => ({
     ipa: ipaInterval.text ?? '',
     ortho: record ? pickOrthoIntervalForConcept(record, ipaInterval)?.text ?? '' : '',
