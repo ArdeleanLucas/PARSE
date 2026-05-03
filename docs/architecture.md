@@ -135,9 +135,9 @@ This layer stores computed comparative structures such as:
 - similarity signals
 - borrowing-related overlays
 - lexeme notes
-- manual overrides layered onto computed output
+- manual overrides layered onto computed output, including `canonical_realizations` for A/B/C form picks, `concept_merges` for compare-row grouping, cognate-set edits, and speaker flags
 
-The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format.
+The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format. Source-item grouping is derived from `concepts.csv` fields (`source_item`, `source_survey`, `custom_order`), while canonical realizations and concept merges live in `parse-enrichments.json` so review choices stay reversible and do not mutate source concepts or annotation tiers.
 
 ### 3. Tags
 

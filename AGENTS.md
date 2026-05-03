@@ -409,6 +409,14 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #227 unloads the HF ORTH model/processor and clears/synchronizes CUDA cache before wav2vec2 IPA, adds `Aligner.release()`, and enforces a tunable 4 GiB low-VRAM guard before IPA in full-pipeline runs.
   - PR #228 adds non-destructive stale `*.lock` cleanup on server startup and `POST /api/locks/cleanup`, with JSON metadata (`creator_pid`, `created_at_unix`, `speaker`), live-PID skip/manual-review semantics, legacy touch-file cleanup, and no process killing.
   - PR #229 removes the global `_LAST_ORTHO_PROVIDER` lifecycle hook and threads the ORTH provider explicitly through full-pipeline / ORTH / concept-window calls so IPA-only full-pipeline selections do not instantiate ORTH and cleanup stays locally owned.
+  - PR #255 adds a host-memory preflight (`PARSE_FULL_PIPELINE_MIN_MEM_GB`) before memory-heavy full-pipeline work, returns structured `oom_suspect` job errors with memory/swap details, persists job snapshots under `PARSE_JOB_SNAPSHOT_DIR` or workspace `.parse/jobs`, recovers non-terminal snapshots after restart as `server_restarted`, and warns via `scripts/parse-run.sh` when `PARSE_COMPUTE_MODE` is unset.
+- **Compare source-item and realization review shipped**:
+  - PR #257 makes `concepts.csv` emit `id,concept_en,source_item,source_survey,custom_order`, parses Audition cue prefixes into `source_item`, propagates `source_survey`, and adds the dry-run-capable `set_concept_field` MCP/chat tool.
+  - PRs #256/#258/#260 show source badges/sorting in `ConceptSidebar`, group concepts sharing a `source_item` into variant rows, expose A/B/C speaker-form realizations with IPA/ORTH/time/playback context, and persist per-speaker canonical picks under `manual_overrides.canonical_realizations`.
+  - PR #261 classifies Audition cue families such as KLQ/EXT/JBIL into `source_survey` and extends conservative source-item backfill.
+  - PR #262 fixes singleton speaker-form matching to use stable concept keys rather than emitted sidebar ids.
+  - PR #263 adds manual concept merge/unmerge overrides under `manual_overrides.concept_merges`, combining underlying concept ids for comparative review without rewriting `concepts.csv` or annotation tiers.
+  - PR #264 is open as of the 2026-05-03 rolling-window audit; do not document its Compare-only scoping as shipped until it merges.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)

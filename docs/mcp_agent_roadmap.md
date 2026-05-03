@@ -11,8 +11,8 @@ PARSE now ships a full workstation-local external-agent surface:
 - **58** in-app `ParseChatTools`
 - **58** default MCP task tools
 - **3** workflow macros
-- **61** tools on the default adapter surface including `mcp_get_exposure_mode`
-- **61** tools on the full adapter surface when `expose_all_tools=true`
+- **62** tools on the default adapter surface including `mcp_get_exposure_mode`
+- **62** tools on the full adapter surface when `expose_all_tools=true`
 - **42** tools on the legacy curated opt-out surface when `expose_all_tools=false` is configured explicitly
 - **OpenAPI 3.1** docs at `GET /openapi.json`, `GET /docs`, and `GET /redoc`
 - **HTTP MCP bridge** on the main PARSE server
@@ -45,9 +45,9 @@ or
 ```
 
 **Current totals:**
-- default adapter surface: **61** tools total
+- default adapter surface: **62** tools total
 - legacy curated opt-out surface: **42** tools total
-- full adapter surface: **61** tools total
+- full adapter surface: **62** tools total
 
 **Why this matters:**
 PARSE no longer requires external agents to tunnel through the browser chat dock to reach core workstation actions.

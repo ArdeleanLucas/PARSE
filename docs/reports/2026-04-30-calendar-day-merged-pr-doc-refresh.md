@@ -28,7 +28,7 @@ Tool-grounded checks used:
 - `gh pr view <199..213,215,216,217> --repo ArdeleanLucas/PARSE --json body,files,commits,mergeCommit,...` for file-level doc implications.
 - `gh pr list --repo ArdeleanLucas/PARSE --state open ...` before and after rebases; final state had only this docs PR (#214) open.
 - Rolling 21-hour verification via `gh pr list --repo ArdeleanLucas/PARSE --state merged --json number,title,mergedAt,url --limit 100`, filtered to `2026-04-30T00:56:21Z..2026-04-30T21:56:21Z`, produced #202-#213 plus #215/#216/#217 exactly.
-- Code count check: `REGISTRY=57`, `ParseChatTools._tool_specs=57`, `DEFAULT_MCP_TOOL_NAMES=57`, `LEGACY_CURATED_MCP_TOOL_NAMES=38`, workflow macros `3`, default adapter total `61`, legacy adapter total `42`.
+- Code count check at that audit cutoff: `REGISTRY=57`, `ParseChatTools._tool_specs=57`, `DEFAULT_MCP_TOOL_NAMES=57`, `LEGACY_CURATED_MCP_TOOL_NAMES=38`, workflow macros `3`, default adapter total `61`, legacy adapter total `42`. Supersession note: PR #257 later raised current counts to `REGISTRY=58`, `ParseChatTools=58`, `DEFAULT_MCP_TOOL_NAMES=58`, default/all adapter total `62`, while legacy curated remains `38` parse-task tools / `42` adapter tools.
 
 ## Merged PRs covered by this refresh
 

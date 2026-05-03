@@ -152,6 +152,8 @@ Cancellation semantics: `POST /api/compute/{jobId}/cancel` returns HTTP 404 with
 
 Stale-lock cleanup semantics: startup and `POST /api/locks/cleanup` scan direct `*.lock` files inside `PARSE_LOCKS_DIR` (or the configured default), delete dead-PID / metadata-less legacy locks, skip live-PID locks, and leave old live-PID locks in place with a manual-review reason controlled by `PARSE_STALE_LOCK_AGE_SEC`. Cleanup never kills processes.
 
+Full-pipeline OOM/restart semantics: before memory-heavy full-pipeline work, the backend checks host `MemAvailable` against `PARSE_FULL_PIPELINE_MIN_MEM_GB`; failures return structured job errors with `error_code: "oom_suspect"`, `mem_available_gb`, `required_gb`, and `swap_total_gb`. Job snapshots persist under `PARSE_JOB_SNAPSHOT_DIR` or the workspace `.parse/jobs` directory, and non-terminal snapshots recovered after server restart are marked `error_code: "server_restarted"` with `recovered_from_disk: true`.
+
 ### Suggestions, chat, and auth
 
 | Endpoint | Purpose | Notes |
@@ -474,7 +476,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing the shipped **58-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **62 tools** total and the `expose_all_tools=true` surface is also **62**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 36-tool subset, which still becomes **40** adapter tools once the 3 workflow macros and adapter helper are included.
+PARSE can also run as a stdio MCP server by exposing the shipped **58-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **62 tools** total and the `expose_all_tools=true` surface is also **62**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 38-tool subset, which still becomes **42** adapter tools once the 3 workflow macros and adapter helper are included.
 
 ### Start the adapter
 
