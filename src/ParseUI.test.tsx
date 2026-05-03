@@ -55,6 +55,22 @@ const mockLoadEnrichments = vi.fn().mockResolvedValue(undefined);
 const mockSaveEnrichments = vi.fn();
 const mockReplaceEnrichments = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
+let mockEnrichmentSaveUsesDeepMerge = false;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepMergeRecords(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    const current = merged[key];
+    merged[key] = isPlainRecord(current) && isPlainRecord(value)
+      ? deepMergeRecords(current, value)
+      : value;
+  }
+  return merged;
+}
 let mockChatMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
 let mockChatSending = false;
 let mockChatError: string | null = null;
@@ -79,6 +95,7 @@ vi.mock("./stores/tagStore", () => {
       tagConcept: mockTagConcept,
       untagConcept: mockUntagConcept,
       getTagsForConcept: mockGetTagsForConcept,
+      getTagsForLexeme: vi.fn(() => []),
     });
   (useTagStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockTagSetState(...args);
@@ -159,7 +176,14 @@ vi.mock("./stores/enrichmentStore", () => {
       data: mockEnrichmentData,
       loading: false,
       load: mockLoadEnrichments,
-      save: mockSaveEnrichments,
+      save: (patch: Record<string, unknown>) => {
+        if (mockEnrichmentSaveUsesDeepMerge) {
+          const merged = deepMergeRecords(mockEnrichmentData, patch);
+          mockEnrichmentData = merged;
+          return mockSaveEnrichments(merged);
+        }
+        return mockSaveEnrichments(patch);
+      },
       replace: mockReplaceEnrichments,
     });
   (useEnrichmentStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
@@ -172,14 +196,21 @@ vi.mock("./stores/enrichmentStore", () => {
       data: Record<string, unknown>;
       loading: boolean;
       load: () => Promise<void>;
-      save: typeof mockSaveEnrichments;
+      save: (patch: Record<string, unknown>) => unknown;
       replace: typeof mockReplaceEnrichments;
     };
   }).getState = () => ({
     data: mockEnrichmentData,
     loading: false,
     load: mockLoadEnrichments,
-    save: mockSaveEnrichments,
+    save: (patch: Record<string, unknown>) => {
+      if (mockEnrichmentSaveUsesDeepMerge) {
+        const merged = deepMergeRecords(mockEnrichmentData, patch);
+        mockEnrichmentData = merged;
+        return mockSaveEnrichments(merged);
+      }
+      return mockSaveEnrichments(patch);
+    },
     replace: mockReplaceEnrichments,
   });
   return { useEnrichmentStore };
@@ -476,6 +507,7 @@ beforeEach(() => {
   ];
   mockRecords = {};
   mockEnrichmentData = {};
+  mockEnrichmentSaveUsesDeepMerge = false;
   mockSelectedRegion = { start: 1.25, end: 2.5 };
   mockCurrentTime = 0;
   mockChatMessages = [];
@@ -927,8 +959,132 @@ describe("ParseUI", () => {
 
     expect(screen.getByText("/aw/")).toBeTruthy();
     expect(screen.getByText("/awa/")).toBeTruthy();
-    expect(screen.getByText("2 utterances")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Fail01-A")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Fail01-B")).toBeTruthy();
+    expect(screen.getByText("1 utterance")).toBeTruthy();
+    expect(screen.queryByTestId("realization-pill-Kzn03-A")).toBeNull();
     expect(screen.queryByText("/ramaːd/")).toBeNull();
+  });
+
+  it("saves canonical realization overrides from compare pills without expanding the row", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("realization-pill-Fail01-B"));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { canonical_realizations: { "1": { Fail01: 1 } } },
+    });
+    expect(screen.queryByTestId("lexeme-detail-row-Fail01")).toBeNull();
+  });
+
+
+  it("preserves existing manual_overrides when saving a canonical realization through enrichment deep merge", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+    mockEnrichmentData = {
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+      },
+    };
+
+    mockEnrichmentSaveUsesDeepMerge = true;
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("realization-pill-Fail01-B"));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: {
+        cognate_sets: { "1": { A: ["Fail01"] } },
+        speaker_flags: { "1": { Fail01: true } },
+        canonical_realizations: { "1": { Fail01: 1 } },
+      },
+    });
+  });
+
+  it("renders the expanded realization picker above lexeme detail", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("lexeme-chevron-Fail01"));
+
+    const detailRow = screen.getByTestId("lexeme-detail-row-Fail01");
+    expect(within(detailRow).getByText(/Realizations · pick one as canonical for BEAST2 export/i)).toBeTruthy();
+    const realizationA = within(detailRow).getByTestId("realization-row-Fail01-A");
+    expect(realizationA.textContent ?? "").toContain("/aw/");
+    expect(realizationA.textContent ?? "").toContain('"ئاو"');
+    expect(realizationA.textContent ?? "").toContain("0:01.0–0:02.0");
+    expect(within(detailRow).getByTestId("realization-play-Fail01-A")).toBeTruthy();
+    expect((within(detailRow).getByLabelText("Canonical") as HTMLInputElement).checked).toBe(true);
+    expect((within(detailRow).getByLabelText("Set canonical") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("marks the canonical realization pill with filled indigo styling", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+    mockEnrichmentData = {
+      manual_overrides: { canonical_realizations: { "1": { Fail01: 1 } } },
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByTestId("realization-pill-Fail01-B").className).toContain("bg-indigo-600");
+    expect(screen.getByTestId("realization-pill-Fail01-A").className).toContain("ring-slate-200");
+    expect(screen.getByText("/aːw/")).toBeTruthy();
   });
 
   it("wires compare Flag and Accept concept buttons to tag actions", () => {

@@ -54,9 +54,101 @@ describe('buildSpeakerForm', () => {
       similarityByLang: { ar: 0.9, fa: null },
       cognate: '—',
       flagged: false,
-      startSec: 10,
-      endSec: 10.5,
+      startSec: 10.1,
+      endSec: 10.4,
+      realizations: [
+        { ipa: 'muwi', ortho: 'مووی', startSec: 10.1, endSec: 10.4 },
+      ],
+      selectedIdx: 0,
     });
+  });
+
+  it('surfaces every IPA realization and defaults the canonical fields to realization A', () => {
+    const record = makeRecord({
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      ipa: [
+        { start: 10.1, end: 10.4, text: 'muwi' },
+        { start: 11.1, end: 11.4, text: 'muː' },
+        { start: 12.1, end: 12.4, text: 'moyi' },
+      ],
+      ortho_words: [
+        { start: 10.15, end: 10.35, text: 'مووی' },
+        { start: 11.15, end: 11.35, text: 'موو' },
+        { start: 12.15, end: 12.35, text: 'مۆی' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, concept, 'Fail02', {}, false, []);
+
+    expect(form.realizations).toEqual([
+      { ipa: 'muwi', ortho: 'مووی', startSec: 10.1, endSec: 10.4 },
+      { ipa: 'muː', ortho: 'موو', startSec: 11.1, endSec: 11.4 },
+      { ipa: 'moyi', ortho: 'مۆی', startSec: 12.1, endSec: 12.4 },
+    ]);
+    expect(form.selectedIdx).toBe(0);
+    expect(form.utterances).toBe(3);
+    expect(form.ipa).toBe('muwi');
+    expect(form.ortho).toBe('مووی');
+    expect(form.startSec).toBe(10.1);
+    expect(form.endSec).toBe(10.4);
+  });
+
+  it('selects the canonical realization from manual overrides', () => {
+    const record = makeRecord({
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      ipa: [
+        { start: 10.1, end: 10.4, text: 'muwi' },
+        { start: 11.1, end: 11.4, text: 'muː' },
+      ],
+      ortho_words: [
+        { start: 10.15, end: 10.35, text: 'مووی' },
+        { start: 11.15, end: 11.35, text: 'موو' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, concept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { hair: { Fail02: 1 } } },
+    }, false, []);
+
+    expect(form.selectedIdx).toBe(1);
+    expect(form.ipa).toBe('muː');
+    expect(form.ortho).toBe('موو');
+    expect(form.startSec).toBe(11.1);
+    expect(form.endSec).toBe(11.4);
+  });
+
+  it('clamps stale canonical overrides to the last available realization', () => {
+    const record = makeRecord({
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      ipa: [
+        { start: 10.1, end: 10.4, text: 'muwi' },
+        { start: 11.1, end: 11.4, text: 'muː' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, concept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { hair: { Fail02: 5 } } },
+    }, false, []);
+
+    expect(form.selectedIdx).toBe(1);
+    expect(form.ipa).toBe('muː');
+  });
+
+  it('coerces negative or non-integer canonical overrides to realization A', () => {
+    const record = makeRecord({
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      ipa: [
+        { start: 10.1, end: 10.4, text: 'muwi' },
+        { start: 11.1, end: 11.4, text: 'muː' },
+      ],
+    });
+
+    expect(buildSpeakerForm(record, concept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { hair: { Fail02: -1 } } },
+    }, false, []).selectedIdx).toBe(0);
+    expect(buildSpeakerForm(record, concept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { hair: { Fail02: 1.5 } } },
+    }, false, []).selectedIdx).toBe(0);
   });
 
   it('prefers manual cognate overrides and per-speaker flags over automatic enrichments', () => {
@@ -96,5 +188,7 @@ describe('buildSpeakerForm', () => {
     expect(form.endSec).toBeNull();
     expect(form.ipa).toBe('');
     expect(form.utterances).toBe(0);
+    expect(form.realizations).toEqual([]);
+    expect(form.selectedIdx).toBe(0);
   });
 });

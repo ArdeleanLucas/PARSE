@@ -11,6 +11,13 @@ export interface Concept {
   customOrder?: number;
 }
 
+export interface Realization {
+  ipa: string;
+  ortho: string;
+  startSec: number | null;
+  endSec: number | null;
+}
+
 export interface SpeakerForm {
   speaker: string;
   ipa: string;
@@ -21,6 +28,8 @@ export interface SpeakerForm {
   flagged: boolean;
   startSec: number | null;
   endSec: number | null;
+  realizations: Realization[];
+  selectedIdx: number;
 }
 
 export function buildSpeakerForm(
@@ -88,15 +97,38 @@ export function buildSpeakerForm(
     ? pickOrthoIntervalForConcept(record, primaryConceptInterval)?.text ?? ''
     : '';
 
+  // pickOrthoIntervalForConcept is strict to the passed interval, so each realization only shows IPA-aligned ortho.
+  const realizations: Realization[] = matchingIpaIntervals.map((ipaInterval) => ({
+    ipa: ipaInterval.text ?? '',
+    ortho: record ? pickOrthoIntervalForConcept(record, ipaInterval)?.text ?? '' : '',
+    startSec: typeof ipaInterval.start === 'number' ? ipaInterval.start : null,
+    endSec: typeof ipaInterval.end === 'number' ? ipaInterval.end : null,
+  }));
+
+  const canonicalOverrides = overrides && isRecord(overrides.canonical_realizations)
+    ? overrides.canonical_realizations as Record<string, unknown>
+    : null;
+  const conceptCanonical = canonicalOverrides && isRecord(canonicalOverrides[concept.key])
+    ? canonicalOverrides[concept.key] as Record<string, unknown>
+    : null;
+  const rawIdx = conceptCanonical?.[speaker];
+  const requestedIdx = typeof rawIdx === 'number' && Number.isInteger(rawIdx) && rawIdx >= 0 ? rawIdx : 0;
+  const selectedIdx = realizations.length > 0
+    ? Math.min(requestedIdx, realizations.length - 1)
+    : 0;
+  const canonical = realizations[selectedIdx];
+
   return {
     speaker,
-    ipa: matchingIpaIntervals[0]?.text ?? '',
-    ortho: orthoText,
-    utterances: matchingIpaIntervals.length,
+    ipa: canonical?.ipa ?? '',
+    ortho: canonical?.ortho ?? orthoText,
+    utterances: realizations.length,
     similarityByLang,
     cognate,
     flagged: speakerFlagged || flagged,
-    startSec: primaryConceptInterval ? primaryConceptInterval.start : null,
-    endSec: primaryConceptInterval ? primaryConceptInterval.end : null,
+    startSec: canonical?.startSec ?? null,
+    endSec: canonical?.endSec ?? null,
+    realizations,
+    selectedIdx,
   };
 }
