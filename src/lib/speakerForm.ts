@@ -1,5 +1,5 @@
 import type { AnnotationInterval, AnnotationRecord } from '../api/types';
-import { conceptMatchesIntervalText, isRecord, overlaps, pickOrthoIntervalForConcept } from './parseUIUtils';
+import { isRecord, overlaps, pickOrthoIntervalForConcept } from './parseUIUtils';
 import type { ConceptTag } from './parseUIUtils';
 
 export interface ConceptVariant {
@@ -78,11 +78,11 @@ function conceptIntervalsForKey(record: AnnotationRecord | null | undefined, con
 }
 
 function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: AnnotationInterval): boolean {
-  const intervalConceptId = interval.concept_id ?? null;
+  const intervalConceptId = String(interval.concept_id ?? '');
   if (concept.variants?.length) {
-    return concept.variants.some((variant) => variant.conceptKey === String(intervalConceptId ?? ''));
+    return concept.variants.some((variant) => variant.conceptKey === intervalConceptId);
   }
-  return conceptMatchesIntervalText(concept, intervalConceptId);
+  return concept.key === intervalConceptId;
 }
 
 function ipaIntervalsForConceptIntervals(record: AnnotationRecord | null | undefined, conceptIntervals: readonly AnnotationInterval[]): AnnotationInterval[] {
