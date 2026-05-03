@@ -353,7 +353,7 @@ import * as apiClient from "./api/client";
 
 function makeRecord(
   speaker: string,
-  concepts: Array<{ conceptText: string; ipa?: string; ortho?: string; start: number; end: number }>,
+  concepts: Array<{ conceptText: string; conceptId?: string; ipa?: string; ortho?: string; start: number; end: number }>,
 ): AnnotationRecord {
   const tier = (intervals: AnnotationInterval[]) => ({
     name: "tier",
@@ -369,7 +369,7 @@ function makeRecord(
       concept: {
         name: "concept",
         display_order: 3,
-        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: '1' })),
+        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: c.conceptId ?? '1' })),
       },
       speaker: { name: "speaker", display_order: 4, intervals: [] },
     },
@@ -636,6 +636,33 @@ describe("ParseUI", () => {
       expect(screen.getByTestId("concept-sort-survey").className).toContain("bg-white");
     });
     expect(screen.getByRole("button", { name: /forehead/i }).textContent ?? "").toContain("KLQ 1.2");
+  });
+
+  it("groups source_item sibling rows into one sidebar entry while leaving singleton concepts visible", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ", custom_order: 1 },
+        { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ", custom_order: 2 },
+        { id: "concept-c", label: "sister of husband", source_item: "2.16", source_survey: "KLQ", custom_order: 3 },
+        { id: "concept-d", label: "water" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
+    expect(within(sidebar).getByText("brother of husband")).toBeTruthy();
+    expect(within(sidebar).queryByText("brother of husband A")).toBeNull();
+    expect(within(sidebar).queryByText("brother of husband B")).toBeNull();
+    expect(within(sidebar).getByText("sister of husband")).toBeTruthy();
+    expect(within(sidebar).getByText("water")).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /brother of husband/i }).textContent ?? "").toContain("KLQ 2.15");
   });
 
   it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
@@ -987,6 +1014,48 @@ describe("ParseUI", () => {
     expect(screen.queryByText("/ramaːd/")).toBeNull();
   });
 
+  it("renders source-item variant pickers with imported A/B labels and persists overrides by source_item", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [
+        { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ" },
+        { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "brother of husband A", conceptId: "concept-a", ipa: "bra-a", ortho: "برا ئا", start: 1, end: 2 },
+        { conceptText: "brother of husband B", conceptId: "concept-b", ipa: "bra-b", ortho: "برا ب", start: 3, end: 4 },
+      ]),
+      Kalh01: makeRecord("Kalh01", [
+        { conceptText: "brother of husband A", conceptId: "concept-a", ipa: "kalh-a", ortho: "کەڵ ئا", start: 1, end: 2 },
+        { conceptText: "brother of husband B", conceptId: "concept-b", ipa: "kalh-b", ortho: "کەڵ ب", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByTestId("realization-pill-Fail01-A")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Fail01-B")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Kalh01-A")).toBeTruthy();
+    expect(screen.getByTestId("realization-pill-Kalh01-B")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("lexeme-chevron-Fail01"));
+    const detailRow = screen.getByTestId("lexeme-detail-row-Fail01");
+    expect(within(detailRow).getByText(/Realizations · pick one as canonical for BEAST2 export/i)).toBeTruthy();
+    expect(within(detailRow).queryByText(/Auto-detected realizations/i)).toBeNull();
+    expect(within(detailRow).queryByRole("button", { name: /Dismiss auto-detection/i })).toBeNull();
+
+    fireEvent.click(screen.getByTestId("realization-pill-Fail01-B"));
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { canonical_realizations: { "2.15": { Fail01: 1 } } },
+    });
+  });
+
   it("saves canonical realization overrides from compare pills without expanding the row", () => {
     mockConfig = {
       project_name: "PARSE",
@@ -1033,6 +1102,8 @@ describe("ParseUI", () => {
       manual_overrides: {
         cognate_sets: { "1": { A: ["Fail01"] } },
         speaker_flags: { "1": { Fail01: true } },
+        canonical_realizations: { "2.15": { Fail01: 0 } },
+        auto_detect_dismissed: { "2": { Fail01: true } },
       },
     };
 
@@ -1046,7 +1117,8 @@ describe("ParseUI", () => {
       manual_overrides: {
         cognate_sets: { "1": { A: ["Fail01"] } },
         speaker_flags: { "1": { Fail01: true } },
-        canonical_realizations: { "1": { Fail01: 1 } },
+        canonical_realizations: { "2.15": { Fail01: 0 }, "1": { Fail01: 1 } },
+        auto_detect_dismissed: { "2": { Fail01: true } },
       },
     });
   });
@@ -1072,7 +1144,8 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByTestId("lexeme-chevron-Fail01"));
 
     const detailRow = screen.getByTestId("lexeme-detail-row-Fail01");
-    expect(within(detailRow).getByText(/Realizations · pick one as canonical for BEAST2 export/i)).toBeTruthy();
+    expect(within(detailRow).getByText(/Auto-detected realizations · pick one as canonical, or/i)).toBeTruthy();
+    expect(within(detailRow).getByRole("button", { name: /Dismiss auto-detection/i })).toBeTruthy();
     const realizationA = within(detailRow).getByTestId("realization-row-Fail01-A");
     expect(realizationA.textContent ?? "").toContain("/aw/");
     expect(realizationA.textContent ?? "").toContain('"ئاو"');
@@ -1080,6 +1153,39 @@ describe("ParseUI", () => {
     expect(within(detailRow).getByTestId("realization-play-Fail01-A")).toBeTruthy();
     expect((within(detailRow).getByLabelText("Canonical") as HTMLInputElement).checked).toBe(true);
     expect((within(detailRow).getByLabelText("Set canonical") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("dismisses per-IPA auto-detection and re-renders the row as utterance count text", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        { conceptText: "water", ipa: "aːw", ortho: "ئاوی", start: 3, end: 4 },
+      ]),
+    };
+    mockEnrichmentSaveUsesDeepMerge = true;
+
+    const { rerender } = render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("lexeme-chevron-Fail01"));
+    fireEvent.click(screen.getByRole("button", { name: /Dismiss auto-detection/i }));
+
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { auto_detect_dismissed: { "1": { Fail01: true } } },
+    });
+
+    rerender(<ParseUI />);
+
+    expect(screen.queryByTestId("realization-pill-Fail01-A")).toBeNull();
+    expect(screen.queryByTestId("realization-pill-Fail01-B")).toBeNull();
+    expect(screen.getByText("2 utterances")).toBeTruthy();
   });
 
   it("marks the canonical realization pill with filled indigo styling", () => {

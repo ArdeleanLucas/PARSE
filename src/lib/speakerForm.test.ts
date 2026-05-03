@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../api/types';
 import { buildSpeakerForm } from './speakerForm';
+import type { Concept } from './speakerForm';
 
 function makeRecord(partial: {
   concept?: AnnotationInterval[];
@@ -60,6 +61,7 @@ describe('buildSpeakerForm', () => {
         { ipa: 'muwi', ortho: 'مووی', startSec: 10.1, endSec: 10.4 },
       ],
       selectedIdx: 0,
+      realizationsSource: 'single',
     });
   });
 
@@ -91,6 +93,7 @@ describe('buildSpeakerForm', () => {
     expect(form.ortho).toBe('مووی');
     expect(form.startSec).toBe(10.1);
     expect(form.endSec).toBe(10.4);
+    expect(form.realizationsSource).toBe('auto-detect');
   });
 
   it('selects the canonical realization from manual overrides', () => {
@@ -174,6 +177,162 @@ describe('buildSpeakerForm', () => {
     const form = buildSpeakerForm(record, concept, 'Fail02', enrichments, false, ['ar']);
     expect(form.cognate).toBe('A');
     expect(form.flagged).toBe(true);
+  });
+
+  it('builds source-item variant realizations from the longest IPA interval under each sibling concept', () => {
+    const sourceConcept: Concept = {
+      id: 1,
+      key: '2.15',
+      name: 'brother of husband',
+      tag: 'untagged',
+      sourceItem: '2.15',
+      variants: [
+        { conceptKey: 'concept-a', conceptEn: 'brother of husband A', variantLabel: 'A' },
+        { conceptKey: 'concept-b', conceptEn: 'brother of husband B', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'brother of husband A', concept_id: 'concept-a' },
+        { start: 3, end: 6, text: 'brother of husband A', concept_id: 'concept-a' },
+        { start: 7, end: 9, text: 'brother of husband B', concept_id: 'concept-b' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'bra-a-short' },
+        { start: 3.1, end: 5.8, text: 'bra-a-long' },
+        { start: 7.2, end: 8.4, text: 'bra-b' },
+      ],
+      ortho_words: [
+        { start: 3.2, end: 5.7, text: 'برا ئا' },
+        { start: 7.3, end: 8.3, text: 'برا ب' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, false, []);
+
+    expect(form.realizationsSource).toBe('source-item');
+    expect(form.realizations).toEqual([
+      { ipa: 'bra-a-long', ortho: 'برا ئا', startSec: 3.1, endSec: 5.8 },
+      { ipa: 'bra-b', ortho: 'برا ب', startSec: 7.2, endSec: 8.4 },
+    ]);
+    expect(form.utterances).toBe(2);
+    expect(form.selectedIdx).toBe(0);
+    expect(form.ipa).toBe('bra-a-long');
+  });
+
+  it('reads source-item canonical overrides from the source_item key', () => {
+    const sourceConcept: Concept = {
+      id: 1,
+      key: '2.15',
+      name: 'brother of husband',
+      tag: 'untagged',
+      sourceItem: '2.15',
+      variants: [
+        { conceptKey: 'concept-a', conceptEn: 'brother of husband A', variantLabel: 'A' },
+        { conceptKey: 'concept-b', conceptEn: 'brother of husband B', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'brother of husband A', concept_id: 'concept-a' },
+        { start: 3, end: 4, text: 'brother of husband B', concept_id: 'concept-b' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'bra-a' },
+        { start: 3.1, end: 3.4, text: 'bra-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {
+      manual_overrides: { canonical_realizations: { '2.15': { Fail02: 1 } } },
+    }, false, []);
+
+    expect(form.realizationsSource).toBe('source-item');
+    expect(form.selectedIdx).toBe(1);
+    expect(form.ipa).toBe('bra-b');
+  });
+
+  it('keeps empty source-item variant slots visible when a speaker is missing one sibling concept', () => {
+    const sourceConcept: Concept = {
+      id: 1,
+      key: '2.15',
+      name: 'brother of husband',
+      tag: 'untagged',
+      sourceItem: '2.15',
+      variants: [
+        { conceptKey: 'concept-a', conceptEn: 'brother of husband A', variantLabel: 'A' },
+        { conceptKey: 'concept-b', conceptEn: 'brother of husband B', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [{ start: 1, end: 2, text: 'brother of husband A', concept_id: 'concept-a' }],
+      ipa: [{ start: 1.1, end: 1.4, text: 'bra-a' }],
+      ortho_words: [{ start: 1.15, end: 1.35, text: 'برا ئا' }],
+    });
+
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, false, []);
+
+    expect(form.realizationsSource).toBe('source-item');
+    expect(form.realizations).toEqual([
+      { ipa: 'bra-a', ortho: 'برا ئا', startSec: 1.1, endSec: 1.4 },
+      { ipa: '', ortho: '', startSec: null, endSec: null },
+    ]);
+    expect(form.utterances).toBe(2);
+  });
+
+  it('collapses per-IPA auto-detection when the speaker dismiss flag is set', () => {
+    const record = makeRecord({
+      concept: [{ start: 10, end: 14, text: 'hair', concept_id: '1' }],
+      ipa: [
+        { start: 10.1, end: 10.4, text: 'muwi' },
+        { start: 11.1, end: 12.4, text: 'muː-long' },
+      ],
+      ortho_words: [
+        { start: 10.15, end: 10.35, text: 'مووی' },
+        { start: 11.15, end: 12.35, text: 'موو' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, concept, 'Fail02', {
+      manual_overrides: { auto_detect_dismissed: { hair: { Fail02: true } } },
+    }, false, []);
+
+    expect(form.realizationsSource).toBe('single');
+    expect(form.realizations).toEqual([
+      { ipa: 'muː-long', ortho: 'موو', startSec: 11.1, endSec: 12.4 },
+    ]);
+    expect(form.utterances).toBe(2);
+  });
+
+  it('prioritizes source-item variants over per-concept auto-detect dismissal', () => {
+    const sourceConcept: Concept = {
+      id: 1,
+      key: '2.15',
+      name: 'brother of husband',
+      tag: 'untagged',
+      sourceItem: '2.15',
+      variants: [
+        { conceptKey: 'concept-a', conceptEn: 'brother of husband A', variantLabel: 'A' },
+        { conceptKey: 'concept-b', conceptEn: 'brother of husband B', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'brother of husband A', concept_id: 'concept-a' },
+        { start: 3, end: 4, text: 'brother of husband B', concept_id: 'concept-b' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'bra-a' },
+        { start: 3.1, end: 3.4, text: 'bra-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {
+      manual_overrides: { auto_detect_dismissed: { 'concept-a': { Fail02: true } } },
+    }, false, []);
+
+    expect(form.realizationsSource).toBe('source-item');
+    expect(form.realizations).toHaveLength(2);
   });
 
   it('preserves external flagged state and leaves timing empty when no concept interval matches', () => {
