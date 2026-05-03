@@ -56,11 +56,11 @@ def test_full_pipeline_preflight_error_carries_structured_details(monkeypatch: p
     monkeypatch.setattr(server, "_host_available_memory_gb", lambda: 1.25, raising=False)
     job_id = server._create_job("compute:full_pipeline", {"speaker": "anon-rss"})
 
-    with pytest.raises(RuntimeError):
-        server._compute_full_pipeline(
-            job_id,
-            {"speaker": "anon-rss", "steps": ["stt"], "run_mode": "concept-windows"},
-        )
+    server._run_compute_job(
+        job_id,
+        "full_pipeline",
+        {"speaker": "anon-rss", "steps": ["stt"], "run_mode": "concept-windows"},
+    )
 
     snapshot = server._get_job_snapshot(job_id)
     assert snapshot is not None
@@ -68,6 +68,12 @@ def test_full_pipeline_preflight_error_carries_structured_details(monkeypatch: p
     assert snapshot["mem_available_gb"] == pytest.approx(1.25)
     assert snapshot["required_gb"] == pytest.approx(3.5)
     assert snapshot["swap_total_gb"] == pytest.approx(0.5)
+    persisted_error_logs = [
+        entry
+        for entry in snapshot.get("logs", [])
+        if entry.get("event") in {"job.error", "job.failed"}
+    ]
+    assert len(persisted_error_logs) == 1
     payload = server._job_response_payload(snapshot)
     assert payload["mem_available_gb"] == pytest.approx(1.25)
     assert payload["required_gb"] == pytest.approx(3.5)
@@ -85,11 +91,11 @@ def test_full_pipeline_preflight_marks_job_error_code_as_oom_suspect(monkeypatch
     monkeypatch.setattr(server, "_host_available_memory_gb", lambda: 1.0, raising=False)
     job_id = server._create_job("compute:full_pipeline", {"speaker": "anon-rss"})
 
-    with pytest.raises(RuntimeError):
-        server._compute_full_pipeline(
-            job_id,
-            {"speaker": "anon-rss", "steps": ["stt"], "run_mode": "concept-windows"},
-        )
+    server._run_compute_job(
+        job_id,
+        "full_pipeline",
+        {"speaker": "anon-rss", "steps": ["stt"], "run_mode": "concept-windows"},
+    )
 
     snapshot = server._get_job_snapshot(job_id)
     assert snapshot is not None

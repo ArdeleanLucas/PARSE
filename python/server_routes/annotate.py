@@ -2464,11 +2464,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     if not selected:
         return {'speaker': speaker, 'steps_run': [], 'results': {}, 'message': 'No steps selected'}
     _set_compute_progress(job_id, 1.0, message='Full pipeline host-memory preflight')
-    try:
-        _server._ensure_host_memory_for_full_pipeline(selected)
-    except FullPipelineMemoryPreflightError as exc:
-        _server._set_job_error(job_id, str(exc), error_code=exc.error_code, details=exc.details)
-        raise
+    _server._ensure_host_memory_for_full_pipeline(selected)
     overwrites_raw = payload.get('overwrites') or {}
     if not isinstance(overwrites_raw, dict):
         overwrites_raw = {}
