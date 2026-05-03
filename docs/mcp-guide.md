@@ -18,8 +18,8 @@ These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflo
 - **58** built-in `ParseChatTools`
 - **58** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `DEFAULT_MCP_WORKFLOW_TOOL_NAMES`
-- **61** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
-- **61** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
+- **62** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
+- **62** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
 - **38** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
 - **42** total adapter tools when `config/mcp_config.json` or `mcp_config.json` explicitly sets `{ "expose_all_tools": false }`
 

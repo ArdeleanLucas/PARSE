@@ -263,6 +263,10 @@ Compare mode is the cross-speaker analysis workspace for historical and comparat
 The current Compare interface provides:
 
 - a **concept × speaker matrix** for side-by-side lexical review
+- source-aware sidebar badges and sorting from `concepts.csv` `source_survey` / `source_item` values
+- grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
+- per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
+- manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
@@ -280,10 +284,12 @@ Typical use:
 
 1. Open a concept row across speakers
 2. Review the forms side by side
-3. Accept, split, merge, or cycle cognate groups
-4. Mark speaker-level irregularities or flags where needed
-5. Consult enrichment overlays and contact-language evidence
-6. Preserve manual adjudications for export
+3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations
+4. Use concept merge/unmerge when two source concepts should be compared as one analytical row, while preserving the original concept ids underneath
+5. Accept, split, merge, or cycle cognate groups
+6. Mark speaker-level irregularities or flags where needed
+7. Consult enrichment overlays and contact-language evidence
+8. Preserve manual adjudications for export
 
 The goal is not just visualization — it is structured decision-making for downstream comparative analysis.
 

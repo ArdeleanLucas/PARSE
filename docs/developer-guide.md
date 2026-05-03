@@ -190,8 +190,10 @@ It supports:
 
 Relevant knobs and files:
 
-- `PARSE_COMPUTE_MODE` or `python python/server.py --compute-mode=...`
+- `PARSE_COMPUTE_MODE` or `python python/server.py --compute-mode=...`; `scripts/parse-run.sh` warns when the mode is unset
 - `PARSE_USE_PERSISTENT_WORKER=true` for the persistent-worker path
+- `PARSE_FULL_PIPELINE_MIN_MEM_GB` for the host-memory preflight that turns low-memory full-pipeline starts into structured `oom_suspect` job errors
+- `PARSE_JOB_SNAPSHOT_DIR` for durable job snapshots; otherwise snapshots live under the workspace `.parse/jobs` directory and non-terminal records recover after restart as `server_restarted`
 - `GET /api/worker/status` for persistent-worker health checks
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
 - `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`

@@ -268,7 +268,9 @@ The launcher and MCP adapter both rely on a shared set of `PARSE_*` environment 
 | `PARSE_SKIP_PULL` | `0` | Skip the `git pull` step in `parse-run.sh`. |
 | `PARSE_PULL_MODE` | `auto` | Git integration strategy: `auto`, `ff`, `rebase`, or `reset`. |
 | `PARSE_USE_PERSISTENT_WORKER` | empty | Enable the persistent compute worker path so wav2vec2 can stay warm across jobs. |
-| `PARSE_COMPUTE_MODE` | empty | Explicit compute launcher mode such as `thread`, `subprocess`, or `persistent`. |
+| `PARSE_COMPUTE_MODE` | empty | Explicit compute launcher mode such as `thread`, `subprocess`, or `persistent`; `scripts/parse-run.sh` warns when this is unset so operators notice the legacy default. |
+| `PARSE_FULL_PIPELINE_MIN_MEM_GB` | backend default | Minimum host `MemAvailable` GiB required before memory-heavy full-pipeline steps; low-memory failures are reported as `oom_suspect`. |
+| `PARSE_JOB_SNAPSHOT_DIR` | workspace `.parse/jobs` | Durable JSON job snapshots used to recover interrupted jobs as `server_restarted` after backend restart. |
 
 ### `.parse-env` for machine-local overrides
 
@@ -382,6 +384,7 @@ The current backend runtime has a few operational features that are easy to miss
   - `persistent` — preloads wav2vec2 once and reuses it across compute jobs
 - `GET /api/worker/status` is the health endpoint for persistent-worker deployments
 - if you supervise the backend with PM2, the tracked file is `deploy/pm2-ecosystem.config.cjs`, and `cwd` should point at the **live workspace**, not just the git checkout
+- full-pipeline jobs now run a host-memory preflight before memory-heavy steps; failures surface `oom_suspect` rather than silently wedging, and durable job snapshots let restarted servers report interrupted jobs as `server_restarted`
 - the PM2 config also documents WSL safety defaults such as `PARSE_STT_FORCE_CPU=1` and `CUDA_VISIBLE_DEVICES=""` for all-CPU fallback operation on unstable GPU stacks
 
 For provider-specific details, see [AI Integration](./ai-integration.md).
