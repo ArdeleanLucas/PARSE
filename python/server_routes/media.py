@@ -247,7 +247,14 @@ def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[
         if not audition_prefix:
             audition_prefix = 'row_{0}'.format(import_index)
         cid, _was_allocated = resolve_or_allocate_concept_id(registry, label)
-        resolved.append({'id': cid, 'label': label, 'audition_prefix': audition_prefix, 'source_item': source_item_from_audition_row(row)})
+        source_item, source_survey = source_item_from_audition_row(row)
+        resolved.append({
+            'id': cid,
+            'label': label,
+            'audition_prefix': audition_prefix,
+            'source_item': source_item,
+            'source_survey': source_survey,
+        })
     return resolved
 
 
