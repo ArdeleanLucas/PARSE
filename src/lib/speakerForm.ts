@@ -31,6 +31,7 @@ export interface SpeakerForm {
   ipa: string;
   ortho: string;
   utterances: number;
+  variantCount: number;
   similarityByLang: Record<string, number | null>;
   cognate: string;
   flagged: boolean;
@@ -74,6 +75,14 @@ function pickLongestInterval(intervals: readonly AnnotationInterval[]): Annotati
 
 function conceptIntervalsForKey(record: AnnotationRecord | null | undefined, conceptKey: string): AnnotationInterval[] {
   return (record?.tiers.concept?.intervals ?? []).filter((interval) => String(interval.concept_id ?? '') === conceptKey);
+}
+
+function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: AnnotationInterval): boolean {
+  const intervalConceptId = interval.concept_id ?? null;
+  if (concept.variants?.length) {
+    return concept.variants.some((variant) => variant.conceptKey === String(intervalConceptId ?? ''));
+  }
+  return conceptMatchesIntervalText(concept, intervalConceptId);
 }
 
 function ipaIntervalsForConceptIntervals(record: AnnotationRecord | null | undefined, conceptIntervals: readonly AnnotationInterval[]): AnnotationInterval[] {
@@ -128,8 +137,9 @@ export function buildSpeakerForm(
   flagged: boolean,
   primaryContactCodes: readonly string[],
 ): SpeakerForm {
-  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptMatchesIntervalText(concept, interval.concept_id ?? null));
+  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptIntervalMatchesSpeakerFormConcept(concept, interval));
   const matchingIpaIntervals = ipaIntervalsForConceptIntervals(record, conceptIntervals);
+  const utterances = matchingIpaIntervals.length;
 
   const similarityRoot = isRecord(enrichments.similarity) ? enrichments.similarity : null;
   const conceptSimilarity = similarityRoot && isRecord(similarityRoot[concept.key]) ? similarityRoot[concept.key] as Record<string, unknown> : null;
@@ -196,7 +206,8 @@ export function buildSpeakerForm(
       speaker,
       ipa: canonical?.ipa ?? '',
       ortho: canonical?.ortho ?? orthoText,
-      utterances: realizations.length,
+      utterances,
+      variantCount: realizations.length,
       similarityByLang,
       cognate,
       flagged: speakerFlagged || flagged,
@@ -210,7 +221,6 @@ export function buildSpeakerForm(
 
   // pickOrthoIntervalForConcept is strict to the passed interval, so each realization only shows IPA-aligned ortho.
   let realizations: Realization[] = matchingIpaIntervals.map((ipaInterval) => realizationFromIpaInterval(record, ipaInterval));
-  const utterances = matchingIpaIntervals.length;
   let realizationsSource: SpeakerForm['realizationsSource'] = realizations.length > 1 ? 'auto-detect' : 'single';
   let selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
 
@@ -222,12 +232,14 @@ export function buildSpeakerForm(
   }
 
   const canonical = realizations[selectedIdx];
+  const variantCount = realizations.length;
 
   return {
     speaker,
     ipa: canonical?.ipa ?? '',
     ortho: canonical?.ortho ?? orthoText,
     utterances,
+    variantCount,
     similarityByLang,
     cognate,
     flagged: speakerFlagged || flagged,

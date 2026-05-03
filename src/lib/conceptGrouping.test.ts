@@ -29,14 +29,40 @@ describe('groupConceptEntries', () => {
       { conceptKey: 'concept-b', conceptEn: 'brother of husband B', variantLabel: 'B' },
     ]);
     expect(grouped[1]).toMatchObject({
-      id: 3,
+      id: 2,
       key: 'concept-c',
       name: 'sister of husband',
       sourceSurvey: 'KLQ',
     });
     expect(grouped[1].sourceItem).toBe('2.16');
     expect(grouped[1].variants).toBeUndefined();
-    expect(grouped[2]).toMatchObject({ id: 4, key: 'concept-d', name: 'water' });
+    expect(grouped[2]).toMatchObject({ id: 3, key: 'concept-d', name: 'water' });
+  });
+
+  it('groups non-adjacent source_item siblings while preserving the position of the first sibling', () => {
+    const entries: ConceptEntry[] = [
+      { id: 'a', label: 'brother of husband A', source_item: '2.15' },
+      { id: 'c', label: 'sister-in-law', source_item: '2.16' },
+      { id: 'b', label: 'brother of husband B', source_item: '2.15' },
+    ];
+    const grouped = groupConceptEntries(entries, untagged);
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].name).toBe('brother of husband');
+    expect(grouped[0].variants).toHaveLength(2);
+    expect(grouped[0].variants?.map(v => v.conceptKey)).toEqual(['a', 'b']);
+    expect(grouped[1].key).toBe('c');
+    expect(grouped[1].name).toBe('sister-in-law');
+  });
+
+  it('emits contiguous concept ids regardless of how many siblings are absorbed', () => {
+    const entries: ConceptEntry[] = [
+      { id: 'a', label: 'brother A', source_item: '2.15' },
+      { id: 'b', label: 'brother B', source_item: '2.15' },
+      { id: 'c', label: 'sister', source_item: '2.16' },
+      { id: 'd', label: 'water' },
+    ];
+    const grouped = groupConceptEntries(entries, untagged);
+    expect(grouped.map(g => g.id)).toEqual([1, 2, 3]);
   });
 
   it('uses sequential variant labels when concept_en has no trailing capital suffix', () => {

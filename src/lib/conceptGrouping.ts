@@ -42,10 +42,10 @@ function variantStemFor(labels: readonly string[]): string {
   return stripTrailingVariantSuffix(labels[0] ?? '');
 }
 
-function singletonConcept(entry: ConceptEntry, index: number, resolveTag: ResolveConceptTag): Concept {
+function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: ResolveConceptTag): Concept {
   const sourceItem = normalizeSourceItem(entry.source_item) ?? undefined;
   return {
-    id: index + 1,
+    id: emittedId,
     key: entry.id,
     name: entry.label,
     tag: resolveTag([entry.id]),
@@ -70,20 +70,24 @@ export function groupConceptEntries(
 
   const grouped: Concept[] = [];
   const emittedSourceItems = new Set<string>();
-  rawConcepts.forEach((entry, index) => {
+  let emittedId = 0;
+  rawConcepts.forEach((entry) => {
     const sourceItem = normalizeSourceItem(entry.source_item);
     if (!sourceItem) {
-      grouped.push(singletonConcept(entry, index, resolveTag));
+      emittedId += 1;
+      grouped.push(singletonConcept(entry, emittedId, resolveTag));
       return;
     }
 
     const siblings = sourceBuckets.get(sourceItem) ?? [];
     if (siblings.length < 2) {
-      grouped.push(singletonConcept(entry, index, resolveTag));
+      emittedId += 1;
+      grouped.push(singletonConcept(entry, emittedId, resolveTag));
       return;
     }
     if (emittedSourceItems.has(sourceItem)) return;
     emittedSourceItems.add(sourceItem);
+    emittedId += 1;
 
     const siblingEntries = siblings.map((siblingIndex) => rawConcepts[siblingIndex]);
     const variants: ConceptVariant[] = siblingEntries.map((sibling, siblingIndex) => ({
@@ -94,7 +98,7 @@ export function groupConceptEntries(
     const conceptKeys = siblingEntries.map((sibling) => sibling.id);
 
     grouped.push({
-      id: index + 1,
+      id: emittedId,
       key: sourceItem,
       name: variantStemFor(siblingEntries.map((sibling) => sibling.label)),
       tag: resolveTag(conceptKeys),

@@ -52,6 +52,7 @@ describe('buildSpeakerForm', () => {
       ipa: 'muwi',
       ortho: 'مووی',
       utterances: 1,
+      variantCount: 1,
       similarityByLang: { ar: 0.9, fa: null },
       cognate: '—',
       flagged: false,
@@ -88,6 +89,7 @@ describe('buildSpeakerForm', () => {
       { ipa: 'moyi', ortho: 'مۆی', startSec: 12.1, endSec: 12.4 },
     ]);
     expect(form.selectedIdx).toBe(0);
+    expect(form.variantCount).toBe(3);
     expect(form.utterances).toBe(3);
     expect(form.ipa).toBe('muwi');
     expect(form.ortho).toBe('مووی');
@@ -114,6 +116,7 @@ describe('buildSpeakerForm', () => {
     }, false, []);
 
     expect(form.selectedIdx).toBe(1);
+    expect(form.variantCount).toBe(2);
     expect(form.ipa).toBe('muː');
     expect(form.ortho).toBe('موو');
     expect(form.startSec).toBe(11.1);
@@ -215,7 +218,8 @@ describe('buildSpeakerForm', () => {
       { ipa: 'bra-a-long', ortho: 'برا ئا', startSec: 3.1, endSec: 5.8 },
       { ipa: 'bra-b', ortho: 'برا ب', startSec: 7.2, endSec: 8.4 },
     ]);
-    expect(form.utterances).toBe(2);
+    expect(form.utterances).toBe(3);
+    expect(form.variantCount).toBe(2);
     expect(form.selectedIdx).toBe(0);
     expect(form.ipa).toBe('bra-a-long');
   });
@@ -249,6 +253,7 @@ describe('buildSpeakerForm', () => {
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.selectedIdx).toBe(1);
+    expect(form.variantCount).toBe(2);
     expect(form.ipa).toBe('bra-b');
   });
 
@@ -277,7 +282,8 @@ describe('buildSpeakerForm', () => {
       { ipa: 'bra-a', ortho: 'برا ئا', startSec: 1.1, endSec: 1.4 },
       { ipa: '', ortho: '', startSec: null, endSec: null },
     ]);
-    expect(form.utterances).toBe(2);
+    expect(form.utterances).toBe(1);
+    expect(form.variantCount).toBe(2);
   });
 
   it('collapses per-IPA auto-detection when the speaker dismiss flag is set', () => {
@@ -302,6 +308,7 @@ describe('buildSpeakerForm', () => {
       { ipa: 'muː-long', ortho: 'موو', startSec: 11.1, endSec: 12.4 },
     ]);
     expect(form.utterances).toBe(2);
+    expect(form.variantCount).toBe(1);
   });
 
   it('prioritizes source-item variants over per-concept auto-detect dismissal', () => {
