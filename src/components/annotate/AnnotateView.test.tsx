@@ -12,7 +12,32 @@ let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, e
 let mockCurrentTime = 0;
 let mockDuration = 4;
 let mockIsPlaying = false;
-let mockTags: Array<{ id: string; concepts: string[] }> = [];
+let mockTags: Array<{ id: string; label: string; color: string }> = [];
+
+const mockSetConceptTag = vi.fn((speaker: string, conceptId: string, tagId: string) => {
+  expect(speaker).toBe('Fail01');
+  if (!mockRecord) return;
+  const nextTags = new Set(mockRecord.concept_tags?.[conceptId] ?? []);
+  nextTags.add(tagId);
+  mockRecord = {
+    ...mockRecord,
+    concept_tags: {
+      ...(mockRecord.concept_tags ?? {}),
+      [conceptId]: Array.from(nextTags),
+    },
+  };
+});
+const mockSetConfirmedAnchor = vi.fn((speaker: string, conceptId: string, anchor: { start: number; end: number; matched_text?: string } | null) => {
+  expect(speaker).toBe('Fail01');
+  if (!mockRecord) return;
+  const nextAnchors = { ...(mockRecord.confirmed_anchors ?? {}) };
+  if (anchor) {
+    nextAnchors[conceptId] = anchor;
+  } else {
+    delete nextAnchors[conceptId];
+  }
+  mockRecord = { ...mockRecord, confirmed_anchors: nextAnchors };
+});
 
 const applyIntervalToMockRecord = (tier: string, interval: AnnotationInterval) => {
   if (!mockRecord) {
@@ -44,13 +69,6 @@ const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockUndo = vi.fn();
 const mockRedo = vi.fn();
-const mockTagConcept = vi.fn((tagId: string, conceptId: string) => {
-  mockTags = mockTags.map((tag) =>
-    tag.id === tagId && !tag.concepts.includes(conceptId)
-      ? { ...tag, concepts: [...tag.concepts, conceptId] }
-      : tag,
-  );
-});
 const mockSeek = vi.fn();
 const mockAddRegion = vi.fn();
 const mockScrollToTimeAtFraction = vi.fn();
@@ -80,6 +98,8 @@ vi.mock('../../stores/annotationStore', () => ({
     saveSpeaker: mockSaveSpeaker,
     undo: mockUndo,
     redo: mockRedo,
+    setConceptTag: mockSetConceptTag,
+    setConfirmedAnchor: mockSetConfirmedAnchor,
     histories: {},
   }),
 }));
@@ -98,7 +118,6 @@ vi.mock('../../stores/playbackStore', () => {
 vi.mock('../../stores/tagStore', () => ({
   useTagStore: (selector: (state: unknown) => unknown) => selector({
     tags: mockTags,
-    tagConcept: mockTagConcept,
   }),
 }));
 
@@ -159,25 +178,19 @@ describe('AnnotateView', () => {
     mockDuration = 4;
     mockIsPlaying = false;
     mockTags = [
-      { id: 'review-needed', concepts: [] },
-      { id: 'confirmed', concepts: [] },
-      { id: 'problematic', concepts: [] },
+      { id: 'review-needed', label: 'Review needed', color: '#f59e0b' },
+      { id: 'confirmed', label: 'Confirmed', color: '#16a34a' },
+      { id: 'problematic', label: 'Problematic', color: '#ef4444' },
     ];
     mockSetInterval.mockClear();
     mockSaveLexemeAnnotation.mockReset();
     mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
-    mockTagConcept.mockImplementation((tagId: string, conceptId: string) => {
-      mockTags = mockTags.map((tag) =>
-        tag.id === tagId && !tag.concepts.includes(conceptId)
-          ? { ...tag, concepts: [...tag.concepts, conceptId] }
-          : tag,
-      );
-    });
+    mockSetConceptTag.mockClear();
+    mockSetConfirmedAnchor.mockClear();
     mockMoveIntervalAcrossTiers.mockClear();
     mockSaveSpeaker.mockClear();
     mockUndo.mockClear();
     mockRedo.mockClear();
-    mockTagConcept.mockClear();
     mockSeek.mockClear();
     mockAddRegion.mockClear();
     mockScrollToTimeAtFraction.mockClear();
@@ -279,12 +292,15 @@ describe('AnnotateView', () => {
 
     fireEvent.click(markDone);
 
-    expect(markDone.getAttribute('aria-pressed')).toBe('true');
-    expect(markDone.className).toContain('bg-emerald-700');
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+    expect(mockSetConfirmedAnchor).toHaveBeenCalledWith('Fail01', 'water', expect.objectContaining({
+      start: 1,
+      end: 2,
+      matched_text: 'water',
+    }));
     expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done.');
 
-    fireEvent.click(markDone);
-    expect(mockTagConcept).toHaveBeenCalledTimes(1);
+    expect(mockSetConceptTag).toHaveBeenCalledTimes(1);
 
     act(() => {
       vi.advanceTimersByTime(1700);
@@ -674,7 +690,7 @@ describe('AnnotateView', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /mark done/i }));
-    expect(mockTagConcept).toHaveBeenCalledWith('confirmed', 'water');
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
   });
 
   it('left-click on the Spectrogram button shows the spectrogram row beneath the waveform', () => {

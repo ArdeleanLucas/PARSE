@@ -40,9 +40,6 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   const addTag = useTagStore((s) => s.addTag);
   const removeTag = useTagStore((s) => s.removeTag);
   const updateTag = useTagStore((s) => s.updateTag);
-  const tagConcept = useTagStore((s) => s.tagConcept);
-  const untagConcept = useTagStore((s) => s.untagConcept);
-  const getTagsForConcept = useTagStore((s) => s.getTagsForConcept);
   const config = useConfigStore((s: { config: ProjectConfig | null }) => s.config);
 
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -84,37 +81,20 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
     setEditingId(null);
   }
 
-  function isConceptTagged(conceptId: string): boolean {
-    if (!selectedTagId) return false;
-    const conceptTags = getTagsForConcept(conceptId);
-    return conceptTags.some((t) => t.id === selectedTagId);
+  function isConceptTagged(_conceptId: string): boolean {
+    return false;
   }
 
-  function toggleConcept(conceptId: string) {
-    if (!selectedTagId) return;
-    if (isConceptTagged(conceptId)) {
-      untagConcept(selectedTagId, conceptId);
-    } else {
-      tagConcept(selectedTagId, conceptId);
-    }
+  function toggleConcept(_conceptId: string) {
+    return;
   }
 
   function tagAllVisible() {
-    if (!selectedTagId) return;
-    for (const c of filteredConcepts) {
-      if (!isConceptTagged(c.id)) {
-        tagConcept(selectedTagId, c.id);
-      }
-    }
+    return;
   }
 
   function untagAllVisible() {
-    if (!selectedTagId) return;
-    for (const c of filteredConcepts) {
-      if (isConceptTagged(c.id)) {
-        untagConcept(selectedTagId, c.id);
-      }
-    }
+    return;
   }
 
   return (
@@ -183,7 +163,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                       fontFamily: "monospace",
                     }}
                   >
-                    {tag.concepts.length}
+                    {0}
                   </span>
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); startEdit(tag); }}>
                     Edit

@@ -60,6 +60,8 @@ export interface AnnotationStoreActionsSlice {
     conceptId: string,
     anchor: ConfirmedAnchor | null,
   ) => void;
+  setConceptTag: (speaker: string, conceptId: string, tagId: string) => void;
+  clearConceptTag: (speaker: string, conceptId: string, tagId: string) => void;
   setIpaReview: (speaker: string, key: string, review: IpaReviewState | null) => void;
   moveIntervalAcrossTiers: (
     speaker: string,

@@ -180,7 +180,7 @@ describe("tags API client contracts", () => {
 
   it("fetches the unified tag registry", async () => {
     const payload = {
-      tags: [{ id: "t1", label: "archaic", color: "#3554B8", concepts: ["sister"], lexemeTargets: [] }],
+      tags: [{ id: "t1", label: "archaic", color: "#3554B8" }],
     };
     fetchMock.mockResolvedValue({
       ok: true,
@@ -194,7 +194,7 @@ describe("tags API client contracts", () => {
   });
 
   it("replaces the unified tag registry through PUT /api/tags", async () => {
-    const tags = [{ id: "t2", label: "dialectal", color: "#0f766e", concepts: ["water"], lexemeTargets: [] }];
+    const tags = [{ id: "t2", label: "dialectal", color: "#0f766e" }];
     fetchMock.mockResolvedValue({
       ok: true,
       status: 204,

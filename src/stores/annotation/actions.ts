@@ -420,6 +420,47 @@ export function createAnnotationActionsSlice(
       );
     },
 
+    setConceptTag: (speaker: string, conceptId: string, tagId: string) => {
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return;
+
+      const clone = deepClone(pre);
+      const key = String(conceptId);
+      const existing = { ...(clone.concept_tags ?? {}) };
+      const current = existing[key] ?? [];
+      if (current.includes(tagId)) return;
+      existing[key] = [...current, tagId];
+      clone.concept_tags = existing;
+      clone.modified_at = nowIsoUtc();
+
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "tag concept");
+    },
+
+    clearConceptTag: (speaker: string, conceptId: string, tagId: string) => {
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return;
+
+      const clone = deepClone(pre);
+      const key = String(conceptId);
+      const existing = { ...(clone.concept_tags ?? {}) };
+      const current = existing[key] ?? [];
+      if (!current.includes(tagId)) return;
+      const next = current.filter((id) => id !== tagId);
+      if (next.length > 0) {
+        existing[key] = next;
+      } else {
+        delete existing[key];
+      }
+      clone.concept_tags = existing;
+      if (tagId === "confirmed" && clone.confirmed_anchors?.[key]) {
+        clone.confirmed_anchors = { ...clone.confirmed_anchors };
+        delete clone.confirmed_anchors[key];
+      }
+      clone.modified_at = nowIsoUtc();
+
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "clear concept tag");
+    },
+
     setIpaReview: (speaker: string, key: string, review: IpaReviewState | null) => {
       const pre = selectSpeakerRecord(get(), speaker);
       if (!pre) return;

@@ -24,15 +24,29 @@ const mockSetInterval = vi.fn();
 const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockMarkLexemeManuallyAdjusted = vi.fn();
-const mockGetTagsForConcept = (conceptId: string) => mockTags.filter((tag) => tag.concepts.includes(conceptId));
-const mockTagConcept = vi.fn((tagId: string, conceptId: string) => {
-  mockTags = mockTags.map((tag) =>
-    tag.id === tagId && !tag.concepts.includes(conceptId)
-      ? { ...tag, concepts: [...tag.concepts, conceptId] }
-      : tag,
-  );
+const mockSetConceptTag = vi.fn((speaker: string, conceptId: string, tagId: string) => {
+  const record = mockRecords[speaker] ?? { speaker_id: speaker, intervals: {}, modified_at: '' };
+  const nextTags = new Set(record.concept_tags?.[conceptId] ?? []);
+  nextTags.add(tagId);
+  mockRecords = {
+    ...mockRecords,
+    [speaker]: {
+      ...record,
+      concept_tags: { ...(record.concept_tags ?? {}), [conceptId]: Array.from(nextTags) },
+    },
+  };
 });
-const mockUntagConcept = vi.fn();
+const mockClearConceptTag = vi.fn((speaker: string, conceptId: string, tagId: string) => {
+  const record = mockRecords[speaker];
+  if (!record) return;
+  const nextTags = (record.concept_tags?.[conceptId] ?? []).filter((id) => id !== tagId);
+  const concept_tags = { ...(record.concept_tags ?? {}) };
+  if (nextTags.length) concept_tags[conceptId] = nextTags;
+  else delete concept_tags[conceptId];
+  mockRecords = { ...mockRecords, [speaker]: { ...record, concept_tags } };
+});
+const mockSetConfirmedAnchor = vi.fn();
+const mockClearConfirmedAnchor = vi.fn();
 const mockUpdateTag = vi.fn();
 const mockSetSelectedRegion = vi.fn();
 const mockSetActiveSpeaker = vi.fn();
@@ -92,10 +106,6 @@ vi.mock("./stores/tagStore", () => {
       hydrate: mockHydrateTags,
       syncFromServer: mockSyncTagsFromServer,
       updateTag: mockUpdateTag,
-      tagConcept: mockTagConcept,
-      untagConcept: mockUntagConcept,
-      getTagsForConcept: mockGetTagsForConcept,
-      getTagsForLexeme: vi.fn(() => []),
     });
   (useTagStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockTagSetState(...args);
@@ -109,6 +119,10 @@ vi.mock("./stores/annotationStore", () => {
       histories: {},
       loadSpeaker: mockLoadSpeaker,
       setInterval: mockSetInterval,
+      setConceptTag: mockSetConceptTag,
+      clearConceptTag: mockClearConceptTag,
+      setConfirmedAnchor: mockSetConfirmedAnchor,
+      clearConfirmedAnchor: mockClearConfirmedAnchor,
       saveLexemeAnnotation: mockSaveLexemeAnnotation,
       saveSpeaker: mockSaveSpeaker,
       markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
@@ -506,9 +520,9 @@ beforeEach(() => {
     annotations_dir: "annotations",
   };
   mockTags = [
-    { id: "review-needed", label: "Review needed", color: "#f59e0b", concepts: [] },
-    { id: "confirmed", label: "Confirmed", color: "#10b981", concepts: [] },
-    { id: "problematic", label: "Problematic", color: "#ef4444", concepts: [] },
+    { id: "review-needed", label: "Review needed", color: "#f59e0b" },
+    { id: "confirmed", label: "Confirmed", color: "#10b981" },
+    { id: "problematic", label: "Problematic", color: "#ef4444" },
   ];
   mockRecords = {};
   mockEnrichmentData = {};
@@ -542,16 +556,11 @@ beforeEach(() => {
   mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
   mockSaveSpeaker.mockClear();
   mockMarkLexemeManuallyAdjusted.mockClear();
-  mockTagConcept.mockClear();
-  mockTagConcept.mockImplementation((tagId: string, conceptId: string) => {
-    mockTags = mockTags.map((tag) =>
-      tag.id === tagId && !tag.concepts.includes(conceptId)
-        ? { ...tag, concepts: [...tag.concepts, conceptId] }
-        : tag,
-    );
-  });
+  mockSetConceptTag.mockClear();
+  mockClearConceptTag.mockClear();
+  mockSetConfirmedAnchor.mockClear();
+  mockClearConfirmedAnchor.mockClear();
   mockUpdateTag.mockClear();
-  mockUntagConcept.mockClear();
   mockSetSelectedRegion.mockClear();
   mockSetActiveSpeaker.mockClear();
   mockSetActiveConcept.mockClear();
@@ -610,9 +619,7 @@ afterEach(() => {
 
 describe("ParseUI", () => {
   it("loads config and tag hydration on mount and computes reviewed count from confirmed tags", () => {
-    mockTags = mockTags.map((tag) =>
-      tag.id === "confirmed" ? { ...tag, concepts: ["1"] } : tag,
-    );
+    mockRecords = { Fail01: { ...makeRecord("Fail01", []), concept_tags: { "1": ["confirmed"] } } };
 
     render(<ParseUI />);
 
@@ -672,13 +679,13 @@ describe("ParseUI", () => {
 
   it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
     mockRecords = {
-      Fail01: makeRecord("Fail01", [
-        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
-      ]),
+      Fail01: {
+        ...makeRecord("Fail01", [
+          { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+        ]),
+        concept_tags: { "1": ["confirmed"] },
+      },
     };
-    mockTags = mockTags.map((tag) =>
-      tag.id === "confirmed" ? { ...tag, concepts: ["1"] } : tag,
-    );
 
     render(<ParseUI />);
 
@@ -748,7 +755,7 @@ describe("ParseUI", () => {
     await switchToAnnotateMode();
 
     fireEvent.click(screen.getByRole("button", { name: /Mark Done/i }));
-    expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("Fail01", "1", "confirmed");
   });
 
   it("turns the sidebar dot green after Mark Done", async () => {
@@ -1461,16 +1468,18 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Flag$/i }));
     fireEvent.click(screen.getByRole("button", { name: /Accept concept/i }));
 
-    expect(mockTagConcept).toHaveBeenCalledWith("problematic", "1");
-    expect(mockTagConcept).toHaveBeenCalledWith("confirmed", "1");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("Fail01", "1", "problematic");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("Kalh01", "1", "problematic");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("Fail01", "1", "confirmed");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("Kalh01", "1", "confirmed");
   });
 
   it("compare table row flag button targets a single speaker via enrichment overrides", () => {
     render(<ParseUI />);
 
     fireEvent.click(screen.getByTestId("speaker-flag-Fail01"));
-    expect(mockUntagConcept).not.toHaveBeenCalled();
-    expect(mockTagConcept).not.toHaveBeenCalledWith("problematic", "1");
+    expect(mockClearConceptTag).not.toHaveBeenCalled();
+    expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "problematic");
     expect(mockSaveEnrichments).toHaveBeenCalledWith({
       manual_overrides: { speaker_flags: { "1": { Fail01: true } } },
     });
@@ -1838,10 +1847,13 @@ describe("ParseUI", () => {
       ],
     } as ProjectConfig;
     mockTags = [
-      { id: "t1", label: "Core", color: "#2563eb", concepts: ["c1", "c2"] },
-      { id: "t2", label: "Fieldwork", color: "#16a34a", concepts: ["c1", "c3"] },
-      { id: "t3", label: "Later", color: "#9333ea", concepts: ["c4"] },
+      { id: "t1", label: "Core", color: "#2563eb" },
+      { id: "t2", label: "Fieldwork", color: "#16a34a" },
+      { id: "t3", label: "Later", color: "#9333ea" },
     ];
+    mockRecords = {
+      Fail01: { ...makeRecord("Fail01", []), concept_tags: { c1: ["t1", "t2"], c2: ["t1"], c3: ["t2"], c4: ["t3"] } },
+    };
 
     render(<ParseUI />);
 

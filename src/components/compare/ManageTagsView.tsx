@@ -1,8 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Check, Plus, Search, Tag } from 'lucide-react';
 
-import { useTagStore } from '../../stores/tagStore';
-
 export interface ManageTagsTag {
   id: string;
   name: string;
@@ -38,8 +36,6 @@ export interface ManageTagsViewProps {
   setSelectedTagId: (s: string | null) => void;
   conceptSearch: string;
   setConceptSearch: (s: string) => void;
-  tagConcept: (tagId: string, conceptKey: string) => void;
-  untagConcept: (tagId: string, conceptKey: string) => void;
 }
 
 const SWATCHES = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'];
@@ -68,20 +64,21 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
   setSelectedTagId,
   conceptSearch,
   setConceptSearch,
-  tagConcept,
-  untagConcept,
 }) => {
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [editingTagName, setEditingTagName] = useState('');
-  const storeTags = useTagStore((s) => s.tags);
   const filteredTags = tags.filter((t) => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
   const selectedTag = tags.find((t) => t.id === selectedTagId);
   const filteredConcepts = concepts.filter((c) => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
   const taggedKeys = useMemo<Set<string>>(() => {
-    if (!selectedTagId) return new Set();
-    const t = storeTags.find((s) => s.id === selectedTagId);
-    return new Set(t?.concepts ?? []);
-  }, [storeTags, selectedTagId]);
+    const selectedState = selectedTagId === 'review-needed' ? 'review' : selectedTagId;
+    if (!selectedState) return new Set();
+    return new Set(
+      concepts
+        .filter((concept) => concept.tag === selectedState)
+        .map((concept) => concept.key),
+    );
+  }, [concepts, selectedTagId]);
 
   return (
     <div className="flex flex-1 min-h-0 bg-slate-50">
@@ -263,7 +260,7 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => selectedTagId && (tagged ? untagConcept(selectedTagId, c.key) : tagConcept(selectedTagId, c.key))}
+                    aria-pressed={tagged}
                     className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${tagged ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}
                   >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagDotClass[c.tag]}`} />

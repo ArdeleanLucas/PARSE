@@ -68,7 +68,7 @@ describe("Cross-session persistence", () => {
     expect(state.records["Fail01"].tiers.ipa.intervals[0].text).toBe("test");
   });
 
-  it("tagStore tags survive navigation to compare and back", () => {
+  it("tagStore vocabulary survives navigation to compare and back", () => {
     // Add a tag to tagStore
     const { addTag } = useTagStore.getState();
     addTag("TestTag", "#ff0000");
@@ -77,12 +77,7 @@ describe("Cross-session persistence", () => {
     const tags = useTagStore.getState().tags;
     expect(tags).toHaveLength(1);
     expect(tags[0].label).toBe("TestTag");
-
-    // Verify concept assignment survives
-    const tagId = tags[0].id;
-    useTagStore.getState().tagConcept(tagId, "water");
-    const conceptTags = useTagStore.getState().getTagsForConcept("water");
-    expect(conceptTags.some((t) => t.id === tagId)).toBe(true);
+    expect(tags[0]).not.toHaveProperty("concepts");
   });
 
   it("configStore does not re-fetch if already loaded", async () => {

@@ -22,7 +22,6 @@ import { LEXEME_SCOPE_TIERS } from "../../../stores/annotation/actions";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
-import { useTagStore } from "../../../stores/tagStore";
 import { saveLexemeNote } from "../../../api/client";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
@@ -97,11 +96,13 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     return () => document.removeEventListener("keydown", onKey);
   }, [speaker, handleUndo, handleRedo]);
 
-  const tagConcept = useTagStore((s) => s.tagConcept);
-  const tags = useTagStore((s) => s.tags);
-  const isConfirmed = useMemo(
-    () => tags.some((tag) => tag.id === "confirmed" && tag.concepts.includes(concept.key)),
-    [tags, concept.key],
+  const setConceptTag = useAnnotationStore((s) => s.setConceptTag);
+  const setConfirmedAnchor = useAnnotationStore((s) => s.setConfirmedAnchor);
+  const isConfirmed = Boolean(record?.concept_tags?.[concept.key]?.includes("confirmed"));
+  const confirmedAnchor = record?.confirmed_anchors?.[concept.key] ?? null;
+  const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
+    () => findAnnotationForConcept(record, concept),
+    [record, concept],
   );
   const [doneToast, setDoneToast] = useState<string | null>(null);
   useEffect(() => {
@@ -114,14 +115,21 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [concept.key]);
   const handleMarkDone = useCallback(() => {
     if (isConfirmed) return;
-    tagConcept("confirmed", concept.key);
-    setDoneToast("Marked done.");
-  }, [concept.key, isConfirmed, tagConcept]);
+    setConceptTag(speaker, concept.key, "confirmed");
+    if (conceptInterval) {
+      setConfirmedAnchor(speaker, concept.key, {
+        start: conceptInterval.start,
+        end: conceptInterval.end,
+        matched_text: directOrthoInterval?.text || orthoInterval?.text || conceptInterval.text || undefined,
+        source: "user+confirmed_tag",
+        confirmed_at: new Date().toISOString(),
+      });
+      setDoneToast("Marked done.");
+    } else {
+      setDoneToast("Marked done. Time anchor skipped: no boundary.");
+    }
+  }, [concept.key, conceptInterval, directOrthoInterval, isConfirmed, orthoInterval, setConceptTag, setConfirmedAnchor, speaker]);
 
-  const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
-    () => findAnnotationForConcept(record, concept),
-    [record, concept],
-  );
   const [ipa, setIpa] = useState(ipaInterval?.text ?? "");
   const [ortho, setOrtho] = useState(directOrthoInterval?.text || orthoInterval?.text || "");
   const [editStart, setEditStart] = useState<string>(conceptInterval ? conceptInterval.start.toFixed(3) : "");
@@ -710,6 +718,35 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
                 />
               </div>
+              <button
+                type="button"
+                data-testid="confirm-time"
+                disabled={!conceptInterval}
+                aria-pressed={Boolean(confirmedAnchor)}
+                title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
+                onClick={() => {
+                  if (!conceptInterval) return;
+                  if (confirmedAnchor) {
+                    setConfirmedAnchor(speaker, concept.key, null);
+                    setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
+                    return;
+                  }
+                  const nextStart = parseFloat(editStart);
+                  const nextEnd = parseFloat(editEnd);
+                  const start = Number.isFinite(nextStart) ? nextStart : conceptInterval.start;
+                  const end = Number.isFinite(nextEnd) ? nextEnd : conceptInterval.end;
+                  setConfirmedAnchor(speaker, concept.key, {
+                    start,
+                    end,
+                    source: "user+boundary_only",
+                    confirmed_at: new Date().toISOString(),
+                  });
+                  setTimestampMessage({ kind: "ok", text: "Boundary confirmed." });
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${confirmedAnchor ? "bg-emerald-600 text-white" : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"}`}
+              >
+                <Check className="h-3.5 w-3.5" /> Confirm time
+              </button>
               {timestampMessage && (
                 <span data-testid="lexeme-timestamp-msg" className={`ml-auto text-[11px] ${timestampMessage.kind === "ok" ? "text-emerald-600" : "text-rose-600"}`}>
                   {timestampMessage.text}

@@ -26,7 +26,7 @@ describe('useTagStore server write-through', () => {
   it('persist schedules a debounced server PUT with current tags', async () => {
     mockPutTags.mockResolvedValue(undefined);
     useTagStore.setState({
-      tags: [{ id: 't1', label: 'Archaic', color: '#3554B8', concepts: ['sister'], lexemeTargets: [] }],
+      tags: [{ id: 't1', label: 'Archaic', color: '#3554B8' }],
     });
 
     useTagStore.getState().persist();
@@ -37,7 +37,7 @@ describe('useTagStore server write-through', () => {
 
     expect(mockPutTags).toHaveBeenCalledTimes(1);
     expect(mockPutTags).toHaveBeenCalledWith([
-      { id: 't1', label: 'Archaic', color: '#3554B8', concepts: ['sister'], lexemeTargets: [] },
+      { id: 't1', label: 'Archaic', color: '#3554B8' },
     ]);
   });
 

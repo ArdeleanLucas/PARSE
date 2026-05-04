@@ -12,20 +12,9 @@ interface TagsPanelSectionProps {
 
 export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
   const tags = useTagStore((state) => state.tags);
-  const tagConcept = useTagStore((state) => state.tagConcept);
-  const untagConcept = useTagStore((state) => state.untagConcept);
   const addTag = useTagStore((state) => state.addTag);
   const [search, setSearch] = useState('');
 
-  const appliedIds = useMemo(
-    () => new Set(tags.filter((tag) => tag.concepts.includes(conceptId)).map((tag) => tag.id)),
-    [tags, conceptId],
-  );
-  const counts = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const tag of tags) out[tag.id] = tag.concepts.length;
-    return out;
-  }, [tags]);
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return tags;
@@ -38,12 +27,12 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
         <h4 id="concept-tags-title" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           <TagIcon className="h-3 w-3" /> Concept Tags
         </h4>
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Applied concept tags">
-          {appliedIds.size} of {tags.length}
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Tag vocabulary size">
+          {tags.length} tag{tags.length === 1 ? '' : 's'}
         </span>
       </div>
       <p className="mb-3 text-[10px] leading-snug text-slate-400">
-        Tags travel with the concept across speakers. Counts show usage across all workspaces.
+        Tags are vocabulary only here; speaker-specific membership lives on each annotation record.
       </p>
 
       <label className="mb-2 flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-500 focus-within:border-indigo-300 focus-within:ring-1 focus-within:ring-indigo-100">
@@ -58,23 +47,9 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
         />
       </label>
 
-      <div className="space-y-1" aria-label="Concept tag list">
+      <div className="space-y-1" aria-label="Concept tag list" data-concept-id={conceptId}>
         {filtered.length > 0 ? (
-          filtered.map((tag) => {
-            const checked = appliedIds.has(tag.id);
-            return (
-              <TagRow
-                key={tag.id}
-                tag={tag}
-                checked={checked}
-                count={counts[tag.id] ?? 0}
-                onToggle={() => {
-                  if (checked) untagConcept(tag.id, conceptId);
-                  else tagConcept(tag.id, conceptId);
-                }}
-              />
-            );
-          })
+          filtered.map((tag) => <TagRow key={tag.id} tag={tag} />)
         ) : (
           <p className="rounded-md border border-dashed border-slate-200 px-2.5 py-2 text-[10px] text-slate-400">
             {tags.length === 0 ? 'No tags yet. Create one below.' : 'No tags match this search.'}
@@ -87,26 +62,17 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
   );
 }
 
-function TagRow({ tag, checked, count, onToggle }: {
-  tag: Tag;
-  checked: boolean;
-  count: number;
-  onToggle: () => void;
-}) {
+function TagRow({ tag }: { tag: Tag }) {
   return (
-    <button
-      type="button"
-      className={`tag-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-slate-50 ${checked ? 'checked bg-indigo-50 text-indigo-900 ring-1 ring-indigo-100' : 'text-slate-700'}`}
-      onClick={onToggle}
-      aria-pressed={checked}
+    <div
+      className="tag-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-slate-700"
     >
-      <span className="check grid h-3.5 w-3.5 place-items-center rounded border border-slate-300 bg-white text-[9px] text-indigo-700" aria-hidden="true">
-        {checked ? <Check className="h-2.5 w-2.5" /> : null}
+      <span className="check grid h-3.5 w-3.5 place-items-center rounded border border-slate-300 bg-white text-[9px] text-transparent" aria-hidden="true">
+        <Check className="h-2.5 w-2.5" />
       </span>
       <span className="tag-dot h-2.5 w-2.5 rounded-full ring-1 ring-black/10" style={{ backgroundColor: tag.color }} aria-hidden="true" />
       <span className="tag-name min-w-0 flex-1 truncate text-[11px] font-medium">{tag.label}</span>
-      <span className="tag-count rounded bg-white/80 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{count}</span>
-    </button>
+    </div>
   );
 }
 
@@ -119,17 +85,16 @@ function CreateTagInline({ onCreate }: { onCreate: (label: string, color: string
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed) return;
     setBusy(true);
     setError(null);
     try {
       onCreate(trimmed, color);
       setName('');
-      setColor(COLOR_SWATCHES[0]);
       setExpanded(false);
     } catch (err) {
-      setError(err instanceof Error && /409/.test(err.message) ? 'Name already exists' : 'Could not create tag');
-      console.warn('[tags] create failed', err);
+      setError(err instanceof Error ? err.message : String(err));
+      console.warn('[TagsPanelSection] create tag failed:', err);
     } finally {
       setBusy(false);
     }
@@ -139,7 +104,7 @@ function CreateTagInline({ onCreate }: { onCreate: (label: string, color: string
     return (
       <button
         type="button"
-        className="mt-2 flex w-full items-center gap-2 rounded-md border border-dashed border-slate-200 px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-slate-200 px-2 py-1.5 text-[11px] font-medium text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
         onClick={() => setExpanded(true)}
       >
         <Plus className="h-3 w-3" /> Create tag
@@ -148,28 +113,22 @@ function CreateTagInline({ onCreate }: { onCreate: (label: string, color: string
   }
 
   return (
-    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2" data-testid="create-tag-form">
+    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
       <input
-        className="mb-2 w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
+        className="mb-2 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 outline-none focus:border-indigo-300"
         placeholder="Tag name"
         value={name}
-        onChange={(event) => {
-          setName(event.target.value);
-          setError(null);
-        }}
-        aria-label="Tag name"
-        aria-invalid={error ? 'true' : undefined}
+        onChange={(event) => setName(event.target.value)}
+        autoFocus
       />
-      {error ? <p className="mb-2 text-[10px] font-medium text-rose-600">{error}</p> : null}
-      <div className="mb-2 flex flex-wrap gap-1" aria-label="Tag color">
+      <div className="mb-2 flex flex-wrap gap-1">
         {COLOR_SWATCHES.map((swatch) => (
           <button
             key={swatch}
             type="button"
-            className={`h-5 w-5 rounded-full ring-1 ring-black/10 ${color === swatch ? 'outline outline-2 outline-offset-1 outline-indigo-400' : ''}`}
+            className={`h-5 w-5 rounded-full ring-2 ${color === swatch ? 'ring-slate-700' : 'ring-transparent'}`}
             style={{ backgroundColor: swatch }}
             aria-label={`Use color ${swatch}`}
-            aria-pressed={color === swatch}
             onClick={() => setColor(swatch)}
           />
         ))}
@@ -177,20 +136,25 @@ function CreateTagInline({ onCreate }: { onCreate: (label: string, color: string
       <div className="flex gap-1.5">
         <button
           type="button"
-          className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!name.trim() || busy}
-          onClick={() => { void submit(); }}
+          disabled={busy || !name.trim()}
+          onClick={() => void submit()}
+          className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white disabled:bg-slate-300"
         >
-          {busy ? 'Creating...' : 'Create'}
+          Save
         </button>
         <button
           type="button"
-          className="rounded px-2 py-1 text-[10px] font-medium text-slate-500 hover:bg-slate-100"
-          onClick={() => setExpanded(false)}
+          onClick={() => {
+            setExpanded(false);
+            setName('');
+            setError(null);
+          }}
+          className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600"
         >
           Cancel
         </button>
       </div>
+      {error && <p className="mt-1 text-[10px] text-rose-600">{error}</p>}
     </div>
   );
 }
