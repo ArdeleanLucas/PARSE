@@ -76,3 +76,72 @@ def test_ipa_sidecars_remain_absent_when_missing() -> None:
 
     assert "ipa_candidates" not in normalized
     assert "ipa_review" not in normalized
+
+
+def test_empty_annotation_record_includes_concept_tags_sidecar() -> None:
+    empty = server._annotation_empty_record("Saha01", "audio/raw/Saha01.wav", 12.0, None)
+
+    assert empty["concept_tags"] == {}
+
+
+def test_concept_tags_round_trip_through_annotation_normalizer_and_json_save(tmp_path: pathlib.Path) -> None:
+    concept_tags = {"1": ["confirmed"], "2": ["review", "problematic"]}
+    raw = _base_annotation()
+    raw["concept_tags"] = concept_tags
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == concept_tags
+
+    path = tmp_path / "annotations" / "Saha01.parse.json"
+    server._write_json_file(path, normalized)
+    loaded = json.loads(path.read_text("utf-8"))
+    reloaded = server._normalize_annotation_record(loaded, "Saha01")
+
+    assert reloaded["concept_tags"] == concept_tags
+
+
+def test_concept_tags_normalization_drops_empty_memberships() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {"1": [], "2": ["confirmed"]}
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == {"2": ["confirmed"]}
+
+
+def test_concept_tags_normalization_coerces_keys_and_deduplicates_tag_lists() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {
+        1: ["confirmed", "review", "confirmed"],
+        "2": "confirmed",
+        "3": [123, "problematic", "problematic"],
+        "4": [None],
+    }
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == {"1": ["confirmed", "review"], "3": ["problematic"]}
+
+
+def test_concept_tags_are_speaker_local_on_disk(tmp_path: pathlib.Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    speaker_a = _base_annotation("Saha01")
+    speaker_a["concept_tags"] = {"1": ["confirmed"]}
+    speaker_b = _base_annotation("Saha02")
+    speaker_b["source_audio"] = "audio/raw/Saha02.wav"
+    speaker_b["concept_tags"] = {"1": ["problematic"], "2": ["review"]}
+
+    path_a = server._annotation_record_path_for_speaker("Saha01")
+    path_b = server._annotation_record_path_for_speaker("Saha02")
+    server._write_json_file(path_a, server._normalize_annotation_record(speaker_a, "Saha01"))
+    server._write_json_file(path_b, server._normalize_annotation_record(speaker_b, "Saha02"))
+
+    speaker_a["concept_tags"] = {"1": ["confirmed", "review"]}
+    server._write_json_file(path_a, server._normalize_annotation_record(speaker_a, "Saha01"))
+
+    reloaded_a = json.loads(path_a.read_text("utf-8"))
+    reloaded_b = json.loads(path_b.read_text("utf-8"))
+
+    assert reloaded_a["concept_tags"] == {"1": ["confirmed", "review"]}
+    assert reloaded_b["concept_tags"] == {"1": ["problematic"], "2": ["review"]}
