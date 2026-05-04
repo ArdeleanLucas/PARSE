@@ -365,28 +365,14 @@ def _extract_concepts_from_annotation(tools: "ParseChatTools", annotation_payloa
 
 
 def _write_concepts_csv(tools: "ParseChatTools", concepts: Sequence[Dict[str, str]]) -> int:
-    import csv as _csv
+    from concept_registry import merge_concepts_into_root_csv
 
-    merged: Dict[str, str] = {
-        item["id"]: item["label"]
-        for item in tools._load_project_concepts()
-        if item.get("id") and item.get("label")
-    }
-    for item in concepts:
-        concept_id = _normalize_space(item.get("id"))
-        label = _normalize_space(item.get("label"))
-        if concept_id and label:
-            merged[concept_id] = label
-
-    ordered = sorted(merged.items(), key=lambda kv: _concept_sort_key(kv[0]))
-    concepts_path = tools.project_root / "concepts.csv"
-    concepts_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(concepts_path, "w", newline="", encoding="utf-8") as handle:
-        writer = _csv.DictWriter(handle, fieldnames=["id", "concept_en"])
-        writer.writeheader()
-        for concept_id, label in ordered:
-            writer.writerow({"id": concept_id, "concept_en": label})
-    return len(ordered)
+    return merge_concepts_into_root_csv(
+        tools.project_root,
+        concepts,
+        normalize_concept_id=_normalize_space,
+        concept_sort_key=_concept_sort_key,
+    )
 
 
 def _write_project_json_for_processed_import(

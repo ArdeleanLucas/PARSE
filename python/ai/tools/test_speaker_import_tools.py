@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import pathlib
@@ -12,6 +13,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from ai.chat_tools import ChatToolValidationError, ParseChatTools
+from concept_source_item import CONCEPT_FIELDNAMES
 import ai.tools.speaker_import_tools as speaker_import_tools
 from ai.tools.speaker_import_tools import (
     tool_csv_only_reimport,
@@ -112,6 +114,86 @@ def _tracked_reimport_files(project_root: pathlib.Path, speaker: str = "Saha01")
         "parse-enrichments.json": project_root / "parse-enrichments.json",
         "concepts.csv": project_root / "concepts.csv",
     }
+
+
+def _write_concepts_fixture(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(CONCEPT_FIELDNAMES))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _read_concepts_fixture(path: pathlib.Path) -> tuple[list[str], list[dict[str, str]]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader.fieldnames or []), list(reader)
+
+
+def test_mcp_write_concepts_csv_preserves_existing_source_item_and_survey(tmp_path) -> None:
+    project_root = tmp_path / "proj"
+    concepts_path = project_root / "concepts.csv"
+    _write_concepts_fixture(
+        concepts_path,
+        [
+            {
+                "id": "1",
+                "concept_en": "ash",
+                "source_item": "1.1",
+                "source_survey": "KLQ",
+                "custom_order": "10",
+            },
+            {
+                "id": "2",
+                "concept_en": "water",
+                "source_item": "",
+                "source_survey": "",
+                "custom_order": "",
+            },
+        ],
+    )
+    tools = ParseChatTools(project_root=project_root)
+
+    total = speaker_import_tools._write_concepts_csv(tools, [{"id": "3", "label": "bark"}])
+
+    fieldnames, rows = _read_concepts_fixture(concepts_path)
+    rows_by_id = {row["id"]: row for row in rows}
+    assert total == 3
+    assert fieldnames == list(CONCEPT_FIELDNAMES)
+    assert rows_by_id["1"]["source_item"] == "1.1"
+    assert rows_by_id["1"]["source_survey"] == "KLQ"
+    assert rows_by_id["1"]["custom_order"] == "10"
+
+
+def test_mcp_write_concepts_csv_writes_source_item_and_survey_for_new_rows(tmp_path) -> None:
+    project_root = tmp_path / "proj"
+    tools = ParseChatTools(project_root=project_root)
+
+    total = speaker_import_tools._write_concepts_csv(
+        tools,
+        [
+            {
+                "id": "5",
+                "label": "forehead",
+                "source_item": "1.2",
+                "source_survey": "KLQ",
+                "custom_order": "20",
+            }
+        ],
+    )
+
+    fieldnames, rows = _read_concepts_fixture(project_root / "concepts.csv")
+    assert total == 1
+    assert fieldnames == list(CONCEPT_FIELDNAMES)
+    assert rows == [
+        {
+            "id": "5",
+            "concept_en": "forehead",
+            "source_item": "1.2",
+            "source_survey": "KLQ",
+            "custom_order": "20",
+        }
+    ]
 
 
 def test_tool_onboard_speaker_import_reports_dry_run_plan_directly(tmp_path) -> None:

@@ -366,8 +366,8 @@ def test_import_processed_speaker_write_copies_assets_and_builds_workspace_files
     with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows == [
-        {"id": "1", "concept_en": "ash"},
-        {"id": "2", "concept_en": "bark"},
+        {"id": "1", "concept_en": "ash", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "2", "concept_en": "bark", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
     imported_annotation = json.loads((project_root / "annotations" / "Fail02.json").read_text(encoding="utf-8"))
@@ -407,9 +407,9 @@ def test_import_processed_speaker_assigns_fallback_ids_without_collisions(tmp_pa
     with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows == [
-        {"id": "1", "concept_en": "ash"},
-        {"id": "2", "concept_en": "free concept"},
-        {"id": "3", "concept_en": "another free concept"},
+        {"id": "1", "concept_en": "ash", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "2", "concept_en": "free concept", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "3", "concept_en": "another free concept", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
 
@@ -449,9 +449,9 @@ def test_import_processed_speaker_preserves_existing_concepts_when_free_text_lac
     with open(project_root / "concepts.csv", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows == [
-        {"id": "1", "concept_en": "water"},
-        {"id": "2", "concept_en": "ash"},
-        {"id": "3", "concept_en": "bark"},
+        {"id": "1", "concept_en": "water", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "2", "concept_en": "ash", "source_item": "", "source_survey": "", "custom_order": ""},
+        {"id": "3", "concept_en": "bark", "source_item": "", "source_survey": "", "custom_order": ""},
     ]
 
 
