@@ -69,6 +69,82 @@ def test_backfill_uses_audition_prefix_when_available(tmp_path: pathlib.Path) ->
     assert format_summary(summary) == "matched=1 added=1 skipped=0"
 
 
+def test_backfill_audition_prefix_lookup_resolves_via_legacy_directory(tmp_path: pathlib.Path) -> None:
+    """audition_prefix resolves when the speaker cue CSV lives in imports/legacy/<speaker>/."""
+    workspace = tmp_path / "workspace"
+    legacy = workspace / "imports" / "legacy" / "LegacySpk01"
+    legacy.mkdir(parents=True)
+    (legacy / "cues.csv").write_text("Name\tStart\tDuration\n(7.7)- knee\t0\t1\n", encoding="utf-8")
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "LegacySpk01.json").write_text(
+        json.dumps(
+            {
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {"concept_id": "9", "audition_prefix": "7.7", "text": "knee", "start": 0, "end": 1}
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "9", "concept_en": "knee-renamed"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "7.7"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_audition_prefix_lookup_resolves_via_external_source_root(tmp_path: pathlib.Path) -> None:
+    """audition_prefix resolves when the speaker cue CSV lives only in an external --source-root."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    external = tmp_path / "external_root" / "ExtSpk01"
+    external.mkdir(parents=True)
+    (external / "cues.csv").write_text(
+        "Name\tStart\tDuration\n[5.22]- Sahar was coming down the mountain with the mule.\t0\t1\n",
+        encoding="utf-8",
+    )
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "ExtSpk01.json").write_text(
+        json.dumps(
+            {
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {
+                                "concept_id": "1",
+                                "audition_prefix": "5.22",
+                                "text": "Sahar was coming down the mountain",
+                                "start": 0,
+                                "end": 1,
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "Sahar was coming down the mountain"}])
+
+    summary = backfill_source_items(workspace, source_roots=[tmp_path / "external_root"], dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "5.22"
+    assert rows[0]["source_survey"] == "EXT"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
 def test_backfill_paren_to_space_normalization(tmp_path: pathlib.Path) -> None:
     """Concept label suffixes in parentheses match cue labels with a space suffix."""
     workspace = tmp_path / "workspace"

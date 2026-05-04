@@ -53,9 +53,10 @@ def format_summary(summary: BackfillSummary) -> str:
 
 def _iter_candidate_csvs(workspace: Path, source_roots: Sequence[Path] = ()) -> list[Path]:
     candidates: list[Path] = []
-    staging = workspace / "imports" / "staging"
-    if staging.exists():
-        candidates.extend(path for path in staging.rglob("*.csv") if path.is_file())
+    for subdirectory in ("imports/staging", "imports/legacy"):
+        directory = workspace / subdirectory
+        if directory.exists():
+            candidates.extend(path for path in directory.rglob("*.csv") if path.is_file())
     for root in source_roots:
         if root.exists():
             candidates.extend(path for path in root.rglob("*.csv") if path.is_file())
@@ -84,10 +85,11 @@ def _dict_reader_for_text(text: str) -> csv.DictReader:
 def _source_maps_from_csvs(
     paths: Iterable[Path],
     summary: BackfillSummary,
-) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, str]]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, str]], dict[str, tuple[str, str]]]:
     by_label: dict[str, str] = {}
     by_label_survey: dict[str, str] = {}
     by_label_by_survey: dict[str, dict[str, str]] = {}
+    by_prefix: dict[str, tuple[str, str]] = {}
     for path in paths:
         try:
             text = path.read_text(encoding="utf-8-sig")
@@ -102,54 +104,32 @@ def _source_maps_from_csvs(
         for record in reader:
             cue_name = row_value(record, "Name")
             source_item, source_survey, label = parse_cue_name(cue_name)
-            if not source_item or not label:
+            if not source_item:
+                continue
+            survey = source_survey or ""
+            by_prefix.setdefault(source_item, (source_item, survey))
+            if not label:
                 continue
             label_key = concept_label_key(label)
-            survey = source_survey or ""
             by_label.setdefault(label_key, source_item)
             by_label_survey.setdefault(label_key, survey)
             by_label_by_survey.setdefault(label_key, {}).setdefault(survey, source_item)
-    return by_label, by_label_survey, by_label_by_survey
+    return by_label, by_label_survey, by_label_by_survey, by_prefix
 
 
-def _speaker_csv_paths(workspace: Path, speaker: str) -> list[Path]:
-    speaker_dir = workspace / "imports" / "staging" / speaker
-    if not speaker_dir.exists():
-        return []
-    return sorted(path for path in speaker_dir.rglob("*.csv") if path.is_file())
-
-
-def _speaker_cue_index(workspace: Path, speaker: str, summary: BackfillSummary) -> dict[str, tuple[str, str]]:
-    by_prefix: dict[str, tuple[str, str]] = {}
-    for path in _speaker_csv_paths(workspace, speaker):
-        try:
-            text = path.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError) as exc:
-            summary.decisions.append("skip {0}: read failed {1}".format(path, exc))
-            continue
-        reader = _dict_reader_for_text(text)
-        fieldnames = {str(name or "").strip().lower() for name in reader.fieldnames or []}
-        if "name" not in fieldnames:
-            summary.decisions.append("skip {0}: no Name column".format(path))
-            continue
-        for record in reader:
-            source_item, source_survey, _label = parse_cue_name(row_value(record, "Name"))
-            if source_item:
-                by_prefix.setdefault(source_item, (source_item, source_survey or ""))
-    return by_prefix
-
-
-def _audition_prefix_index(workspace: Path, summary: BackfillSummary) -> dict[str, tuple[str, str]]:
-    """Return concept_id -> (source_item, survey) from legacy speaker annotation traces."""
+def _audition_prefix_index(
+    workspace: Path,
+    by_prefix: dict[str, tuple[str, str]],
+    summary: BackfillSummary,
+) -> dict[str, tuple[str, str]]:
+    """Return concept_id -> (source_item, survey) by joining annotation traces to the global prefix index."""
     out: dict[str, tuple[str, str]] = {}
     annotations = workspace / "annotations"
     if not annotations.exists():
         return out
-    cue_indexes: dict[str, dict[str, tuple[str, str]]] = {}
     for path in sorted(annotations.glob("*.json")):
         if path.name.endswith(".parse.json"):
             continue
-        speaker = path.stem
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -160,11 +140,6 @@ def _audition_prefix_index(workspace: Path, summary: BackfillSummary) -> dict[st
         intervals = data.get("tiers", {}).get("concept", {}).get("intervals", [])
         if not isinstance(intervals, list):
             continue
-        if speaker not in cue_indexes:
-            cue_indexes[speaker] = _speaker_cue_index(workspace, speaker, summary)
-        cue_index = cue_indexes[speaker]
-        if not cue_index:
-            continue
         for interval in intervals:
             if not isinstance(interval, dict):
                 continue
@@ -172,7 +147,7 @@ def _audition_prefix_index(workspace: Path, summary: BackfillSummary) -> dict[st
             audition_prefix = str(interval.get("audition_prefix") or "").strip()
             if not cid or not audition_prefix or audition_prefix.startswith("row_"):
                 continue
-            hit = cue_index.get(audition_prefix)
+            hit = by_prefix.get(audition_prefix)
             if hit:
                 out.setdefault(cid, hit)
     return out
@@ -253,8 +228,8 @@ def backfill_source_items(
         return summary
 
     csv_paths = _iter_candidate_csvs(workspace, source_root_paths)
-    by_label, by_label_survey, by_label_by_survey = _source_maps_from_csvs(csv_paths, summary)
-    audition_index = _audition_prefix_index(workspace, summary)
+    by_label, by_label_survey, by_label_by_survey, by_prefix = _source_maps_from_csvs(csv_paths, summary)
+    audition_index = _audition_prefix_index(workspace, by_prefix, summary)
     bare_label_concepts = _bare_label_concepts(rows)
 
     for row in rows:
