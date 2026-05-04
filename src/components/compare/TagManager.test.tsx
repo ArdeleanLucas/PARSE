@@ -62,6 +62,16 @@ vi.mock("../../stores/annotationStore", () => ({
 
 import { TagManager } from "./TagManager";
 
+function makeRecord(speaker: string, conceptTags: Record<string, string[]> = {}): AnnotationRecord {
+  return {
+    speaker,
+    source_wav: `${speaker}.wav`,
+    source_audio: `${speaker}.wav`,
+    tiers: { concept: { name: "concept", display_order: 0, intervals: [] } },
+    concept_tags: conceptTags,
+  };
+}
+
 beforeEach(() => {
   mockTags = [
     { id: "t1", label: "Review", color: "#f59e0b" },
@@ -74,8 +84,8 @@ beforeEach(() => {
   mockClearConceptTag.mockClear();
   mockSelectedSpeakers = ["S1"];
   mockRecords = {
-    S1: { speaker: "S1", source_wav: "S1.wav", source_audio: "S1.wav", tiers: {}, concept_tags: { c1: ["t1"] } } as AnnotationRecord,
-    S2: { speaker: "S2", source_wav: "S2.wav", source_audio: "S2.wav", tiers: {}, concept_tags: { c2: ["t1"] } } as AnnotationRecord,
+    S1: makeRecord("S1", { c1: ["t1"] }),
+    S2: makeRecord("S2", { c2: ["t1"] }),
   };
 });
 

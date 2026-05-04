@@ -16,9 +16,9 @@ function makeRecord(speaker: string, conceptTags: Record<string, string[]> = {})
     speaker,
     source_wav: `${speaker}.wav`,
     source_audio: `${speaker}.wav`,
-    tiers: {},
+    tiers: { concept: { name: 'concept', display_order: 0, intervals: [] } },
     concept_tags: conceptTags,
-  } as AnnotationRecord;
+  };
 }
 
 function resetStore() {

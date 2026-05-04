@@ -68,6 +68,16 @@ vi.mock("../../stores/configStore", () => ({
 
 import { EnrichmentsPanel } from "./EnrichmentsPanel";
 
+function makeRecord(speaker: string, conceptTags: Record<string, string[]> = {}): AnnotationRecord {
+  return {
+    speaker,
+    source_wav: `${speaker}.wav`,
+    source_audio: `${speaker}.wav`,
+    tiers: { concept: { name: "concept", display_order: 0, intervals: [] } },
+    concept_tags: conceptTags,
+  };
+}
+
 beforeEach(() => {
   mockData = {};
   mockLoading = false;
@@ -83,8 +93,8 @@ beforeEach(() => {
     { id: "confirmed", label: "Confirmed", color: "#10b981" },
   ];
   mockRecords = {
-    S1: { speaker: "S1", source_wav: "S1.wav", source_audio: "S1.wav", tiers: {}, concept_tags: { "42": ["review-needed"] } } as AnnotationRecord,
-    S2: { speaker: "S2", source_wav: "S2.wav", source_audio: "S2.wav", tiers: {}, concept_tags: { "42": ["confirmed"] } } as AnnotationRecord,
+    S1: makeRecord("S1", { "42": ["review-needed"] }),
+    S2: makeRecord("S2", { "42": ["confirmed"] }),
   };
 });
 

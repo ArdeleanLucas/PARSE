@@ -61,10 +61,8 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   const targetSpeakers = selectedSpeakers.length > 0 ? selectedSpeakers : config?.speakers ?? [];
   const usageCounts = new Map<string, number>();
   for (const record of Object.values(records)) {
-    for (const [conceptId, tagIds] of Object.entries(record.concept_tags ?? {})) {
+    for (const tagIds of Object.values(record.concept_tags ?? {})) {
       for (const tagId of tagIds) {
-        const key = `${record.speaker}::${conceptId}::${tagId}`;
-        if (!key) continue;
         usageCounts.set(tagId, (usageCounts.get(tagId) ?? 0) + 1);
       }
     }
