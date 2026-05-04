@@ -17,6 +17,38 @@ def _read_rows(path: pathlib.Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def test_backfill_does_not_match_concept_id_against_jbil_source_item(tmp_path: pathlib.Path) -> None:
+    """Concept id=1/label=hair must not inherit JBIL cue '1- one' by ID collision."""
+    workspace = tmp_path / "workspace"
+    staging = workspace / "imports" / "staging" / "Test01"
+    staging.mkdir(parents=True)
+    (staging / "cues.csv").write_text(
+        "Name\tStart\tDuration\n"
+        "1- one\t0\t1\n"
+        "(2.5)- hair\t1\t1\n",
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    with concepts_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(
+            [
+                {"id": "1", "concept_en": "hair", "source_item": "", "source_survey": "", "custom_order": ""},
+                {"id": "2", "concept_en": "one", "source_item": "", "source_survey": "", "custom_order": ""},
+            ]
+        )
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "2.5"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert rows[1]["source_item"] == "1"
+    assert rows[1]["source_survey"] == "JBIL"
+    assert format_summary(summary) == "matched=2 added=2 skipped=0"
+
+
 def test_backfill_source_items_dry_run_and_apply_are_idempotent(tmp_path: pathlib.Path) -> None:
     workspace = tmp_path / "workspace"
     staging = workspace / "imports" / "staging" / "Saha01"

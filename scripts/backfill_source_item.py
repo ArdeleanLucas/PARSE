@@ -77,11 +77,9 @@ def _dict_reader_for_text(text: str) -> csv.DictReader:
 def _source_maps_from_csvs(
     paths: Iterable[Path],
     summary: BackfillSummary,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str]]:
     by_label: dict[str, str] = {}
-    by_id: dict[str, str] = {}
     by_label_survey: dict[str, str] = {}
-    by_id_survey: dict[str, str] = {}
     for path in paths:
         try:
             text = path.read_text(encoding="utf-8-sig")
@@ -100,11 +98,9 @@ def _source_maps_from_csvs(
                 continue
             label_key = concept_label_key(label)
             by_label.setdefault(label_key, source_item)
-            by_id.setdefault(source_item, source_item)
             survey = source_survey or ""
             by_label_survey.setdefault(label_key, survey)
-            by_id_survey.setdefault(source_item, survey)
-    return by_label, by_id, by_label_survey, by_id_survey
+    return by_label, by_label_survey
 
 
 def backfill_source_items(
@@ -124,19 +120,18 @@ def backfill_source_items(
         return summary
 
     csv_paths = _iter_candidate_csvs(workspace, source_root_paths)
-    by_label, by_id, by_label_survey, by_id_survey = _source_maps_from_csvs(csv_paths, summary)
-    if not by_label and not by_id:
+    by_label, by_label_survey = _source_maps_from_csvs(csv_paths, summary)
+    if not by_label:
         return summary
 
     for row in rows:
         cid = str(row.get("id") or "").strip()
         label = str(row.get("concept_en") or "").strip()
         label_key = concept_label_key(label)
-        matched_by_id = cid in by_id
-        target = by_id.get(cid) or by_label.get(label_key)
+        target = by_label.get(label_key)
         if not target:
             continue
-        target_survey = (by_id_survey.get(cid) if matched_by_id else by_label_survey.get(label_key)) or ""
+        target_survey = by_label_survey.get(label_key) or ""
         summary.matched += 1
         current = str(row.get("source_item") or "").strip()
         current_survey = str(row.get("source_survey") or "").strip()
