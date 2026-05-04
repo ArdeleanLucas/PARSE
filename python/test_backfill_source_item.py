@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import pathlib
 import sys
 
@@ -15,6 +16,214 @@ FIELDNAMES = ["id", "concept_en", "source_item", "source_survey", "custom_order"
 def _read_rows(path: pathlib.Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
+
+
+def _write_concepts(concepts_path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    concepts_path.parent.mkdir(parents=True, exist_ok=True)
+    with concepts_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        for row in rows:
+            normalized = {field: "" for field in FIELDNAMES}
+            normalized.update(row)
+            writer.writerow(normalized)
+
+
+def _copy_smart_matching_cues(workspace: pathlib.Path, speaker: str = "Smart01") -> pathlib.Path:
+    staging = workspace / "imports" / "staging" / speaker
+    staging.mkdir(parents=True)
+    fixture = pathlib.Path(__file__).resolve().parent / "test_fixtures" / "backfill_smart_matching_cues.csv"
+    cues_path = staging / "cues.csv"
+    cues_path.write_bytes(fixture.read_bytes())
+    return cues_path
+
+
+def test_backfill_uses_audition_prefix_when_available(tmp_path: pathlib.Path) -> None:
+    """A renamed concept still resolves through its recorded Audition prefix trace."""
+    workspace = tmp_path / "workspace"
+    _copy_smart_matching_cues(workspace, "Smart01")
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "Smart01.json").write_text(
+        json.dumps(
+            {
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {"concept_id": "1", "audition_prefix": "1.2", "text": "forehead", "start": 0, "end": 1}
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "fore"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "1.2"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_audition_prefix_lookup_resolves_via_legacy_directory(tmp_path: pathlib.Path) -> None:
+    """audition_prefix resolves when the speaker cue CSV lives in imports/legacy/<speaker>/."""
+    workspace = tmp_path / "workspace"
+    legacy = workspace / "imports" / "legacy" / "LegacySpk01"
+    legacy.mkdir(parents=True)
+    (legacy / "cues.csv").write_text("Name\tStart\tDuration\n(7.7)- knee\t0\t1\n", encoding="utf-8")
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "LegacySpk01.json").write_text(
+        json.dumps(
+            {
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {"concept_id": "9", "audition_prefix": "7.7", "text": "knee", "start": 0, "end": 1}
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "9", "concept_en": "knee-renamed"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "7.7"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_audition_prefix_lookup_resolves_via_external_source_root(tmp_path: pathlib.Path) -> None:
+    """audition_prefix resolves when the speaker cue CSV lives only in an external --source-root."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    external = tmp_path / "external_root" / "ExtSpk01"
+    external.mkdir(parents=True)
+    (external / "cues.csv").write_text(
+        "Name\tStart\tDuration\n[5.22]- Sahar was coming down the mountain with the mule.\t0\t1\n",
+        encoding="utf-8",
+    )
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "ExtSpk01.json").write_text(
+        json.dumps(
+            {
+                "tiers": {
+                    "concept": {
+                        "intervals": [
+                            {
+                                "concept_id": "1",
+                                "audition_prefix": "5.22",
+                                "text": "Sahar was coming down the mountain",
+                                "start": 0,
+                                "end": 1,
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "Sahar was coming down the mountain"}])
+
+    summary = backfill_source_items(workspace, source_roots=[tmp_path / "external_root"], dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "5.22"
+    assert rows[0]["source_survey"] == "EXT"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_paren_to_space_normalization(tmp_path: pathlib.Path) -> None:
+    """Concept label suffixes in parentheses match cue labels with a space suffix."""
+    workspace = tmp_path / "workspace"
+    _copy_smart_matching_cues(workspace)
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "father (A)"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "2.3"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_jbil_alternate_when_bare_label_already_concept(tmp_path: pathlib.Path) -> None:
+    """A suffixed concept falls back to JBIL only when the bare label is a sibling concept."""
+    workspace = tmp_path / "workspace"
+    _copy_smart_matching_cues(workspace)
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [
+            {"id": "1", "concept_en": "nose"},
+            {"id": "2", "concept_en": "nose (A)"},
+        ],
+    )
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "1.5"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert rows[1]["source_item"] == "34"
+    assert rows[1]["source_survey"] == "JBIL"
+    assert format_summary(summary) == "matched=2 added=2 skipped=0"
+
+
+def test_backfill_jbil_alternate_does_not_fire_without_bare_sibling(tmp_path: pathlib.Path) -> None:
+    """A lone suffixed concept must not inherit JBIL from its base cue without a bare concept sibling."""
+    workspace = tmp_path / "workspace"
+    _copy_smart_matching_cues(workspace)
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "nose (A)"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == ""
+    assert rows[0]["source_survey"] == ""
+    assert format_summary(summary) == "matched=0 added=0 skipped=0"
+
+
+def test_backfill_leading_number_jbil_rescue(tmp_path: pathlib.Path) -> None:
+    """Leading integers in concept labels are direct JBIL source_item values."""
+    workspace = tmp_path / "workspace"
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "48 stomach (organ)"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "48"
+    assert rows[0]["source_survey"] == "JBIL"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
+
+
+def test_backfill_malformed_klq_rescue(tmp_path: pathlib.Path) -> None:
+    """Malformed KLQ prefixes left in concept labels still recover the dotted source_item."""
+    workspace = tmp_path / "workspace"
+    concepts_path = workspace / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "1", "concept_en": "(2.29- child of one's son)-"}])
+
+    summary = backfill_source_items(workspace, dry_run=False)
+    rows = _read_rows(concepts_path)
+
+    assert rows[0]["source_item"] == "2.29"
+    assert rows[0]["source_survey"] == "KLQ"
+    assert format_summary(summary) == "matched=1 added=1 skipped=0"
 
 
 def test_backfill_does_not_match_concept_id_against_jbil_source_item(tmp_path: pathlib.Path) -> None:
