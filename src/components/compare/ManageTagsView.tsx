@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Check, Plus, Search, Tag } from 'lucide-react';
 
+import { useAnnotationStore } from '../../stores/annotationStore';
+import { useConfigStore } from '../../stores/configStore';
+import { useUIStore } from '../../stores/uiStore';
+
 export interface ManageTagsTag {
   id: string;
   name: string;
@@ -66,19 +70,35 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
   setConceptSearch,
 }) => {
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const records = useAnnotationStore((state) => state.records);
+  const setConceptTag = useAnnotationStore((state) => state.setConceptTag);
+  const clearConceptTag = useAnnotationStore((state) => state.clearConceptTag);
+  const selectedSpeakers = useUIStore((state) => state.selectedSpeakers) ?? [];
+  const configSpeakers = useConfigStore((state) => state.config?.speakers ?? []);
+  const targetSpeakers = selectedSpeakers.length > 0 ? selectedSpeakers : configSpeakers;
   const [editingTagName, setEditingTagName] = useState('');
   const filteredTags = tags.filter((t) => t.name.toLowerCase().includes(tagSearch.toLowerCase()));
   const selectedTag = tags.find((t) => t.id === selectedTagId);
   const filteredConcepts = concepts.filter((c) => c.name.toLowerCase().includes(conceptSearch.toLowerCase()));
   const taggedKeys = useMemo<Set<string>>(() => {
-    const selectedState = selectedTagId === 'review-needed' ? 'review' : selectedTagId;
-    if (!selectedState) return new Set();
-    return new Set(
-      concepts
-        .filter((concept) => concept.tag === selectedState)
-        .map((concept) => concept.key),
-    );
-  }, [concepts, selectedTagId]);
+    if (!selectedTagId) return new Set();
+    const keys = new Set<string>();
+    for (const speaker of targetSpeakers) {
+      const conceptTags = records[speaker]?.concept_tags ?? {};
+      for (const [conceptKey, tagIds] of Object.entries(conceptTags)) {
+        if (tagIds.includes(selectedTagId)) keys.add(conceptKey);
+      }
+    }
+    return keys;
+  }, [records, selectedTagId, targetSpeakers]);
+
+  const toggleConceptTag = (conceptKey: string, tagged: boolean) => {
+    if (!selectedTagId) return;
+    const action = tagged ? clearConceptTag : setConceptTag;
+    for (const speaker of targetSpeakers) {
+      action(speaker, conceptKey, selectedTagId);
+    }
+  };
 
   return (
     <div className="flex flex-1 min-h-0 bg-slate-50">
@@ -261,6 +281,7 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
                     key={c.id}
                     type="button"
                     aria-pressed={tagged}
+                    onClick={() => toggleConceptTag(c.key, tagged)}
                     className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${tagged ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}
                   >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagDotClass[c.tag]}`} />

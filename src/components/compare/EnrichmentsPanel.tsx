@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Spinner } from "../shared/Spinner";
 import { Badge } from "../shared/Badge";
 import { Button } from "../shared/Button";
+import { useAnnotationStore } from "../../stores/annotationStore";
+import { useConfigStore } from "../../stores/configStore";
 import { useEnrichmentStore } from "../../stores/enrichmentStore";
+import { useTagStore } from "../../stores/tagStore";
+import { useUIStore } from "../../stores/uiStore";
 import { useExport } from "../../hooks/useExport";
 import { useComputeJob } from "../../hooks/useComputeJob";
 
@@ -58,11 +62,29 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
   const loading = useEnrichmentStore((store) => store.loading);
   const load = useEnrichmentStore((store) => store.load);
   const save = useEnrichmentStore((store) => store.save);
+  const records = useAnnotationStore((store) => store.records);
+  const tagVocabulary = useTagStore((store) => store.tags);
+  const selectedSpeakers = useUIStore((store) => store.selectedSpeakers) ?? [];
+  const configSpeakers = useConfigStore((store) => store.config?.speakers ?? []);
 
   const { exportLingPyTSV } = useExport();
   const { start: startCompute, state: computeState } = useComputeJob("cognates");
 
   const [exportLoading, setExportLoading] = useState(false);
+  const targetSpeakers = useMemo(() => {
+    if (selectedSpeakers.length > 0) return selectedSpeakers;
+    return configSpeakers.length > 0 ? configSpeakers : Object.keys(records);
+  }, [configSpeakers, records, selectedSpeakers]);
+  const conceptTags = useMemo(() => {
+    if (!activeConcept) return [];
+    const tagIds = new Set<string>();
+    for (const speaker of targetSpeakers) {
+      for (const tagId of records[speaker]?.concept_tags?.[activeConcept] ?? []) {
+        tagIds.add(tagId);
+      }
+    }
+    return tagVocabulary.filter((tag) => tagIds.has(tag.id));
+  }, [activeConcept, records, tagVocabulary, targetSpeakers]);
 
   useEffect(() => {
     if (activeConcept && Object.keys(data).length === 0) {
@@ -88,7 +110,7 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
 
   const conceptId = activeConcept;
   const entry = getEntry(data, conceptId);
-  const tags: Array<{ id: string; label: string; color: string }> = [];
+  const tags = conceptTags;
 
   if (!entry) {
     return (

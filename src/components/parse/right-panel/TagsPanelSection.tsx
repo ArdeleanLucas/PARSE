@@ -1,18 +1,39 @@
 import { useMemo, useState } from 'react';
 import { Check, Plus, Search, Tag as TagIcon } from 'lucide-react';
 
+import { useAnnotationStore } from '@/stores/annotationStore';
 import { useTagStore } from '@/stores/tagStore';
+import { useUIStore } from '@/stores/uiStore';
 import type { Tag } from '@/api/types';
 
 const COLOR_SWATCHES = ['#3554B8', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#475569'] as const;
 
 interface TagsPanelSectionProps {
   conceptId: string;
+  speaker?: string | null;
 }
 
-export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
+export function TagsPanelSection({ conceptId, speaker }: TagsPanelSectionProps) {
   const tags = useTagStore((state) => state.tags);
   const addTag = useTagStore((state) => state.addTag);
+  const activeSpeaker = useUIStore((state) => state.activeSpeaker);
+  const records = useAnnotationStore((state) => state.records);
+  const setConceptTag = useAnnotationStore((state) => state.setConceptTag);
+  const clearConceptTag = useAnnotationStore((state) => state.clearConceptTag);
+  const targetSpeaker = speaker ?? activeSpeaker;
+  const activeTagIds = targetSpeaker ? records[targetSpeaker]?.concept_tags?.[conceptId] ?? [] : [];
+  const appliedCount = tags.filter((tag) => activeTagIds.includes(tag.id)).length;
+  const usageCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of Object.values(records)) {
+      for (const tagIds of Object.values(record.concept_tags ?? {})) {
+        for (const tagId of tagIds) {
+          counts.set(tagId, (counts.get(tagId) ?? 0) + 1);
+        }
+      }
+    }
+    return counts;
+  }, [records]);
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -27,9 +48,14 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
         <h4 id="concept-tags-title" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           <TagIcon className="h-3 w-3" /> Concept Tags
         </h4>
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Tag vocabulary size">
-          {tags.length} tag{tags.length === 1 ? '' : 's'}
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[9px] text-emerald-700" aria-label="Applied tag count">
+            {appliedCount} of {tags.length}
+          </span>
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Tag vocabulary size">
+            {tags.length} tag{tags.length === 1 ? '' : 's'}
+          </span>
+        </div>
       </div>
       <p className="mb-3 text-[10px] leading-snug text-slate-400">
         Tags are vocabulary only here; speaker-specific membership lives on each annotation record.
@@ -49,7 +75,23 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
 
       <div className="space-y-1" aria-label="Concept tag list" data-concept-id={conceptId}>
         {filtered.length > 0 ? (
-          filtered.map((tag) => <TagRow key={tag.id} tag={tag} />)
+          filtered.map((tag) => {
+            const checked = activeTagIds.includes(tag.id);
+            return (
+              <TagRow
+                key={tag.id}
+                tag={tag}
+                checked={checked}
+                usageCount={usageCounts.get(tag.id) ?? 0}
+                disabled={!targetSpeaker}
+                onToggle={() => {
+                  if (!targetSpeaker) return;
+                  if (checked) clearConceptTag(targetSpeaker, conceptId, tag.id);
+                  else setConceptTag(targetSpeaker, conceptId, tag.id);
+                }}
+              />
+            );
+          })
         ) : (
           <p className="rounded-md border border-dashed border-slate-200 px-2.5 py-2 text-[10px] text-slate-400">
             {tags.length === 0 ? 'No tags yet. Create one below.' : 'No tags match this search.'}
@@ -62,17 +104,34 @@ export function TagsPanelSection({ conceptId }: TagsPanelSectionProps) {
   );
 }
 
-function TagRow({ tag }: { tag: Tag }) {
+function TagRow({
+  tag,
+  checked,
+  usageCount,
+  disabled,
+  onToggle,
+}: {
+  tag: Tag;
+  checked: boolean;
+  usageCount: number;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div
-      className="tag-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-slate-700"
+    <button
+      type="button"
+      className={`tag-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-slate-700 transition ${checked ? 'bg-indigo-50 ring-1 ring-indigo-100' : 'hover:bg-slate-50'} disabled:cursor-not-allowed disabled:opacity-50`}
+      aria-pressed={checked}
+      disabled={disabled}
+      onClick={onToggle}
     >
-      <span className="check grid h-3.5 w-3.5 place-items-center rounded border border-slate-300 bg-white text-[9px] text-transparent" aria-hidden="true">
+      <span className={`check grid h-3.5 w-3.5 place-items-center rounded border text-[9px] ${checked ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-transparent'}`} aria-hidden="true">
         <Check className="h-2.5 w-2.5" />
       </span>
       <span className="tag-dot h-2.5 w-2.5 rounded-full ring-1 ring-black/10" style={{ backgroundColor: tag.color }} aria-hidden="true" />
       <span className="tag-name min-w-0 flex-1 truncate text-[11px] font-medium">{tag.label}</span>
-    </div>
+      <span data-testid={`tag-usage-${tag.id}`} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{usageCount}</span>
+    </button>
   );
 }
 
