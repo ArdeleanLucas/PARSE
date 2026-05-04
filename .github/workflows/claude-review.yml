@@ -1,0 +1,27 @@
+name: Claude PR Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: |
+            Review this PR thoroughly. Focus on:
+            - Logic bugs and correctness
+            - TypeScript type safety issues
+            - React hook/component anti-patterns
+            - Missing or inadequate test coverage
+            - Consistency with existing codebase conventions
+            Post inline comments where relevant and a concise summary at the end.
