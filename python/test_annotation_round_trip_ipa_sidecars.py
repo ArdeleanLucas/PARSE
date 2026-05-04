@@ -78,10 +78,25 @@ def test_ipa_sidecars_remain_absent_when_missing() -> None:
     assert "ipa_review" not in normalized
 
 
-def test_empty_annotation_record_includes_concept_tags_sidecar() -> None:
+def test_empty_annotation_record_leaves_concept_tags_sidecar_absent() -> None:
     empty = server._annotation_empty_record("Saha01", "audio/raw/Saha01.wav", 12.0, None)
 
-    assert empty["concept_tags"] == {}
+    assert "concept_tags" not in empty
+
+
+def test_concept_tags_remain_absent_when_missing() -> None:
+    normalized = server._normalize_annotation_record(_base_annotation(), "Saha01")
+
+    assert "concept_tags" not in normalized
+
+
+def test_concept_tags_sidecar_is_omitted_when_all_memberships_normalize_empty() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {"1": [], "2": "confirmed", "3": [None, 123]}
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert "concept_tags" not in normalized
 
 
 def test_concept_tags_round_trip_through_annotation_normalizer_and_json_save(tmp_path: pathlib.Path) -> None:

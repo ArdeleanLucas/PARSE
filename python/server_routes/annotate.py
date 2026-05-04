@@ -487,7 +487,7 @@ def _annotation_empty_record(speaker: str, source_audio: _server.Optional[str], 
     source_audio_text = str(source_audio or '').strip()
     if not source_audio_text:
         source_audio_text = _server._annotation_primary_source_wav(speaker_text)
-    return {'version': 1, 'project_id': _server._annotation_project_id(), 'speaker': speaker_text, 'source_audio': source_audio_text, 'source_audio_duration_sec': float(duration), 'tiers': {'ipa': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['ipa']), 'ortho': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['ortho']), 'concept': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['concept']), 'speaker': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['speaker'])}, 'confirmed_anchors': {}, 'concept_tags': {}, 'metadata': {'language_code': _server._annotation_language_code(existing_record), 'created': now_iso, 'modified': now_iso}}
+    return {'version': 1, 'project_id': _server._annotation_project_id(), 'speaker': speaker_text, 'source_audio': source_audio_text, 'source_audio_duration_sec': float(duration), 'tiers': {'ipa': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['ipa']), 'ortho': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['ortho']), 'concept': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['concept']), 'speaker': _server._annotation_empty_tier(_server.ANNOTATION_TIER_ORDER['speaker'])}, 'confirmed_anchors': {}, 'metadata': {'language_code': _server._annotation_language_code(existing_record), 'created': now_iso, 'modified': now_iso}}
 
 
 def _annotation_normalize_concept_tags(raw_tags: _server.Any) -> _server.Dict[str, _server.List[str]]:
@@ -617,7 +617,11 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
                 entry['variants_used'] = [str(x) for x in variants_used]
             clean_anchors[str(key)] = entry
         normalized['confirmed_anchors'] = clean_anchors
-    normalized['concept_tags'] = _annotation_normalize_concept_tags(raw_record.get('concept_tags'))
+    raw_concept_tags = raw_record.get('concept_tags')
+    if isinstance(raw_concept_tags, dict):
+        clean_concept_tags = _annotation_normalize_concept_tags(raw_concept_tags)
+        if clean_concept_tags:
+            normalized['concept_tags'] = clean_concept_tags
     raw_ipa_candidates = raw_record.get('ipa_candidates')
     clean_ipa_candidates = _annotation_normalize_ipa_candidates(raw_ipa_candidates)
     if clean_ipa_candidates is not None:
