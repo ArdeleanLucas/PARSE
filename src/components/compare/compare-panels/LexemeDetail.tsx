@@ -12,9 +12,9 @@ export function LexemeDetail({ speaker, conceptId, conceptLabel, startSec, endSe
   const records = useAnnotationStore((s) => s.records);
   const { enrichmentData, saveEnrichments } = useEnrichmentsBinding();
   const tags = useTagStore((s) => s.tags);
-  const getTagsForLexeme = useTagStore((s) => s.getTagsForLexeme);
-  const tagLexeme = useTagStore((s) => s.tagLexeme);
-  const untagLexeme = useTagStore((s) => s.untagLexeme);
+  const setConceptTag = useAnnotationStore((s) => s.setConceptTag);
+  const clearConceptTag = useAnnotationStore((s) => s.clearConceptTag);
+  const setConfirmedAnchor = useAnnotationStore((s) => s.setConfirmedAnchor);
   const addTag = useTagStore((s) => s.addTag);
 
   const lexemeNotesBlock = useMemo(() => {
@@ -36,10 +36,10 @@ export function LexemeDetail({ speaker, conceptId, conceptLabel, startSec, endSe
     setUserNote(lexemeNotesBlock?.user_note ?? "");
   }, [lexemeNotesBlock?.user_note]);
 
-  const lexemeTags = getTagsForLexeme(speaker, conceptId);
-  const lexemeTagIds = new Set(lexemeTags.map((tag) => tag.id));
+  const record = records[speaker] as { source_audio?: string; source_wav?: string; concept_tags?: Record<string, string[]> } | undefined;
+  const lexemeTagIds = new Set(record?.concept_tags?.[conceptId] ?? []);
+  const lexemeTags = tags.filter((tag) => lexemeTagIds.has(tag.id));
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const record = records[speaker] as { source_audio?: string; source_wav?: string } | undefined;
   const audioUrl = deriveAudioUrl(record);
   const canPlay = Boolean(audioUrl && startSec != null && endSec != null);
   const canShowSpectrogram = startSec != null && endSec != null;
@@ -105,7 +105,7 @@ export function LexemeDetail({ speaker, conceptId, conceptLabel, startSec, endSe
     if (!trimmed) return;
     const existing = tags.find((tag) => tag.label.toLowerCase() === trimmed.toLowerCase());
     const tag = existing ?? addTag(trimmed, "#6b7280");
-    tagLexeme(tag.id, speaker, conceptId);
+    setConceptTag(speaker, conceptId, tag.id);
     setTagSearch("");
   };
 
@@ -137,11 +137,14 @@ export function LexemeDetail({ speaker, conceptId, conceptLabel, startSec, endSe
         savingNote={savingNote}
         noteError={noteError}
         lexemeTags={lexemeTags}
-        untagLexeme={untagLexeme}
+        untagLexeme={(tagId, tagSpeaker, tagConceptId) => {
+          clearConceptTag(tagSpeaker, tagConceptId, tagId);
+          if (tagId === "confirmed") setConfirmedAnchor(tagSpeaker, tagConceptId, null);
+        }}
         tagSearch={tagSearch}
         setTagSearch={setTagSearch}
         filteredTagSuggestions={filteredTagSuggestions}
-        tagLexeme={tagLexeme}
+        tagLexeme={(tagId, tagSpeaker, tagConceptId) => setConceptTag(tagSpeaker, tagConceptId, tagId)}
         handleAddTag={handleAddTag}
       />
     </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTagStore } from "../../../stores/tagStore";
+import type { Tag } from "../../../api/types";
 import { useCompareSelection } from "./useCompareSelection";
 import { parseConcepts } from "./shared";
 import { ConceptRow } from "./ConceptRow";
@@ -7,8 +8,7 @@ import type { ConceptTableProps } from "./types";
 
 export function ConceptTable({ onPlayEntry }: ConceptTableProps) {
   const { activeConcept, config, enrichmentData, records, setActiveConcept, speakers } = useCompareSelection();
-  const getTagsForConcept = useTagStore((s) => s.getTagsForConcept);
-  const getTagsForLexeme = useTagStore((s) => s.getTagsForLexeme);
+  const tags = useTagStore((s) => s.tags);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (speaker: string, conceptId: string) => {
@@ -22,6 +22,18 @@ export function ConceptTable({ onPlayEntry }: ConceptTableProps) {
   };
 
   const concepts = parseConcepts((config as Record<string, unknown> | null)?.concepts);
+  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const getTagsForConcept = (conceptId: string): Tag[] => {
+    const ids = new Set<string>();
+    for (const record of Object.values(records)) {
+      for (const tagId of record.concept_tags?.[conceptId] ?? []) ids.add(tagId);
+    }
+    return Array.from(ids).map((id) => tagsById.get(id)).filter((tag): tag is Tag => Boolean(tag));
+  };
+  const getTagsForLexeme = (speaker: string, conceptId: string): Tag[] => {
+    const ids = records[speaker]?.concept_tags?.[conceptId] ?? [];
+    return ids.map((id) => tagsById.get(id)).filter((tag): tag is Tag => Boolean(tag));
+  };
   if (concepts.length === 0) {
     return <div style={{ fontFamily: "monospace", padding: "1rem", color: "#6b7280" }}>No concepts loaded.</div>;
   }

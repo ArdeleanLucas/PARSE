@@ -83,6 +83,8 @@ export interface AnnotationRecord {
   /** Keyed by concept id (string). Seeded by the Search & Anchor Lexeme
    * flow; surfaces as cross-speaker signal in other speakers' searches. */
   confirmed_anchors?: Record<string, ConfirmedAnchor>;
+  /** Per-speaker concept tag sidecar. Keys are concept ids; values are tag ids. */
+  concept_tags?: Record<string, string[]>;
   /** Keyed by `<concept_id>::ipa::<interval_index>` or `<concept_id>::ipa_phone::<interval_index>`. */
   ipa_candidates?: Record<string, IpaCandidate[]>;
   ipa_review?: Record<string, IpaReviewState>;
@@ -152,13 +154,6 @@ export interface Tag {
   id: string; // uuid
   label: string;
   color: string; // hex
-  concepts: string[]; // concept ids that carry this tag (concept-level)
-  /**
-   * Per-lexeme tag targets, each encoded as `${speaker}::${conceptId}`.
-   * A lexeme is the intersection of a concept + speaker; tagging a lexeme
-   * only colours that speaker's form, not the whole concept row.
-   */
-  lexemeTargets?: string[];
 }
 
 export interface TagsResponse {

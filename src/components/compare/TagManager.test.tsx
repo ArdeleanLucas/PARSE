@@ -11,9 +11,6 @@ let mockTags: Tag[] = [];
 const mockAddTag = vi.fn();
 const mockRemoveTag = vi.fn();
 const mockUpdateTag = vi.fn();
-const mockTagConcept = vi.fn();
-const mockUntagConcept = vi.fn();
-const mockGetTagsForConcept = vi.fn((_conceptId: string): Tag[] => []);
 
 let mockActiveConcept: string | null = null;
 
@@ -37,9 +34,6 @@ vi.mock("../../stores/tagStore", () => ({
       addTag: mockAddTag,
       removeTag: mockRemoveTag,
       updateTag: mockUpdateTag,
-      tagConcept: mockTagConcept,
-      untagConcept: mockUntagConcept,
-      getTagsForConcept: mockGetTagsForConcept,
     }),
 }));
 
@@ -57,15 +51,12 @@ import { TagManager } from "./TagManager";
 
 beforeEach(() => {
   mockTags = [
-    { id: "t1", label: "Review", color: "#f59e0b", concepts: ["c1"] },
-    { id: "t2", label: "Confirmed", color: "#10b981", concepts: [] },
+    { id: "t1", label: "Review", color: "#f59e0b" },
+    { id: "t2", label: "Confirmed", color: "#10b981" },
   ];
   mockAddTag.mockClear();
   mockRemoveTag.mockClear();
   mockUpdateTag.mockClear();
-  mockTagConcept.mockClear();
-  mockUntagConcept.mockClear();
-  mockGetTagsForConcept.mockReset().mockReturnValue([]);
 });
 
 afterEach(() => {
@@ -97,27 +88,13 @@ describe("TagManager", () => {
     expect(mockRemoveTag).toHaveBeenCalledWith("t1");
   });
 
-  it("clicking concept chip calls tagConcept or untagConcept", () => {
-    mockGetTagsForConcept.mockImplementation((conceptId: string) => {
-      if (conceptId === "c1") return [mockTags[0]];
-      return [];
-    });
-
+  it("renders concept chips as vocabulary-only context for the selected tag", () => {
     render(<TagManager isOpen={true} onClose={() => {}} />);
 
-    // Select a tag first
-    const tagRow = screen.getByTestId("tag-row-t1");
-    fireEvent.click(tagRow);
+    fireEvent.click(screen.getByTestId("tag-row-t1"));
 
-    // Click an untagged concept
-    const chipC2 = screen.getByTestId("concept-chip-c2");
-    fireEvent.click(chipC2);
-    expect(mockTagConcept).toHaveBeenCalledWith("t1", "c2");
-
-    // Click a tagged concept
-    const chipC1 = screen.getByTestId("concept-chip-c1");
-    fireEvent.click(chipC1);
-    expect(mockUntagConcept).toHaveBeenCalledWith("t1", "c1");
+    expect(screen.getByTestId("concept-chip-c1")).toBeTruthy();
+    expect(screen.getByTestId("concept-chip-c2")).toBeTruthy();
   });
 
   it("search filters concept chips", () => {

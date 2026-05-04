@@ -144,6 +144,29 @@ describe("annotationStore undo/redo", () => {
     );
   });
 
+  it("sets and clears per-speaker concept tags without touching other speakers", () => {
+    useAnnotationStore.setState({
+      records: { S1: seed(), S2: { ...seed(), speaker: "S2" } },
+      dirty: { S1: false, S2: false },
+      loading: {},
+      histories: {},
+    });
+
+    const store = useAnnotationStore.getState();
+    store.setConceptTag("S1", "c1", "confirmed");
+
+    expect(useAnnotationStore.getState().records.S1.concept_tags).toEqual({ c1: ["confirmed"] });
+    expect(useAnnotationStore.getState().records.S2.concept_tags).toBeUndefined();
+    expect(useAnnotationStore.getState().dirty.S1).toBe(true);
+    expect(useAnnotationStore.getState().dirty.S2).toBe(false);
+    expect(useAnnotationStore.getState().histories.S1.undo.slice(-1)[0]?.label).toBe("tag concept");
+
+    store.clearConceptTag("S1", "c1", "confirmed");
+
+    expect(useAnnotationStore.getState().records.S1.concept_tags?.c1).toBeUndefined();
+    expect(useAnnotationStore.getState().histories.S1.undo.slice(-1)[0]?.label).toBe("clear concept tag");
+  });
+
   it("ensureSttTier copies segments and is idempotent", () => {
     const segs = [
       { start: 0, end: 1, text: "one" },

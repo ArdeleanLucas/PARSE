@@ -2,7 +2,7 @@
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-let mockStoreTags: Array<{ id: string; name: string; color: string; concepts: string[] }> = [];
+let mockStoreTags: Array<{ id: string; label: string; color: string }> = [];
 
 vi.mock('../../stores/tagStore', () => ({
   useTagStore: (selector: (state: unknown) => unknown) => selector({
@@ -52,8 +52,6 @@ function renderManageTagsView(overrides: Partial<React.ComponentProps<typeof Man
     setSelectedTagId: vi.fn(),
     conceptSearch: '',
     setConceptSearch: vi.fn(),
-    tagConcept: vi.fn(),
-    untagConcept: vi.fn(),
     ...overrides,
   };
 
@@ -62,8 +60,8 @@ function renderManageTagsView(overrides: Partial<React.ComponentProps<typeof Man
 
 beforeEach(() => {
   mockStoreTags = [
-    { id: 'review-needed', name: 'Review needed', color: '#f59e0b', concepts: ['fire'] },
-    { id: 'confirmed', name: 'Confirmed', color: '#10b981', concepts: ['earth'] },
+    { id: 'review-needed', label: 'Review needed', color: '#f59e0b' },
+    { id: 'confirmed', label: 'Confirmed', color: '#10b981' },
   ];
 });
 
@@ -109,20 +107,10 @@ describe('ManageTagsView', () => {
     expect(onUpdateTag).toHaveBeenCalledWith('review-needed', 'Needs review');
   });
 
-  it('toggles concept assignment using the selected tag membership from the store', () => {
-    const tagConcept = vi.fn();
-    const untagConcept = vi.fn();
+  it('shows vocabulary-only tag membership derived from concept status', () => {
+    renderManageTagsView({ selectedTagId: 'review-needed' });
 
-    renderManageTagsView({
-      selectedTagId: 'review-needed',
-      tagConcept,
-      untagConcept,
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /fire/i }));
-    fireEvent.click(screen.getByRole('button', { name: /water/i }));
-
-    expect(untagConcept).toHaveBeenCalledWith('review-needed', 'fire');
-    expect(tagConcept).toHaveBeenCalledWith('review-needed', 'water');
+    expect(screen.getByRole('button', { name: /fire/i }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /water/i }).getAttribute('aria-pressed')).toBe('false');
   });
 });

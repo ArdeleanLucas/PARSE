@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { AnnotationRecord, Tag } from "../../api/types";
+import type { AnnotationRecord } from "../../api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock state                                                         */
@@ -12,7 +12,6 @@ let mockRecords: Record<string, AnnotationRecord> = {};
 let mockActiveConcept: string | null = null;
 let mockSelectedSpeakers: string[] = [];
 let mockEnrichmentData: Record<string, unknown> = {};
-let mockTags: Tag[] = [];
 const mockSetActiveConcept = vi.fn();
 
 vi.mock("../../stores/configStore", () => ({
@@ -37,22 +36,6 @@ vi.mock("../../stores/uiStore", () => ({
 vi.mock("../../stores/enrichmentStore", () => ({
   useEnrichmentStore: (selector: (s: unknown) => unknown) =>
     selector({ data: mockEnrichmentData }),
-}));
-
-vi.mock("../../stores/tagStore", () => ({
-  useTagStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      tags: mockTags,
-      getTagsForConcept: (conceptId: string) =>
-        mockTags.filter((t) => t.concepts.includes(conceptId)),
-      getTagsForLexeme: (speaker: string, conceptId: string) => {
-        const key = `${speaker}::${conceptId}`;
-        return mockTags.filter((t) => (t.lexemeTargets ?? []).includes(key));
-      },
-      tagLexeme: vi.fn(),
-      untagLexeme: vi.fn(),
-      addTag: vi.fn(),
-    }),
 }));
 
 import { ConceptTable } from "./ConceptTable";
@@ -101,7 +84,6 @@ beforeEach(() => {
   mockActiveConcept = null;
   mockSelectedSpeakers = [];
   mockEnrichmentData = {};
-  mockTags = [];
   mockSetActiveConcept.mockClear();
 });
 

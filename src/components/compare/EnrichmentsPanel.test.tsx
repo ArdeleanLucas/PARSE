@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Tag } from "../../api/types";
 
 let mockData: Record<string, unknown> = {};
 let mockLoading = false;
 const mockLoad = vi.fn(async () => {});
 const mockSave = vi.fn(async () => {});
-let mockTags: Tag[] = [];
-const mockGetTagsForConcept = vi.fn((): Tag[] => mockTags);
 
 const mockExportLingPyTSV = vi.fn(async () => {});
 const mockComputeStart = vi.fn(async () => {});
@@ -30,17 +27,6 @@ vi.mock("../../stores/enrichmentStore", () => ({
       loading: mockLoading,
       load: mockLoad,
       save: mockSave,
-    }),
-}));
-
-vi.mock("../../stores/tagStore", () => ({
-  useTagStore: (selector: (state: {
-    tags: Tag[];
-    getTagsForConcept: () => Tag[];
-  }) => unknown) =>
-    selector({
-      tags: mockTags,
-      getTagsForConcept: mockGetTagsForConcept,
     }),
 }));
 
@@ -66,8 +52,6 @@ beforeEach(() => {
   mockLoading = false;
   mockLoad.mockClear();
   mockSave.mockClear();
-  mockTags = [];
-  mockGetTagsForConcept.mockReset().mockReturnValue([]);
   mockExportLingPyTSV.mockClear();
   mockComputeStart.mockClear();
   mockComputeState = { status: "idle", progress: 0, error: null };

@@ -3,7 +3,6 @@ import { Spinner } from "../shared/Spinner";
 import { Badge } from "../shared/Badge";
 import { Button } from "../shared/Button";
 import { useEnrichmentStore } from "../../stores/enrichmentStore";
-import { useTagStore } from "../../stores/tagStore";
 import { useExport } from "../../hooks/useExport";
 import { useComputeJob } from "../../hooks/useComputeJob";
 
@@ -59,7 +58,6 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
   const loading = useEnrichmentStore((store) => store.loading);
   const load = useEnrichmentStore((store) => store.load);
   const save = useEnrichmentStore((store) => store.save);
-  const getTagsForConcept = useTagStore((store) => store.getTagsForConcept);
 
   const { exportLingPyTSV } = useExport();
   const { start: startCompute, state: computeState } = useComputeJob("cognates");
@@ -90,7 +88,7 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
 
   const conceptId = activeConcept;
   const entry = getEntry(data, conceptId);
-  const tags = getTagsForConcept(conceptId);
+  const tags: Array<{ id: string; label: string; color: string }> = [];
 
   if (!entry) {
     return (

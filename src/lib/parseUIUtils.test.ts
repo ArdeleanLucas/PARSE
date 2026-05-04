@@ -89,7 +89,7 @@ describe('parseUIUtils', () => {
   });
 
   it('prioritizes problematic then confirmed then review tags when deriving concept status', () => {
-    const tag = (id: string): StoreTag => ({ id, label: id, color: '#000000', concepts: [] });
+    const tag = (id: string): StoreTag => ({ id, label: id, color: '#000000' });
 
     expect(getConceptStatus([tag('review')])).toBe('review');
     expect(getConceptStatus([tag('confirmed'), tag('review')])).toBe('confirmed');

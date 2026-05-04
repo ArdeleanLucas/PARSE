@@ -84,7 +84,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus, ContactLexemePopulateResult } from './api/types';
+import type { ClefConfigStatus, ContactLexemePopulateResult, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -130,10 +130,8 @@ export function ParseUI() {
   const hydrateTagStore  = useTagStore(s => s.hydrate);
   const syncTagStoreFromServer = useTagStore(s => s.syncFromServer);
   const updateStoreTag   = useTagStore(s => s.updateTag);
-  const tagConcept       = useTagStore(s => s.tagConcept);
-  const untagConcept     = useTagStore(s => s.untagConcept);
-  const getTagsForConcept = useTagStore(s => s.getTagsForConcept);
   const annotationRecords = useAnnotationStore(s => s.records);
+  const setConceptTag = useAnnotationStore(s => s.setConceptTag);
   const enrichmentData = useEnrichmentStore(s => s.data);
   const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
   const setActiveConceptUI = useUIStore(s => s.setActiveConcept);
@@ -819,6 +817,28 @@ export function ParseUI() {
   }, [enrichmentData]);
 
   // — Derived: real concepts with live tag state —
+  const getTagsForConcept = useCallback((conceptKey: string): Tag[] => {
+    const appliedIds = new Set<string>();
+    for (const record of Object.values(annotationRecords)) {
+      for (const tagId of record.concept_tags?.[conceptKey] ?? []) {
+        appliedIds.add(tagId);
+      }
+    }
+    return storeTags.filter((tag) => appliedIds.has(tag.id));
+  }, [annotationRecords, storeTags]);
+
+  const selectedTagTargetSpeakers = useCallback((): string[] => {
+    // Compare starts with all speakers selected via an effect; keep toolbar tag actions
+    // deterministic on the first render by falling back to the configured speakers.
+    return selectedSpeakers.length > 0 ? selectedSpeakers : rawSpeakers;
+  }, [rawSpeakers, selectedSpeakers]);
+
+  const setConceptTagForSelectedSpeakers = useCallback((tagId: string, conceptKey: string) => {
+    for (const targetSpeaker of selectedTagTargetSpeakers()) {
+      setConceptTag(targetSpeaker, conceptKey, tagId);
+    }
+  }, [selectedTagTargetSpeakers, setConceptTag]);
+
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
     const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
@@ -892,8 +912,16 @@ export function ParseUI() {
 
   // — Derived: tags list from store —
   const tagsList = useMemo<LingTag[]>(() =>
-    storeTags.map(t => ({ id: t.id, name: t.label, color: t.color, dotClass: '', count: t.concepts.length })),
-    [storeTags]
+    storeTags.map(t => ({
+      id: t.id,
+      name: t.label,
+      color: t.color,
+      dotClass: '',
+      count: Object.values(annotationRecords).filter((record) =>
+        Object.values(record.concept_tags ?? {}).some((ids) => ids.includes(t.id)),
+      ).length,
+    })),
+    [annotationRecords, storeTags]
   );
 
   // AI bottom panel
@@ -1007,9 +1035,9 @@ export function ParseUI() {
     }
     if (selectedTagIds.size > 0) {
       list = list.filter(c => {
+        const conceptTagIds = new Set(getTagsForConcept(c.key).map((tag) => tag.id));
         for (const tagId of selectedTagIds) {
-          const storeTag = storeTags.find(t => t.id === tagId);
-          if (!storeTag || !storeTag.concepts.includes(c.key)) return false;
+          if (!conceptTagIds.has(tagId)) return false;
         }
         return true;
       });
@@ -1035,7 +1063,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, storeTags]);
+  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, getTagsForConcept]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceFormLists = useMemo(
@@ -1702,8 +1730,6 @@ export function ParseUI() {
               setSelectedTagId={setSelectedTagId}
               conceptSearch={tagConceptSearch}
               setConceptSearch={setTagConceptSearch}
-              tagConcept={tagConcept}
-              untagConcept={untagConcept}
             />
             <AIChat
               height={aiHeight}
@@ -1764,7 +1790,7 @@ export function ParseUI() {
                   <button
                     onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic')
                       ? null
-                      : tagConcept('problematic', concept.key)}
+                      : setConceptTagForSelectedSpeakers('problematic', concept.key)}
                     className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic') ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                   >
                     <Flag className="h-3.5 w-3.5"/> Flag
@@ -1772,7 +1798,7 @@ export function ParseUI() {
                   <button
                     onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed')
                       ? null
-                      : tagConcept('confirmed', concept.key)}
+                      : setConceptTagForSelectedSpeakers('confirmed', concept.key)}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
                   >
                     <Check className="h-3.5 w-3.5"/> Accept concept
