@@ -1,7 +1,7 @@
 """PARSE server route-domain module: annotate."""
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Set
 
 import hashlib
 import server as _server
@@ -498,7 +498,7 @@ def _annotation_normalize_concept_tags(raw_tags: _server.Any) -> _server.Dict[st
         if not isinstance(raw_tag_ids, list):
             continue
         tag_ids: _server.List[str] = []
-        seen: set[str] = set()
+        seen: Set[str] = set()
         for raw_tag_id in raw_tag_ids:
             if not isinstance(raw_tag_id, str) or raw_tag_id in seen:
                 continue
