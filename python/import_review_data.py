@@ -19,6 +19,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from concept_source_item import write_concepts_csv_rows
+
 
 PROJECT_NAME = "Southern Kurdish Dialect Comparison"
 PROJECT_ID = "southern-kurdish-dialect-comparison"
@@ -343,10 +345,7 @@ def main() -> None:
     # Write concepts.csv
     csv_path = output_dir / "concepts.csv"
     csv_rows = build_concepts_csv_rows(concepts)
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["id", "concept_en"])
-        writer.writeheader()
-        writer.writerows(csv_rows)
+    write_concepts_csv_rows(csv_path, csv_rows)
     print(f"Wrote {csv_path} ({len(csv_rows)} concepts)")
 
     # Write per-speaker annotation files

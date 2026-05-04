@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import server as _server
-from concept_source_item import concept_row_from_item, source_item_from_audition_row, write_concepts_csv_rows
-from concept_registry import concept_label_key, load_concept_registry, resolve_or_allocate_concept_id
+from concept_source_item import concept_row_from_item, source_item_from_audition_row
+from concept_registry import concept_label_key, load_concept_registry, merge_concepts_into_root_csv, resolve_or_allocate_concept_id
 
 def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _server.List[_server.Dict[str, _server.Any]]:
     suggestions_path = _server._project_root() / 'ai_suggestions.json'
@@ -154,41 +154,12 @@ def _parse_concepts_csv(csv_path: _server.pathlib.Path) -> _server.List[_server.
 
 def _merge_concepts_into_root_csv(new_concepts: _server.List[_server.Dict[str, str]]) -> int:
     """Merge new concepts into root concepts.csv. Existing rows win on id collision. Returns total."""
-    import csv as _csv
-    concepts_path = _server._project_root() / 'concepts.csv'
-    merged: _server.Dict[str, _server.Dict[str, str]] = {}
-    if concepts_path.exists():
-        try:
-            with open(concepts_path, newline='', encoding='utf-8') as handle:
-                reader = _csv.DictReader(handle)
-                for row in reader:
-                    cid = _server._normalize_concept_id(row.get('id'))
-                    label = str(row.get('concept_en') or '').strip()
-                    if cid and label:
-                        normalized = concept_row_from_item(row)
-                        normalized['id'] = cid
-                        normalized['concept_en'] = label
-                        merged[cid] = normalized
-        except (OSError, _csv.Error):
-            pass
-    for item in new_concepts:
-        cid = _server._normalize_concept_id(item.get('id'))
-        label = str(item.get('label') or '').strip()
-        if not (cid and label):
-            continue
-        incoming = concept_row_from_item({**item, 'concept_en': label})
-        incoming['id'] = cid
-        incoming['concept_en'] = label
-        if cid not in merged:
-            merged[cid] = incoming
-            continue
-        existing = merged[cid]
-        for key in ('source_item', 'source_survey', 'custom_order'):
-            if not existing.get(key) and incoming.get(key):
-                existing[key] = incoming[key]
-    ordered = [row for _cid, row in sorted(merged.items(), key=lambda kv: _server._concept_sort_key(kv[0]))]
-    write_concepts_csv_rows(concepts_path, ordered)
-    return len(ordered)
+    return merge_concepts_into_root_csv(
+        _server._project_root(),
+        new_concepts,
+        normalize_concept_id=_server._normalize_concept_id,
+        concept_sort_key=_server._concept_sort_key,
+    )
 
 def _register_speaker_in_project_json(speaker: str) -> None:
     """Add speaker to project.json speakers block. Preserves existing keys."""

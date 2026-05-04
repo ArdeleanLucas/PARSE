@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from concept_source_item import write_concepts_csv_rows
+
 from ..chat_tools import (
     ChatToolSpec,
     _read_json_file,
@@ -216,15 +218,13 @@ def contact_lexeme_lookup(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict
 
         # If concept filter is given, write a temporary concepts CSV with only those
         import tempfile
-        import csv as _csv
         if concept_filter:
             tmp_concepts = Path(tempfile.mktemp(suffix=".csv"))
             try:
-                with open(tmp_concepts, "w", newline="", encoding="utf-8") as f:
-                    writer = _csv.DictWriter(f, fieldnames=["id", "concept_en"])
-                    writer.writeheader()
-                    for i, c in enumerate(concept_filter, 1):
-                        writer.writerow({"id": str(i), "concept_en": c})
+                write_concepts_csv_rows(
+                    tmp_concepts,
+                    [{"id": str(i), "concept_en": c} for i, c in enumerate(concept_filter, 1)],
+                )
                 effective_concepts_path = tmp_concepts
             except Exception:
                 effective_concepts_path = concepts_path
