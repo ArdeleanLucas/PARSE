@@ -1,12 +1,34 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { AnnotationRecord } from '../../api/types';
 
 let mockStoreTags: Array<{ id: string; label: string; color: string }> = [];
+let mockSelectedSpeakers: string[] = [];
+let mockConfigSpeakers: string[] = [];
+let mockRecords: Record<string, AnnotationRecord> = {};
+const mockSetConceptTag = vi.fn();
+const mockClearConceptTag = vi.fn();
 
 vi.mock('../../stores/tagStore', () => ({
   useTagStore: (selector: (state: unknown) => unknown) => selector({
     tags: mockStoreTags,
+  }),
+}));
+
+vi.mock('../../stores/uiStore', () => ({
+  useUIStore: (selector: (state: unknown) => unknown) => selector({ selectedSpeakers: mockSelectedSpeakers }),
+}));
+
+vi.mock('../../stores/configStore', () => ({
+  useConfigStore: (selector: (state: unknown) => unknown) => selector({ config: { speakers: mockConfigSpeakers } }),
+}));
+
+vi.mock('../../stores/annotationStore', () => ({
+  useAnnotationStore: (selector: (state: unknown) => unknown) => selector({
+    records: mockRecords,
+    setConceptTag: mockSetConceptTag,
+    clearConceptTag: mockClearConceptTag,
   }),
 }));
 
@@ -63,6 +85,14 @@ beforeEach(() => {
     { id: 'review-needed', label: 'Review needed', color: '#f59e0b' },
     { id: 'confirmed', label: 'Confirmed', color: '#10b981' },
   ];
+  mockSelectedSpeakers = ['S1'];
+  mockConfigSpeakers = ['S1', 'S2'];
+  mockRecords = {
+    S1: { speaker: 'S1', source_wav: 'S1.wav', source_audio: 'S1.wav', tiers: {}, concept_tags: { fire: ['review-needed'] } } as AnnotationRecord,
+    S2: { speaker: 'S2', source_wav: 'S2.wav', source_audio: 'S2.wav', tiers: {}, concept_tags: { water: ['review-needed'] } } as AnnotationRecord,
+  };
+  mockSetConceptTag.mockClear();
+  mockClearConceptTag.mockClear();
 });
 
 afterEach(() => {
@@ -107,10 +137,30 @@ describe('ManageTagsView', () => {
     expect(onUpdateTag).toHaveBeenCalledWith('review-needed', 'Needs review');
   });
 
-  it('shows vocabulary-only tag membership derived from concept status', () => {
+  it('shows tag membership derived from selected speaker annotation records', () => {
     renderManageTagsView({ selectedTagId: 'review-needed' });
 
     expect(screen.getByRole('button', { name: /fire/i }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: /water/i }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('toggles concept assignment using the selected tag membership', () => {
+    renderManageTagsView({ selectedTagId: 'review-needed' });
+
+    fireEvent.click(screen.getByRole('button', { name: /water/i }));
+    expect(mockSetConceptTag).toHaveBeenCalledWith('S1', 'water', 'review-needed');
+
+    fireEvent.click(screen.getByRole('button', { name: /fire/i }));
+    expect(mockClearConceptTag).toHaveBeenCalledWith('S1', 'fire', 'review-needed');
+  });
+
+  it('falls back to configured speakers when toggling with no selected speakers', () => {
+    mockSelectedSpeakers = [];
+    renderManageTagsView({ selectedTagId: 'confirmed' });
+
+    fireEvent.click(screen.getByRole('button', { name: /earth/i }));
+
+    expect(mockSetConceptTag).toHaveBeenCalledWith('S1', 'earth', 'confirmed');
+    expect(mockSetConceptTag).toHaveBeenCalledWith('S2', 'earth', 'confirmed');
   });
 });

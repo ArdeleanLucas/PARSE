@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Button } from "../shared/Button";
 import { useTagStore } from "../../stores/tagStore";
+import { useAnnotationStore } from "../../stores/annotationStore";
 import { useConfigStore } from "../../stores/configStore";
+import { useUIStore } from "../../stores/uiStore";
 import type { Tag } from "../../api/types";
 import type { ProjectConfig } from "../../api/types";
 
@@ -41,6 +43,10 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   const removeTag = useTagStore((s) => s.removeTag);
   const updateTag = useTagStore((s) => s.updateTag);
   const config = useConfigStore((s: { config: ProjectConfig | null }) => s.config);
+  const selectedSpeakers = useUIStore((s) => s.selectedSpeakers) ?? [];
+  const records = useAnnotationStore((s) => s.records);
+  const setConceptTag = useAnnotationStore((s) => s.setConceptTag);
+  const clearConceptTag = useAnnotationStore((s) => s.clearConceptTag);
 
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -52,6 +58,17 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
 
   const concepts = getConceptList(config);
   const selectedTag = tags.find((t) => t.id === selectedTagId) ?? null;
+  const targetSpeakers = selectedSpeakers.length > 0 ? selectedSpeakers : config?.speakers ?? [];
+  const usageCounts = new Map<string, number>();
+  for (const record of Object.values(records)) {
+    for (const [conceptId, tagIds] of Object.entries(record.concept_tags ?? {})) {
+      for (const tagId of tagIds) {
+        const key = `${record.speaker}::${conceptId}::${tagId}`;
+        if (!key) continue;
+        usageCounts.set(tagId, (usageCounts.get(tagId) ?? 0) + 1);
+      }
+    }
+  }
 
   const filteredConcepts = concepts.filter((c) =>
     c.label.toLowerCase().includes(searchQuery.toLowerCase())
@@ -81,20 +98,35 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
     setEditingId(null);
   }
 
-  function isConceptTagged(_conceptId: string): boolean {
-    return false;
+  function isConceptTagged(conceptId: string): boolean {
+    if (!selectedTagId) return false;
+    return targetSpeakers.some((speaker) => records[speaker]?.concept_tags?.[conceptId]?.includes(selectedTagId));
   }
 
-  function toggleConcept(_conceptId: string) {
-    return;
+  function toggleConcept(conceptId: string) {
+    if (!selectedTagId) return;
+    const action = isConceptTagged(conceptId) ? clearConceptTag : setConceptTag;
+    for (const speaker of targetSpeakers) {
+      action(speaker, conceptId, selectedTagId);
+    }
   }
 
   function tagAllVisible() {
-    return;
+    if (!selectedTagId) return;
+    for (const concept of filteredConcepts) {
+      for (const speaker of targetSpeakers) {
+        setConceptTag(speaker, concept.id, selectedTagId);
+      }
+    }
   }
 
   function untagAllVisible() {
-    return;
+    if (!selectedTagId) return;
+    for (const concept of filteredConcepts) {
+      for (const speaker of targetSpeakers) {
+        clearConceptTag(speaker, concept.id, selectedTagId);
+      }
+    }
   }
 
   return (
@@ -163,7 +195,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                       fontFamily: "monospace",
                     }}
                   >
-                    {0}
+                    {usageCounts.get(tag.id) ?? 0}
                   </span>
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); startEdit(tag); }}>
                     Edit

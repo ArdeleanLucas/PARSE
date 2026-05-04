@@ -763,4 +763,64 @@ describe('AnnotateView', () => {
     fireEvent.click(screen.getByRole('button', { name: /spectrogram/i }));
     expect(screen.queryByTestId('spectrogram-playhead')).toBeNull();
   });
+
+  it('marks done without a time anchor when no concept boundary exists', () => {
+    vi.useFakeTimers();
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByRole('button', { name: /Mark Done/i }));
+
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+    expect(mockSetConfirmedAnchor).not.toHaveBeenCalled();
+    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done. Time anchor skipped: no boundary.');
+  });
+
+  it('disables Confirm time when no concept boundary exists', () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    expect((screen.getByTestId('confirm-time') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('toggles Confirm time anchor without tagging or matched text', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    const { rerender } = renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByTestId('confirm-time'));
+
+    expect(mockSetConfirmedAnchor).toHaveBeenCalledWith('Fail01', 'water', expect.objectContaining({
+      start: 1,
+      end: 2,
+      source: 'user+boundary_only',
+      confirmed_at: expect.any(String),
+    }));
+    expect(mockSetConfirmedAnchor.mock.calls[0][2]).not.toHaveProperty('matched_text');
+    expect(mockSetConceptTag).not.toHaveBeenCalled();
+
+    mockRecord = {
+      ...mockRecord!,
+      confirmed_anchors: {
+        ...(mockRecord!.confirmed_anchors ?? {}),
+        water: { start: 1, end: 2, source: 'user+boundary_only', confirmed_at: '2026-05-04T00:00:00.000Z' },
+      },
+    };
+    rerender(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('confirm-time'));
+    expect(mockSetConfirmedAnchor).toHaveBeenLastCalledWith('Fail01', 'water', null);
+  });
+
 });

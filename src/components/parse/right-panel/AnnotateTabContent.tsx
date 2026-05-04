@@ -67,7 +67,7 @@ export function AnnotateTabContent({
         </div>
       </div>
 
-      <TagsPanelSection conceptId={currentConceptId} />
+      <TagsPanelSection conceptId={currentConceptId} speaker={activeActionSpeaker} />
 
       <div className="border-b border-slate-100 p-4">
         <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">

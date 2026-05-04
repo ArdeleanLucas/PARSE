@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Tag } from "../../api/types";
+import type { AnnotationRecord, Tag } from "../../api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock state                                                         */
@@ -11,13 +11,17 @@ let mockTags: Tag[] = [];
 const mockAddTag = vi.fn();
 const mockRemoveTag = vi.fn();
 const mockUpdateTag = vi.fn();
+const mockSetConceptTag = vi.fn();
+const mockClearConceptTag = vi.fn();
+let mockRecords: Record<string, AnnotationRecord> = {};
+let mockSelectedSpeakers: string[] = [];
 
 let mockActiveConcept: string | null = null;
 
 let mockConfig: Record<string, unknown> | null = {
   project_name: "test",
   language_code: "en",
-  speakers: [],
+  speakers: ["S1", "S2"],
   audio_dir: "",
   annotations_dir: "",
   concepts: [
@@ -39,12 +43,21 @@ vi.mock("../../stores/tagStore", () => ({
 
 vi.mock("../../stores/uiStore", () => ({
   useUIStore: (selector: (s: unknown) => unknown) =>
-    selector({ activeConcept: mockActiveConcept }),
+    selector({ activeConcept: mockActiveConcept, selectedSpeakers: mockSelectedSpeakers }),
 }));
 
 vi.mock("../../stores/configStore", () => ({
   useConfigStore: (selector: (s: unknown) => unknown) =>
     selector({ config: mockConfig }),
+}));
+
+vi.mock("../../stores/annotationStore", () => ({
+  useAnnotationStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      records: mockRecords,
+      setConceptTag: mockSetConceptTag,
+      clearConceptTag: mockClearConceptTag,
+    }),
 }));
 
 import { TagManager } from "./TagManager";
@@ -57,6 +70,13 @@ beforeEach(() => {
   mockAddTag.mockClear();
   mockRemoveTag.mockClear();
   mockUpdateTag.mockClear();
+  mockSetConceptTag.mockClear();
+  mockClearConceptTag.mockClear();
+  mockSelectedSpeakers = ["S1"];
+  mockRecords = {
+    S1: { speaker: "S1", source_wav: "S1.wav", source_audio: "S1.wav", tiers: {}, concept_tags: { c1: ["t1"] } } as AnnotationRecord,
+    S2: { speaker: "S2", source_wav: "S2.wav", source_audio: "S2.wav", tiers: {}, concept_tags: { c2: ["t1"] } } as AnnotationRecord,
+  };
 });
 
 afterEach(() => {
@@ -95,6 +115,37 @@ describe("TagManager", () => {
 
     expect(screen.getByTestId("concept-chip-c1")).toBeTruthy();
     expect(screen.getByTestId("concept-chip-c2")).toBeTruthy();
+  });
+
+
+
+  it("toggles selected tag membership for selected speakers", () => {
+    render(<TagManager isOpen={true} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByTestId("tag-row-t1"));
+    expect(screen.getByTestId("concept-chip-c1").textContent).toContain("water");
+
+    fireEvent.click(screen.getByTestId("concept-chip-c3"));
+    expect(mockSetConceptTag).toHaveBeenCalledWith("S1", "c3", "t1");
+
+    fireEvent.click(screen.getByTestId("concept-chip-c1"));
+    expect(mockClearConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
+  });
+
+  it("tags and untags all visible concepts across all configured speakers when none are selected", () => {
+    mockSelectedSpeakers = [];
+    render(<TagManager isOpen={true} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByTestId("tag-row-t1"));
+    fireEvent.change(screen.getByTestId("concept-search"), { target: { value: "wat" } });
+    fireEvent.click(screen.getByText("Tag all visible"));
+
+    expect(mockSetConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
+    expect(mockSetConceptTag).toHaveBeenCalledWith("S2", "c1", "t1");
+
+    fireEvent.click(screen.getByText("Untag all visible"));
+    expect(mockClearConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
+    expect(mockClearConceptTag).toHaveBeenCalledWith("S2", "c1", "t1");
   });
 
   it("search filters concept chips", () => {

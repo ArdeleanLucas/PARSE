@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { AnnotationRecord, Tag } from "../../api/types";
 
 let mockData: Record<string, unknown> = {};
 let mockLoading = false;
+let mockRecords: Record<string, AnnotationRecord> = {};
+let mockTags: Tag[] = [];
+let mockSelectedSpeakers: string[] = [];
+let mockConfigSpeakers: string[] = [];
 const mockLoad = vi.fn(async () => {});
 const mockSave = vi.fn(async () => {});
 
@@ -45,6 +50,22 @@ vi.mock("../../hooks/useComputeJob", () => ({
   }),
 }));
 
+vi.mock("../../stores/annotationStore", () => ({
+  useAnnotationStore: (selector: (state: unknown) => unknown) => selector({ records: mockRecords }),
+}));
+
+vi.mock("../../stores/tagStore", () => ({
+  useTagStore: (selector: (state: unknown) => unknown) => selector({ tags: mockTags }),
+}));
+
+vi.mock("../../stores/uiStore", () => ({
+  useUIStore: (selector: (state: unknown) => unknown) => selector({ selectedSpeakers: mockSelectedSpeakers }),
+}));
+
+vi.mock("../../stores/configStore", () => ({
+  useConfigStore: (selector: (state: unknown) => unknown) => selector({ config: { speakers: mockConfigSpeakers } }),
+}));
+
 import { EnrichmentsPanel } from "./EnrichmentsPanel";
 
 beforeEach(() => {
@@ -55,6 +76,16 @@ beforeEach(() => {
   mockExportLingPyTSV.mockClear();
   mockComputeStart.mockClear();
   mockComputeState = { status: "idle", progress: 0, error: null };
+  mockSelectedSpeakers = ["S1"];
+  mockConfigSpeakers = ["S1", "S2"];
+  mockTags = [
+    { id: "review-needed", label: "Review needed", color: "#f59e0b" },
+    { id: "confirmed", label: "Confirmed", color: "#10b981" },
+  ];
+  mockRecords = {
+    S1: { speaker: "S1", source_wav: "S1.wav", source_audio: "S1.wav", tiers: {}, concept_tags: { "42": ["review-needed"] } } as AnnotationRecord,
+    S2: { speaker: "S2", source_wav: "S2.wav", source_audio: "S2.wav", tiers: {}, concept_tags: { "42": ["confirmed"] } } as AnnotationRecord,
+  };
 });
 
 afterEach(() => {
@@ -90,6 +121,35 @@ describe("EnrichmentsPanel", () => {
     expect(screen.getByTestId("cognate-sets")).toBeTruthy();
     expect(screen.getByText(/spk1, spk2/)).toBeTruthy();
     expect(screen.getByText(/spk3/)).toBeTruthy();
+  });
+
+
+
+  it("renders tags from selected speaker annotation membership", () => {
+    mockData = {
+      "42": {
+        cognate_sets: { A: ["S1"] },
+      },
+    };
+
+    render(<EnrichmentsPanel activeConcept="42" />);
+
+    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(screen.queryByText("Confirmed")).toBeNull();
+  });
+
+  it("falls back to all configured speakers when resolving concept tags", () => {
+    mockSelectedSpeakers = [];
+    mockData = {
+      "42": {
+        cognate_sets: { A: ["S1"] },
+      },
+    };
+
+    render(<EnrichmentsPanel activeConcept="42" />);
+
+    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(screen.getByText("Confirmed")).toBeTruthy();
   });
 
   it("Verify Cognates calls save with correct patch", () => {
