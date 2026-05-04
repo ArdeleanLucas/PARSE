@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +36,11 @@ class BackfillSummary:
     added: int = 0
     skipped: int = 0
     decisions: list[str] = field(default_factory=list)
+
+
+_PAREN_LETTER_SUFFIX = re.compile(r"^(.+?)\s*\(([A-Za-z]+)\)\s*$")
+_LEADING_NUM = re.compile(r"^\s*(\d+)\s+(.+?)\s*$")
+_MALFORMED_KLQ = re.compile(r"^\s*\(\s*(\d+(?:\.\d+)*)\s*[-\u2013\u2014]")
 
 
 def default_workspace_path() -> Path:
@@ -77,9 +84,10 @@ def _dict_reader_for_text(text: str) -> csv.DictReader:
 def _source_maps_from_csvs(
     paths: Iterable[Path],
     summary: BackfillSummary,
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, str]]]:
     by_label: dict[str, str] = {}
     by_label_survey: dict[str, str] = {}
+    by_label_by_survey: dict[str, dict[str, str]] = {}
     for path in paths:
         try:
             text = path.read_text(encoding="utf-8-sig")
@@ -97,10 +105,135 @@ def _source_maps_from_csvs(
             if not source_item or not label:
                 continue
             label_key = concept_label_key(label)
-            by_label.setdefault(label_key, source_item)
             survey = source_survey or ""
+            by_label.setdefault(label_key, source_item)
             by_label_survey.setdefault(label_key, survey)
-    return by_label, by_label_survey
+            by_label_by_survey.setdefault(label_key, {}).setdefault(survey, source_item)
+    return by_label, by_label_survey, by_label_by_survey
+
+
+def _speaker_csv_paths(workspace: Path, speaker: str) -> list[Path]:
+    speaker_dir = workspace / "imports" / "staging" / speaker
+    if not speaker_dir.exists():
+        return []
+    return sorted(path for path in speaker_dir.rglob("*.csv") if path.is_file())
+
+
+def _speaker_cue_index(workspace: Path, speaker: str, summary: BackfillSummary) -> dict[str, tuple[str, str]]:
+    by_prefix: dict[str, tuple[str, str]] = {}
+    for path in _speaker_csv_paths(workspace, speaker):
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as exc:
+            summary.decisions.append("skip {0}: read failed {1}".format(path, exc))
+            continue
+        reader = _dict_reader_for_text(text)
+        fieldnames = {str(name or "").strip().lower() for name in reader.fieldnames or []}
+        if "name" not in fieldnames:
+            summary.decisions.append("skip {0}: no Name column".format(path))
+            continue
+        for record in reader:
+            source_item, source_survey, _label = parse_cue_name(row_value(record, "Name"))
+            if source_item:
+                by_prefix.setdefault(source_item, (source_item, source_survey or ""))
+    return by_prefix
+
+
+def _audition_prefix_index(workspace: Path, summary: BackfillSummary) -> dict[str, tuple[str, str]]:
+    """Return concept_id -> (source_item, survey) from legacy speaker annotation traces."""
+    out: dict[str, tuple[str, str]] = {}
+    annotations = workspace / "annotations"
+    if not annotations.exists():
+        return out
+    cue_indexes: dict[str, dict[str, tuple[str, str]]] = {}
+    for path in sorted(annotations.glob("*.json")):
+        if path.name.endswith(".parse.json"):
+            continue
+        speaker = path.stem
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            summary.decisions.append("skip {0}: annotation read failed {1}".format(path, exc))
+            continue
+        if not isinstance(data, dict):
+            continue
+        intervals = data.get("tiers", {}).get("concept", {}).get("intervals", [])
+        if not isinstance(intervals, list):
+            continue
+        if speaker not in cue_indexes:
+            cue_indexes[speaker] = _speaker_cue_index(workspace, speaker, summary)
+        cue_index = cue_indexes[speaker]
+        if not cue_index:
+            continue
+        for interval in intervals:
+            if not isinstance(interval, dict):
+                continue
+            cid = str(interval.get("concept_id") or "").strip()
+            audition_prefix = str(interval.get("audition_prefix") or "").strip()
+            if not cid or not audition_prefix or audition_prefix.startswith("row_"):
+                continue
+            hit = cue_index.get(audition_prefix)
+            if hit:
+                out.setdefault(cid, hit)
+    return out
+
+
+def _bare_label_concepts(rows: Sequence[dict[str, str]]) -> set[str]:
+    bare: set[str] = set()
+    for row in rows:
+        label = str(row.get("concept_en") or "").strip()
+        if label and not _PAREN_LETTER_SUFFIX.match(label):
+            bare.add(concept_label_key(label))
+    return bare
+
+
+def _jbil_lookup(by_label_by_survey: dict[str, dict[str, str]], label_key: str) -> str | None:
+    return by_label_by_survey.get(label_key, {}).get("JBIL")
+
+
+def _resolve_concept(
+    cid: str,
+    label: str,
+    by_label: dict[str, str],
+    by_label_survey: dict[str, str],
+    by_label_by_survey: dict[str, dict[str, str]],
+    audition_index: dict[str, tuple[str, str]],
+    bare_label_concepts: set[str],
+) -> tuple[str, str] | None:
+    """Resolve source_item/source_survey using the fixed smart-match priority order.
+
+    Priority: audition-prefix trace, exact label, paren-to-space normalization,
+    JBIL alternate, leading-number JBIL, malformed-KLQ rescue.
+    """
+    if cid in audition_index:
+        return audition_index[cid]
+
+    label_key = concept_label_key(label)
+    if label_key in by_label:
+        return by_label[label_key], by_label_survey.get(label_key, "")
+
+    suffix_match = _PAREN_LETTER_SUFFIX.match(label)
+    if suffix_match:
+        base = suffix_match.group(1).strip()
+        normalized_key = concept_label_key("{0} {1}".format(base, suffix_match.group(2).strip()))
+        if normalized_key in by_label:
+            return by_label[normalized_key], by_label_survey.get(normalized_key, "")
+
+        base_key = concept_label_key(base)
+        if base_key in bare_label_concepts:
+            jbil_source_item = _jbil_lookup(by_label_by_survey, base_key)
+            if jbil_source_item:
+                return jbil_source_item, "JBIL"
+
+    leading_match = _LEADING_NUM.match(label)
+    if leading_match:
+        return leading_match.group(1), "JBIL"
+
+    malformed_match = _MALFORMED_KLQ.match(label)
+    if malformed_match:
+        return malformed_match.group(1), "KLQ"
+
+    return None
 
 
 def backfill_source_items(
@@ -120,18 +253,25 @@ def backfill_source_items(
         return summary
 
     csv_paths = _iter_candidate_csvs(workspace, source_root_paths)
-    by_label, by_label_survey = _source_maps_from_csvs(csv_paths, summary)
-    if not by_label:
-        return summary
+    by_label, by_label_survey, by_label_by_survey = _source_maps_from_csvs(csv_paths, summary)
+    audition_index = _audition_prefix_index(workspace, summary)
+    bare_label_concepts = _bare_label_concepts(rows)
 
     for row in rows:
         cid = str(row.get("id") or "").strip()
         label = str(row.get("concept_en") or "").strip()
-        label_key = concept_label_key(label)
-        target = by_label.get(label_key)
-        if not target:
+        resolved = _resolve_concept(
+            cid,
+            label,
+            by_label,
+            by_label_survey,
+            by_label_by_survey,
+            audition_index,
+            bare_label_concepts,
+        )
+        if not resolved:
             continue
-        target_survey = by_label_survey.get(label_key) or ""
+        target, target_survey = resolved
         summary.matched += 1
         current = str(row.get("source_item") or "").strip()
         current_survey = str(row.get("source_survey") or "").strip()
