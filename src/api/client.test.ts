@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelComputeJob, getConfig, getTags, putTags, runChat, saveAnnotation, startChatSession } from "./client";
+import {
+  cancelComputeJob,
+  getConfig,
+  getTags,
+  putTags,
+  runChat,
+  saveAnnotation,
+  searchLexeme,
+  startChatSession,
+} from "./client";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -131,6 +140,50 @@ describe("getConfig / unwrapConfig schema-version guard", () => {
       json: async () => ({ project_name: "test", speakers: [] }),
     });
     await expect(getConfig()).rejects.toThrow(/outdated/i);
+  });
+});
+
+describe("lexeme search API client contract", () => {
+  const fetchMock = vi.fn();
+  const searchPayload = {
+    speaker: "Fail02",
+    concept_id: "1",
+    variants: ["water"],
+    language: "ku",
+    candidates: [],
+    signals_available: { phonemizer: false, cross_speaker_anchors: 0, contact_variants: [] },
+  };
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => searchPayload,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("omits tiers when the option is absent or empty", async () => {
+    await expect(searchLexeme("Fail02", ["water"], { conceptId: "1" })).resolves.toEqual(searchPayload);
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.not.stringContaining("tiers="), expect.any(Object));
+
+    await searchLexeme("Fail02", ["water"], { conceptId: "1", tiers: [] });
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.not.stringContaining("tiers="), expect.any(Object));
+  });
+
+  it("serializes selected tiers as a comma-joined query param", async () => {
+    await searchLexeme("Fail02", ["water"], { conceptId: "1", tiers: ["stt", "ipa"] });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("tiers=stt%2Cipa"),
+      expect.any(Object),
+    );
   });
 });
 
