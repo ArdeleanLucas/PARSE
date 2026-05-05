@@ -43,6 +43,26 @@ export interface SpeakerForm {
   realizations: Realization[];
   selectedIdx: number;
   realizationsSource: 'source-item' | 'auto-detect' | 'merged' | 'single';
+  /**
+   * True when the canonical realization's start (or end) sits past
+   * `record.source_audio_duration_sec`. Surfaced so the UI can grey the row
+   * and disable playback when the working WAV doesn't yet cover the
+   * timestamp (e.g. Khan01 manifest-derived intervals beyond the WAV's
+   * 8590s end before the multi-WAV concat lands).
+   */
+  pastEndOfAudio: boolean;
+}
+
+function computePastEndOfAudio(
+  record: AnnotationRecord | null | undefined,
+  startSec: number | null,
+  endSec: number | null,
+): boolean {
+  const dur = record?.source_audio_duration_sec;
+  if (typeof dur !== 'number' || !Number.isFinite(dur) || dur <= 0) return false;
+  if (typeof startSec === 'number' && startSec >= dur) return true;
+  if (typeof endSec === 'number' && endSec > dur) return true;
+  return false;
 }
 
 function emptyRealization(): Realization {
@@ -222,6 +242,7 @@ export function buildSpeakerForm(
       realizations,
       selectedIdx,
       realizationsSource: 'merged',
+      pastEndOfAudio: computePastEndOfAudio(record, canonical?.startSec ?? null, canonical?.endSec ?? null),
     };
   }
 
@@ -243,6 +264,7 @@ export function buildSpeakerForm(
       realizations,
       selectedIdx,
       realizationsSource: 'source-item',
+      pastEndOfAudio: computePastEndOfAudio(record, canonical?.startSec ?? null, canonical?.endSec ?? null),
     };
   }
 
@@ -275,5 +297,6 @@ export function buildSpeakerForm(
     realizations,
     selectedIdx,
     realizationsSource,
+    pastEndOfAudio: computePastEndOfAudio(record, canonical?.startSec ?? null, canonical?.endSec ?? null),
   };
 }

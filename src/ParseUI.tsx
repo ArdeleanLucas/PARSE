@@ -2009,7 +2009,20 @@ export function ParseUI() {
                           onClick={() => toggleLexemeExpanded(f.speaker)}
                           className={`cursor-pointer bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
                         >
-                          <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">{f.speaker}</td>
+                          <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>{f.speaker}</span>
+                              {f.pastEndOfAudio ? (
+                                <span
+                                  data-testid={`past-eoa-badge-${f.speaker}`}
+                                  className="inline-flex items-center rounded bg-amber-50 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200"
+                                  title={`Realization at ${typeof f.startSec === 'number' ? f.startSec.toFixed(1) : '?'}s is past the end of this speaker's working WAV. Audio cannot play yet.`}
+                                >
+                                  past EOA
+                                </span>
+                              ) : null}
+                            </span>
+                          </td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-2">
                               <span

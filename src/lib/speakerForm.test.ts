@@ -63,6 +63,7 @@ describe('buildSpeakerForm', () => {
       ],
       selectedIdx: 0,
       realizationsSource: 'single',
+      pastEndOfAudio: false,
     });
   });
 
@@ -497,6 +498,67 @@ describe('buildSpeakerForm', () => {
     expect(form.realizationsSource).toBe('merged');
     expect(form.realizations).toHaveLength(3);
     expect(form.realizations[2].ipa).toBe('sar-bare');
+  });
+
+  describe('pastEndOfAudio', () => {
+    const concept: Concept = { id: 1, key: 'hair', name: 'Hair', tag: 'untagged' };
+
+    function makeRecordWithDuration(duration: number | undefined, ipa: AnnotationInterval[], conceptIv: AnnotationInterval[]): AnnotationRecord {
+      const record = makeRecord({ ipa, concept: conceptIv });
+      // source_audio_duration_sec lives on AnnotationRecord directly.
+      (record as AnnotationRecord & { source_audio_duration_sec?: number }).source_audio_duration_sec = duration;
+      return record;
+    }
+
+    it('is false when source_audio_duration_sec is missing', () => {
+      const record = makeRecord({
+        concept: [{ start: 100, end: 101, text: 'hair', concept_id: 'hair' }],
+        ipa: [{ start: 100, end: 101, text: 'mu' }],
+      });
+      const form = buildSpeakerForm(record, concept, 'Fail02', {}, false, []);
+      expect(form.pastEndOfAudio).toBe(false);
+    });
+
+    it('is false when realization start sits inside the working WAV', () => {
+      const record = makeRecordWithDuration(8590,
+        [{ start: 8000, end: 8001, text: 'mu' }],
+        [{ start: 8000, end: 8001, text: 'hair', concept_id: 'hair' }]);
+      const form = buildSpeakerForm(record, concept, 'Khan02', {}, false, []);
+      expect(form.startSec).toBe(8000);
+      expect(form.pastEndOfAudio).toBe(false);
+    });
+
+    it('is true when realization start is past source_audio_duration_sec (Khan01 manifest case)', () => {
+      const record = makeRecordWithDuration(8590,
+        [{ start: 12000, end: 12001, text: 'mu' }],
+        [{ start: 12000, end: 12001, text: 'hair', concept_id: 'hair' }]);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      expect(form.startSec).toBe(12000);
+      expect(form.pastEndOfAudio).toBe(true);
+    });
+
+    it('is true when realization end exceeds source_audio_duration_sec even if start is within', () => {
+      const record = makeRecordWithDuration(8590,
+        [{ start: 8589, end: 8591, text: 'mu' }],
+        [{ start: 8589, end: 8591, text: 'hair', concept_id: 'hair' }]);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      expect(form.pastEndOfAudio).toBe(true);
+    });
+
+    it('is true when realization start equals source_audio_duration_sec (no playable audio left)', () => {
+      const record = makeRecordWithDuration(8590,
+        [{ start: 8590, end: 8590.5, text: 'mu' }],
+        [{ start: 8590, end: 8590.5, text: 'hair', concept_id: 'hair' }]);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      expect(form.pastEndOfAudio).toBe(true);
+    });
+
+    it('is false when there is no matching realization (no canonical to flag)', () => {
+      const record = makeRecordWithDuration(8590, [], []);
+      const form = buildSpeakerForm(record, concept, 'Empty', {}, false, []);
+      expect(form.startSec).toBeNull();
+      expect(form.pastEndOfAudio).toBe(false);
+    });
   });
 
 });
