@@ -5,6 +5,8 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { KHAN_ANNOTATION_EXPECTATIONS } from "./__fixtures__/khan-expected-anchors";
+
 const testEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 const envBase = testEnv?.PARSE_API_BASE_URL;
 const API_BASE = (envBase ?? "http://127.0.0.1:8766").replace(/\/+$/, "");
@@ -40,7 +42,70 @@ function resolveJobId(payload: unknown): string {
   return "";
 }
 
+const WORKSPACE_MISCONFIG_MESSAGE =
+  "Concept interval has no concept_id. This usually means the PARSE backend is reading from the wrong workspace " +
+  "(e.g. an older backup). Check that PARSE_WORKSPACE_ROOT points at /home/lucas/parse-workspace and that the " +
+  "running server.py is from the canonical clone, not OpenClaw.";
+
+function conceptIntervals(payload: unknown): Record<string, unknown>[] {
+  if (!isRecord(payload) || !isRecord(payload.tiers)) {
+    return [];
+  }
+  const conceptTier = payload.tiers.concept;
+  if (!isRecord(conceptTier) || !Array.isArray(conceptTier.intervals)) {
+    return [];
+  }
+  return conceptTier.intervals.filter(isRecord);
+}
+
+function missingConceptIdIndexes(intervals: Record<string, unknown>[]): number[] {
+  const missing: number[] = [];
+  intervals.forEach((interval, index) => {
+    const conceptId = interval.concept_id;
+    if (typeof conceptId !== "string" || !conceptId.trim()) {
+      missing.push(index);
+    }
+  });
+  return missing;
+}
+
+function missingAuditionPrefixIndexes(intervals: Record<string, unknown>[]): number[] {
+  const missing: number[] = [];
+  intervals.forEach((interval, index) => {
+    const auditionPrefix = interval.audition_prefix;
+    if (typeof auditionPrefix !== "string" || !auditionPrefix.trim()) {
+      missing.push(index);
+    }
+  });
+  return missing;
+}
+
+function missingImportIndexIndexes(intervals: Record<string, unknown>[]): number[] {
+  const missing: number[] = [];
+  intervals.forEach((interval, index) => {
+    if (!Number.isInteger(interval.import_index)) {
+      missing.push(index);
+    }
+  });
+  return missing;
+}
+
+const describeApiRegression = envBase ? describe : describe.skip;
+let apiRegressionFixtureProject = false;
+
+function isApiRegressionFixtureConfig(payload: unknown): boolean {
+  if (!isRecord(payload)) {
+    return false;
+  }
+  const config = isRecord(payload.config) ? payload.config : payload;
+  return config.project_name === "PARSE API Regression Fixture";
+}
+
 beforeAll(async () => {
+  if (!envBase) {
+    return;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/config`, { signal: AbortSignal.timeout(3000) });
@@ -55,9 +120,11 @@ beforeAll(async () => {
       `Python API regression requires a healthy server at ${API_BASE}. GET /api/config returned ${response.status}.`
     );
   }
+
+  apiRegressionFixtureProject = isApiRegressionFixtureConfig(await json(response.clone()));
 });
 
-describe("Python API regression", () => {
+describeApiRegression("Python API regression", () => {
   // ── Config ──────────────────────────────────────────────────────────────
 
   it("GET /api/config → { config: {...} }", async () => {
@@ -88,6 +155,40 @@ describe("Python API regression", () => {
     expect(d.speaker).toBe("Fail01");
     expect(isRecord(d.tiers)).toBe(true);
   });
+
+  it("GET /api/annotations/Saha01 → positive control speaker + concept tier", async () => {
+    const r = await fetch(`${API_BASE}/api/annotations/Saha01`);
+    if (apiRegressionFixtureProject && r.status === 404) {
+      return;
+    }
+    expect(r.status).toBe(200);
+
+    const d = await json(r);
+    expect(isRecord(d)).toBe(true);
+    expect((d as Record<string, unknown>).speaker).toBe("Saha01");
+    expect(conceptIntervals(d).length).toBeGreaterThan(0);
+  });
+
+  for (const [speaker, expected] of Object.entries(KHAN_ANNOTATION_EXPECTATIONS)) {
+    it(`${speaker} concept tier rows carry concept_id (workspace misconfig sentinel)`, async () => {
+      const r = await fetch(`${API_BASE}/api/annotations/${speaker}`);
+      if (apiRegressionFixtureProject && r.status === 404) {
+        return;
+      }
+      expect(r.status).toBe(200);
+
+      const d = await json(r);
+      expect(isRecord(d)).toBe(true);
+      expect((d as Record<string, unknown>).speaker).toBe(speaker);
+
+      const intervals = conceptIntervals(d);
+      expect(intervals.length).toBe(expected.count);
+      expect(missingConceptIdIndexes(intervals), WORKSPACE_MISCONFIG_MESSAGE).toEqual([]);
+      expect(missingAuditionPrefixIndexes(intervals)).toEqual([]);
+      expect(missingImportIndexIndexes(intervals)).toEqual([]);
+      expect(intervals[0]?.start).toBeCloseTo(expected.firstStartSec, 3);
+    });
+  }
 
   it("POST /api/annotations/Fail01 accepts valid payload or returns structured path-guard error", async () => {
     const getResponse = await fetch(`${API_BASE}/api/annotations/Fail01`);
