@@ -602,7 +602,7 @@ The following validation items remain important, but they are **not hard blocker
 - **Canonical PARSE clone:** `/home/lucas/gh/tarahassistant/PARSE-rebuild`
   - Directory name is historical (preserved post-cutover to avoid breaking worktrees and `parse-*` helper scripts).
   - `git remote -v` must show `origin git@github.com:ArdeleanLucas/PARSE.git` (the canonical post-cutover repo) before any work.
-  - This is the only PARSE clone on the PC. Pre-cutover oracle and archive clones have been removed; their history is preserved in `/home/lucas/gh/backups/2026-04-27-pre-cutover/` (git bundles + workspace rsync).
+  - This is the only PARSE clone on the PC. Pre-cutover oracle and archive clones have been removed; their history is preserved in cold-storage git bundles and workspace rsync backups. Treat all cutover-era backups as read-only evidence, not as live runtime roots.
 
 ### Active development rule
 - New work branches from `origin/main` in the canonical clone, in a worktree under `/home/lucas/gh/worktrees/<agent>-<slug>/` (full recipe in §Parallel work via worktrees above).
