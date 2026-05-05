@@ -33,28 +33,37 @@ def _write_test_wav(path: pathlib.Path) -> None:
 
 
 def _write_processed_fixture(root: pathlib.Path, speaker: str = "Fail02") -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
-    wav_path = root / "Audio_Working" / speaker / "speaker.wav"
+    return _write_processed_artifacts(
+        root,
+        speaker,
+        {
+            "version": 1,
+            "project_id": "southern-kurdish-dialect-comparison",
+            "speaker": speaker,
+            "source_audio": f"audio/working/{speaker}/speaker.wav",
+            "source_audio_duration_sec": 2.0,
+            "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
+            "tiers": {
+                "concept": {"display_order": 3, "intervals": [{"start": 0.0, "end": 1.0, "text": "1: ash"}, {"start": 1.0, "end": 2.0, "text": "2: bark"}]},
+                "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 1.0, "text": speaker}, {"start": 1.0, "end": 2.0, "text": speaker}]},
+            },
+        },
+    )
+
+
+def _write_processed_artifacts(
+    root: pathlib.Path,
+    speaker: str,
+    annotation_payload: dict[str, object],
+    *,
+    wav_name: str = "speaker.wav",
+) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+    wav_path = root / "Audio_Working" / speaker / wav_name
     _write_test_wav(wav_path)
 
     annotation_path = root / "annotations" / f"{speaker}.json"
     annotation_path.parent.mkdir(parents=True, exist_ok=True)
-    annotation_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "project_id": "southern-kurdish-dialect-comparison",
-                "speaker": speaker,
-                "source_audio": f"audio/working/{speaker}/speaker.wav",
-                "source_audio_duration_sec": 2.0,
-                "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
-                "tiers": {
-                    "concept": {"display_order": 3, "intervals": [{"start": 0.0, "end": 1.0, "text": "1: ash"}, {"start": 1.0, "end": 2.0, "text": "2: bark"}]},
-                    "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 1.0, "text": speaker}, {"start": 1.0, "end": 2.0, "text": speaker}]},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    annotation_path.write_text(json.dumps(annotation_payload), encoding="utf-8")
 
     peaks_path = root / "peaks" / f"{speaker}.json"
     peaks_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +254,177 @@ def test_tool_import_processed_speaker_reports_dry_run_plan_directly(tmp_path) -
     assert payload["plan"]["speaker"] == "Fail02"
     assert payload["plan"]["conceptCount"] == 2
     assert payload["plan"]["audioDest"].endswith("audio/working/Fail02/speaker.wav")
+
+
+def test_tool_import_processed_speaker_preserves_concepts_csv_when_annotation_uses_existing_ids(tmp_path) -> None:
+    speaker = "Fail02"
+    external_root = tmp_path / "processed"
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    concepts_path = project_root / "concepts.csv"
+    concepts_before = (
+        b"id,concept_en,source_item,source_survey,custom_order\n"
+        b"1,ash,1.1,KLQ,10\n"
+        b"2,bark,2.1,KLQ,20\n"
+    )
+    concepts_path.write_bytes(concepts_before)
+    wav_path, annotation_path, peaks_path = _write_processed_artifacts(
+        external_root,
+        speaker,
+        {
+            "version": 1,
+            "project_id": "southern-kurdish-dialect-comparison",
+            "speaker": speaker,
+            "source_audio": f"audio/working/{speaker}/speaker.wav",
+            "source_audio_duration_sec": 2.0,
+            "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
+            "tiers": {
+                "concept": {
+                    "display_order": 3,
+                    "intervals": [
+                        {"start": 0.0, "end": 1.0, "text": "هێلکە", "concept_id": "1"},
+                        {"start": 1.0, "end": 2.0, "text": "پوست", "concept_id": "2"},
+                    ],
+                },
+                "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 2.0, "text": speaker}]},
+            },
+        },
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = tool_import_processed_speaker(
+        tools,
+        {
+            "speaker": speaker,
+            "workingWav": str(wav_path),
+            "annotationJson": str(annotation_path),
+            "peaksJson": str(peaks_path),
+        },
+    )
+
+    assert payload["ok"] is True
+    assert payload["plan"]["conceptCount"] == 2
+    assert payload["conceptCount"] == 2
+    assert concepts_path.read_bytes() == concepts_before
+
+
+def test_tool_import_processed_speaker_skips_wav_copy_when_source_is_destination(tmp_path) -> None:
+    speaker = "Same01"
+    project_root = tmp_path / "proj"
+    external_root = tmp_path / "processed"
+    project_root.mkdir()
+    (project_root / "concepts.csv").write_bytes(
+        b"id,concept_en,source_item,source_survey,custom_order\n1,ash,1.1,KLQ,10\n"
+    )
+    audio_dest = project_root / "audio" / "working" / speaker / "same.wav"
+    _write_test_wav(audio_dest)
+    before = audio_dest.stat()
+    _unused_wav_path, annotation_path, peaks_path = _write_processed_artifacts(
+        external_root,
+        speaker,
+        {
+            "version": 1,
+            "project_id": "southern-kurdish-dialect-comparison",
+            "speaker": speaker,
+            "source_audio": f"audio/working/{speaker}/same.wav",
+            "source_audio_duration_sec": 1.0,
+            "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
+            "tiers": {
+                "concept": {"display_order": 3, "intervals": [{"start": 0.0, "end": 1.0, "text": "ash", "concept_id": "1"}]},
+                "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 1.0, "text": speaker}]},
+            },
+        },
+        wav_name="same.wav",
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[project_root, external_root])
+
+    payload = tool_import_processed_speaker(
+        tools,
+        {
+            "speaker": speaker,
+            "workingWav": str(audio_dest),
+            "annotationJson": str(annotation_path),
+            "peaksJson": str(peaks_path),
+        },
+    )
+
+    after = audio_dest.stat()
+    assert payload["ok"] is True
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+
+
+def test_tool_import_processed_speaker_writes_parse_json_and_preserves_unclaimed_tiers_and_top_level_state(tmp_path) -> None:
+    speaker = "Fail02"
+    external_root = tmp_path / "processed"
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "concepts.csv").write_bytes(
+        b"id,concept_en,source_item,source_survey,custom_order\n1,ash,1.1,KLQ,10\n"
+    )
+    imported_concept_intervals = [{"start": 0.0, "end": 1.0, "text": "هێلکە", "concept_id": "1"}]
+    imported_ipa_intervals = [{"start": 0.0, "end": 1.0, "text": "aʃ"}]
+    imported_ortho_intervals = [{"start": 0.0, "end": 1.0, "text": "ash"}]
+    _wav_path, annotation_path, peaks_path = _write_processed_artifacts(
+        external_root,
+        speaker,
+        {
+            "version": 1,
+            "project_id": "southern-kurdish-dialect-comparison",
+            "speaker": speaker,
+            "source_audio": f"audio/working/{speaker}/speaker.wav",
+            "source_audio_duration_sec": 1.0,
+            "metadata": {"language_code": "sdh", "timestamps_source": "processed"},
+            "tiers": {
+                "concept": {"display_order": 3, "intervals": imported_concept_intervals},
+                "ipa": {"display_order": 1, "intervals": imported_ipa_intervals},
+                "ortho": {"display_order": 2, "intervals": imported_ortho_intervals},
+                "speaker": {"display_order": 4, "intervals": [{"start": 0.0, "end": 1.0, "text": speaker}]},
+            },
+        },
+    )
+    ortho_words = [{"start": float(index), "end": float(index) + 0.1, "text": f"word-{index}"} for index in range(1000)]
+    existing_parse = {
+        "version": 1,
+        "speaker": speaker,
+        "source_audio": f"audio/working/{speaker}/old.wav",
+        "tiers": {
+            "concept": {"display_order": 3, "intervals": [{"start": 0.0, "end": 1.0, "text": "stale", "concept_id": "1"}]},
+            "ortho_words": {"display_order": 5, "intervals": ortho_words},
+            "stt": {"display_order": 6, "intervals": [{"start": 0.0, "end": 1.0, "text": "stt scratch"}]},
+            "sentence": {"display_order": 7, "intervals": [{"start": 0.0, "end": 1.0, "text": "sentence scratch"}]},
+        },
+        "ipa_candidates": {"1::ipa::0": [{"candidate": "aʃ", "score": 0.9}]},
+        "concept_tags": {"1": {"status": "confirmed"}},
+        "confirmed_anchors": {"1": {"start": 0.0, "end": 1.0}},
+    }
+    parse_path = project_root / "annotations" / f"{speaker}.parse.json"
+    parse_path.parent.mkdir(parents=True, exist_ok=True)
+    parse_path.write_text(json.dumps(existing_parse), encoding="utf-8")
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = tool_import_processed_speaker(
+        tools,
+        {
+            "speaker": speaker,
+            "workingWav": str(_wav_path),
+            "annotationJson": str(annotation_path),
+            "peaksJson": str(peaks_path),
+        },
+    )
+
+    legacy_json = json.loads((project_root / "annotations" / f"{speaker}.json").read_text(encoding="utf-8"))
+    parse_json = json.loads(parse_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert legacy_json["tiers"]["concept"]["intervals"] == imported_concept_intervals
+    assert parse_json["tiers"]["concept"]["intervals"] == imported_concept_intervals
+    assert parse_json["tiers"]["ipa"]["intervals"] == imported_ipa_intervals
+    assert parse_json["tiers"]["ortho"]["intervals"] == imported_ortho_intervals
+    assert len(parse_json["tiers"]["ortho_words"]["intervals"]) == 1000
+    assert parse_json["tiers"]["stt"] == existing_parse["tiers"]["stt"]
+    assert parse_json["tiers"]["sentence"] == existing_parse["tiers"]["sentence"]
+    assert parse_json["ipa_candidates"] == existing_parse["ipa_candidates"]
+    assert parse_json["concept_tags"] == existing_parse["concept_tags"]
+    assert parse_json["confirmed_anchors"] == existing_parse["confirmed_anchors"]
 
 
 def test_csv_only_reimport_takes_backup_and_calls_worker(tmp_path, monkeypatch) -> None:
