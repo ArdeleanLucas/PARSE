@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import csv
 from datetime import datetime, timezone
 import json
 import os
@@ -304,14 +305,13 @@ def _extract_concepts_from_annotation(tools: "ParseChatTools", annotation_payloa
         for item in existing_concepts
         if _normalize_space(item.get("id")) and _normalize_space(item.get("label"))
     }
-    reserved_numeric_ids = {
-        _normalize_space(item.get("id"))
-        for item in existing_concepts
-        if _normalize_space(item.get("id"))
-    }
+    reserved_numeric_ids = set(existing_label_by_id)
     for raw_interval in intervals:
         if not isinstance(raw_interval, dict):
             continue
+        explicit_id = _normalize_space(raw_interval.get("concept_id") or raw_interval.get("conceptId"))
+        if explicit_id:
+            reserved_numeric_ids.add(explicit_id)
         text = _normalize_space(raw_interval.get("text"))
         if not text:
             continue
@@ -334,24 +334,35 @@ def _extract_concepts_from_annotation(tools: "ParseChatTools", annotation_payloa
         fallback_index += 1
         return assigned
 
+    def _label_from_text(text: str) -> str:
+        match = concept_re.match(text)
+        if match:
+            return _normalize_space(match.group(2))
+        return text
+
     for raw_interval in intervals:
         if not isinstance(raw_interval, dict):
             continue
         text = _normalize_space(raw_interval.get("text"))
-        if not text:
-            continue
-        match = concept_re.match(text)
-        if match:
-            claimed_id = _normalize_space(match.group(1))
-            label = _normalize_space(match.group(2))
-            existing_label_for_id = existing_label_by_id.get(claimed_id)
-            if existing_label_for_id and existing_label_for_id.casefold() != label.casefold():
-                concept_id = _resolve_by_label(label)
-            else:
-                concept_id = claimed_id
+        explicit_id = _normalize_space(raw_interval.get("concept_id") or raw_interval.get("conceptId"))
+        if explicit_id:
+            concept_id = explicit_id
+            label = existing_label_by_id.get(concept_id) or _label_from_text(text)
         else:
-            label = text
-            concept_id = _resolve_by_label(label)
+            if not text:
+                continue
+            match = concept_re.match(text)
+            if match:
+                claimed_id = _normalize_space(match.group(1))
+                label = _normalize_space(match.group(2))
+                existing_label_for_id = existing_label_by_id.get(claimed_id)
+                if existing_label_for_id and existing_label_for_id.casefold() != label.casefold():
+                    concept_id = _resolve_by_label(label)
+                else:
+                    concept_id = claimed_id
+            else:
+                label = text
+                concept_id = _resolve_by_label(label)
         if not concept_id or not label or concept_id in seen_ids:
             continue
         seen_ids.add(concept_id)
@@ -366,6 +377,38 @@ def _extract_concepts_from_annotation(tools: "ParseChatTools", annotation_payloa
 
 def _write_concepts_csv(tools: "ParseChatTools", concepts: Sequence[Dict[str, str]]) -> int:
     from concept_registry import merge_concepts_into_root_csv
+    from concept_source_item import concept_row_from_item, read_concepts_csv_rows, row_value
+
+    concepts_path = tools.project_root / "concepts.csv"
+    try:
+        existing_rows = read_concepts_csv_rows(concepts_path)
+    except (OSError, csv.Error, UnicodeDecodeError):
+        existing_rows = []
+    existing_by_id = {
+        _normalize_space(row.get("id")): row
+        for row in existing_rows
+        if _normalize_space(row.get("id")) and row_value(row, "concept_en")
+    }
+    if existing_by_id:
+        needs_write = False
+        for item in concepts:
+            incoming = concept_row_from_item(item)
+            concept_id = _normalize_space(incoming.get("id"))
+            label = row_value(incoming, "concept_en")
+            if not concept_id or not label:
+                continue
+            existing = existing_by_id.get(concept_id)
+            if existing is None:
+                needs_write = True
+                break
+            for key in ("source_item", "source_survey", "custom_order"):
+                if not existing.get(key) and incoming.get(key):
+                    needs_write = True
+                    break
+            if needs_write:
+                break
+        if not needs_write:
+            return len(existing_by_id)
 
     return merge_concepts_into_root_csv(
         tools.project_root,
@@ -373,6 +416,52 @@ def _write_concepts_csv(tools: "ParseChatTools", concepts: Sequence[Dict[str, st
         normalize_concept_id=_normalize_space,
         concept_sort_key=_concept_sort_key,
     )
+
+
+def _copy2_unless_samefile(source: Path, destination: Path) -> bool:
+    """Copy ``source`` to ``destination`` unless both paths already name the same file."""
+
+    try:
+        if destination.exists() and os.path.samefile(source, destination):
+            return False
+    except OSError:
+        pass
+    shutil.copy2(source, destination)
+    return True
+
+
+def _merge_processed_annotation_for_parse_json(
+    existing_payload: Any,
+    imported_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge a processed import into an existing live ``.parse.json`` annotation.
+
+    Processed imports own only the tiers they actually provide. Existing live-only
+    tiers and scratch/review top-level fields are preserved so STT/IPA review state
+    is not erased by a manifest-derived speaker refresh.
+    """
+
+    if not isinstance(existing_payload, dict):
+        return copy.deepcopy(imported_payload)
+
+    merged = copy.deepcopy(existing_payload)
+    for key, value in imported_payload.items():
+        if key == "tiers":
+            continue
+        merged[key] = copy.deepcopy(value)
+
+    imported_tiers = imported_payload.get("tiers")
+    if not isinstance(imported_tiers, dict):
+        return merged
+    existing_tiers = merged.get("tiers") if isinstance(merged.get("tiers"), dict) else {}
+    merged_tiers = copy.deepcopy(existing_tiers)
+    for tier_name, tier_payload in imported_tiers.items():
+        if isinstance(tier_payload, dict) and isinstance(tier_payload.get("intervals"), list):
+            merged_tiers[tier_name] = copy.deepcopy(tier_payload)
+        elif tier_name not in merged_tiers:
+            merged_tiers[tier_name] = copy.deepcopy(tier_payload)
+    merged["tiers"] = merged_tiers
+    return merged
 
 
 def _write_project_json_for_processed_import(
@@ -862,6 +951,7 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
 
     audio_dest = tools.audio_dir / "working" / speaker / working_wav.name
     annotation_dest = tools.annotations_dir / (speaker + ".json")
+    parse_annotation_dest = tools.annotations_dir / (speaker + ".parse.json")
     peaks_dest = tools.peaks_dir / (speaker + ".json") if peaks_json else None
     transcript_dest = (
         tools.project_root / "imports" / "legacy" / speaker / transcript_csv.name
@@ -901,7 +991,7 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
     if transcript_dest is not None:
         transcript_dest.parent.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(working_wav, audio_dest)
+    _copy2_unless_samefile(working_wav, audio_dest)
     if peaks_json is not None and peaks_dest is not None:
         shutil.copy2(peaks_json, peaks_dest)
     if transcript_csv is not None and transcript_dest is not None:
@@ -911,6 +1001,9 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
     annotation_out["speaker"] = speaker
     annotation_out["source_audio"] = tools._display_readable_path(audio_dest)
     annotation_dest.write_text(json.dumps(annotation_out, indent=2, ensure_ascii=False), encoding="utf-8")
+    existing_parse_payload = _read_json_file(parse_annotation_dest, None)
+    parse_annotation_out = _merge_processed_annotation_for_parse_json(existing_parse_payload, annotation_out)
+    parse_annotation_dest.write_text(json.dumps(parse_annotation_out, indent=2, ensure_ascii=False), encoding="utf-8")
 
     concept_total = _write_concepts_csv(tools, concepts)
     _write_project_json_for_processed_import(tools, speaker, project_id, language_code, concept_total)
