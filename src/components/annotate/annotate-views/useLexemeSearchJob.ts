@@ -3,11 +3,18 @@ import { useCallback, useEffect, useState } from "react";
 import {
   searchLexeme,
   type LexemeSearchCandidate,
+  type LexemeSearchOptions,
   type LexemeSearchResponse,
 } from "../../../api/client";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 
 import { buildLexemeSearchStatus } from "./shared";
+
+const LEXEME_SEARCH_TIERS = ["ortho_words", "ortho", "stt", "ipa"] as const;
+
+export type LexemeSearchTier = (typeof LEXEME_SEARCH_TIERS)[number];
+
+export const ALL_LEXEME_SEARCH_TIERS: readonly LexemeSearchTier[] = LEXEME_SEARCH_TIERS;
 
 interface UseLexemeSearchJobArgs {
   activeConceptId: string | null;
@@ -38,6 +45,9 @@ export function useLexemeSearchJob({
   const [variantsRaw, setVariantsRaw] = useState("");
   const [response, setResponse] = useState<LexemeSearchResponse | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedTiers, setSelectedTiers] = useState<Set<string>>(
+    () => new Set(ALL_LEXEME_SEARCH_TIERS),
+  );
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -45,6 +55,10 @@ export function useLexemeSearchJob({
     setResponse(null);
     setSelectedKey(null);
     setStatus("");
+  }, [activeSpeaker, activeConceptId]);
+
+  useEffect(() => {
+    setSelectedTiers(new Set(ALL_LEXEME_SEARCH_TIERS));
   }, [activeSpeaker, activeConceptId]);
 
   const seedHint = conceptLabel;
@@ -66,6 +80,18 @@ export function useLexemeSearchJob({
   const candidates = response?.candidates ?? [];
   const signals = response?.signals_available ?? null;
 
+  const toggleTier = useCallback((name: string) => {
+    setSelectedTiers((current) => {
+      const next = new Set(current);
+      if (next.has(name)) {
+        next.delete(name);
+      } else if ((ALL_LEXEME_SEARCH_TIERS as readonly string[]).includes(name)) {
+        next.add(name);
+      }
+      return next;
+    });
+  }, []);
+
   const runSearch = useCallback(async () => {
     const variants = parseVariants(variantsRaw);
     if (variants.length === 0) {
@@ -78,12 +104,22 @@ export function useLexemeSearchJob({
       setStatus("No speaker selected.");
       return null;
     }
+    if (selectedTiers.size === 0) {
+      setResponse(null);
+      setStatus("Select at least one tier.");
+      return null;
+    }
+    const tiers = ALL_LEXEME_SEARCH_TIERS.filter((tier) => selectedTiers.has(tier));
     setBusy(true);
     setStatus("Searching…");
     try {
-      const resp = await searchLexeme(activeSpeaker, variants, {
+      const searchOptions: LexemeSearchOptions = {
         conceptId: activeConceptId ? String(activeConceptId) : undefined,
-      });
+      };
+      if (tiers.length !== ALL_LEXEME_SEARCH_TIERS.length) {
+        searchOptions.tiers = tiers;
+      }
+      const resp = await searchLexeme(activeSpeaker, variants, searchOptions);
       setResponse(resp);
       const first = resp.candidates[0];
       setSelectedKey(first ? keyOf(first) : null);
@@ -97,7 +133,7 @@ export function useLexemeSearchJob({
     } finally {
       setBusy(false);
     }
-  }, [activeConceptId, activeSpeaker, keyOf, parseVariants, variantsRaw]);
+  }, [activeConceptId, activeSpeaker, keyOf, parseVariants, selectedTiers, variantsRaw]);
 
   const useSeed = useCallback(() => {
     if (seedHint) setVariantsRaw(seedHint);
@@ -141,10 +177,12 @@ export function useLexemeSearchJob({
     seedHint,
     selectCandidate,
     selectedKey,
+    selectedTiers,
     setSelectedKey,
     setVariantsRaw,
     signals,
     status,
+    toggleTier,
     useSeed,
     variantsRaw,
   };

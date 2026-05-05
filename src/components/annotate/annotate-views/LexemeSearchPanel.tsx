@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Button } from "../../shared/Button";
 import { Input } from "../../shared/Input";
 import { useAnnotateSelection } from "./useAnnotateSelection";
-import { useLexemeSearchJob } from "./useLexemeSearchJob";
+import { ALL_LEXEME_SEARCH_TIERS, useLexemeSearchJob } from "./useLexemeSearchJob";
 import { LexemeResults } from "./LexemeResults";
 import type { LexemeSearchPanelProps } from "./types";
 import { formatSearchTime } from "./shared";
@@ -32,8 +32,10 @@ export function LexemeSearchPanel({ onSeek }: LexemeSearchPanelProps) {
     seedHint,
     selectCandidate,
     selectedKey,
+    selectedTiers,
     setVariantsRaw,
     status,
+    toggleTier,
     useSeed,
     variantsRaw,
   } = useLexemeSearchJob({
@@ -41,6 +43,8 @@ export function LexemeSearchPanel({ onSeek }: LexemeSearchPanelProps) {
     activeSpeaker,
     conceptLabel: activeConcept?.label ?? "",
   });
+  const noTiersSelected = selectedTiers.size === 0;
+  const allTiersSelected = selectedTiers.size === ALL_LEXEME_SEARCH_TIERS.length;
 
   return (
     <div
@@ -96,6 +100,37 @@ export function LexemeSearchPanel({ onSeek }: LexemeSearchPanelProps) {
         (e.g. <code>yek, yak, jek</code>).
       </div>
 
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <div style={{ color: "#475569", fontSize: "0.75rem" }}>
+          Tier filter: {allTiersSelected ? "all tiers" : "custom tiers"}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
+          {ALL_LEXEME_SEARCH_TIERS.map((tier) => {
+            const selected = selectedTiers.has(tier);
+            return (
+              <Button
+                key={tier}
+                type="button"
+                variant="secondary"
+                size="sm"
+                aria-pressed={selected}
+                onClick={() => toggleTier(tier)}
+                style={{
+                  background: selected ? "#dbeafe" : "transparent",
+                  borderColor: selected ? "#60a5fa" : "#cbd5e1",
+                  color: selected ? "#1e3a8a" : "#475569",
+                }}
+              >
+                {tier}
+              </Button>
+            );
+          })}
+        </div>
+        {noTiersSelected ? (
+          <div style={{ color: "#b45309", fontSize: "0.75rem" }}>Select at least one tier.</div>
+        ) : null}
+      </div>
+
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}>
           <Input
@@ -122,7 +157,7 @@ export function LexemeSearchPanel({ onSeek }: LexemeSearchPanelProps) {
             const first = await runSearch();
             if (first) onSeek?.(first.start);
           }}
-          disabled={busy}
+          disabled={busy || noTiersSelected}
         >
           {busy ? "Searching…" : "Search"}
         </Button>
