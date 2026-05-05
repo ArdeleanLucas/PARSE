@@ -823,4 +823,70 @@ describe('AnnotateView', () => {
     expect(mockSetConfirmedAnchor).toHaveBeenLastCalledWith('Fail01', 'water', null);
   });
 
+  describe('past-end-of-audio handling (Khan01 manifest case)', () => {
+    function withDuration(record: AnnotationRecord, durationSec: number): AnnotationRecord {
+      return { ...record, source_audio_duration_sec: durationSec } as AnnotationRecord;
+    }
+
+    it('shows no banner and leaves play enabled when all intervals fit inside the working WAV', () => {
+      mockRecord = withDuration(
+        makeRecord([{ conceptText: 'water', ipa: 'aw', start: 1, end: 2 }]),
+        4,
+      );
+      renderWaterAnnotateView();
+      expect(screen.queryByTestId('past-eoa-banner')).toBeNull();
+      const play = screen.getByTestId('annotate-play') as HTMLButtonElement;
+      expect(play.getAttribute('aria-disabled')).toBeNull();
+    });
+
+    it('shows the banner when at least one concept interval is past source_audio_duration_sec', () => {
+      mockRecord = withDuration(
+        makeRecord([
+          { conceptText: 'water', ipa: 'aw', start: 1, end: 2 },
+          { conceptText: 'water', ipa: 'aw', start: 12000, end: 12001 },
+        ]),
+        8590,
+      );
+      renderWaterAnnotateView();
+      const banner = screen.getByTestId('past-eoa-banner');
+      expect(banner).toBeTruthy();
+      expect(banner.textContent).toContain('1');
+      expect(banner.textContent).toContain('2');
+      expect(banner.textContent?.toLowerCase()).toContain('past the end of the source audio');
+      expect(banner.textContent).toContain('143m');
+      expect(banner.textContent?.toLowerCase()).toContain('editing text fields is still permitted');
+    });
+
+    it('disables the play button and routes the click to a toast when the active concept is past EOA', () => {
+      vi.useFakeTimers();
+      mockRecord = withDuration(
+        makeRecord([{ conceptText: 'water', ipa: 'aw', start: 12000, end: 12001 }]),
+        8590,
+      );
+      renderWaterAnnotateView();
+      const play = screen.getByTestId('annotate-play') as HTMLButtonElement;
+      expect(play.getAttribute('aria-disabled')).toBe('true');
+      expect(play.getAttribute('title')?.toLowerCase()).toContain('past the end of the source audio');
+
+      fireEvent.click(play);
+      expect(mockPlayPause).not.toHaveBeenCalled();
+      expect(mockPlayRange).not.toHaveBeenCalled();
+      expect(screen.getByTestId('past-eoa-toast').textContent?.toLowerCase()).toContain('cannot seek past end');
+
+      act(() => { vi.advanceTimersByTime(2300); });
+      expect(screen.queryByTestId('past-eoa-toast')).toBeNull();
+    });
+
+    it('keeps editing text fields enabled even when the concept is past EOA', () => {
+      mockRecord = withDuration(
+        makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 12000, end: 12001 }]),
+        8590,
+      );
+      renderWaterAnnotateView();
+      const orthoInput = screen.getByPlaceholderText('Enter orthographic form…') as HTMLInputElement;
+      expect(orthoInput.disabled).toBe(false);
+      expect(orthoInput.value).toBe('ئاو');
+    });
+  });
+
 });

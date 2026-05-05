@@ -104,6 +104,45 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     () => findAnnotationForConcept(record, concept),
     [record, concept],
   );
+
+  // Past-end-of-audio detection. The annotation can carry intervals whose
+  // timestamps land beyond `source_audio_duration_sec` — e.g. Khan01's
+  // manifest is built against the [file1+file2+file3] concat (12665s) but
+  // the working WAV is only the third file (8590s) until the concat lands.
+  // Surface a per-speaker banner and disable seek/play for the current
+  // concept when its interval starts past EOA.
+  const sourceAudioDurationSec = record?.source_audio_duration_sec ?? null;
+  const currentConceptPastEoa = useMemo(() => {
+    if (!conceptInterval || typeof sourceAudioDurationSec !== 'number' || sourceAudioDurationSec <= 0) return false;
+    if (typeof conceptInterval.start === 'number' && conceptInterval.start >= sourceAudioDurationSec) return true;
+    if (typeof conceptInterval.end === 'number' && conceptInterval.end > sourceAudioDurationSec) return true;
+    return false;
+  }, [conceptInterval, sourceAudioDurationSec]);
+  const pastEoaSummary = useMemo(() => {
+    const intervals = record?.tiers.concept?.intervals ?? [];
+    if (typeof sourceAudioDurationSec !== 'number' || sourceAudioDurationSec <= 0) {
+      return { total: intervals.length, pastEoa: 0 };
+    }
+    let pastEoa = 0;
+    for (const iv of intervals) {
+      const startPast = typeof iv.start === 'number' && iv.start >= sourceAudioDurationSec;
+      const endPast = typeof iv.end === 'number' && iv.end > sourceAudioDurationSec;
+      if (startPast || endPast) pastEoa += 1;
+    }
+    return { total: intervals.length, pastEoa };
+  }, [record, sourceAudioDurationSec]);
+  const formatDurationHuman = (sec: number): string => {
+    if (!Number.isFinite(sec) || sec <= 0) return '0s';
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec - m * 60);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+  const [pastEoaToast, setPastEoaToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pastEoaToast) return;
+    const t = window.setTimeout(() => setPastEoaToast(null), 2200);
+    return () => window.clearTimeout(t);
+  }, [pastEoaToast]);
   const [doneToast, setDoneToast] = useState<string | null>(null);
   useEffect(() => {
     if (!doneToast) return;
@@ -316,6 +355,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [cancelQuickRetime, quickRetimeMenu]);
 
   const handlePlayToggle = useCallback(() => {
+    if (currentConceptPastEoa) {
+      setPastEoaToast('Cannot seek past end of source audio.');
+      return;
+    }
     if (isPlaying) {
       pause();
       return;
@@ -325,7 +368,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     } else {
       playPause();
     }
-  }, [isPlaying, selectedRegion, pause, playRange, playPause]);
+  }, [currentConceptPastEoa, isPlaying, selectedRegion, pause, playRange, playPause]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -643,6 +686,27 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         onNext={onNext}
       />
 
+      {pastEoaSummary.pastEoa > 0 && typeof sourceAudioDurationSec === 'number' ? (
+        <section className="px-8 pt-3" data-testid="past-eoa-banner">
+          <div className="mx-auto max-w-4xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+            <strong className="font-semibold">{pastEoaSummary.pastEoa}</strong>
+            {" of "}
+            <strong className="font-semibold">{pastEoaSummary.total}</strong>
+            {" concept rows are past the end of the source audio ("}
+            <span className="font-mono">{formatDurationHuman(sourceAudioDurationSec)}</span>
+            {") and cannot be played until the working WAV is extended. Editing text fields is still permitted."}
+          </div>
+        </section>
+      ) : null}
+
+      {pastEoaToast ? (
+        <section className="px-8 pt-2" data-testid="past-eoa-toast">
+          <div className="mx-auto max-w-4xl rounded-md border border-slate-200 bg-slate-100 px-3 py-1.5 text-[11px] text-slate-700">
+            {pastEoaToast}
+          </div>
+        </section>
+      ) : null}
+
       <section className="px-8 py-6">
         <div className="mx-auto max-w-4xl space-y-5">
           <div>
@@ -855,9 +919,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           <button onClick={() => skip(-1)} title="-1s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><ChevronLeft className="h-4 w-4" /></button>
           <button
             onClick={handlePlayToggle}
-            title={selectedRegion ? "Play selected region (Space)" : "Play (Space)"}
+            aria-disabled={currentConceptPastEoa || undefined}
+            title={
+              currentConceptPastEoa
+                ? `This concept's interval starts past the end of the source audio (${typeof sourceAudioDurationSec === 'number' ? sourceAudioDurationSec.toFixed(1) : '?'}s). Audio cannot play yet.`
+                : selectedRegion ? "Play selected region (Space)" : "Play (Space)"
+            }
             data-testid="annotate-play"
-            className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
+            className={
+              "grid h-10 w-10 place-items-center rounded-full text-white shadow-sm " +
+              (currentConceptPastEoa
+                ? "bg-slate-300 cursor-not-allowed"
+                : "bg-slate-900 hover:bg-slate-700")
+            }
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
           </button>
