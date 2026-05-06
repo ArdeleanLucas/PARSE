@@ -262,6 +262,34 @@ describe('AnnotateView', () => {
     expect(getOrthographicInput().value).toBe('refined-word');
   });
 
+  it('does not save unedited ortho_words fallback text as a direct ORTH annotation', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('god');
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'xwa' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      ipaText: 'xwa',
+      orthoText: '',
+    })));
+  });
+
+  it('saves an edited ortho_words fallback as a direct ORTH annotation', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.change(getOrthographicInput(), { target: { value: 'خودا' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      orthoText: 'خودا',
+    })));
+  });
+
   it('falls back to ortho_words pre-fill when tiers.ortho overlap interval has empty text', () => {
     mockRecord = makeRecord([{ conceptText: 'one', ortho: '', orthoWords: 'fallback-word', start: 18.5, end: 19.5 }]);
 
