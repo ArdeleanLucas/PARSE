@@ -32,7 +32,7 @@ export function normalizeConcept(raw: string): string {
   return s.trim();
 }
 
-export function parseConcepts(concepts: unknown): { id: string; label: string }[] {
+export function parseConcepts(concepts: unknown): { id: string; label: string; key?: string }[] {
   if (!Array.isArray(concepts)) return [];
   return concepts.map((c) => {
     if (typeof c === "string") {
@@ -40,10 +40,11 @@ export function parseConcepts(concepts: unknown): { id: string; label: string }[
       return { id, label: id };
     }
     if (c && typeof c === "object" && ("id" in c || "label" in c)) {
-      const obj = c as { id?: string; label?: string };
+      const obj = c as { id?: string; label?: string; key?: string };
       const id = normalizeConcept(obj.id ?? obj.label ?? "");
+      const key = typeof obj.key === "string" ? obj.key.trim() : "";
       const label = obj.label ?? obj.id ?? id;
-      return { id, label };
+      return key ? { id, key, label } : { id, label };
     }
     return { id: String(c), label: String(c) };
   });

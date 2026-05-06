@@ -1,9 +1,18 @@
 import type { AnnotationInterval, AnnotationRecord } from "../../../api/types";
 
+export interface ConceptVariantIdentity {
+  conceptKey: string;
+  conceptEn?: string;
+  variantLabel?: string;
+}
+
 export interface Concept {
   id: number | string;
   key: string;
   name: string;
+  variants?: ConceptVariantIdentity[];
+  mergedKeys?: string[];
+  mergedVariants?: ConceptVariantIdentity[];
 }
 
 export interface AnnotateViewProps {

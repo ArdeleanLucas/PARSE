@@ -13,6 +13,8 @@ let mockActiveConcept: string | null = null;
 let mockSelectedSpeakers: string[] = [];
 let mockEnrichmentData: Record<string, unknown> = {};
 const mockSetActiveConcept = vi.fn();
+const mockSaveLexemeNote = vi.fn();
+const mockSaveEnrichments = vi.fn();
 
 vi.mock("../../stores/configStore", () => ({
   useConfigStore: (selector: (s: unknown) => unknown) =>
@@ -35,7 +37,17 @@ vi.mock("../../stores/uiStore", () => ({
 
 vi.mock("../../stores/enrichmentStore", () => ({
   useEnrichmentStore: (selector: (s: unknown) => unknown) =>
-    selector({ data: mockEnrichmentData }),
+    selector({ data: mockEnrichmentData, save: mockSaveEnrichments }),
+}));
+
+vi.mock("../../stores/tagStore", () => ({
+  useTagStore: (selector: (s: unknown) => unknown) =>
+    selector({ tags: [], addTag: vi.fn() }),
+}));
+
+vi.mock("../../api/client", () => ({
+  saveLexemeNote: (...args: unknown[]) => mockSaveLexemeNote(...args),
+  spectrogramUrl: () => "/spectrogram.png",
 }));
 
 import { ConceptTable } from "./ConceptTable";
@@ -46,7 +58,7 @@ import { ConceptTable } from "./ConceptTable";
 
 function makeRecord(
   speaker: string,
-  concepts: { id: string; ipa: string; ortho: string; start: number; end: number }[],
+  concepts: { id: string; ipa: string; ortho: string; start: number; end: number; rawKey?: string }[],
 ): AnnotationRecord {
   return {
     speaker,
@@ -64,7 +76,7 @@ function makeRecord(
       concept: {
         name: "concept",
         display_order: 3,
-        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.id })),
+        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.id, concept_id: c.rawKey ?? c.id })),
       },
       speaker: { name: "speaker", display_order: 4, intervals: [] },
     },
@@ -85,6 +97,10 @@ beforeEach(() => {
   mockSelectedSpeakers = [];
   mockEnrichmentData = {};
   mockSetActiveConcept.mockClear();
+  mockSaveLexemeNote.mockReset();
+  mockSaveLexemeNote.mockResolvedValue({ success: true });
+  mockSaveEnrichments.mockReset();
+  mockSaveEnrichments.mockResolvedValue(undefined);
 });
 
 afterEach(cleanup);
@@ -153,4 +169,31 @@ describe("ConceptTable", () => {
     const badge = screen.getByTestId("cognate-badge-water-Sp1");
     expect(badge.textContent).toBe("A");
   });
+  it("passes the raw concept key to Compare lexeme-note saves for grouped display concepts", async () => {
+    mockConfig = {
+      speakers: ["Sp1"],
+      concepts: [{ id: "53", key: "55", label: "long" }],
+    };
+    mockRecords = {
+      Sp1: makeRecord("Sp1", [
+        { id: "53", rawKey: "55", ipa: "drang", ortho: "long", start: 5090.25, end: 5091.125 },
+      ]),
+    };
+
+    render(<ConceptTable />);
+    fireEvent.click(screen.getByTestId("lexeme-button-53-Sp1"));
+    const note = screen.getByTestId("lexeme-user-note-Sp1-55");
+    fireEvent.change(note, { target: { value: "compare note" } });
+    fireEvent.blur(note);
+
+    await vi.waitFor(() => expect(mockSaveLexemeNote).toHaveBeenCalled());
+    expect(mockSaveLexemeNote).toHaveBeenCalledWith({
+      speaker: "Sp1",
+      concept_id: "55",
+      user_note: "compare note",
+    });
+  });
+
+
+
 });

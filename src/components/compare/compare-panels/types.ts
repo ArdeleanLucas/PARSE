@@ -58,7 +58,7 @@ export type GroupLetter = "A" | "B" | "C" | "D" | "E";
 export const GROUP_LETTERS: GroupLetter[] = ["A", "B", "C", "D", "E"];
 
 export interface ConceptRowProps {
-  concept: { id: string; label: string };
+  concept: { id: string; label: string; key?: string };
   index: number;
   speakers: string[];
   activeConcept: string | null;

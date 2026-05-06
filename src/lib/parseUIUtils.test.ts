@@ -64,24 +64,33 @@ describe('parseUIUtils', () => {
     expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: true, apiTarget: 'http://127.0.0.1:8866/' })).toBe('http://127.0.0.1:8866/audio/working/Fail02/foo.wav');
   });
 
-  it('matches concept intervals by stringified concept_id equality', () => {
-    expect(conceptMatchesIntervalText({ id: 226 }, '226')).toBe(true);
+  it('matches concept intervals by raw concept key, not grouped display id', () => {
+    expect(conceptMatchesIntervalText({ id: 50, key: '52', variants: [{ conceptKey: '52' }] }, '52')).toBe(true);
+    expect(conceptMatchesIntervalText({ id: 50, key: '52', variants: [{ conceptKey: '52' }] }, '50')).toBe(false);
   });
 
-  it('matches when the concept id is provided as a string', () => {
-    expect(conceptMatchesIntervalText({ id: '226' }, '226')).toBe(true);
+  it('matches merged raw keys represented by a display concept', () => {
+    const concept = { id: 26, key: '26', mergedKeys: ['26', '27', '141'] };
+
+    expect(conceptMatchesIntervalText(concept, '27')).toBe(true);
+    expect(conceptMatchesIntervalText(concept, '141')).toBe(true);
+    expect(conceptMatchesIntervalText(concept, '42')).toBe(false);
   });
 
-  it('returns false when interval concept_id belongs to another concept', () => {
-    expect(conceptMatchesIntervalText({ id: 226 }, '227')).toBe(false);
+  it('matches when the concept raw key is provided as a string', () => {
+    expect(conceptMatchesIntervalText({ id: 'display-226', key: '226' }, '226')).toBe(true);
+  });
+
+  it('returns false when interval concept_id belongs to another underlying concept', () => {
+    expect(conceptMatchesIntervalText({ id: 226, key: '226' }, '227')).toBe(false);
   });
 
   it('returns false when interval concept_id is missing', () => {
-    expect(conceptMatchesIntervalText({ id: 226 }, null)).toBe(false);
+    expect(conceptMatchesIntervalText({ id: 226, key: '226' }, null)).toBe(false);
   });
 
   it('returns false when interval concept_id is empty', () => {
-    expect(conceptMatchesIntervalText({ id: 226 }, '')).toBe(false);
+    expect(conceptMatchesIntervalText({ id: 226, key: '226' }, '')).toBe(false);
   });
 
   it('has no text parameter in the public matcher contract', () => {

@@ -22,7 +22,7 @@ describe("annotation concept lookup", () => {
       { start: 200, end: 210, text: "to listen to" },
     ]);
 
-    const lookup = findAnnotationForConcept(record, { id: 226, key: "JBIL_10.A", name: "ten" });
+    const lookup = findAnnotationForConcept(record, { id: 226, key: "226", name: "ten" });
 
     expect(lookup.conceptInterval).toBeNull();
   });
@@ -33,9 +33,26 @@ describe("annotation concept lookup", () => {
       { start: 200, end: 210, text: "ten", concept_id: "226", import_index: 144 } as AnnotationRecord["tiers"][string]["intervals"][number],
     ]);
 
-    const lookup = findAnnotationForConcept(record, { id: 226, key: "JBIL_10.A", name: "ten" });
+    const lookup = findAnnotationForConcept(record, { id: 226, key: "226", name: "ten" });
 
     expect(lookup.conceptInterval?.start).toBe(200);
+  });
+
+
+  it("uses the raw concept key instead of the grouped display id for shifted grouped rows", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 4013.131, end: 4013.999, text: "big", concept_id: "53" },
+      { start: 5090.250, end: 5091.125, text: "long", concept_id: "55" },
+    ]);
+
+    const lookup = findAnnotationForConcept(record, {
+      id: 53,
+      key: "55",
+      name: "long",
+      variants: [{ conceptKey: "55", conceptEn: "long", variantLabel: "A" }],
+    });
+
+    expect(lookup.conceptInterval).toMatchObject({ start: 5090.250, end: 5091.125, text: "long", concept_id: "55" });
   });
 
   it("keeps display ortho_words separate from strict ortho-tier annotation status", () => {
@@ -48,7 +65,7 @@ describe("annotation concept lookup", () => {
       intervals: [{ start: 100, end: 110, text: "one", concept_id: "217" }],
     };
 
-    const lookup = findAnnotationForConcept(record, { id: 217, key: "one", name: "one" });
+    const lookup = findAnnotationForConcept(record, { id: 217, key: "217", name: "one" });
 
     expect(lookup.orthoInterval?.text).toBe("one");
     expect(lookup.directOrthoInterval).toBeNull();

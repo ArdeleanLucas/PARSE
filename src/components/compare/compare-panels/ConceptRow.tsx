@@ -18,6 +18,7 @@ export function ConceptRow({
   totalCols,
   onPlayEntry,
 }: ConceptRowProps) {
+  const rawConceptId = concept.key ?? concept.id;
   const isActive = activeConcept === concept.id;
   const conceptTags = getTagsForConcept(concept.id);
   const expandedSpeakers = speakers.filter((speaker) => expanded.has(expandKey(speaker, concept.id)));
@@ -112,7 +113,7 @@ export function ConceptRow({
                 <LexemeDetail
                   key={expandKey(speaker, concept.id)}
                   speaker={speaker}
-                  conceptId={concept.id}
+                  conceptId={rawConceptId}
                   conceptLabel={concept.label}
                   ipa={entry.ipa}
                   ortho={entry.ortho}

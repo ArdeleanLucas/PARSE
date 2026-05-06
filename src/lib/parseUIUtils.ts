@@ -57,11 +57,34 @@ export function deriveAudioUrl(
  * compared; intervals without concept_id intentionally do not match so legacy
  * rows fail loudly as unannotated instead of silently mis-pairing.
  */
+type ConceptIdentityLike = {
+  id: number | string;
+  key?: number | string | null;
+  variants?: readonly { conceptKey?: number | string | null }[];
+  mergedKeys?: readonly (number | string | null | undefined)[];
+  mergedVariants?: readonly { conceptKey?: number | string | null }[];
+};
+
+export function underlyingConceptKeys(concept: ConceptIdentityLike): string[] {
+  const keys = new Set<string>();
+  const add = (value: number | string | null | undefined) => {
+    const text = value == null ? "" : String(value).trim();
+    if (text) keys.add(text);
+  };
+  add(concept.key);
+  for (const variant of concept.variants ?? []) add(variant.conceptKey);
+  for (const key of concept.mergedKeys ?? []) add(key);
+  for (const variant of concept.mergedVariants ?? []) add(variant.conceptKey);
+  return Array.from(keys);
+}
+
 export function conceptMatchesIntervalText(
-  concept: { id: number | string },
+  concept: ConceptIdentityLike,
   intervalConceptId: string | null | undefined,
 ): boolean {
-  return intervalConceptId != null && intervalConceptId !== "" && String(intervalConceptId) === String(concept.id);
+  const intervalKey = intervalConceptId == null ? "" : String(intervalConceptId).trim();
+  if (!intervalKey) return false;
+  return underlyingConceptKeys(concept).includes(intervalKey);
 }
 
 export function getConceptStatus(tags: StoreTag[]): ConceptTag {
