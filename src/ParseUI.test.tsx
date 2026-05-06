@@ -783,6 +783,102 @@ describe("ParseUI", () => {
     });
   });
 
+  it("scopes annotate sidebar status filters to the active speaker when that speaker has no annotation record", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Khan03", "Saha01"],
+      concepts: [
+        { id: "1", label: "water", source_item: "1.1", source_survey: "KLQ" },
+        { id: "1.5", label: "nose", source_item: "1.5", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Saha01: { ...makeRecord("Saha01", []), concept_tags: { "1.5": ["confirmed", "problematic"] } },
+    };
+
+    const { rerender } = render(<ParseUI />);
+    await switchToAnnotateMode();
+    const sidebar = () => screen.getByTestId("concept-sidebar");
+    const noseButton = () => within(sidebar()).queryByRole("button", { name: /nose.*KLQ 1\.5/i });
+
+    expect(noseButton()?.querySelector("span")?.className).toContain("bg-slate-300");
+
+    fireEvent.click(screen.getByTestId("tagfilter-unreviewed"));
+    expect(noseButton()).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("tagfilter-unreviewed"));
+    fireEvent.click(screen.getByTestId("tagfilter-flagged"));
+    expect(noseButton()).toBeNull();
+
+    mockSetConceptTag("Saha01", "1.5", "confirmed");
+    rerender(<ParseUI />);
+    fireEvent.click(screen.getByTestId("tagfilter-flagged"));
+    fireEvent.click(screen.getByTestId("tagfilter-unreviewed"));
+    expect(noseButton()).toBeTruthy();
+  });
+
+  it("scopes annotate custom tag filters to the active speaker and preserves compare union semantics", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Khan03", "Saha01"],
+      concepts: [
+        { id: "1", label: "water", source_item: "1.1", source_survey: "KLQ" },
+        { id: "1.5", label: "nose", source_item: "1.5", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockTags = [...mockTags, { id: "thesis", label: "Thesis", color: "#6366f1" }];
+    mockRecords = {
+      Khan03: { ...makeRecord("Khan03", []), concept_tags: { "1.5": ["thesis"] } },
+      Saha01: makeRecord("Saha01", []),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+    const sidebar = () => screen.getByTestId("concept-sidebar");
+    const noseButton = () => within(sidebar()).queryByRole("button", { name: /nose.*KLQ 1\.5/i });
+    const thesisFilter = () => within(sidebar()).getByRole("button", { name: /Thesis/i });
+
+    fireEvent.click(thesisFilter());
+    expect(noseButton()).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Saha01" })[0]);
+    await waitFor(() => expect(noseButton()).toBeNull());
+
+    await switchToCompareMode();
+    fireEvent.click(thesisFilter());
+    expect(noseButton()).toBeTruthy();
+  });
+
+  it("keeps compare action buttons checked from the selected-speaker tag union", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Khan03", "Saha01"],
+      concepts: [
+        { id: "1", label: "water", source_item: "1.1", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Khan03: makeRecord("Khan03", []),
+      Saha01: { ...makeRecord("Saha01", []), concept_tags: { "1": ["confirmed"] } },
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    const waterButton = within(sidebar).getByRole("button", { name: /water.*KLQ 1\.1/i });
+    expect(waterButton.querySelector("span")?.className).toContain("bg-emerald-500");
+    expect(screen.getByRole("button", { name: /Accept concept/i }).className).toContain("bg-emerald-700");
+  });
+
   it("waits for the newly selected speaker audio to become ready before seeking and drawing a region", async () => {
     mockConfig = {
       project_name: "PARSE",

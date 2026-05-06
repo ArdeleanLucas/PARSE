@@ -817,9 +817,12 @@ export function ParseUI() {
   }, [enrichmentData]);
 
   // — Derived: real concepts with live tag state —
-  const getTagsForConcept = useCallback((conceptKey: string): Tag[] => {
+  const getTagsForConcept = useCallback((conceptKey: string, speakerScope?: string[]): Tag[] => {
     const appliedIds = new Set<string>();
-    for (const record of Object.values(annotationRecords)) {
+    const records = speakerScope && speakerScope.length > 0
+      ? speakerScope.map((scopedSpeaker) => annotationRecords[scopedSpeaker]).filter(Boolean)
+      : Object.values(annotationRecords);
+    for (const record of records) {
       for (const tagId of record.concept_tags?.[conceptKey] ?? []) {
         appliedIds.add(tagId);
       }
@@ -833,6 +836,14 @@ export function ParseUI() {
     return selectedSpeakers.length > 0 ? selectedSpeakers : rawSpeakers;
   }, [rawSpeakers, selectedSpeakers]);
 
+  const activeTagScope = useMemo(
+    () => currentMode === 'annotate'
+      ? (selectedSpeakers[0] ? [selectedSpeakers[0]] : [])
+      : selectedTagTargetSpeakers(),
+    [currentMode, selectedSpeakers, selectedTagTargetSpeakers],
+  );
+  const activeTagScopeKey = activeTagScope.join('\u0000');
+
   const setConceptTagForSelectedSpeakers = useCallback((tagId: string, conceptKey: string) => {
     for (const targetSpeaker of selectedTagTargetSpeakers()) {
       setConceptTag(targetSpeaker, conceptKey, tagId);
@@ -843,10 +854,10 @@ export function ParseUI() {
     if (rawConcepts.length === 0) return [];
     const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
     return groupConceptEntries(rawConcepts, (conceptKeys) => {
-      const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey));
+      const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey, activeTagScope));
       return getConceptStatus(tags);
     }, mergesForCurrentMode);
-  }, [rawConcepts, getTagsForConcept, storeTags, conceptMerges, currentMode]);
+  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode]);
 
   const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
 
@@ -1011,9 +1022,10 @@ export function ParseUI() {
       if (!block) return false;
       return Object.values(block).some((members) => Array.isArray(members) && members.length > 0);
     };
-    const hasSpeakerFlag = (key: string): boolean => {
+    const hasSpeakerFlag = (key: string, speakerScope?: string[]): boolean => {
       const block = speakerFlags[key];
       if (!isRecord(block)) return false;
+      if (speakerScope && speakerScope.length > 0) return speakerScope.some((scopedSpeaker) => !!block[scopedSpeaker]);
       return Object.values(block).some((v) => !!v);
     };
     const hasBorrowing = (key: string): boolean => {
@@ -1027,15 +1039,15 @@ export function ParseUI() {
     if (statusFilter === 'unreviewed') {
       // Unreviewed ≡ not yet confirmed AND no cognate assignment yet.
       // Formerly lived as a separate header tab; now a left-panel pill.
-      list = list.filter(c => !hasCognateAssignment(c.key) && c.tag !== 'confirmed');
+      list = list.filter(c => !hasCognateAssignment(c.key) && getTagsForConcept(c.key, activeTagScope).every((tag) => tag.id !== 'confirmed'));
     } else if (statusFilter === 'flagged') {
-      list = list.filter(c => c.tag === 'problematic' || hasSpeakerFlag(c.key));
+      list = list.filter(c => getTagsForConcept(c.key, activeTagScope).some((tag) => tag.id === 'problematic') || hasSpeakerFlag(c.key, activeTagScope));
     } else if (statusFilter === 'borrowings') {
       list = list.filter(c => hasBorrowing(c.key));
     }
     if (selectedTagIds.size > 0) {
       list = list.filter(c => {
-        const conceptTagIds = new Set(getTagsForConcept(c.key).map((tag) => tag.id));
+        const conceptTagIds = new Set(getTagsForConcept(c.key, activeTagScope).map((tag) => tag.id));
         for (const tagId of selectedTagIds) {
           if (!conceptTagIds.has(tagId)) return false;
         }
@@ -1063,7 +1075,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, getTagsForConcept]);
+  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const referenceFormLists = useMemo(
@@ -1079,7 +1091,7 @@ export function ParseUI() {
   }, [concept, enrichmentData]);
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
-    const flagged = getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic');
+    const flagged = getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic');
 
     return activeSpeakers.map((speaker) => buildSpeakerForm(
       annotationRecords[speaker],
@@ -1089,7 +1101,7 @@ export function ParseUI() {
       flagged,
       primaryContactCodes,
     ));
-  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, selectedSpeakers, speakers, primaryContactCodes]);
+  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, activeTagScopeKey, selectedSpeakers, speakers, primaryContactCodes]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
   const navigationConcepts = filtered.length > 0 ? filtered : concepts;
@@ -1788,18 +1800,18 @@ export function ParseUI() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic')
+                    onClick={() => getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic')
                       ? null
                       : setConceptTagForSelectedSpeakers('problematic', concept.key)}
-                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'problematic') ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic') ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                   >
                     <Flag className="h-3.5 w-3.5"/> Flag
                   </button>
                   <button
-                    onClick={() => getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed')
+                    onClick={() => getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed')
                       ? null
                       : setConceptTagForSelectedSpeakers('confirmed', concept.key)}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
                   >
                     <Check className="h-3.5 w-3.5"/> Accept concept
                   </button>
