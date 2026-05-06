@@ -135,9 +135,25 @@ return intervalConceptId != null && intervalConceptId !== "" && String(intervalC
 
 The contract breach is that `Concept.id` is a display-order id after grouping, while `interval.concept_id` is a raw data id.
 
+## Write-path risk
+
+The same identity mismatch can affect explicit Annotate writes, but the observed risk shape is slightly different from simple “new rows use display ids”. Current `AnnotateView` Save Annotation / quick-retime calls `saveLexemeAnnotation()` with only timestamp bounds and `conceptName`, not a `concept_id` parameter. The store then:
+
+1. locates the concept interval by `oldStart` / `oldEnd`, where those bounds came from the already-wrong read-side lookup;
+2. retimes that raw interval in place;
+3. overwrites its `text` with the displayed concept name; and
+4. preserves the existing raw `concept_id` because `updateMatchingInterval()` spreads the old interval.
+
+So for the reported `long` example, saving while the UI is on displayed `long` would target the raw `big` interval (`concept_id: "53"`) and can rewrite its text/times as if it were `long`. That is worse than a label-only display bug: the UI can persist wrong `text` and retiming edits onto the wrong raw concept row. It does not appear, from this path, to persist a brand-new concept-tier interval with the grouped display id; instead it mutates the wrong existing raw-id interval selected by the read bug. Any eventual fix should still audit all write paths and tests for both cases:
+
+- no use of grouped display ids when creating or updating `concept_id` fields;
+- no mutation of a wrong raw interval due to a read-side lookup that already selected the wrong bounds.
+
+Related paths that already use raw `concept.key` for sidecar metadata look safer on first inspection: speaker notes (`saveLexemeNote({ concept_id: concept.key })`), concept tags, and confirmed anchors are keyed by `concept.key`. This audit did not exhaustively certify generic interval editing APIs or backend compute refresh targets.
+
 ## Fix direction
 
-Frontend concept lookup should match against raw concept keys, not grouped display ids.
+Frontend concept lookup and write targeting should match against raw concept keys, not grouped display ids.
 
 Likely implementation shape:
 
