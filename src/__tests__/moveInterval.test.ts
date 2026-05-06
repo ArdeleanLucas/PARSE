@@ -15,6 +15,7 @@ vi.mock("@/api/client", () => ({
 
 import { useAnnotationStore } from "../stores/annotationStore";
 import { LEXEME_SCOPE_TIERS } from "../stores/annotation/actions";
+import { findAnnotationForConcept } from "../components/annotate/annotate-views/shared";
 
 function seedFail02() {
   useAnnotationStore.setState({
@@ -507,6 +508,57 @@ describe("annotationStore.saveLexemeAnnotation (real-shape data)", () => {
     });
 
     expect(result).toMatchObject({ ok: true, moved: 1 });
+  });
+
+
+  it("retimes the raw-key matched concept row and leaves the grouped display-id collision row untouched", () => {
+    useAnnotationStore.setState({
+      records: {
+        Saha01: {
+          speaker: "Saha01",
+          tiers: {
+            concept: {
+              name: "concept", display_order: 1,
+              intervals: [
+                { start: 4013.131, end: 4013.999, text: "big", concept_id: "53" },
+                { start: 5090.250, end: 5091.125, text: "long", concept_id: "55" },
+              ],
+            },
+            ipa: { name: "ipa", display_order: 2, intervals: [] },
+            ortho: { name: "ortho", display_order: 3, intervals: [] },
+            ortho_words: { name: "ortho_words", display_order: 4, intervals: [] },
+          },
+          created_at: "2026-01-01T00:00:00Z",
+          modified_at: "2026-01-01T00:00:00Z",
+          source_wav: "Saha01.wav",
+        },
+      },
+      dirty: {}, loading: {}, histories: {},
+    });
+
+    const concept = {
+      id: 53,
+      key: "55",
+      name: "long",
+      variants: [{ conceptKey: "55", conceptEn: "long", variantLabel: "A" }],
+    };
+    const conceptInterval = findAnnotationForConcept(useAnnotationStore.getState().records.Saha01, concept).conceptInterval;
+
+    expect(conceptInterval).toMatchObject({ start: 5090.250, end: 5091.125, concept_id: "55" });
+
+    const result = useAnnotationStore.getState().saveLexemeAnnotation({
+      speaker: "Saha01",
+      oldStart: conceptInterval!.start, oldEnd: conceptInterval!.end,
+      newStart: 6000, newEnd: 6001,
+      ipaText: "",
+      orthoText: "",
+      conceptName: "long",
+    });
+
+    expect(result).toEqual({ ok: true, moved: 1 });
+    const intervals = useAnnotationStore.getState().records.Saha01.tiers.concept.intervals;
+    expect(intervals.find((iv) => iv.concept_id === "53")).toMatchObject({ start: 4013.131, end: 4013.999, text: "big" });
+    expect(intervals.find((iv) => iv.concept_id === "55")).toMatchObject({ start: 6000, end: 6001, text: "long", manuallyAdjusted: true });
   });
 
   it("returns moved=0 with a clean error when no concept interval matches", () => {
