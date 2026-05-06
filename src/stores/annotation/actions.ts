@@ -107,6 +107,7 @@ function retimeOverlappingInterval(
   newStart: number,
   newEnd: number,
   text?: string,
+  createEmptyInterval = false,
 ): boolean {
   const tier = record.tiers[tierKey];
   const idx = tier ? findBestOverlapIntervalIndex(tier.intervals, oldStart, oldEnd) : -1;
@@ -122,7 +123,8 @@ function retimeOverlappingInterval(
     return true;
   }
 
-  if (text === undefined || text.trim() === "") return false;
+  if (text === undefined) return false;
+  if (!createEmptyInterval && text.trim() === "") return false;
   const writableTier = ensureAnnotationTier(record, tierKey);
   writableTier.intervals.push({
     start: newStart,
@@ -178,12 +180,12 @@ function applyLexemeRetime(
   oldEnd: number,
   newStart: number,
   newEnd: number,
-  texts?: { conceptName?: string; ipaText?: string; orthoText?: string },
+  texts?: { conceptName?: string; ipaText?: string; orthoText?: string; orthoEdited?: boolean },
 ): number {
   if (!updateMatchingInterval(record, "concept", oldStart, oldEnd, newStart, newEnd, texts?.conceptName)) return 0;
   let moved = 1;
   if (retimeOverlappingInterval(record, "ipa", oldStart, oldEnd, newStart, newEnd, texts?.ipaText)) moved += 1;
-  if (retimeOverlappingInterval(record, "ortho", oldStart, oldEnd, newStart, newEnd, texts?.orthoText)) moved += 1;
+  if (retimeOverlappingInterval(record, "ortho", oldStart, oldEnd, newStart, newEnd, texts?.orthoText, texts?.orthoEdited === true)) moved += 1;
   if (rescaleAssociatedIntervals(record, "ortho_words", oldStart, oldEnd, newStart, newEnd) > 0) moved += 1;
   return moved;
 }
@@ -511,7 +513,7 @@ export function createAnnotationActionsSlice(
       return moved;
     },
 
-    saveLexemeAnnotation: ({ speaker, oldStart, oldEnd, newStart, newEnd, ipaText, orthoText, conceptName }) => {
+    saveLexemeAnnotation: ({ speaker, oldStart, oldEnd, newStart, newEnd, ipaText, orthoText, orthoEdited, conceptName }) => {
       if (!Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
         return { ok: false, error: "End must be greater than start." };
       }
@@ -520,7 +522,7 @@ export function createAnnotationActionsSlice(
       if (!pre) return { ok: false, error: "Speaker record not loaded." };
 
       const clone = deepClone(pre);
-      const moved = applyLexemeRetime(clone, oldStart, oldEnd, newStart, newEnd, { conceptName, ipaText, orthoText });
+      const moved = applyLexemeRetime(clone, oldStart, oldEnd, newStart, newEnd, { conceptName, ipaText, orthoText, orthoEdited });
 
       if (moved === 0) {
         return { ok: false, error: "No matching lexeme intervals found." };
