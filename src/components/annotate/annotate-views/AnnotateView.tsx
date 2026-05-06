@@ -169,8 +169,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     }
   }, [concept.key, conceptInterval, directOrthoInterval, isConfirmed, orthoInterval, setConceptTag, setConfirmedAnchor, speaker]);
 
+  const displayedOrthoText = directOrthoInterval ? directOrthoInterval.text : (orthoInterval?.text ?? "");
   const [ipa, setIpa] = useState(ipaInterval?.text ?? "");
-  const [ortho, setOrtho] = useState(directOrthoInterval?.text || orthoInterval?.text || "");
+  const [ortho, setOrtho] = useState(displayedOrthoText);
+  const [orthoUserEdited, setOrthoUserEdited] = useState(false);
   const [editStart, setEditStart] = useState<string>(conceptInterval ? conceptInterval.start.toFixed(3) : "");
   const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : "");
   const [timestampSaving, setTimestampSaving] = useState(false);
@@ -182,7 +184,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   useEffect(() => {
     setIpa(ipaInterval?.text ?? "");
-    setOrtho(directOrthoInterval?.text || orthoInterval?.text || "");
+    setOrtho(displayedOrthoText);
+    setOrthoUserEdited(false);
     setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : "");
     setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : "");
     setTimestampMessage(null);
@@ -190,7 +193,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
-  }, [speaker, concept.key, conceptInterval, ipaInterval, orthoInterval, directOrthoInterval]);
+  }, [speaker, concept.key, conceptInterval, ipaInterval, displayedOrthoText]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -288,6 +291,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     quickRetimeSelection,
   });
 
+  // `orthoInterval` may be an auto-imported/display-only `ortho_words` fallback.
+  // Do not persist that fallback as a direct ORTH annotation unless the user edits it.
+  const saveOrthoText = directOrthoInterval ? ortho : (orthoUserEdited ? ortho : undefined);
+
   const commitQuickRetime = useCallback(async () => {
     if (!conceptInterval || !quickRetimeMenu) return;
     setTimestampSaving(true);
@@ -299,7 +306,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         newStart: quickRetimeMenu.start,
         newEnd: quickRetimeMenu.end,
         ipaText: ipa,
-        orthoText: ortho,
+        orthoText: saveOrthoText,
+        orthoEdited: orthoUserEdited,
         conceptName: concept.name,
       });
       if (!result.ok) {
@@ -324,7 +332,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     } finally {
       setTimestampSaving(false);
     }
-  }, [addRegion, clearQuickRetimeSelection, concept, conceptInterval, ipa, ortho, quickRetimeMenu, record, saveLexemeAnnotation, saveSpeaker, seek, speaker]);
+  }, [addRegion, clearQuickRetimeSelection, concept, conceptInterval, ipa, orthoUserEdited, quickRetimeMenu, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker, seek, speaker]);
 
   const cancelQuickRetime = useCallback(() => {
     clearQuickRetimeSelection();
@@ -724,7 +732,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic</label>
             <input
               value={ortho}
-              onChange={(e) => setOrtho(e.target.value)}
+              onChange={(e) => {
+                setOrthoUserEdited(true);
+                setOrtho(e.target.value);
+              }}
               placeholder="Enter orthographic form…"
               dir="rtl"
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-serif text-xl text-slate-900 placeholder:text-slate-300 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
@@ -836,7 +847,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     newStart: nextStart,
                     newEnd: nextEnd,
                     ipaText: ipa,
-                    orthoText: ortho,
+                    orthoText: saveOrthoText,
+                    orthoEdited: orthoUserEdited,
                     conceptName: concept.name,
                   });
                   if (!result.ok) {

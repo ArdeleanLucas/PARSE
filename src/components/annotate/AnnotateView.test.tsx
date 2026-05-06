@@ -262,12 +262,88 @@ describe('AnnotateView', () => {
     expect(getOrthographicInput().value).toBe('refined-word');
   });
 
-  it('falls back to ortho_words pre-fill when tiers.ortho overlap interval has empty text', () => {
+  it('does not save unedited ortho_words fallback text as a direct ORTH annotation', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('god');
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'xwa' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      ipaText: 'xwa',
+      orthoText: undefined,
+    })));
+  });
+
+  it('keeps a cleared ortho_words fallback empty after save and reload', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+    mockSaveLexemeAnnotation.mockImplementation(({ newStart, newEnd, orthoText }) => {
+      mockRecord = makeRecord([{ conceptText: 'water', ortho: orthoText, orthoWords: 'god', start: newStart, end: newEnd }]);
+      return { ok: true, moved: 3 };
+    });
+
+    const { unmount } = renderWaterAnnotateView();
+
+    const orthographic = getOrthographicInput();
+    expect(orthographic.value).toBe('god');
+    fireEvent.change(orthographic, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      orthoText: '',
+    })));
+
+    unmount();
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('');
+  });
+
+  it('keeps a cleared pre-existing direct ORTH interval empty after save and reload', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ortho: 'God', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+    mockSaveLexemeAnnotation.mockImplementation(({ newStart, newEnd, orthoText }) => {
+      mockRecord = makeRecord([{ conceptText: 'water', ortho: orthoText, orthoWords: 'god', start: newStart, end: newEnd }]);
+      return { ok: true, moved: 4 };
+    });
+
+    const { unmount } = renderWaterAnnotateView();
+
+    const orthographic = getOrthographicInput();
+    expect(orthographic.value).toBe('God');
+    fireEvent.change(orthographic, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      orthoText: '',
+    })));
+
+    unmount();
+    renderWaterAnnotateView();
+
+    expect(getOrthographicInput().value).toBe('');
+  });
+
+  it('saves an edited ortho_words fallback as a direct ORTH annotation', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', orthoWords: 'god', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.change(getOrthographicInput(), { target: { value: 'خودا' } });
+    fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      orthoText: 'خودا',
+    })));
+  });
+
+  it('treats an overlapping empty tiers.ortho interval as an explicit clear instead of falling back to ortho_words', () => {
     mockRecord = makeRecord([{ conceptText: 'one', ortho: '', orthoWords: 'fallback-word', start: 18.5, end: 19.5 }]);
 
     renderWaterAnnotateView();
 
-    expect(getOrthographicInput().value).toBe('fallback-word');
+    expect(getOrthographicInput().value).toBe('');
   });
 
   it('renders no badge for a boundary-only concept', () => {
@@ -450,6 +526,7 @@ describe('AnnotateView', () => {
       newEnd: 2.75,
       ipaText: 'aβ',
       orthoText: 'ئاو',
+      orthoEdited: true,
       conceptName: 'water',
     }));
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
@@ -526,6 +603,7 @@ describe('AnnotateView', () => {
       newEnd: 2.75,
       ipaText: 'edited-ipa',
       orthoText: 'edited-ortho',
+      orthoEdited: true,
       conceptName: 'water',
     }));
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));

@@ -740,6 +740,7 @@ describe("ParseUI", () => {
       newEnd: 2.5,
       ipaText: "aβ",
       orthoText: "ئاو",
+      orthoEdited: true,
       conceptName: "water",
     });
     await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith("Fail01", expect.anything()));

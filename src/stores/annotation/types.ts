@@ -31,7 +31,8 @@ export interface SaveLexemeAnnotationPayload {
   newStart: number;
   newEnd: number;
   ipaText: string;
-  orthoText: string;
+  orthoText?: string;
+  orthoEdited?: boolean;
   conceptName: string;
 }
 
