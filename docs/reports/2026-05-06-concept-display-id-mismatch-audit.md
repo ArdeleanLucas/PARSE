@@ -169,6 +169,44 @@ Likely implementation shape:
   - displayed `long` must not match raw `big`
   - displayed `big` must match raw `big`
 
+## Additional review gaps / follow-up audit notes
+
+### Existing on-disk text mismatch scan
+
+A quick concept-tier scan now checks every active `/home/lucas/parse-workspace/annotations/*.json` file for rows where `interval.concept_id` resolves through raw `concepts.csv`, but `interval.text` does not exactly equal the raw concept name. Full output: [`2026-05-06-concept-tier-text-mismatch-audit.tsv`](./2026-05-06-concept-tier-text-mismatch-audit.tsv).
+
+Results:
+
+- **275** exact mismatch rows across active annotation JSON files.
+- Deduplicating `.json` / `.parse.json` mirror rows by speaker/timing/identity/text gives **166** distinct mismatch rows.
+- Many are expected label-normalization variants (`nose` vs `nose (A)`, `grass` vs `grass A`, possessive prompts like `my son` vs `son`). After a simple suffix/variant normalization, **115** file rows / **78** distinct rows remain suspicious.
+- Only **1** suspicious normalized mismatch is currently marked `manuallyAdjusted: true`: `Saha01.parse.json` has `concept_id: "50"` resolving to raw `God` (`KLQ 3.11`) at `9116.0-9116.878`, but `text: "salt"`. This is exactly the kind of already-on-disk mutation the write-path risk predicts.
+
+By distinct speaker rows after simple normalization:
+
+| Speaker | exact text mismatches | suspicious normalized mismatches | manually-adjusted suspicious mismatches |
+|---|---:|---:|---:|
+| Khan01 | 39 | 13 | 0 |
+| Khan02 | 93 | 52 | 0 |
+| Khan03 | 33 | 12 | 0 |
+| Saha01 | 1 | 1 | 1 |
+
+This is not yet a full corruption classifier: Khan legacy data has many import-label quirks, so mismatch rows require manual classification before any repair. But it gives the missing “already on disk” risk number and identifies the strongest UI-induced candidate.
+
+### Backend/compute scoped-refresh risk
+
+The frontend scoped-refresh path deserves audit before any eventual fix lands. `useParseUIPipeline()` accepts backend `affected_concepts` / `affectedConcepts` and `ParseUI.tsx` forwards them to `useAnnotationStore.getState().applyConceptScopedRefresh()`. In `src/stores/annotation/actions.ts`, `targetId()` resolves `target.concept_id ?? target.conceptId ?? target.id`, and `intervalMatchesTarget()` compares that id against interval `id`, `concept_id`, `conceptId`, then positional fallback.
+
+Current risk framing: if those targets are emitted by backend code using raw ids, this path is compatible. If any frontend or backend caller ever passes a grouped display `Concept.id` as `id` / `conceptId`, scoped refresh can reproduce the same identity drift and patch the wrong row. The eventual implementation PR should trace every `affected_concepts` producer and pin regression coverage for raw-id-only targets.
+
+### Compare write paths
+
+This audit walked Annotate writes in detail, but Compare has separate state writes:
+
+- Compare flag/accept buttons in `ParseUI.tsx` use `concept.key`, so concept tags appear raw-keyed and safer on first inspection.
+- Compare notes persistence currently uses `persistCompareNotes(conceptId, value)` where `conceptId` is the grouped display id. That is localStorage UI state rather than annotation JSON, but it can still drift notes across grouped concept rows and should be migrated/audited with the read-side fix.
+- `AIChat` receives `conceptId={concept.id}` in Compare; chat is maintenance-only, but any tool call or context that treats that id as a raw concept id is suspect.
+
 ## Data caveat
 
-This audit is about frontend lookup. It does not certify every raw annotation interval as linguistically correct. It does show that the specific `long`/`salt` wrong-time behavior, and many similar rows, are explainable by frontend id drift rather than by corrupted timestamps in the saved annotation files.
+This audit is about frontend lookup and write-risk triage. It does not certify every raw annotation interval as linguistically correct. It does show that the specific `long`/`salt` wrong-time behavior, and many similar rows, are explainable by frontend id drift rather than by originally corrupted timestamps in the saved annotation files; the added mismatch scan shows at least one likely already-persisted text mutation (`Saha01.parse.json`, raw `God` row now texted `salt`).
