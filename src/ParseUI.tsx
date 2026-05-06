@@ -819,7 +819,7 @@ export function ParseUI() {
   // — Derived: real concepts with live tag state —
   const getTagsForConcept = useCallback((conceptKey: string, speakerScope?: string[]): Tag[] => {
     const appliedIds = new Set<string>();
-    const records = speakerScope && speakerScope.length > 0
+    const records = speakerScope !== undefined
       ? speakerScope.map((scopedSpeaker) => annotationRecords[scopedSpeaker]).filter(Boolean)
       : Object.values(annotationRecords);
     for (const record of records) {

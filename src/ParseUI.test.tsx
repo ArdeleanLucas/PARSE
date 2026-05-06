@@ -855,6 +855,63 @@ describe("ParseUI", () => {
     expect(noseButton()).toBeTruthy();
   });
 
+  it("scopes annotate right-panel tag rows to the active speaker", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Khan03", "Saha01"],
+      concepts: [
+        { id: "1.5", label: "nose", source_item: "1.5", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Saha01: { ...makeRecord("Saha01", []), concept_tags: { "1.5": ["confirmed", "problematic"] } },
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const rightPanel = () => screen.getByTestId("right-panel");
+    const confirmedRow = () => within(rightPanel()).getByRole("button", { name: /Confirmed\s+1/i });
+    const problematicRow = () => within(rightPanel()).getByRole("button", { name: /Problematic\s+1/i });
+    expect(confirmedRow().getAttribute("aria-pressed")).toBe("false");
+    expect(problematicRow().getAttribute("aria-pressed")).toBe("false");
+    expect(confirmedRow().className).not.toContain("bg-indigo-50");
+    expect(problematicRow().className).not.toContain("bg-indigo-50");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Saha01" })[0]);
+    await waitFor(() => expect(confirmedRow().getAttribute("aria-pressed")).toBe("true"));
+    expect(problematicRow().getAttribute("aria-pressed")).toBe("true");
+    expect(confirmedRow().className).toContain("bg-indigo-50");
+    expect(problematicRow().className).toContain("bg-indigo-50");
+  });
+
+  it("treats an explicit empty annotate tag scope as untagged", () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Khan03", "Saha01"],
+      concepts: [
+        { id: "1.5", label: "nose", source_item: "1.5", source_survey: "KLQ" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Saha01: { ...makeRecord("Saha01", []), concept_tags: { "1.5": ["confirmed"] } },
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    const noseButton = within(sidebar).getByRole("button", { name: /nose.*KLQ 1\.5/i });
+    expect(noseButton.querySelector("span")?.className).toContain("bg-slate-300");
+    expect(noseButton.querySelector("span")?.className).not.toContain("bg-emerald-500");
+  });
+
   it("keeps compare action buttons checked from the selected-speaker tag union", () => {
     mockConfig = {
       project_name: "PARSE",
