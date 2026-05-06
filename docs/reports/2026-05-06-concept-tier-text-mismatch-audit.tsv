@@ -1,0 +1,276 @@
+speaker_file	speaker	index	start	end	concept_id	raw_name	interval_text	source_survey	source_item	audition_prefix	import_index	manuallyAdjusted	normalized_match
+Khan01.json	Khan01	6	1350.632	1351.5240000000001	223	seven	six	JBIL	7	7	6	False	False
+Khan01.json	Khan01	31	1933.4299999999998	1934.0589999999997	250	hair (women)	hair	JBIL	32	32	31	False	False
+Khan01.json	Khan01	33	1972.3780000000002	1973.18	132	nose (A)	nose	JBIL	34	34	33	False	True
+Khan01.json	Khan01	42	2269.52	2270.4	133	elbow (A)	elbow	JBIL	43	43	42	False	True
+Khan01.json	Khan01	63	3582.547	3583.679	287	wife	my wife	JBIL	66	66	63	False	False
+Khan01.json	Khan01	67	3618.651	3619.72	290	son	my son	JBIL	69	69	67	False	False
+Khan01.json	Khan01	70	3649.0	3650.173	292	daughter	my daughter	JBIL	71	71	70	False	False
+Khan01.json	Khan01	71	3674.376	3675.1380000000004	136	father (A)	father	JBIL	72	72	71	False	True
+Khan01.json	Khan01	72	3771.427	3772.418	293	mother (B)	mother	JBIL	73	73	72	False	True
+Khan01.json	Khan01	74	3821.658	3822.4049999999997	613	sister A	sister	JBIL	75	75	74	False	True
+Khan01.json	Khan01	75	3822.523	3823.152	295	groom	sister	JBIL	76	76	75	False	False
+Khan01.json	Khan01	76	3823.475	3823.999	295	groom	sister	JBIL	76	76	76	False	False
+Khan01.json	Khan01	77	3856.267	3857.297	296	bride	groom	JBIL	77	77	77	False	False
+Khan01.json	Khan01	100	5145.686	5146.464	591	tree branch	branch	JBIL	100	100	100	False	False
+Khan01.json	Khan01	107	5541.827	5542.578	614	grass A	grass	JBIL	107	107	107	False	True
+Khan01.json	Khan01	108	5564.842	5565.704	614	grass A	grass	JBIL	107	107	108	False	True
+Khan01.json	Khan01	115	5853.247	5854.222000000001	202	night (A)	night	JBIL	114	114	115	False	True
+Khan01.json	Khan01	117	5928.693	5929.448	146	wind (A)	wind	JBIL	116	116	117	False	True
+Khan01.json	Khan01	124	6105.186	6106.148	144	snow (A)	ice	JBIL	123	123	124	False	False
+Khan01.json	Khan01	125	6125.203	6126.313	148	fog (A)	snow	JBIL	124	124	125	False	False
+Khan01.json	Khan01	126	6146.888	6147.702	142	rain (A)	fog	JBIL	125	125	126	False	False
+Khan01.json	Khan01	127	6167.768	6168.989	616	rain (B)	rain	JBIL	126	126	127	False	True
+Khan01.json	Khan01	128	6191.209	6192.226	615	river A	river	JBIL	127	127	128	False	True
+Khan01.json	Khan01	129	6369.018	6370.445	615	river A	river	JBIL	127	127	129	False	True
+Khan01.json	Khan01	148	7225.969	7226.953	157	hungry (A)	hungry	JBIL	146	146	148	False	True
+Khan01.json	Khan01	149	7275.53	7276.686	158	thirsty (A)	thirsty	JBIL	147	147	149	False	True
+Khan01.json	Khan01	150	7303.209	7304.242	359	bitter (B)	bitter	JBIL	148	148	150	False	True
+Khan01.json	Khan01	152	7387.635	7388.964	362	good (B)	good	JBIL	150	150	152	False	True
+Khan01.json	Khan01	153	7442.151	7443.16	156	bad (A)	bad !	JBIL	151	151	153	False	False
+Khan01.json	Khan01	157	7601.515	7602.5160000000005	159	sweet (A)	sweet	JBIL	155	155	157	False	True
+Khan01.json	Khan01	166	7801.599	7802.559	153	heavy (A)	heavy	JBIL	164	164	166	False	True
+Khan01.json	Khan01	168	7833.27	7834.216	376	dirty (B)	dirty	JBIL	166	166	168	False	True
+Khan01.json	Khan01	170	7866.96	7867.613	161	wet (A)	wet	JBIL	168	168	170	False	True
+Khan01.json	Khan01	171	7908.222	7909.195	150	big (A)	big	JBIL	169	169	171	False	True
+Khan01.json	Khan01	172	7939.2	7940.104	151	small (A)	small	JBIL	170	170	172	False	True
+Khan01.json	Khan01	180	8211.509	8212.441	167	yellow (A)	yellow	JBIL	178	178	180	False	True
+Khan01.json	Khan01	181	8221.707999999999	8222.89	386	red (B)	red	JBIL	179	179	181	False	True
+Khan01.json	Khan01	182	8250.0	8251.042	165	black (A)	black	JBIL	180	180	182	False	True
+Khan01.json	Khan01	183	8305.475999999999	8306.490999999998	164	white (A)	white	JBIL	181	181	183	False	True
+Khan01.parse.json	Khan01	6	1350.632	1351.5240000000001	223	seven	six	JBIL	7	7	6	False	False
+Khan01.parse.json	Khan01	31	1933.4299999999998	1934.0589999999997	250	hair (women)	hair	JBIL	32	32	31	False	False
+Khan01.parse.json	Khan01	33	1972.3780000000002	1973.18	132	nose (A)	nose	JBIL	34	34	33	False	True
+Khan01.parse.json	Khan01	42	2269.52	2270.4	133	elbow (A)	elbow	JBIL	43	43	42	False	True
+Khan01.parse.json	Khan01	63	3582.547	3583.679	287	wife	my wife	JBIL	66	66	63	False	False
+Khan01.parse.json	Khan01	67	3618.651	3619.72	290	son	my son	JBIL	69	69	67	False	False
+Khan01.parse.json	Khan01	70	3649.0	3650.173	292	daughter	my daughter	JBIL	71	71	70	False	False
+Khan01.parse.json	Khan01	71	3674.376	3675.1380000000004	136	father (A)	father	JBIL	72	72	71	False	True
+Khan01.parse.json	Khan01	72	3771.427	3772.418	293	mother (B)	mother	JBIL	73	73	72	False	True
+Khan01.parse.json	Khan01	74	3821.658	3822.4049999999997	613	sister A	sister	JBIL	75	75	74	False	True
+Khan01.parse.json	Khan01	75	3822.523	3823.152	295	groom	sister	JBIL	76	76	75	False	False
+Khan01.parse.json	Khan01	76	3823.475	3823.999	295	groom	sister	JBIL	76	76	76	False	False
+Khan01.parse.json	Khan01	77	3856.267	3857.297	296	bride	groom	JBIL	77	77	77	False	False
+Khan01.parse.json	Khan01	100	5145.686	5146.464	591	tree branch	branch	JBIL	100	100	100	False	False
+Khan01.parse.json	Khan01	107	5541.827	5542.578	614	grass A	grass	JBIL	107	107	107	False	True
+Khan01.parse.json	Khan01	108	5564.842	5565.704	614	grass A	grass	JBIL	107	107	108	False	True
+Khan01.parse.json	Khan01	115	5853.247	5854.222000000001	202	night (A)	night	JBIL	114	114	115	False	True
+Khan01.parse.json	Khan01	117	5928.693	5929.448	146	wind (A)	wind	JBIL	116	116	117	False	True
+Khan01.parse.json	Khan01	124	6105.186	6106.148	144	snow (A)	ice	JBIL	123	123	124	False	False
+Khan01.parse.json	Khan01	125	6125.203	6126.313	148	fog (A)	snow	JBIL	124	124	125	False	False
+Khan01.parse.json	Khan01	126	6146.888	6147.702	142	rain (A)	fog	JBIL	125	125	126	False	False
+Khan01.parse.json	Khan01	127	6167.768	6168.989	616	rain (B)	rain	JBIL	126	126	127	False	True
+Khan01.parse.json	Khan01	128	6191.209	6192.226	615	river A	river	JBIL	127	127	128	False	True
+Khan01.parse.json	Khan01	129	6369.018	6370.445	615	river A	river	JBIL	127	127	129	False	True
+Khan01.parse.json	Khan01	148	7225.969	7226.953	157	hungry (A)	hungry	JBIL	146	146	148	False	True
+Khan01.parse.json	Khan01	149	7275.53	7276.686	158	thirsty (A)	thirsty	JBIL	147	147	149	False	True
+Khan01.parse.json	Khan01	150	7303.209	7304.242	359	bitter (B)	bitter	JBIL	148	148	150	False	True
+Khan01.parse.json	Khan01	152	7387.635	7388.964	362	good (B)	good	JBIL	150	150	152	False	True
+Khan01.parse.json	Khan01	153	7442.151	7443.16	156	bad (A)	bad !	JBIL	151	151	153	False	False
+Khan01.parse.json	Khan01	157	7601.515	7602.5160000000005	159	sweet (A)	sweet	JBIL	155	155	157	False	True
+Khan01.parse.json	Khan01	166	7801.599	7802.559	153	heavy (A)	heavy	JBIL	164	164	166	False	True
+Khan01.parse.json	Khan01	168	7833.27	7834.216	376	dirty (B)	dirty	JBIL	166	166	168	False	True
+Khan01.parse.json	Khan01	170	7866.96	7867.613	161	wet (A)	wet	JBIL	168	168	170	False	True
+Khan01.parse.json	Khan01	171	7908.222	7909.195	150	big (A)	big	JBIL	169	169	171	False	True
+Khan01.parse.json	Khan01	172	7939.2	7940.104	151	small (A)	small	JBIL	170	170	172	False	True
+Khan01.parse.json	Khan01	180	8211.509	8212.441	167	yellow (A)	yellow	JBIL	178	178	180	False	True
+Khan01.parse.json	Khan01	181	8221.707999999999	8222.89	386	red (B)	red	JBIL	179	179	181	False	True
+Khan01.parse.json	Khan01	182	8250.0	8251.042	165	black (A)	black	JBIL	180	180	182	False	True
+Khan01.parse.json	Khan01	183	8305.475999999999	8306.490999999998	164	white (A)	white	JBIL	181	181	183	False	True
+Khan02.json	Khan02	9	593.2280000000001	594.2470000000001	599	hair (collective)	rib	KLQ	1.1	1.1	9	False	False
+Khan02.json	Khan02	10	606.237	607.3389999999999	522	the baby is in the uterus	uterus	KLQ	1.11	1.11	10	False	False
+Khan02.json	Khan02	20	770.289	771.198	587	a 40 day old baby	baby	KLQ	2.8	2.8	20	False	False
+Khan02.json	Khan02	21	783.9	784.6709999999999	140	paternal uncle (B)	paternal uncle	KLQ	2.9	2.9	21	False	True
+Khan02.json	Khan02	22	792.626	793.824	12	father	maternal uncle	KLQ	2.1	2.1	22	False	False
+Khan02.json	Khan02	33	1328.79	1329.864	13	mother	son of sister	KLQ	2.2	2.2	33	False	False
+Khan02.json	Khan02	39	1544.68	1545.999	607	"step-son "" son of wife"""	"step-son "" son of husband"""	KLQ	2.26	2.26	39	False	False
+Khan02.json	Khan02	41	1586.83	1587.999	609	"step-daughter ""daughter of wife"""	"step-daughter ""daughter of husband"""	KLQ	2.27	2.27	41	False	False
+Khan02.json	Khan02	45	1650.187	1651.145	588	(2.29- child of one’s son)-	child of one’s son	KLQ	2.29	2.29	45	False	False
+Khan02.json	Khan02	55	1851.383	1852.6190000000001	42	rain	shade	KLQ	3.1	3.1	55	False	False
+Khan02.json	Khan02	58	1935.423	1936.293	600	hill ?	hill	KLQ	3.13	3.13	58	False	False
+Khan02.json	Khan02	69	2051.2870000000003	2052.2430000000004	53	big	thin (man)	KLQ	4.1	4.1	69	False	False
+Khan02.json	Khan02	79	2220.816	2221.85	54	small	bad	KLQ	4.2	4.2	79	False	False
+Khan02.json	Khan02	89	2430.5699999999997	2431.6699999999996	55	long	deep	KLQ	4.3	4.3	89	False	False
+Khan02.json	Khan02	111	2908.921	2910.243	95	to be born	to remember	KLQ	6.1	6.1	111	False	False
+Khan02.json	Khan02	122	3158.319	3159.314	589	to stand, to stop	to stand	KLQ	7.6	7.6	122	False	False
+Khan02.json	Khan02	123	3177.412	3178.5769999999998	589	to stand, to stop	to stop	KLQ	7.6	7.6	123	False	False
+Khan02.json	Khan02	127	3282.561	3283.9990000000003	110	to go	to walk	KLQ	7.1	7.1	127	False	False
+Khan02.json	Khan02	129	3313.309	3314.828	170	to fly (B)	to fly	KLQ	7.12	7.12	129	False	True
+Khan02.json	Khan02	148	3797.276	3798.9829999999997	171	to kill	to destroy (the police destroyed the house)	KLQ	9.1	9.1	148	False	False
+Khan02.json	Khan02	158	3940.668	3941.713	548	here	today	KLQ	10.1	10.1	158	False	False
+Khan02.json	Khan02	171	4140.84	4141.999	549	there	evening	KLQ	10.2	10.2	171	False	False
+Khan02.json	Khan02	185	4352.0	4352.939	590	how much	how much salt is in the bag?	KLQ	12.6	12.6	185	False	False
+Khan02.json	Khan02	186	4361.091	4361.999000000001	525	how many	how many boys are in the class?	KLQ	12.7	12.7	186	False	False
+Khan02.json	Khan02	238	5330.0	5331.247	611	56 skin	skin	JBIL	56	56	238	False	False
+Khan02.json	Khan02	279	6203.452	6204.703	591	tree branch	branch	JBIL	100	100	279	False	False
+Khan02.json	Khan02	286	6458.823	6459.621	614	grass A	grass	JBIL	107	107	286	False	True
+Khan02.json	Khan02	293	6677.743	6678.725	202	night (A)	night	JBIL	114	114	293	False	True
+Khan02.json	Khan02	295	6699.282	6700.159000000001	146	wind (A)	wind	JBIL	116	116	295	False	True
+Khan02.json	Khan02	302	6836.524	6837.4400000000005	144	snow (A)	ice	JBIL	123	123	302	False	False
+Khan02.json	Khan02	303	6838.502	6839.484	148	fog (A)	snow	JBIL	124	124	303	False	False
+Khan02.json	Khan02	304	6848.953	6849.725	142	rain (A)	fog	JBIL	125	125	304	False	False
+Khan02.json	Khan02	305	6852.948	6853.999000000001	616	rain (B)	rain	JBIL	126	126	305	False	True
+Khan02.json	Khan02	306	6934.519	6935.2	615	river A	river	JBIL	127	127	306	False	True
+Khan02.json	Khan02	322	7273.563	7274.61	157	hungry (A)	hungry	JBIL	146	146	322	False	True
+Khan02.json	Khan02	323	7279.64	7280.582	158	thirsty (A)	thirsty	JBIL	147	147	323	False	True
+Khan02.json	Khan02	324	7349.279	7349.999000000001	359	bitter (B)	bitter	JBIL	148	148	324	False	True
+Khan02.json	Khan02	326	7328.144	7329.06	362	good (B)	good	JBIL	150	150	326	False	True
+Khan02.json	Khan02	327	7330.803	7331.68	156	bad (A)	bad	JBIL	151	151	327	False	True
+Khan02.json	Khan02	331	7406.779	7407.695000000001	159	sweet (A)	sweet	JBIL	155	155	331	False	True
+Khan02.json	Khan02	340	7475.085	7475.999	153	heavy (A)	heavy	JBIL	164	164	340	False	True
+Khan02.json	Khan02	342	7477.351	7477.999	376	dirty (B)	dirty	JBIL	166	166	342	False	True
+Khan02.json	Khan02	344	7481.044	7481.544	161	wet (A)	wet	JBIL	168	168	344	False	True
+Khan02.json	Khan02	345	7519.749	7520.639	150	big (A)	big	JBIL	169	169	345	False	True
+Khan02.json	Khan02	346	7521.569	7522.525000000001	151	small (A)	small	JBIL	170	170	346	False	True
+Khan02.json	Khan02	354	7620.678	7621.5289999999995	167	yellow (A)	yellow	JBIL	178	178	354	False	True
+Khan02.json	Khan02	355	7622.564	7623.585	386	red (B)	red	JBIL	179	179	355	False	True
+Khan02.json	Khan02	356	7625.372	7626.4980000000005	165	black (A)	black	JBIL	180	180	356	False	True
+Khan02.json	Khan02	357	7628.568	7629.602	164	white (A)	white	JBIL	181	181	357	False	True
+Khan02.json	Khan02	478	10876.221	10876.999	181	here (A)	here	JBIL	300	300	478	False	True
+Khan02.json	Khan02	480	10899.595	10900.373	182	there (A)	there	JBIL	302	302	480	False	True
+Khan02.json	Khan02	487	11093.388	11094.068000000001	190	today (A)	today	JBIL	309	309	487	False	True
+Khan02.json	Khan02	488	11096.74	11097.528	191	yesterday (A)	yesterday	JBIL	310	310	488	False	True
+Khan02.json	Khan02	490	11106.0	11107.0	515	tomorrow (B)	tomorrow	JBIL	312	312	490	False	True
+Khan02.json	Khan02	491	11107.474	11108.154	515	tomorrow (B)	tomorrow	JBIL	312	312	491	False	True
+Khan02.json	Khan02	492	11110.251	11111.621000000001	194	the day after tomorrow (A)	the day after tomorrow	JBIL	313	313	492	False	True
+Khan02.json	Khan02	493	11114.667	11115.613	213	where (A)	where	JBIL	314	314	493	False	True
+Khan02.json	Khan02	494	11117.0	11117.733	214	when (A)	when	JBIL	315	315	494	False	True
+Khan02.json	Khan02	495	11120.178	11120.999	212	how (A)	how	JBIL	316	316	495	False	True
+Khan02.json	Khan02	497	11145.562	11146.232	210	what (A)	what	JBIL	318	318	497	False	True
+Khan02.json	Khan02	498	11156.0	11156.64	601	Im a teacher	I	JBIL	319	319	498	False	False
+Khan02.json	Khan02	499	11158.425	11158.999	595	you see me	you (sg.)	JBIL	320	320	499	False	False
+Khan02.json	Khan02	500	11161.816	11162.644	560	we are teaching	we	JBIL	321	321	500	False	False
+Khan02.json	Khan02	501	11165.765	11166.514	561	you are teaching	you (pl.)	JBIL	322	322	501	False	False
+Khan02.json	Khan02	502	11173.109	11173.917000000001	562	they are taching	they	JBIL	323	323	502	False	False
+Khan02.parse.json	Khan02	8	593.2280000000001	594.2470000000001	599	hair (collective)	rib	KLQ	1.1	1.1	9	False	False
+Khan02.parse.json	Khan02	9	606.237	607.3389999999999	522	the baby is in the uterus	uterus	KLQ	1.11	1.11	10	False	False
+Khan02.parse.json	Khan02	19	770.289	771.198	587	a 40 day old baby	baby	KLQ	2.8	2.8	20	False	False
+Khan02.parse.json	Khan02	20	783.9	784.6709999999999	140	paternal uncle (B)	paternal uncle	KLQ	2.9	2.9	21	False	True
+Khan02.parse.json	Khan02	21	792.626	793.824	12	father	maternal uncle	KLQ	2.1	2.1	22	False	False
+Khan02.parse.json	Khan02	33	1328.79	1329.864	13	mother	son of sister	KLQ	2.2	2.2	33	False	False
+Khan02.parse.json	Khan02	39	1544.68	1545.999	607	"step-son "" son of wife"""	"step-son "" son of husband"""	KLQ	2.26	2.26	39	False	False
+Khan02.parse.json	Khan02	41	1586.83	1587.999	609	"step-daughter ""daughter of wife"""	"step-daughter ""daughter of husband"""	KLQ	2.27	2.27	41	False	False
+Khan02.parse.json	Khan02	45	1650.187	1651.145	588	(2.29- child of one’s son)-	child of one’s son	KLQ	2.29	2.29	45	False	False
+Khan02.parse.json	Khan02	54	1851.383	1852.6190000000001	42	rain	shade	KLQ	3.1	3.1	55	False	False
+Khan02.parse.json	Khan02	57	1935.423	1936.293	600	hill ?	hill	KLQ	3.13	3.13	58	False	False
+Khan02.parse.json	Khan02	68	2051.2870000000003	2052.2430000000004	53	big	thin (man)	KLQ	4.1	4.1	69	False	False
+Khan02.parse.json	Khan02	78	2220.816	2221.85	54	small	bad	KLQ	4.2	4.2	79	False	False
+Khan02.parse.json	Khan02	88	2430.5699999999997	2431.6699999999996	55	long	deep	KLQ	4.3	4.3	89	False	False
+Khan02.parse.json	Khan02	110	2908.921	2910.243	95	to be born	to remember	KLQ	6.1	6.1	111	False	False
+Khan02.parse.json	Khan02	121	3158.319	3159.314	589	to stand, to stop	to stand	KLQ	7.6	7.6	122	False	False
+Khan02.parse.json	Khan02	122	3177.412	3178.5769999999998	589	to stand, to stop	to stop	KLQ	7.6	7.6	123	False	False
+Khan02.parse.json	Khan02	126	3282.561	3283.9990000000003	110	to go	to walk	KLQ	7.1	7.1	127	False	False
+Khan02.parse.json	Khan02	128	3313.309	3314.828	170	to fly (B)	to fly	KLQ	7.12	7.12	129	False	True
+Khan02.parse.json	Khan02	147	3797.276	3798.9829999999997	171	to kill	to destroy (the police destroyed the house)	KLQ	9.1	9.1	148	False	False
+Khan02.parse.json	Khan02	157	3940.668	3941.713	548	here	today	KLQ	10.1	10.1	158	False	False
+Khan02.parse.json	Khan02	169	4140.84	4141.999	549	there	evening	KLQ	10.2	10.2	171	False	False
+Khan02.parse.json	Khan02	184	4352.0	4352.939	590	how much	how much salt is in the bag?	KLQ	12.6	12.6	185	False	False
+Khan02.parse.json	Khan02	185	4361.091	4361.999000000001	525	how many	how many boys are in the class?	KLQ	12.7	12.7	186	False	False
+Khan02.parse.json	Khan02	237	5330.0	5331.247	611	56 skin	skin	JBIL	56	56	238	False	False
+Khan02.parse.json	Khan02	278	6203.452	6204.703	591	tree branch	branch	JBIL	100	100	279	False	False
+Khan02.parse.json	Khan02	285	6458.823	6459.621	614	grass A	grass	JBIL	107	107	286	False	True
+Khan02.parse.json	Khan02	293	6677.743	6678.725	202	night (A)	night	JBIL	114	114	293	False	True
+Khan02.parse.json	Khan02	295	6699.282	6700.159000000001	146	wind (A)	wind	JBIL	116	116	295	False	True
+Khan02.parse.json	Khan02	302	6836.524	6837.4400000000005	144	snow (A)	ice	JBIL	123	123	302	False	False
+Khan02.parse.json	Khan02	303	6838.502	6839.484	148	fog (A)	snow	JBIL	124	124	303	False	False
+Khan02.parse.json	Khan02	304	6848.953	6849.725	142	rain (A)	fog	JBIL	125	125	304	False	False
+Khan02.parse.json	Khan02	305	6852.948	6853.999000000001	616	rain (B)	rain	JBIL	126	126	305	False	True
+Khan02.parse.json	Khan02	306	6934.519	6935.2	615	river A	river	JBIL	127	127	306	False	True
+Khan02.parse.json	Khan02	322	7273.563	7274.61	157	hungry (A)	hungry	JBIL	146	146	322	False	True
+Khan02.parse.json	Khan02	323	7279.64	7280.582	158	thirsty (A)	thirsty	JBIL	147	147	323	False	True
+Khan02.parse.json	Khan02	325	7328.144	7329.06	362	good (B)	good	JBIL	150	150	326	False	True
+Khan02.parse.json	Khan02	326	7330.803	7331.68	156	bad (A)	bad	JBIL	151	151	327	False	True
+Khan02.parse.json	Khan02	327	7349.279	7349.999000000001	359	bitter (B)	bitter	JBIL	148	148	324	False	True
+Khan02.parse.json	Khan02	331	7406.779	7407.695000000001	159	sweet (A)	sweet	JBIL	155	155	331	False	True
+Khan02.parse.json	Khan02	340	7475.085	7475.999	153	heavy (A)	heavy	JBIL	164	164	340	False	True
+Khan02.parse.json	Khan02	341	7477.351	7477.999	376	dirty (B)	dirty	JBIL	166	166	342	False	True
+Khan02.parse.json	Khan02	343	7481.044	7481.544	161	wet (A)	wet	JBIL	168	168	344	False	True
+Khan02.parse.json	Khan02	345	7519.749	7520.639	150	big (A)	big	JBIL	169	169	345	False	True
+Khan02.parse.json	Khan02	346	7521.569	7522.525000000001	151	small (A)	small	JBIL	170	170	346	False	True
+Khan02.parse.json	Khan02	354	7620.678	7621.5289999999995	167	yellow (A)	yellow	JBIL	178	178	354	False	True
+Khan02.parse.json	Khan02	355	7622.564	7623.585	386	red (B)	red	JBIL	179	179	355	False	True
+Khan02.parse.json	Khan02	356	7625.372	7626.4980000000005	165	black (A)	black	JBIL	180	180	356	False	True
+Khan02.parse.json	Khan02	357	7628.568	7629.602	164	white (A)	white	JBIL	181	181	357	False	True
+Khan02.parse.json	Khan02	478	10876.221	10876.999	181	here (A)	here	JBIL	300	300	478	False	True
+Khan02.parse.json	Khan02	480	10899.595	10900.373	182	there (A)	there	JBIL	302	302	480	False	True
+Khan02.parse.json	Khan02	487	11093.388	11094.068000000001	190	today (A)	today	JBIL	309	309	487	False	True
+Khan02.parse.json	Khan02	488	11096.74	11097.528	191	yesterday (A)	yesterday	JBIL	310	310	488	False	True
+Khan02.parse.json	Khan02	490	11106.0	11107.0	515	tomorrow (B)	tomorrow	JBIL	312	312	490	False	True
+Khan02.parse.json	Khan02	491	11107.474	11108.154	515	tomorrow (B)	tomorrow	JBIL	312	312	491	False	True
+Khan02.parse.json	Khan02	492	11110.251	11111.621000000001	194	the day after tomorrow (A)	the day after tomorrow	JBIL	313	313	492	False	True
+Khan02.parse.json	Khan02	493	11114.667	11115.613	213	where (A)	where	JBIL	314	314	493	False	True
+Khan02.parse.json	Khan02	494	11117.0	11117.733	214	when (A)	when	JBIL	315	315	494	False	True
+Khan02.parse.json	Khan02	495	11120.178	11120.999	212	how (A)	how	JBIL	316	316	495	False	True
+Khan02.parse.json	Khan02	497	11145.562	11146.232	210	what (A)	what	JBIL	318	318	497	False	True
+Khan02.parse.json	Khan02	498	11156.0	11156.64	601	Im a teacher	I	JBIL	319	319	498	False	False
+Khan02.parse.json	Khan02	499	11158.425	11158.999	595	you see me	you (sg.)	JBIL	320	320	499	False	False
+Khan02.parse.json	Khan02	500	11161.816	11162.644	560	we are teaching	we	JBIL	321	321	500	False	False
+Khan02.parse.json	Khan02	501	11165.765	11166.514	561	you are teaching	you (pl.)	JBIL	322	322	501	False	False
+Khan02.parse.json	Khan02	502	11173.109	11173.917000000001	562	they are taching	they	JBIL	323	323	502	False	False
+Khan03.json	Khan03	6	568.9	580.0	223	seven	six	JBIL	7	7	6	False	False
+Khan03.json	Khan03	31	821.0	834.8	250	hair (women)	hair	JBIL	32	32	31	False	False
+Khan03.json	Khan03	33	875.3	877.3	132	nose (A)	nose	JBIL	34	34	33	False	True
+Khan03.json	Khan03	42	1010.8	1012.8	133	elbow (A)	elbow	JBIL	43	43	42	False	True
+Khan03.json	Khan03	65	1362.4	1373.9	287	wife	my wife	JBIL	66	66	65	False	False
+Khan03.json	Khan03	68	1428.7	1437.9	290	son	my son	JBIL	69	69	68	False	False
+Khan03.json	Khan03	70	1480.5	1481.4	292	daughter	my daughter	JBIL	71	71	70	False	False
+Khan03.json	Khan03	71	1480.0	1480.0	136	father (A)	father	JBIL	72	72	71	False	True
+Khan03.json	Khan03	72	1483.4	1501.3	293	mother (B)	mother	JBIL	73	73	72	False	True
+Khan03.json	Khan03	75	1507.0	1507.0	295	groom	sister B	JBIL	76	76	75	False	False
+Khan03.json	Khan03	76	1517.8	1532.6	296	bride	groom	JBIL	77	77	76	False	False
+Khan03.json	Khan03	99	2113.2	2123.9	591	tree branch	branch	JBIL	100	100	99	False	False
+Khan03.json	Khan03	113	2322.0	2356.3	202	night (A)	night	JBIL	114	114	113	False	True
+Khan03.json	Khan03	115	2442.5	2444.5	146	wind (A)	wind	JBIL	116	116	115	False	True
+Khan03.json	Khan03	122	2883.3	2891.3	144	snow (A)	ice	JBIL	123	123	122	False	False
+Khan03.json	Khan03	123	2891.3	2908.6	148	fog (A)	snow	JBIL	124	124	123	False	False
+Khan03.json	Khan03	124	2908.6	2920.3	142	rain (A)	fog	JBIL	125	125	124	False	False
+Khan03.json	Khan03	125	2920.3	2925.8	616	rain (B)	rain	JBIL	126	126	125	False	True
+Khan03.json	Khan03	145	3294.5	3300.2	157	hungry (A)	hungry	JBIL	146	146	145	False	True
+Khan03.json	Khan03	146	3331.8	3334.9	158	thirsty (A)	thirsty	JBIL	147	147	146	False	True
+Khan03.json	Khan03	147	3341.4	3343.4	359	bitter (B)	bitter	JBIL	148	148	147	False	True
+Khan03.json	Khan03	149	3355.4	3370.4	362	good (B)	good	JBIL	150	150	149	False	True
+Khan03.json	Khan03	150	3370.4	3388.9	156	bad (A)	bad !	JBIL	151	151	150	False	False
+Khan03.json	Khan03	154	3416.2	3425.3	159	sweet (A)	sweet	JBIL	155	155	154	False	True
+Khan03.json	Khan03	163	3524.2	3526.2	153	heavy (A)	heavy	JBIL	164	164	163	False	True
+Khan03.json	Khan03	165	3537.2	3545.9	376	dirty (B)	dirty	JBIL	166	166	165	False	True
+Khan03.json	Khan03	167	3562.3	3568.3	161	wet (A)	wet	JBIL	168	168	167	False	True
+Khan03.json	Khan03	168	3568.3	3578.4	150	big (A)	big	JBIL	169	169	168	False	True
+Khan03.json	Khan03	169	3580.4	3582.4	151	small (A)	small	JBIL	170	170	169	False	True
+Khan03.json	Khan03	177	3660.5	3694.8	167	yellow (A)	yellow	JBIL	178	178	177	False	True
+Khan03.json	Khan03	178	3707.2	3712.7	386	red (B)	red	JBIL	179	179	178	False	True
+Khan03.json	Khan03	179	3712.7	3727.6	165	black (A)	black	JBIL	180	180	179	False	True
+Khan03.json	Khan03	180	3727.6	3752.4	164	white (A)	white	JBIL	181	181	180	False	True
+Khan03.parse.json	Khan03	6	568.9	580.0	223	seven	six	JBIL	7	7	6	False	False
+Khan03.parse.json	Khan03	31	821.0	834.8	250	hair (women)	hair	JBIL	32	32	31	False	False
+Khan03.parse.json	Khan03	33	875.3	877.3	132	nose (A)	nose	JBIL	34	34	33	False	True
+Khan03.parse.json	Khan03	42	1010.8	1012.8	133	elbow (A)	elbow	JBIL	43	43	42	False	True
+Khan03.parse.json	Khan03	65	1362.4	1373.9	287	wife	my wife	JBIL	66	66	65	False	False
+Khan03.parse.json	Khan03	68	1428.7	1437.9	290	son	my son	JBIL	69	69	68	False	False
+Khan03.parse.json	Khan03	70	1480.5	1481.4	292	daughter	my daughter	JBIL	71	71	70	False	False
+Khan03.parse.json	Khan03	71	1480.0	1480.0	136	father (A)	father	JBIL	72	72	71	False	True
+Khan03.parse.json	Khan03	72	1483.4	1501.3	293	mother (B)	mother	JBIL	73	73	72	False	True
+Khan03.parse.json	Khan03	75	1507.0	1507.0	295	groom	sister B	JBIL	76	76	75	False	False
+Khan03.parse.json	Khan03	76	1517.8	1532.6	296	bride	groom	JBIL	77	77	76	False	False
+Khan03.parse.json	Khan03	99	2113.2	2123.9	591	tree branch	branch	JBIL	100	100	99	False	False
+Khan03.parse.json	Khan03	113	2322.0	2356.3	202	night (A)	night	JBIL	114	114	113	False	True
+Khan03.parse.json	Khan03	115	2442.5	2444.5	146	wind (A)	wind	JBIL	116	116	115	False	True
+Khan03.parse.json	Khan03	122	2883.3	2891.3	144	snow (A)	ice	JBIL	123	123	122	False	False
+Khan03.parse.json	Khan03	123	2891.3	2908.6	148	fog (A)	snow	JBIL	124	124	123	False	False
+Khan03.parse.json	Khan03	124	2908.6	2920.3	142	rain (A)	fog	JBIL	125	125	124	False	False
+Khan03.parse.json	Khan03	125	2920.3	2925.8	616	rain (B)	rain	JBIL	126	126	125	False	True
+Khan03.parse.json	Khan03	145	3294.5	3300.2	157	hungry (A)	hungry	JBIL	146	146	145	False	True
+Khan03.parse.json	Khan03	146	3331.8	3334.9	158	thirsty (A)	thirsty	JBIL	147	147	146	False	True
+Khan03.parse.json	Khan03	147	3341.4	3343.4	359	bitter (B)	bitter	JBIL	148	148	147	False	True
+Khan03.parse.json	Khan03	149	3355.4	3370.4	362	good (B)	good	JBIL	150	150	149	False	True
+Khan03.parse.json	Khan03	150	3370.4	3388.9	156	bad (A)	bad !	JBIL	151	151	150	False	False
+Khan03.parse.json	Khan03	154	3416.2	3425.3	159	sweet (A)	sweet	JBIL	155	155	154	False	True
+Khan03.parse.json	Khan03	163	3524.2	3526.2	153	heavy (A)	heavy	JBIL	164	164	163	False	True
+Khan03.parse.json	Khan03	165	3537.2	3545.9	376	dirty (B)	dirty	JBIL	166	166	165	False	True
+Khan03.parse.json	Khan03	167	3562.3	3568.3	161	wet (A)	wet	JBIL	168	168	167	False	True
+Khan03.parse.json	Khan03	168	3568.3	3578.4	150	big (A)	big	JBIL	169	169	168	False	True
+Khan03.parse.json	Khan03	169	3580.4	3582.4	151	small (A)	small	JBIL	170	170	169	False	True
+Khan03.parse.json	Khan03	177	3660.5	3694.8	167	yellow (A)	yellow	JBIL	178	178	177	False	True
+Khan03.parse.json	Khan03	178	3707.2	3712.7	386	red (B)	red	JBIL	179	179	178	False	True
+Khan03.parse.json	Khan03	179	3712.7	3727.6	165	black (A)	black	JBIL	180	180	179	False	True
+Khan03.parse.json	Khan03	180	3727.6	3752.4	164	white (A)	white	JBIL	181	181	180	False	True
+Saha01.parse.json	Saha01	402	9116.0	9116.878	50	God	salt	KLQ	3.11	3.11	40	True	False
