@@ -2479,7 +2479,7 @@ export function ParseUI() {
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
           onOpenManualOffset={openManualOffset}
-          currentConceptId={concept.key}
+          currentConceptId={activeRawKey ?? concept.key}
           annotateSpeakerTools={annotatePhoneticTools}
           annotateAuxTools={<TranscriptionLanesControls />}
           onSaveAnnotations={() => {

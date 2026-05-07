@@ -193,3 +193,66 @@ def test_duplicate_restores_backup_when_atomic_write_fails(tmp_path: pathlib.Pat
     backups = sorted(tmp_path.glob("concepts.csv.bak-*-pre-duplicate-322"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == prewrite
+
+
+def test_duplicate_copies_concept_tags_to_sibling_in_annotation_files(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    annotation_data = {
+        "version": 1,
+        "speaker": "Saha01",
+        "concept_tags": {
+            "322": ["thesis", "confirmed"],
+            "100": ["thesis"],
+        },
+    }
+    annotation_path = annotations_dir / "Saha01.json"
+    annotation_path.write_text(json.dumps(annotation_data), encoding="utf-8")
+
+    # Speaker with no tags for concept 322 — sibling slot must stay absent
+    empty_speaker_data = {"version": 1, "speaker": "Khan01", "concept_tags": {"100": ["thesis"]}}
+    (annotations_dir / "Khan01.json").write_text(json.dumps(empty_speaker_data), encoding="utf-8")
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    sibling_id = payload["sibling"]["id"]
+
+    # Tags copied for Saha01 who had them
+    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
+    assert updated["concept_tags"][sibling_id] == ["thesis", "confirmed"]
+    assert updated["concept_tags"]["322"] == ["thesis", "confirmed"]  # primary unchanged
+
+    # No spurious entry for Khan01 who had no tags for 322
+    khan_updated = json.loads((annotations_dir / "Khan01.json").read_text(encoding="utf-8"))
+    assert sibling_id not in khan_updated["concept_tags"]
+
+
+def test_duplicate_does_not_overwrite_existing_sibling_tags(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+
+    # Sibling slot already populated — must not be overwritten
+    annotation_data = {
+        "version": 1,
+        "speaker": "Saha01",
+        "concept_tags": {
+            "322": ["thesis"],
+            "618": ["confirmed"],
+        },
+    }
+    annotation_path = annotations_dir / "Saha01.json"
+    annotation_path.write_text(json.dumps(annotation_data), encoding="utf-8")
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+    assert status == HTTPStatus.OK
+
+    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
+    # Existing sibling tags must be preserved, not overwritten
+    assert updated["concept_tags"]["618"] == ["confirmed"]
