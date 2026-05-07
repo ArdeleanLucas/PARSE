@@ -1,6 +1,9 @@
 """PARSE server route-domain module: exports."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import server as _server
 from concepts_io import ConceptDuplicateError, duplicate_concept_ab_pair
 
@@ -51,13 +54,41 @@ def _api_post_tags_import(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
+def _copy_concept_tags_to_sibling(annotations_dir: Path, primary_id: str, sibling_id: str) -> None:
+    """Copy concept_tags[primary_id] to concept_tags[sibling_id] in every annotation JSON."""
+    if not annotations_dir.is_dir():
+        return
+    for annotation_path in sorted(annotations_dir.glob('*.json')):
+        try:
+            data = json.loads(annotation_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError):
+            continue
+        concept_tags = data.get('concept_tags')
+        if not isinstance(concept_tags, dict):
+            continue
+        primary_tags = concept_tags.get(primary_id)
+        if not primary_tags or sibling_id in concept_tags:
+            continue
+        concept_tags[sibling_id] = list(primary_tags)
+        data['concept_tags'] = concept_tags
+        tmp = annotation_path.with_suffix('.json.tmp')
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+            tmp.replace(annotation_path)
+        except OSError:
+            pass
+
 def _api_post_concept_duplicate(self, concept_id: str) -> None:
     """Duplicate one concepts.csv row into A/B tracking siblings."""
     try:
         payload = duplicate_concept_ab_pair(_server._project_root(), concept_id)
     except ConceptDuplicateError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
+    _copy_concept_tags_to_sibling(
+        _server._annotations_dir_path(),
+        payload['primary']['id'],
+        payload['sibling']['id'],
+    )
     self._send_json(_server.HTTPStatus.OK, payload)
 
 __all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import', '_api_post_concept_duplicate']
-

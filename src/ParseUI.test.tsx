@@ -60,7 +60,17 @@ const mockAddRegion = vi.fn();
 const mockScrollToTimeAtFraction = vi.fn();
 const mockSetWaveZoom = vi.fn();
 const mockSetRate = vi.fn();
-const mockAnnotationSetState = vi.fn();
+const mockAnnotationSetState = vi.fn((...args: unknown[]) => {
+  const patch = args[0];
+  if (typeof patch === "function") {
+    const next = (patch as (state: { records: Record<string, AnnotationRecord> }) => { records?: Record<string, AnnotationRecord> } | void)({ records: mockRecords });
+    if (next?.records) mockRecords = next.records;
+    return;
+  }
+  if (patch && typeof patch === "object" && "records" in patch) {
+    mockRecords = (patch as { records: Record<string, AnnotationRecord> }).records;
+  }
+});
 const mockEnrichmentSetState = vi.fn();
 const mockTagSetState = vi.fn();
 const mockPlaybackSetState = vi.fn();
@@ -996,6 +1006,50 @@ describe("ParseUI", () => {
     expect(problematicRow().getAttribute("aria-pressed")).toBe("true");
     expect(confirmedRow().className).toContain("bg-indigo-50");
     expect(problematicRow().className).toContain("bg-indigo-50");
+  });
+
+  it("seeds loaded annotation records with duplicate sibling tags and keeps the grouped primary tag visible", async () => {
+    mockTags = [...mockTags, { id: "thesis", label: "Thesis", color: "#6366f1" }];
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: { ...makeRecord("Fail01", []), concept_tags: { "365": ["thesis"] } },
+    };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+      sibling: { id: "618", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+    });
+    mockReloadConfig.mockImplementationOnce(async () => {
+      mockConfig = {
+        ...(mockConfig as ProjectConfig),
+        concepts: [
+          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+          { id: "618", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+        ],
+      };
+    });
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+    const rightPanel = () => screen.getByTestId("right-panel");
+    const thesisRow = () => within(rightPanel()).getByRole("button", { name: /Thesis\s+1/i });
+    expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /JBIL 154/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into A\/B\)/i }));
+
+    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
+    await waitFor(() => expect(mockRecords.Fail01.concept_tags?.["618"]).toEqual(["thesis"]));
+    expect(mockRecords.Fail01.concept_tags?.["365"]).toEqual(["thesis"]);
+    expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
   });
 
   it("treats an explicit empty annotate tag scope as untagged", () => {

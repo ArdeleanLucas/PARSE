@@ -91,7 +91,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
+import type { AnnotationRecord, ClefConfigStatus, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -105,6 +105,32 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 const SIDEBAR_SCOPE_STORAGE_PREFIX = 'parse.sidebar.scopedToSpeaker';
+
+function seedLoadedDuplicateSiblingTags(primaryId: string, siblingId: string): void {
+  useAnnotationStore.setState((state) => {
+    let changed = false;
+    const records: Record<string, AnnotationRecord> = {};
+
+    for (const [speaker, record] of Object.entries(state.records)) {
+      const conceptTags = record.concept_tags;
+      const primaryTags = conceptTags?.[primaryId];
+      if (!conceptTags || !primaryTags?.length || siblingId in conceptTags) {
+        records[speaker] = record;
+        continue;
+      }
+      records[speaker] = {
+        ...record,
+        concept_tags: {
+          ...conceptTags,
+          [siblingId]: [...primaryTags],
+        },
+      };
+      changed = true;
+    }
+
+    return changed ? { records } : {};
+  });
+}
 
 function persistCompareNotes(conceptId: number, value: string) {
   try {
@@ -1829,7 +1855,8 @@ export function ParseUI() {
             const mergesForReload = currentMode === 'compare' ? conceptMerges : undefined;
             void (async () => {
               try {
-                await duplicateConcept(underlyingKey);
+                const duplicated = await duplicateConcept(underlyingKey);
+                seedLoadedDuplicateSiblingTags(duplicated.primary.id, duplicated.sibling.id);
                 await reloadConfig();
                 // Re-resolve the post-reload grouped concept by the
                 // original raw concept_id — `groupConceptEntries` will
@@ -2479,7 +2506,7 @@ export function ParseUI() {
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
           onOpenManualOffset={openManualOffset}
-          currentConceptId={concept.key}
+          currentConceptId={activeRawKey ?? concept.key}
           annotateSpeakerTools={annotatePhoneticTools}
           annotateAuxTools={<TranscriptionLanesControls />}
           onSaveAnnotations={() => {
