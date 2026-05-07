@@ -57,12 +57,14 @@ import { useActionJob, formatEta } from './hooks/useActionJob';
 import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
 import { listActiveJobs } from './api/client';
+import { duplicateConcept } from './api/client';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
+import { Toast } from './components/shared/Toast';
 import {
   TranscriptionRunModal,
 } from './components/shared/TranscriptionRunModal';
@@ -127,6 +129,7 @@ export {
 export function ParseUI() {
   // — Stores —
   const loadConfig       = useConfigStore(s => s.load);
+  const reloadConfig     = useConfigStore(s => s.reload);
   const rawSpeakers      = useConfigStore(s => s.config?.speakers ?? []);
   const rawConcepts      = useConfigStore(s => s.config?.concepts ?? []);
   const surveySettings   = useConfigStore(s => s.config?.survey_settings ?? {});
@@ -831,6 +834,7 @@ export function ParseUI() {
   const [tagConceptSearch, setTagConceptSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
   const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
+  const [duplicateToast, setDuplicateToast] = useState<{ message: string; variant: 'error' | 'warning' } | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -1810,6 +1814,39 @@ export function ParseUI() {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             if (target) unmergeConcept(target.key);
           }}
+          onDuplicateConcept={(sidebarConcept) => {
+            // Pin the underlying concept_id (the concepts.csv row id) now —
+            // `concepts` re-derives on every config reload, so the captured
+            // object goes stale. The disable matrix in ConceptSidebar
+            // prevents this handler from firing for already-A/B concepts,
+            // so we don't need a variants-aware fallback here.
+            const target = concepts.find((c) => c.id === sidebarConcept.id) ?? null;
+            const underlyingKey = target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
+            // Capture the grouping inputs at click-time so the post-reload
+            // regrouping mirrors the live `concepts` memo at line 880 — in
+            // particular `conceptMerges` matters when a duplicated concept
+            // is also part of a user merge.
+            const mergesForReload = currentMode === 'compare' ? conceptMerges : undefined;
+            void (async () => {
+              try {
+                await duplicateConcept(underlyingKey);
+                await reloadConfig();
+                // Re-resolve the post-reload grouped concept by the
+                // original raw concept_id — `groupConceptEntries` will
+                // have rolled (A) and (B) into one sidebar entry sharing
+                // a `source_item`, so the numeric id may have shifted.
+                const after = useConfigStore.getState().config?.concepts ?? [];
+                const grouped = groupConceptEntries(after, () => 'untagged', mergesForReload);
+                const next = findConceptByUnderlyingKey(grouped, underlyingKey);
+                if (next) setConceptId(next.id);
+              } catch (err) {
+                console.error('[ParseUI] duplicateConcept failed:', err);
+                const message = err instanceof Error ? err.message : String(err);
+                const variant = /\b409\b/.test(message) ? 'warning' : 'error';
+                setDuplicateToast({ message, variant });
+              }
+            })();
+          }}
         />
 
         {/* MAIN + AI STACK */}
@@ -2537,6 +2574,14 @@ export function ParseUI() {
       <Modal open={modals.commentsImport.isOpen} onClose={modals.commentsImport.close} title="Import Audition Comments">
         <CommentsImport onImportComplete={modals.commentsImport.close} />
       </Modal>
+      {duplicateToast && (
+        <Toast
+          message={duplicateToast.message}
+          variant={duplicateToast.variant}
+          duration={5000}
+          onDismiss={() => setDuplicateToast(null)}
+        />
+      )}
     </div>
   );
 }

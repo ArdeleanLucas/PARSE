@@ -91,11 +91,14 @@ let mockChatError: string | null = null;
 let mockWaveOptions: Array<{ audioUrl?: string; onReady?: (duration: number) => void }> = [];
 let mockWaveSurferInstance: unknown = null;
 
+const mockReloadConfig = vi.fn().mockResolvedValue(undefined);
+const mockConfigGetState = vi.fn(() => ({ config: mockConfig }));
 vi.mock("./stores/configStore", () => {
   const useConfigStore = (selector: (s: unknown) => unknown) =>
-    selector({ config: mockConfig, load: mockLoadConfig });
+    selector({ config: mockConfig, load: mockLoadConfig, reload: mockReloadConfig });
   (useConfigStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockConfigSetState(...args);
+  (useConfigStore as unknown as { getState: () => unknown }).getState = () => mockConfigGetState();
   return { useConfigStore };
 });
 
@@ -360,6 +363,10 @@ vi.mock("./api/client", () => ({
   saveClefConfig: vi.fn().mockResolvedValue(undefined),
   startContactLexemeFetch: vi.fn().mockResolvedValue({ job_id: 'contact-fetch-job-1' }),
   listActiveJobs: vi.fn().mockResolvedValue([]),
+  duplicateConcept: vi.fn().mockResolvedValue({
+    primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
+    sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
+  }),
 }));
 
 import { ParseUI } from "./ParseUI";

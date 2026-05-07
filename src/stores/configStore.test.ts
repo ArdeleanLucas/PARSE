@@ -107,3 +107,45 @@ describe("configStore.update", () => {
     });
   });
 });
+
+describe("configStore.reload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useConfigStore.setState({
+      config: structuredClone(baseConfig),
+      loading: false,
+      error: null,
+    });
+  });
+
+  it("force-refreshes from /api/config even when config is already loaded", async () => {
+    const updated: ProjectConfig = {
+      ...structuredClone(baseConfig),
+      project_name: "After Reload",
+      concepts: [{ id: "1", label: "leaf (A)" }, { id: "618", label: "leaf (B)" }],
+    };
+    mockedGetConfig.mockResolvedValueOnce(updated);
+
+    await useConfigStore.getState().reload();
+
+    expect(mockedGetConfig).toHaveBeenCalledTimes(1);
+    expect(useConfigStore.getState().config?.project_name).toBe("After Reload");
+    expect(useConfigStore.getState().config?.concepts).toHaveLength(2);
+    expect(useConfigStore.getState().loading).toBe(false);
+  });
+
+  it("records the error message and clears the loading flag when getConfig fails", async () => {
+    mockedGetConfig.mockRejectedValueOnce(new Error("config fetch failed"));
+
+    await useConfigStore.getState().reload();
+
+    expect(useConfigStore.getState().error).toBe("config fetch failed");
+    expect(useConfigStore.getState().loading).toBe(false);
+  });
+
+  it("does not double-fetch when a load is already in flight", async () => {
+    useConfigStore.setState({ loading: true });
+    await useConfigStore.getState().reload();
+    expect(mockedGetConfig).not.toHaveBeenCalled();
+  });
+});

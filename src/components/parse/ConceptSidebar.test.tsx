@@ -502,4 +502,101 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /fire/i })).toBeTruthy();
   });
 
+
+  describe('right-click → Duplicate (split into A/B)', () => {
+    const concepts = [
+      { id: 1, key: '1', name: 'leaf', tag: 'untagged' as const, sourceItem: '102' },
+      { id: 2, key: '2', name: 'rain (A)', tag: 'untagged' as const, sourceItem: '125' },
+      {
+        id: 3,
+        key: '3',
+        name: 'deep',
+        tag: 'untagged' as const,
+        sourceItem: '4.30',
+        variants: [
+          { conceptKey: '81', conceptEn: 'deep (A)', variantLabel: 'A' },
+          { conceptKey: '82', conceptEn: 'deep (B)', variantLabel: 'B' },
+        ],
+      },
+      // Stem-named concept with no variants — exercises the regex
+      // correctly NOT firing on a bare stem like "deep" or "branch".
+      // This protects against a regex regression that would mistakenly
+      // disable concepts whose label happens to look stem-like.
+      { id: 4, key: '4', name: 'branch', tag: 'untagged' as const, sourceItem: '101' },
+    ];
+
+    function renderWith(onDuplicateConcept: () => void) {
+      return render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={1}
+          onConceptSelect={vi.fn()}
+          onDuplicateConcept={onDuplicateConcept}
+        />,
+      );
+    }
+
+    function openMenuFor(name: RegExp): void {
+      const button = screen.getByRole('button', { name });
+      fireEvent.contextMenu(button);
+    }
+
+    it('fires onDuplicateConcept for a singleton concept', () => {
+      const onDuplicate = vi.fn();
+      renderWith(onDuplicate);
+      openMenuFor(/^leaf/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('false');
+      fireEvent.click(item);
+      expect(onDuplicate).toHaveBeenCalledTimes(1);
+      expect(onDuplicate.mock.calls[0][0].id).toBe(1);
+    });
+
+    it('disables the item for concepts whose label ends in (A) — lonely (A) rows in concepts.csv', () => {
+      const onDuplicate = vi.fn();
+      renderWith(onDuplicate);
+      openMenuFor(/rain \(A\)/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(item.getAttribute('title')).toBe('Already part of an A/B pair');
+      fireEvent.click(item);
+      expect(onDuplicate).not.toHaveBeenCalled();
+    });
+
+    it('disables the item for grouped concepts that already have A+B variants', () => {
+      const onDuplicate = vi.fn();
+      renderWith(onDuplicate);
+      openMenuFor(/^deep/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(item);
+      expect(onDuplicate).not.toHaveBeenCalled();
+    });
+
+    it('does not disable a stem-named concept when no variants are present', () => {
+      // Regression guard: the trailing-(A)/(B) regex must NOT match a bare
+      // stem like "branch". Without this, a future refactor of the regex
+      // could silently start disabling normal singletons and the
+      // `variants.length >= 2` test above would not catch it.
+      const onDuplicate = vi.fn();
+      renderWith(onDuplicate);
+      openMenuFor(/^branch/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('false');
+      fireEvent.click(item);
+      expect(onDuplicate).toHaveBeenCalledTimes(1);
+      expect(onDuplicate.mock.calls[0][0].id).toBe(4);
+    });
+  });
+
 });
