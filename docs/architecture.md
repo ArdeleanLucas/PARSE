@@ -1,6 +1,6 @@
 # Architecture & Data Model
 
-> Last updated: 2026-04-29
+> Last updated: 2026-05-07
 >
 > This document summarizes the current PARSE system shape: the unified React shell, Python backend, hybrid data model, Lexical Anchor Alignment System, CLEF provider registry, and export flow.
 
@@ -108,8 +108,14 @@ flowchart TD
     Compare --> Enrich[parse-enrichments.json]
     Ann --> Export[LingPy TSV / NEXUS / ELAN / TextGrid]
     Enrich --> Export
-    Tags[Zustand tagStore persistence] --> AnnotateUI[Annotate mode]
-    Tags --> CompareUI[Compare mode]
+    Tags[Zustand tagStore vocabulary] --> AnnotateUI[Annotate mode]
+    Ann --> ConceptTags[AnnotationRecord.concept_tags
+speaker-local tag membership]
+    ConceptTags --> AnnotateUI
+    SurveyOverlap[survey-overlap.json
+survey/source display choices] --> AnnotateUI
+    Tags --> CompareUI
+    SurveyOverlap --> CompareUI
 ```
 
 ### 1. Live annotations
@@ -137,15 +143,17 @@ This layer stores computed comparative structures such as:
 - lexeme notes
 - manual overrides layered onto computed output, including `canonical_realizations` for A/B/C form picks, `concept_merges` for compare-row grouping, cognate-set edits, and speaker flags
 
-The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format. Source-item grouping is derived from `concepts.csv` fields (`source_item`, `source_survey`, `custom_order`), while canonical realizations and concept merges live in `parse-enrichments.json` so review choices stay reversible and do not mutate source concepts or annotation tiers.
+The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format. Source-item grouping is derived from `concepts.csv` fields (`source_item`, `source_survey`, `custom_order`), while canonical realizations and concept merges live in `parse-enrichments.json` so review choices stay reversible and do not mutate source concepts or annotation tiers. Concept merges are Compare-mode-only: Annotate continues to expose raw concept rows so fieldwork navigation, tagging, and interval editing stay grounded in the source concept ids.
 
-### 3. Tags
+### 3. Tags and speaker-local concept membership
 
-The tag system is shared across Annotate and Compare.
+The tag vocabulary is shared across Annotate and Compare, but concept membership is now speaker-local.
 
-The current README describes it as a **Zustand `tagStore` persisted to localStorage**, scoped to the project and reused across workflows.
+- The reusable tag definitions remain in the Zustand-backed `tagStore` persistence layer.
+- Per-speaker concept membership lives in `AnnotationRecord.concept_tags`, keyed by concept id with tag-id arrays. Empty memberships are omitted during normalization so blank sidecars do not pollute new records.
+- Annotate tag filters/counts are scoped to the active speaker; confirming or flagging concept `1` on one speaker does not mark concept `1` as confirmed for every other speaker.
 
-### 4. Transcript and analysis sidecars
+### 4. Transcript, survey, and analysis sidecars
 
 PARSE also depends on supporting artifacts such as:
 
@@ -153,6 +161,7 @@ PARSE also depends on supporting artifacts such as:
 - `peaks/<Speaker>.json`
 - optional import/legacy transcript CSVs
 - `source_index.json`
+- `survey-overlap.json`, which stores survey labels/colors, concept-to-survey source-item links, color-coding enablement, and per-speaker survey choices
 
 These are not the same thing as the main annotation truth, but they materially support search, alignment, import, and visualization.
 
@@ -203,10 +212,12 @@ clips carry explicit sample rates and are resampled to 16 kHz when needed;
 concept-window timing comes from the caller-supplied concept interval rather
 than Whisper timestamp returns. Generated-token logprobs feed confidence, while
 `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`,
-`condition_on_previous_text`, deterministic sampling flags, and prompt ids from
-`initial_prompt` provide the anti-cascade guard surface. Legacy `compute_type`
-and VAD keys remain accepted in config for CT2 compatibility but are logged as
-ignored by HF.
+`condition_on_previous_text`, deterministic sampling flags, and explicit
+caller-supplied prompt ids provide the anti-cascade guard surface. Current
+full-file, concept-window, and per-lexeme HF ORTH callers pass no configured
+prompt by default; callers must intentionally opt in if they want seeded
+decoding. Legacy `compute_type` and VAD keys remain accepted in config for CT2
+compatibility but are logged as ignored by HF.
 
 This separation is important conceptually:
 
@@ -313,7 +324,7 @@ The annotation compute layer now supports three run modes across HTTP, frontend 
 - `concept-windows` — process concept-tier windows, optionally narrowed by `concept_ids`.
 - `edited-only` — process only concept-tier rows marked `manuallyAdjusted`, optionally narrowed by `concept_ids`.
 
-Non-full backend results include `affected_concepts` so the React workstation can refresh rows touched by a scoped rerun without repainting unrelated concept rows. This scoped refresh is advisory: after IPA, ORTH, STT, or BND compute completion, the workstation still reloads the completed speaker annotation from disk so persisted tier writes are canonical. The frontend run preview also carries `runMode` into its cell computation: concept-window and edited-only IPA cells may be runnable despite stale full-mode `ipa.can_run=false` when ORTH/concept-tier presence is observable, while full mode and pure-empty concept-window speakers stay blocked. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect.
+Non-full backend results include `affected_concepts` so the React workstation can refresh rows touched by a scoped rerun without repainting unrelated concept rows. This scoped refresh is advisory: after IPA, ORTH, STT, or BND compute completion, the workstation still reloads the completed speaker annotation from disk so persisted tier writes are canonical. The frontend run preview also carries `runMode` into its cell computation: concept-window and edited-only IPA cells may be runnable despite stale full-mode `ipa.can_run=false` when ORTH/concept-tier presence is observable, while full mode and pure-empty concept-window speakers stay blocked. Empty edited-only requests return a no-op payload rather than scheduling an empty background job. Concept-window STT/ORTH deliberately avoid English concept/gloss `initial_prompt` seeding and resolve language from request payload or annotation metadata before falling back to Whisper auto-detect. Concept-window / edited-only STT, ORTH, and IPA action-menu runs plus single-lexeme ORTH/IPA rerun endpoints share the pad vocabulary `0.0`, `0.2`, `0.5`; the pad widens acoustic context only, leaving reviewed interval bounds stable.
 
 ## Compute cancellation, GPU lifecycle, and lock recovery
 

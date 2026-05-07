@@ -73,5 +73,6 @@ The clean docs worktree contains only the tracked historical `.hermes/handoffs/`
 
 - Published-PR coverage: **10/10 reviewed**.
 - Shipped-behavior docs: **9/9 merged PRs covered** where user/operator/agent contracts changed.
-- Pending behavior: **#264 open**, documented only as pending; active docs do not claim Compare-only merge scoping as shipped.
+- Pending behavior at this report's cutoff: **#264 open**, documented only as pending; active docs did not claim Compare-only merge scoping as shipped.
+- Supersession note, 2026-05-07: #264 merged after this report's cutoff and is covered as shipped in `docs/reports/2026-05-07-post-265-merged-pr-doc-refresh.md`.
 - MCP count truth: code-verified as **58** parse tools, **62** default/all adapter tools, **38/42** legacy curated opt-out.

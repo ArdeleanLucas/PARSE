@@ -1,6 +1,6 @@
 # Developer Guide
 
-> Last updated: 2026-04-24
+> Last updated: 2026-05-07
 >
 > This guide is for contributors working on the active PARSE codebase: the React + Vite frontend in `src/`, the Python backend in `python/`, and the current workflow-specific documentation split under `docs/`.
 
@@ -13,7 +13,7 @@ Current architectural highlights:
 - **Frontend**: React 18 + TypeScript + Vite
 - **Backend**: Python API server in `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`)
 - **Modes**: Annotate (`/`) and Compare (`/compare`) in one unified shell
-- **Data**: per-speaker annotation JSON + `parse-enrichments.json`
+- **Data**: per-speaker annotation JSON (`AnnotationRecord.confirmed_anchors`, `concept_tags`, IPA review sidecars), `parse-enrichments.json`, and survey/source sidecars such as `survey-overlap.json`
 - **AI**: task-routed provider system for STT, ORTH, acoustic IPA, and chat
 - **Automation**: built-in chat tooling plus MCP server mode
 
@@ -197,6 +197,9 @@ Relevant knobs and files:
 - `GET /api/worker/status` for persistent-worker health checks
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
 - `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`
+- `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for synchronous reviewer-triggered interval reruns with pad values `0.0`, `0.2`, `0.5`
+- `GET /api/survey-overlap` and `POST /api/survey-overlap` for source/survey labels, color coding, concept links, and per-speaker survey choices
+- `POST /api/concepts/{conceptId}/duplicate` for A/B concept-row creation with a prewrite backup
 - `POST /api/locks/cleanup` plus startup cleanup for stale speaker-lock recovery; cleanup deletes stale `*.lock` files only and never kills processes
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.
@@ -219,7 +222,8 @@ The current PARSE architecture expects:
 
 - API traffic to go through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/`)
 - shared typed contracts to live in `src/api/types.ts` plus helper-local contract-family modules
-- data persistence to flow through the established stores and backend routes
+- single-lexeme reruns, survey-overlap updates, and concept duplication to use the existing typed API helpers; do not add bare `fetch()` from components
+- data persistence to flow through the established stores and backend routes, especially `AnnotationRecord.concept_tags` for speaker-local tag membership
 - the unified shell model to remain the organizing principle rather than splitting Annotate and Compare into isolated apps again
 - contributors to verify whether a top-level `.tsx`/`.ts` file is now a barrel before adding new logic directly into it
 
