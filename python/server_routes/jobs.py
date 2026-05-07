@@ -1074,6 +1074,13 @@ def _api_post_compute_start(self, compute_type: str) -> None:
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Compute type is required')
     body = self._read_json_body(required=False)
     body_obj = self._expect_object(body or {}, 'Request body')
+    if 'pad' in body_obj and normalized_type in {'stt', 'ortho', 'ortho_only', 'ortho-only', 'ipa_only', 'ipa-only', 'ipa'}:
+        try:
+            run_mode = _server._normalize_compute_run_mode(body_obj.get('run_mode') if body_obj.get('run_mode') is not None else body_obj.get('runMode'))
+            if run_mode != 'full' or normalized_type in {'ortho', 'ortho_only', 'ortho-only'}:
+                _server._payload_pad(body_obj)
+        except RuntimeError as exc:
+            raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, str(exc)) from exc
     noop_payload = _server._compute_concept_scoped_noop_payload(normalized_type, body_obj)
     if noop_payload is not None:
         self._send_json(_server.HTTPStatus.OK, noop_payload)

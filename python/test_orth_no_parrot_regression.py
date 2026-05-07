@@ -12,6 +12,7 @@ import pytest
 
 from ai.providers.hf_whisper import HFWhisperProvider
 from app.http.lexeme_rerun_handlers import build_post_run_ipa_response, build_post_run_ortho_response
+import server
 
 DISTINCTIVE_MARKER_PROMPT = "<DISTINCTIVE-MARKER-PROMPT>"
 CLEAN_TRANSCRIPT = "clean lexical decode"
@@ -229,3 +230,37 @@ def test_lexeme_rerun_outputs_never_include_configured_initial_prompt(
     assert DISTINCTIVE_MARKER_PROMPT not in text
     assert text == CLEAN_TRANSCRIPT
     assert response.payload["interval"] == {"start": 0.6, "end": 1.1}
+
+
+@pytest.mark.parametrize("pad", [0.0, 0.2, 0.5])
+def test_concept_window_outputs_never_include_configured_initial_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pad: float,
+) -> None:
+    """Bulk concept-window ORTH must suppress configured Whisper prompts too."""
+    import ai.forced_align as forced_align
+
+    provider = _provider_with_distinctive_prompt()
+    _write_workspace(tmp_path)
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        server,
+        "_pipeline_audio_path_for_speaker",
+        lambda speaker: tmp_path / "audio" / "working" / speaker / "synthetic.wav",
+    )
+    monkeypatch.setattr(forced_align, "_load_audio_mono_16k", lambda _path: _synthetic_audio())
+
+    result = server._compute_speaker_ortho(
+        "job-concept-window",
+        {"speaker": "Saha01", "run_mode": "concept-windows", "pad": pad},
+        provider=provider,
+    )
+
+    assert result["pad"] == pad
+    annotation = json.loads((tmp_path / "annotations" / "Saha01.parse.json").read_text(encoding="utf-8"))
+    rows = annotation["tiers"]["ortho"]["intervals"]
+    assert rows
+    assert all(DISTINCTIVE_MARKER_PROMPT not in str(row.get("text") or "") for row in rows)
+    assert [row["text"] for row in rows] == [CLEAN_TRANSCRIPT]

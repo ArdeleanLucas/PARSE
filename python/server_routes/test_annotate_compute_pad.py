@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+from http import HTTPStatus
+from typing import Any
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+import server  # noqa: E402
+
+
+class _HandlerHarness(server.RangeRequestHandler):
+    def __init__(self, body: dict[str, Any] | None = None) -> None:
+        self._body = {} if body is None else body
+        self.sent_json: list[tuple[HTTPStatus, dict[str, Any]]] = []
+
+    def _read_json_body(self, required: bool = True) -> dict[str, Any]:
+        return self._body
+
+    def _expect_object(self, value: Any, _label: str) -> dict[str, Any]:
+        assert isinstance(value, dict)
+        return value
+
+    def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+        self.sent_json.append((status, payload))
+
+
+class _FullOrthoProvider:
+    def __init__(self) -> None:
+        self.transcribe_calls: list[dict[str, Any]] = []
+
+    def transcribe(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self.transcribe_calls.append(dict(kwargs))
+        return []
+
+
+class _ClipProvider:
+    pass
+
+
+def _seed_annotation(
+    tmp_path: pathlib.Path,
+    *,
+    speaker: str = "Fail02",
+    concept_intervals: list[dict[str, Any]] | None = None,
+    ortho_intervals: list[dict[str, Any]] | None = None,
+) -> pathlib.Path:
+    (tmp_path / "annotations").mkdir(parents=True, exist_ok=True)
+    audio_path = tmp_path / "audio" / "working" / speaker / "synthetic.wav"
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(b"RIFFWAVEfake")
+    payload = {
+        "version": 1,
+        "project_id": "parse-test",
+        "speaker": speaker,
+        "source_audio": f"audio/working/{speaker}/synthetic.wav",
+        "source_audio_duration_sec": 8.0,
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 3,
+                "intervals": concept_intervals
+                or [{"start": 1.0, "end": 1.5, "text": "root", "concept_id": "1"}],
+            },
+            "ortho": {"type": "interval", "display_order": 2, "intervals": ortho_intervals or []},
+            "ipa": {"type": "interval", "display_order": 1, "intervals": []},
+            "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+        },
+        "metadata": {"language_code": "sdh"},
+    }
+    (tmp_path / "annotations" / f"{speaker}.parse.json").write_text(json.dumps(payload), encoding="utf-8")
+    return audio_path
+
+
+def _patch_common(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_pipeline_audio_path_for_speaker", lambda speaker: tmp_path / "audio" / "working" / speaker / "synthetic.wav")
+
+
+def _capture_concept_window_runner(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def fake_runner(**kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(dict(kwargs))
+        step = str(kwargs["step"])
+        return [
+            {
+                "start": 1.0,
+                "end": 1.5,
+                "text": f"{step}-window",
+                "conceptId": "1",
+                "source": f"concept_window_{step}",
+            }
+        ]
+
+    monkeypatch.setattr(server, "_run_step_on_concept_windows", fake_runner)
+    return calls
+
+
+def _run_ortho_concept_windows(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> dict[str, Any]:
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: _ClipProvider())
+    return server._compute_speaker_ortho("job-ortho", {"speaker": "Fail02", "run_mode": "concept-windows", **payload})
+
+
+def test_compute_speaker_ortho_concept_windows_default_pad_is_0_20(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _capture_concept_window_runner(monkeypatch)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {})
+
+    assert calls[0]["pad_sec"] == 0.2
+    assert result["pad"] == 0.2
+
+
+def test_compute_speaker_ortho_concept_windows_explicit_pad_0_0(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _capture_concept_window_runner(monkeypatch)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {"pad": 0.0})
+
+    assert calls[0]["pad_sec"] == 0.0
+    assert result["pad"] == 0.0
+
+
+def test_compute_speaker_ortho_concept_windows_explicit_pad_0_5(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _capture_concept_window_runner(monkeypatch)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {"pad": 0.5})
+
+    assert calls[0]["pad_sec"] == 0.5
+    assert result["pad"] == 0.5
+
+
+def test_compute_speaker_ortho_concept_windows_invalid_pad_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    handler = _HandlerHarness({"speaker": "Fail02", "run_mode": "concept-windows", "pad": 0.123})
+    monkeypatch.setattr(server, "_compute_concept_scoped_noop_payload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(server, "_job_callback_url_from_mapping", lambda _body: None)
+    monkeypatch.setattr(
+        server,
+        "_app_build_post_compute_start_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("invalid pad must not start a job")),
+        raising=False,
+    )
+
+    with pytest.raises(server.ApiError) as excinfo:
+        handler._api_post_compute_start("ortho")
+
+    assert excinfo.value.status == HTTPStatus.BAD_REQUEST
+    assert excinfo.value.message == "pad must be one of 0.0, 0.2, 0.5"
+
+
+def test_compute_speaker_stt_concept_windows_pad_threaded(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+    calls = _capture_concept_window_runner(monkeypatch)
+    monkeypatch.setattr(server, "get_stt_provider", lambda: _ClipProvider())
+
+    result = server._compute_speaker_stt("job-stt", {"speaker": "Fail02", "run_mode": "concept-windows", "pad": 0.5})
+
+    assert calls[0]["step"] == "stt"
+    assert calls[0]["pad_sec"] == 0.5
+    assert result["pad"] == 0.5
+
+
+def test_compute_speaker_ipa_concept_windows_pad_threaded(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+    calls = _capture_concept_window_runner(monkeypatch)
+    monkeypatch.setattr(server, "_get_ipa_aligner", lambda: _ClipProvider())
+
+    result = server._compute_speaker_ipa("job-ipa", {"speaker": "Fail02", "run_mode": "concept-windows", "pad": 0.5})
+
+    assert calls[0]["step"] == "ipa"
+    assert calls[0]["pad_sec"] == 0.5
+    assert result["pad"] == 0.5
+
+
+def test_compute_full_run_mode_ignores_pad(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+    provider = _FullOrthoProvider()
+    monkeypatch.setattr(server, "_run_step_on_concept_windows", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("full mode must not run concept windows")))
+
+    result = server._compute_speaker_ortho("job-ortho", {"speaker": "Fail02", "run_mode": "full", "pad": 0.5}, provider=provider)
+
+    assert provider.transcribe_calls
+    assert result["speaker"] == "Fail02"
+    assert "pad" not in result
+
+
+def test_concept_windows_result_payload_reports_pad(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _capture_concept_window_runner(monkeypatch)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {"pad": 0.5})
+
+    assert calls[0]["pad_sec"] == 0.5
+    assert result["pad"] == 0.5
+    assert isinstance(result["pad"], float)
