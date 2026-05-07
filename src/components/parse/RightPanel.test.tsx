@@ -210,7 +210,11 @@ describe('RightPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Reset survey display defaults/i }));
-    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({ surveys: {}, color_coding_enabled: false });
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({
+      reset_surveys: true,
+      reset_speaker_choices: true,
+      color_coding_enabled: false,
+    });
     expect((screen.getByRole('button', { name: /Add survey placeholder/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 

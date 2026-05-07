@@ -114,7 +114,11 @@ export function SurveyValuesSection({
   };
 
   const resetDefaults = () => {
-    onSurveyOverlapUpdate({ surveys: {}, color_coding_enabled: false });
+    onSurveyOverlapUpdate({
+      reset_surveys: true,
+      reset_speaker_choices: true,
+      color_coding_enabled: false,
+    });
   };
 
   return (
