@@ -322,6 +322,8 @@ class LocalWhisperProvider(provider_module.AIProvider):
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
         segment_callback: Optional[Callable[[Segment], None]] = None,
+        *,
+        initial_prompt: Optional[str] = None,
     ) -> List[Segment]:
         """Run full-file STT with faster-whisper."""
         path = Path(audio_path).expanduser().resolve()
@@ -354,8 +356,8 @@ class LocalWhisperProvider(provider_module.AIProvider):
                 transcribe_kwargs["vad_parameters"] = self.vad_parameters
             if self.compression_ratio_threshold is not None:
                 transcribe_kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
-            if self.initial_prompt:
-                transcribe_kwargs["initial_prompt"] = self.initial_prompt
+            if initial_prompt:
+                transcribe_kwargs["initial_prompt"] = initial_prompt
             segs_iter, info = m.transcribe(str(path), **transcribe_kwargs)
             total_duration = float(getattr(info, "duration", 0.0) or 0.0)
             for segment in segs_iter:
@@ -434,6 +436,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
         language: Optional[str] = None,
         progress_callback: Optional[Callable[[float, int], None]] = None,
         sample_rate: int = 16000,
+        initial_prompt: Optional[str] = None,
     ) -> List[SegmentWithWords]:
         """Transcribe pre-sliced windows from a loaded mono waveform."""
         if audio_array is None or not intervals:
@@ -468,8 +471,8 @@ class LocalWhisperProvider(provider_module.AIProvider):
         }
         if self.compression_ratio_threshold is not None:
             kwargs["compression_ratio_threshold"] = self.compression_ratio_threshold
-        if self.initial_prompt:
-            kwargs["initial_prompt"] = self.initial_prompt
+        if initial_prompt:
+            kwargs["initial_prompt"] = initial_prompt
 
         segments_out: List[SegmentWithWords] = []
         total_intervals = len(intervals)
@@ -566,7 +569,7 @@ class LocalWhisperProvider(provider_module.AIProvider):
 
         model = self._load_whisper_model()
         selected_language = _normalize_whisper_language((language or self.language) or None)
-        prompt = initial_prompt if initial_prompt is not None else self.initial_prompt
+        prompt = initial_prompt
 
         kwargs: Dict[str, Any] = {
             "language": selected_language,

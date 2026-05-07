@@ -276,16 +276,13 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
     assert processor.calls[0]["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"}
     assert processor.calls[0]["audio"].shape == (16000,)
     assert processor.inputs[0].to_devices == ["cuda:0"]
-    assert processor.prompt_ids_calls == [{"text": "ignored by hf", "return_tensors": "pt"}]
-    assert len(processor.prompt_ids) == 1
-    assert processor.prompt_ids[0].to_devices == ["cuda:0"]
+    assert processor.prompt_ids_calls == []
     assert model.generate_calls == [
         {
             "input_features": "features-1",
             "return_dict_in_generate": True,
             "output_scores": True,
             **_guard_kwargs(),
-            "prompt_ids": processor.prompt_ids[0],
             "language": "fa",
             "task": "transcribe",
         }
@@ -346,7 +343,7 @@ def test_repetition_guards_passed_to_generate(monkeypatch: pytest.MonkeyPatch) -
         )
     )
 
-    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32), initial_prompt="ABC")
 
     assert processor.prompt_ids_calls == [{"text": "ABC", "return_tensors": "pt"}]
     assert len(processor.prompt_ids) == 1
@@ -458,18 +455,13 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     assert first_window.shape == (8000,)
     assert second_window.shape == (20000,)
     assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"} for call in processor.calls)
-    assert processor.prompt_ids_calls == [
-        {"text": "ignored by hf", "return_tensors": "pt"},
-        {"text": "ignored by hf", "return_tensors": "pt"},
-    ]
-    assert [prompt_ids.to_devices for prompt_ids in processor.prompt_ids] == [["cuda:0"], ["cuda:0"]]
+    assert processor.prompt_ids_calls == []
     assert _model.generate_calls == [
         {
             "input_features": "features-1",
             "return_dict_in_generate": True,
             "output_scores": True,
             **_guard_kwargs(),
-            "prompt_ids": processor.prompt_ids[0],
             "language": "fa",
             "task": "transcribe",
         },
@@ -478,7 +470,6 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
             "return_dict_in_generate": True,
             "output_scores": True,
             **_guard_kwargs(),
-            "prompt_ids": processor.prompt_ids[1],
             "language": "fa",
             "task": "transcribe",
         },
@@ -635,3 +626,74 @@ def test_transcribe_clip_returns_real_confidence_not_placeholder(
     assert text == "سێ"
     assert confidence == pytest.approx(_expected_confidence([0.0, 1.0], 0))
     assert confidence != 1.0
+
+
+def test_transcribe_clip_initial_prompt_none_suppresses_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["سێ"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt="CONFIG-PROMPT-MARKER"))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32), initial_prompt=None)
+
+    assert processor.prompt_ids_calls == []
+    assert "prompt_ids" not in model.generate_calls[0]
+
+
+def test_transcribe_clip_initial_prompt_explicit_seeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["سێ"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt="CONFIG-PROMPT-MARKER"))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32), initial_prompt="custom-prompt")
+
+    assert processor.prompt_ids_calls == [{"text": "custom-prompt", "return_tensors": "pt"}]
+    assert model.generate_calls[0]["prompt_ids"] is processor.prompt_ids[0]
+
+
+def test_transcribe_segments_in_memory_initial_prompt_none_suppresses_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["سێ"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt="CONFIG-PROMPT-MARKER"))
+
+    provider.transcribe_segments_in_memory(
+        np.zeros(16000, dtype=np.float32),
+        [(0.0, 1.0)],
+        initial_prompt=None,
+        sample_rate=16000,
+    )
+
+    assert processor.prompt_ids_calls == []
+    assert "prompt_ids" not in model.generate_calls[0]
+
+
+def test_transcribe_initial_prompt_none_suppresses_config_per_chunk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_path = tmp_path / "long.wav"
+    audio_path.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
+    _install_soundfile_stub(monkeypatch, samples=16000 * 60, sample_rate=16000)
+    processor, model = _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=["first chunk", "second chunk"]),
+        model=_RecordingModel(
+            generated=[
+                _generated_result(selected_token=1, score_row=[0.0, 1.0]),
+                _generated_result(selected_token=1, score_row=[0.0, 0.0]),
+            ]
+        ),
+    )
+    provider = HFWhisperProvider(config=_config(initial_prompt="CONFIG-PROMPT-MARKER"))
+
+    result = provider.transcribe(audio_path, initial_prompt=None)
+
+    assert [segment["text"] for segment in result] == ["first chunk", "second chunk"]
+    assert len(model.generate_calls) == 2
+    assert processor.prompt_ids_calls == []
+    assert all("prompt_ids" not in call for call in model.generate_calls)
+
+
+def test_transcribe_clip_max_new_tokens_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    _processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["سێ"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt=""))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32), max_new_tokens=8)
+
+    assert model.generate_calls[0]["max_new_tokens"] == 8

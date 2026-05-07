@@ -1,4 +1,9 @@
-"""Synchronous lexeme interval ORTH/IPA rerun HTTP helpers."""
+"""Synchronous lexeme interval ORTH/IPA rerun HTTP helpers.
+
+Requests accept ``pad`` values ``0.0``, ``0.2`` (default), or ``0.5``.
+The pad widens the acoustic window passed to the ORTH/IPA runner while the
+JSON response reports the original user-selected interval bounds.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +53,7 @@ class _RerunRequest:
     start: float
     end: float
     language: Optional[str]
+    pad: float
 
 
 def _request_string(body: Mapping[str, Any], *names: str) -> str:
@@ -67,6 +73,17 @@ def _coerce_interval_float(body: Mapping[str, Any], key: str) -> float:
         raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "interval {0} must be a finite number".format(key)) from exc
     if not math.isfinite(value):
         raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "interval {0} must be a finite number".format(key))
+    return value
+
+
+def _coerce_pad(body: Mapping[str, Any]) -> float:
+    raw = body.get("pad", 0.2)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "pad must be one of 0.0, 0.2, 0.5") from exc
+    if not math.isfinite(value) or value not in {0.0, 0.2, 0.5}:
+        raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "pad must be one of 0.0, 0.2, 0.5")
     return value
 
 
@@ -109,6 +126,7 @@ def _parse_request(body: Mapping[str, Any], *, normalize_speaker_id: SpeakerNorm
         start=start,
         end=end,
         language=_language_from_body_or_record(body, record),
+        pad=_coerce_pad(body),
     )
 
 
@@ -218,7 +236,9 @@ def _build_post_run_response(
     started = time.monotonic()
     try:
         audio_path = resolve_audio_path_for_speaker(request.speaker)
-        text = runner(audio_path=audio_path, start=request.start, end=request.end, language=request.language)
+        padded_start = max(0.0, request.start - request.pad)
+        padded_end = request.end + request.pad
+        text = runner(audio_path=audio_path, start=padded_start, end=padded_end, language=request.language)
     except LexemeRerunHandlerError:
         raise
     except Exception as exc:

@@ -10,9 +10,9 @@ from server_routes.locks import _locks_dir
 
 
 def _run_ortho_interval(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
-    from ai.stt_pipeline import run_stt_on_interval
+    from ai.stt_pipeline import run_ortho_on_interval
 
-    return run_stt_on_interval(
+    return run_ortho_on_interval(
         audio_path=audio_path,
         start=start,
         end=end,

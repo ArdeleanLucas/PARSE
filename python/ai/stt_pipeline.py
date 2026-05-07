@@ -263,7 +263,7 @@ def _slice_audio_to_temp_wav(audio_path: Path, start: float, end: float) -> Path
     return temp_path
 
 
-def run_stt_on_interval(
+def run_ortho_on_interval(
     audio_path: Path,
     start: float,
     end: float,
@@ -298,7 +298,14 @@ def run_stt_on_interval(
         except ImportError:
             from forced_align import DEFAULT_SAMPLE_RATE, _load_audio_mono_16k  # type: ignore
         audio_tensor = _load_audio_mono_16k(path)
-        segments = segmented(audio_tensor, [(start_f, end_f)], language=language, progress_callback=None, sample_rate=DEFAULT_SAMPLE_RATE)
+        segments = segmented(
+            audio_tensor,
+            [(start_f, end_f)],
+            language=language,
+            progress_callback=None,
+            sample_rate=DEFAULT_SAMPLE_RATE,
+            initial_prompt=None,
+        )
         return _join_segment_text(segments)
 
     try:
@@ -308,6 +315,7 @@ def run_stt_on_interval(
             progress_callback=None,
             start_sec=start_f,
             end_sec=end_f,
+            initial_prompt=None,
         )
         return _join_segment_text(segments)
     except TypeError as exc:
@@ -317,7 +325,14 @@ def run_stt_on_interval(
     temp_path: Optional[Path] = None
     try:
         temp_path = _slice_audio_to_temp_wav(path, start_f, end_f)
-        return _join_segment_text(provider_obj.transcribe(audio_path=temp_path, language=language, progress_callback=None))
+        return _join_segment_text(
+            provider_obj.transcribe(
+                audio_path=temp_path,
+                language=language,
+                progress_callback=None,
+                initial_prompt=None,
+            )
+        )
     finally:
         if temp_path is not None:
             try:

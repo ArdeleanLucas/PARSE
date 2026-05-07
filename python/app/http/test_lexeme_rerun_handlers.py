@@ -11,6 +11,7 @@ import pytest
 from ai.speaker_locks import SpeakerLockError
 from app.http.lexeme_rerun_handlers import (
     LexemeRerunHandlerError,
+    _parse_request,
     build_post_run_ipa_response,
     build_post_run_ortho_response,
 )
@@ -137,7 +138,8 @@ def test_run_ortho_happy_path(tmp_path: Path) -> None:
         "interval": {"start": 2795.918, "end": 2796.698},
         "source": "rerun",
     }
-    assert calls and calls[0]["start"] == 2795.918 and calls[0]["end"] == 2796.698
+    assert calls and calls[0]["start"] == pytest.approx(2795.718)
+    assert calls[0]["end"] == pytest.approx(2796.898)
 
 
 def test_run_ipa_happy_path(tmp_path: Path) -> None:
@@ -258,3 +260,79 @@ def test_run_ipa_does_not_mutate_record(tmp_path: Path) -> None:
 
     assert response.status == HTTPStatus.OK
     assert annotation_path.read_bytes() == before
+
+
+def _base_rerun_body(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0}
+    body.update(overrides)
+    return body
+
+
+def test_pad_default_is_0_20(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    response = _ortho_response(
+        tmp_path,
+        _base_rerun_body(),
+        runner=lambda **kwargs: calls.append(kwargs) or "ریشەم",
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert calls[0]["start"] == pytest.approx(0.8)
+    assert calls[0]["end"] == pytest.approx(2.2)
+    assert response.payload["interval"] == {"start": 1.0, "end": 2.0}
+
+
+def test_pad_explicit_0_0_no_padding(tmp_path: Path) -> None:
+    parsed = _parse_request(
+        _base_rerun_body(pad=0.0),
+        normalize_speaker_id=_normalize_speaker,
+        record={"metadata": {"language_code": "ku"}},
+    )
+    assert parsed.pad == pytest.approx(0.0)
+    calls: list[dict[str, Any]] = []
+
+    _ortho_response(
+        tmp_path,
+        _base_rerun_body(pad=0.0),
+        runner=lambda **kwargs: calls.append(kwargs) or "ریشەم",
+    )
+
+    assert calls[0]["start"] == pytest.approx(1.0)
+    assert calls[0]["end"] == pytest.approx(2.0)
+
+
+def test_pad_explicit_0_5_widens(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    _ipa_response(
+        tmp_path,
+        _base_rerun_body(pad=0.5),
+        runner=lambda **kwargs: calls.append(kwargs) or "ʃari:",
+    )
+
+    assert calls[0]["start"] == pytest.approx(0.5)
+    assert calls[0]["end"] == pytest.approx(2.5)
+
+
+def test_pad_invalid_value_400(tmp_path: Path) -> None:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
+        _ortho_response(tmp_path, _base_rerun_body(pad=0.123), runner=lambda **kwargs: "unused")
+
+    assert getattr(exc_info.value, "status") == HTTPStatus.BAD_REQUEST
+    message = str(exc_info.value)
+    assert "pad must be one of" in message
+    assert "0.0" in message and "0.2" in message and "0.5" in message
+
+
+def test_pad_clamped_to_zero_at_start(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    _ortho_response(
+        tmp_path,
+        _base_rerun_body(start=0.1, end=0.5, pad=0.2),
+        runner=lambda **kwargs: calls.append(kwargs) or "ریشەم",
+    )
+
+    assert calls[0]["start"] == pytest.approx(0.0)
+    assert calls[0]["end"] == pytest.approx(0.7)
