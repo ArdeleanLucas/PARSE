@@ -115,6 +115,10 @@ def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> N
     assert "reset_speaker_choices" in description
     assert "reset_concept_survey_links" in description
     assert "boolean" in description
+    # Response shape contract — bare SurveyOverlapState, no envelope.
+    assert "no envelope" in description
+    get_description = path["get"].get("description", "")
+    assert "no envelope" in get_description
 
 
 def test_build_openapi_document_restores_old_tags_shape_and_put_contract() -> None:
