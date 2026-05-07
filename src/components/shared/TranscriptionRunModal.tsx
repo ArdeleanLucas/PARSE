@@ -48,6 +48,7 @@ function formatEditedConceptPreviewRow(row: EditedConceptPreviewRow): string {
 
 const DEFAULT_ACTION_MENU_PAD: LexemeRerunPad = 0.2;
 const ACTION_MENU_PAD_OPTIONS: LexemeRerunPad[] = [...LEXEME_RERUN_PAD_VALUES];
+const PAD_APPLICABLE_STEPS = new Set<PipelineStepId>(["stt", "ortho", "ipa"]);
 
 function formatActionMenuPad(value: LexemeRerunPad): string {
   return value.toFixed(1);
@@ -77,8 +78,8 @@ export function TranscriptionRunModal({
   const [selectedSteps, setSelectedSteps] = useState<Set<PipelineStepId>>(() => new Set());
   const [runMode, setRunMode] = useState<TranscriptionRunMode>("full");
   const [editedConcepts, setEditedConcepts] = useState<EditedConceptPreviewRow[]>([]);
-  const [orthPad, setOrthPad] = useState<LexemeRerunPad>(DEFAULT_ACTION_MENU_PAD);
-  const orthPadRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [padSec, setPadSec] = useState<LexemeRerunPad>(DEFAULT_ACTION_MENU_PAD);
+  const padRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [editedConceptsStatus, setEditedConceptsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [editedConceptsError, setEditedConceptsError] = useState<string | null>(null);
   const [refineLexemes, setRefineLexemes] = useState(false);
@@ -91,14 +92,14 @@ export function TranscriptionRunModal({
 
   useEffect(() => {
     if (!open) {
-      setOrthPad(DEFAULT_ACTION_MENU_PAD);
+      setPadSec(DEFAULT_ACTION_MENU_PAD);
       return;
     }
     let cancelled = false;
     setRefineLexemes(false);
     setRunMode("full");
     setEditedConcepts([]);
-    setOrthPad(DEFAULT_ACTION_MENU_PAD);
+    setPadSec(DEFAULT_ACTION_MENU_PAD);
     setEditedConceptsStatus("idle");
     setEditedConceptsError(null);
     setScopeByStep({
@@ -246,10 +247,10 @@ export function TranscriptionRunModal({
   const editedOnlyLoading = runMode === "edited-only" && editedConceptsStatus === "loading";
   const editedOnlyError = runMode === "edited-only" && editedConceptsStatus === "error";
   const willOverwrite = summary.overwrite > 0;
-  const includesOrthoStep = stepsToRender.includes("ortho");
-  const showOrthoPad = runMode !== "full" && includesOrthoStep;
+  const includesPadApplicableStep = stepsToRender.some((step) => PAD_APPLICABLE_STEPS.has(step));
+  const showPadSelector = runMode !== "full" && includesPadApplicableStep;
 
-  const handleOrthPadKeyDown = (value: LexemeRerunPad, event: KeyboardEvent<HTMLButtonElement>) => {
+  const handlePadKeyDown = (value: LexemeRerunPad, event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowUp") return;
     event.preventDefault();
     const currentIndex = ACTION_MENU_PAD_OPTIONS.indexOf(value);
@@ -257,8 +258,8 @@ export function TranscriptionRunModal({
     const delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
     const nextIndex = (currentIndex + delta + ACTION_MENU_PAD_OPTIONS.length) % ACTION_MENU_PAD_OPTIONS.length;
     const next = ACTION_MENU_PAD_OPTIONS[nextIndex];
-    setOrthPad(next);
-    orthPadRefs.current[nextIndex]?.focus();
+    setPadSec(next);
+    padRefs.current[nextIndex]?.focus();
   };
 
   const handleConfirm = () => {
@@ -276,12 +277,13 @@ export function TranscriptionRunModal({
       }
     }
     const includesOrtho = stepsArr.includes("ortho");
+    const includesPadApplicableStepInPayload = stepsArr.some((step) => PAD_APPLICABLE_STEPS.has(step));
     onConfirm({
       speakers: speakersArr,
       steps: stepsArr,
       overwrites,
       runMode,
-      pad: runMode !== "full" && includesOrtho ? orthPad : undefined,
+      pad: runMode !== "full" && includesPadApplicableStepInPayload ? padSec : undefined,
       refineLexemes: runMode === "full" && includesOrtho && refineLexemes ? true : undefined,
     });
   };
@@ -404,7 +406,7 @@ export function TranscriptionRunModal({
           </div>
         )}
 
-        {showOrthoPad && (
+        {showPadSelector && (
           <div
             className="rounded-md border border-slate-200 bg-white px-3 py-2"
             data-testid="action-menu-pad-selector"
@@ -412,17 +414,17 @@ export function TranscriptionRunModal({
             <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Audio context pad</div>
             <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Audio context pad">
               {ACTION_MENU_PAD_OPTIONS.map((value, index) => {
-                const selected = orthPad === value;
+                const selected = padSec === value;
                 const label = value === DEFAULT_ACTION_MENU_PAD ? `${formatActionMenuPad(value)} s · default` : `${formatActionMenuPad(value)} s`;
                 return (
                   <button
                     key={value}
                     type="button"
-                    ref={(node) => { orthPadRefs.current[index] = node; }}
+                    ref={(node) => { padRefs.current[index] = node; }}
                     data-testid={`action-menu-pad-${formatActionMenuPad(value)}`}
                     aria-pressed={selected}
-                    onClick={() => setOrthPad(value)}
-                    onKeyDown={(event) => handleOrthPadKeyDown(value, event)}
+                    onClick={() => setPadSec(value)}
+                    onKeyDown={(event) => handlePadKeyDown(value, event)}
                     className={
                       "rounded-full border px-3 py-1 text-xs font-semibold transition-colors " +
                       (selected
@@ -465,9 +467,9 @@ export function TranscriptionRunModal({
         >
           <span>
             {runMode === "edited-only" ? (
-              <>Run on {editedConcepts.length} edited concepts × {stepsToRender.length} steps ({stepsToRender.map((step) => STEP_LABELS[step]).join(", ") || "none"}){showOrthoPad ? ` · pad ${formatActionMenuPad(orthPad)} s` : ""}.</>
+              <>Run on {editedConcepts.length} edited concepts × {stepsToRender.length} steps ({stepsToRender.map((step) => STEP_LABELS[step]).join(", ") || "none"}){showPadSelector ? ` · pad ${formatActionMenuPad(padSec)} s` : ""}.</>
             ) : (
-              <>Running {selectedSpeakers.size} speaker{selectedSpeakers.size === 1 ? "" : "s"} × {stepsToRender.length} step{stepsToRender.length === 1 ? "" : "s"}{showOrthoPad ? ` · pad ${formatActionMenuPad(orthPad)} s` : ""}. <span className="text-emerald-700 font-medium">{summary.ok} ok</span>, <span className="text-sky-700 font-medium">{summary.keep} keep existing</span>, <span className="text-amber-700 font-medium">{summary.overwrite} will overwrite</span>, <span className="text-rose-700 font-medium">{summary.blocked} blocked</span> (will be skipped at runtime).</>
+              <>Running {selectedSpeakers.size} speaker{selectedSpeakers.size === 1 ? "" : "s"} × {stepsToRender.length} step{stepsToRender.length === 1 ? "" : "s"}{showPadSelector ? ` · pad ${formatActionMenuPad(padSec)} s` : ""}. <span className="text-emerald-700 font-medium">{summary.ok} ok</span>, <span className="text-sky-700 font-medium">{summary.keep} keep existing</span>, <span className="text-amber-700 font-medium">{summary.overwrite} will overwrite</span>, <span className="text-rose-700 font-medium">{summary.blocked} blocked</span> (will be skipped at runtime).</>
             )}
           </span>
         </div>
