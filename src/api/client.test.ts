@@ -6,6 +6,8 @@ import {
   getTags,
   putTags,
   runChat,
+  rerunLexemeIpa,
+  rerunLexemeOrtho,
   saveAnnotation,
   searchLexeme,
   startChatSession,
@@ -197,6 +199,42 @@ describe("annotation API client contracts", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("rerunLexemeIpa posts the exact lexeme window and returns the rerun IPA payload", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await expect(rerunLexemeIpa({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 })).resolves.toEqual({
+      ipa: "ʃari:",
+      interval: { start: 2795.918, end: 2796.698 },
+      source: "rerun",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/lexeme/run_ipa", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 }),
+    }));
+  });
+
+  it("rerunLexemeOrtho posts the exact lexeme window and returns the rerun ORTH payload", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await expect(rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 })).resolves.toEqual({
+      ortho: "شار",
+      interval: { start: 2795.918, end: 2796.698 },
+      source: "rerun",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/lexeme/run_ortho", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 }),
+    }));
   });
 
   it("saveAnnotation unwraps the server-normalized annotation record", async () => {

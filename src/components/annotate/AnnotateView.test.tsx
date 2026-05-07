@@ -3,8 +3,10 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../../api/types';
 
-const { mockSaveLexemeNoteApi, mockSaveEnrichments, mockLoadEnrichments } = vi.hoisted(() => ({
+const { mockSaveLexemeNoteApi, mockRerunLexemeIpa, mockRerunLexemeOrtho, mockSaveEnrichments, mockLoadEnrichments } = vi.hoisted(() => ({
   mockSaveLexemeNoteApi: vi.fn(),
+  mockRerunLexemeIpa: vi.fn(),
+  mockRerunLexemeOrtho: vi.fn(),
   mockSaveEnrichments: vi.fn(),
   mockLoadEnrichments: vi.fn(),
 }));
@@ -90,6 +92,8 @@ let mockWaveSurferOptions: { quickRetimeSelection?: {
 
 vi.mock('../../api/client', () => ({
   saveLexemeNote: mockSaveLexemeNoteApi,
+  rerunLexemeIpa: mockRerunLexemeIpa,
+  rerunLexemeOrtho: mockRerunLexemeOrtho,
 }));
 
 vi.mock('../../stores/annotationStore', () => ({
@@ -217,6 +221,10 @@ describe('AnnotateView', () => {
     mockClearQuickRetimeSelection.mockClear();
     mockSaveLexemeNoteApi.mockReset();
     mockSaveLexemeNoteApi.mockResolvedValue({ success: true });
+    mockRerunLexemeIpa.mockReset();
+    mockRerunLexemeIpa.mockResolvedValue({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+    mockRerunLexemeOrtho.mockReset();
+    mockRerunLexemeOrtho.mockResolvedValue({ ortho: 'new-orth', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
     mockSaveEnrichments.mockReset();
     mockSaveEnrichments.mockResolvedValue(undefined);
     mockLoadEnrichments.mockReset();
@@ -1060,6 +1068,146 @@ describe('AnnotateView', () => {
 
     fireEvent.click(screen.getByTestId('confirm-time'));
     expect(mockSetConfirmedAnchor).toHaveBeenLastCalledWith('Fail01', 'water', null);
+  });
+
+
+  describe('lexeme field re-run controls', () => {
+    function getIpaInput() {
+      return screen.getByPlaceholderText('Enter IPA…') as HTMLInputElement;
+    }
+
+    it('renders Run IPA and Run ORTH buttons next to their labels', () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+
+      const runIpa = screen.getByTestId('run-ipa-button') as HTMLButtonElement;
+      const runOrth = screen.getByTestId('run-orth-button') as HTMLButtonElement;
+      expect(runIpa.textContent).toContain('Run IPA');
+      expect(runOrth.textContent).toContain('Run ORTH');
+      expect(runIpa.disabled).toBe(false);
+      expect(runOrth.disabled).toBe(false);
+    });
+
+    it('Run IPA disabled when concept has no boundary', () => {
+      mockRecord = makeRecord([]);
+
+      renderWaterAnnotateView();
+
+      expect((screen.getByTestId('run-ipa-button') as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId('run-orth-button') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('Run IPA opens the overwrite dialog and POSTs only after primary confirm', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+
+      expect(screen.getByTestId('rerun-confirm-modal')).toBeTruthy();
+      expect(mockRerunLexemeIpa).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      await waitFor(() => expect(mockRerunLexemeIpa).toHaveBeenCalledWith({
+        speaker: 'Fail01',
+        concept_key: 'water',
+        start: 1.25,
+        end: 2.5,
+      }));
+    });
+
+    it('cancel in the dialog does not POST and does not mutate the field', () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-cancel'));
+
+      expect(mockRerunLexemeIpa).not.toHaveBeenCalled();
+      expect(getIpaInput().value).toBe('old-ipa');
+      expect(screen.queryByTestId('rerun-confirm-modal')).toBeNull();
+    });
+
+    it('Esc closes the dialog without POSTing', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(mockRerunLexemeIpa).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('rerun-confirm-modal')).toBeNull());
+    });
+
+    it('success response replaces the IPA value', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      await waitFor(() => expect(getIpaInput().value).toBe('new-ipa'));
+    });
+
+    it('success response on Run ORTH replaces the orthographic value AND sets orthoUserEdited', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', orthoWords: 'old-orth', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeOrtho.mockResolvedValueOnce({ ortho: 'نوێ', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-orth-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      await waitFor(() => expect(getOrthographicInput().value).toBe('نوێ'));
+      fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
+
+      await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+        orthoText: 'نوێ',
+        orthoEdited: true,
+      })));
+    });
+
+    it('⌘Z after a successful re-run restores the previous value', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+      await waitFor(() => expect(getIpaInput().value).toBe('new'));
+
+      fireEvent.keyDown(document, { key: 'z', metaKey: true });
+
+      expect(getIpaInput().value).toBe('old');
+    });
+
+    it('4xx error displays the server message and keeps the field unchanged', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockRejectedValueOnce(new Error('interval too long'));
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      expect(await screen.findByText('interval too long')).toBeTruthy();
+      expect(screen.getByTestId('rerun-confirm-modal')).toBeTruthy();
+      expect(getIpaInput().value).toBe('old-ipa');
+    });
+
+    it('network error shows fallback copy', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockRejectedValueOnce(new Error(
+        'Could not reach the PARSE API for POST /api/lexeme/run_ipa. Check that the Python server is running at http://127.0.0.1:8766 and that the Vite /api proxy is active.',
+      ));
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      expect(await screen.findByText('Network error. Try again.')).toBeTruthy();
+      expect(getIpaInput().value).toBe('old-ipa');
+    });
   });
 
   describe('past-end-of-audio handling (Khan01 manifest case)', () => {
