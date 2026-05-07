@@ -19,6 +19,12 @@ export interface SidebarConcept {
   surveys?: ConceptSurveyLinks;
   mergedKeys?: string[];
   mergeAbsorbedNames?: string[];
+  /** Present when the concept was already grouped from concepts.csv as an
+   * A/B family (e.g. `deep (A)` 81 + `deep (B)` 82 sharing source_item 4.30).
+   * Mirrors the `ConceptVariant` shape from `speakerForm.ts` so the grouped
+   * concept passes through structurally. Used to disable the right-click
+   * "Duplicate" item — splitting an already-split concept is a no-op the
+   * backend rejects with 409. */
   variants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
   mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
 }
@@ -50,6 +56,7 @@ interface ConceptSidebarProps {
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
+  onDuplicateConcept?: (concept: SidebarConcept) => void;
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
@@ -83,6 +90,7 @@ export function ConceptSidebar({
   onSurveyChoiceChange,
   onMergeRequest,
   onUnmergeConcept,
+  onDuplicateConcept,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
@@ -309,6 +317,37 @@ export function ConceptSidebar({
           >
             Merge with…
           </button>
+          {(() => {
+            // Concepts that are already part of an A/B family are
+            // ineligible for further duplication. Three sources of evidence:
+            //   - explicit `variants` array from groupConceptEntries (clean
+            //     A+B in concepts.csv sharing a source_item)
+            //   - `mergedKeys` length > 1 (the user already merged siblings)
+            //   - trailing `(A)` / `(B)` suffix on the display label
+            //     (lonely (A) rows in concepts.csv with no sibling, etc.)
+            const c = contextMenu.concept;
+            const alreadyAb =
+              (Array.isArray(c.variants) && c.variants.length >= 2) ||
+              (Array.isArray(c.mergedKeys) && c.mergedKeys.length > 1) ||
+              /\s*\((A|B)\)\s*$/.test(c.name);
+            const tooltip = alreadyAb ? 'Already part of an A/B pair' : 'Split this concept into A and B siblings';
+            return (
+              <button
+                type="button"
+                role="menuitem"
+                aria-disabled={alreadyAb}
+                title={tooltip}
+                className={`block w-full rounded px-2 py-1 text-left ${alreadyAb ? 'cursor-not-allowed text-slate-300' : 'text-slate-700 hover:bg-slate-50'}`}
+                onClick={() => {
+                  if (alreadyAb) return;
+                  onDuplicateConcept?.(c);
+                  setContextMenu(null);
+                }}
+              >
+                Duplicate (split into A/B)
+              </button>
+            );
+          })()}
           {contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
             <button
               type="button"

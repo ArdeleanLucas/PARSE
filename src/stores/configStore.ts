@@ -7,6 +7,7 @@ interface ConfigStore {
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
+  reload: () => Promise<void>;
   update: (patch: Partial<ProjectConfig>) => Promise<void>;
   updateSurveyOverlap: (patch: SurveyOverlapPatch) => Promise<void>;
 }
@@ -34,6 +35,21 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     const { config, loading } = get();
     if (config !== null && !loading) return;
     if (loading) return; // don't double-fetch
+    set({ loading: true, error: null });
+    try {
+      const data = await getConfig();
+      set({ config: data, loading: false });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ loading: false, error: message });
+    }
+  },
+
+  reload: async () => {
+    // Force-refresh from /api/config, bypassing the load() short-circuit.
+    // Used after server-mutating actions (e.g. concept duplicate) where the
+    // canonical concepts.csv has changed and the FE needs the new state.
+    if (get().loading) return;
     set({ loading: true, error: null });
     try {
       const data = await getConfig();
