@@ -40,13 +40,11 @@ def test_api_get_survey_overlap_returns_backward_compatible_default_state(tmp_pa
         (
             HTTPStatus.OK,
             {
-                "survey_overlap": {
-                    "version": 1,
-                    "color_coding_enabled": False,
-                    "surveys": {},
-                    "concept_survey_links": {},
-                    "speaker_choices": {},
-                }
+                "version": 1,
+                "color_coding_enabled": False,
+                "surveys": {},
+                "concept_survey_links": {},
+                "speaker_choices": {},
             },
         )
     ]
@@ -69,14 +67,11 @@ def test_api_post_survey_overlap_persists_labels_toggle_and_speaker_choices(tmp_
         (
             HTTPStatus.OK,
             {
-                "success": True,
-                "survey_overlap": {
-                    "version": 1,
-                    "color_coding_enabled": True,
-                    "surveys": {"klq": {"display_label": "Kurdish Linguistic Questionnaire", "display_color": "violet"}},
-                    "concept_survey_links": {"salt": {"klq": "3.14", "jbil": "139"}},
-                    "speaker_choices": {"Saha01": {"salt": "jbil"}},
-                },
+                "version": 1,
+                "color_coding_enabled": True,
+                "surveys": {"klq": {"display_label": "Kurdish Linguistic Questionnaire", "display_color": "violet"}},
+                "concept_survey_links": {"salt": {"klq": "3.14", "jbil": "139"}},
+                "speaker_choices": {"Saha01": {"salt": "jbil"}},
             },
         )
     ]
@@ -92,7 +87,7 @@ def test_api_post_survey_overlap_accepts_nested_patch_payload(tmp_path: pathlib.
     handler._api_post_survey_overlap()
 
     assert handler.sent[0][0] == HTTPStatus.OK
-    assert handler.sent[0][1]["survey_overlap"]["surveys"] == {"jbil": {"display_label": "Bailey", "display_color": "amber"}}
+    assert handler.sent[0][1]["surveys"] == {"jbil": {"display_label": "Bailey", "display_color": "amber"}}
 
 
 def test_survey_overlap_dispatch_routes_get_and_post(monkeypatch) -> None:
@@ -105,3 +100,34 @@ def test_survey_overlap_dispatch_routes_get_and_post(monkeypatch) -> None:
     handler._dispatch_api_post("/api/survey-overlap")
 
     assert calls == ["get", "post"]
+
+def test_api_survey_overlap_returns_bare_state_without_envelope_keys(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """Wire format regression: the response payload must match SurveyOverlapState directly.
+
+    PR #291/#292 shipped with a {"survey_overlap": ...} (and {"success": True, ...}) envelope
+    that the frontend client did not unwrap, silently wiping the in-memory store after every
+    POST. This test pins the bare-state contract so the bug cannot recur unnoticed.
+
+    Paired with src/api/client.test.ts "rejects responses that re-introduce a
+    survey_overlap or success envelope". If you change the wire format on
+    either side, update both tests.
+    """
+    monkeypatch.chdir(tmp_path)
+    expected_keys = {"version", "color_coding_enabled", "surveys", "concept_survey_links", "speaker_choices"}
+
+    get_handler = _HandlerHarness()
+    get_handler._api_get_survey_overlap()
+    assert get_handler.sent[0][0] == HTTPStatus.OK
+    get_payload = get_handler.sent[0][1]
+    assert set(get_payload.keys()) == expected_keys, get_payload
+    assert "survey_overlap" not in get_payload
+    assert "success" not in get_payload
+
+    post_handler = _HandlerHarness({"color_coding_enabled": True})
+    post_handler._api_post_survey_overlap()
+    assert post_handler.sent[0][0] == HTTPStatus.OK
+    post_payload = post_handler.sent[0][1]
+    assert set(post_payload.keys()) == expected_keys, post_payload
+    assert "survey_overlap" not in post_payload
+    assert "success" not in post_payload
+    assert post_payload["color_coding_enabled"] is True

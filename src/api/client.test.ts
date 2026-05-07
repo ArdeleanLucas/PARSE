@@ -147,6 +147,15 @@ describe("getConfig / unwrapConfig schema-version guard", () => {
   });
 });
 
+/**
+ * Wire-format contract for /api/survey-overlap.
+ *
+ * The endpoint returns the SurveyOverlapState payload BARE — no
+ * "survey_overlap": ... envelope, no "success": true wrapper. The
+ * paired backend assertion lives in
+ * python/test_survey_overlap_routes.py::test_api_survey_overlap_returns_bare_state_without_envelope_keys.
+ * If you change the response shape on either side, update both tests.
+ */
 describe("survey-overlap API client contract", () => {
   const fetchMock = vi.fn();
 
@@ -189,6 +198,33 @@ describe("survey-overlap API client contract", () => {
       method: "POST",
       body: JSON.stringify(patch),
     }));
+  });
+
+  it("rejects responses that re-introduce a survey_overlap or success envelope", async () => {
+    // Regression for PR #291 / PR #292: the backend originally wrapped the
+    // payload in {survey_overlap, success}, the frontend expected bare state,
+    // and the configStore silently overwrote in-memory survey settings with
+    // undefined. This test pins the contract so the bug cannot recur.
+    const stateKeys = ["version", "color_coding_enabled", "surveys", "concept_survey_links", "speaker_choices"];
+    const bare = {
+      version: 1,
+      color_coding_enabled: true,
+      surveys: { klq: { display_label: "Kurdish List", display_color: "teal" } },
+      concept_survey_links: {},
+      speaker_choices: {},
+    };
+
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers(), json: async () => bare });
+    const fromGet = await getSurveyOverlap();
+    expect(Object.keys(fromGet).sort()).toEqual(stateKeys.sort());
+    expect((fromGet as unknown as Record<string, unknown>).survey_overlap).toBeUndefined();
+    expect((fromGet as unknown as Record<string, unknown>).success).toBeUndefined();
+
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers(), json: async () => bare });
+    const fromPost = await updateSurveyOverlap({ color_coding_enabled: true });
+    expect(Object.keys(fromPost).sort()).toEqual(stateKeys.sort());
+    expect((fromPost as unknown as Record<string, unknown>).survey_overlap).toBeUndefined();
+    expect((fromPost as unknown as Record<string, unknown>).success).toBeUndefined();
   });
 });
 

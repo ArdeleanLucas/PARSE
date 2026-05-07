@@ -20,13 +20,13 @@ def _api_update_config(self) -> None:
     self._send_json(response.status, response.payload)
 
 def _api_get_survey_overlap(self) -> None:
-    self._send_json(_server.HTTPStatus.OK, {'survey_overlap': load_survey_overlap_state(_server._project_root())})
+    self._send_json(_server.HTTPStatus.OK, load_survey_overlap_state(_server._project_root()))
 
 def _api_post_survey_overlap(self) -> None:
     body = self._expect_object(self._read_json_body(), 'survey overlap payload')
     patch = self._expect_object(body.get('survey_overlap', body), 'survey_overlap')
     state = update_survey_overlap_state(_server._project_root(), patch)
-    self._send_json(_server.HTTPStatus.OK, {'success': True, 'survey_overlap': state})
+    self._send_json(_server.HTTPStatus.OK, state)
 
 def _api_auth_key(self) -> None:
     """POST /api/auth/key — store a direct API key."""

@@ -118,7 +118,11 @@ describe('RightPanel', () => {
     const surveyHeader = screen.getByRole('button', { name: /Survey Values/i });
     const timestampHeader = screen.getByRole('button', { name: /Timestamp tools/i });
     expect(surveyHeader.compareDocumentPosition(timestampHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText(/Current survey/i).textContent ?? '').toContain('Jbil Modal');
+    const summary = screen.getByTestId('survey-current-summary');
+    expect(summary.textContent ?? '').toContain('Active survey');
+    expect(summary.textContent ?? '').toContain('Jbil Modal');
+    expect(summary.textContent ?? '').toContain('Source item');
+    expect(summary.textContent ?? '').toContain('JBIL_100');
 
     fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
 

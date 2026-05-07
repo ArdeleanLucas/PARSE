@@ -212,11 +212,11 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
             "put": {"tags": ["Config"], "summary": "Update project configuration", "operationId": "putConfig", "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("Updated project configuration", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
         },
         "/api/survey-overlap": {
-            "get": {"tags": ["Config"], "summary": "Read survey-overlap sidecar state", "operationId": "getSurveyOverlap", "responses": {"200": _response("Survey-overlap sidecar state", _schema_ref("GenericObject")), "500": _response("Server error", _schema_ref("ErrorResponse"))}},
+            "get": {"tags": ["Config"], "summary": "Read survey-overlap sidecar state", "description": "Returns the SurveyOverlapState payload directly (no envelope, no success wrapper).", "operationId": "getSurveyOverlap", "responses": {"200": _response("Survey-overlap sidecar state", _schema_ref("GenericObject")), "500": _response("Server error", _schema_ref("ErrorResponse"))}},
             "post": {
                 "tags": ["Config"],
                 "summary": "Patch survey labels, links, color toggle, and per-speaker choices",
-                "description": "Survey-overlap patches merge by default. Optional boolean flags reset_surveys, reset_speaker_choices, and reset_concept_survey_links clear those sections before any supplied replacement entries are merged.",
+                "description": "Survey-overlap patches merge by default. Optional boolean flags reset_surveys, reset_speaker_choices, and reset_concept_survey_links clear those sections before any supplied replacement entries are merged. The response is the SurveyOverlapState payload directly (no envelope, no success wrapper).",
                 "operationId": "postSurveyOverlap",
                 "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))},
                 "responses": {"200": _response("Updated survey-overlap state", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))},

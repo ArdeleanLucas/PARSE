@@ -149,10 +149,17 @@ export function SurveyValuesSection({
         ) : (
           <>
             {activeConcept ? (
-              <div className="rounded-md bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
-                <span className="font-semibold text-slate-600">
-                  Current survey <span className="ml-1 font-mono text-slate-700">{surveyLabelFor(resolved.surveyId, surveySettings)} {resolved.sourceItem}</span>
-                </span>
+              <div className="rounded-md bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500 space-y-0.5" data-testid="survey-current-summary">
+                <div>
+                  <span className="font-semibold text-slate-600">Active survey</span>
+                  <span className="ml-1 font-mono text-slate-700">{surveyLabelFor(resolved.surveyId, surveySettings) || '—'}</span>
+                </div>
+                {resolved.sourceItem ? (
+                  <div>
+                    <span className="font-semibold text-slate-600">Source item</span>
+                    <span className="ml-1 font-mono text-slate-700">{resolved.sourceItem}</span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
