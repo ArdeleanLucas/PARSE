@@ -25,7 +25,7 @@ import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
 import { rerunLexemeIpa, rerunLexemeOrtho, saveLexemeNote } from "../../../api/client";
-import type { LexemeNoteEntry, LexemeRerunPad, LexemeRerunRequest } from "../../../api/types";
+import { LEXEME_RERUN_PAD_VALUES, type LexemeNoteEntry, type LexemeRerunPad, type LexemeRerunRequest } from "../../../api/types";
 import { useEnrichmentStore } from "../../../stores/enrichmentStore";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
@@ -44,14 +44,14 @@ type RerunDialogState = { field: RerunField; error: string | null } | null;
 type LocalUndoEntry = { field: RerunField; value: string; orthoUserEdited?: boolean };
 
 const DEFAULT_RERUN_PAD: LexemeRerunPad = 0.2;
-const RERUN_PAD_OPTIONS: LexemeRerunPad[] = [0.0, 0.2, 0.5];
+const RERUN_PAD_OPTIONS: LexemeRerunPad[] = [...LEXEME_RERUN_PAD_VALUES];
 
 function formatRerunPad(value: LexemeRerunPad): string {
   return value.toFixed(1);
 }
 
 function rerunRequestWithPad(request: LexemeRerunRequest, pad: LexemeRerunPad): LexemeRerunRequest {
-  return pad === DEFAULT_RERUN_PAD ? request : { ...request, pad };
+  return { ...request, pad };
 }
 
 function truncatePreview(value: string): string {

@@ -1169,7 +1169,7 @@ describe('AnnotateView', () => {
       expect(screen.getByTestId('rerun-pad-0.5').getAttribute('aria-pressed')).toBe('false');
     });
 
-    it('Run IPA opens the overwrite dialog and POSTs only after primary confirm', async () => {
+    it('Run IPA opens the overwrite dialog and POSTs the explicit default pad only after primary confirm', async () => {
       mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
 
       renderWaterAnnotateView();
@@ -1185,6 +1185,7 @@ describe('AnnotateView', () => {
         concept_key: 'water',
         start: 1.25,
         end: 2.5,
+        pad: 0.2,
       }));
     });
 

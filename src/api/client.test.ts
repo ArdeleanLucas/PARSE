@@ -14,6 +14,7 @@ import {
   startChatSession,
   updateSurveyOverlap,
 } from "./client";
+import { LEXEME_RERUN_PAD_VALUES } from "./types";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -321,6 +322,7 @@ describe("annotation API client contracts", () => {
   });
 
   it("rerunLexemeOrtho posts pad=0.5 when provided", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
     fetchMock.mockResolvedValue({
       ok: true,
       headers: new Headers(),
@@ -340,6 +342,7 @@ describe("annotation API client contracts", () => {
   });
 
   it("rerunLexemeOrtho omits pad when not provided", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toContain(0.2);
     fetchMock.mockResolvedValue({
       ok: true,
       headers: new Headers(),
@@ -353,6 +356,7 @@ describe("annotation API client contracts", () => {
   });
 
   it("rerunLexemeIpa accepts pad too", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
     fetchMock.mockResolvedValue({
       ok: true,
       headers: new Headers(),

@@ -78,7 +78,8 @@ export interface IpaCandidatesPayload {
 }
 
 
-export type LexemeRerunPad = 0.0 | 0.2 | 0.5;
+export const LEXEME_RERUN_PAD_VALUES = [0.0, 0.2, 0.5] as const;
+export type LexemeRerunPad = typeof LEXEME_RERUN_PAD_VALUES[number];
 
 export interface LexemeRerunRequest {
   speaker: string;
