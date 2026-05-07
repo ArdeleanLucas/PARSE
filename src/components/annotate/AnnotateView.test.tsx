@@ -1140,7 +1140,7 @@ describe('AnnotateView', () => {
       await waitFor(() => expect(screen.queryByTestId('rerun-confirm-modal')).toBeNull());
     });
 
-    it('success response replaces the IPA value', async () => {
+    it('success response replaces the IPA value AND persists via saveLexemeAnnotation + saveSpeaker', async () => {
       mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
       mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
 
@@ -1149,9 +1149,19 @@ describe('AnnotateView', () => {
       fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
 
       await waitFor(() => expect(getIpaInput().value).toBe('new-ipa'));
+      expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+        speaker: 'Fail01',
+        oldStart: 1.25,
+        oldEnd: 2.5,
+        newStart: 1.25,
+        newEnd: 2.5,
+        ipaText: 'new-ipa',
+        conceptName: 'water',
+      }));
+      expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything());
     });
 
-    it('success response on Run ORTH replaces the orthographic value AND sets orthoUserEdited', async () => {
+    it('success response on Run ORTH replaces the orthographic value AND persists with orthoEdited=true', async () => {
       mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', orthoWords: 'old-orth', start: 1.25, end: 2.5 }]);
       mockRerunLexemeOrtho.mockResolvedValueOnce({ ortho: 'نوێ', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
 
@@ -1160,12 +1170,11 @@ describe('AnnotateView', () => {
       fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
 
       await waitFor(() => expect(getOrthographicInput().value).toBe('نوێ'));
-      fireEvent.click(screen.getByTestId('save-lexeme-annotation'));
-
-      await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
         orthoText: 'نوێ',
         orthoEdited: true,
-      })));
+      }));
+      expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything());
     });
 
     it('⌘Z after a successful re-run restores the previous value', async () => {
@@ -1207,6 +1216,35 @@ describe('AnnotateView', () => {
 
       expect(await screen.findByText('Network error. Try again.')).toBeTruthy();
       expect(getIpaInput().value).toBe('old-ipa');
+    });
+
+    it('Run IPA save-store failure shows error and keeps modal open', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+      mockSaveLexemeAnnotation.mockReturnValueOnce({ ok: false, error: 'concept boundary moved' });
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      expect(await screen.findByText('concept boundary moved')).toBeTruthy();
+      expect(screen.getByTestId('rerun-confirm-modal')).toBeTruthy();
+      expect(getIpaInput().value).toBe('old-ipa');
+      expect(mockSaveSpeaker).not.toHaveBeenCalled();
+    });
+
+    it('Run IPA save-disk failure surfaces a timestamp error and closes the modal', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+      mockSaveSpeaker.mockRejectedValueOnce(new Error('disk full'));
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      await waitFor(() => expect(screen.queryByTestId('rerun-confirm-modal')).toBeNull());
+      expect(getIpaInput().value).toBe('new-ipa');
+      expect((await screen.findByTestId('lexeme-timestamp-msg')).textContent).toContain('disk full');
     });
   });
 

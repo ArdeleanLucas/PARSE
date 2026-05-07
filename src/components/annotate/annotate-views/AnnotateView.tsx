@@ -691,30 +691,69 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [rerunBusy, rerunRequest]);
 
   const confirmRerun = useCallback(async () => {
-    if (!rerunDialog || !rerunRequest) return;
-    setRerunBusy(rerunDialog.field);
+    if (!rerunDialog || !rerunRequest || !conceptInterval) return;
+    const dialogField = rerunDialog.field;
+    setRerunBusy(dialogField);
     setRerunDialog((current) => current ? { ...current, error: null } : current);
+
+    let apiResultText: string;
     try {
-      if (rerunDialog.field === "ipa") {
+      if (dialogField === "ipa") {
         const result = await rerunLexemeIpa(rerunRequest);
-        localUndoRef.current.push({ field: "ipa", value: ipa });
-        setIpa(result.ipa);
-        setUndoToast(`Re-ran IPA — set to "${truncatePreview(result.ipa)}"`);
+        apiResultText = result.ipa;
       } else {
         const result = await rerunLexemeOrtho(rerunRequest);
-        localUndoRef.current.push({ field: "ortho", value: ortho, orthoUserEdited });
-        setOrtho(result.ortho);
-        setOrthoUserEdited(true);
-        setUndoToast(`Re-ran ORTH — set to "${truncatePreview(result.ortho)}"`);
+        apiResultText = result.ortho;
       }
-      setRerunDialog(null);
     } catch (error) {
       const message = extractRerunError(error);
       setRerunDialog((current) => current ? { ...current, error: message } : current);
-    } finally {
       setRerunBusy(null);
+      return;
     }
-  }, [ipa, ortho, orthoUserEdited, rerunDialog, rerunRequest]);
+
+    const saveResult = saveLexemeAnnotation({
+      speaker,
+      oldStart: conceptInterval.start,
+      oldEnd: conceptInterval.end,
+      newStart: rerunRequest.start,
+      newEnd: rerunRequest.end,
+      ipaText: dialogField === "ipa" ? apiResultText : ipa,
+      orthoText: dialogField === "ortho" ? apiResultText : saveOrthoText,
+      orthoEdited: dialogField === "ortho" ? true : orthoUserEdited,
+      conceptName: concept.name,
+    });
+    if (!saveResult.ok) {
+      setRerunDialog((current) => current ? { ...current, error: saveResult.error } : current);
+      setRerunBusy(null);
+      return;
+    }
+
+    if (dialogField === "ipa") {
+      localUndoRef.current.push({ field: "ipa", value: ipa });
+      setIpa(apiResultText);
+    } else {
+      localUndoRef.current.push({ field: "ortho", value: ortho, orthoUserEdited });
+      setOrtho(apiResultText);
+      setOrthoUserEdited(true);
+    }
+
+    try {
+      await saveSpeaker(speaker, record);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setTimestampMessage({ kind: "err", text: message });
+      setRerunDialog(null);
+      setRerunBusy(null);
+      return;
+    }
+
+    setUndoToast(dialogField === "ipa"
+      ? `Re-ran IPA — saved "${truncatePreview(apiResultText)}"`
+      : `Re-ran ORTH — saved "${truncatePreview(apiResultText)}"`);
+    setRerunDialog(null);
+    setRerunBusy(null);
+  }, [concept.name, conceptInterval, ipa, ortho, orthoUserEdited, record, rerunDialog, rerunRequest, saveLexemeAnnotation, saveOrthoText, saveSpeaker, speaker]);
 
   const closeRerunDialog = useCallback(() => {
     if (rerunBusy) return;
