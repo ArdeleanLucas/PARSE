@@ -5,9 +5,11 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Loader2,
   Pause,
   Play,
   Redo2,
+  RotateCw,
   Save,
   SkipBack,
   SkipForward,
@@ -22,7 +24,7 @@ import { LEXEME_SCOPE_TIERS } from "../../../stores/annotation/actions";
 import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
-import { saveLexemeNote } from "../../../api/client";
+import { rerunLexemeIpa, rerunLexemeOrtho, saveLexemeNote } from "../../../api/client";
 import type { LexemeNoteEntry } from "../../../api/types";
 import { useEnrichmentStore } from "../../../stores/enrichmentStore";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
@@ -35,6 +37,24 @@ import type { AnnotateViewProps } from "./types";
 export { pickOrthoIntervalForConcept };
 
 const SPEC_HEIGHT = 180;
+
+type RerunField = "ipa" | "ortho";
+type RerunDialogState = { field: RerunField; error: string | null } | null;
+
+type LocalUndoEntry = { field: RerunField; value: string; orthoUserEdited?: boolean };
+
+function truncatePreview(value: string): string {
+  return value.length > 80 ? `${value.slice(0, 77)}…` : value;
+}
+
+function extractRerunError(error: unknown): string {
+  if (error instanceof TypeError && /failed to fetch/i.test(error.message)) return "Network error. Try again.";
+  if (error instanceof Error) {
+    const match = error.message.match(/\{\s*"error"\s*:\s*"([^"]+)"\s*\}/);
+    return match?.[1] ?? error.message;
+  }
+  return String(error || "Re-run failed.");
+}
 
 export const AnnotateView: React.FC<AnnotateViewProps> = ({
   concept,
@@ -66,6 +86,18 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [undoToast]);
 
   const handleUndo = useCallback(() => {
+    const local = localUndoRef.current.pop();
+    if (local) {
+      if (local.field === "ipa") {
+        setIpa(local.value);
+        setUndoToast("Undid IPA re-run");
+      } else {
+        setOrtho(local.value);
+        setOrthoUserEdited(Boolean(local.orthoUserEdited));
+        setUndoToast("Undid ORTH re-run");
+      }
+      return;
+    }
     const label = undoAnnotation(speaker);
     if (label) setUndoToast(`Undid ${label}`);
   }, [speaker, undoAnnotation]);
@@ -176,6 +208,11 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
+  const [rerunDialog, setRerunDialog] = useState<RerunDialogState>(null);
+  const [rerunBusy, setRerunBusy] = useState<RerunField | null>(null);
+  const localUndoRef = useRef<LocalUndoEntry[]>([]);
+  const rerunPrimaryRef = useRef<HTMLButtonElement | null>(null);
+  const rerunCancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setIpa(ipaInterval?.text ?? "");
@@ -187,6 +224,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
+    setRerunDialog(null);
+    setRerunBusy(null);
+    localUndoRef.current = [];
   }, [speaker, concept.key, conceptInterval, ipaInterval, displayedOrthoText]);
 
   useEffect(() => {
@@ -631,6 +671,107 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   const fmt = formatPlaybackTime;
 
+  const rerunRequest = useMemo(() => {
+    if (!conceptInterval) return null;
+    const parsedStart = parseFloat(editStart);
+    const parsedEnd = parseFloat(editEnd);
+    const start = Number.isFinite(parsedStart) ? parsedStart : conceptInterval.start;
+    const end = Number.isFinite(parsedEnd) ? parsedEnd : conceptInterval.end;
+    return { speaker, concept_key: concept.key, start, end };
+  }, [concept.key, conceptInterval, editEnd, editStart, speaker]);
+
+  const rerunIntervalLabel = rerunRequest
+    ? `${rerunRequest.start.toFixed(3)} – ${rerunRequest.end.toFixed(3)} s · Δ ${(rerunRequest.end - rerunRequest.start).toFixed(3)}s`
+    : "No interval";
+
+  const startRerun = useCallback((field: RerunField) => {
+    if (!rerunRequest || rerunBusy) return;
+    setRerunDialog({ field, error: null });
+  }, [rerunBusy, rerunRequest]);
+
+  const confirmRerun = useCallback(async () => {
+    if (!rerunDialog || !rerunRequest) return;
+    setRerunBusy(rerunDialog.field);
+    setRerunDialog((current) => current ? { ...current, error: null } : current);
+    try {
+      if (rerunDialog.field === "ipa") {
+        const result = await rerunLexemeIpa(rerunRequest);
+        localUndoRef.current.push({ field: "ipa", value: ipa });
+        setIpa(result.ipa);
+        setUndoToast(`Re-ran IPA — set to "${truncatePreview(result.ipa)}"`);
+      } else {
+        const result = await rerunLexemeOrtho(rerunRequest);
+        localUndoRef.current.push({ field: "ortho", value: ortho, orthoUserEdited });
+        setOrtho(result.ortho);
+        setOrthoUserEdited(true);
+        setUndoToast(`Re-ran ORTH — set to "${truncatePreview(result.ortho)}"`);
+      }
+      setRerunDialog(null);
+    } catch (error) {
+      const message = extractRerunError(error);
+      setRerunDialog((current) => current ? { ...current, error: message } : current);
+    } finally {
+      setRerunBusy(null);
+    }
+  }, [ipa, ortho, orthoUserEdited, rerunDialog, rerunRequest]);
+
+  const closeRerunDialog = useCallback(() => {
+    if (rerunBusy) return;
+    setRerunDialog(null);
+  }, [rerunBusy]);
+
+  useEffect(() => {
+    if (!rerunDialog) return;
+    const previousActive = document.activeElement as HTMLElement | null;
+    const focusId = window.setTimeout(() => rerunPrimaryRef.current?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRerunDialog();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const first = rerunCancelRef.current;
+      const last = rerunPrimaryRef.current;
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusId);
+      window.removeEventListener("keydown", onKeyDown);
+      previousActive?.focus?.();
+    };
+  }, [closeRerunDialog, rerunDialog]);
+
+  const rerunButtonClass = "inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50";
+
+  const renderRerunButton = (field: RerunField) => {
+    const busy = rerunBusy === field;
+    return (
+      <button
+        type="button"
+        data-testid={field === "ipa" ? "run-ipa-button" : "run-orth-button"}
+        disabled={!conceptInterval || Boolean(rerunBusy)}
+        onClick={() => startRerun(field)}
+        className={rerunButtonClass}
+      >
+        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
+        {busy ? "Running…" : field === "ipa" ? "Run IPA" : "Run ORTH"}
+      </button>
+    );
+  };
+
+  const rerunDialogValue = rerunDialog?.field === "ipa" ? ipa : ortho;
+  const rerunDialogTitle = rerunDialog?.field === "ipa" ? "Overwrite IPA transcription?" : "Overwrite orthographic form?";
+  const rerunDialogPrimary = rerunDialog?.field === "ipa" ? "Run IPA & overwrite" : "Run ORTH & overwrite";
+
   return (
     <main className="flex-1 overflow-y-auto bg-slate-50">
       <section className="border-b border-slate-200 bg-white">
@@ -808,7 +949,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       <section className="px-8 py-6">
         <div className="mx-auto max-w-4xl space-y-5">
           <div>
-            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">IPA Transcription</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">IPA Transcription</label>
+              {renderRerunButton("ipa")}
+            </div>
             <input
               value={ipa}
               onChange={(e) => setIpa(e.target.value)}
@@ -819,7 +963,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
 
           <div>
-            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Orthographic</label>
+              {renderRerunButton("ortho")}
+            </div>
             <input
               value={ortho}
               onChange={(e) => {
@@ -1096,6 +1243,68 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
         )}
       </section>
+      {rerunDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeRerunDialog();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rerun-confirm-title"
+            data-testid="rerun-confirm-modal"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2 id="rerun-confirm-title" className="text-base font-semibold text-slate-900">{rerunDialogTitle}</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This will replace the current value. This action can be undone with ⌘Z.
+            </p>
+            <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
+              {rerunIntervalLabel}
+            </div>
+            <div className="mt-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Current value</div>
+              <div
+                dir={rerunDialog.field === "ortho" ? "rtl" : "ltr"}
+                className={`mt-1 min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 ${rerunDialog.field === "ortho" ? "font-serif" : "font-mono"}`}
+              >
+                {truncatePreview(rerunDialogValue) || "Empty"}
+              </div>
+            </div>
+            {rerunDialog.error ? (
+              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {rerunDialog.error}
+              </div>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                ref={rerunCancelRef}
+                data-testid="rerun-confirm-cancel"
+                disabled={Boolean(rerunBusy)}
+                onClick={closeRerunDialog}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                ref={rerunPrimaryRef}
+                data-testid="rerun-confirm-primary"
+                disabled={Boolean(rerunBusy)}
+                onClick={() => void confirmRerun()}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {rerunBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+                {rerunDialogPrimary}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {settingsAnchor && (
         <SpectrogramSettings
           anchor={settingsAnchor}

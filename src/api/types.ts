@@ -77,6 +77,31 @@ export interface IpaCandidatesPayload {
   review: Record<string, IpaReviewState>;
 }
 
+
+export interface LexemeRerunRequest {
+  speaker: string;
+  concept_key: string;
+  start: number;
+  end: number;
+}
+
+export interface LexemeRerunInterval {
+  start: number;
+  end: number;
+}
+
+export interface LexemeRerunIpaResponse {
+  ipa: string;
+  interval: LexemeRerunInterval;
+  source: "rerun";
+}
+
+export interface LexemeRerunOrthoResponse {
+  ortho: string;
+  interval: LexemeRerunInterval;
+  source: "rerun";
+}
+
 export interface AnnotationRecord {
   speaker: string;
   tiers: Record<string, AnnotationTier>; // keys: ipa_phone, ipa, ortho, ortho_words, stt, concept, sentence, speaker

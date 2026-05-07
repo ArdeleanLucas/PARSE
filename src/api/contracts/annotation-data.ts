@@ -1,4 +1,4 @@
-import type { AnnotationRecord, IpaCandidatesPayload, IpaReviewState, IpaReviewUpdate, SttSegmentsPayload } from "../types";
+import type { AnnotationRecord, IpaCandidatesPayload, IpaReviewState, IpaReviewUpdate, LexemeRerunIpaResponse, LexemeRerunOrthoResponse, LexemeRerunRequest, SttSegmentsPayload } from "../types";
 import { apiFetch } from "./shared";
 
 type SaveAnnotationResponse = AnnotationRecord | { annotation?: AnnotationRecord };
@@ -43,4 +43,19 @@ export async function putIpaReview(
     },
   );
   return payload.review;
+}
+
+
+export async function rerunLexemeIpa(request: LexemeRerunRequest): Promise<LexemeRerunIpaResponse> {
+  return apiFetch<LexemeRerunIpaResponse>("/api/lexeme/run_ipa", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function rerunLexemeOrtho(request: LexemeRerunRequest): Promise<LexemeRerunOrthoResponse> {
+  return apiFetch<LexemeRerunOrthoResponse>("/api/lexeme/run_ortho", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }
