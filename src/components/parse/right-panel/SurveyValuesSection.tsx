@@ -6,6 +6,7 @@ import {
   aggregateWorkspaceSurveys,
   defaultSurveySettings,
   resolveConceptSurvey,
+  SURVEY_CHIP_CLASSES,
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
@@ -37,22 +38,8 @@ const SURVEY_COLOR_PALETTE = [
   'slate',
 ] as const;
 
-const colorClass: Record<string, string> = {
-  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
-  violet: 'bg-violet-50 text-violet-700 ring-violet-200',
-  blue: 'bg-blue-50 text-blue-700 ring-blue-200',
-  sky: 'bg-sky-50 text-sky-700 ring-sky-200',
-  teal: 'bg-teal-50 text-teal-700 ring-teal-200',
-  emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  amber: 'bg-amber-50 text-amber-700 ring-amber-200',
-  orange: 'bg-orange-50 text-orange-700 ring-orange-200',
-  rose: 'bg-rose-50 text-rose-700 ring-rose-200',
-  pink: 'bg-pink-50 text-pink-700 ring-pink-200',
-  slate: 'bg-slate-100 text-slate-600 ring-slate-200',
-};
-
 function chipClass(active: boolean, colorKey: string, colorCoding: boolean): string {
-  if (active && colorCoding) return colorClass[colorKey] ?? colorClass.slate;
+  if (active && colorCoding) return SURVEY_CHIP_CLASSES[colorKey] ?? SURVEY_CHIP_CLASSES.slate;
   if (active) return 'bg-slate-900 text-white ring-slate-900';
   return 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50';
 }
@@ -245,7 +232,7 @@ export function SurveyValuesSection({
                               title={color}
                               disabled={!surveyColorCodingEnabled}
                               onClick={() => updateColor(surveyId, color)}
-                              className={`h-5 rounded-full ring-1 disabled:cursor-not-allowed ${colorClass[color]} ${displayColor === color ? 'outline outline-2 outline-offset-1 outline-slate-400' : ''}`}
+                              className={`h-5 rounded-full ring-1 disabled:cursor-not-allowed ${SURVEY_CHIP_CLASSES[color] ?? SURVEY_CHIP_CLASSES.slate} ${displayColor === color ? 'outline outline-2 outline-offset-1 outline-slate-400' : ''}`}
                             />
                           ))}
                         </div>

@@ -276,7 +276,7 @@ export function ConceptSidebar({
                     +{concept.mergedKeys.length - 1}
                   </span>
                 )}
-                <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.displayColor ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
+                <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
               </button>
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">

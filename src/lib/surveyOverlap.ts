@@ -38,8 +38,6 @@ export const SURVEY_BADGE_TEXT_CLASSES: Record<string, string> = {
   slate: 'text-slate-400',
 };
 
-
-
 export interface ResolvedConceptSurvey {
   conceptKey: string;
   surveyId: string;
