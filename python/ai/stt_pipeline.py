@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 try:
-    from .provider import Segment, WordSpan, get_provider, load_ai_config
+    from .provider import Segment, WordSpan, get_ortho_provider, get_provider, load_ai_config
 except ImportError:
-    from provider import Segment, WordSpan, get_provider, load_ai_config  # type: ignore
+    from provider import Segment, WordSpan, get_ortho_provider, get_provider, load_ai_config  # type: ignore
 
 
 LONG_FILE_WARNING_SECONDS = 20.0 * 60.0
@@ -235,6 +235,95 @@ def run_stt_pipeline(
         "model": model_name_from_config(config),
         "segments": cleaned,
     }
+
+
+def _join_segment_text(segments: List[Segment]) -> str:
+    return " ".join(str(segment.get("text", "") or "").strip() for segment in segments if str(segment.get("text", "") or "").strip()).strip()
+
+
+def _slice_audio_to_temp_wav(audio_path: Path, start: float, end: float) -> Path:
+    try:
+        import soundfile as sf
+    except ImportError as exc:  # pragma: no cover - dependency is present in PARSE runtimes
+        raise RuntimeError("soundfile is required for interval STT fallback") from exc
+    import tempfile
+
+    data, sample_rate = sf.read(str(audio_path), dtype="float32", always_2d=True)
+    start_sample = max(0, int(round(start * float(sample_rate))))
+    end_sample = min(len(data), int(round(end * float(sample_rate))))
+    if end_sample <= start_sample:
+        raise ValueError("interval slice is empty")
+    window = data[start_sample:end_sample]
+    if getattr(window, "ndim", 1) == 2 and window.shape[1] > 1:
+        window = window.mean(axis=1)
+    handle = tempfile.NamedTemporaryFile(prefix="parse-lexeme-rerun-", suffix=".wav", delete=False)
+    handle.close()
+    temp_path = Path(handle.name)
+    sf.write(str(temp_path), window, int(sample_rate))
+    return temp_path
+
+
+def run_stt_on_interval(
+    audio_path: Path,
+    start: float,
+    end: float,
+    *,
+    language: Optional[str] = None,
+    config_path: Optional[Path] = None,
+    provider: Optional[Any] = None,
+) -> str:
+    """Run orthographic transcription on one bounded [start, end] interval.
+
+    The helper prefers PARSE's ORTH provider and its in-memory segmented API
+    when available, avoiding full-file Whisper on the synchronous lexeme button
+    path. Providers without in-memory support fall back to a temporary WAV slice.
+    """
+    path = Path(audio_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError("Input audio does not exist: {0}".format(path))
+    start_f = float(start)
+    end_f = float(end)
+    if not (start_f >= 0.0 and end_f > start_f):
+        raise ValueError("interval must satisfy start >= 0 and end > start")
+
+    provider_obj = provider
+    if provider_obj is None:
+        config = build_provider_config(config_path=config_path, language=language)
+        provider_obj = get_ortho_provider(config)
+
+    segmented = getattr(provider_obj, "transcribe_segments_in_memory", None)
+    if callable(segmented):
+        try:
+            from .forced_align import DEFAULT_SAMPLE_RATE, _load_audio_mono_16k
+        except ImportError:
+            from forced_align import DEFAULT_SAMPLE_RATE, _load_audio_mono_16k  # type: ignore
+        audio_tensor = _load_audio_mono_16k(path)
+        segments = segmented(audio_tensor, [(start_f, end_f)], language=language, progress_callback=None, sample_rate=DEFAULT_SAMPLE_RATE)
+        return _join_segment_text(segments)
+
+    try:
+        segments = provider_obj.transcribe(
+            audio_path=path,
+            language=language,
+            progress_callback=None,
+            start_sec=start_f,
+            end_sec=end_f,
+        )
+        return _join_segment_text(segments)
+    except TypeError as exc:
+        if "start_sec" not in str(exc) and "end_sec" not in str(exc) and "unexpected" not in str(exc):
+            raise
+
+    temp_path: Optional[Path] = None
+    try:
+        temp_path = _slice_audio_to_temp_wav(path, start_f, end_f)
+        return _join_segment_text(provider_obj.transcribe(audio_path=temp_path, language=language, progress_callback=None))
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:
