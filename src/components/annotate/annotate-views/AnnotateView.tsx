@@ -208,7 +208,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   useEffect(() => {
     setUserNote(lexemeNotesBlock?.user_note ?? "");
-  }, [lexemeNotesBlock?.user_note]);
+  }, [speaker, concept.key, lexemeNotesBlock?.user_note]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);

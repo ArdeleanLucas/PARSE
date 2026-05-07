@@ -524,6 +524,41 @@ describe('AnnotateView', () => {
     }));
   });
 
+  it('clears userNote when navigating to a concept with no saved note even if the previous concept had unblurred edits', () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 },
+      { conceptText: 'fire', ipa: 'fr', ortho: 'ئاگر', start: 3, end: 4 },
+    ]);
+    mockEnrichmentData = { lexeme_notes: {} };
+
+    const { rerender } = render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const waterTextarea = screen.getByTestId('lexeme-user-note-Fail01-water') as HTMLTextAreaElement;
+    fireEvent.change(waterTextarea, { target: { value: 'unblurred edit' } });
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 2, key: 'fire', name: 'fire' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const fireTextarea = screen.getByTestId('lexeme-user-note-Fail01-fire') as HTMLTextAreaElement;
+    expect(fireTextarea.value).toBe('');
+  });
 
   it('renders a live waveform playhead chip from playback state with two-decimal precision', () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
