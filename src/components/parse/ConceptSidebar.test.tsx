@@ -402,4 +402,104 @@ describe('ConceptSidebar', () => {
     expect(screen.getByText('+2').getAttribute('title')).toContain('head (A)');
   });
 
+  it('scopes rows to the active speaker elicited keys and matches merged or variant keys', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[
+          { id: 1, key: '1', name: 'water', tag: 'untagged' as const },
+          { id: 2, key: '2', name: 'fire', tag: 'confirmed' as const },
+          { id: 3, key: 'display-3', name: 'brother of husband', tag: 'untagged' as const, mergedKeys: ['3a', '3b'] },
+          { id: 4, key: 'display-4', name: 'variant row', tag: 'untagged' as const, variants: [{ conceptKey: '4b', conceptEn: 'variant row B', variantLabel: 'B' }] },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail02"
+        scopedToSpeaker
+        onScopedToSpeakerChange={vi.fn()}
+        elicitedConceptKeys={new Set(['1', '3b', '4b'])}
+      />,
+    );
+
+    expect(screen.getByText('Scoped to Fail02')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /fire/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /brother of husband/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /variant row/i })).toBeTruthy();
+    expect(screen.getByText('3 concepts')).toBeTruthy();
+  });
+
+  it('shows all master rows with no-data suffixes when unscoped', () => {
+    const onScopedToSpeakerChange = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[
+          { id: 1, key: '1', name: 'water', tag: 'untagged' as const },
+          { id: 2, key: '2', name: 'fire', tag: 'confirmed' as const },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail02"
+        scopedToSpeaker={false}
+        onScopedToSpeakerChange={onScopedToSpeakerChange}
+        elicitedConceptKeys={new Set(['1'])}
+      />,
+    );
+
+    expect(screen.getByText('Showing all 2 master')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
+    const fire = screen.getByRole('button', { name: /fire/i });
+    expect(fire.className).toContain('text-slate-400');
+    expect(fire.textContent ?? '').toContain('no data');
+    fireEvent.click(screen.getByRole('button', { name: /Scope to speaker/i }));
+    expect(onScopedToSpeakerChange).toHaveBeenCalledWith(true);
+  });
+
+  it('falls back to the master list with an annotation-file note for an empty scoped set', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="1n"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail02"
+        scopedToSpeaker
+        onScopedToSpeakerChange={vi.fn()}
+        elicitedConceptKeys={new Set()}
+      />,
+    );
+
+    expect(screen.getByText('No annotation file for Fail02 — showing master list')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /fire/i })).toBeTruthy();
+  });
+
 });

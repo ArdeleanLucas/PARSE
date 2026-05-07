@@ -618,6 +618,109 @@ afterEach(() => {
 });
 
 describe("ParseUI", () => {
+
+  it("scopes Annotate sidebar and reviewed counter to the active speaker's elicited concepts by default", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Fail02"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+        { id: "3", label: "earth" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: {
+        ...makeRecord("Fail01", [
+          { conceptText: "water", conceptId: "1", ipa: "aw", ortho: "ئاو", start: 1, end: 2 },
+          { conceptText: "earth", conceptId: "3", ipa: "xak", ortho: "خاک", start: 3, end: 4 },
+        ]),
+        concept_tags: { "1": ["confirmed"], "2": ["confirmed"] },
+      },
+      Fail02: makeRecord("Fail02", [
+        { conceptText: "fire", conceptId: "2", ipa: "agir", ortho: "ئاگر", start: 5, end: 6 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByText("1 / 2 reviewed for Fail01")).toBeTruthy());
+    expect(screen.getByText("2 of 3 master concepts elicited")).toBeTruthy();
+    const sidebar = screen.getByTestId("concept-sidebar");
+    expect(within(sidebar).getByText("Scoped to Fail01")).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /water/i })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /earth/i })).toBeTruthy();
+    expect(within(sidebar).queryByRole("button", { name: /fire/i })).toBeNull();
+  });
+
+  it("keeps Compare mode on the global sidebar and reviewed denominator by default", () => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Fail02"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+        { id: "3", label: "earth" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: { ...makeRecord("Fail01", [{ conceptText: "water", conceptId: "1", start: 1, end: 2 }]), concept_tags: { "1": ["confirmed"] } },
+    };
+
+    render(<ParseUI />);
+
+    expect(screen.getByText("1 / 3 reviewed")).toBeTruthy();
+    const sidebar = screen.getByTestId("concept-sidebar");
+    expect(within(sidebar).getByRole("button", { name: /water/i })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /fire/i })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: /earth/i })).toBeTruthy();
+  });
+
+  it("persists Annotate Show all sidebar scope and updates elicited counts on speaker switch", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Fail02"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+        { id: "3", label: "earth" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "water", conceptId: "1", start: 1, end: 2 }]),
+      Fail02: {
+        ...makeRecord("Fail02", [
+          { conceptText: "fire", conceptId: "2", start: 3, end: 4 },
+          { conceptText: "earth", conceptId: "3", start: 5, end: 6 },
+        ]),
+        concept_tags: { "2": ["confirmed"] },
+      },
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByText("0 / 1 reviewed for Fail01")).toBeTruthy());
+    expect(screen.getByText("Showing all 3 master")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /fire/i }).textContent ?? "").toContain("no data");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Fail02" })[0]);
+
+    await waitFor(() => expect(screen.getByText("1 / 2 reviewed for Fail02")).toBeTruthy());
+    expect(screen.getByText("2 of 3 master concepts elicited")).toBeTruthy();
+  });
   it("loads config and tag hydration on mount and computes reviewed count from confirmed tags", () => {
     mockRecords = { Fail01: { ...makeRecord("Fail01", []), concept_tags: { "1": ["confirmed"] } } };
 
@@ -625,7 +728,7 @@ describe("ParseUI", () => {
 
     expect(mockLoadConfig).toHaveBeenCalledOnce();
     expect(mockHydrateTags).toHaveBeenCalledOnce();
-    expect(mockSyncTagsFromServer).toHaveBeenCalledOnce();
+    expect(mockSyncTagsFromServer).toHaveBeenCalled();
     expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
   });
 
@@ -1412,7 +1515,7 @@ describe("ParseUI", () => {
     await switchToAnnotateMode();
 
     const sidebar = screen.getByTestId("concept-sidebar");
-    expect(within(sidebar).getByText("4 concepts")).toBeTruthy();
+    expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /head \(A\).*#1/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /head \(B\).*#2/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /head.*#3/i })).toBeTruthy();

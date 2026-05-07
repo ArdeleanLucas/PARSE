@@ -37,6 +37,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
+import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { fmtTime } from './lib/fmtTime';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
@@ -101,6 +102,7 @@ type ConceptSortMode = 'az' | '1n' | 'survey';
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
 
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
+const SIDEBAR_SCOPE_STORAGE_PREFIX = 'parse.sidebar.scopedToSpeaker';
 
 function persistCompareNotes(conceptId: number, value: string) {
   try {
@@ -417,6 +419,26 @@ export function ParseUI() {
   });
   useEffect(() => {
     try { localStorage.setItem('parse.currentMode', currentMode); }
+    catch { /* non-fatal */ }
+  }, [currentMode]);
+  const readStoredSidebarScope = (mode: AppMode): boolean => {
+    const fallback = mode === 'annotate';
+    try {
+      const raw = localStorage.getItem(`${SIDEBAR_SCOPE_STORAGE_PREFIX}.${mode}`);
+      if (raw === 'true') return true;
+      if (raw === 'false') return false;
+    } catch { /* non-fatal */ }
+    return fallback;
+  };
+  const [sidebarScopedByMode, setSidebarScopedByMode] = useState<Record<AppMode, boolean>>(() => ({
+    annotate: readStoredSidebarScope('annotate'),
+    compare: readStoredSidebarScope('compare'),
+    tags: readStoredSidebarScope('tags'),
+  }));
+  const scopedToSpeaker = sidebarScopedByMode[currentMode] ?? (currentMode === 'annotate');
+  const setScopedToSpeaker = useCallback((next: boolean) => {
+    setSidebarScopedByMode((previous) => ({ ...previous, [currentMode]: next }));
+    try { localStorage.setItem(`${SIDEBAR_SCOPE_STORAGE_PREFIX}.${currentMode}`, String(next)); }
     catch { /* non-fatal */ }
   }, [currentMode]);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
@@ -1116,6 +1138,18 @@ export function ParseUI() {
     if (!borrowingRoot) return null;
     return borrowingRoot[concept.key] ?? borrowingRoot[concept.name] ?? null;
   }, [concept, enrichmentData]);
+  const activeSpeakerForSidebar = selectedSpeakers[0] ?? null;
+  const elicitedConceptKeys = useMemo(
+    () => speakerElicitedConceptKeys(activeSpeakerForSidebar ? annotationRecords[activeSpeakerForSidebar] : null),
+    [annotationRecords, activeSpeakerForSidebar],
+  );
+
+  const speakerScopedConcepts = useMemo(() => (
+    scopedToSpeaker && activeSpeakerForSidebar && elicitedConceptKeys.size > 0
+      ? filtered.filter((candidate) => conceptMatchesElicitedKeys(candidate, elicitedConceptKeys))
+      : filtered
+  ), [filtered, scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys]);
+
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
     const flagged = getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic');
@@ -1131,7 +1165,24 @@ export function ParseUI() {
   }, [annotationRecords, concept, enrichmentData, getTagsForConcept, activeTagScopeKey, selectedSpeakers, speakers, primaryContactCodes]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
-  const navigationConcepts = filtered.length > 0 ? filtered : concepts;
+  const activeSpeakerProgress = currentMode === 'annotate' && activeSpeakerForSidebar ? activeSpeakerForSidebar : null;
+  const elicitedForSpeaker = activeSpeakerProgress ? elicitedConceptKeys.size : 0;
+  const reviewedForSpeaker = activeSpeakerProgress && elicitedForSpeaker > 0
+    ? concepts.filter((candidate) => (
+      conceptMatchesElicitedKeys(candidate, elicitedConceptKeys)
+      && conceptUnderlyingKeys(candidate).some((key) => getTagsForConcept(key, activeTagScope).some((tag) => tag.id === 'confirmed'))
+    )).length
+    : 0;
+  const progressReviewed = activeSpeakerProgress && elicitedForSpeaker > 0 ? reviewedForSpeaker : reviewed;
+  const progressTotal = activeSpeakerProgress && elicitedForSpeaker > 0 ? elicitedForSpeaker : total;
+  const progressWidth = progressTotal > 0 ? (progressReviewed / progressTotal) * 100 : 0;
+  // Keyboard-arrow navigation prefers the user-visible list. Fall back
+  // through scoped → search-filtered → global so an empty scope (e.g. a
+  // speaker with zero elicited matches for the current query) still
+  // navigates the search results, not the entire 522-concept registry.
+  const navigationConcepts = speakerScopedConcepts.length > 0
+    ? speakerScopedConcepts
+    : (filtered.length > 0 ? filtered : concepts);
   const navigationTotal = navigationConcepts.length;
 
   const goToConceptOffset = useCallback((offset: number) => {
@@ -1255,9 +1306,18 @@ export function ParseUI() {
               <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE</span>
             </div>
             <div className="hidden items-center gap-3 md:flex">
-              <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewed} / {total} reviewed</div>
+              <div>
+                {activeSpeakerProgress && elicitedForSpeaker > 0 ? (
+                  <>
+                    <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewedForSpeaker} / {elicitedForSpeaker} reviewed for {activeSpeakerProgress}</div>
+                    <div className="text-[10px] text-slate-400 tabular-nums">{elicitedForSpeaker} of {total} master concepts elicited</div>
+                  </>
+                ) : (
+                  <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewed} / {total} reviewed</div>
+                )}
+              </div>
               <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${(reviewed/total)*100}%` }}/>
+                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${progressWidth}%` }}/>
               </div>
             </div>
           </div>
@@ -1726,7 +1786,7 @@ export function ParseUI() {
           sortMode={sortMode}
           onSortModeChange={handleConceptSortModeChange}
           hasSourceItems={hasSourceItems}
-          filteredConcepts={filtered}
+          filteredConcepts={speakerScopedConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
           selectedTagIds={selectedTagIds}
@@ -1734,11 +1794,14 @@ export function ParseUI() {
           tags={tagsList}
           activeConceptId={conceptId}
           onConceptSelect={setConceptId}
-          activeSpeaker={selectedSpeakers[0] ?? null}
+          activeSpeaker={activeSpeakerForSidebar}
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}
+          scopedToSpeaker={scopedToSpeaker}
+          onScopedToSpeakerChange={setScopedToSpeaker}
+          elicitedConceptKeys={elicitedConceptKeys}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             setMergePickerPrimary(target);

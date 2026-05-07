@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 
 import type { ConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
+import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveConceptSurvey, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -18,6 +19,8 @@ export interface SidebarConcept {
   surveys?: ConceptSurveyLinks;
   mergedKeys?: string[];
   mergeAbsorbedNames?: string[];
+  variants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
+  mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
 }
 
 interface SidebarTag {
@@ -47,6 +50,9 @@ interface ConceptSidebarProps {
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
+  scopedToSpeaker?: boolean;
+  onScopedToSpeakerChange?: (next: boolean) => void;
+  elicitedConceptKeys?: ReadonlySet<string>;
 }
 
 const tagDot: Record<ConceptTag, string> = {
@@ -77,6 +83,9 @@ export function ConceptSidebar({
   onSurveyChoiceChange,
   onMergeRequest,
   onUnmergeConcept,
+  scopedToSpeaker = false,
+  onScopedToSpeakerChange,
+  elicitedConceptKeys = new Set<string>(),
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +108,15 @@ export function ConceptSidebar({
     else next.add(tagId);
     onTagSelectionChange(next);
   };
+  const hasElicitedScope = elicitedConceptKeys.size > 0;
+  const scopedConcepts = scopedToSpeaker && hasElicitedScope
+    ? filteredConcepts.filter((concept) => conceptMatchesElicitedKeys(concept, elicitedConceptKeys))
+    : filteredConcepts;
+  const scopeLabel = scopedToSpeaker && activeSpeaker
+    ? `Scoped to ${activeSpeaker}`
+    : `Showing all ${filteredConcepts.length} master`;
+  const scopeButtonLabel = scopedToSpeaker ? 'Show all' : 'Scope to speaker';
+  const showMissingAnnotationNote = scopedToSpeaker && activeSpeaker && !hasElicitedScope;
 
   return (
     <aside className="w-[250px] shrink-0 border-r border-slate-200/80 bg-white flex flex-col" data-testid="concept-sidebar">
@@ -140,8 +158,25 @@ export function ConceptSidebar({
               Source
             </button>
           </div>
-          <span className="ml-auto text-[10px] text-slate-400">{filteredConcepts.length} concepts</span>
+          <span className="ml-auto text-[10px] text-slate-400">{scopedConcepts.length} concepts</span>
         </div>
+        {activeSpeaker && onScopedToSpeakerChange && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-slate-600">{scopeLabel}</span>
+              <button
+                type="button"
+                onClick={() => onScopedToSpeakerChange(!scopedToSpeaker)}
+                className="rounded-full bg-white px-2 py-0.5 font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50"
+              >
+                {scopeButtonLabel}
+              </button>
+            </div>
+            {showMissingAnnotationNote && (
+              <div className="mt-1 text-slate-400">No annotation file for {activeSpeaker} — showing master list</div>
+            )}
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap gap-1">
           <button
             onClick={() => {
@@ -197,8 +232,10 @@ export function ConceptSidebar({
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 pb-6">
-        {filteredConcepts.map((concept) => {
+        {scopedConcepts.map((concept) => {
           const active = concept.id === activeConceptId;
+          const isElicited = !hasElicitedScope || conceptMatchesElicitedKeys(concept, elicitedConceptKeys);
+          const inactiveRowClass = isElicited ? 'text-slate-600' : 'text-slate-400';
           const surveyConcept = { ...concept, key: concept.key ?? String(concept.id) };
           const resolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
           const resolvedSurveyLabel = surveyLabelFor(resolvedSurvey.surveyId, surveySettings);
@@ -217,10 +254,12 @@ export function ConceptSidebar({
                   event.preventDefault();
                   setContextMenu({ concept, x: event.clientX, y: event.clientY });
                 }}
-                className={`group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600'}`}
+                className={`group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
-                <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}</span>
+                <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}{!isElicited && !scopedToSpeaker && hasElicitedScope && (
+                  <span className="ml-1 text-[10px] italic text-slate-400">no data</span>
+                )}</span>
                 {concept.mergedKeys && concept.mergedKeys.length > 1 && (
                   <span
                     title={(concept.mergeAbsorbedNames ?? []).join(', ')}
