@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from concepts_io import ConceptDuplicateError, duplicate_concept_ab_pair
 
 def _api_get_export_lingpy(self) -> None:
     """Stream LingPy-compatible wordlist TSV as a file download."""
@@ -50,5 +51,13 @@ def _api_post_tags_import(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import']
+def _api_post_concept_duplicate(self, concept_id: str) -> None:
+    """Duplicate one concepts.csv row into A/B tracking siblings."""
+    try:
+        payload = duplicate_concept_ab_pair(_server._project_root(), concept_id)
+    except ConceptDuplicateError as exc:
+        raise _server.ApiError(exc.status, exc.message) from exc
+    self._send_json(_server.HTTPStatus.OK, payload)
+
+__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import', '_api_post_concept_duplicate']
 

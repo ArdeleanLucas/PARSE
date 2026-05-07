@@ -104,6 +104,27 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 "properties": {"error": {"type": "string"}},
                 "additionalProperties": True,
             },
+            "ConceptCsvRow": {
+                "type": "object",
+                "required": ["id", "concept_en", "source_item", "source_survey", "custom_order"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "concept_en": {"type": "string"},
+                    "source_item": {"type": "string"},
+                    "source_survey": {"type": "string"},
+                    "custom_order": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "ConceptDuplicateResponse": {
+                "type": "object",
+                "required": ["primary", "sibling"],
+                "properties": {
+                    "primary": _schema_ref("ConceptCsvRow"),
+                    "sibling": _schema_ref("ConceptCsvRow"),
+                },
+                "additionalProperties": False,
+            },
             "GenericJobResponse": {
                 "type": "object",
                 "properties": {
@@ -332,6 +353,9 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/concepts/import": {
             "post": {"tags": ["Annotations"], "summary": "Import concepts CSV", "operationId": "importConcepts", "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}, "required": ["file"]}}}}, "responses": {"200": _response("Imported concepts summary", _schema_ref("GenericObject"))}},
+        },
+        "/api/concepts/{conceptId}/duplicate": {
+            "post": {"tags": ["Annotations"], "summary": "Duplicate one concept row into A/B variants", "operationId": "duplicateConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "requestBody": {"required": False, "content": _json_content({"type": "object", "maxProperties": 0, "additionalProperties": False})}, "responses": {"200": _response("Duplicated concept rows", _schema_ref("ConceptDuplicateResponse")), "400": _response("Invalid concept id or malformed path", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept already belongs to an A/B pair", _schema_ref("ErrorResponse")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False}},
         },
         "/api/tags/import": {
             "post": {"tags": ["Tags"], "summary": "Import tags from CSV", "operationId": "importTags", "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}, "required": ["file"]}}}}, "responses": {"200": _response("Imported tags summary", _schema_ref("GenericObject"))}},
