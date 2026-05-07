@@ -12,11 +12,12 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
 from server_routes import media
+from survey_overlap import SURVEY_OVERLAP_FILENAME
 
 
 class _OnboardHandlerHarness(server.RangeRequestHandler):
-    def __init__(self, *, body: bytes, boundary: str):
-        self.path = "/api/onboard/speaker"
+    def __init__(self, *, body: bytes, boundary: str, path: str = "/api/onboard/speaker"):
+        self.path = path
         self.headers = email.message_from_string(
             f"Content-Type: multipart/form-data; boundary={boundary}\n"
             f"Content-Length: {len(body)}\n\n"
@@ -45,6 +46,28 @@ def _write_concepts_csv(path: pathlib.Path, rows: list) -> None:
             writer.writerow(row)
 
 
+def _write_full_concepts_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+        writer.writeheader()
+        for row in rows:
+            payload = {"source_item": "", "source_survey": "", "custom_order": ""}
+            payload.update(row)
+            writer.writerow(payload)
+
+
+def _full_concepts_csv_text(rows: list[dict[str, str]]) -> str:
+    handle = io.StringIO()
+    writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+    writer.writeheader()
+    for row in rows:
+        payload = {"source_item": "", "source_survey": "", "custom_order": ""}
+        payload.update(row)
+        writer.writerow(payload)
+    return handle.getvalue()
+
+
 def _write_audition_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as handle:
@@ -66,6 +89,7 @@ def _make_onboard_multipart(
     include_audio: bool = True,
     cue_csv: str | None = None,
     comments_csv: str | None = None,
+    extra_fields: dict[str, str] | None = None,
 ) -> tuple[bytes, str]:
     boundary = "----parseonboardboundary"
     parts: list[bytes] = []
@@ -91,6 +115,8 @@ def _make_onboard_multipart(
         )
 
     add_field("speaker_id", speaker_id)
+    for field_name, field_value in (extra_fields or {}).items():
+        add_field(field_name, field_value)
     if include_audio:
         add_file("audio", "source.wav", b"RIFF0000WAVEfmt ", "audio/wav")
     if cue_csv is not None:
@@ -205,6 +231,145 @@ def test_api_post_onboard_speaker_rejects_comments_without_cue(tmp_path, monkeyp
     assert "commentsCsv requires csv" in exc_info.value.message
     assert job_payloads == []
     assert _FakeThread.calls == []
+
+
+def test_api_post_onboard_speaker_preview_returns_overlaps_without_writes(tmp_path, monkeypatch) -> None:
+    job_payloads = _stub_onboard_http(monkeypatch, tmp_path)
+    _write_full_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "1", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ"},
+            {"id": "2", "concept_en": "snow", "source_item": "3.13", "source_survey": "KLQ"},
+        ],
+    )
+    incoming_csv = _full_concepts_csv_text(
+        [
+            {"id": "1", "concept_en": "salt", "source_item": "139", "source_survey": "JBIL"},
+            {"id": "2", "concept_en": "snow", "source_item": "140", "source_survey": "JBIL"},
+            {"id": "3", "concept_en": "fire", "source_item": "141", "source_survey": "JBIL"},
+        ]
+    )
+    body, boundary = _make_onboard_multipart(speaker_id="Saha01", cue_csv=incoming_csv)
+    handler = _OnboardHandlerHarness(body=body, boundary=boundary, path="/api/onboard/speaker?preview=1")
+
+    handler._api_post_onboard_speaker()
+
+    assert handler.sent_json == [
+        (
+            HTTPStatus.OK,
+            {
+                "preview": True,
+                "speaker": "Saha01",
+                "overlap_concepts": [
+                    {"concept_id": "1", "concept_en": "salt", "surveys": {"klq": "3.14", "jbil": "139"}, "auto_detected": "jbil"},
+                    {"concept_id": "2", "concept_en": "snow", "surveys": {"klq": "3.13", "jbil": "140"}, "auto_detected": "jbil"},
+                ],
+            },
+        )
+    ]
+    assert not (tmp_path / "audio" / "original" / "Saha01").exists()
+    assert not (tmp_path / SURVEY_OVERLAP_FILENAME).exists()
+    assert job_payloads == []
+    assert _FakeThread.calls == []
+
+
+def test_api_post_onboard_speaker_preview_rejects_comments_without_cue_before_writes(tmp_path, monkeypatch) -> None:
+    job_payloads = _stub_onboard_http(monkeypatch, tmp_path)
+    comments_csv = "Name\tStart\tDuration\tTime Format\tType\tDescription\n9- nine note\t0\t1\tdecimal\tCue\t\n"
+    body, boundary = _make_onboard_multipart(speaker_id="Saha01", comments_csv=comments_csv)
+    handler = _OnboardHandlerHarness(body=body, boundary=boundary, path="/api/onboard/speaker?preview=1")
+
+    with pytest.raises(server.ApiError) as exc_info:
+        handler._api_post_onboard_speaker()
+
+    assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+    assert "commentsCsv requires csv" in exc_info.value.message
+    assert not (tmp_path / "audio" / "original" / "Saha01").exists()
+    assert job_payloads == []
+    assert _FakeThread.calls == []
+
+
+def test_api_post_onboard_speaker_commit_threads_survey_choices_when_supplied(tmp_path, monkeypatch) -> None:
+    job_payloads = _stub_onboard_http(monkeypatch, tmp_path)
+    incoming_csv = _full_concepts_csv_text([
+        {"id": "1", "concept_en": "salt", "source_item": "139", "source_survey": "JBIL"},
+    ])
+    survey_choices = json.dumps({"Saha01": {"1": "JBIL"}})
+    body, boundary = _make_onboard_multipart(
+        speaker_id="Saha01",
+        cue_csv=incoming_csv,
+        extra_fields={"survey_choices": survey_choices},
+    )
+    handler = _OnboardHandlerHarness(body=body, boundary=boundary)
+
+    handler._api_post_onboard_speaker()
+
+    speaker_dir = tmp_path / "audio" / "original" / "Saha01"
+    assert handler.sent_json == [(HTTPStatus.OK, {"job_id": "job-http", "jobId": "job-http", "status": "running", "speaker": "Saha01"})]
+    assert job_payloads[0][1]["surveyChoices"] == {"1": "jbil"}
+    assert _FakeThread.calls[0][1] == ("job-http", "Saha01", speaker_dir / "source.wav", speaker_dir / "cue.csv", None, {"1": "jbil"})
+
+
+def test_onboard_commit_with_survey_choices_writes_survey_overlap_sidecar(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _stub_job(monkeypatch)
+    _write_full_concepts_csv(
+        tmp_path / "concepts.csv",
+        [{"id": "1", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ"}],
+    )
+    wav_dest = _make_wav(tmp_path, "Saha01")
+    csv_dest = wav_dest.parent / "elicitation.csv"
+    _write_full_concepts_csv(
+        csv_dest,
+        [
+            {"id": "1", "concept_en": "salt", "source_item": "139", "source_survey": "JBIL"},
+            {"id": "2", "concept_en": "snow", "source_item": "140", "source_survey": "JBIL"},
+        ],
+    )
+
+    server._run_onboard_speaker_job("job-survey-choice", "Saha01", wav_dest, csv_dest, None, {"1": "JBIL", "2": "JBIL"})
+
+    sidecar = json.loads((tmp_path / SURVEY_OVERLAP_FILENAME).read_text(encoding="utf-8"))
+    assert sidecar["speaker_choices"] == {"Saha01": {"1": "jbil", "2": "jbil"}}
+
+
+def test_onboard_preview_then_commit_persists_all_previewed_choices(tmp_path, monkeypatch) -> None:
+    job_payloads = _stub_onboard_http(monkeypatch, tmp_path)
+    _write_full_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "1", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ"},
+            {"id": "2", "concept_en": "snow", "source_item": "3.13", "source_survey": "KLQ"},
+        ],
+    )
+    incoming_csv = _full_concepts_csv_text(
+        [
+            {"id": "1", "concept_en": "salt", "source_item": "139", "source_survey": "JBIL"},
+            {"id": "2", "concept_en": "snow", "source_item": "140", "source_survey": "JBIL"},
+        ]
+    )
+    preview_body, preview_boundary = _make_onboard_multipart(speaker_id="Saha01", cue_csv=incoming_csv)
+    preview_handler = _OnboardHandlerHarness(body=preview_body, boundary=preview_boundary, path="/api/onboard/speaker?preview=1")
+
+    preview_handler._api_post_onboard_speaker()
+
+    previewed_ids = [item["concept_id"] for item in preview_handler.sent_json[0][1]["overlap_concepts"]]
+    assert previewed_ids == ["1", "2"]
+
+    commit_body, commit_boundary = _make_onboard_multipart(
+        speaker_id="Saha01",
+        cue_csv=incoming_csv,
+        extra_fields={"survey_choices": json.dumps({"Saha01": {concept_id: "JBIL" for concept_id in previewed_ids}})},
+    )
+    commit_handler = _OnboardHandlerHarness(body=commit_body, boundary=commit_boundary)
+    commit_handler._api_post_onboard_speaker()
+    thread_args = list(_FakeThread.calls[-1][1])
+    thread_args[0] = "job-preview-cycle"
+    server._run_onboard_speaker_job(*thread_args)
+
+    sidecar = json.loads((tmp_path / SURVEY_OVERLAP_FILENAME).read_text(encoding="utf-8"))
+    assert sidecar["speaker_choices"] == {"Saha01": {"1": "jbil", "2": "jbil"}}
+    assert len(job_payloads) == 1
 
 
 def test_onboard_populates_project_json_speakers(tmp_path, monkeypatch) -> None:

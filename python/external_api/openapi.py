@@ -117,6 +117,27 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": True,
             },
+            "OnboardSpeakerOverlapConcept": {
+                "type": "object",
+                "required": ["concept_id", "concept_en", "surveys", "auto_detected"],
+                "properties": {
+                    "concept_id": {"type": "string"},
+                    "concept_en": {"type": "string"},
+                    "surveys": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "auto_detected": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "OnboardSpeakerPreview": {
+                "type": "object",
+                "required": ["preview", "speaker", "overlap_concepts"],
+                "properties": {
+                    "preview": {"type": "boolean", "const": True},
+                    "speaker": {"type": "string"},
+                    "overlap_concepts": {"type": "array", "items": _schema_ref("OnboardSpeakerOverlapConcept")},
+                },
+                "additionalProperties": False,
+            },
             "AuthStatus": {
                 "type": "object",
                 "properties": {
@@ -277,7 +298,7 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
             "get": {"tags": ["Search"], "summary": "Search lexeme/concept candidates", "operationId": "searchLexemeCandidates", "parameters": [_parameter("speaker", "query", {"type": "string"}), _parameter("variants", "query", {"type": "string"}), _parameter("concept_id", "query", {"type": "string"}), _parameter("language", "query", {"type": "string"}), _parameter("tiers", "query", {"type": "string"}), _parameter("limit", "query", {"type": "integer"}), _parameter("max_distance", "query", {"type": "number"})], "responses": {"200": _response("Candidate ranges", _schema_ref("GenericObject"))}},
         },
         "/api/onboard/speaker": {
-            "post": {"tags": ["Onboarding"], "summary": "Upload raw audio and optional CSV files for one speaker", "operationId": "onboardSpeaker", "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"speaker_id": {"type": "string"}, "audio": {"type": "string", "format": "binary"}, "csv": {"type": "string", "format": "binary"}, "commentsCsv": {"type": "string", "format": "binary"}}, "required": ["speaker_id", "audio"], "additionalProperties": True}}}}, "responses": {"200": _response("Onboarding job started", _schema_ref("GenericJobResponse")), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
+            "post": {"tags": ["Onboarding"], "summary": "Upload raw audio and optional CSV files for one speaker", "operationId": "onboardSpeaker", "parameters": [_parameter("preview", "query", {"type": "boolean"}, description="Validate the multipart import and return overlap_concepts without writing files or starting a job.")], "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"speaker_id": {"type": "string"}, "audio": {"type": "string", "format": "binary"}, "csv": {"type": "string", "format": "binary"}, "commentsCsv": {"type": "string", "format": "binary"}, "survey_choices": {"type": "string", "description": "Optional JSON speaker_choices payload. Accepts {speaker: {concept_id: survey_id}} or a bare {concept_id: survey_id} map for the importing speaker."}}, "required": ["speaker_id", "audio"], "additionalProperties": True}}}}, "responses": {"200": _response("Onboarding job started or import-overlap preview", {"oneOf": [_schema_ref("GenericJobResponse"), _schema_ref("OnboardSpeakerPreview")]}), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
         },
         "/api/onboard/speaker/status": {
             "post": {"tags": ["Onboarding"], "summary": "Poll onboarding job status", "operationId": "pollOnboardSpeaker", "requestBody": {"required": True, "content": _json_content({"type": "object", "properties": {"jobId": {"type": "string"}, "job_id": {"type": "string"}}, "additionalProperties": False})}, "responses": {"200": _response("Onboarding job status", _schema_ref("GenericJobResponse"))}},
