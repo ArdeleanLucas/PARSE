@@ -1263,9 +1263,8 @@ def _run_step_on_concept_windows(
     duration_sec = total_samples / float(DEFAULT_SAMPLE_RATE) if total_samples else 0.0
     if duration_sec <= 0.0:
         return []
-    # Deliberately avoid seeding Whisper with PARSE concept IDs/glosses here.
-    # They are often English labels ("head", "arm", "knee") and caused
-    # Razhan to drift into English/Latin-script loops on short Kurdish clips.
+    # Pass initial_prompt=None to suppress the configured ortho prompt; this is
+    # required to prevent Whisper from echoing it on short concept clips.
     initial_prompt = None
     rows: _server.List[_server.Dict[str, _server.Any]] = []
     source_by_step = {
@@ -2247,12 +2246,32 @@ def _compute_speaker_ortho(
     should_cancel = make_should_cancel(job_id)
     cancelled_requested = False
     try:
-        try:
-            segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback, should_cancel=should_cancel)
-        except TypeError as exc:
-            if 'should_cancel' not in str(exc):
-                raise
-            segments = provider.transcribe(audio_path=audio_path, language=language_str, progress_callback=_progress_callback)
+        base_transcribe_kwargs = {
+            'audio_path': audio_path,
+            'language': language_str,
+            'progress_callback': _progress_callback,
+        }
+        attempts = [
+            {**base_transcribe_kwargs, 'should_cancel': should_cancel, 'initial_prompt': None},
+            {**base_transcribe_kwargs, 'should_cancel': should_cancel},
+            {**base_transcribe_kwargs, 'initial_prompt': None},
+            base_transcribe_kwargs,
+        ]
+        segments = None
+        last_type_error: _server.Optional[TypeError] = None
+        for transcribe_kwargs in attempts:
+            try:
+                segments = provider.transcribe(**transcribe_kwargs)
+                break
+            except TypeError as exc:
+                message = str(exc)
+                if 'should_cancel' not in message and 'initial_prompt' not in message and 'unexpected' not in message:
+                    raise
+                last_type_error = exc
+        if segments is None:
+            if last_type_error is not None:
+                raise last_type_error
+            segments = []
         cancelled_requested = should_cancel()
     finally:
         clear_cancel(job_id)

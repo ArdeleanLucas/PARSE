@@ -3,17 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server_routes.lexeme_rerun import _run_ipa_interval, _run_ortho_interval
 
 
-def test_run_ortho_interval_calls_stt_pipeline_with_expected_kwargs(monkeypatch) -> None:
+def test_run_ortho_interval_calls_renamed_helper(monkeypatch) -> None:
+    import ai.stt_pipeline as stt_pipeline
+
+    with pytest.raises(ImportError):
+        from ai.stt_pipeline import run_stt_on_interval  # noqa: F401
+
     calls: list[dict[str, Any]] = []
 
-    def fake_run_stt_on_interval(**kwargs: Any) -> str:
+    def fake_run_ortho_on_interval(**kwargs: Any) -> str:
         calls.append(kwargs)
         return "ریشەم"
 
-    monkeypatch.setattr("ai.stt_pipeline.run_stt_on_interval", fake_run_stt_on_interval)
+    monkeypatch.setattr(stt_pipeline, "run_ortho_on_interval", fake_run_ortho_on_interval)
 
     result = _run_ortho_interval(audio_path=Path("/tmp/x.wav"), start=1.0, end=2.0, language="sdh")
 

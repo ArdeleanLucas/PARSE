@@ -20,6 +20,7 @@ HF_TRANSFORMERS_IMPORT_ERROR = (
 _CT2_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
 _HF_WHISPER_SAMPLE_RATE = 16000
 _HF_WHISPER_CHUNK_SECONDS = 30.0
+_USE_CONFIG_PROMPT = object()
 # Whisper's special/control tokens occupy the high-id range; skip them when
 # averaging generated-token logprobs so confidence reflects lexical content.
 _WHISPER_SPECIAL_TOKEN_MIN_ID = 50257
@@ -137,7 +138,10 @@ class HFWhisperProvider(provider_module.AIProvider):
 
     This provider intentionally accepts the same section knobs as the legacy
     faster-whisper ORTH config and applies HF equivalents for the CT2
-    repetition guards that prevent long-audio Whisper cascades.
+    repetition guards that prevent long-audio Whisper cascades. Per-call
+    ``initial_prompt`` is caller-controlled: public transcription methods
+    default to ``None`` (no seed) and callers must explicitly pass a prompt
+    when seeding is desired.
     """
 
     def __init__(
@@ -376,6 +380,8 @@ class HFWhisperProvider(provider_module.AIProvider):
         audio_payload: Dict[str, Any],
         *,
         language: Optional[str] = None,
+        initial_prompt: Any = _USE_CONFIG_PROMPT,
+        max_new_tokens: Optional[int] = None,
     ) -> Tuple[str, float]:
         processor, model = self._load_model()
         sample_rate = int(audio_payload.get("sampling_rate") or _HF_WHISPER_SAMPLE_RATE)
@@ -400,12 +406,15 @@ class HFWhisperProvider(provider_module.AIProvider):
             "do_sample": False,
             **self._generate_kwargs(language),
         }
-        if self.initial_prompt:
+        prompt = self.initial_prompt if initial_prompt is _USE_CONFIG_PROMPT else initial_prompt
+        if prompt:
             prompt_ids = processor.get_prompt_ids(
-                self.initial_prompt,
+                str(prompt),
                 return_tensors="pt",
             ).to(self._effective_device)
             generate_kwargs["prompt_ids"] = prompt_ids
+        if max_new_tokens is not None:
+            generate_kwargs["max_new_tokens"] = int(max_new_tokens)
         generated = model.generate(**generate_kwargs)
         decoded = processor.batch_decode(
             getattr(generated, "sequences", []),
@@ -428,6 +437,9 @@ class HFWhisperProvider(provider_module.AIProvider):
         progress_callback: Optional[Callable[[float, int], None]] = None,
         segment_callback: Optional[Callable[["Segment"], None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
+        *,
+        initial_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
     ) -> List["Segment"]:
         path = Path(audio_path).expanduser().resolve()
         if not path.exists():
@@ -463,6 +475,8 @@ class HFWhisperProvider(provider_module.AIProvider):
             text, confidence = self._transcribe_audio_payload(
                 self._audio_payload(window, sample_rate),
                 language=language,
+                initial_prompt=initial_prompt,
+                max_new_tokens=max_new_tokens,
             )
             if text:
                 segment: Segment = {
@@ -514,6 +528,8 @@ class HFWhisperProvider(provider_module.AIProvider):
         progress_callback: Optional[Callable[[float, int], None]] = None,
         sample_rate: int = 16000,
         should_cancel: Optional[Callable[[], bool]] = None,
+        initial_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
     ) -> List["SegmentWithWords"]:
         if audio_array is None or not intervals:
             return []
@@ -558,6 +574,8 @@ class HFWhisperProvider(provider_module.AIProvider):
                 text, confidence = self._transcribe_audio_payload(
                     self._audio_payload(window, sample_rate_i),
                     language=language,
+                    initial_prompt=initial_prompt,
+                    max_new_tokens=max_new_tokens,
                 )
             except Exception as exc:
                 print(
@@ -591,10 +609,10 @@ class HFWhisperProvider(provider_module.AIProvider):
         *,
         initial_prompt: Optional[str] = None,
         language: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
     ) -> Tuple[str, float]:
         if audio_array is None:
             return ("", 0.0)
-        _ = initial_prompt
         payload = self._audio_payload(audio_array)
         audio_np = payload["raw"]
         total_samples = int(audio_np.shape[0]) if getattr(audio_np, "ndim", 0) else 0
@@ -604,6 +622,8 @@ class HFWhisperProvider(provider_module.AIProvider):
             return self._transcribe_audio_payload(
                 payload,
                 language=language,
+                initial_prompt=initial_prompt,
+                max_new_tokens=max_new_tokens,
             )
         except Exception as exc:
             print(
