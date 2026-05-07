@@ -518,6 +518,11 @@ describe('ConceptSidebar', () => {
           { conceptKey: '82', conceptEn: 'deep (B)', variantLabel: 'B' },
         ],
       },
+      // Stem-named concept with no variants — exercises the regex
+      // correctly NOT firing on a bare stem like "deep" or "branch".
+      // This protects against a regex regression that would mistakenly
+      // disable concepts whose label happens to look stem-like.
+      { id: 4, key: '4', name: 'branch', tag: 'untagged' as const, sourceItem: '101' },
     ];
 
     function renderWith(onDuplicateConcept: () => void) {
@@ -578,6 +583,20 @@ describe('ConceptSidebar', () => {
       expect(onDuplicate).not.toHaveBeenCalled();
     });
 
+    it('does not disable a stem-named concept when no variants are present', () => {
+      // Regression guard: the trailing-(A)/(B) regex must NOT match a bare
+      // stem like "branch". Without this, a future refactor of the regex
+      // could silently start disabling normal singletons and the
+      // `variants.length >= 2` test above would not catch it.
+      const onDuplicate = vi.fn();
+      renderWith(onDuplicate);
+      openMenuFor(/^branch/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('false');
+      fireEvent.click(item);
+      expect(onDuplicate).toHaveBeenCalledTimes(1);
+      expect(onDuplicate.mock.calls[0][0].id).toBe(4);
+    });
   });
 
 });

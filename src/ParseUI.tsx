@@ -1815,16 +1815,18 @@ export function ParseUI() {
             if (target) unmergeConcept(target.key);
           }}
           onDuplicateConcept={(sidebarConcept) => {
-            // Pin the underlying concept key now — `concepts` re-derives on
-            // every config reload, so the captured object would go stale.
+            // Pin the underlying concept_id (the concepts.csv row id) now —
+            // `concepts` re-derives on every config reload, so the captured
+            // object goes stale. The disable matrix in ConceptSidebar
+            // prevents this handler from firing for already-A/B concepts,
+            // so we don't need a variants-aware fallback here.
             const target = concepts.find((c) => c.id === sidebarConcept.id) ?? null;
-            const underlyingKey = (() => {
-              // Prefer an explicit raw concept_id if the grouped concept is
-              // a singleton (concepts.csv id stored in `key`); otherwise
-              // fall back to the first variant's conceptKey.
-              if (target?.variants?.length) return target.variants[0].conceptKey;
-              return target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
-            })();
+            const underlyingKey = target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
+            // Capture the grouping inputs at click-time so the post-reload
+            // regrouping mirrors the live `concepts` memo at line 880 — in
+            // particular `conceptMerges` matters when a duplicated concept
+            // is also part of a user merge.
+            const mergesForReload = currentMode === 'compare' ? conceptMerges : undefined;
             void (async () => {
               try {
                 await duplicateConcept(underlyingKey);
@@ -1834,7 +1836,7 @@ export function ParseUI() {
                 // have rolled (A) and (B) into one sidebar entry sharing
                 // a `source_item`, so the numeric id may have shifted.
                 const after = useConfigStore.getState().config?.concepts ?? [];
-                const grouped = groupConceptEntries(after, () => 'untagged');
+                const grouped = groupConceptEntries(after, () => 'untagged', mergesForReload);
                 const next = findConceptByUnderlyingKey(grouped, underlyingKey);
                 if (next) setConceptId(next.id);
               } catch (err) {
