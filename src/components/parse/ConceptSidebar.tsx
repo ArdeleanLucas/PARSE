@@ -3,7 +3,7 @@ import { Search } from 'lucide-react';
 
 import type { ConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
-import { resolveConceptSurvey, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
+import { defaultSurveySettings, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
@@ -276,7 +276,7 @@ export function ConceptSidebar({
                     +{concept.mergedKeys.length - 1}
                   </span>
                 )}
-                <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
+                <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
               </button>
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">
@@ -284,13 +284,14 @@ export function ConceptSidebar({
                     const sourceItem = surveyConcept.surveys?.[surveyId] ?? '';
                     const label = surveyLabelFor(surveyId, surveySettings);
                     const selected = resolvedSurvey.surveyId === surveyId;
+                    const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
                     return (
                       <button
                         key={surveyId}
                         type="button"
                         aria-label={selected ? `Current survey ${label} ${sourceItem}` : `Switch ${concept.name} to ${label} ${sourceItem}`}
                         onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, surveyId)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ${selected ? (surveyColorCodingEnabled ? 'bg-indigo-50 text-indigo-700 ring-indigo-200' : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
+                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ${selected ? (surveyColorCodingEnabled ? (SURVEY_CHIP_CLASSES[displayColor] ?? SURVEY_CHIP_CLASSES.slate) : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
                       >
                         {label}
                       </button>
