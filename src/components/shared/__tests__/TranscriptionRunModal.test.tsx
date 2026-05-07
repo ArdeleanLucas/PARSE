@@ -568,6 +568,163 @@ describe("TranscriptionRunModal", () => {
     }));
   });
 
+
+  it("pad selector renders when STT-only is selected in concept-window mode", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["stt"]}
+        title="Run STT"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+
+    expect(screen.getByTestId("action-menu-pad-0.0").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").textContent).toContain("default");
+  });
+
+  it("pad selector renders when IPA-only is selected in concept-window mode", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["ipa"]}
+        title="Run IPA"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+
+    expect(screen.getByTestId("action-menu-pad-0.0").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").textContent).toContain("default");
+  });
+
+  it("STT-only pad selection updates the confirm payload", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    const onConfirm = vi.fn<[TranscriptionRunConfirm], void>();
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["stt"]}
+        title="Run STT"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("action-menu-pad-0.5"));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-confirm"));
+    });
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      steps: ["stt"],
+      runMode: "concept-windows",
+      pad: 0.5,
+    }));
+  });
+
+  it("IPA-only pad selection updates the confirm payload", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    const onConfirm = vi.fn<[TranscriptionRunConfirm], void>();
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["ipa"]}
+        title="Run IPA"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("action-menu-pad-0.5"));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-confirm"));
+    });
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      steps: ["ipa"],
+      runMode: "concept-windows",
+      pad: 0.5,
+    }));
+  });
+
+  it("pad selector hidden when no concept-window-capable step is selected", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["normalize"]}
+        title="Normalize Audio"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+
+    expect(screen.queryByTestId("action-menu-pad-selector")).toBeNull();
+    expect(screen.queryByTestId("action-menu-pad-0.0")).toBeNull();
+    expect(screen.queryByTestId("action-menu-pad-0.2")).toBeNull();
+    expect(screen.queryByTestId("action-menu-pad-0.5")).toBeNull();
+  });
+
   it("ORTH pad closes and reopens at the 0.2 default", async () => {
     vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
       makeState({ speaker }),
