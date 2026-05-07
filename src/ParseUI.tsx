@@ -2387,6 +2387,7 @@ export function ParseUI() {
             if (speaker) void useAnnotationStore.getState().saveSpeaker(speaker);
           }}
           activeConcept={concept}
+          workspaceConcepts={concepts}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}

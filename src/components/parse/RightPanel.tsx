@@ -60,6 +60,8 @@ export function RightPanel(props: RightPanelProps) {
           <SurveyValuesSection
             activeConcept={props.activeConcept}
             activeSpeaker={props.activeActionSpeaker ?? props.selectedSpeakers[0] ?? null}
+            workspaceConcepts={props.workspaceConcepts}
+            conceptSurveyLinks={props.conceptSurveyLinks}
             surveyColorCodingEnabled={props.surveyColorCodingEnabled}
             surveySettings={props.surveySettings}
             speakerSurveyChoices={props.speakerSurveyChoices}

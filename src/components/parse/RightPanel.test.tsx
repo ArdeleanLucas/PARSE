@@ -39,6 +39,7 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       exporting={false}
       onOpenCommentsImport={vi.fn()}
       activeActionSpeaker="Fail01"
+      workspaceConcepts={[]}
       offsetPhase="idle"
       onDetectOffset={vi.fn()}
       onOpenManualOffset={vi.fn()}
@@ -126,7 +127,7 @@ describe('RightPanel', () => {
     }));
   });
 
-  it('supports Survey Values label edit save/cancel and disables color coding when no overlap exists', () => {
+  it('supports Survey Values label edit save/cancel and keeps color coding toggle enabled for a single survey', () => {
     const onSurveyOverlapUpdate = vi.fn();
     renderRightPanel({
       currentMode: 'annotate',
@@ -141,12 +142,22 @@ describe('RightPanel', () => {
         sourceSurvey: 'klq',
         surveys: { klq: 'KLQ_1.10' },
       },
+      workspaceConcepts: [{
+        id: 7,
+        key: 'rain',
+        name: 'rain',
+        tag: 'untagged',
+        sourceItem: 'KLQ_1.10',
+        sourceSurvey: 'klq',
+        surveys: { klq: 'KLQ_1.10' },
+      }],
       surveySettings: { klq: { display_label: 'Kurdish List', display_color: 'slate' } },
       onSurveyOverlapUpdate,
     });
 
     const colorToggle = screen.getByTestId('survey-color-coding-toggle') as HTMLButtonElement;
-    expect(colorToggle.disabled).toBe(true);
+    expect(colorToggle.disabled).toBe(false);
+    expect(colorToggle.title).toBe('Toggle survey color coding workspace-wide.');
 
     fireEvent.click(screen.getByRole('button', { name: /Edit survey label Kurdish List/i }));
     const input = screen.getByLabelText('Survey label for klq') as HTMLInputElement;
@@ -156,6 +167,82 @@ describe('RightPanel', () => {
     expect(onSurveyOverlapUpdate).toHaveBeenCalledWith(expect.objectContaining({
       surveys: { klq: { display_label: 'KLQ Field List', display_color: 'slate' } },
     }));
+  });
+
+  it('lists workspace-level surveys and updates color swatches/reset defaults', () => {
+    const onSurveyOverlapUpdate = vi.fn();
+    const activeConcept = {
+      id: 7,
+      key: 'rain',
+      name: 'rain',
+      tag: 'untagged',
+      sourceItem: 'KLQ_1.10',
+      sourceSurvey: 'klq',
+      surveys: { klq: 'KLQ_1.10' },
+    } as const;
+    renderRightPanel({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Fail01'],
+      activeActionSpeaker: 'Fail01',
+      activeConcept,
+      workspaceConcepts: [
+        activeConcept,
+        { id: 8, key: 'fire', name: 'fire', tag: 'untagged', sourceItem: 'JBIL_2', sourceSurvey: 'jbil', surveys: { jbil: 'JBIL_2' } },
+      ],
+      surveyColorCodingEnabled: true,
+      surveySettings: {
+        klq: { display_label: 'Kurdish List', display_color: 'teal' },
+        wals: { display_label: 'WALS', display_color: 'blue' },
+      },
+      onSurveyOverlapUpdate,
+    });
+
+    expect(screen.getByRole('button', { name: /Survey Values 3/i })).toBeTruthy();
+    expect(screen.getAllByText('Kurdish List').length).toBeGreaterThan(0);
+    expect(screen.getByText('jbil')).toBeTruthy();
+    expect(screen.getByText('WALS')).toBeTruthy();
+
+    expect(screen.getByRole('button', { name: /Current survey Kurdish List KLQ_1.10/i }).className).toContain('bg-teal-50');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set Kurdish List color to orange' }));
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({
+      surveys: { klq: { display_label: 'Kurdish List', display_color: 'orange' } },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Reset survey display defaults/i }));
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({ surveys: {}, color_coding_enabled: false });
+    expect((screen.getByRole('button', { name: /Add survey placeholder/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('disables survey color swatches when workspace color coding is off', () => {
+    renderRightPanel({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Fail01'],
+      activeActionSpeaker: 'Fail01',
+      activeConcept: {
+        id: 7,
+        key: 'rain',
+        name: 'rain',
+        tag: 'untagged',
+        sourceItem: 'KLQ_1.10',
+        sourceSurvey: 'klq',
+        surveys: { klq: 'KLQ_1.10' },
+      },
+      workspaceConcepts: [{
+        id: 7,
+        key: 'rain',
+        name: 'rain',
+        tag: 'untagged',
+        sourceItem: 'KLQ_1.10',
+        sourceSurvey: 'klq',
+        surveys: { klq: 'KLQ_1.10' },
+      }],
+      surveyColorCodingEnabled: false,
+      surveySettings: { klq: { display_label: 'Kurdish List', display_color: 'slate' } },
+    });
+
+    expect(screen.getByText('Turn on color-coding to apply.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Set Kurdish List color to teal' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('collapses drawer sections when their headers are clicked', () => {
@@ -281,6 +368,7 @@ describe('RightPanel', () => {
         exporting={false}
         onOpenCommentsImport={vi.fn()}
         activeActionSpeaker="Fail01"
+        workspaceConcepts={[]}
         offsetPhase="idle"
         onDetectOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
