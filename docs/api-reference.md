@@ -1,6 +1,6 @@
 # API Reference
 
-> Last updated: 2026-04-29
+> Last updated: 2026-05-07
 >
 > This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
@@ -85,6 +85,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | Endpoint | Purpose | Notes |
 |---|---|---|
 | `GET /api/config` | Read project configuration | Current config payload is wrapped and includes `schema_version: 1` |
+| `GET /api/survey-overlap` | Read survey-overlap sidecar state | Returns the `SurveyOverlapState` object directly from `survey-overlap.json` |
 | `GET /api/annotations/{speaker}` | Read one speaker annotation record | Resolves the requested speaker to the normalized annotation payload |
 | `GET /api/stt-segments/{speaker}` | Read cached STT segments for a speaker | Returns `segments: []` when cache is missing rather than 404 |
 | `GET /api/enrichments` | Read comparative enrichments | Returns `{ enrichments: ... }` |
@@ -127,11 +128,18 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows; optional `commentsCsv` imports companion notes by row index |
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
+| `POST /api/concepts/{conceptId}/duplicate` | Duplicate one concept row into A/B variants | Numeric `conceptId`; renames the original to `X (A)`, appends `X (B)`, writes a pre-duplicate backup, and returns `{ primary, sibling }` |
 | `POST /api/tags/import` | Import tags from CSV | Multipart form upload |
+| `POST /api/lexeme/run_ortho` | Synchronously rerun ORTH for one selected lexeme interval | Body: `speaker`, `concept_key`, `start`, `end`, optional `pad` (`0.0`, `0.2`, `0.5`); returns `{ ortho, interval, source: "rerun" }` |
+| `POST /api/lexeme/run_ipa` | Synchronously rerun IPA for one selected lexeme interval | Same body/pad contract as ORTH; returns `{ ipa, interval, source: "rerun" }` |
 | `POST /api/lexeme-notes` | Write or delete a lexeme note | Writes into `parse-enrichments.json` |
 | `POST /api/lexeme-notes/import` | Import lexeme notes/comments from CSV | Multipart form upload |
 
 Audition marker CSV import details live in [Audition CSV speaker import](runtime/audition-csv-import.md). It preserves CSV row order and cue timestamps, resolves labels to integer PARSE concept ids before allocating new ids, writes concept + `ortho_words` intervals with `import_index` / `audition_prefix` trace metadata, accepts bracket and bare/malformed-prefix rows, can join a companion `commentsCsv` upload into `parse-enrichments.json` lexeme notes by row index, and deliberately leaves `ortho`, `ipa`, and `bnd` for downstream jobs.
+
+Lexeme rerun endpoints are synchronous, speaker-lock-protected interval helpers for reviewer-driven correction, not background jobs. The server validates speaker/concept existence, rejects intervals longer than 60 seconds, widens only the acoustic window by `pad`, and reports the original selected `start`/`end` in the response so callers do not accidentally retime data just because they requested more acoustic context.
+
+`POST /api/concepts/{conceptId}/duplicate` mutates `concepts.csv`, not annotation intervals. It refuses non-numeric ids, missing concepts, and rows already participating in an A/B pair. The backend writes a `concepts.csv.bak-*-pre-duplicate-<id>` backup before replacing the CSV, restores the prewrite bytes if the write fails, and returns both rows for frontend refresh.
 
 ### Audio, STT, and compute jobs
 
@@ -173,6 +181,7 @@ Full-pipeline OOM/restart semantics: before memory-heavy full-pipeline work, the
 |---|---|---|
 | `POST /api/enrichments` | Save enrichments | Accepts either `{ enrichments: ... }` or the raw object |
 | `POST /api/config` | Update project configuration | Current server accepts POST as an update path |
+| `POST /api/survey-overlap` | Patch survey-overlap sidecar state | Merges `surveys`, `concept_survey_links`, `speaker_choices`, and `color_coding_enabled`; optional reset flags clear sections before replacements are merged |
 | `POST /api/clef/config` | Save CLEF language configuration | Used by the guided Configure CLEF modal before optional auto-populate |
 | `POST /api/clef/clear` | Clear CLEF reference forms and optional provider caches | Operates only on per-language `config/sil_contact_languages.json[lang].concepts`; supports `dryRun`, language/concept scoping, and `clearCache` |
 | `POST /api/clef/form-selections` | Save CLEF form selections | Persists which populated reference forms should contribute to similarity scoring |
@@ -183,6 +192,26 @@ Full-pipeline OOM/restart semantics: before memory-heavy full-pipeline work, the
 
 
 Offset-apply responses include both `shiftedIntervals` (tier-interval count) and `shiftedConcepts` (distinct concept count). UI and external agents should prefer `shiftedConcepts` for human-facing summaries while preserving `shiftedIntervals` for backend/audit totals.
+
+`GET /api/survey-overlap` and `POST /api/survey-overlap` read/write the survey-overlap sidecar used by Compare and Annotate sidebar badges. The canonical shape is:
+
+```json
+{
+  "version": 1,
+  "color_coding_enabled": true,
+  "surveys": {
+    "jbil": { "display_label": "JBIL", "display_color": "indigo" }
+  },
+  "concept_survey_links": {
+    "322": { "jbil": "102", "klq": "3.14" }
+  },
+  "speaker_choices": {
+    "Khan01": { "322": "jbil" }
+  }
+}
+```
+
+Patch requests merge by default. Use `reset_surveys`, `reset_speaker_choices`, or `reset_concept_survey_links` when a caller intentionally wants to clear a section before writing replacements.
 
 Use `POST /api/clef/clear` with `dryRun=true` first to preview the number of forms, languages, concepts, and cache entries that would be removed. The request body is:
 
@@ -242,6 +271,7 @@ The compute dispatcher normalizes several named background workflows.
 |---|---|---|
 | `run_mode` | `"full"` \| `"concept-windows"` \| `"edited-only"` | Optional; omitted means `"full"`. Non-full modes process concept-tier windows instead of the whole speaker. |
 | `concept_ids` | `string[]` | Optional explicit concept scope for non-full modes. `edited-only` additionally filters to concept intervals with `manuallyAdjusted === true`. |
+| `pad` | `0.0` \| `0.2` \| `0.5` | Optional acoustic context pad for concept-window / edited-only STT, ORTH, and IPA action-menu reruns; default is `0.2`. The pad widens the compute clip without changing saved interval bounds. |
 
 Non-full responses include `run_mode`, `concept_windows`, and `affected_concepts` (`[{ concept_id, start, end }]`) when concept rows were processed. The React workstation treats those affected concepts as a best-effort scoped refresh hint, not the source of truth; after IPA, ORTH, STT, or BND compute completion, it reloads the completed speaker annotation from disk. Current `pipeline_state` is still conservative/full-mode-centric for some IPA preflight cases, so the run modal carries the selected `run_mode` into frontend cell computation: concept-window and edited-only IPA cells can be displayed runnable when ORTH/concept-tier presence is observable, but full-mode IPA without ORTH and pure-empty concept-window speakers remain blocked. An `edited-only` run with no matching concepts returns a structured no-op (`no_op: true`, `jobId: null`, `affected_concepts: []`) rather than starting an empty job.
 

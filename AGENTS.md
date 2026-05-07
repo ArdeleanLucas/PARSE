@@ -340,7 +340,7 @@ When the docs or older plans mention the historical monoliths, translate them th
 - `src/stores/annotationStore.ts` — barrel only; concrete annotation-store helpers live under `src/stores/annotation/`
 - compare/annotate/CLEF top-level `.tsx` files may now be barrels; check `docs/architecture/post-decomp-file-map.md` before adding new logic directly into an old top-level entrypoint
 
-## Current State (updated 2026-05-01)
+## Current State (updated 2026-05-07)
 
 PARSE has crossed the React pivot and the unified UI redesign is **merged to `main`**.
 
@@ -384,6 +384,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #215 makes post-compute disk reload canonical: `affected_concepts` / scoped row refresh is an advisory optimization, and `reloadSpeakerAnnotation` must still run after IPA, ORTH, STT, or BND compute completion so disk-written intervals appear in the UI.
   - PR #217 makes the Run Full Pipeline preview run-mode-aware for IPA: in `concept-windows` / `edited-only`, stale full-mode `ipa.can_run=false` no longer blocks the cell when ORTH/concept-tier presence is observable; full-mode IPA-without-ORTH and pure-empty concept-window speakers remain blocked.
   - PRs #221/#224/#225 add cancellation across the batch/UI/backend boundary: Cancel stops frontend polling immediately, fire-and-forget posts `POST /api/compute/{jobId}/cancel`, and HF ORTH cooperatively exits with `status: partial_cancelled` / `cancelled_at_interval` when work already produced intervals.
+  - PRs #289/#290/#293 add synchronous reviewer-triggered `POST /api/lexeme/run_ortho` and `POST /api/lexeme/run_ipa` endpoints plus React confirm flows; requests accept `speaker`, `concept_key`, `start`, `end`, and `pad` (`0.0`, `0.2`, `0.5`), return the original interval bounds, and auto-persist confirmed ORTH/IPA text through the existing annotation save path.
+  - PRs #298/#301/#302/#304 thread the same pad vocabulary through lexeme rerun dialogs and STT/ORTH/IPA action-menu concept-window / edited-only compute payloads; pad widens acoustic context without retiming reviewed intervals.
 - **Annotate review UX polished**:
   - PRs #184/#185 add waveform drag-selection quick retime, a two-decimal waveform playhead chip, and cancel/Escape for transient retime selections.
   - PRs #186/#187 add manual volume control with default 100%.
@@ -392,6 +394,9 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PRs #209/#211 split header status into strict `Annotated` vs `Complete` badges: `Complete` requires concept + IPA + strict `ortho` overlap, and auto-imported `ortho_words` no longer count as human-reviewed orthography.
   - PR #210 moves BND progress into the existing global header chip instead of duplicating progress text inside the drawer.
   - PR #223 makes the ORTHOGRAPHIC editor prefer direct `tiers.ortho` text before falling back to imported/derived `ortho_words`, preserving existing save flow into `tiers.ortho`.
+  - PRs #275/#279/#287/#288 add lexeme-search tier filtering, graceful display for concept intervals past source-audio end, durable Annotate speaker-note edits, and Mark Done flushing of pending inline edits before confirmation.
+  - PRs #284/#294 scope tag filters/counts and sidebar concept visibility by active speaker so Annotate does not surface another speaker's unelicited concepts or tag state.
+  - PR #286 keeps annotation matching on the raw concept key rather than display ids, preserving source identity through source-item and duplicate/variant workflows.
 - **Speaker onboarding from Audition CSV shipped**:
   - PR #198 teaches `POST /api/onboard/speaker` to detect Adobe Audition marker CSVs when concepts-style parsing finds no rows and `Name`/`Start` headers are present.
   - PR #200 resolves Audition labels against existing `concepts.csv` `concept_en` values before allocating new integer ids, so the import path remains integer-id only while preserving duplicate/repeated elicitations as separate intervals.
@@ -403,7 +408,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #216 adds a built-in Southern Kurdish Arabic-script ORTH decoder prime when `ortho.initial_prompt` is omitted and preserves explicit `"initial_prompt": ""` as user opt-out.
   - PR #218 changes ORTH default backend to Hugging Face Transformers `HFWhisperProvider` on `razhan/whisper-base-sdh`; STT remains faster-whisper, and legacy ORTH uses `ortho.backend="faster-whisper"` plus a local CTranslate2 model path.
   - PRs #219/#220/#222 restore HF transcription fidelity with low-level `WhisperProcessor` + `WhisperForConditionalGeneration.generate()`, 30-second full-file chunks, generated-token logprob confidence, non-16 kHz in-memory resampling, and concept-window decoding without `return_timestamps=True`.
-  - PR #226 restores HF decode-level repetition guards: `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_previous_text`, `temperature=0.0`, `do_sample=false`, and `initial_prompt` prompt ids. `compute_type` and VAD remain legacy faster-whisper options and are logged as ignored by HF.
+  - PR #226 restores HF decode-level repetition guards: `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_previous_text`, `temperature=0.0`, and `do_sample=false`. `compute_type` and VAD remain legacy faster-whisper options and are logged as ignored by HF.
+  - PRs #299/#300 make full-file, concept-window, and per-lexeme HF ORTH suppress configured prompts by default, require explicit caller opt-in for seeded decoding, and add no-parrot regression evidence for the prompt-prefix incident.
   - Cite Razhan model usage with Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*, Interspeech 2025, doi:10.21437/Interspeech.2025-2296, PDF: https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf.
 - **Full-pipeline resource lifecycle and stale-lock recovery shipped**:
   - PR #227 unloads the HF ORTH model/processor and clears/synchronizes CUDA cache before wav2vec2 IPA, adds `Aligner.release()`, and enforces a tunable 4 GiB low-VRAM guard before IPA in full-pipeline runs.
@@ -416,7 +422,11 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #261 classifies Audition cue families such as KLQ/EXT/JBIL into `source_survey` and extends conservative source-item backfill.
   - PR #262 fixes singleton speaker-form matching to use stable concept keys rather than emitted sidebar ids.
   - PR #263 adds manual concept merge/unmerge overrides under `manual_overrides.concept_merges`, combining underlying concept ids for comparative review without rewriting `concepts.csv` or annotation tiers.
-  - PR #264 is open as of the 2026-05-03 rolling-window audit; do not document its Compare-only scoping as shipped until it merges.
+  - PR #264 scopes concept merges to Compare mode; Annotate keeps raw concept rows independently navigable.
+  - PRs #267/#268/#270/#284 ship speaker-local `AnnotationRecord.concept_tags`, omit empty concept-tag sidecars, and keep tag filters/counts scoped to the active speaker while preserving the shared tag vocabulary.
+  - PRs #271/#272/#273/#278 harden source-item backfill/import so `concepts.csv` keeps the five-column schema and MCP/processed-speaker onboarding does not collapse `source_item` / `source_survey` metadata.
+  - PRs #291/#292/#295/#303 add `survey-overlap.json`, `GET`/`POST /api/survey-overlap`, survey label/color controls, per-speaker choices, Current-survey copy, and sidebar color/multi-survey chips.
+  - PRs #297/#296 add `POST /api/concepts/{conceptId}/duplicate` and a sidebar right-click duplicate action that renames the source row to `X (A)`, appends `X (B)` with the same source metadata, and refreshes the workstation.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)

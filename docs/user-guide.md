@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-05-01
+> Last updated: 2026-05-07
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -54,8 +54,9 @@ The current Annotate surface includes:
 - **Clip-bounded playback** for the selected region
 - A global **Space** play/pause hotkey
 - **Per-speaker undo/redo** controls in the Annotate playback bar, with `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+Y`
-- Concept display and sorting controls
-- ConceptSidebar tag/filter controls for selective review (the duplicate Annotate right-drawer concept filter was removed)
+- Concept display and sorting controls, including source/survey-aware sidebar ordering when `source_item` / `source_survey` values are present
+- Speaker-scoped ConceptSidebar tag/filter controls for selective review (the duplicate Annotate right-drawer concept filter was removed)
+- Survey/source badges and optional color coding from `survey-overlap.json`
 - The shared **AI chat dock**
 
 ### Annotate jobs and automation
@@ -93,9 +94,9 @@ Current runtime truth:
 - Legacy ORTH through faster-whisper/CTranslate2 remains available with `ortho.backend="faster-whisper"` plus an explicit local CT2 directory. CT2-looking directories are rejected by `backend="hf"` with an actionable error.
 - Provider-side Whisper decoding maps Razhan/DOLMA `sd`/`sdh` requests to `fa`; PARSE project and annotation metadata should still keep Southern Kurdish as `sdh`.
 - HF ORTH uses 30-second low-level `WhisperForConditionalGeneration.generate()` chunks for whole-file transcription, resamples non-16 kHz in-memory clips, keeps concept-window timing from caller-supplied windows, and avoids `return_timestamps=True` in concept-window generation.
-- HF ORTH applies decode-level anti-cascade guards: `condition_on_previous_text=False`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and prompt ids from `initial_prompt`; legacy `compute_type`/VAD options are logged as ignored by HF.
-- If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime; an explicit `"initial_prompt": ""` remains the opt-out.
-- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss `initial_prompt` seeding, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+- HF ORTH applies decode-level anti-cascade guards: `condition_on_previous_text=False`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and explicit prompt ids only when a caller opts in; legacy `compute_type`/VAD options are logged as ignored by HF.
+- Full-file, concept-window, and per-lexeme HF ORTH now suppress configured `ortho.initial_prompt` by default so short clips do not parrot the decoder prime. See [ORTH initial prompt suppression](./orth-initial-prompt-suppression.md) for the 2026-05-07 regression audit.
+- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss seeding; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
 - Long ORTH jobs observe backend cancellation cooperatively. When cancellation arrives after some windows were written, PARSE can persist partial ORTH output and return `status: partial_cancelled` with `cancelled_at_interval` metadata.
 
 #### Forced alignment
@@ -180,13 +181,18 @@ Automation in PARSE is intentionally review-first.
 Annotate mode supports:
 
 - inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions; the ORTHOGRAPHIC editor prefers direct `tiers.ortho` text before falling back to imported/derived `ortho_words`, and saves still write through the reviewed `tiers.ortho` path
+- single-lexeme **Rerun ORTH** and **Rerun IPA** actions that call `/api/lexeme/run_ortho` or `/api/lexeme/run_ipa`, offer pad choices `0.0`, `0.2` (default), and `0.5`, and auto-save the confirmed tier text back into the selected interval
+- concept-window and edited-only STT / ORTH / IPA action-menu reruns that use the same pad vocabulary, so hard tokens can widen acoustic context without changing the reviewed interval bounds
 - per-speaker undo/redo with merge recovery and operation-labelled toasts
 - draggable lexeme timestamp editing plus waveform drag-select quick retime for the active concept
 - quick-retime cancel/Escape dismissal before commit
 - identity-only concept lookup: the active concept matches annotation rows by `concept_id` only, so legacy rows without `concept_id` remain visibly unannotated until reimported or saved through the concept-id gate
 - server-normalized Save Annotation refresh: success copy and visual bounds come back from the saved annotation, including `concept`, `ipa`, `ortho`, and `ortho_words`/BND changes
 - strict header status badges: `Annotated` means concept plus IPA or strict `ortho`, while `Complete` requires concept plus IPA plus strict `ortho`; auto-imported `ortho_words` can help display BND/word text but no longer counts as reviewed orthography
-- per-lexeme speaker notes saved as `(speaker, concept_id, user_note)`
+- per-lexeme speaker notes saved as `(speaker, concept_id, user_note)` and persisted when changed from Annotate
+- Mark Done flushes pending inline edits first, so confirmation does not silently discard an unsaved ORTH/IPA/STT edit
+- concept intervals extending past the source-audio duration render gracefully instead of crashing the annotation view
+- speaker-local concept tag membership in `AnnotationRecord.concept_tags`; the shared tag vocabulary remains project-wide, but tag filters/counts in Annotate are scoped to the active speaker
 - transport-bar volume control with current default 100%
 - manual boundary correction
 - constant timestamp-offset detect/apply workflows for CSV↔audio misalignment; apply results report both shifted tier intervals and shifted concepts
@@ -264,9 +270,11 @@ The current Compare interface provides:
 
 - a **concept × speaker matrix** for side-by-side lexical review
 - source-aware sidebar badges and sorting from `concepts.csv` `source_survey` / `source_item` values
+- survey-overlap chips, color coding, and per-speaker survey choices from `survey-overlap.json`; the Current survey badge updates from the active speaker/context rather than stale global copy
 - grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
 - per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
-- manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals
+- manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals; merge overrides are Compare-mode-only and do not collapse Annotate navigation
+- right-click concept duplication that renames the selected row to `X (A)` and appends a new `X (B)` row with the same `source_item` / `source_survey` and a fresh numeric id
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
@@ -286,10 +294,11 @@ Typical use:
 2. Review the forms side by side
 3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations
 4. Use concept merge/unmerge when two source concepts should be compared as one analytical row, while preserving the original concept ids underneath
-5. Accept, split, merge, or cycle cognate groups
-6. Mark speaker-level irregularities or flags where needed
-7. Consult enrichment overlays and contact-language evidence
-8. Preserve manual adjudications for export
+5. Duplicate a concept into A/B rows when a single source item needs parallel lexical realizations rather than a reversible Compare-only merge
+6. Accept, split, merge, or cycle cognate groups
+7. Mark speaker-level irregularities or flags where needed
+8. Consult enrichment overlays and contact-language evidence
+9. Preserve manual adjudications for export
 
 The goal is not just visualization — it is structured decision-making for downstream comparative analysis.
 
