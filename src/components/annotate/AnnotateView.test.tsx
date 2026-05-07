@@ -1197,7 +1197,9 @@ describe('AnnotateView', () => {
 
     it('network error shows fallback copy', async () => {
       mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
-      mockRerunLexemeIpa.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      mockRerunLexemeIpa.mockRejectedValueOnce(new Error(
+        'Could not reach the PARSE API for POST /api/lexeme/run_ipa. Check that the Python server is running at http://127.0.0.1:8766 and that the Vite /api proxy is active.',
+      ));
 
       renderWaterAnnotateView();
       fireEvent.click(screen.getByTestId('run-ipa-button'));

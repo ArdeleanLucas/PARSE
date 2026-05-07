@@ -47,9 +47,10 @@ function truncatePreview(value: string): string {
   return value.length > 80 ? `${value.slice(0, 77)}…` : value;
 }
 
-function extractRerunError(error: unknown): string {
-  if (error instanceof TypeError && /failed to fetch/i.test(error.message)) return "Network error. Try again.";
+export function extractRerunError(error: unknown): string {
   if (error instanceof Error) {
+    if (/could not reach the parse api/i.test(error.message)) return "Network error. Try again.";
+    if (error instanceof TypeError && /failed to fetch|networkerror/i.test(error.message)) return "Network error. Try again.";
     const match = error.message.match(/\{\s*"error"\s*:\s*"([^"]+)"\s*\}/);
     return match?.[1] ?? error.message;
   }
