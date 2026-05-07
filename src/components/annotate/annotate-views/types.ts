@@ -23,6 +23,8 @@ export interface AnnotateViewProps {
   onNext: () => void;
   audioUrl: string;
   peaksUrl?: string;
+  surveyLabel?: string;
+  surveySourceItem?: string;
   onCaptureOffsetAnchor?: () => void;
   captureToast?: string | null;
 }

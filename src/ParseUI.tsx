@@ -16,7 +16,11 @@ import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
-import { compareSurveyKeys } from './lib/surveySort';
+import {
+  compareConceptsByResolvedSurvey,
+  resolveConceptSurvey,
+  surveyLabelFor,
+} from './lib/surveyOverlap';
 import {
   conceptMatchesIntervalText,
   deriveAudioUrl,
@@ -84,7 +88,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus, ContactLexemePopulateResult, Tag } from './api/types';
+import type { ClefConfigStatus, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -123,6 +127,10 @@ export function ParseUI() {
   const loadConfig       = useConfigStore(s => s.load);
   const rawSpeakers      = useConfigStore(s => s.config?.speakers ?? []);
   const rawConcepts      = useConfigStore(s => s.config?.concepts ?? []);
+  const surveySettings   = useConfigStore(s => s.config?.survey_settings ?? {});
+  const surveyColorCodingEnabled = useConfigStore(s => s.config?.survey_color_coding_enabled ?? false);
+  const speakerSurveyChoices = useConfigStore(s => s.config?.speaker_survey_choices ?? {});
+  const updateSurveyOverlap = useConfigStore(s => s.updateSurveyOverlap);
   const configError      = useConfigStore(s => s.error);
   const [dismissedConfigError, setDismissedConfigError] = useState<string | null>(null);
   const storeTags        = useTagStore(s => s.tags);
@@ -154,6 +162,20 @@ export function ParseUI() {
     sortModeUserTouchedRef.current = true;
     setSortMode(mode);
   }, []);
+  const handleSurveyOverlapUpdate = useCallback((patch: SurveyOverlapPatch) => {
+    void updateSurveyOverlap(patch);
+  }, [updateSurveyOverlap]);
+  const handleSurveyChoiceChange = useCallback((speaker: string, conceptKey: string, surveyId: string) => {
+    void updateSurveyOverlap({
+      speaker_choices: {
+        ...speakerSurveyChoices,
+        [speaker]: {
+          ...(speakerSurveyChoices[speaker] ?? {}),
+          [conceptKey]: surveyId,
+        },
+      },
+    });
+  }, [speakerSurveyChoices, updateSurveyOverlap]);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
   const { exportLingPyTSV } = useExport();
   const {
@@ -1061,23 +1083,28 @@ export function ParseUI() {
     if (sortMode === 'az') {
       list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortMode === 'survey') {
-      // Natural sort lives in src/lib/surveySort.ts — the same module the
-      // regression tests import, so any future branch that reverts the
-      // sidebar sort will fail CI instead of landing silently.
-      list = [...list].sort((a, b) => {
-        const av = a.sourceItem ?? '';
-        const bv = b.sourceItem ?? '';
-        if (av && !bv) return -1;
-        if (!av && bv) return 1;
-        return compareSurveyKeys(av, bv);
-      });
+      list = [...list].sort((a, b) => compareConceptsByResolvedSurvey(
+        a,
+        b,
+        selectedSpeakers[0] ?? null,
+        speakerSurveyChoices,
+        surveySettings,
+      ));
     } else {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
+  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, speakerSurveyChoices, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
 
   const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
+  const activeResolvedSurvey = useMemo(
+    () => resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings),
+    [concept, selectedSpeakers, speakerSurveyChoices, surveySettings],
+  );
+  const activeSurveyLabel = activeResolvedSurvey.surveyId
+    ? surveyLabelFor(activeResolvedSurvey.surveyId, surveySettings)
+    : undefined;
+  const activeSurveySourceItem = activeResolvedSurvey.sourceItem || undefined;
   const referenceFormLists = useMemo(
     () => resolveReferenceFormLists(enrichmentData, silConcepts, concept, primaryContactCodes, contactLanguageScripts),
     [concept, enrichmentData, silConcepts, primaryContactCodes, contactLanguageScripts],
@@ -1707,6 +1734,11 @@ export function ParseUI() {
           tags={tagsList}
           activeConceptId={conceptId}
           onConceptSelect={setConceptId}
+          activeSpeaker={selectedSpeakers[0] ?? null}
+          surveySettings={surveySettings}
+          speakerSurveyChoices={speakerSurveyChoices}
+          surveyColorCodingEnabled={surveyColorCodingEnabled}
+          onSurveyChoiceChange={handleSurveyChoiceChange}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             setMergePickerPrimary(target);
@@ -1764,6 +1796,8 @@ export function ParseUI() {
               onNext={goNext}
               audioUrl={deriveAudioUrl(annotationRecords[selectedSpeakers[0] ?? ''])}
               peaksUrl={selectedSpeakers[0] ? resolveAssetUrl(`/peaks/${selectedSpeakers[0]}.json`) : undefined}
+              surveyLabel={activeSurveyLabel}
+              surveySourceItem={activeSurveySourceItem}
               onCaptureOffsetAnchor={captureAnchorFromBar}
               captureToast={captureToast}
             />
@@ -2352,6 +2386,11 @@ export function ParseUI() {
             const speaker = selectedSpeakers[0];
             if (speaker) void useAnnotationStore.getState().saveSpeaker(speaker);
           }}
+          activeConcept={concept}
+          surveyColorCodingEnabled={surveyColorCodingEnabled}
+          surveySettings={surveySettings}
+          speakerSurveyChoices={speakerSurveyChoices}
+          onSurveyOverlapUpdate={handleSurveyOverlapUpdate}
         />
       </div>
 

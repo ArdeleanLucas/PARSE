@@ -66,3 +66,49 @@ def test_build_workspace_frontend_config_preserves_config_defaults_when_project_
     assert result["speakers"] == []
     assert result["concepts"] == []
     assert result["schema_version"] == 3
+
+
+def test_build_workspace_frontend_config_projects_survey_overlap_sidecar(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "project.json").write_text(json.dumps({"speakers": ["Saha01", "Khan01"]}), encoding="utf-8")
+    with open(tmp_path / "concepts.csv", "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+        writer.writeheader()
+        writer.writerow({"id": "101", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ", "custom_order": ""})
+        writer.writerow({"id": "102", "concept_en": "water", "source_item": "3.15", "source_survey": "KLQ", "custom_order": ""})
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps(
+            {
+                "color_coding_enabled": True,
+                "surveys": {
+                    "klq": {"display_label": "KLQ", "display_color": "indigo"},
+                    "jbil": {"display_label": "Bailey", "display_color": "amber"},
+                },
+                "concept_survey_links": {"101": {"klq": "3.14", "jbil": "139"}},
+                "speaker_choices": {"Saha01": {"101": "jbil"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_workspace_frontend_config(tmp_path, {}, schema_version=8)
+
+    assert result["survey_color_coding_enabled"] is True
+    assert result["survey_settings"] == {
+        "klq": {"display_label": "KLQ", "display_color": "indigo"},
+        "jbil": {"display_label": "Bailey", "display_color": "amber"},
+    }
+    assert result["speaker_survey_choices"] == {"Saha01": {"101": "jbil"}}
+    assert result["concepts"][0] == {
+        "id": "101",
+        "label": "salt",
+        "source_item": "3.14",
+        "source_survey": "KLQ",
+        "surveys": {"klq": "3.14", "jbil": "139"},
+    }
+    assert result["concepts"][1] == {
+        "id": "102",
+        "label": "water",
+        "source_item": "3.15",
+        "source_survey": "KLQ",
+        "surveys": {"klq": "3.15"},
+    }

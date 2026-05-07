@@ -1400,9 +1400,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_enrichments()
             return
 
-        if request_path == "/api/config":
-            self._api_get_config()
-            return
+        if request_path == "/api/config": self._api_get_config(); return
+        if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
 
         if request_path == "/api/auth/status":
             self._api_auth_status()
@@ -1498,9 +1497,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_enrichments()
             return
 
-        if request_path == "/api/config":
-            self._api_update_config()
-            return
+        if request_path == "/api/config": self._api_update_config(); return
+        if request_path == "/api/survey-overlap": self._api_post_survey_overlap(); return
 
         if request_path == "/api/clef/config":
             self._api_post_clef_config()

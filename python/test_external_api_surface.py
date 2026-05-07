@@ -49,6 +49,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     spec = build_openapi_document(base_url="http://127.0.0.1:8766")
     assert set(spec["paths"].keys()) == {
         "/api/config",
+        "/api/survey-overlap",
         "/api/annotations/{speaker}",
         "/api/annotations/{speaker}/ipa-candidates",
         "/api/annotations/{speaker}/ipa-review/{key}",
@@ -99,6 +100,16 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/mcp/tools",
         "/api/mcp/tools/{toolName}",
     }
+
+
+def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    path = spec["paths"]["/api/survey-overlap"]
+
+    assert set(path) == {"get", "post"}
+    assert path["get"]["operationId"] == "getSurveyOverlap"
+    assert path["post"]["operationId"] == "postSurveyOverlap"
+    assert path["post"]["requestBody"]["required"] is True
 
 
 def test_build_openapi_document_restores_old_tags_shape_and_put_contract() -> None:

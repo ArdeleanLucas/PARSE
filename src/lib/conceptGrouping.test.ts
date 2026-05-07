@@ -39,6 +39,19 @@ describe('groupConceptEntries', () => {
     expect(grouped[2]).toMatchObject({ id: 3, key: 'concept-d', name: 'water' });
   });
 
+  it('threads plural survey links through grouped and singleton concepts', () => {
+    const entries: ConceptEntry[] = [
+      { id: 'concept-a', label: 'rain A', source_item: 'KLQ_1.10', source_survey: 'KLQ', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } },
+      { id: 'concept-b', label: 'rain B', source_item: 'KLQ_1.10', source_survey: 'KLQ', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } },
+      { id: 'concept-c', label: 'fire', source_item: 'KLQ_2.1', source_survey: 'KLQ', surveys: { klq: 'KLQ_2.1' } },
+    ];
+
+    const grouped = groupConceptEntries(entries, untagged);
+
+    expect(grouped[0]).toMatchObject({ key: 'KLQ_1.10', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } });
+    expect(grouped[1]).toMatchObject({ key: 'concept-c', surveys: { klq: 'KLQ_2.1' } });
+  });
+
   it('groups non-adjacent source_item siblings while preserving the position of the first sibling', () => {
     const entries: ConceptEntry[] = [
       { id: 'a', label: 'brother of husband A', source_item: '2.15' },

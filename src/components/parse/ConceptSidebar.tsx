@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 
+import type { ConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
+import { resolveConceptSurvey, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
+
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
 export type ConceptStatusFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
@@ -12,6 +15,7 @@ export interface SidebarConcept {
   tag: ConceptTag;
   sourceItem?: string;
   sourceSurvey?: string;
+  surveys?: ConceptSurveyLinks;
   mergedKeys?: string[];
   mergeAbsorbedNames?: string[];
 }
@@ -36,6 +40,11 @@ interface ConceptSidebarProps {
   tags: SidebarTag[];
   activeConceptId: number;
   onConceptSelect: (conceptId: number) => void;
+  activeSpeaker?: string | null;
+  surveySettings?: SurveySettingsMap;
+  speakerSurveyChoices?: SpeakerSurveyChoices;
+  surveyColorCodingEnabled?: boolean;
+  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
 }
@@ -61,6 +70,11 @@ export function ConceptSidebar({
   tags,
   activeConceptId,
   onConceptSelect,
+  activeSpeaker = null,
+  surveySettings = {},
+  speakerSurveyChoices = {},
+  surveyColorCodingEnabled = false,
+  onSurveyChoiceChange,
   onMergeRequest,
   onUnmergeConcept,
 }: ConceptSidebarProps) {
@@ -185,32 +199,59 @@ export function ConceptSidebar({
       <nav className="flex-1 overflow-y-auto px-2 pb-6">
         {filteredConcepts.map((concept) => {
           const active = concept.id === activeConceptId;
-          const sourceLabel = concept.sourceSurvey && concept.sourceItem
-            ? `${concept.sourceSurvey} ${concept.sourceItem}`
-            : concept.sourceItem;
+          const surveyConcept = { ...concept, key: concept.key ?? String(concept.id) };
+          const resolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
+          const resolvedSurveyLabel = surveyLabelFor(resolvedSurvey.surveyId, surveySettings);
+          const sourceLabel = resolvedSurvey.surveyId && resolvedSurvey.sourceItem
+            ? `${resolvedSurveyLabel} ${resolvedSurvey.sourceItem}`
+            : resolvedSurvey.sourceItem || (concept.sourceSurvey && concept.sourceItem
+              ? `${concept.sourceSurvey} ${concept.sourceItem}`
+              : concept.sourceItem);
           const badge = sourceLabel ?? `#${concept.id}`;
+          const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
           return (
-            <button
-              key={concept.id}
-              onClick={() => onConceptSelect(concept.id)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setContextMenu({ concept, x: event.clientX, y: event.clientY });
-              }}
-              className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
-              <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}</span>
-              {concept.mergedKeys && concept.mergedKeys.length > 1 && (
-                <span
-                  title={(concept.mergeAbsorbedNames ?? []).join(', ')}
-                  className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
-                >
-                  +{concept.mergedKeys.length - 1}
-                </span>
+            <div key={concept.id} data-testid={`concept-row-${concept.id}`} className={`mb-0.5 rounded-md ${active ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+              <button
+                onClick={() => onConceptSelect(concept.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenu({ concept, x: event.clientX, y: event.clientY });
+                }}
+                className={`group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600'}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
+                <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}</span>
+                {concept.mergedKeys && concept.mergedKeys.length > 1 && (
+                  <span
+                    title={(concept.mergeAbsorbedNames ?? []).join(', ')}
+                    className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                  >
+                    +{concept.mergedKeys.length - 1}
+                  </span>
+                )}
+                <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
+              </button>
+              {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
+                <div className="flex flex-wrap gap-1 px-7 pb-1.5">
+                  {surveyChoices.map((surveyId) => {
+                    const sourceItem = surveyConcept.surveys?.[surveyId] ?? '';
+                    const label = surveyLabelFor(surveyId, surveySettings);
+                    const selected = resolvedSurvey.surveyId === surveyId;
+                    return (
+                      <button
+                        key={surveyId}
+                        type="button"
+                        aria-label={selected ? `Current survey ${label} ${sourceItem}` : `Switch ${concept.name} to ${label} ${sourceItem}`}
+                        onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, surveyId)}
+                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ${selected ? (surveyColorCodingEnabled ? 'bg-indigo-50 text-indigo-700 ring-indigo-200' : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-              <span className={`font-mono text-[10px] ${active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
-            </button>
+            </div>
           );
         })}
       </nav>

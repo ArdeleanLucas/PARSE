@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import type { SurveyOverlapPatch, SpeakerSurveyChoices, SurveySettingsMap } from '../../../api/types';
+import type { Concept } from '../../../lib/speakerForm';
 import type { CompareComputeJobStatus, CompareComputeMode, OffsetPhase } from '../compareComputeContract';
 
 export type AppMode = 'annotate' | 'compare' | 'tags';
@@ -39,6 +41,11 @@ export interface RightPanelProps {
   annotateSpeakerTools?: ReactNode;
   annotateAuxTools?: ReactNode;
   onSaveAnnotations: () => void;
+  activeConcept?: Concept | null;
+  surveyColorCodingEnabled: boolean;
+  surveySettings: SurveySettingsMap;
+  speakerSurveyChoices: SpeakerSurveyChoices;
+  onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
 }
 
 export interface SpeakersSectionProps {

@@ -65,6 +65,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   onNext,
   audioUrl,
   peaksUrl,
+  surveyLabel,
+  surveySourceItem,
   onCaptureOffsetAnchor,
   captureToast,
 }) => {
@@ -922,6 +924,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         concept={concept}
         speaker={speaker}
         totalConcepts={totalConcepts}
+        surveyLabel={surveyLabel}
+        surveySourceItem={surveySourceItem}
         onPrev={onPrev}
         onNext={onNext}
       />

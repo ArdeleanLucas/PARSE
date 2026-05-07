@@ -269,6 +269,27 @@ describe('AnnotateView', () => {
     expect(screen.getByTestId('transcription-lanes')).toBeTruthy();
   });
 
+  it('surfaces resolved survey metadata in the annotate header', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        surveyLabel="Jbil Modal"
+        surveySourceItem="JBIL_100"
+      />,
+    );
+
+    expect(screen.getByText('Survey')).toBeTruthy();
+    expect(screen.getByText('Jbil Modal')).toBeTruthy();
+    expect(screen.getByText('JBIL_100')).toBeTruthy();
+  });
+
   it('pre-fills ORTHOGRAPHIC editor from tiers.ortho when both ortho and ortho_words have entries for the concept window', () => {
     mockRecord = makeRecord([{ conceptText: 'one', conceptId: 'water', ipa: 'jɛk', ortho: 'یەک', orthoWords: 'one', start: 18.5, end: 19.5 }]);
 

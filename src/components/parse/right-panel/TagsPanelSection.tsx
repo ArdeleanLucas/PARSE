@@ -5,6 +5,7 @@ import { useAnnotationStore } from '@/stores/annotationStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useUIStore } from '@/stores/uiStore';
 import type { Tag } from '@/api/types';
+import { CollapsibleSection } from './CollapsibleSection';
 
 const COLOR_SWATCHES = ['#3554B8', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#475569'] as const;
 
@@ -43,20 +44,20 @@ export function TagsPanelSection({ conceptId, speaker }: TagsPanelSectionProps) 
   }, [search, tags]);
 
   return (
-    <section className="border-b border-slate-100 p-4" aria-labelledby="concept-tags-title">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h4 id="concept-tags-title" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <TagIcon className="h-3 w-3" /> Concept Tags
-        </h4>
-        <div className="flex items-center gap-1">
+    <CollapsibleSection
+      title="Concept Tags"
+      icon={<TagIcon className="h-3 w-3" />}
+      meta={(
+        <span className="flex items-center gap-1">
           <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[9px] text-emerald-700" aria-label="Applied tag count">
             {appliedCount} of {tags.length}
           </span>
           <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500" aria-label="Tag vocabulary size">
             {tags.length} tag{tags.length === 1 ? '' : 's'}
           </span>
-        </div>
-      </div>
+        </span>
+      )}
+    >
       <p className="mb-3 text-[10px] leading-snug text-slate-400">
         Tags are vocabulary only here; speaker-specific membership lives on each annotation record.
       </p>
@@ -100,7 +101,7 @@ export function TagsPanelSection({ conceptId, speaker }: TagsPanelSectionProps) 
       </div>
 
       <CreateTagInline onCreate={addTag} />
-    </section>
+    </CollapsibleSection>
   );
 }
 

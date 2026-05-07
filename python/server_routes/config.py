@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 
 def _workspace_frontend_config(base_config: _server.Optional[_server.Dict[str, _server.Any]]=None) -> _server.Dict[str, _server.Any]:
     return _server._app_build_workspace_frontend_config(_server._project_root(), base_config, schema_version=_server.CONFIG_SCHEMA_VERSION)
@@ -17,6 +18,15 @@ def _api_update_config(self) -> None:
     except _server._app_ProjectConfigHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
+
+def _api_get_survey_overlap(self) -> None:
+    self._send_json(_server.HTTPStatus.OK, {'survey_overlap': load_survey_overlap_state(_server._project_root())})
+
+def _api_post_survey_overlap(self) -> None:
+    body = self._expect_object(self._read_json_body(), 'survey overlap payload')
+    patch = self._expect_object(body.get('survey_overlap', body), 'survey_overlap')
+    state = update_survey_overlap_state(_server._project_root(), patch)
+    self._send_json(_server.HTTPStatus.OK, {'success': True, 'survey_overlap': state})
 
 def _api_auth_key(self) -> None:
     """POST /api/auth/key — store a direct API key."""
@@ -55,5 +65,5 @@ def _api_auth_logout(self) -> None:
     response = _server._app_build_auth_logout_response(clear_tokens=openai_auth.clear_tokens)
     self._send_json(response.status, response.payload)
 
-__all__ = ['_workspace_frontend_config', '_api_get_config', '_api_update_config', '_api_auth_key', '_api_auth_status', '_api_auth_start', '_api_auth_poll', '_api_auth_logout']
+__all__ = ['_workspace_frontend_config', '_api_get_config', '_api_update_config', '_api_get_survey_overlap', '_api_post_survey_overlap', '_api_auth_key', '_api_auth_status', '_api_auth_start', '_api_auth_poll', '_api_auth_logout']
 

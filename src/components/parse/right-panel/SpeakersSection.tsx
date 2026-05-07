@@ -1,6 +1,7 @@
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Plus, Users, X } from 'lucide-react';
 
 import type { SpeakersSectionProps } from './types';
+import { CollapsibleSection } from './CollapsibleSection';
 
 export function SpeakersSection({
   currentMode,
@@ -12,15 +13,11 @@ export function SpeakersSection({
   onToggleSpeaker,
 }: SpeakersSectionProps) {
   return (
-    <div className="border-b border-slate-100 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          Speakers {currentMode === 'annotate' && <span className="ml-1 rounded bg-indigo-50 px-1 py-0.5 font-mono text-[8px] text-indigo-600">SINGLE</span>}
-        </h4>
-        <span className="text-[10px] text-slate-400">
-          {currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {speakers.length}
-        </span>
-      </div>
+    <CollapsibleSection
+      title={currentMode === 'annotate' ? 'Speakers SINGLE' : 'Speakers'}
+      icon={<Users className="h-3 w-3" />}
+      meta={<span className="text-[10px] text-slate-400">{currentMode === 'annotate' ? '1' : selectedSpeakers.length} / {speakers.length}</span>}
+    >
       <div className="mb-2 flex gap-1">
         <select
           value={currentMode === 'annotate' ? (selectedSpeakers[0] ?? '') : (speakerPicker ?? '')}
@@ -61,6 +58,6 @@ export function SpeakersSection({
           Concept list scoped to <span className="font-mono text-slate-600">{selectedSpeakers[0]}</span>'s dataset.
         </p>
       )}
-    </div>
+    </CollapsibleSection>
   );
 }

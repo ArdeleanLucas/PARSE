@@ -154,12 +154,33 @@ export interface SttSegmentsPayload {
   source?: string;
 }
 
+export interface SurveyDisplaySettings {
+  display_label: string;
+  display_color: string;
+}
+
+export type SurveySettingsMap = Record<string, SurveyDisplaySettings>;
+export type ConceptSurveyLinks = Record<string, string>;
+export type ConceptSurveyLinksByConcept = Record<string, ConceptSurveyLinks>;
+export type SpeakerSurveyChoices = Record<string, Record<string, string>>;
+
+export interface SurveyOverlapState {
+  version: number;
+  color_coding_enabled: boolean;
+  surveys: SurveySettingsMap;
+  concept_survey_links: ConceptSurveyLinksByConcept;
+  speaker_choices: SpeakerSurveyChoices;
+}
+
+export type SurveyOverlapPatch = Partial<SurveyOverlapState>;
+
 export interface ConceptEntry {
   id: string;
   label: string;
   source_item?: string;
   source_survey?: string;
   custom_order?: number;
+  surveys?: ConceptSurveyLinks;
 }
 
 export interface ProjectConfig {
@@ -167,6 +188,9 @@ export interface ProjectConfig {
   language_code: string;
   speakers?: string[];
   concepts: ConceptEntry[];
+  survey_settings?: SurveySettingsMap;
+  survey_color_coding_enabled?: boolean;
+  speaker_survey_choices?: SpeakerSurveyChoices;
   audio_dir: string;
   annotations_dir: string;
   schema_version?: number;

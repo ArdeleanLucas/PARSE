@@ -332,6 +332,48 @@ describe('ConceptSidebar', () => {
     expect(onUnmerge).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'head' }));
   });
 
+  it('renders Approach A survey pills and sends per-speaker choice flips', () => {
+    const onSurveyChoiceChange = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="survey"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{
+          id: 7,
+          key: 'rain',
+          name: 'rain',
+          tag: 'untagged' as const,
+          sourceItem: 'KLQ_1.10',
+          sourceSurvey: 'klq',
+          surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' },
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={7}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+        surveySettings={{
+          klq: { display_label: 'Kurdish List', display_color: 'slate' },
+          jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
+        }}
+        speakerSurveyChoices={{ Fail01: { rain: 'jbil' } }}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+      />,
+    );
+
+    expect(screen.getByTestId('concept-row-7').textContent ?? '').toContain('Jbil Modal JBIL_100');
+
+    fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
+
+    expect(onSurveyChoiceChange).toHaveBeenCalledWith('Fail01', 'rain', 'klq');
+  });
+
   it('shows a merge-count badge with absorbed names in the tooltip', () => {
     render(
       <ConceptSidebar
