@@ -71,7 +71,10 @@ export function underlyingConceptKeys(concept: ConceptIdentityLike): string[] {
     const text = value == null ? "" : String(value).trim();
     if (text) keys.add(text);
   };
-  add(concept.key);
+  // Grouped concepts keep `key` as the shared source_item for stable rows and
+  // survey overrides; only variants/merged keys are master concept ids that can
+  // be compared to annotation-tier concept_id values.
+  if (!concept.variants?.length) add(concept.key);
   for (const variant of concept.variants ?? []) add(variant.conceptKey);
   for (const key of concept.mergedKeys ?? []) add(key);
   for (const variant of concept.mergedVariants ?? []) add(variant.conceptKey);

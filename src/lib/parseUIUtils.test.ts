@@ -10,6 +10,7 @@ import {
   overlaps,
   readTextBlob,
   resolveAssetUrl,
+  underlyingConceptKeys,
 } from './parseUIUtils';
 
 function makeRecord(overrides: Partial<AnnotationRecord> = {}): AnnotationRecord {
@@ -67,6 +68,20 @@ describe('parseUIUtils', () => {
   it('matches concept intervals by raw concept key, not grouped display id', () => {
     expect(conceptMatchesIntervalText({ id: 50, key: '52', variants: [{ conceptKey: '52' }] }, '52')).toBe(true);
     expect(conceptMatchesIntervalText({ id: 50, key: '52', variants: [{ conceptKey: '52' }] }, '50')).toBe(false);
+  });
+
+  it('excludes grouped source_item keys from concept-id matching while preserving variant master ids', () => {
+    const groupedConcept = {
+      id: 3,
+      key: '298',
+      variants: [{ conceptKey: '504' }, { conceptKey: '505' }, { conceptKey: '547' }],
+    };
+
+    expect(underlyingConceptKeys(groupedConcept)).toEqual(['504', '505', '547']);
+    expect(conceptMatchesIntervalText(groupedConcept, '298')).toBe(false);
+    expect(conceptMatchesIntervalText(groupedConcept, '504')).toBe(true);
+    expect(conceptMatchesIntervalText(groupedConcept, '505')).toBe(true);
+    expect(conceptMatchesIntervalText(groupedConcept, '547')).toBe(true);
   });
 
   it('matches merged raw keys represented by a display concept', () => {
