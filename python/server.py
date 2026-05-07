@@ -176,7 +176,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media")
+_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -1540,7 +1540,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/tags/import":
             self._api_post_tags_import()
             return
-
+        if request_path == "/api/lexeme/run_ortho":
+            self._api_post_lexeme_run_ortho()
+            return
+        if request_path == "/api/lexeme/run_ipa":
+            self._api_post_lexeme_run_ipa()
+            return
         if request_path == "/api/lexeme-notes":
             self._api_post_lexeme_note()
             return
