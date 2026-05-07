@@ -3,11 +3,14 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../../api/types';
 
-const { mockSaveLexemeNoteApi } = vi.hoisted(() => ({
+const { mockSaveLexemeNoteApi, mockSaveEnrichments, mockLoadEnrichments } = vi.hoisted(() => ({
   mockSaveLexemeNoteApi: vi.fn(),
+  mockSaveEnrichments: vi.fn(),
+  mockLoadEnrichments: vi.fn(),
 }));
 
 let mockRecord: AnnotationRecord | null = null;
+let mockEnrichmentData: Record<string, unknown> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
 let mockCurrentTime = 0;
 let mockDuration = 4;
@@ -104,6 +107,16 @@ vi.mock('../../stores/annotationStore', () => ({
   }),
 }));
 
+vi.mock('../../stores/enrichmentStore', () => ({
+  useEnrichmentStore: (selector: (state: unknown) => unknown) => selector({
+    data: mockEnrichmentData,
+    save: mockSaveEnrichments,
+    load: mockLoadEnrichments,
+    loading: false,
+    replace: vi.fn(),
+  }),
+}));
+
 vi.mock('../../stores/playbackStore', () => {
   const usePlaybackStore = (selector: (state: unknown) => unknown) => selector({
     isPlaying: mockIsPlaying,
@@ -173,6 +186,7 @@ function makeRecord(concepts: Array<{ conceptText: string; conceptId?: string; i
 describe('AnnotateView', () => {
   beforeEach(() => {
     mockRecord = null;
+    mockEnrichmentData = {};
     mockSelectedRegion = { start: 1.25, end: 2.5 };
     mockCurrentTime = 0;
     mockDuration = 4;
@@ -203,6 +217,9 @@ describe('AnnotateView', () => {
     mockClearQuickRetimeSelection.mockClear();
     mockSaveLexemeNoteApi.mockReset();
     mockSaveLexemeNoteApi.mockResolvedValue({ success: true });
+    mockSaveEnrichments.mockReset();
+    mockSaveEnrichments.mockResolvedValue(undefined);
+    mockLoadEnrichments.mockReset();
     mockWaveSurferOptions = null;
   });
 
@@ -465,6 +482,83 @@ describe('AnnotateView', () => {
     }));
   });
 
+  it('loads persisted speaker note for the active speaker and concept on mount', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+    mockEnrichmentData = {
+      lexeme_notes: {
+        Fail01: {
+          water: { user_note: 'Existing note', updated_at: '2026-05-07T00:00:00Z' },
+        },
+      },
+    };
+
+    renderWaterAnnotateView();
+
+    expect((screen.getByTestId('lexeme-user-note-Fail01-water') as HTMLTextAreaElement).value).toBe('Existing note');
+  });
+
+  it('saving a speaker note also updates the in-memory enrichment store', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+    mockEnrichmentData = { lexeme_notes: {} };
+
+    renderWaterAnnotateView();
+
+    const notes = screen.getByTestId('lexeme-user-note-Fail01-water');
+    fireEvent.change(notes, { target: { value: 'Vowel length unclear.' } });
+    fireEvent.blur(notes);
+
+    await waitFor(() => expect(mockSaveLexemeNoteApi).toHaveBeenCalledWith({
+      speaker: 'Fail01',
+      concept_id: 'water',
+      user_note: 'Vowel length unclear.',
+    }));
+    await waitFor(() => expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      lexeme_notes: {
+        Fail01: {
+          water: expect.objectContaining({
+            user_note: 'Vowel length unclear.',
+            updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          }),
+        },
+      },
+    }));
+  });
+
+  it('clears userNote when navigating to a concept with no saved note even if the previous concept had unblurred edits', () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 },
+      { conceptText: 'fire', ipa: 'fr', ortho: 'ئاگر', start: 3, end: 4 },
+    ]);
+    mockEnrichmentData = { lexeme_notes: {} };
+
+    const { rerender } = render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const waterTextarea = screen.getByTestId('lexeme-user-note-Fail01-water') as HTMLTextAreaElement;
+    fireEvent.change(waterTextarea, { target: { value: 'unblurred edit' } });
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 2, key: 'fire', name: 'fire' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    const fireTextarea = screen.getByTestId('lexeme-user-note-Fail01-fire') as HTMLTextAreaElement;
+    expect(fireTextarea.value).toBe('');
+  });
 
   it('renders a live waveform playhead chip from playback state with two-decimal precision', () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);

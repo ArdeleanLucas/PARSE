@@ -23,6 +23,8 @@ import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
 import { saveLexemeNote } from "../../../api/client";
+import type { LexemeNoteEntry } from "../../../api/types";
+import { useEnrichmentStore } from "../../../stores/enrichmentStore";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
 
@@ -98,6 +100,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
 
   const setConceptTag = useAnnotationStore((s) => s.setConceptTag);
   const setConfirmedAnchor = useAnnotationStore((s) => s.setConfirmedAnchor);
+  const enrichmentData = useEnrichmentStore((s) => s.data) as Record<string, unknown> | null;
+  const saveEnrichments = useEnrichmentStore((s) => s.save);
   const isConfirmed = Boolean(record?.concept_tags?.[concept.key]?.includes("confirmed"));
   const confirmedAnchor = record?.confirmed_anchors?.[concept.key] ?? null;
   const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
@@ -170,6 +174,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [concept.key, conceptInterval, directOrthoInterval, isConfirmed, orthoInterval, setConceptTag, setConfirmedAnchor, speaker]);
 
   const displayedOrthoText = directOrthoInterval ? directOrthoInterval.text : (orthoInterval?.text ?? "");
+  const lexemeNotesBlock = useMemo(() => {
+    const block = enrichmentData?.lexeme_notes;
+    if (!block || typeof block !== "object") return undefined;
+    const speakerBlock = (block as Record<string, unknown>)[speaker];
+    if (!speakerBlock || typeof speakerBlock !== "object") return undefined;
+    const entry = (speakerBlock as Record<string, unknown>)[concept.key];
+    return (entry && typeof entry === "object" ? entry : undefined) as LexemeNoteEntry | undefined;
+  }, [concept.key, enrichmentData, speaker]);
   const [ipa, setIpa] = useState(ipaInterval?.text ?? "");
   const [ortho, setOrtho] = useState(displayedOrthoText);
   const [orthoUserEdited, setOrthoUserEdited] = useState(false);
@@ -177,7 +189,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [editEnd, setEditEnd] = useState<string>(conceptInterval ? conceptInterval.end.toFixed(3) : "");
   const [timestampSaving, setTimestampSaving] = useState(false);
   const [timestampMessage, setTimestampMessage] = useState<{ kind: "ok"; text: string } | { kind: "err"; text: string } | null>(null);
-  const [userNote, setUserNote] = useState("");
+  const [userNote, setUserNote] = useState(lexemeNotesBlock?.user_note ?? "");
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
@@ -189,11 +201,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setEditStart(conceptInterval ? conceptInterval.start.toFixed(3) : "");
     setEditEnd(conceptInterval ? conceptInterval.end.toFixed(3) : "");
     setTimestampMessage(null);
-    setUserNote("");
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
   }, [speaker, concept.key, conceptInterval, ipaInterval, displayedOrthoText]);
+
+  useEffect(() => {
+    setUserNote(lexemeNotesBlock?.user_note ?? "");
+  }, [speaker, concept.key, lexemeNotesBlock?.user_note]);
 
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -344,12 +359,23 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     try {
       await saveLexemeNote({ speaker, concept_id: concept.key, user_note: userNote });
+      await saveEnrichments({
+        lexeme_notes: {
+          [speaker]: {
+            [concept.key]: {
+              ...(lexemeNotesBlock ?? {}),
+              user_note: userNote,
+              updated_at: new Date().toISOString(),
+            },
+          },
+        },
+      });
     } catch (err) {
       setNoteError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSavingNote(false);
     }
-  }, [concept.key, speaker, userNote]);
+  }, [concept.key, lexemeNotesBlock, saveEnrichments, speaker, userNote]);
 
   useEffect(() => {
     if (!quickRetimeMenu) return;
