@@ -77,6 +77,110 @@ def test_update_and_save_preserve_canonical_survey_ids(tmp_path: pathlib.Path) -
     assert payload["speaker_choices"] == {"Saha01": {"101": "jbil"}}
 
 
+def test_update_reset_surveys_flag_clears_existing_survey_settings(tmp_path: pathlib.Path) -> None:
+    update_survey_overlap_state(
+        tmp_path,
+        {
+            "surveys": {
+                "KLQ": {"display_label": "Kurdish List", "display_color": "teal"},
+                "JBIL": {"display_label": "Jbil", "display_color": "amber"},
+            },
+            "concept_survey_links": {"101": {"KLQ": "3.14"}},
+            "speaker_choices": {"Saha01": {"101": "KLQ"}},
+        },
+    )
+
+    state = update_survey_overlap_state(tmp_path, {"reset_surveys": True})
+
+    assert state["surveys"] == {}
+    assert state["concept_survey_links"] == {"101": {"klq": "3.14"}}
+    assert state["speaker_choices"] == {"Saha01": {"101": "klq"}}
+    payload = json.loads((tmp_path / SURVEY_OVERLAP_FILENAME).read_text(encoding="utf-8"))
+    assert payload["surveys"] == {}
+
+
+def test_update_reset_surveys_then_applies_incoming_survey_settings(tmp_path: pathlib.Path) -> None:
+    update_survey_overlap_state(
+        tmp_path,
+        {
+            "surveys": {
+                "KLQ": {"display_label": "Kurdish List", "display_color": "teal"},
+                "JBIL": {"display_label": "Jbil", "display_color": "amber"},
+            },
+        },
+    )
+
+    state = update_survey_overlap_state(
+        tmp_path,
+        {
+            "reset_surveys": True,
+            "surveys": {"WALS": {"display_label": "World Atlas", "display_color": "blue"}},
+        },
+    )
+
+    assert state["surveys"] == {"wals": {"display_label": "World Atlas", "display_color": "blue"}}
+
+
+def test_update_reset_speaker_choices_clears_independently_of_surveys(tmp_path: pathlib.Path) -> None:
+    update_survey_overlap_state(
+        tmp_path,
+        {
+            "surveys": {"KLQ": {"display_label": "Kurdish List", "display_color": "teal"}},
+            "speaker_choices": {"Saha01": {"101": "KLQ"}},
+        },
+    )
+
+    state = update_survey_overlap_state(tmp_path, {"reset_speaker_choices": True})
+
+    assert state["speaker_choices"] == {}
+    assert state["surveys"] == {"klq": {"display_label": "Kurdish List", "display_color": "teal"}}
+
+
+def test_update_reset_concept_survey_links_clears_independently(tmp_path: pathlib.Path) -> None:
+    update_survey_overlap_state(
+        tmp_path,
+        {
+            "concept_survey_links": {"101": {"KLQ": "3.14"}},
+            "speaker_choices": {"Saha01": {"101": "KLQ"}},
+        },
+    )
+
+    state = update_survey_overlap_state(tmp_path, {"reset_concept_survey_links": True})
+
+    assert state["concept_survey_links"] == {}
+    assert state["speaker_choices"] == {"Saha01": {"101": "klq"}}
+
+
+def test_update_reset_flags_compose_in_one_call(tmp_path: pathlib.Path) -> None:
+    update_survey_overlap_state(
+        tmp_path,
+        {
+            "color_coding_enabled": True,
+            "surveys": {"KLQ": {"display_label": "Kurdish List", "display_color": "teal"}},
+            "concept_survey_links": {"101": {"KLQ": "3.14"}},
+            "speaker_choices": {"Saha01": {"101": "KLQ"}},
+        },
+    )
+
+    state = update_survey_overlap_state(
+        tmp_path,
+        {
+            "reset_surveys": True,
+            "reset_speaker_choices": True,
+            "reset_concept_survey_links": True,
+            "color_coding_enabled": False,
+        },
+    )
+
+    assert state == {
+        "version": 1,
+        "color_coding_enabled": False,
+        "surveys": {},
+        "concept_survey_links": {},
+        "speaker_choices": {},
+    }
+
+
 def test_resolve_survey_for_speaker_uses_choice_then_legacy_default(tmp_path: pathlib.Path) -> None:
     state = update_survey_overlap_state(
         tmp_path,

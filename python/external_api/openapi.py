@@ -192,7 +192,14 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/survey-overlap": {
             "get": {"tags": ["Config"], "summary": "Read survey-overlap sidecar state", "operationId": "getSurveyOverlap", "responses": {"200": _response("Survey-overlap sidecar state", _schema_ref("GenericObject")), "500": _response("Server error", _schema_ref("ErrorResponse"))}},
-            "post": {"tags": ["Config"], "summary": "Patch survey labels, links, color toggle, and per-speaker choices", "operationId": "postSurveyOverlap", "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("Updated survey-overlap state", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))}},
+            "post": {
+                "tags": ["Config"],
+                "summary": "Patch survey labels, links, color toggle, and per-speaker choices",
+                "description": "Survey-overlap patches merge by default. Optional boolean flags reset_surveys, reset_speaker_choices, and reset_concept_survey_links clear those sections before any supplied replacement entries are merged.",
+                "operationId": "postSurveyOverlap",
+                "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))},
+                "responses": {"200": _response("Updated survey-overlap state", _schema_ref("GenericObject")), "400": _response("Validation error", _schema_ref("ErrorResponse"))},
+            },
         },
         "/api/annotations/{speaker}": {
             "get": {"tags": ["Annotations"], "summary": "Read one speaker annotation record", "operationId": "getAnnotation", "parameters": [_parameter("speaker", "path", {"type": "string"}, required=True)], "responses": {"200": _response("Normalized annotation payload", _schema_ref("GenericObject")), "400": _response("Invalid speaker", _schema_ref("ErrorResponse")), "404": _response("Missing annotation", _schema_ref("ErrorResponse"))}},

@@ -110,6 +110,11 @@ def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> N
     assert path["get"]["operationId"] == "getSurveyOverlap"
     assert path["post"]["operationId"] == "postSurveyOverlap"
     assert path["post"]["requestBody"]["required"] is True
+    description = path["post"]["description"]
+    assert "reset_surveys" in description
+    assert "reset_speaker_choices" in description
+    assert "reset_concept_survey_links" in description
+    assert "boolean" in description
 
 
 def test_build_openapi_document_restores_old_tags_shape_and_put_contract() -> None:

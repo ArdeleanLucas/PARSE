@@ -157,6 +157,7 @@ def save_survey_overlap_state(project_root: Path, state: SurveyOverlapState) -> 
     return clean
 
 
+# Patches merge by default; reset_* flags clear a section first so reset plus re-seed can compose in one payload.
 def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object]) -> SurveyOverlapState:
     current = load_survey_overlap_state(project_root)
     merged: SurveyOverlapState = {
@@ -166,6 +167,12 @@ def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object])
         "concept_survey_links": {cid: dict(links) for cid, links in current["concept_survey_links"].items()},
         "speaker_choices": {speaker: dict(choices) for speaker, choices in current["speaker_choices"].items()},
     }
+    if patch.get("reset_surveys") is True:
+        merged["surveys"] = {}
+    if patch.get("reset_concept_survey_links") is True:
+        merged["concept_survey_links"] = {}
+    if patch.get("reset_speaker_choices") is True:
+        merged["speaker_choices"] = {}
     if "color_coding_enabled" in patch:
         merged["color_coding_enabled"] = bool(patch.get("color_coding_enabled"))
     if isinstance(patch.get("surveys"), Mapping):
