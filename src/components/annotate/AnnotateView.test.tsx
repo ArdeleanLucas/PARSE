@@ -1246,6 +1246,29 @@ describe('AnnotateView', () => {
       expect(getIpaInput().value).toBe('new-ipa');
       expect((await screen.findByTestId('lexeme-timestamp-msg')).textContent).toContain('disk full');
     });
+
+    it('Run IPA result survives concept reload (round-trip through the store)', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeIpa.mockResolvedValueOnce({ ipa: 'new-ipa', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+      mockSaveLexemeAnnotation.mockImplementation(({ ipaText, newStart, newEnd }) => {
+        mockRecord = makeRecord([{ conceptText: 'water', ipa: ipaText, start: newStart, end: newEnd }]);
+        return { ok: true, moved: 1 };
+      });
+
+      const { unmount } = renderWaterAnnotateView();
+      expect(getIpaInput().value).toBe('old-ipa');
+
+      fireEvent.click(screen.getByTestId('run-ipa-button'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+      await waitFor(() => expect(getIpaInput().value).toBe('new-ipa'));
+      await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalled());
+
+      unmount();
+      renderWaterAnnotateView();
+
+      expect(getIpaInput().value).toBe('new-ipa');
+    });
+
   });
 
   describe('past-end-of-audio handling (Khan01 manifest case)', () => {
