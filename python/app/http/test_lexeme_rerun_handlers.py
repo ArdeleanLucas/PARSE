@@ -10,6 +10,7 @@ import pytest
 
 from ai.speaker_locks import SpeakerLockError
 from app.http.lexeme_rerun_handlers import (
+    LexemeRerunHandlerError,
     build_post_run_ipa_response,
     build_post_run_ortho_response,
 )
@@ -155,7 +156,7 @@ def test_run_ipa_happy_path(tmp_path: Path) -> None:
 
 
 def test_run_ortho_invalid_interval(tmp_path: Path) -> None:
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(tmp_path, {"speaker": "Saha01", "concept_key": "root", "start": 2.0, "end": 2.0})
 
     assert getattr(exc_info.value, "status") == HTTPStatus.BAD_REQUEST
@@ -164,7 +165,7 @@ def test_run_ortho_invalid_interval(tmp_path: Path) -> None:
 
 def test_run_ortho_missing_speaker(tmp_path: Path) -> None:
     _write_workspace(tmp_path)
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         build_post_run_ortho_response(
             {"speaker": "Missing", "concept_key": "root", "start": 1.0, "end": 2.0},
             project_root=tmp_path,
@@ -184,7 +185,7 @@ def test_run_ortho_missing_speaker(tmp_path: Path) -> None:
 
 
 def test_run_ortho_missing_concept_key_field(tmp_path: Path) -> None:
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(tmp_path, {"speaker": "Saha01", "start": 1.0, "end": 2.0})
 
     assert getattr(exc_info.value, "status") == HTTPStatus.BAD_REQUEST
@@ -192,7 +193,7 @@ def test_run_ortho_missing_concept_key_field(tmp_path: Path) -> None:
 
 
 def test_run_ortho_missing_concept_key(tmp_path: Path) -> None:
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(tmp_path, {"speaker": "Saha01", "concept_key": "unknown", "start": 1.0, "end": 2.0})
 
     assert getattr(exc_info.value, "status") == HTTPStatus.NOT_FOUND
@@ -203,7 +204,7 @@ def test_run_ortho_speaker_locked(tmp_path: Path) -> None:
     def locked(_speaker: str, _locks_dir: Path) -> Path:
         raise SpeakerLockError("speaker locked elsewhere")
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(
             tmp_path,
             {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0},
@@ -218,7 +219,7 @@ def test_run_ortho_provider_error(tmp_path: Path) -> None:
     def broken(**kwargs: Any) -> str:
         raise RuntimeError("model unavailable")
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(
             tmp_path,
             {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0},
@@ -230,7 +231,7 @@ def test_run_ortho_provider_error(tmp_path: Path) -> None:
 
 
 def test_run_ortho_interval_too_long(tmp_path: Path) -> None:
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
         _ortho_response(tmp_path, {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 62.0})
 
     assert getattr(exc_info.value, "status") == HTTPStatus.BAD_REQUEST

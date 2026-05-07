@@ -1540,7 +1540,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/tags/import":
             self._api_post_tags_import()
             return
-        if request_path in {"/api/lexeme/run_ortho", "/api/lexeme/run_ipa"}: (self._api_post_lexeme_run_ortho if request_path.endswith("run_ortho") else self._api_post_lexeme_run_ipa)(); return
+        if request_path == "/api/lexeme/run_ortho":
+            self._api_post_lexeme_run_ortho()
+            return
+        if request_path == "/api/lexeme/run_ipa":
+            self._api_post_lexeme_run_ipa()
+            return
         if request_path == "/api/lexeme-notes":
             self._api_post_lexeme_note()
             return

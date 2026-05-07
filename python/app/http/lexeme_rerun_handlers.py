@@ -72,6 +72,7 @@ def _coerce_interval_float(body: Mapping[str, Any], key: str) -> float:
 
 def _language_from_body_or_record(body: Mapping[str, Any], record: Mapping[str, Any]) -> Optional[str]:
     raw_language = body.get("language")
+    # Undocumented escape hatch — frontend doesn't send this; metadata fallback is the canonical source.
     if raw_language is not None:
         language = str(raw_language).strip()
         return language or None
@@ -122,6 +123,7 @@ def _concept_key_exists(project_root: Path, concept_key: str) -> bool:
         if _row_matches_concept_key(row, key, label_key):
             return True
 
+    # Fallback for rows ConceptRegistry filters out (e.g. empty concept_en).
     concepts_path = Path(project_root) / "concepts.csv"
     if not concepts_path.exists():
         return False
@@ -227,7 +229,7 @@ def _build_post_run_response(
             try:
                 release_speaker_lock(request.speaker, resolved_locks_dir)
             except Exception:
-                logger.warning("failed to release lexeme rerun speaker lock for %s", request.speaker)
+                logger.warning("failed to release lexeme rerun speaker lock for %s", request.speaker, exc_info=True)
 
     elapsed_ms = (time.monotonic() - started) * 1000.0
     logger.info("lexeme %s rerun completed in %.1f ms", tier_key, elapsed_ms)

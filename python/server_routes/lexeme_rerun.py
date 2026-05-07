@@ -12,7 +12,13 @@ from server_routes.locks import _locks_dir
 def _run_ortho_interval(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
     from ai.stt_pipeline import run_stt_on_interval
 
-    return run_stt_on_interval(audio_path, start, end, language=language, config_path=_server._config_path())
+    return run_stt_on_interval(
+        audio_path=audio_path,
+        start=start,
+        end=end,
+        language=language,
+        config_path=_server._config_path(),
+    )
 
 
 def _run_ipa_interval(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
