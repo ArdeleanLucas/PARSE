@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable, Set
 
 import hashlib
+import math
 import server as _server
 from ai.provider import AIProvider
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
@@ -1053,6 +1054,17 @@ def _payload_concept_ids(payload: _server.Dict[str, _server.Any]) -> _server.Opt
     return ids
 
 
+def _payload_pad(payload: _server.Dict[str, _server.Any]) -> float:
+    raw = payload.get('pad', 0.2)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError('pad must be one of 0.0, 0.2, 0.5') from exc
+    if not math.isfinite(value) or value not in {0.0, 0.2, 0.5}:
+        raise RuntimeError('pad must be one of 0.0, 0.2, 0.5')
+    return value
+
+
 def _concept_id_from_interval(interval: _server.Dict[str, _server.Any]) -> str:
     for key in ('conceptId', 'concept_id', 'id', 'text'):
         raw = interval.get(key)
@@ -1230,7 +1242,7 @@ def _run_step_on_concept_windows(
     job_id: _server.Optional[str],
     *,
     language: _server.Optional[str] = None,
-    pad_sec: float = 0.8,
+    pad_sec: float = 0.2,
     should_cancel: _server.Optional[Callable[[], bool]] = None,
 ) -> _server.List[_server.Dict[str, _server.Any]]:
     """Run one provider over ±pad_sec short clips around concept intervals.
@@ -1367,7 +1379,7 @@ def _run_step_on_concept_windows(
             _set_compute_progress(job_id, pct, message='{0} concept window {1}/{2}'.format(step_name.upper(), idx + 1, total))
     return rows
 
-def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.8, weak_conf: float=0.5, job_id: _server.Optional[str]=None, language: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
+def _short_clip_refine_lexemes(audio_path: _server.pathlib.Path, concept_intervals: _server.List[_server.Dict[str, _server.Any]], ortho_words: _server.List[_server.Dict[str, _server.Any]], provider: _server.Any, *, pad_sec: float=0.2, weak_conf: float=0.5, job_id: _server.Optional[str]=None, language: _server.Optional[str]=None) -> _server.List[_server.Dict[str, _server.Any]]:
     """Re-transcribe weak/missing concept-aligned lexeme windows.
 
     This keeps the original refine_lexemes gating semantics, but delegates the
@@ -1503,6 +1515,7 @@ def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -
         return _server._run_stt_job(job_id, speaker, source_wav, language)
 
     concept_ids = _server._payload_concept_ids(payload)
+    pad_sec = _server._payload_pad(payload)
     if annotation_path is None:
         raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
     concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
@@ -1522,6 +1535,7 @@ def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -
         step='stt',
         job_id=job_id,
         language=language,
+        pad_sec=pad_sec,
     )
     _server._write_stt_cache(speaker, str(audio_path), language, segments, source=run_mode)
     return {
@@ -1531,6 +1545,7 @@ def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -
         'concept_windows': len(concept_intervals),
         'segments_written': len(segments),
         'source': run_mode,
+        'pad': float(pad_sec),
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
     }
 
@@ -1549,6 +1564,7 @@ def _compute_speaker_ortho_concept_windows(
     language: _server.Optional[str],
     has_existing_text: bool,
     provider: _server.Optional[AIProvider] = None,
+    pad_sec: float = 0.2,
 ) -> _server.Dict[str, _server.Any]:
     if not language:
         language = _transcription_language_from_payload_or_annotation({}, annotation, speaker=speaker, step='ortho')
@@ -1575,6 +1591,7 @@ def _compute_speaker_ortho_concept_windows(
             step='ortho',
             job_id=job_id,
             language=language,
+            pad_sec=pad_sec,
             should_cancel=should_cancel,
         )
         cancelled_requested = should_cancel()
@@ -1598,6 +1615,7 @@ def _compute_speaker_ortho_concept_windows(
         'skipped': False,
         'replaced_existing': has_existing_text,
         'audio_path': str(audio_path),
+        'pad': float(pad_sec),
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
     }
     if cancelled_requested and len(rows) < len(concept_intervals):
@@ -1617,6 +1635,7 @@ def _compute_speaker_ipa_concept_windows(
     tiers: _server.Dict[str, _server.Any],
     run_mode: str,
     concept_ids: _server.Optional[_server.Sequence[str]],
+    pad_sec: float = 0.2,
 ) -> _server.Dict[str, _server.Any]:
     concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
     if not concept_intervals:
@@ -1639,6 +1658,7 @@ def _compute_speaker_ipa_concept_windows(
         provider=aligner,
         step='ipa',
         job_id=job_id,
+        pad_sec=pad_sec,
     )
     clean_rows: _server.List[_server.Dict[str, _server.Any]] = []
     for row in rows:
@@ -1662,6 +1682,7 @@ def _compute_speaker_ipa_concept_windows(
         'skipped': skipped,
         'total': len(concept_intervals),
         'ortho_source': 'concept',
+        'pad': float(pad_sec),
         'skip_breakdown': {'empty_ipa_from_model': skipped},
         'exception_samples': [],
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
@@ -1694,6 +1715,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     overwrite = bool(payload.get('overwrite', False))
     run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
     concept_ids = _server._payload_concept_ids(payload)
+    pad_sec = _server._payload_pad(payload) if run_mode != 'full' else 0.2
     _server._compute_checkpoint('IPA.parsed_args', speaker=speaker, overwrite=overwrite, run_mode=run_mode)
     canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
     legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
@@ -1724,6 +1746,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             tiers=tiers,
             run_mode=run_mode,
             concept_ids=concept_ids,
+            pad_sec=pad_sec,
         )
     ortho_words_tier = tiers.get('ortho_words') or {}
     ortho_words_intervals = list(ortho_words_tier.get('intervals') or [])
@@ -2198,6 +2221,7 @@ def _compute_speaker_ortho(
     refine_payload = payload.get('refine_lexemes')
     run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
     concept_ids = _server._payload_concept_ids(payload)
+    pad_sec = _server._payload_pad(payload)
     canonical_path = _server._project_root() / _server._annotation_record_relative_path(speaker)
     legacy_path = _server._project_root() / _server._annotation_legacy_record_relative_path(speaker)
     if canonical_path.is_file():
@@ -2230,6 +2254,7 @@ def _compute_speaker_ortho(
             language=language_str,
             has_existing_text=has_existing_text,
             provider=provider,
+            pad_sec=pad_sec,
         )
     if has_existing_text and (not overwrite):
         return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals)}
@@ -2328,7 +2353,7 @@ def _compute_speaker_ortho(
         concept_intervals = [iv for iv in (concept_tier.get('intervals') or [] if concept_tier else []) if isinstance(iv, dict)]
         if concept_intervals:
             _set_compute_progress(job_id, 97.0, message='ORTH refine_lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
-            refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, job_id=job_id, language=language_str)
+            refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, pad_sec=pad_sec, job_id=job_id, language=language_str)
     merged_words = _server._merge_ortho_words(ortho_words, refined_additions)
     ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
     if ortho_words_tier is None:
@@ -3019,5 +3044,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
