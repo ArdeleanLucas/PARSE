@@ -1176,7 +1176,13 @@ export function ParseUI() {
   const progressReviewed = activeSpeakerProgress && elicitedForSpeaker > 0 ? reviewedForSpeaker : reviewed;
   const progressTotal = activeSpeakerProgress && elicitedForSpeaker > 0 ? elicitedForSpeaker : total;
   const progressWidth = progressTotal > 0 ? (progressReviewed / progressTotal) * 100 : 0;
-  const navigationConcepts = speakerScopedConcepts.length > 0 ? speakerScopedConcepts : concepts;
+  // Keyboard-arrow navigation prefers the user-visible list. Fall back
+  // through scoped → search-filtered → global so an empty scope (e.g. a
+  // speaker with zero elicited matches for the current query) still
+  // navigates the search results, not the entire 522-concept registry.
+  const navigationConcepts = speakerScopedConcepts.length > 0
+    ? speakerScopedConcepts
+    : (filtered.length > 0 ? filtered : concepts);
   const navigationTotal = navigationConcepts.length;
 
   const goToConceptOffset = useCallback((offset: number) => {
