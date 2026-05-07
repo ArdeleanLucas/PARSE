@@ -62,7 +62,7 @@ describe("annotation concept lookup", () => {
     ]);
 
     const lookup = findAnnotationForConcept(record, {
-      id: "group:JBIL:298",
+      id: 3,
       key: "298",
       name: "this",
       variants: [
@@ -82,7 +82,7 @@ describe("annotation concept lookup", () => {
     ]);
 
     const lookup = findAnnotationForConcept(record, {
-      id: "group:JBIL:298",
+      id: 3,
       key: "298",
       name: "this",
       variants: [

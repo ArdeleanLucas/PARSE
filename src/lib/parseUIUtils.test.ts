@@ -72,7 +72,7 @@ describe('parseUIUtils', () => {
 
   it('excludes grouped source_item keys from concept-id matching while preserving variant master ids', () => {
     const groupedConcept = {
-      id: 'group:JBIL:298',
+      id: 3,
       key: '298',
       variants: [{ conceptKey: '504' }, { conceptKey: '505' }, { conceptKey: '547' }],
     };
