@@ -55,6 +55,46 @@ describe("annotation concept lookup", () => {
     expect(lookup.conceptInterval).toMatchObject({ start: 5090.250, end: 5091.125, text: "long", concept_id: "55" });
   });
 
+  it("does not let a grouped source_item key collide with an earlier master concept_id", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 2259.36, end: 2260.119, text: "dog", concept_id: "298", audition_prefix: "79" },
+      { start: 3001.5, end: 3002.25, text: "this", concept_id: "547", audition_prefix: "298" },
+    ]);
+
+    const lookup = findAnnotationForConcept(record, {
+      id: "group:JBIL:298",
+      key: "298",
+      name: "this",
+      variants: [
+        { conceptKey: "504", conceptEn: "this (A)", variantLabel: "A" },
+        { conceptKey: "505", conceptEn: "this (B)", variantLabel: "B" },
+        { conceptKey: "547", conceptEn: "this", variantLabel: "C" },
+      ],
+    });
+
+    expect(lookup.conceptInterval).toMatchObject({ start: 3001.5, end: 3002.25, text: "this", concept_id: "547" });
+  });
+
+  it("matches the grouped variant master id when the colliding singleton row appears later", () => {
+    const record = makeRecordWithConceptIntervals([
+      { start: 3001.5, end: 3002.25, text: "this", concept_id: "547", audition_prefix: "298" },
+      { start: 2259.36, end: 2260.119, text: "dog", concept_id: "298", audition_prefix: "79" },
+    ]);
+
+    const lookup = findAnnotationForConcept(record, {
+      id: "group:JBIL:298",
+      key: "298",
+      name: "this",
+      variants: [
+        { conceptKey: "504", conceptEn: "this (A)", variantLabel: "A" },
+        { conceptKey: "505", conceptEn: "this (B)", variantLabel: "B" },
+        { conceptKey: "547", conceptEn: "this", variantLabel: "C" },
+      ],
+    });
+
+    expect(lookup.conceptInterval).toMatchObject({ start: 3001.5, end: 3002.25, text: "this", concept_id: "547" });
+  });
+
   it("keeps display ortho_words separate from strict ortho-tier annotation status", () => {
     const record = makeRecordWithConceptIntervals([
       { start: 100, end: 110, text: "one", concept_id: "217" },
