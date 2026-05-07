@@ -6,6 +6,8 @@
 
 PARSE is AI-native, but not in the sense of a generic chatbot pasted onto a UI. Different tasks route to different providers and model families, and the in-app assistant operates through a bounded PARSE-specific tool layer.
 
+For per-model deep-dive (configuration knobs, tuning recommendations, language-scoped empirical evidence), see [`models/`](models/README.md).
+
 ## Provider system at a glance
 
 PARSE routes AI work by task type rather than forcing one model/provider to do everything.
