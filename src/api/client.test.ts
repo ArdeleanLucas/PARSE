@@ -14,6 +14,7 @@ import {
   startChatSession,
   updateSurveyOverlap,
 } from "./client";
+import { LEXEME_RERUN_PAD_VALUES } from "./types";
 
 describe("chat API client contracts", () => {
   const fetchMock = vi.fn();
@@ -318,6 +319,60 @@ describe("annotation API client contracts", () => {
       method: "POST",
       body: JSON.stringify({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 }),
     }));
+  });
+
+  it("rerunLexemeOrtho posts pad=0.5 when provided", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      speaker: "Saha01",
+      concept_key: "root",
+      start: 2795.918,
+      end: 2796.698,
+      pad: 0.5,
+    });
+  });
+
+  it("rerunLexemeOrtho omits pad when not provided", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toContain(0.2);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("pad");
+  });
+
+  it("rerunLexemeIpa accepts pad too", async () => {
+    expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeIpa({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      speaker: "Saha01",
+      concept_key: "root",
+      start: 2795.918,
+      end: 2796.698,
+      pad: 0.5,
+    });
   });
 
   it("saveAnnotation unwraps the server-normalized annotation record", async () => {

@@ -802,7 +802,6 @@ describe('AnnotateView', () => {
     expect(mockSeek).toHaveBeenCalledWith(1.75);
   });
 
-
   it('cancels a quick-retime menu selection without saving', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
 
@@ -884,7 +883,6 @@ describe('AnnotateView', () => {
     expect(screen.getByDisplayValue('new-ipa')).toBeTruthy();
     expect(screen.getByDisplayValue('new-ortho')).toBeTruthy();
   });
-
 
   it('uses the server-normalized annotation to report changed tiers and refresh saved bounds', async () => {
     const before = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-ortho', start: 1.25, end: 2.5 }]);
@@ -1119,7 +1117,59 @@ describe('AnnotateView', () => {
       expect((screen.getByTestId('run-orth-button') as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it('Run IPA opens the overwrite dialog and POSTs only after primary confirm', async () => {
+    it('rerun dialog renders 3 pad pills with 0.2 default', () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-orth-button'));
+
+      const padButtons = [screen.getByTestId('rerun-pad-0.0'), screen.getByTestId('rerun-pad-0.2'), screen.getByTestId('rerun-pad-0.5')];
+      expect(padButtons).toHaveLength(3);
+      expect(screen.getByTestId('rerun-pad-0.0').getAttribute('aria-pressed')).toBe('false');
+      expect(screen.getByTestId('rerun-pad-0.2').getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByTestId('rerun-pad-0.5').getAttribute('aria-pressed')).toBe('false');
+      expect(screen.getByText(/default/i)).toBeTruthy();
+      expect(screen.getByText(/pad 0.2s/)).toBeTruthy();
+
+      fireEvent.keyDown(screen.getByTestId('rerun-pad-0.2'), { key: 'ArrowRight' });
+      expect(screen.getByTestId('rerun-pad-0.5').getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByText(/pad 0.5s/)).toBeTruthy();
+    });
+
+    it('changing pad pill updates the dispatched request', async () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
+      mockRerunLexemeOrtho.mockResolvedValueOnce({ ortho: 'نوێ', interval: { start: 1.25, end: 2.5 }, source: 'rerun' });
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-orth-button'));
+      fireEvent.click(screen.getByTestId('rerun-pad-0.5'));
+      fireEvent.click(screen.getByTestId('rerun-confirm-primary'));
+
+      await waitFor(() => expect(mockRerunLexemeOrtho).toHaveBeenCalledWith({
+        speaker: 'Fail01',
+        concept_key: 'water',
+        start: 1.25,
+        end: 2.5,
+        pad: 0.5,
+      }));
+    });
+
+    it('closing dialog resets pad to 0.2', () => {
+      mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
+
+      renderWaterAnnotateView();
+      fireEvent.click(screen.getByTestId('run-orth-button'));
+      fireEvent.click(screen.getByTestId('rerun-pad-0.5'));
+      expect(screen.getByTestId('rerun-pad-0.5').getAttribute('aria-pressed')).toBe('true');
+
+      fireEvent.click(screen.getByTestId('rerun-confirm-cancel'));
+      fireEvent.click(screen.getByTestId('run-orth-button'));
+
+      expect(screen.getByTestId('rerun-pad-0.2').getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByTestId('rerun-pad-0.5').getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('Run IPA opens the overwrite dialog and POSTs the explicit default pad only after primary confirm', async () => {
       mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old-ipa', ortho: 'old-orth', start: 1.25, end: 2.5 }]);
 
       renderWaterAnnotateView();
@@ -1135,6 +1185,7 @@ describe('AnnotateView', () => {
         concept_key: 'water',
         start: 1.25,
         end: 2.5,
+        pad: 0.2,
       }));
     });
 
