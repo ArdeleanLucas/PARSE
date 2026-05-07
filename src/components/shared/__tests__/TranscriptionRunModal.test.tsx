@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TranscriptionRunModal,
+  type PipelineStepId,
   type TranscriptionRunConfirm,
 } from "../TranscriptionRunModal";
 
@@ -499,6 +500,138 @@ describe("TranscriptionRunModal", () => {
 
     expect(await screen.findByText("No manually edited concepts on this speaker.")).toBeTruthy();
     expect((screen.getByTestId("transcription-run-confirm") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+
+  it("renders ORTH pad pills with 0.2 default in concept-window mode", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["ortho"]}
+        title="Generate ORTH"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+
+    expect(screen.getByTestId("action-menu-pad-0.0").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("action-menu-pad-0.2").textContent).toContain("default");
+    expect(screen.getByTestId("transcription-run-summary").textContent).toContain("pad 0.2 s");
+  });
+
+  it("ORTH pad selection updates the confirm payload", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    const onConfirm = vi.fn<[TranscriptionRunConfirm], void>();
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["ortho"]}
+        title="Generate ORTH"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("action-menu-pad-0.5"));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-confirm"));
+    });
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      steps: ["ortho"],
+      runMode: "concept-windows",
+      pad: 0.5,
+    }));
+  });
+
+  it("ORTH pad closes and reopens at the 0.2 default", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+    const onClose = vi.fn();
+    const props = {
+      onClose,
+      onConfirm: () => {},
+      speakers: ["Alpha"],
+      defaultSelectedSpeaker: "Alpha",
+      fixedSteps: ["ortho"] as PipelineStepId[],
+      title: "Generate ORTH",
+    };
+    const { rerender } = render(<TranscriptionRunModal open={true} {...props} />);
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+      fireEvent.click(screen.getByTestId("action-menu-pad-0.5"));
+    });
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("transcription-run-cancel"));
+    });
+    rerender(<TranscriptionRunModal open={false} {...props} />);
+    rerender(<TranscriptionRunModal open={true} {...props} />);
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+    });
+    expect(screen.getByTestId("action-menu-pad-0.2").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("ORTH pad arrow-key navigation cycles pills", async () => {
+    vi.mocked(getPipelineState).mockImplementation(async (speaker: string) =>
+      makeState({ speaker }),
+    );
+
+    render(
+      <TranscriptionRunModal
+        open={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+        speakers={["Alpha"]}
+        defaultSelectedSpeaker="Alpha"
+        fixedSteps={["ortho"]}
+        title="Generate ORTH"
+      />,
+    );
+
+    await screen.findByTestId("transcription-run-speaker-Alpha");
+    act(() => {
+      fireEvent.click(screen.getByRole("radio", { name: /all concept windows/i }));
+      fireEvent.keyDown(screen.getByTestId("action-menu-pad-0.2"), { key: "ArrowRight" });
+    });
+    expect(screen.getByTestId("action-menu-pad-0.5").getAttribute("aria-pressed")).toBe("true");
+
+    act(() => {
+      fireEvent.keyDown(screen.getByTestId("action-menu-pad-0.5"), { key: "ArrowRight" });
+    });
+    expect(screen.getByTestId("action-menu-pad-0.0").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("handles getPipelineState rejection per-speaker (Test F)", async () => {

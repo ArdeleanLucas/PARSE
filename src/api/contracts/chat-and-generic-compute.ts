@@ -1,4 +1,4 @@
-import type { ChatJob, ChatStatus, ComputeJob, ComputeStatus } from "../types";
+import type { ChatJob, ChatStatus, ComputeJob, ComputeStartBody, ComputeStatus } from "../types";
 import { apiFetch, isRecord, resolveJobId, resolveSessionId } from "./shared";
 
 export async function startChatSession(sessionId?: string): Promise<{ session_id: string; sessionId?: string }> {
@@ -63,7 +63,7 @@ export async function pollChat(jobId: string): Promise<ChatStatus> {
 
 export async function startCompute(
   computeType: string,
-  body?: Record<string, unknown>,
+  body?: ComputeStartBody,
 ): Promise<ComputeJob> {
   const payload = await apiFetch<unknown>(`/api/compute/${encodeURIComponent(computeType)}`, {
     method: "POST",

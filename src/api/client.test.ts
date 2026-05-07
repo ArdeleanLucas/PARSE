@@ -12,6 +12,7 @@ import {
   saveAnnotation,
   searchLexeme,
   startChatSession,
+  startCompute,
   updateSurveyOverlap,
 } from "./client";
 import { LEXEME_RERUN_PAD_VALUES } from "./types";
@@ -394,6 +395,51 @@ describe("annotation API client contracts", () => {
   });
 });
 
+
+
+describe("compute API client contracts", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("startCompute passes pad through unchanged", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ job_id: "job-pad" }),
+    });
+
+    await startCompute("full_pipeline", { speaker: "Fail01", run_mode: "concept-windows", steps: ["ortho"], pad: 0.5 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      speaker: "Fail01",
+      run_mode: "concept-windows",
+      steps: ["ortho"],
+      pad: 0.5,
+    });
+  });
+
+  it("startCompute preserves default pad on the wire", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ job_id: "job-pad-default" }),
+    });
+
+    await startCompute("full_pipeline", { speaker: "Fail01", run_mode: "edited-only", steps: ["ortho"], pad: 0.2 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toMatchObject({ pad: 0.2 });
+  });
+});
 
 describe("tags API client contracts", () => {
   const fetchMock = vi.fn();

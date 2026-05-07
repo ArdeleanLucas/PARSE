@@ -136,6 +136,7 @@ export function useParseUIPipeline({
       language: getLanguage(),
       refineLexemes: confirm.refineLexemes,
       runMode: confirm.runMode,
+      pad: confirm.pad,
     });
   }, [batch, closeRunModal, getLanguage]);
 
