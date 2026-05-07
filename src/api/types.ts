@@ -78,11 +78,14 @@ export interface IpaCandidatesPayload {
 }
 
 
+export type LexemeRerunPad = 0.0 | 0.2 | 0.5;
+
 export interface LexemeRerunRequest {
   speaker: string;
   concept_key: string;
   start: number;
   end: number;
+  pad?: LexemeRerunPad;
 }
 
 export interface LexemeRerunInterval {

@@ -320,6 +320,57 @@ describe("annotation API client contracts", () => {
     }));
   });
 
+  it("rerunLexemeOrtho posts pad=0.5 when provided", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      speaker: "Saha01",
+      concept_key: "root",
+      start: 2795.918,
+      end: 2796.698,
+      pad: 0.5,
+    });
+  });
+
+  it("rerunLexemeOrtho omits pad when not provided", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("pad");
+  });
+
+  it("rerunLexemeIpa accepts pad too", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({ ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
+    });
+
+    await rerunLexemeIpa({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      speaker: "Saha01",
+      concept_key: "root",
+      start: 2795.918,
+      end: 2796.698,
+      pad: 0.5,
+    });
+  });
+
   it("saveAnnotation unwraps the server-normalized annotation record", async () => {
     const normalized = {
       speaker: "Fail01",

@@ -25,7 +25,7 @@ import { useAnnotationStore } from "../../../stores/annotationStore";
 import { usePlaybackStore } from "../../../stores/playbackStore";
 import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
 import { rerunLexemeIpa, rerunLexemeOrtho, saveLexemeNote } from "../../../api/client";
-import type { LexemeNoteEntry } from "../../../api/types";
+import type { LexemeNoteEntry, LexemeRerunPad, LexemeRerunRequest } from "../../../api/types";
 import { useEnrichmentStore } from "../../../stores/enrichmentStore";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
@@ -42,6 +42,17 @@ type RerunField = "ipa" | "ortho";
 type RerunDialogState = { field: RerunField; error: string | null } | null;
 
 type LocalUndoEntry = { field: RerunField; value: string; orthoUserEdited?: boolean };
+
+const DEFAULT_RERUN_PAD: LexemeRerunPad = 0.2;
+const RERUN_PAD_OPTIONS: LexemeRerunPad[] = [0.0, 0.2, 0.5];
+
+function formatRerunPad(value: LexemeRerunPad): string {
+  return value.toFixed(1);
+}
+
+function rerunRequestWithPad(request: LexemeRerunRequest, pad: LexemeRerunPad): LexemeRerunRequest {
+  return pad === DEFAULT_RERUN_PAD ? request : { ...request, pad };
+}
 
 function truncatePreview(value: string): string {
   return value.length > 80 ? `${value.slice(0, 77)}…` : value;
@@ -213,9 +224,11 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
   const [rerunDialog, setRerunDialog] = useState<RerunDialogState>(null);
   const [rerunBusy, setRerunBusy] = useState<RerunField | null>(null);
+  const [rerunPad, setRerunPad] = useState<LexemeRerunPad>(DEFAULT_RERUN_PAD);
   const localUndoRef = useRef<LocalUndoEntry[]>([]);
   const rerunPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const rerunCancelRef = useRef<HTMLButtonElement | null>(null);
+  const rerunPadRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     setIpa(ipaInterval?.text ?? "");
@@ -229,6 +242,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setQuickRetimeMenu(null);
     setRerunDialog(null);
     setRerunBusy(null);
+    setRerunPad(DEFAULT_RERUN_PAD);
     localUndoRef.current = [];
   }, [speaker, concept.key, conceptInterval, ipaInterval, displayedOrthoText]);
 
@@ -684,11 +698,12 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [concept.key, conceptInterval, editEnd, editStart, speaker]);
 
   const rerunIntervalLabel = rerunRequest
-    ? `${rerunRequest.start.toFixed(3)} – ${rerunRequest.end.toFixed(3)} s · Δ ${(rerunRequest.end - rerunRequest.start).toFixed(3)}s`
+    ? `${rerunRequest.start.toFixed(3)} – ${rerunRequest.end.toFixed(3)} s · Δ ${(rerunRequest.end - rerunRequest.start).toFixed(3)}s · pad ${formatRerunPad(rerunPad)}s`
     : "No interval";
 
   const startRerun = useCallback((field: RerunField) => {
     if (!rerunRequest || rerunBusy) return;
+    setRerunPad(DEFAULT_RERUN_PAD);
     setRerunDialog({ field, error: null });
   }, [rerunBusy, rerunRequest]);
 
@@ -698,13 +713,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setRerunBusy(dialogField);
     setRerunDialog((current) => current ? { ...current, error: null } : current);
 
+    const apiRequest = rerunRequestWithPad(rerunRequest, rerunPad);
     let apiResultText: string;
     try {
       if (dialogField === "ipa") {
-        const result = await rerunLexemeIpa(rerunRequest);
+        const result = await rerunLexemeIpa(apiRequest);
         apiResultText = result.ipa;
       } else {
-        const result = await rerunLexemeOrtho(rerunRequest);
+        const result = await rerunLexemeOrtho(apiRequest);
         apiResultText = result.ortho;
       }
     } catch (error) {
@@ -747,6 +763,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       setTimestampMessage({ kind: "err", text: message });
       setRerunDialog(null);
       setRerunBusy(null);
+      setRerunPad(DEFAULT_RERUN_PAD);
       return;
     }
 
@@ -755,11 +772,13 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       : `Re-ran ORTH — saved "${truncatePreview(apiResultText)}"`);
     setRerunDialog(null);
     setRerunBusy(null);
-  }, [concept.name, conceptInterval, ipa, ortho, orthoUserEdited, record, rerunDialog, rerunRequest, saveLexemeAnnotation, saveOrthoText, saveSpeaker, speaker]);
+    setRerunPad(DEFAULT_RERUN_PAD);
+  }, [concept.name, conceptInterval, ipa, ortho, orthoUserEdited, record, rerunDialog, rerunPad, rerunRequest, saveLexemeAnnotation, saveOrthoText, saveSpeaker, speaker]);
 
   const closeRerunDialog = useCallback(() => {
     if (rerunBusy) return;
     setRerunDialog(null);
+    setRerunPad(DEFAULT_RERUN_PAD);
   }, [rerunBusy]);
 
   useEffect(() => {
@@ -773,7 +792,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         return;
       }
       if (event.key !== "Tab") return;
-      const first = rerunCancelRef.current;
+      const first = rerunPadRefs.current[0] ?? rerunCancelRef.current;
       const last = rerunPrimaryRef.current;
       if (!first || !last) return;
       if (event.shiftKey && document.activeElement === first) {
@@ -809,6 +828,20 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       </button>
     );
   };
+
+  const handleRerunPadKeyDown = useCallback((value: LexemeRerunPad, event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const index = RERUN_PAD_OPTIONS.indexOf(value);
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? 1
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? -1
+        : 0;
+    if (!direction || index < 0) return;
+    event.preventDefault();
+    const nextIndex = (index + direction + RERUN_PAD_OPTIONS.length) % RERUN_PAD_OPTIONS.length;
+    setRerunPad(RERUN_PAD_OPTIONS[nextIndex]);
+    window.setTimeout(() => rerunPadRefs.current[nextIndex]?.focus(), 0);
+  }, []);
 
   const rerunDialogValue = rerunDialog?.field === "ipa" ? ipa : ortho;
   const rerunDialogTitle = rerunDialog?.field === "ipa" ? "Overwrite IPA transcription?" : "Overwrite orthographic form?";
@@ -1308,6 +1341,35 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             </p>
             <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
               {rerunIntervalLabel}
+            </div>
+            <div className="mt-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Audio context pad</div>
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Audio context pad">
+                {RERUN_PAD_OPTIONS.map((value, index) => {
+                  const selected = rerunPad === value;
+                  const label = value === DEFAULT_RERUN_PAD ? `${formatRerunPad(value)} s · default` : `${formatRerunPad(value)} s`;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      ref={(node) => { rerunPadRefs.current[index] = node; }}
+                      data-testid={`rerun-pad-${formatRerunPad(value)}`}
+                      aria-pressed={selected}
+                      disabled={Boolean(rerunBusy)}
+                      onClick={() => setRerunPad(value)}
+                      onKeyDown={(event) => handleRerunPadKeyDown(value, event)}
+                      className={
+                        "rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+                        (selected
+                          ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div className="mt-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Current value</div>
