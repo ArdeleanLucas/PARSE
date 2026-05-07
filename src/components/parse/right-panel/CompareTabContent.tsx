@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, Download, Play, RefreshCw, Save, Upload } fr
 
 import { formatEta } from '../../../hooks/useActionJob';
 import { isCompareComputeMode, isCompareRunDisabled } from '../compareComputeContract';
+import { CollapsibleSection } from './CollapsibleSection';
 import type { RightPanelProps } from './types';
 
 type CompareTabContentProps = Pick<
@@ -52,8 +53,7 @@ export function CompareTabContent({
 }: CompareTabContentProps) {
   return (
     <>
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compute</h4>
+      <CollapsibleSection title="Compute" icon={<Play className="h-3 w-3" />}>
         <select
           value={computeMode}
           onChange={(event) => {
@@ -126,10 +126,9 @@ export function CompareTabContent({
         {computeMode !== 'contact-lexemes' && computeJobStatus === 'error' && (
           <div className="mt-1 text-[10px] text-rose-600">{computeJobError}</div>
         )}
-      </div>
+      </CollapsibleSection>
 
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Status</h4>
+      <CollapsibleSection title="Status" icon={<CheckCircle2 className="h-3 w-3" />}>
         <div className="mb-2 flex items-center gap-2">
           {speakers.length > 0 || conceptCount > 0 ? (
             <>
@@ -160,10 +159,9 @@ export function CompareTabContent({
             </div>
           </div>
         )}
-      </div>
+      </CollapsibleSection>
 
-      <div className="p-4">
-        <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Decisions</h4>
+      <CollapsibleSection title="Decisions" icon={<Save className="h-3 w-3" />} className="p-4">
         <div className="space-y-1.5">
           <button
             className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
@@ -193,7 +191,7 @@ export function CompareTabContent({
             <Upload className="h-3 w-3" /> Import Audition comments
           </button>
         </div>
-      </div>
+      </CollapsibleSection>
     </>
   );
 }

@@ -49,6 +49,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     spec = build_openapi_document(base_url="http://127.0.0.1:8766")
     assert set(spec["paths"].keys()) == {
         "/api/config",
+        "/api/survey-overlap",
         "/api/annotations/{speaker}",
         "/api/annotations/{speaker}/ipa-candidates",
         "/api/annotations/{speaker}/ipa-review/{key}",
@@ -101,6 +102,21 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     }
 
 
+def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    path = spec["paths"]["/api/survey-overlap"]
+
+    assert set(path) == {"get", "post"}
+    assert path["get"]["operationId"] == "getSurveyOverlap"
+    assert path["post"]["operationId"] == "postSurveyOverlap"
+    assert path["post"]["requestBody"]["required"] is True
+    description = path["post"]["description"]
+    assert "reset_surveys" in description
+    assert "reset_speaker_choices" in description
+    assert "reset_concept_survey_links" in description
+    assert "boolean" in description
+
+
 def test_build_openapi_document_restores_old_tags_shape_and_put_contract() -> None:
     spec = build_openapi_document(base_url="http://127.0.0.1:8766")
     tags_path = spec["paths"]["/api/tags"]
@@ -127,9 +143,17 @@ def test_build_openapi_document_keeps_lexeme_media_search_contract_honest() -> N
     assert import_schema["properties"]["speaker_id"] == {"type": "string"}
     assert import_schema["properties"]["csv"] == {"type": "string", "format": "binary"}
 
-    onboard_schema = spec["paths"]["/api/onboard/speaker"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    onboard_post = spec["paths"]["/api/onboard/speaker"]["post"]
+    onboard_schema = onboard_post["requestBody"]["content"]["multipart/form-data"]["schema"]
     assert onboard_schema["required"] == ["speaker_id", "audio"]
     assert onboard_schema["properties"]["commentsCsv"] == {"type": "string", "format": "binary"}
+    assert onboard_schema["properties"]["survey_choices"]["type"] == "string"
+    assert "speaker_choices" in onboard_schema["properties"]["survey_choices"]["description"]
+    preview_param = next(param for param in onboard_post["parameters"] if param["name"] == "preview")
+    assert preview_param["in"] == "query"
+    assert preview_param["schema"] == {"type": "boolean"}
+    response_schema = onboard_post["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response_schema == {"oneOf": [{"$ref": "#/components/schemas/GenericJobResponse"}, {"$ref": "#/components/schemas/OnboardSpeakerPreview"}]}
 
 
 def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp_path: pathlib.Path) -> None:

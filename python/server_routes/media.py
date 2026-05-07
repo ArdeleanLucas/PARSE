@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import server as _server
-from concept_source_item import concept_row_from_item, source_item_from_audition_row
+from concept_source_item import concept_row_from_item, read_concepts_csv_rows, source_item_from_audition_row
 from concept_registry import concept_label_key, load_concept_registry, merge_concepts_into_root_csv, resolve_or_allocate_concept_id
+from survey_overlap import concept_survey_links_for_row, load_survey_overlap_state, normalize_survey_id, update_survey_overlap_state
 
 def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _server.List[_server.Dict[str, _server.Any]]:
     suggestions_path = _server._project_root() / 'ai_suggestions.json'
@@ -126,30 +127,38 @@ def _compute_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _serve
         raise ValueError("stt payload missing 'sourceWav'")
     return _server._run_stt_job(job_id, speaker, source_wav, language)
 
+def _parse_concepts_csv_text(csv_text: str) -> _server.List[_server.Dict[str, str]]:
+    """Parse concepts-style CSV text (id, concept_en); return [] if columns do not match."""
+    import csv as _csv
+    import io as _io
+    try:
+        reader = _csv.DictReader(_io.StringIO(csv_text))
+        fieldnames = [str(name or '').strip().lower() for name in reader.fieldnames or []]
+        if 'id' not in fieldnames or 'concept_en' not in fieldnames:
+            return []
+        concepts: _server.List[_server.Dict[str, str]] = []
+        for row in reader:
+            cid = _server._normalize_concept_id(row.get('id'))
+            label = str(row.get('concept_en') or '').strip()
+            if cid and label:
+                normalized = concept_row_from_item(row)
+                concepts.append({
+                    'id': cid,
+                    'label': label,
+                    'source_item': normalized.get('source_item', ''),
+                    'source_survey': normalized.get('source_survey', ''),
+                    'custom_order': normalized.get('custom_order', ''),
+                })
+        return concepts
+    except _csv.Error:
+        return []
+
+
 def _parse_concepts_csv(csv_path: _server.pathlib.Path) -> _server.List[_server.Dict[str, str]]:
     """Parse a concepts-style CSV (id, concept_en). Returns [] if columns don't match."""
-    import csv as _csv
     try:
-        with open(csv_path, newline='', encoding='utf-8-sig') as handle:
-            reader = _csv.DictReader(handle)
-            fieldnames = [str(name or '').strip().lower() for name in reader.fieldnames or []]
-            if 'id' not in fieldnames or 'concept_en' not in fieldnames:
-                return []
-            concepts: _server.List[_server.Dict[str, str]] = []
-            for row in reader:
-                cid = _server._normalize_concept_id(row.get('id'))
-                label = str(row.get('concept_en') or '').strip()
-                if cid and label:
-                    normalized = concept_row_from_item(row)
-                    concepts.append({
-                        'id': cid,
-                        'label': label,
-                        'source_item': normalized.get('source_item', ''),
-                        'source_survey': normalized.get('source_survey', ''),
-                        'custom_order': normalized.get('custom_order', ''),
-                    })
-            return concepts
-    except (OSError, UnicodeDecodeError, _csv.Error):
+        return _parse_concepts_csv_text(csv_path.read_text(encoding='utf-8-sig'))
+    except (OSError, UnicodeDecodeError):
         return []
 
 def _merge_concepts_into_root_csv(new_concepts: _server.List[_server.Dict[str, str]]) -> int:
@@ -176,12 +185,12 @@ def _register_speaker_in_project_json(speaker: str) -> None:
     _server._write_json_file(_server._project_json_path(), project)
 
 
-def _looks_like_audition_csv(csv_path: _server.pathlib.Path) -> bool:
-    """Return True for Adobe Audition marker exports (Name + Start header)."""
+def _looks_like_audition_csv_text(csv_text: str) -> bool:
+    """Return True for Adobe Audition marker CSV text (Name + Start header)."""
     import csv as _csv
     import io as _io
+    sample = str(csv_text or '')[:4096]
     try:
-        sample = csv_path.read_text(encoding='utf-8-sig')[:4096]
         dialect = None
         try:
             dialect = _csv.Sniffer().sniff(sample, delimiters='\t,;')
@@ -190,7 +199,15 @@ def _looks_like_audition_csv(csv_path: _server.pathlib.Path) -> bool:
         reader = _csv.DictReader(_io.StringIO(sample), dialect=dialect) if dialect else _csv.DictReader(_io.StringIO(sample), delimiter='\t')
         fieldnames = {str(name or '').strip().lower() for name in (reader.fieldnames or [])}
         return 'name' in fieldnames and 'start' in fieldnames
-    except (OSError, UnicodeDecodeError, _csv.Error) as exc:
+    except _csv.Error:
+        return False
+
+
+def _looks_like_audition_csv(csv_path: _server.pathlib.Path) -> bool:
+    """Return True for Adobe Audition marker exports (Name + Start header)."""
+    try:
+        return _looks_like_audition_csv_text(csv_path.read_text(encoding='utf-8-sig'))
+    except (OSError, UnicodeDecodeError) as exc:
         print('[audition-csv] detection failed for {0}: {1!r}'.format(csv_path, exc), file=_server.sys.stderr, flush=True)
         return False
 
@@ -341,6 +358,148 @@ def _collect_audition_comment_notes(cue_rows: _server.List[_server.Any], comment
     return notes
 
 
+def _field_text(form: _server.Any, name: str) -> str:
+    value = form.getfirst(name, '') if hasattr(form, 'getfirst') else ''
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace').strip()
+    return str(value or '').strip()
+
+
+def _truthy_upload_flag(value: object) -> bool:
+    return str(value or '').strip().casefold() in {'1', 'true', 'yes', 'on', 'preview'}
+
+
+def _preview_requested(self: _server.Any, form: _server.Any) -> bool:
+    try:
+        query_values = self._request_query_params().get('preview', [])
+    except Exception:
+        query_values = []
+    if any(_truthy_upload_flag(value) for value in query_values):
+        return True
+    return _truthy_upload_flag(_field_text(form, 'preview'))
+
+
+def _decode_uploaded_csv(csv_item: _server.Any) -> str:
+    if csv_item is None or not getattr(csv_item, 'filename', None):
+        return ''
+    data = csv_item.file.read()
+    try:
+        return data.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return ''
+
+
+def _concepts_from_csv_text(csv_text: str) -> _server.List[_server.Dict[str, str]]:
+    parsed = _parse_concepts_csv_text(csv_text)
+    if parsed:
+        return parsed
+    if not _looks_like_audition_csv_text(csv_text):
+        return []
+    try:
+        from lexeme_notes import parse_audition_csv as _parse_audition_csv
+        cue_rows = _parse_audition_csv(csv_text)
+    except Exception:
+        return []
+    if not cue_rows:
+        return []
+    return _unique_resolved_concepts(_resolve_audition_concepts(cue_rows))
+
+
+def _concept_label(item: _server.Dict[str, object]) -> str:
+    return str(item.get('concept_en') or item.get('label') or '').strip()
+
+
+def _add_survey_links(target: _server.Dict[str, str], links: _server.Dict[str, object]) -> None:
+    for survey_id, source_item in links.items():
+        sid = normalize_survey_id(survey_id)
+        item = str(source_item or '').strip()
+        if sid and item:
+            target[sid] = item
+
+
+def _build_onboard_overlap_preview(speaker: str, csv_text: str) -> _server.Dict[str, _server.Any]:
+    project_root = _server._project_root()
+    state = load_survey_overlap_state(project_root)
+    incoming = _concepts_from_csv_text(csv_text) if csv_text else []
+    by_label: _server.Dict[str, _server.Dict[str, _server.Any]] = {}
+
+    def entry_for(label: str, concept_id: str) -> _server.Optional[_server.Dict[str, _server.Any]]:
+        clean_label = str(label or '').strip()
+        key = concept_label_key(clean_label)
+        if not key:
+            return None
+        entry = by_label.setdefault(key, {'concept_id': str(concept_id or '').strip(), 'concept_en': clean_label, 'surveys': {}, 'incoming_surveys': []})
+        if not entry.get('concept_id') and concept_id:
+            entry['concept_id'] = str(concept_id or '').strip()
+        if not entry.get('concept_en') and clean_label:
+            entry['concept_en'] = clean_label
+        return entry
+
+    try:
+        existing_rows = read_concepts_csv_rows(project_root / 'concepts.csv')
+    except Exception:
+        existing_rows = []
+    for row in existing_rows:
+        cid = _server._normalize_concept_id(row.get('id')) or str(row.get('id') or '').strip()
+        label = _concept_label(row)
+        entry = entry_for(label, cid)
+        if entry is None:
+            continue
+        _add_survey_links(entry['surveys'], concept_survey_links_for_row(row, state))
+
+    for item in incoming:
+        cid = _server._normalize_concept_id(item.get('id')) or str(item.get('id') or '').strip()
+        label = _concept_label(item)
+        entry = entry_for(label, cid)
+        if entry is None:
+            continue
+        source_survey = normalize_survey_id(item.get('source_survey'))
+        source_item = str(item.get('source_item') or '').strip()
+        if source_survey and source_item:
+            entry['surveys'][source_survey] = source_item
+            entry['incoming_surveys'].append(source_survey)
+
+    overlap_concepts: _server.List[_server.Dict[str, _server.Any]] = []
+    for entry in by_label.values():
+        surveys = entry.get('surveys') if isinstance(entry.get('surveys'), dict) else {}
+        if len(surveys) < 2:
+            continue
+        incoming_surveys = [sid for sid in entry.get('incoming_surveys', []) if sid in surveys]
+        auto_detected = incoming_surveys[0] if incoming_surveys else sorted(surveys.keys())[0]
+        overlap_concepts.append({
+            'concept_id': str(entry.get('concept_id') or '').strip(),
+            'concept_en': str(entry.get('concept_en') or '').strip(),
+            'surveys': dict(surveys),
+            'auto_detected': auto_detected,
+        })
+
+    overlap_concepts.sort(key=lambda item: _server._concept_sort_key(str(item.get('concept_id') or '')))
+    return {'preview': True, 'speaker': speaker, 'overlap_concepts': overlap_concepts}
+
+
+def _extract_survey_choices(form: _server.Any, speaker: str) -> _server.Optional[_server.Dict[str, str]]:
+    raw = _field_text(form, 'survey_choices') or _field_text(form, 'surveyChoices')
+    if not raw:
+        return None
+    try:
+        payload = _server.json.loads(raw)
+    except _server.json.JSONDecodeError as exc:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'survey_choices must be valid JSON') from exc
+    if isinstance(payload, dict) and isinstance(payload.get('survey_choices'), dict):
+        payload = payload.get('survey_choices')
+    if not isinstance(payload, dict):
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'survey_choices must be an object')
+    speaker_payload = payload.get(speaker)
+    choices = speaker_payload if isinstance(speaker_payload, dict) else payload
+    clean: _server.Dict[str, str] = {}
+    for concept_id, survey_id in choices.items():
+        cid = str(concept_id or '').strip()
+        sid = normalize_survey_id(survey_id)
+        if cid and sid:
+            clean[cid] = sid
+    return clean or None
+
+
 def _write_audition_comment_notes(speaker: str, notes: _server.List[_server.Dict[str, _server.Any]]) -> int:
     if not notes:
         return 0
@@ -365,7 +524,7 @@ def _write_audition_comment_notes(speaker: str, notes: _server.List[_server.Dict
     return imported
 
 
-def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path], comments_csv_dest: _server.Optional[_server.pathlib.Path] = None) -> None:
+def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathlib.Path, csv_dest: _server.Optional[_server.pathlib.Path], comments_csv_dest: _server.Optional[_server.pathlib.Path] = None, survey_choices: _server.Optional[_server.Dict[str, str]] = None) -> None:
     """Background worker for onboard/speaker — scaffold annotation + register in source_index."""
     try:
         _server._set_job_progress(job_id, 30.0, message='Scaffolding annotation record')
@@ -431,6 +590,8 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
                         except Exception as exc:
                             print('[audition-csv] comments import failed for {0}: {1!r}'.format(comments_csv_dest.name, exc), file=_server.sys.stderr, flush=True)
                             comments_imported = 0
+        if survey_choices:
+            update_survey_overlap_state(_server._project_root(), {'speaker_choices': {speaker: survey_choices}})
         _server._set_job_progress(job_id, 90.0, message='Finalizing')
         result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'wavPath': wav_relative, 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'commentsCsvPath': str(comments_csv_dest.relative_to(_server._project_root())) if comments_csv_dest else None, 'annotationPath': str(annotation_path.relative_to(_server._project_root())), 'conceptsAdded': concepts_added, 'conceptTotal': concept_total, 'commentsImported': comments_imported, 'lexemesImported': lexemes_imported}
         complete_message = 'Imported {0} lexemes from {1}'.format(lexemes_imported, csv_dest.name) if lexemes_imported and csv_dest else 'Speaker onboarded'
@@ -553,6 +714,11 @@ def _api_post_onboard_speaker(self) -> None:
     has_comments_csv = comments_item is not None and bool(getattr(comments_item, 'filename', None))
     if has_comments_csv and not has_csv:
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'commentsCsv requires csv cue file')
+    if _preview_requested(self, form):
+        csv_text = _decode_uploaded_csv(csv_item) if has_csv else ''
+        self._send_json(_server.HTTPStatus.OK, _build_onboard_overlap_preview(speaker, csv_text))
+        return
+    survey_choices = _extract_survey_choices(form, speaker)
     speaker_audio_dir = _server._project_root() / 'audio' / 'original' / speaker
     speaker_audio_dir.mkdir(parents=True, exist_ok=True)
     wav_dest = speaker_audio_dir / audio_filename
@@ -572,10 +738,13 @@ def _api_post_onboard_speaker(self) -> None:
         comments_csv_dest.write_bytes(comments_csv_data)
     try:
         job_payload = {'speaker': speaker, 'wavPath': str(wav_dest.relative_to(_server._project_root())), 'csvPath': str(csv_dest.relative_to(_server._project_root())) if csv_dest else None, 'commentsCsvPath': str(comments_csv_dest.relative_to(_server._project_root())) if comments_csv_dest else None}
+        if survey_choices:
+            job_payload['surveyChoices'] = survey_choices
         job_id = _server._create_job('onboard:speaker', job_payload)
     except _server.JobResourceConflictError as exc:
         raise _server.ApiError(_server.HTTPStatus.CONFLICT, str(exc))
-    thread = _server.threading.Thread(target=_server._run_onboard_speaker_job, args=(job_id, speaker, wav_dest, csv_dest, comments_csv_dest), daemon=True)
+    thread_args = (job_id, speaker, wav_dest, csv_dest, comments_csv_dest, survey_choices) if survey_choices else (job_id, speaker, wav_dest, csv_dest, comments_csv_dest)
+    thread = _server.threading.Thread(target=_server._run_onboard_speaker_job, args=thread_args, daemon=True)
     thread.start()
     self._send_json(_server.HTTPStatus.OK, {'job_id': job_id, 'jobId': job_id, 'status': 'running', 'speaker': speaker})
 

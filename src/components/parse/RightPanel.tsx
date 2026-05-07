@@ -1,6 +1,7 @@
 import { PanelRightClose } from 'lucide-react';
 
 import { AnnotateTabContent, collapsedPanelIcons, CompareTabContent, SpeakersSection } from './right-panel';
+import { SurveyValuesSection } from './right-panel/SurveyValuesSection';
 import type { RightPanelProps } from './right-panel';
 
 export type { RightPanelProps } from './right-panel';
@@ -28,10 +29,12 @@ export function RightPanel(props: RightPanelProps) {
 
       <div className={`absolute inset-x-0 top-[46px] flex flex-col items-center gap-1 py-3 transition-opacity duration-300 ${panelOpen ? 'pointer-events-none opacity-0' : 'opacity-100 delay-200'}`}>
         {collapsedPanelIcons.map(({ icon: Icon, label }) => (
-          <button
-            key={label}
-            title={label}
-            onClick={onTogglePanel}
+            <button
+              key={label}
+              title={label}
+              aria-hidden={panelOpen}
+              tabIndex={panelOpen ? -1 : 0}
+              onClick={onTogglePanel}
             className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
           >
             <Icon className="h-4 w-4" />
@@ -52,6 +55,17 @@ export function RightPanel(props: RightPanelProps) {
           onAddSpeaker={props.onAddSpeaker}
           onToggleSpeaker={props.onToggleSpeaker}
         />
+
+        {currentMode === 'annotate' && (
+          <SurveyValuesSection
+            activeConcept={props.activeConcept}
+            activeSpeaker={props.activeActionSpeaker ?? props.selectedSpeakers[0] ?? null}
+            surveyColorCodingEnabled={props.surveyColorCodingEnabled}
+            surveySettings={props.surveySettings}
+            speakerSurveyChoices={props.speakerSurveyChoices}
+            onSurveyOverlapUpdate={props.onSurveyOverlapUpdate}
+          />
+        )}
 
         {currentMode === 'compare' ? (
           <CompareTabContent

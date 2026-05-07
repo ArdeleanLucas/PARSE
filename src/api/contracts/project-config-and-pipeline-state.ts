@@ -1,4 +1,4 @@
-import type { ProjectConfig } from "../types";
+import type { ProjectConfig, SurveyOverlapPatch, SurveyOverlapState } from "../types";
 import { apiFetch, unwrapConfig } from "./shared";
 
 export async function getConfig(): Promise<ProjectConfig> {
@@ -9,6 +9,17 @@ export async function getConfig(): Promise<ProjectConfig> {
 export async function updateConfig(patch: Partial<ProjectConfig>): Promise<void> {
   await apiFetch<void>("/api/config", {
     method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function getSurveyOverlap(): Promise<SurveyOverlapState> {
+  return apiFetch<SurveyOverlapState>("/api/survey-overlap");
+}
+
+export async function updateSurveyOverlap(patch: SurveyOverlapPatch): Promise<SurveyOverlapState> {
+  return apiFetch<SurveyOverlapState>("/api/survey-overlap", {
+    method: "POST",
     body: JSON.stringify(patch),
   });
 }

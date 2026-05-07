@@ -1,4 +1,4 @@
-import type { AnnotationInterval, AnnotationRecord } from '../api/types';
+import type { AnnotationInterval, AnnotationRecord, ConceptSurveyLinks } from '../api/types';
 import { isRecord, overlaps, pickOrthoIntervalForConcept } from './parseUIUtils';
 import type { ConceptTag } from './parseUIUtils';
 
@@ -6,6 +6,7 @@ export interface ConceptVariant {
   conceptKey: string;
   conceptEn: string;
   variantLabel: string;
+  surveys?: ConceptSurveyLinks;
 }
 
 export interface Concept {
@@ -16,6 +17,7 @@ export interface Concept {
   sourceItem?: string;
   sourceSurvey?: string;
   customOrder?: number;
+  surveys?: ConceptSurveyLinks;
   variants?: ConceptVariant[];
   mergedKeys?: string[];
   mergedVariants?: ConceptVariant[];

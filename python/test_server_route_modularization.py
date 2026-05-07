@@ -26,6 +26,7 @@ def test_route_binding_installer_is_exposed() -> None:
         ("jobs", "_api_get_jobs"),
         ("exports", "_api_get_export_lingpy"),
         ("config", "_api_get_config"),
+        ("config", "_api_get_survey_overlap"),
         ("clef", "_api_get_clef_config"),
         ("chat", "_api_post_chat_run_start"),
         ("media", "_api_post_normalize"),

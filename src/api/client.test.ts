@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelComputeJob,
   getConfig,
+  getSurveyOverlap,
   getTags,
   putTags,
   runChat,
@@ -11,6 +12,7 @@ import {
   saveAnnotation,
   searchLexeme,
   startChatSession,
+  updateSurveyOverlap,
 } from "./client";
 
 describe("chat API client contracts", () => {
@@ -142,6 +144,51 @@ describe("getConfig / unwrapConfig schema-version guard", () => {
       json: async () => ({ project_name: "test", speakers: [] }),
     });
     await expect(getConfig()).rejects.toThrow(/outdated/i);
+  });
+});
+
+describe("survey-overlap API client contract", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the normalized survey-overlap sidecar state", async () => {
+    const payload = {
+      version: 1,
+      color_coding_enabled: false,
+      surveys: { klq: { display_label: "KLQ", display_color: "slate" } },
+      concept_survey_links: { rain: { klq: "KLQ_1.10", jbil: "JBIL_100" } },
+      speaker_choices: { Saha01: { rain: "jbil" } },
+    };
+    fetchMock.mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json: async () => payload });
+
+    await expect(getSurveyOverlap()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith("/api/survey-overlap", expect.objectContaining({ headers: expect.any(Object) }));
+  });
+
+  it("posts survey-overlap patches and returns the normalized state", async () => {
+    const patch = { speaker_choices: { Saha01: { rain: "jbil" } } };
+    const normalized = {
+      version: 1,
+      color_coding_enabled: false,
+      surveys: {},
+      concept_survey_links: { rain: { klq: "KLQ_1.10", jbil: "JBIL_100" } },
+      speaker_choices: patch.speaker_choices,
+    };
+    fetchMock.mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json: async () => normalized });
+
+    await expect(updateSurveyOverlap(patch)).resolves.toEqual(normalized);
+    expect(fetchMock).toHaveBeenCalledWith("/api/survey-overlap", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify(patch),
+    }));
   });
 });
 

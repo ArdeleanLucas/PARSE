@@ -52,6 +52,7 @@ function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: Re
     sourceItem,
     sourceSurvey: sourceItem ? entry.source_survey : undefined,
     customOrder: entry.custom_order,
+    surveys: entry.surveys,
   };
 }
 
@@ -114,6 +115,7 @@ export function groupConceptEntries(
       sourceItem,
       sourceSurvey: entry.source_survey,
       customOrder: entry.custom_order,
+      surveys: entry.surveys,
       variants,
     });
   });

@@ -6,11 +6,23 @@ interface SpeakerHeaderProps {
   concept: Concept;
   speaker: string;
   totalConcepts: number;
+  surveyLabel?: string;
+  surveySourceItem?: string;
   onPrev: () => void;
   onNext: () => void;
 }
 
-export function SpeakerHeader({ annotated, complete, concept, speaker, totalConcepts, onPrev, onNext }: SpeakerHeaderProps) {
+export function SpeakerHeader({
+  annotated,
+  complete,
+  concept,
+  speaker,
+  totalConcepts,
+  surveyLabel,
+  surveySourceItem,
+  onPrev,
+  onNext,
+}: SpeakerHeaderProps) {
   return (
     <section className="px-8 pt-6">
       <div className="mx-auto max-w-4xl">
@@ -45,6 +57,13 @@ export function SpeakerHeader({ annotated, complete, concept, speaker, totalConc
               <span className="text-[9px] uppercase tracking-wider text-slate-400">Source</span>
               <span className="text-slate-500">{speaker}.wav</span>
             </div>
+            {surveyLabel && surveySourceItem ? (
+              <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
+                <span className="text-[9px] uppercase tracking-wider text-slate-400">Survey</span>
+                <span className="text-slate-600">{surveyLabel}</span>
+                <span className="text-slate-400">{surveySourceItem}</span>
+              </div>
+            ) : null}
           </div>
           <button
             onClick={onNext}

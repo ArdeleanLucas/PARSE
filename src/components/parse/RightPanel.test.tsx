@@ -44,6 +44,10 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       onOpenManualOffset={vi.fn()}
       currentConceptId="c1"
       onSaveAnnotations={vi.fn()}
+      surveyColorCodingEnabled={false}
+      surveySettings={{}}
+      speakerSurveyChoices={{}}
+      onSurveyOverlapUpdate={vi.fn()}
       {...overrides}
     />,
   );
@@ -85,6 +89,82 @@ describe('RightPanel', () => {
     expect(within(panel).queryByRole('button', { name: 'Confirmed' })).toBeNull();
     expect(within(panel).queryByRole('button', { name: 'Problematic' })).toBeNull();
     expect(within(panel).getByRole('button', { name: /save annotations/i })).toBeTruthy();
+  });
+
+  it('renders Survey Values between Speakers and Timestamp tools and persists per-speaker flips', () => {
+    const onSurveyOverlapUpdate = vi.fn();
+    renderRightPanel({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Fail01'],
+      activeActionSpeaker: 'Fail01',
+      activeConcept: {
+        id: 7,
+        key: 'rain',
+        name: 'rain',
+        tag: 'untagged',
+        sourceItem: 'KLQ_1.10',
+        sourceSurvey: 'klq',
+        surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' },
+      },
+      surveySettings: {
+        klq: { display_label: 'Kurdish List', display_color: 'slate' },
+        jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
+      },
+      speakerSurveyChoices: { Fail01: { rain: 'jbil' } },
+      onSurveyOverlapUpdate,
+    });
+
+    const surveyHeader = screen.getByRole('button', { name: /Survey Values/i });
+    const timestampHeader = screen.getByRole('button', { name: /Timestamp tools/i });
+    expect(surveyHeader.compareDocumentPosition(timestampHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/Current survey/i).textContent ?? '').toContain('Jbil Modal');
+
+    fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
+
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      speaker_choices: { Fail01: { rain: 'klq' } },
+    }));
+  });
+
+  it('supports Survey Values label edit save/cancel and disables color coding when no overlap exists', () => {
+    const onSurveyOverlapUpdate = vi.fn();
+    renderRightPanel({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Fail01'],
+      activeActionSpeaker: 'Fail01',
+      activeConcept: {
+        id: 7,
+        key: 'rain',
+        name: 'rain',
+        tag: 'untagged',
+        sourceItem: 'KLQ_1.10',
+        sourceSurvey: 'klq',
+        surveys: { klq: 'KLQ_1.10' },
+      },
+      surveySettings: { klq: { display_label: 'Kurdish List', display_color: 'slate' } },
+      onSurveyOverlapUpdate,
+    });
+
+    const colorToggle = screen.getByTestId('survey-color-coding-toggle') as HTMLButtonElement;
+    expect(colorToggle.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit survey label Kurdish List/i }));
+    const input = screen.getByLabelText('Survey label for klq') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'KLQ Field List' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save survey label klq/i }));
+
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      surveys: { klq: { display_label: 'KLQ Field List', display_color: 'slate' } },
+    }));
+  });
+
+  it('collapses drawer sections when their headers are clicked', () => {
+    renderRightPanel({ currentMode: 'annotate' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Speakers/i }));
+
+    expect(screen.queryByText(/Concept list scoped to/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /Timestamp tools/i })).toBeTruthy();
   });
 
   it('preserves speaker-selection behavior in compare mode', () => {
@@ -206,6 +286,10 @@ describe('RightPanel', () => {
         onOpenManualOffset={vi.fn()}
         currentConceptId="c1"
         onSaveAnnotations={vi.fn()}
+        surveyColorCodingEnabled={false}
+        surveySettings={{}}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
       />,
     );
 

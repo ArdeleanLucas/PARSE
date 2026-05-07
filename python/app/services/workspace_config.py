@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import copy
-import csv
 import json
 import pathlib
 from typing import Any, Dict, List, Optional
 
-from concept_source_item import row_value
+from concept_source_item import read_concepts_csv_rows, row_value
+from survey_overlap import (
+    concept_survey_links_for_row,
+    load_survey_overlap_state,
+    survey_settings_for_ids,
+)
 
 
 def _read_json_dict(path: pathlib.Path) -> Dict[str, Any]:
@@ -37,41 +41,46 @@ def _collect_speakers(project_payload: Dict[str, Any], source_index_payload: Dic
     return sorted(dict.fromkeys(speakers))
 
 
-def _load_concepts(project_root: pathlib.Path) -> List[Dict[str, Any]]:
+def _load_concepts(project_root: pathlib.Path) -> tuple[List[Dict[str, Any]], Dict[str, Dict[str, str]], bool, Dict[str, Dict[str, str]]]:
     concepts_path = project_root / "concepts.csv"
     concepts: List[Dict[str, Any]] = []
+    survey_state = load_survey_overlap_state(project_root)
+    used_survey_ids: set[str] = set()
     if not concepts_path.exists():
-        return concepts
+        return concepts, survey_settings_for_ids(survey_state, used_survey_ids), bool(survey_state["color_coding_enabled"]), survey_state["speaker_choices"]
 
-    with concepts_path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            cid = str(row.get("id") or "").strip()
-            label = str(row.get("concept_en") or "").strip()
-            if not (cid and label):
-                continue
+    for row in read_concepts_csv_rows(concepts_path):
+        cid = str(row.get("id") or "").strip()
+        label = str(row.get("concept_en") or "").strip()
+        if not (cid and label):
+            continue
 
-            entry: Dict[str, Any] = {"id": cid, "label": label}
-            source_item = row_value(row, "source_item", "survey_item")
-            if source_item:
-                entry["source_item"] = source_item
+        entry: Dict[str, Any] = {"id": cid, "label": label}
+        source_item = row_value(row, "source_item", "survey_item")
+        if source_item:
+            entry["source_item"] = source_item
 
-            source_survey = row_value(row, "source_survey")
-            if source_survey:
-                entry["source_survey"] = source_survey
+        source_survey = row_value(row, "source_survey")
+        if source_survey:
+            entry["source_survey"] = source_survey
 
-            custom_order_raw = str(row.get("custom_order") or "").strip()
-            if custom_order_raw:
+        links = concept_survey_links_for_row(row, survey_state)
+        if links:
+            entry["surveys"] = links
+            used_survey_ids.update(links.keys())
+
+        custom_order_raw = str(row.get("custom_order") or "").strip()
+        if custom_order_raw:
+            try:
+                entry["custom_order"] = int(custom_order_raw)
+            except ValueError:
                 try:
-                    entry["custom_order"] = int(custom_order_raw)
+                    entry["custom_order"] = float(custom_order_raw)
                 except ValueError:
-                    try:
-                        entry["custom_order"] = float(custom_order_raw)
-                    except ValueError:
-                        pass
-            concepts.append(entry)
+                    pass
+        concepts.append(entry)
 
-    return concepts
+    return concepts, survey_settings_for_ids(survey_state, used_survey_ids), bool(survey_state["color_coding_enabled"]), survey_state["speaker_choices"]
 
 
 def build_workspace_frontend_config(
@@ -86,7 +95,7 @@ def build_workspace_frontend_config(
     project_payload = _read_json_dict(root / "project.json")
     source_index_payload = _read_json_dict(root / "source_index.json")
     speakers = _collect_speakers(project_payload, source_index_payload)
-    concepts = _load_concepts(root)
+    concepts, survey_settings, survey_color_coding_enabled, speaker_survey_choices = _load_concepts(root)
 
     language_block = project_payload.get("language") if isinstance(project_payload.get("language"), dict) else {}
     language_code = str(
@@ -106,6 +115,9 @@ def build_workspace_frontend_config(
     config["language_code"] = language_code
     config["speakers"] = speakers
     config["concepts"] = concepts
+    config["survey_settings"] = survey_settings
+    config["survey_color_coding_enabled"] = survey_color_coding_enabled
+    config["speaker_survey_choices"] = speaker_survey_choices
     config["audio_dir"] = str(project_payload.get("audio_dir") or config.get("audio_dir") or "audio")
     config["annotations_dir"] = str(project_payload.get("annotations_dir") or config.get("annotations_dir") or "annotations")
     config["schema_version"] = schema_version

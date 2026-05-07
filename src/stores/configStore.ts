@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { ProjectConfig } from "../api/types";
-import { getConfig, updateConfig } from "../api/client";
+import type { ProjectConfig, SurveyOverlapPatch, SurveyOverlapState } from "../api/types";
+import { getConfig, updateConfig, updateSurveyOverlap as persistSurveyOverlap } from "../api/client";
 
 interface ConfigStore {
   config: ProjectConfig | null;
@@ -8,6 +8,21 @@ interface ConfigStore {
   error: string | null;
   load: () => Promise<void>;
   update: (patch: Partial<ProjectConfig>) => Promise<void>;
+  updateSurveyOverlap: (patch: SurveyOverlapPatch) => Promise<void>;
+}
+
+function mergeSurveyOverlapProjection(config: ProjectConfig, state: SurveyOverlapState): ProjectConfig {
+  const conceptLinks = state.concept_survey_links ?? {};
+  return {
+    ...config,
+    concepts: config.concepts.map((concept) => ({
+      ...concept,
+      surveys: conceptLinks[concept.id] ?? concept.surveys,
+    })),
+    survey_settings: state.surveys,
+    survey_color_coding_enabled: state.color_coding_enabled,
+    speaker_survey_choices: state.speaker_choices,
+  };
 }
 
 export const useConfigStore = create<ConfigStore>()((set, get) => ({
@@ -39,6 +54,22 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     try {
       await updateConfig(patch);
       set({ config: { ...current, ...patch } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ error: message });
+    }
+  },
+
+  updateSurveyOverlap: async (patch: SurveyOverlapPatch) => {
+    const current = get().config;
+    if (!current) {
+      set({ error: "Cannot update survey overlap before config has loaded" });
+      return;
+    }
+    set({ error: null });
+    try {
+      const state = await persistSurveyOverlap(patch);
+      set({ config: mergeSurveyOverlapProjection(current, state) });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ error: message });

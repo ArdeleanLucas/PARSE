@@ -1,6 +1,7 @@
 import { Activity, Anchor, AudioLines, Layers, Mic, Save, Scissors, SlidersHorizontal, Video } from 'lucide-react';
 
 import type { RightPanelProps } from './types';
+import { CollapsibleSection } from './CollapsibleSection';
 import { TagsPanelSection } from './TagsPanelSection';
 
 type AnnotateTabContentProps = Pick<
@@ -37,10 +38,7 @@ export function AnnotateTabContent({
 
   return (
     <>
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <Anchor className="h-3 w-3" /> Timestamp tools
-        </h4>
+      <CollapsibleSection title="Timestamp tools" icon={<Anchor className="h-3 w-3" />}>
         <p className="mb-3 text-[10px] leading-snug text-slate-400">
           Shift every lexeme on this speaker by a constant offset. Lexemes you have manually retimed or anchored are protected and stay put.
         </p>
@@ -65,14 +63,11 @@ export function AnnotateTabContent({
             Detect offset (manual anchors)
           </button>
         </div>
-      </div>
+      </CollapsibleSection>
 
       <TagsPanelSection conceptId={currentConceptId} speaker={activeActionSpeaker} />
 
-      <div className="border-b border-slate-100 p-4">
-        <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          <Activity className="h-3 w-3" /> Phonetic tools
-        </h4>
+      <CollapsibleSection title="Phonetic tools" icon={<Activity className="h-3 w-3" />}>
         <p className="mb-3 text-[10px] leading-snug text-slate-400">
           Tools operate on PARSE's virtual timeline — every action is scoped to the current audio segment.
         </p>
@@ -97,16 +92,16 @@ export function AnnotateTabContent({
             </button>
           ))}
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="p-4">
+      <CollapsibleSection title="Annotation write" icon={<Save className="h-3 w-3" />} className="p-4">
         <button
           className="flex w-full items-center gap-2 rounded-md bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
           onClick={onSaveAnnotations}
         >
           <Save className="h-3 w-3" /> Save annotations
         </button>
-      </div>
+      </CollapsibleSection>
     </>
   );
 }
