@@ -172,7 +172,11 @@ export interface SurveyOverlapState {
   speaker_choices: SpeakerSurveyChoices;
 }
 
-export type SurveyOverlapPatch = Partial<SurveyOverlapState>;
+export type SurveyOverlapPatch = Partial<SurveyOverlapState> & {
+  reset_surveys?: boolean;
+  reset_speaker_choices?: boolean;
+  reset_concept_survey_links?: boolean;
+};
 
 export interface ConceptEntry {
   id: string;

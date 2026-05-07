@@ -1,5 +1,6 @@
 import type {
   ConceptSurveyLinks,
+  ConceptSurveyLinksByConcept,
   SpeakerSurveyChoices,
   SurveyDisplaySettings,
   SurveySettingsMap,
@@ -109,6 +110,35 @@ export function resolveConceptSurvey(
     hasOverlap: surveyIds.length > 1,
     availableSurveys: links,
   };
+}
+
+export function aggregateWorkspaceSurveys(
+  concepts: readonly Concept[] | undefined,
+  settings: SurveySettingsMap | undefined,
+  links: ConceptSurveyLinksByConcept | undefined = undefined,
+): string[] {
+  const surveyIds = new Set<string>();
+
+  for (const surveyId of Object.keys(settings ?? {})) {
+    const normalized = normalizeSurveyId(surveyId);
+    if (normalized) surveyIds.add(normalized);
+  }
+
+  for (const conceptLinks of Object.values(links ?? {})) {
+    for (const surveyId of Object.keys(conceptLinks ?? {})) {
+      const normalized = normalizeSurveyId(surveyId);
+      if (normalized) surveyIds.add(normalized);
+    }
+  }
+
+  for (const concept of concepts ?? []) {
+    for (const surveyId of Object.keys(surveyLinksForConcept(concept))) {
+      const normalized = normalizeSurveyId(surveyId);
+      if (normalized) surveyIds.add(normalized);
+    }
+  }
+
+  return [...surveyIds].sort();
 }
 
 export function compareConceptsByResolvedSurvey(

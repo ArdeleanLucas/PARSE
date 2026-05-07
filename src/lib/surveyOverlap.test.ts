@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Concept } from "./speakerForm";
 import {
+  aggregateWorkspaceSurveys,
   compareConceptsByResolvedSurvey,
   defaultSurveySettings,
   normalizeSurveyId,
@@ -61,6 +62,19 @@ describe("survey-overlap frontend helpers", () => {
     );
 
     expect(resolved).toMatchObject({ surveyId: "klq", sourceItem: "2.15", hasOverlap: false });
+  });
+
+  it("aggregates workspace survey ids from settings, sidecar links, and legacy concept fields", () => {
+    const concepts = [
+      makeConcept({ key: "rain", surveys: { klq: "KLQ_1.10" }, sourceSurvey: "KLQ" }),
+      makeConcept({ key: "fire", surveys: { jbil: "JBIL_2" }, sourceSurvey: undefined }),
+      makeConcept({ key: "stone", surveys: undefined, sourceSurvey: "SSWL", sourceItem: "sswl-9" }),
+    ];
+
+    expect(aggregateWorkspaceSurveys(concepts, { wals: { display_label: "WALS", display_color: "blue" } }, {
+      wind: { abvd: "ABVD-1" },
+      water: { klq: "KLQ_2" },
+    })).toEqual(["abvd", "jbil", "klq", "sswl", "wals"]);
   });
 
   it("sorts by each speaker's resolved survey item with missing items last", () => {

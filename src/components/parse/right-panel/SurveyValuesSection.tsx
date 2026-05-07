@@ -1,24 +1,41 @@
 import { useMemo, useState } from 'react';
-import { Database, Pencil, X } from 'lucide-react';
+import { Database, Pencil, RotateCcw, X } from 'lucide-react';
 
 import type { Concept } from '../../../lib/speakerForm';
 import {
+  aggregateWorkspaceSurveys,
   defaultSurveySettings,
   resolveConceptSurvey,
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
-import type { SpeakerSurveyChoices, SurveyOverlapPatch, SurveySettingsMap } from '../../../api/types';
+import type { ConceptSurveyLinksByConcept, SpeakerSurveyChoices, SurveyOverlapPatch, SurveySettingsMap } from '../../../api/types';
 import { CollapsibleSection } from './CollapsibleSection';
 
 interface SurveyValuesSectionProps {
   activeConcept?: Concept | null;
   activeSpeaker?: string | null;
+  workspaceConcepts?: Concept[];
+  conceptSurveyLinks?: ConceptSurveyLinksByConcept;
   surveyColorCodingEnabled: boolean;
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
   onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
 }
+
+const SURVEY_COLOR_PALETTE = [
+  'indigo',
+  'violet',
+  'blue',
+  'sky',
+  'teal',
+  'emerald',
+  'amber',
+  'orange',
+  'rose',
+  'pink',
+  'slate',
+] as const;
 
 const colorClass: Record<string, string> = {
   indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
@@ -43,6 +60,8 @@ function chipClass(active: boolean, colorKey: string, colorCoding: boolean): str
 export function SurveyValuesSection({
   activeConcept,
   activeSpeaker,
+  workspaceConcepts = [],
+  conceptSurveyLinks,
   surveyColorCodingEnabled,
   surveySettings,
   speakerSurveyChoices,
@@ -50,9 +69,13 @@ export function SurveyValuesSection({
 }: SurveyValuesSectionProps) {
   const [editingSurveyId, setEditingSurveyId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
-  const choices = useMemo(() => activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [], [activeConcept]);
+  const conceptChoices = useMemo(() => activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [], [activeConcept]);
+  const workspaceChoices = useMemo(() => {
+    const concepts = workspaceConcepts.length > 0 ? workspaceConcepts : (activeConcept ? [activeConcept] : []);
+    return aggregateWorkspaceSurveys(concepts, surveySettings, conceptSurveyLinks);
+  }, [activeConcept, conceptSurveyLinks, surveySettings, workspaceConcepts]);
   const resolved = activeConcept ? resolveConceptSurvey(activeConcept, activeSpeaker, speakerSurveyChoices, surveySettings) : { surveyId: '', sourceItem: '' };
-  const hasOverlap = choices.length > 1;
+  const hasWorkspaceSurveys = workspaceChoices.length > 0;
   const conceptKey = activeConcept?.key ?? '';
   const speaker = activeSpeaker ?? '';
 
@@ -73,7 +96,6 @@ export function SurveyValuesSection({
     const existing = surveySettings[surveyId] ?? defaultSurveySettings(surveyId);
     onSurveyOverlapUpdate({
       surveys: {
-        ...surveySettings,
         [surveyId]: { ...existing, display_label: label.trim() || defaultSurveySettings(surveyId).display_label },
       },
     });
@@ -81,11 +103,29 @@ export function SurveyValuesSection({
     setDraftLabel('');
   };
 
+  const updateColor = (surveyId: string, displayColor: string) => {
+    if (!surveyColorCodingEnabled) return;
+    const existing = surveySettings[surveyId] ?? defaultSurveySettings(surveyId);
+    onSurveyOverlapUpdate({
+      surveys: {
+        [surveyId]: { ...existing, display_color: displayColor },
+      },
+    });
+  };
+
+  const resetDefaults = () => {
+    onSurveyOverlapUpdate({
+      reset_surveys: true,
+      reset_speaker_choices: true,
+      color_coding_enabled: false,
+    });
+  };
+
   return (
     <CollapsibleSection
       title="Survey Values"
       icon={<Database className="h-3 w-3" />}
-      meta={<span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{choices.length}</span>}
+      meta={<span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{workspaceChoices.length}</span>}
     >
       <div className="space-y-3">
         <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px]">
@@ -93,29 +133,32 @@ export function SurveyValuesSection({
           <button
             type="button"
             data-testid="survey-color-coding-toggle"
-            disabled={!hasOverlap}
+            disabled={!hasWorkspaceSurveys}
             onClick={() => onSurveyOverlapUpdate({ color_coding_enabled: !surveyColorCodingEnabled })}
             className="rounded border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-45"
-            title={hasOverlap ? 'Toggle optional survey color coding' : 'Only one survey value is available for this concept'}
+            title="Toggle survey color coding workspace-wide."
           >
             {surveyColorCodingEnabled ? 'On' : 'Off'}
           </button>
         </div>
 
-        {!activeConcept || choices.length === 0 ? (
+        {workspaceChoices.length === 0 ? (
           <p className="rounded-md border border-dashed border-slate-200 px-2.5 py-2 text-[10px] text-slate-400">
-            No survey values are attached to this concept yet.
+            No survey values are attached to this workspace yet.
           </p>
         ) : (
           <>
-            <div className="rounded-md bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
-              <span className="font-semibold text-slate-600">
-                Current survey <span className="ml-1 font-mono text-slate-700">{surveyLabelFor(resolved.surveyId, surveySettings)} {resolved.sourceItem}</span>
-              </span>
-            </div>
+            {activeConcept ? (
+              <div className="rounded-md bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
+                <span className="font-semibold text-slate-600">
+                  Current survey <span className="ml-1 font-mono text-slate-700">{surveyLabelFor(resolved.surveyId, surveySettings)} {resolved.sourceItem}</span>
+                </span>
+              </div>
+            ) : null}
 
-            <div className="flex flex-wrap gap-1.5">
-              {choices.map((surveyId) => {
+            {activeConcept && conceptChoices.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {conceptChoices.map((surveyId) => {
                 const sourceItem = activeConcept.surveys?.[surveyId] ?? '';
                 const label = surveyLabelFor(surveyId, surveySettings);
                 const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
@@ -131,13 +174,15 @@ export function SurveyValuesSection({
                     {label} <span className="font-mono">{sourceItem}</span>
                   </button>
                 );
-              })}
-            </div>
+                })}
+              </div>
+            ) : null}
 
             <div className="space-y-1.5">
-              {choices.map((surveyId) => {
+              {workspaceChoices.map((surveyId) => {
                 const label = surveyLabelFor(surveyId, surveySettings);
                 const editing = editingSurveyId === surveyId;
+                const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
                 return (
                   <div key={surveyId} className="rounded-md border border-slate-200 bg-white px-2 py-1.5">
                     {editing ? (
@@ -170,22 +215,59 @@ export function SurveyValuesSection({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-700">{label}</span>
-                        <span className="font-mono text-[9px] text-slate-400">{surveyId}</span>
-                        <button
-                          type="button"
-                          aria-label={`Edit survey label ${label}`}
-                          onClick={() => { setEditingSurveyId(surveyId); setDraftLabel(label); }}
-                          className="rounded border border-slate-200 p-1 text-slate-500 hover:bg-slate-50"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-700">{label}</span>
+                          <span className="font-mono text-[9px] text-slate-400">{surveyId}</span>
+                          <button
+                            type="button"
+                            aria-label={`Edit survey label ${label}`}
+                            onClick={() => { setEditingSurveyId(surveyId); setDraftLabel(label); }}
+                            className="rounded border border-slate-200 p-1 text-slate-500 hover:bg-slate-50"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                        {!surveyColorCodingEnabled ? <p className="text-[9px] text-slate-400">Turn on color-coding to apply.</p> : null}
+                        <div className={`grid grid-cols-6 gap-1 ${surveyColorCodingEnabled ? '' : 'opacity-40'}`}>
+                          {SURVEY_COLOR_PALETTE.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              aria-label={`Set ${label} color to ${color}`}
+                              title={color}
+                              disabled={!surveyColorCodingEnabled}
+                              onClick={() => updateColor(surveyId, color)}
+                              className={`h-5 rounded-full ring-1 disabled:cursor-not-allowed ${colorClass[color]} ${displayColor === color ? 'outline outline-2 outline-offset-1 outline-slate-400' : ''}`}
+                            />
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
                 );
               })}
+            </div>
+
+            <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-2">
+              <button
+                type="button"
+                aria-label="Reset survey display defaults"
+                onClick={resetDefaults}
+                className="inline-flex items-center gap-1 text-left text-[10px] font-semibold text-slate-500 hover:text-slate-700"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset to defaults
+              </button>
+              <button
+                type="button"
+                aria-label="Add survey placeholder"
+                disabled
+                title="Future surveys (e.g. WALS, SSWL) will appear here."
+                className="rounded-md border border-dashed border-slate-200 px-2 py-1.5 text-[10px] font-medium text-slate-400 disabled:cursor-not-allowed"
+              >
+                + Add survey
+              </button>
             </div>
           </>
         )}
