@@ -401,6 +401,73 @@ describe('AnnotateView', () => {
     expect(screen.queryByTestId('annotate-mark-done-toast')).toBeNull();
   });
 
+  it('Mark Done persists a pending IPA edit before flipping confirmed', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'old', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect((screen.getByPlaceholderText('Enter IPA…') as HTMLInputElement).value).toBe('old');
+    fireEvent.change(screen.getByPlaceholderText('Enter IPA…'), { target: { value: 'next' } });
+    fireEvent.click(screen.getByTestId('annotate-mark-done'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      speaker: 'Fail01',
+      oldStart: 1,
+      oldEnd: 2,
+      newStart: 1,
+      newEnd: 2,
+      ipaText: 'next',
+    })));
+    expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.objectContaining({ speaker: 'Fail01' }));
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+    expect(mockSetConfirmedAnchor).toHaveBeenCalledWith('Fail01', 'water', expect.objectContaining({
+      start: 1,
+      end: 2,
+    }));
+    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done.');
+  });
+
+  it('Mark Done persists a pending orth edit before flipping confirmed', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.change(getOrthographicInput(), { target: { value: 'new orth' } });
+    fireEvent.click(screen.getByTestId('annotate-mark-done'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      orthoText: 'new orth',
+      orthoEdited: true,
+    })));
+    await waitFor(() => expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed'));
+    expect(mockSaveLexemeAnnotation.mock.invocationCallOrder[0]).toBeLessThan(mockSetConceptTag.mock.invocationCallOrder[0]);
+  });
+
+  it('Mark Done persists a pending timestamp edit', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.change(screen.getByTestId('lexeme-start'), { target: { value: '1.500' } });
+    fireEvent.click(screen.getByTestId('annotate-mark-done'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      newStart: 1.5,
+      newEnd: 2,
+    })));
+  });
+
+  it('Mark Done with no pending edits skips saveLexemeAnnotation', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    fireEvent.click(screen.getByTestId('annotate-mark-done'));
+
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+  });
+
   it('clears the Marked done toast when navigating to a different concept', () => {
     mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
 

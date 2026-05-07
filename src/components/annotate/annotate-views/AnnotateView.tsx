@@ -156,23 +156,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   useEffect(() => {
     setDoneToast(null);
   }, [concept.key]);
-  const handleMarkDone = useCallback(() => {
-    if (isConfirmed) return;
-    setConceptTag(speaker, concept.key, "confirmed");
-    if (conceptInterval) {
-      setConfirmedAnchor(speaker, concept.key, {
-        start: conceptInterval.start,
-        end: conceptInterval.end,
-        matched_text: directOrthoInterval?.text || orthoInterval?.text || conceptInterval.text || undefined,
-        source: "user+confirmed_tag",
-        confirmed_at: new Date().toISOString(),
-      });
-      setDoneToast("Marked done.");
-    } else {
-      setDoneToast("Marked done. Time anchor skipped: no boundary.");
-    }
-  }, [concept.key, conceptInterval, directOrthoInterval, isConfirmed, orthoInterval, setConceptTag, setConfirmedAnchor, speaker]);
-
   const displayedOrthoText = directOrthoInterval ? directOrthoInterval.text : (orthoInterval?.text ?? "");
   const lexemeNotesBlock = useMemo(() => {
     const block = enrichmentData?.lexeme_notes;
@@ -309,6 +292,87 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   // `orthoInterval` may be an auto-imported/display-only `ortho_words` fallback.
   // Do not persist that fallback as a direct ORTH annotation unless the user edits it.
   const saveOrthoText = directOrthoInterval ? ortho : (orthoUserEdited ? ortho : undefined);
+
+  const pendingEdits = useMemo(() => {
+    if (!conceptInterval) return false;
+    const nextStart = parseFloat(editStart);
+    const nextEnd = parseFloat(editEnd);
+    const startChanged = Number.isFinite(nextStart) && Math.abs(nextStart - conceptInterval.start) > 1e-6;
+    const endChanged = Number.isFinite(nextEnd) && Math.abs(nextEnd - conceptInterval.end) > 1e-6;
+    const ipaChanged = ipa !== (ipaInterval?.text ?? "");
+    return startChanged || endChanged || ipaChanged || orthoUserEdited;
+  }, [conceptInterval, editEnd, editStart, ipa, ipaInterval, orthoUserEdited]);
+
+  const handleMarkDone = useCallback(async () => {
+    if (isConfirmed) return;
+    let savedConceptInterval = conceptInterval;
+    let savedIpaText = ipaInterval?.text ?? "";
+    let savedOrthoText: string | undefined;
+    let savedDirectOrthoText = directOrthoInterval?.text ?? undefined;
+
+    if (conceptInterval && pendingEdits) {
+      const parsedStart = parseFloat(editStart);
+      const parsedEnd = parseFloat(editEnd);
+      const nextStart = Number.isFinite(parsedStart) ? parsedStart : conceptInterval.start;
+      const nextEnd = Number.isFinite(parsedEnd) ? parsedEnd : conceptInterval.end;
+      setTimestampSaving(true);
+      try {
+        const result = saveLexemeAnnotation({
+          speaker,
+          oldStart: conceptInterval.start,
+          oldEnd: conceptInterval.end,
+          newStart: nextStart,
+          newEnd: nextEnd,
+          ipaText: ipa,
+          orthoText: saveOrthoText,
+          orthoEdited: orthoUserEdited,
+          conceptName: concept.name,
+        });
+        if (!result.ok) {
+          setTimestampMessage({ kind: "err", text: result.error });
+          return;
+        }
+        const saveResult = await saveSpeaker(speaker, record);
+        if (saveResult?.record) {
+          const reread = findAnnotationForConcept(saveResult.record, concept);
+          savedConceptInterval = reread.conceptInterval ?? savedConceptInterval;
+          savedIpaText = reread.ipaInterval?.text ?? savedIpaText;
+          savedDirectOrthoText = reread.directOrthoInterval?.text ?? savedDirectOrthoText;
+          savedOrthoText = reread.orthoInterval?.text ?? savedOrthoText;
+        }
+        if (savedConceptInterval) {
+          storedIntervalRef.current = { start: savedConceptInterval.start, end: savedConceptInterval.end };
+          setEditStart(savedConceptInterval.start.toFixed(3));
+          setEditEnd(savedConceptInterval.end.toFixed(3));
+          addRegion(savedConceptInterval.start, savedConceptInterval.end);
+        }
+        setTimestampMessage({ kind: "ok", text: `Saved (${result.moved} tier${result.moved === 1 ? "" : "s"} updated).` });
+      } catch (err) {
+        setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+        return;
+      } finally {
+        setTimestampSaving(false);
+      }
+    }
+
+    setConceptTag(speaker, concept.key, "confirmed");
+    if (savedConceptInterval) {
+      setConfirmedAnchor(speaker, concept.key, {
+        start: savedConceptInterval.start,
+        end: savedConceptInterval.end,
+        matched_text: savedDirectOrthoText || savedOrthoText || savedConceptInterval.text || savedIpaText || undefined,
+        source: "user+confirmed_tag",
+        confirmed_at: new Date().toISOString(),
+      });
+      setDoneToast("Marked done.");
+    } else {
+      setDoneToast("Marked done. Time anchor skipped: no boundary.");
+    }
+  }, [
+    addRegion, concept, conceptInterval, directOrthoInterval, editEnd, editStart, ipa, ipaInterval,
+    isConfirmed, orthoUserEdited, pendingEdits, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker,
+    setConceptTag, setConfirmedAnchor, speaker,
+  ]);
 
   const commitQuickRetime = useCallback(async () => {
     if (!conceptInterval || !quickRetimeMenu) return;
