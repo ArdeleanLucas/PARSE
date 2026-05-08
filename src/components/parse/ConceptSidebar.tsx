@@ -254,12 +254,22 @@ export function ConceptSidebar({
               : concept.sourceItem);
           const badge = sourceLabel ?? `#${concept.id}`;
           const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
+          const nextSurveyId = surveyChoices.length > 1 && resolvedSurvey.surveyId
+            ? surveyChoices[(surveyChoices.indexOf(resolvedSurvey.surveyId) + 1) % surveyChoices.length]
+            : undefined;
+          const nextSurveySourceItem = nextSurveyId ? surveyConcept.surveys?.[nextSurveyId] ?? '' : '';
+          const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
+          const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && nextSurveyId);
           const variants = concept.variants ?? [];
           const hasVariants = variants.length > 0;
           const firstVariantKey = variants[0]?.conceptKey ?? null;
           const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === firstVariantKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
+          const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
           const expanded = expandedConceptIds.has(concept.id);
           const parentName = concept.name;
+          const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
+          const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';
+          const parentButtonLabel = `${parentName}${noDataSuffix}${mergeCountSuffix} ${badge}`.trim();
           return (
             <div key={concept.id} data-testid={`concept-row-${concept.id}`} className={`mb-0.5 rounded-md ${parentActive ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
               <div className="flex items-center">
@@ -283,6 +293,7 @@ export function ConceptSidebar({
                   <span className="ml-0.5 w-[18px]" />
                 )}
                 <button
+                  aria-label={parentButtonLabel}
                   onClick={() => {
                     if (firstVariantKey ?? concept.key) onConceptSelect(concept.id, firstVariantKey ?? concept.key);
                     else onConceptSelect(concept.id);
@@ -305,8 +316,19 @@ export function ConceptSidebar({
                       +{concept.mergedKeys.length - 1}
                     </span>
                   )}
-                  <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
                 </button>
+                {canFlipSurveyBadge ? (
+                  <button
+                    type="button"
+                    aria-label={`Switch survey for ${concept.name} from ${resolvedSurveyLabel} ${resolvedSurvey.sourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
+                    onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)}
+                    className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 ${surveyBadgeClassName}`}
+                  >
+                    {badge}
+                  </button>
+                ) : (
+                  <span className={`mr-2 px-1 py-0.5 ${surveyBadgeClassName}`}>{badge}</span>
+                )}
               </div>
               {expanded && variants.map((variant) => {
                 const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;

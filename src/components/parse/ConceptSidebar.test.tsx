@@ -41,7 +41,7 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
     const active = screen.getByRole('button', { name: /fire/i });
     expect(active.className).toContain('bg-indigo-50');
-    expect(active.textContent ?? '').toContain('2.1');
+    expect(screen.getByTestId('concept-row-2').textContent ?? '').toContain('2.1');
   });
 
   it('forwards search, status filter, tag selection, and concept-selection callbacks', () => {
@@ -199,7 +199,7 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('KLQ 1.2');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('KLQ 1.2');
   });
 
   it('shows bare source item as the concept badge without a prefix when source survey is absent', () => {
@@ -221,7 +221,7 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const text = screen.getByRole('button', { name: /forehead/i }).textContent ?? '';
+    const text = screen.getByTestId('concept-row-42').textContent ?? '';
     expect(text).toContain('1.2');
     expect(text).not.toContain('#1.2');
   });
@@ -245,7 +245,7 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('#42');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('#42');
   });
 
   it('labels the source-aware sort tab as Source', () => {
@@ -293,8 +293,8 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /forehead/i }).textContent ?? '').toContain('KLQ 1.2');
-    expect(screen.getByRole('button', { name: /hair/i }).textContent ?? '').toContain('#43');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('KLQ 1.2');
+    expect(screen.getByTestId('concept-row-43').textContent ?? '').toContain('#43');
     expect(screen.getByTestId('concept-sort-survey').hasAttribute('disabled')).toBe(false);
   });
 
@@ -370,6 +370,49 @@ describe('ConceptSidebar', () => {
     expect(screen.getByTestId('concept-row-7').textContent ?? '').toContain('Jbil Modal JBIL_100');
 
     fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
+
+    expect(onSurveyChoiceChange).toHaveBeenCalledWith('Fail01', 'rain', 'klq');
+  });
+
+  it('lets users click the visible survey badge to flip to the next overlapping survey', () => {
+    const onSurveyChoiceChange = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="survey"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{
+          id: 7,
+          key: 'rain',
+          name: 'rain',
+          tag: 'untagged' as const,
+          sourceItem: 'KLQ_1.10',
+          sourceSurvey: 'klq',
+          surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' },
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={7}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+        surveySettings={{
+          klq: { display_label: 'Kurdish List', display_color: 'slate' },
+          jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
+        }}
+        speakerSurveyChoices={{ Fail01: { rain: 'jbil' } }}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+      />,
+    );
+
+    const badge = screen.getByRole('button', { name: /Switch survey for rain from Jbil Modal JBIL_100 to Kurdish List KLQ_1.10/i });
+    expect(badge.textContent ?? '').toContain('Jbil Modal JBIL_100');
+
+    fireEvent.click(badge);
 
     expect(onSurveyChoiceChange).toHaveBeenCalledWith('Fail01', 'rain', 'klq');
   });

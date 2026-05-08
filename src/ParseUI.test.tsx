@@ -767,7 +767,7 @@ describe("ParseUI", () => {
     await waitFor(() => {
       expect(screen.getByTestId("concept-sort-survey").className).toContain("bg-white");
     });
-    expect(screen.getByRole("button", { name: /forehead/i }).textContent ?? "").toContain("KLQ 1.2");
+    expect(screen.getByRole("button", { name: /forehead.*KLQ 1\.2/i })).toBeTruthy();
   });
 
   it("groups source_item sibling rows into one sidebar entry while leaving singleton concepts visible", () => {
@@ -794,7 +794,7 @@ describe("ParseUI", () => {
     expect(within(sidebar).queryByText("brother of husband B")).toBeNull();
     expect(within(sidebar).getByText("sister of husband")).toBeTruthy();
     expect(within(sidebar).getByText("water")).toBeTruthy();
-    expect(within(sidebar).getByRole("button", { name: /brother of husband/i }).textContent ?? "").toContain("KLQ 2.15");
+    expect(within(sidebar).getByRole("button", { name: /brother of husband.*KLQ 2\.15/i })).toBeTruthy();
   });
 
   it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
