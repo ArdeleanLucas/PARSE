@@ -187,12 +187,14 @@ def test_propagates_to_speaker_concept_tags(tmp_path) -> None:
     speaker_2 = annotations_dir / "Speaker02.json"
     untouched = annotations_dir / "Speaker03.json"
     parse_json = annotations_dir / "SpeakerParse.parse.json"
+    parse_legacy_shadow = annotations_dir / "SpeakerParse.json"
     speaker_1.write_text(json.dumps(_annotation_record("Speaker01", ["cold-a", "cold-b"])), encoding="utf-8")
     speaker_2.write_text(json.dumps(_annotation_record("Speaker02", ["cold-a"])), encoding="utf-8")
     untouched.write_text(json.dumps(_annotation_record("Speaker03", ["dog"])), encoding="utf-8")
     parse_json.write_text(json.dumps(_annotation_record("SpeakerParse", ["cold-a"])), encoding="utf-8")
+    parse_legacy_shadow.write_text(json.dumps(_annotation_record("SpeakerParse", ["cold-a"])), encoding="utf-8")
     untouched_before = untouched.stat().st_mtime_ns
-    parse_json_before = parse_json.stat().st_mtime_ns
+    parse_legacy_shadow_before = parse_legacy_shadow.stat().st_mtime_ns
     tools = ParseChatTools(project_root=tmp_path)
 
     payload = tool_prepare_tag_import(
@@ -207,15 +209,20 @@ def test_propagates_to_speaker_concept_tags(tmp_path) -> None:
 
     assert payload["ok"] is True
     assert payload["assignedCount"] == 2
-    assert payload["propagatedSpeakerCount"] == 2
-    assert payload["propagatedConceptAssignments"] == 3
+    assert payload["propagatedSpeakerCount"] == 3
+    assert payload["propagatedConceptAssignments"] == 4
+    assert payload["removedConceptAssignments"] == 0
     assert _read_json(speaker_1)["concept_tags"] == {"cold-a": ["thesis"], "cold-b": ["thesis"]}
     assert _read_json(speaker_2)["concept_tags"] == {"cold-a": ["thesis"]}
+    assert _read_json(parse_json)["concept_tags"] == {"cold-a": ["thesis"]}
     assert _read_json(untouched)["concept_tags"] == {}
     assert untouched.stat().st_mtime_ns == untouched_before
-    assert parse_json.stat().st_mtime_ns == parse_json_before
+    assert _read_json(parse_legacy_shadow)["concept_tags"] == {}
+    assert parse_legacy_shadow.stat().st_mtime_ns == parse_legacy_shadow_before
     assert len(list(annotations_dir.glob("Speaker01.json.bak-*-pre-tag-import"))) == 1
     assert len(list(annotations_dir.glob("Speaker02.json.bak-*-pre-tag-import"))) == 1
+    assert len(list(annotations_dir.glob("SpeakerParse.parse.json.bak-*-pre-tag-import"))) == 1
+    assert not list(annotations_dir.glob("SpeakerParse.json.bak-*-pre-tag-import"))
     assert not list(annotations_dir.glob("Speaker03.json.bak-*-pre-tag-import"))
 
     second = tool_prepare_tag_import(
@@ -231,10 +238,45 @@ def test_propagates_to_speaker_concept_tags(tmp_path) -> None:
     assert second["ok"] is True
     assert second["propagatedSpeakerCount"] == 0
     assert second["propagatedConceptAssignments"] == 0
+    assert second["removedConceptAssignments"] == 0
     assert _read_json(speaker_1)["concept_tags"] == {"cold-a": ["thesis"], "cold-b": ["thesis"]}
     assert _read_json(speaker_2)["concept_tags"] == {"cold-a": ["thesis"]}
     assert len(list(annotations_dir.glob("Speaker01.json.bak-*-pre-tag-import"))) == 1
     assert len(list(annotations_dir.glob("Speaker02.json.bak-*-pre-tag-import"))) == 1
+
+
+def test_tag_reimport_reconciles_stale_memberships(tmp_path) -> None:
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    speaker = annotations_dir / "Speaker01.parse.json"
+    speaker.write_text(
+        json.dumps(_annotation_record("Speaker01", ["cold-a"], {"cold-a": ["old"], "dog": ["thesis"]})),
+        encoding="utf-8",
+    )
+    tools = ParseChatTools(project_root=tmp_path)
+    (tmp_path / "parse-tags.json").write_text(
+        json.dumps([{"id": "thesis", "label": "Thesis", "color": "#ffffff", "concepts": ["dog"]}]),
+        encoding="utf-8",
+    )
+
+    payload = tool_prepare_tag_import(
+        tools,
+        {
+            "tagName": "Thesis",
+            "color": "#123456",
+            "conceptIds": ["cold-a"],
+            "dryRun": False,
+        },
+    )
+
+    assert payload["ok"] is True
+    assert payload["assignedCount"] == 1
+    assert payload["propagatedSpeakerCount"] == 1
+    assert payload["propagatedConceptAssignments"] == 1
+    assert payload["removedConceptAssignments"] == 1
+    assert _read_json(speaker)["concept_tags"] == {"cold-a": ["old", "thesis"]}
+    tags = json.loads((tmp_path / "parse-tags.json").read_text(encoding="utf-8"))
+    assert tags[0]["concepts"] == ["cold-a"]
 
 
 def test_propagateToSpeakers_false_skips_per_speaker_writes(tmp_path) -> None:

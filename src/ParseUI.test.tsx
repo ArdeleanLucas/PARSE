@@ -975,6 +975,40 @@ describe("ParseUI", () => {
     expect(noseButton()).toBeTruthy();
   });
 
+  it("keeps grouped variant concepts in speaker-scoped custom tag filters and excludes untagged elicited concepts", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Saha01"],
+      concepts: [
+        { id: "367", label: "cold (A)", source_item: "157", source_survey: "JBIL" },
+        { id: "368", label: "cold (B)", source_item: "157", source_survey: "JBIL" },
+        { id: "540", label: "cold", source_item: "157", source_survey: "JBIL" },
+        { id: "521", label: "they", source_item: "323", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockTags = [...mockTags, { id: "thesis", label: "Thesis", color: "#6366f1" }];
+    mockRecords = {
+      Saha01: {
+        ...makeRecord("Saha01", [
+          { conceptText: "cold", conceptId: "540", start: 0, end: 1 },
+          { conceptText: "they", conceptId: "521", start: 1, end: 2 },
+        ]),
+        concept_tags: { "540": ["thesis"] },
+      },
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+    const sidebar = () => screen.getByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar()).getByRole("button", { name: /Thesis/i }));
+
+    expect(within(sidebar()).queryByRole("button", { name: /cold.*JBIL 157/i })).toBeTruthy();
+    expect(within(sidebar()).queryByRole("button", { name: /they.*JBIL 323/i })).toBeNull();
+  });
+
   it("scopes annotate right-panel tag rows to the active speaker", async () => {
     mockConfig = {
       project_name: "PARSE",

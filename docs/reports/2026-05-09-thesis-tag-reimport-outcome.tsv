@@ -1,0 +1,11 @@
+speaker	thesis_csv_count	tagged_id_count	tagged_base_count	missing_thesis_labels	extra_tagged_labels
+Fail01	82	102	80	ash;bark	
+Fail02	82	90	80	ash;bark	
+Kalh01	82	103	82		
+Khan01	82	110	82		
+Khan02	82	91	77	i;knee;skin;we;you	
+Khan03	82	76	75	i;sister;skin;that;this;we;you	
+Khan04	82	88	80	ash;bark	
+Mand01	82	101	82		
+Qasr01	82	102	82		
+Saha01	82	100	82		

@@ -1130,7 +1130,9 @@ export function ParseUI() {
     }
     if (selectedTagIds.size > 0) {
       list = list.filter(c => {
-        const conceptTagIds = new Set(getTagsForConcept(c.key, activeTagScope).map((tag) => tag.id));
+        const conceptTagIds = new Set(
+          conceptUnderlyingKeys(c).flatMap((key) => getTagsForConcept(key, activeTagScope).map((tag) => tag.id)),
+        );
         for (const tagId of selectedTagIds) {
           if (!conceptTagIds.has(tagId)) return false;
         }
