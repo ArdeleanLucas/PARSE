@@ -112,34 +112,116 @@ def test_duplicate_single_row_renames_original_appends_sibling_and_writes_backup
     assert backups[0].read_bytes() == prewrite
 
 
-@pytest.mark.parametrize("label", ["leaf (A)", "leaf (B)"])
-def test_duplicate_refuses_rows_already_in_ab_pair(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, label: str) -> None:
+def test_duplicate_creates_C_when_AB_already_exist(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     concepts_path = tmp_path / "concepts.csv"
-    prewrite = _write_concepts(concepts_path, [{"id": "322", "concept_en": label, "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.CONFLICT
-    assert payload == {"error": "concept already part of an A/B pair"}
-    assert concepts_path.read_bytes() == prewrite
-    assert not list(tmp_path.glob("concepts.csv.bak-*"))
-
-
-def test_duplicate_refuses_when_b_sibling_exists_for_same_source_item(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    prewrite = _write_concepts(
+    _write_concepts(
         concepts_path,
         [
-            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+            {"id": "322", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
             {"id": "618", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
         ],
     )
 
     status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
 
-    assert status == HTTPStatus.CONFLICT
-    assert payload == {"error": "concept already part of an A/B pair"}
-    assert concepts_path.read_bytes() == prewrite
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "leaf (A)"
+    assert payload["sibling"] == {
+        "id": "619",
+        "concept_en": "leaf (C)",
+        "source_item": "102",
+        "source_survey": "JBIL",
+        "custom_order": "",
+    }
+    assert _read_concepts(concepts_path)[-1]["concept_en"] == "leaf (C)"
+
+
+def test_duplicate_creates_D_after_three(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [
+            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
+            {"id": "618", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+        ],
+    )
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+    assert status == HTTPStatus.OK
+    assert payload["sibling"]["concept_en"] == "leaf (C)"
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "leaf (A)"
+    assert payload["sibling"]["id"] == "620"
+    assert payload["sibling"]["concept_en"] == "leaf (D)"
+    assert [row["concept_en"] for row in _read_concepts(concepts_path) if row["source_item"] == "102"] == [
+        "leaf (A)",
+        "leaf (B)",
+        "leaf (C)",
+        "leaf (D)",
+    ]
+
+
+def test_duplicate_falls_back_to_numeric_after_Z(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    rows = [
+        {
+            "id": str(index),
+            "concept_en": f"leaf ({chr(64 + index)})",
+            "source_item": "102",
+            "source_survey": "JBIL",
+            "custom_order": "",
+        }
+        for index in range(1, 27)
+    ]
+    _write_concepts(concepts_path, rows)
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "1")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "leaf (A)"
+    assert payload["sibling"]["id"] == "27"
+    assert payload["sibling"]["concept_en"] == "leaf (27)"
+
+
+def test_duplicate_leaves_bare_primary_when_A_sibling_already_exists(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [
+            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
+            {"id": "618", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+        ],
+    )
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "leaf"
+    assert payload["sibling"]["concept_en"] == "leaf (B)"
+    assert _read_concepts(concepts_path) == [
+        {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
+        {"id": "618", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+        {"id": "619", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+    ]
+
+
+def test_duplicate_does_not_double_suffix_when_primary_already_lettered(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"}])
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "leaf (C)"
+    # Sparse families intentionally allocate the first free label, not the next ordinal after the target.
+    assert payload["sibling"]["concept_en"] == "leaf (A)"
+    assert _read_concepts(concepts_path) == [
+        {"id": "322", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
+        {"id": "323", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+    ]
 
 
 def test_duplicate_returns_404_when_concept_missing(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +267,7 @@ def test_duplicate_restores_backup_when_atomic_write_fails(tmp_path: pathlib.Pat
     monkeypatch.setattr(concepts_io, "write_concepts_csv_rows", fail_after_torn_write)
 
     with pytest.raises(concepts_io.ConceptDuplicateError) as excinfo:
-        concepts_io.duplicate_concept_ab_pair(tmp_path, "322")
+        concepts_io.duplicate_concept_variant(tmp_path, "322")
 
     assert int(excinfo.value.status) == HTTPStatus.INTERNAL_SERVER_ERROR
     assert str(excinfo.value) == "failed to duplicate concept"

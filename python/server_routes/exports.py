@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import server as _server
-from concepts_io import ConceptDuplicateError, duplicate_concept_ab_pair
+from concepts_io import ConceptDuplicateError, duplicate_concept_variant
 
 def _api_get_export_lingpy(self) -> None:
     """Stream LingPy-compatible wordlist TSV as a file download."""
@@ -79,9 +79,9 @@ def _copy_concept_tags_to_sibling(annotations_dir: Path, primary_id: str, siblin
             pass
 
 def _api_post_concept_duplicate(self, concept_id: str) -> None:
-    """Duplicate one concepts.csv row into A/B tracking siblings."""
+    """Duplicate one concepts.csv row into a new variant sibling."""
     try:
-        payload = duplicate_concept_ab_pair(_server._project_root(), concept_id)
+        payload = duplicate_concept_variant(_server._project_root(), concept_id)
     except ConceptDuplicateError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
     _copy_concept_tags_to_sibling(
