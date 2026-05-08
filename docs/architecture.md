@@ -68,7 +68,7 @@ Key examples:
 - `src/components/annotate/AnnotateView.tsx`, `AnnotateMode.tsx`, `AnnotationPanel.tsx`, `LexemeSearchPanel.tsx` — barrels only; concrete UI modules live under `src/components/annotate/annotate-views/`
 - `src/hooks/useWaveSurfer.ts` and `src/hooks/useBatchPipelineJob.ts` — barrels only; concrete hook pieces live under `src/hooks/wave-surfer/` and `src/hooks/batch-pipeline/`
 
-For the current file-by-file layout, use [Post-decomp File Map](./architecture/post-decomp-file-map.md).
+For the current file-by-file layout, use [Post-decomp File Map](./architecture/post-decomp-file-map.md). Frontend-specific UI contracts, including sidebar grouped-variant visibility, live in [Frontend Architecture](./frontend-architecture.md).
 
 ## Backend design
 

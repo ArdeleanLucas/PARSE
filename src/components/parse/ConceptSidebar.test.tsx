@@ -514,7 +514,7 @@ describe('ConceptSidebar', () => {
         scopedToSpeaker
         onScopedToSpeakerChange={vi.fn()}
         elicitedConceptKeys={new Set(['1'])}
-        isVariantVisible={(_concept, variant) => variant.conceptKey === '1'}
+        isConceptVariantVisibleInSidebar={(_concept, variant) => variant.conceptKey === '1'}
       />,
     );
 
