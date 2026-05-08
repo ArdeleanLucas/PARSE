@@ -24,7 +24,7 @@ export async function loadWaveSurferAudio(
     return;
   }
   try {
-    const response = await fetch(options.peaksUrl, { signal: abortCtrl.signal });
+    const response = await fetch(options.peaksUrl, { signal: abortCtrl.signal, cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const peaksJson = (await response.json()) as PeaksJson;
     const channelData = getChannelDataFromPeaks(peaksJson);
