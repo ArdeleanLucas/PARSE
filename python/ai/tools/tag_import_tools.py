@@ -86,13 +86,30 @@ def _annotation_file_is_tag_import_target(path: Path) -> bool:
     name = path.name
     if not name.endswith(".json"):
         return False
-    if name.endswith(".parse.json"):
-        return False
     if ".bak" in name or name.endswith(".tmp"):
         return False
     if name in {"manifest.json", "parse-enrichments.json"}:
         return False
     return True
+
+
+def _annotation_speaker_key(path: Path) -> str:
+    name = path.name
+    if name.endswith(".parse.json"):
+        return name[: -len(".parse.json")]
+    if name.endswith(".json"):
+        return name[: -len(".json")]
+    return path.stem
+
+
+def _iter_annotation_tag_import_targets(annotations_dir: Path) -> List[Path]:
+    candidates = [path for path in sorted(annotations_dir.glob("*.json")) if _annotation_file_is_tag_import_target(path)]
+    parse_speakers = {_annotation_speaker_key(path) for path in candidates if path.name.endswith(".parse.json")}
+    return [
+        path
+        for path in candidates
+        if path.name.endswith(".parse.json") or _annotation_speaker_key(path) not in parse_speakers
+    ]
 
 
 def _collect_annotation_concept_ids(value: Any) -> Set[str]:
@@ -136,9 +153,8 @@ def _propagate_tag_to_speaker_annotations(tools: "ParseChatTools", tag_id: str, 
     timestamp = _datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     modified_speakers = 0
     assignments_added = 0
-    for path in sorted(annotations_dir.glob("*.json")):
-        if not _annotation_file_is_tag_import_target(path):
-            continue
+    assignments_removed = 0
+    for path in _iter_annotation_tag_import_targets(annotations_dir):
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 record = _json.load(handle)
@@ -153,6 +169,20 @@ def _propagate_tag_to_speaker_annotations(tools: "ParseChatTools", tag_id: str, 
         if not isinstance(concept_tags, dict):
             concept_tags = {}
         file_assignments_added = 0
+        file_assignments_removed = 0
+        for concept_id in sorted(list(concept_tags.keys())):
+            if concept_id in target_concept_ids:
+                continue
+            raw_tag_ids = concept_tags.get(concept_id)
+            tag_ids = [str(raw_tag_id) for raw_tag_id in raw_tag_ids] if isinstance(raw_tag_ids, list) else []
+            if tag_id not in tag_ids:
+                continue
+            tag_ids = [raw_tag_id for raw_tag_id in tag_ids if raw_tag_id != tag_id]
+            if tag_ids:
+                concept_tags[concept_id] = tag_ids
+            else:
+                concept_tags.pop(concept_id, None)
+            file_assignments_removed += 1
         for concept_id in sorted(present_concept_ids):
             raw_tag_ids = concept_tags.get(concept_id)
             tag_ids = [str(raw_tag_id) for raw_tag_id in raw_tag_ids] if isinstance(raw_tag_ids, list) else []
@@ -161,7 +191,7 @@ def _propagate_tag_to_speaker_annotations(tools: "ParseChatTools", tag_id: str, 
             tag_ids.append(tag_id)
             concept_tags[concept_id] = tag_ids
             file_assignments_added += 1
-        if not file_assignments_added:
+        if not file_assignments_added and not file_assignments_removed:
             continue
         backup_path = path.with_name("{0}.bak-{1}-pre-tag-import".format(path.name, timestamp))
         _shutil.copy2(path, backup_path)
@@ -169,9 +199,11 @@ def _propagate_tag_to_speaker_annotations(tools: "ParseChatTools", tag_id: str, 
         _write_json_atomic(path, record)
         modified_speakers += 1
         assignments_added += file_assignments_added
+        assignments_removed += file_assignments_removed
     return {
         "propagatedSpeakerCount": modified_speakers,
         "propagatedConceptAssignments": assignments_added,
+        "removedConceptAssignments": assignments_removed,
     }
 
 
@@ -391,9 +423,7 @@ def tool_prepare_tag_import(tools: "ParseChatTools", args: Dict[str, Any]) -> Di
     assigned_count = len(concept_ids)
     for tag in tags:
         if tag.get("id") == tag_id:
-            existing_ids = set(tag.get("concepts") or [])
-            existing_ids.update(concept_ids)
-            tag["concepts"] = sorted(existing_ids)
+            tag["concepts"] = sorted(set(concept_ids))
             assigned_count = len(tag["concepts"])
             tag["label"] = tag_name
             tag["color"] = color
