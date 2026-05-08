@@ -9,6 +9,26 @@ function normalizeSourceItem(sourceItem: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeSourceSurvey(sourceSurvey: string | undefined): string | null {
+  const trimmed = sourceSurvey?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function sourceBucketKey(sourceItem: string, sourceSurvey: string | undefined): string {
+  const survey = normalizeSourceSurvey(sourceSurvey) ?? '';
+  return `${survey}\u0000${sourceItem}`;
+}
+
+function groupedConceptKey(
+  sourceItem: string,
+  sourceSurvey: string | undefined,
+  sourceItemsWithMultipleGroupedBuckets: ReadonlySet<string>,
+): string {
+  if (!sourceItemsWithMultipleGroupedBuckets.has(sourceItem)) return sourceItem;
+  const survey = normalizeSourceSurvey(sourceSurvey) ?? 'unspecified';
+  return `source:${survey}:${sourceItem}`;
+}
+
 function fallbackVariantLabel(index: number): string {
   const code = 'A'.charCodeAt(0) + index;
   return code <= 'Z'.charCodeAt(0) ? String.fromCharCode(code) : String(index + 1);
@@ -78,13 +98,24 @@ export function groupConceptEntries(
   conceptMerges?: Record<string, readonly string[]>,
 ): Concept[] {
   const sourceBuckets = new Map<string, number[]>();
+  const sourceBucketKeysByItem = new Map<string, Set<string>>();
   rawConcepts.forEach((entry, index) => {
     const sourceItem = normalizeSourceItem(entry.source_item);
     if (!sourceItem) return;
-    const bucket = sourceBuckets.get(sourceItem) ?? [];
+    const bucketKey = sourceBucketKey(sourceItem, entry.source_survey);
+    const bucket = sourceBuckets.get(bucketKey) ?? [];
     bucket.push(index);
-    sourceBuckets.set(sourceItem, bucket);
+    sourceBuckets.set(bucketKey, bucket);
+    const bucketKeys = sourceBucketKeysByItem.get(sourceItem) ?? new Set<string>();
+    bucketKeys.add(bucketKey);
+    sourceBucketKeysByItem.set(sourceItem, bucketKeys);
   });
+
+  const sourceItemsWithMultipleGroupedBuckets = new Set<string>();
+  for (const [sourceItem, bucketKeys] of sourceBucketKeysByItem.entries()) {
+    const groupedBucketCount = Array.from(bucketKeys).filter((bucketKey) => (sourceBuckets.get(bucketKey)?.length ?? 0) >= 2).length;
+    if (groupedBucketCount >= 2) sourceItemsWithMultipleGroupedBuckets.add(sourceItem);
+  }
 
   const grouped: Concept[] = [];
   const emittedSourceItems = new Set<string>();
@@ -97,14 +128,15 @@ export function groupConceptEntries(
       return;
     }
 
-    const siblings = sourceBuckets.get(sourceItem) ?? [];
+    const bucketKey = sourceBucketKey(sourceItem, entry.source_survey);
+    const siblings = sourceBuckets.get(bucketKey) ?? [];
     if (siblings.length < 2) {
       emittedId += 1;
       grouped.push(singletonConcept(entry, emittedId, resolveTag));
       return;
     }
-    if (emittedSourceItems.has(sourceItem)) return;
-    emittedSourceItems.add(sourceItem);
+    if (emittedSourceItems.has(bucketKey)) return;
+    emittedSourceItems.add(bucketKey);
     emittedId += 1;
 
     const siblingEntries = siblings.map((siblingIndex) => rawConcepts[siblingIndex]);
@@ -117,7 +149,7 @@ export function groupConceptEntries(
 
     grouped.push({
       id: emittedId,
-      key: sourceItem,
+      key: groupedConceptKey(sourceItem, entry.source_survey, sourceItemsWithMultipleGroupedBuckets),
       name: variantStemFor(siblingEntries.map((sibling) => sibling.label)),
       tag: resolveTag(conceptKeys),
       sourceItem,

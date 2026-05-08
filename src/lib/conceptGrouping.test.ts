@@ -52,6 +52,38 @@ describe('groupConceptEntries', () => {
     expect(grouped[1]).toMatchObject({ key: 'concept-c', surveys: { klq: 'KLQ_2.1' } });
   });
 
+  it('does not group equal source item numbers from different surveys', () => {
+    const entries: ConceptEntry[] = [
+      { id: '88', label: 'white', source_item: '5.1', source_survey: 'KLQ' },
+      { id: '563', label: 'The boy cut the rope with a knife !', source_item: '5.1', source_survey: 'EXT' },
+      { id: '596', label: 'The boy cut the rope with a knife', source_item: '5.1', source_survey: 'EXT' },
+    ];
+
+    const grouped = groupConceptEntries(entries, untagged);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0]).toMatchObject({ key: '88', name: 'white', sourceSurvey: 'KLQ', sourceItem: '5.1' });
+    expect(grouped[0].variants).toBeUndefined();
+    expect(grouped[1]).toMatchObject({ key: '5.1', sourceSurvey: 'EXT', sourceItem: '5.1' });
+    expect(grouped[1].variants?.map((variant) => variant.conceptKey)).toEqual(['563', '596']);
+  });
+
+  it('keeps grouped concept keys unique when multiple surveys share an item number', () => {
+    const entries: ConceptEntry[] = [
+      { id: '88a', label: 'white A', source_item: '5.1', source_survey: 'KLQ' },
+      { id: '88b', label: 'white B', source_item: '5.1', source_survey: 'KLQ' },
+      { id: '563', label: 'The boy cut the rope with a knife !', source_item: '5.1', source_survey: 'EXT' },
+      { id: '596', label: 'The boy cut the rope with a knife', source_item: '5.1', source_survey: 'EXT' },
+    ];
+
+    const grouped = groupConceptEntries(entries, untagged);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped.map((concept) => concept.key)).toEqual(['source:KLQ:5.1', 'source:EXT:5.1']);
+    expect(grouped.map((concept) => concept.sourceItem)).toEqual(['5.1', '5.1']);
+    expect(grouped.map((concept) => concept.sourceSurvey)).toEqual(['KLQ', 'EXT']);
+  });
+
   it('groups non-adjacent source_item siblings while preserving the position of the first sibling', () => {
     const entries: ConceptEntry[] = [
       { id: 'a', label: 'brother of husband A', source_item: '2.15' },
