@@ -135,9 +135,6 @@ def duplicate_concept_variant(
         source_item=source_item,
         rewrite_bare_primary=rewrite_bare_primary,
     )
-    if not stem or not variant_label:
-        raise ConceptDuplicateError(HTTPStatus.CONFLICT, "concept row cannot be duplicated")
-
     backup_path = _backup_path(concepts_path, normalized_id, now)
     try:
         original_bytes = concepts_path.read_bytes()
