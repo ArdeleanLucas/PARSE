@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from concept_source_item import read_concepts_csv_rows, write_concepts_csv_rows
 
-_AB_SUFFIX_RE = re.compile(r"\([AB]\)\s*$")
+_VARIANT_SUFFIX_RE = re.compile(r"\(([A-Z]|\d+)\)\s*$")
 
 
 class ConceptDuplicateError(Exception):
@@ -28,8 +28,13 @@ def _numeric_id(value: object) -> str:
     return text if text.isdigit() else ""
 
 
-def _has_ab_suffix(label: str) -> bool:
-    return bool(_AB_SUFFIX_RE.search(str(label or "").strip()))
+def _variant_suffix(label: str) -> str:
+    match = _VARIANT_SUFFIX_RE.search(str(label or "").strip())
+    return match.group(1) if match else ""
+
+
+def _variant_stem(label: str) -> str:
+    return _VARIANT_SUFFIX_RE.sub("", str(label or "").strip()).strip()
 
 
 def _backup_timestamp(now: datetime | None = None) -> str:
@@ -56,23 +61,49 @@ def _restore_from_backup(concepts_path: Path, backup_path: Path) -> None:
     concepts_path.write_bytes(backup_path.read_bytes())
 
 
-def _has_existing_b_sibling(rows: Sequence[Mapping[str, Any]], *, target_index: int, source_item: str) -> bool:
+def _source_item_variant_suffixes(rows: Sequence[Mapping[str, Any]], *, source_item: str, exclude_index: int | None = None) -> set[str]:
+    used: set[str] = set()
     for index, row in enumerate(rows):
-        if index == target_index:
+        if exclude_index is not None and index == exclude_index:
             continue
-        label = str(row.get("concept_en") or "").strip()
-        if str(row.get("source_item") or "").strip() == source_item and label.endswith("(B)"):
-            return True
-    return False
+        if str(row.get("source_item") or "").strip() != source_item:
+            continue
+        suffix = _variant_suffix(str(row.get("concept_en") or ""))
+        if suffix:
+            used.add(suffix)
+    return used
 
 
-def duplicate_concept_ab_pair(
+def _next_free_variant_label(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_item: str,
+    rewrite_bare_primary: bool,
+) -> str:
+    used = _source_item_variant_suffixes(rows, source_item=source_item)
+    if rewrite_bare_primary:
+        # A bare primary will be rewritten to `(A)` before the sibling is appended.
+        used.add("A")
+
+    for codepoint in range(ord("A"), ord("Z") + 1):
+        label = chr(codepoint)
+        if label not in used:
+            return label
+
+    numeric_labels = {int(label) for label in used if label.isdigit()}
+    label_num = 27
+    while label_num in numeric_labels:
+        label_num += 1
+    return str(label_num)
+
+
+def duplicate_concept_variant(
     project_root: Path,
     concept_id: str,
     *,
     now: datetime | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Split one concepts.csv row into an `(A)` primary and appended `(B)` sibling."""
+    """Duplicate one concepts.csv row into the next free source-item variant."""
 
     normalized_id = _numeric_id(concept_id)
     if not normalized_id:
@@ -95,10 +126,17 @@ def duplicate_concept_ab_pair(
     target = dict(rows[target_index])
     label = str(target.get("concept_en") or "").strip()
     source_item = str(target.get("source_item") or "").strip()
-    if _has_ab_suffix(label):
-        raise ConceptDuplicateError(HTTPStatus.CONFLICT, "concept already part of an A/B pair")
-    if _has_existing_b_sibling(rows, target_index=target_index, source_item=source_item):
-        raise ConceptDuplicateError(HTTPStatus.CONFLICT, "concept already part of an A/B pair")
+    stem = _variant_stem(label)
+    target_suffix = _variant_suffix(label)
+    sibling_suffixes = _source_item_variant_suffixes(rows, source_item=source_item, exclude_index=target_index)
+    rewrite_bare_primary = not target_suffix and "A" not in sibling_suffixes
+    variant_label = _next_free_variant_label(
+        rows,
+        source_item=source_item,
+        rewrite_bare_primary=rewrite_bare_primary,
+    )
+    if not stem or not variant_label:
+        raise ConceptDuplicateError(HTTPStatus.CONFLICT, "concept row cannot be duplicated")
 
     backup_path = _backup_path(concepts_path, normalized_id, now)
     try:
@@ -109,10 +147,10 @@ def duplicate_concept_ab_pair(
 
     primary = dict(target)
     primary["id"] = normalized_id
-    primary["concept_en"] = "{0} (A)".format(label)
+    primary["concept_en"] = "{0} (A)".format(stem) if rewrite_bare_primary else label
     sibling = {
         "id": str(_max_numeric_id(rows) + 1),
-        "concept_en": "{0} (B)".format(label),
+        "concept_en": "{0} ({1})".format(stem, variant_label),
         "source_item": source_item,
         "source_survey": str(target.get("source_survey") or "").strip(),
         "custom_order": "",
