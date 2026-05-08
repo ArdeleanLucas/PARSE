@@ -89,6 +89,33 @@ describe('groupConceptEntries', () => {
     expect(grouped[0].variants?.map((variant) => variant.variantLabel)).toEqual(['A', 'B', 'C']);
   });
 
+  it('groups three explicit variants into one n-ary source-item concept', () => {
+    const grouped = groupConceptEntries([
+      { id: '365', label: 'new (A)', source_item: '154', source_survey: 'JBIL' },
+      { id: '618', label: 'new (B)', source_item: '154', source_survey: 'JBIL' },
+      { id: '619', label: 'new (C)', source_item: '154', source_survey: 'JBIL' },
+    ], untagged);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].name).toBe('new');
+    expect(grouped[0].variants).toEqual([
+      { conceptKey: '365', conceptEn: 'new (A)', variantLabel: 'A' },
+      { conceptKey: '618', conceptEn: 'new (B)', variantLabel: 'B' },
+      { conceptKey: '619', conceptEn: 'new (C)', variantLabel: 'C' },
+    ]);
+  });
+
+  it('keeps numeric fallback suffix variants with their numeric labels', () => {
+    const grouped = groupConceptEntries([
+      { id: '900', label: 'shape (26)', source_item: '8.8' },
+      { id: '901', label: 'shape (27)', source_item: '8.8' },
+    ], untagged);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].name).toBe('shape');
+    expect(grouped[0].variants?.map((variant) => variant.variantLabel)).toEqual(['26', '27']);
+  });
+
   it('leaves missing, blank, and single-child source_item rows as singleton concepts', () => {
     const entries: ConceptEntry[] = [
       { id: 'a', label: 'blank source', source_item: '   ' },

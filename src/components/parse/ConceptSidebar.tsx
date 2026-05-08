@@ -19,12 +19,10 @@ export interface SidebarConcept {
   surveys?: ConceptSurveyLinks;
   mergedKeys?: string[];
   mergeAbsorbedNames?: string[];
-  /** Present when the concept was already grouped from concepts.csv as an
-   * A/B family (e.g. `deep (A)` 81 + `deep (B)` 82 sharing source_item 4.30).
-   * Mirrors the `ConceptVariant` shape from `speakerForm.ts` so the grouped
-   * concept passes through structurally. Used to disable the right-click
-   * "Duplicate" item — splitting an already-split concept is a no-op the
-   * backend rejects with 409. */
+  /** Present when concepts.csv already groups multiple variants by source_item
+   * (e.g. `deep (A)`, `deep (B)`, `deep (C)`). Mirrors the `ConceptVariant`
+   * shape from `speakerForm.ts` so each underlying row can be surfaced as a
+   * selectable child while N-ary duplicate actions remain enabled. */
   variants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
   mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
 }
@@ -48,7 +46,8 @@ interface ConceptSidebarProps {
   onTagSelectionChange: (selected: Set<string>) => void;
   tags: SidebarTag[];
   activeConceptId: number;
-  onConceptSelect: (conceptId: number) => void;
+  activeConceptKey?: string | null;
+  onConceptSelect: (conceptId: number, conceptKey?: string) => void;
   activeSpeaker?: string | null;
   surveySettings?: SurveySettingsMap;
   speakerSurveyChoices?: SpeakerSurveyChoices;
@@ -82,6 +81,7 @@ export function ConceptSidebar({
   onTagSelectionChange,
   tags,
   activeConceptId,
+  activeConceptKey = null,
   onConceptSelect,
   activeSpeaker = null,
   surveySettings = {},
@@ -96,6 +96,7 @@ export function ConceptSidebar({
   elicitedConceptKeys = new Set<string>(),
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
+  const [expandedConceptIds, setExpandedConceptIds] = useState<Set<number>>(() => new Set());
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -241,7 +242,6 @@ export function ConceptSidebar({
       </div>
       <nav className="flex-1 overflow-y-auto px-2 pb-6">
         {scopedConcepts.map((concept) => {
-          const active = concept.id === activeConceptId;
           const isElicited = !hasElicitedScope || conceptMatchesElicitedKeys(concept, elicitedConceptKeys);
           const inactiveRowClass = isElicited ? 'text-slate-600' : 'text-slate-400';
           const surveyConcept = { ...concept, key: concept.key ?? String(concept.id) };
@@ -254,30 +254,88 @@ export function ConceptSidebar({
               : concept.sourceItem);
           const badge = sourceLabel ?? `#${concept.id}`;
           const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
+          const variants = concept.variants ?? [];
+          const hasVariants = variants.length > 0;
+          const firstVariantKey = variants[0]?.conceptKey ?? null;
+          const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === firstVariantKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
+          const expanded = expandedConceptIds.has(concept.id);
+          const parentName = concept.name;
           return (
-            <div key={concept.id} data-testid={`concept-row-${concept.id}`} className={`mb-0.5 rounded-md ${active ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-              <button
-                onClick={() => onConceptSelect(concept.id)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setContextMenu({ concept, x: event.clientX, y: event.clientY });
-                }}
-                className={`group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${active ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
-                <span className={`flex-1 text-[13px] ${active ? 'font-semibold' : 'font-medium'}`}>{concept.name}{!isElicited && !scopedToSpeaker && hasElicitedScope && (
-                  <span className="ml-1 text-[10px] italic text-slate-400">no data</span>
-                )}</span>
-                {concept.mergedKeys && concept.mergedKeys.length > 1 && (
-                  <span
-                    title={(concept.mergeAbsorbedNames ?? []).join(', ')}
-                    className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+            <div key={concept.id} data-testid={`concept-row-${concept.id}`} className={`mb-0.5 rounded-md ${parentActive ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+              <div className="flex items-center">
+                {hasVariants ? (
+                  <button
+                    type="button"
+                    aria-label={expanded ? 'Collapse variants' : 'Expand variants'}
+                    data-testid={`concept-variant-toggle-${concept.id}`}
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedConceptIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(concept.id)) next.delete(concept.id);
+                      else next.add(concept.id);
+                      return next;
+                    })}
+                    className="ml-0.5 rounded px-1 py-1 text-[10px] font-semibold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                   >
-                    +{concept.mergedKeys.length - 1}
-                  </span>
+                    {expanded ? '−' : '+'}
+                  </button>
+                ) : (
+                  <span className="ml-0.5 w-[18px]" />
                 )}
-                <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : active ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
-              </button>
+                <button
+                  onClick={() => {
+                    if (firstVariantKey ?? concept.key) onConceptSelect(concept.id, firstVariantKey ?? concept.key);
+                    else onConceptSelect(concept.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({ concept, x: event.clientX, y: event.clientY });
+                  }}
+                  className={`group flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${parentActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
+                  <span className={`flex-1 text-[13px] ${parentActive ? 'font-semibold' : 'font-medium'}`}>{parentName}{!isElicited && !scopedToSpeaker && hasElicitedScope && (
+                    <span className="ml-1 text-[10px] italic text-slate-400">no data</span>
+                  )}</span>
+                  {concept.mergedKeys && concept.mergedKeys.length > 1 && (
+                    <span
+                      title={(concept.mergeAbsorbedNames ?? []).join(', ')}
+                      className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                    >
+                      +{concept.mergedKeys.length - 1}
+                    </span>
+                  )}
+                  <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
+                </button>
+              </div>
+              {expanded && variants.map((variant) => {
+                const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
+                const childConcept: SidebarConcept = {
+                  ...concept,
+                  key: variant.conceptKey,
+                  name: variant.conceptEn,
+                  variants: undefined,
+                  mergedKeys: undefined,
+                  mergedVariants: undefined,
+                  mergeAbsorbedNames: undefined,
+                };
+                return (
+                  <button
+                    key={variant.conceptKey}
+                    data-testid={`concept-variant-row-${variant.conceptKey}`}
+                    onClick={() => onConceptSelect(concept.id, variant.conceptKey)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
+                    }}
+                    className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
+                    <span className={`flex-1 text-[12px] ${childActive ? 'font-semibold' : 'font-medium'}`}>{variant.conceptEn}</span>
+                    <span className="font-mono text-[10px] text-slate-300">{variant.conceptKey}</span>
+                  </button>
+                );
+              })}
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">
                   {surveyChoices.map((surveyId) => {
@@ -318,37 +376,19 @@ export function ConceptSidebar({
           >
             Merge with…
           </button>
-          {(() => {
-            // Concepts that are already part of an A/B family are
-            // ineligible for further duplication. Three sources of evidence:
-            //   - explicit `variants` array from groupConceptEntries (clean
-            //     A+B in concepts.csv sharing a source_item)
-            //   - `mergedKeys` length > 1 (the user already merged siblings)
-            //   - trailing `(A)` / `(B)` suffix on the display label
-            //     (lonely (A) rows in concepts.csv with no sibling, etc.)
-            const c = contextMenu.concept;
-            const alreadyAb =
-              (Array.isArray(c.variants) && c.variants.length >= 2) ||
-              (Array.isArray(c.mergedKeys) && c.mergedKeys.length > 1) ||
-              /\s*\((A|B)\)\s*$/.test(c.name);
-            const tooltip = alreadyAb ? 'Already part of an A/B pair' : 'Split this concept into A and B siblings';
-            return (
-              <button
-                type="button"
-                role="menuitem"
-                aria-disabled={alreadyAb}
-                title={tooltip}
-                className={`block w-full rounded px-2 py-1 text-left ${alreadyAb ? 'cursor-not-allowed text-slate-300' : 'text-slate-700 hover:bg-slate-50'}`}
-                onClick={() => {
-                  if (alreadyAb) return;
-                  onDuplicateConcept?.(c);
-                  setContextMenu(null);
-                }}
-              >
-                Duplicate (split into A/B)
-              </button>
-            );
-          })()}
+          <button
+            type="button"
+            role="menuitem"
+            aria-disabled="false"
+            title="Add a new variant"
+            className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onDuplicateConcept?.(contextMenu.concept);
+              setContextMenu(null);
+            }}
+          >
+            Duplicate (split into next variant)
+          </button>
           {contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
             <button
               type="button"

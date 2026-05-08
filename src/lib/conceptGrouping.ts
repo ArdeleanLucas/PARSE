@@ -15,12 +15,19 @@ function fallbackVariantLabel(index: number): string {
 }
 
 function variantLabelFor(conceptEn: string, index: number): string {
-  const match = conceptEn.match(/(?:\s+|\s*\()([A-Z])\)?\s*$/);
-  return match?.[1] ?? fallbackVariantLabel(index);
+  const match = conceptEn.match(/(?:\s*\(([A-Z]|\d+)\)|\s+([A-Z]|\d+))\s*$/);
+  return match?.[1] ?? match?.[2] ?? fallbackVariantLabel(index);
 }
 
 function stripTrailingVariantSuffix(label: string): string {
-  return label.replace(/\s+[A-Z]\s*$/, '').trimEnd();
+  return label
+    .replace(/\s*\(([A-Z]|\d+)\)\s*$/, '')
+    .replace(/\s+([A-Z]|\d+)\s*$/, '')
+    .trimEnd();
+}
+
+function stripDanglingVariantPunctuation(label: string): string {
+  return label.replace(/[\s(]+$/, '').trimEnd();
 }
 
 function longestCommonPrefix(values: readonly string[]): string {
@@ -37,9 +44,10 @@ function longestCommonPrefix(values: readonly string[]): string {
 }
 
 function variantStemFor(labels: readonly string[]): string {
-  const prefixStem = stripTrailingVariantSuffix(longestCommonPrefix(labels));
-  if (prefixStem.length > 0) return prefixStem;
-  return stripTrailingVariantSuffix(labels[0] ?? '');
+  const strippedLabels = labels.map((label) => stripTrailingVariantSuffix(label));
+  const commonStem = stripDanglingVariantPunctuation(longestCommonPrefix(strippedLabels));
+  if (commonStem.length > 0) return commonStem;
+  return stripDanglingVariantPunctuation(strippedLabels[0] ?? '');
 }
 
 function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: ResolveConceptTag): Concept {

@@ -503,29 +503,25 @@ describe('ConceptSidebar', () => {
   });
 
 
-  describe('right-click → Duplicate (split into A/B)', () => {
+  describe('right-click → Duplicate (split into next variant)', () => {
     const concepts = [
       { id: 1, key: '1', name: 'leaf', tag: 'untagged' as const, sourceItem: '102' },
       { id: 2, key: '2', name: 'rain (A)', tag: 'untagged' as const, sourceItem: '125' },
       {
         id: 3,
-        key: '3',
-        name: 'deep',
+        key: '154',
+        name: 'new',
         tag: 'untagged' as const,
-        sourceItem: '4.30',
+        sourceItem: '154',
         variants: [
-          { conceptKey: '81', conceptEn: 'deep (A)', variantLabel: 'A' },
-          { conceptKey: '82', conceptEn: 'deep (B)', variantLabel: 'B' },
+          { conceptKey: '365', conceptEn: 'new (A)', variantLabel: 'A' },
+          { conceptKey: '618', conceptEn: 'new (B)', variantLabel: 'B' },
         ],
       },
-      // Stem-named concept with no variants — exercises the regex
-      // correctly NOT firing on a bare stem like "deep" or "branch".
-      // This protects against a regex regression that would mistakenly
-      // disable concepts whose label happens to look stem-like.
       { id: 4, key: '4', name: 'branch', tag: 'untagged' as const, sourceItem: '101' },
     ];
 
-    function renderWith(onDuplicateConcept: () => void) {
+    function renderWith(onDuplicateConcept: (concept: unknown) => void) {
       return render(
         <ConceptSidebar
           query=""
@@ -555,43 +551,70 @@ describe('ConceptSidebar', () => {
       const onDuplicate = vi.fn();
       renderWith(onDuplicate);
       openMenuFor(/^leaf/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
       expect(item.getAttribute('aria-disabled')).toBe('false');
       fireEvent.click(item);
       expect(onDuplicate).toHaveBeenCalledTimes(1);
       expect(onDuplicate.mock.calls[0][0].id).toBe(1);
     });
 
-    it('disables the item for concepts whose label ends in (A) — lonely (A) rows in concepts.csv', () => {
+    it('keeps duplicate enabled for grouped A/B concepts', () => {
       const onDuplicate = vi.fn();
       renderWith(onDuplicate);
-      openMenuFor(/rain \(A\)/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
-      expect(item.getAttribute('aria-disabled')).toBe('true');
-      expect(item.getAttribute('title')).toBe('Already part of an A/B pair');
+      openMenuFor(/^new/);
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
+      expect(item.getAttribute('aria-disabled')).toBe('false');
+      expect(item.getAttribute('title')).toBe('Add a new variant');
       fireEvent.click(item);
-      expect(onDuplicate).not.toHaveBeenCalled();
+      expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '154', name: 'new' }));
     });
 
-    it('disables the item for grouped concepts that already have A+B variants', () => {
+    it('renders selectable variant child rows under an expanded grouped parent', () => {
+      const onSelect = vi.fn();
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey="618"
+          onConceptSelect={onSelect}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
+
+      expect(screen.getByTestId('concept-variant-row-365').textContent ?? '').toContain('new (A)');
+      const rowB = screen.getByTestId('concept-variant-row-618');
+      expect(rowB.textContent ?? '').toContain('new (B)');
+      expect(rowB.className).toContain('bg-indigo-50');
+      fireEvent.click(rowB);
+      expect(onSelect).toHaveBeenCalledWith(3, '618');
+    });
+
+    it("right-click on a B child fires onDuplicateConcept with B's conceptKey", () => {
       const onDuplicate = vi.fn();
       renderWith(onDuplicate);
-      openMenuFor(/^deep/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
-      expect(item.getAttribute('aria-disabled')).toBe('true');
-      fireEvent.click(item);
-      expect(onDuplicate).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ }));
+
+      expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
     });
 
     it('does not disable a stem-named concept when no variants are present', () => {
-      // Regression guard: the trailing-(A)/(B) regex must NOT match a bare
-      // stem like "branch". Without this, a future refactor of the regex
-      // could silently start disabling normal singletons and the
-      // `variants.length >= 2` test above would not catch it.
       const onDuplicate = vi.fn();
       renderWith(onDuplicate);
       openMenuFor(/^branch/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into A\/B\)/ });
+      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
       expect(item.getAttribute('aria-disabled')).toBe('false');
       fireEvent.click(item);
       expect(onDuplicate).toHaveBeenCalledTimes(1);
