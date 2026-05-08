@@ -1044,12 +1044,55 @@ describe("ParseUI", () => {
     expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /JBIL 154/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into A\/B\)/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
     await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
     await waitFor(() => expect(mockRecords.Fail01.concept_tags?.["618"]).toEqual(["thesis"]));
     expect(mockRecords.Fail01.concept_tags?.["365"]).toEqual(["thesis"]);
     expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("duplicates an already grouped A/B variant and shows A/B/C children after reload", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      sibling: { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
+    });
+    mockReloadConfig.mockImplementationOnce(async () => {
+      mockConfig = {
+        ...(mockConfig as ProjectConfig),
+        concepts: [
+          { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+          { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+          { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
+        ],
+      };
+    });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByTestId("concept-variant-toggle-1"));
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+
+    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-619")).toBeTruthy());
+    expect(within(sidebar).getByTestId("concept-variant-row-365").textContent ?? "").toContain("new (A)");
+    expect(within(sidebar).getByTestId("concept-variant-row-618").textContent ?? "").toContain("new (B)");
+    expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").toContain("new (C)");
   });
 
   it("treats an explicit empty annotate tag scope as untagged", () => {

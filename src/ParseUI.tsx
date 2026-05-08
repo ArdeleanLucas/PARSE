@@ -217,6 +217,7 @@ export function ParseUI() {
   const [statusFilter, setStatusFilter] = useState<ConceptStatusFilter>('all');
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(() => new Set());
   const [conceptId, setConceptId] = useState(1);
+  const [selectedConceptKey, setSelectedConceptKey] = useState<string | null>(null);
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState<CompareComputeMode>('cognates');
@@ -944,11 +945,18 @@ export function ParseUI() {
   const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
   const activeRawKey = useMemo<string | null>(() => {
     if (!selectedConcept) return null;
+    if (selectedConceptKey && (
+      selectedConcept.key === selectedConceptKey
+      || selectedConcept.variants?.some((variant) => variant.conceptKey === selectedConceptKey)
+      || selectedConcept.mergedKeys?.includes(selectedConceptKey)
+    )) {
+      return selectedConceptKey;
+    }
     // Mode switches collapse/expand concept rows; first underlying key is the deterministic tie-breaker.
     if (selectedConcept.mergedKeys?.length) return selectedConcept.mergedKeys[0] ?? selectedConcept.key;
     if (selectedConcept.variants?.length) return selectedConcept.variants[0]?.conceptKey ?? selectedConcept.key;
     return selectedConcept.key;
-  }, [selectedConcept]);
+  }, [selectedConcept, selectedConceptKey]);
   const previousActiveRawKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -956,6 +964,7 @@ export function ParseUI() {
     if (!rawKeyToResolve) return;
     const next = findConceptByUnderlyingKey(concepts, rawKeyToResolve);
     if (next && next.id !== conceptId) setConceptId(next.id);
+    if (next && selectedConceptKey !== rawKeyToResolve) setSelectedConceptKey(rawKeyToResolve);
   }, [concepts, currentMode]);
 
   useEffect(() => {
@@ -1148,7 +1157,24 @@ export function ParseUI() {
     return list;
   }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, speakerSurveyChoices, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
 
-  const concept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
+  const baseConcept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
+  const concept = useMemo<Concept>(() => {
+    const rawKey = activeRawKey;
+    if (!rawKey || currentMode !== 'annotate') return baseConcept;
+    const variant = baseConcept.variants?.find((candidate) => candidate.conceptKey === rawKey);
+    if (variant) {
+      return {
+        ...baseConcept,
+        key: variant.conceptKey,
+        name: variant.conceptEn,
+        variants: undefined,
+        mergedVariants: undefined,
+        mergedKeys: undefined,
+        mergeAbsorbedNames: undefined,
+      };
+    }
+    return baseConcept;
+  }, [baseConcept, activeRawKey, currentMode]);
   const activeResolvedSurvey = useMemo(
     () => resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings),
     [concept, selectedSpeakers, speakerSurveyChoices, surveySettings],
@@ -1216,6 +1242,7 @@ export function ParseUI() {
   const navigationTotal = navigationConcepts.length;
 
   const goToConceptOffset = useCallback((offset: number) => {
+    setSelectedConceptKey(null);
     setConceptId((id) => {
       const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
       if (list.length === 0) return id;
@@ -1823,7 +1850,11 @@ export function ParseUI() {
           onTagSelectionChange={setSelectedTagIds}
           tags={tagsList}
           activeConceptId={conceptId}
-          onConceptSelect={setConceptId}
+          activeConceptKey={activeRawKey}
+          onConceptSelect={(nextConceptId, nextConceptKey) => {
+            setConceptId(nextConceptId);
+            setSelectedConceptKey(nextConceptKey ?? null);
+          }}
           activeSpeaker={activeSpeakerForSidebar}
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}
@@ -1843,11 +1874,14 @@ export function ParseUI() {
           onDuplicateConcept={(sidebarConcept) => {
             // Pin the underlying concept_id (the concepts.csv row id) now —
             // `concepts` re-derives on every config reload, so the captured
-            // object goes stale. The disable matrix in ConceptSidebar
-            // prevents this handler from firing for already-A/B concepts,
-            // so we don't need a variants-aware fallback here.
+            // object goes stale. Variant child rows pass their raw concept key
+            // through `sidebarConcept.key`, while grouped parent rows fall
+            // back to the first underlying variant.
             const target = concepts.find((c) => c.id === sidebarConcept.id) ?? null;
-            const underlyingKey = target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
+            const variantKey = sidebarConcept.key && target?.variants?.some((variant) => variant.conceptKey === sidebarConcept.key)
+              ? sidebarConcept.key
+              : null;
+            const underlyingKey = variantKey ?? target?.variants?.[0]?.conceptKey ?? target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
             // Capture the grouping inputs at click-time so the post-reload
             // regrouping mirrors the live `concepts` memo at line 880 — in
             // particular `conceptMerges` matters when a duplicated concept
@@ -1865,7 +1899,10 @@ export function ParseUI() {
                 const after = useConfigStore.getState().config?.concepts ?? [];
                 const grouped = groupConceptEntries(after, () => 'untagged', mergesForReload);
                 const next = findConceptByUnderlyingKey(grouped, underlyingKey);
-                if (next) setConceptId(next.id);
+                if (next) {
+                  setConceptId(next.id);
+                  setSelectedConceptKey(underlyingKey);
+                }
               } catch (err) {
                 console.error('[ParseUI] duplicateConcept failed:', err);
                 const message = err instanceof Error ? err.message : String(err);
