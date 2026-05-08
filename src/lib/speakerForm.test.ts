@@ -243,7 +243,7 @@ describe('buildSpeakerForm', () => {
     expect(form.ipa).toBe('bra-a-long');
   });
 
-  it('reads source-item canonical overrides from the source_item key', () => {
+  it('reads source-item canonical overrides from the concept key', () => {
     const sourceConcept: Concept = {
       id: 1,
       key: '2.15',
@@ -274,6 +274,44 @@ describe('buildSpeakerForm', () => {
     expect(form.selectedIdx).toBe(1);
     expect(form.variantCount).toBe(2);
     expect(form.ipa).toBe('bra-b');
+  });
+
+  it('isolates source-item canonical overrides for survey-qualified grouped keys', () => {
+    const sourceConcept: Concept = {
+      id: 1,
+      key: 'source:EXT:5.1',
+      name: 'The boy cut the rope with a knife',
+      tag: 'untagged',
+      sourceItem: '5.1',
+      sourceSurvey: 'EXT',
+      variants: [
+        { conceptKey: '563', conceptEn: 'The boy cut the rope with a knife !', variantLabel: 'A' },
+        { conceptKey: '596', conceptEn: 'The boy cut the rope with a knife', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'The boy cut the rope with a knife !', concept_id: '563' },
+        { start: 3, end: 4, text: 'The boy cut the rope with a knife', concept_id: '596' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'clause-a' },
+        { start: 3.1, end: 3.4, text: 'clause-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, sourceConcept, 'Saha01', {
+      manual_overrides: {
+        canonical_realizations: {
+          '5.1': { Saha01: 0 },
+          'source:EXT:5.1': { Saha01: 1 },
+        },
+      },
+    }, false, []);
+
+    expect(form.realizationsSource).toBe('source-item');
+    expect(form.selectedIdx).toBe(1);
+    expect(form.ipa).toBe('clause-b');
   });
 
   it('keeps empty source-item variant slots visible when a speaker is missing one sibling concept', () => {

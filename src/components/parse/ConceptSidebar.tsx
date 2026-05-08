@@ -27,6 +27,8 @@ export interface SidebarConcept {
   mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
 }
 
+type SidebarVariant = NonNullable<SidebarConcept['variants']>[number];
+
 interface SidebarTag {
   id: string;
   name: string;
@@ -56,6 +58,7 @@ interface ConceptSidebarProps {
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
+  isVariantVisible?: (concept: SidebarConcept, variant: SidebarVariant) => boolean;
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
@@ -91,6 +94,7 @@ export function ConceptSidebar({
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
+  isVariantVisible,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
@@ -255,8 +259,9 @@ export function ConceptSidebar({
           const badge = sourceLabel ?? `#${concept.id}`;
           const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
           const variants = concept.variants ?? [];
-          const hasVariants = variants.length > 0;
-          const firstVariantKey = variants[0]?.conceptKey ?? null;
+          const visibleVariants = isVariantVisible ? variants.filter((variant) => isVariantVisible(concept, variant)) : variants;
+          const hasVariants = visibleVariants.length > 1;
+          const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
           const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === firstVariantKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
           const expanded = expandedConceptIds.has(concept.id);
           const parentName = concept.name;
@@ -308,7 +313,7 @@ export function ConceptSidebar({
                   <span className={`font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`}>{badge}</span>
                 </button>
               </div>
-              {expanded && variants.map((variant) => {
+              {expanded && hasVariants && visibleVariants.map((variant) => {
                 const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
                 const childConcept: SidebarConcept = {
                   ...concept,

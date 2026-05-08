@@ -438,6 +438,49 @@ describe('ConceptSidebar', () => {
     expect(screen.getByText('3 concepts')).toBeTruthy();
   });
 
+  it('does not surface hidden source-item variants in a scoped tag-filtered sidebar row', () => {
+    const onSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortMode="survey"
+        onSortModeChange={vi.fn()}
+        hasSourceItems
+        filteredConcepts={[{
+          id: 1,
+          key: '1.1',
+          name: 'hair',
+          tag: 'confirmed' as const,
+          sourceItem: '1.1',
+          sourceSurvey: 'KLQ',
+          variants: [
+            { conceptKey: '1', conceptEn: 'hair', variantLabel: '1' },
+            { conceptKey: '599', conceptEn: 'hair (collective)', variantLabel: '599' },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set(['custom-sk-concept-list'])}
+        onTagSelectionChange={vi.fn()}
+        tags={[{ id: 'custom-sk-concept-list', name: 'Thesis', color: '#2563eb' }]}
+        activeConceptId={1}
+        activeConceptKey="1"
+        onConceptSelect={onSelect}
+        activeSpeaker="Saha01"
+        scopedToSpeaker
+        onScopedToSpeakerChange={vi.fn()}
+        elicitedConceptKeys={new Set(['1'])}
+        isVariantVisible={(_concept, variant) => variant.conceptKey === '1'}
+      />,
+    );
+
+    expect(screen.queryByTestId('concept-variant-toggle-1')).toBeNull();
+    expect(screen.queryByText('hair (collective)')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /hair/i }));
+    expect(onSelect).toHaveBeenCalledWith(1, '1');
+  });
+
   it('shows all master rows with no-data suffixes when unscoped', () => {
     const onScopedToSpeakerChange = vi.fn();
     render(

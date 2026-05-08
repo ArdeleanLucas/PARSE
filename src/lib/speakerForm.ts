@@ -250,7 +250,7 @@ export function buildSpeakerForm(
 
   if (concept.sourceItem && concept.variants && concept.variants.length >= 2) {
     const realizations = concept.variants.map((variant) => buildSingleRealizationForVariant(record, variant.conceptKey));
-    const selectedIdx = readCanonicalOverride(canonicalOverrides, concept.sourceItem, speaker, realizations.length);
+    const selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
     return {
       speaker,
