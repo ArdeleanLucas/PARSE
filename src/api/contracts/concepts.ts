@@ -1,4 +1,4 @@
-import type { ConceptEntry } from "../types";
+import type { ConceptEntry, ConceptSurveyLinkMutation, ConceptSurveyLinkResponse, RelinkByGlossRequest, RelinkByGlossResponse } from "../types";
 import { apiFetch } from "./shared";
 
 export interface ConceptDuplicateResponse {
@@ -20,4 +20,34 @@ export async function duplicateConcept(conceptId: string): Promise<ConceptDuplic
     `/api/concepts/${encodeURIComponent(conceptId)}/duplicate`,
     { method: "POST" },
   );
+}
+
+
+export async function setConceptSurveyLink(
+  conceptId: string,
+  payload: ConceptSurveyLinkMutation,
+): Promise<ConceptSurveyLinkResponse> {
+  return apiFetch<ConceptSurveyLinkResponse>(
+    `/api/concepts/${encodeURIComponent(conceptId)}/survey-links`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function deleteConceptSurveyLink(
+  conceptId: string,
+  payload: ConceptSurveyLinkMutation,
+): Promise<ConceptSurveyLinkResponse> {
+  return apiFetch<ConceptSurveyLinkResponse>(
+    `/api/concepts/${encodeURIComponent(conceptId)}/survey-links`,
+    { method: "DELETE", body: JSON.stringify(payload) },
+  );
+}
+
+export async function relinkConceptsByGloss(
+  payload: RelinkByGlossRequest = {},
+): Promise<RelinkByGlossResponse> {
+  return apiFetch<RelinkByGlossResponse>("/api/concepts/relink-by-gloss", {
+    method: "POST",
+    body: JSON.stringify({ apply: false, ...payload }),
+  });
 }

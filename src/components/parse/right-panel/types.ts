@@ -48,6 +48,7 @@ export interface RightPanelProps {
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
   onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
+  onRelinkApplied?: () => void | Promise<void>;
 }
 
 export interface SpeakersSectionProps {

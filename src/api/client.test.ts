@@ -14,6 +14,9 @@ import {
   startChatSession,
   startCompute,
   updateSurveyOverlap,
+  setConceptSurveyLink,
+  deleteConceptSurveyLink,
+  relinkConceptsByGloss,
 } from "./client";
 import { LEXEME_RERUN_PAD_VALUES } from "./types";
 
@@ -481,6 +484,55 @@ describe("tags API client contracts", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/tags", expect.objectContaining({
       method: "PUT",
       body: JSON.stringify({ tags }),
+    }));
+  });
+});
+
+
+describe("concept survey-link/relink contract", () => {
+  const fetchMock = vi.fn();
+  const jsonResponse = (body: unknown) => ({ ok: true, json: async () => body });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts and deletes concept survey links at the concept-scoped endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, concept: { id: "527", label: "head" } }));
+    await expect(setConceptSurveyLink("527", { survey_id: "jbil", source_item: "31" })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/527/survey-links", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ survey_id: "jbil", source_item: "31" }),
+    }));
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, concept: { id: "527", label: "head" } }));
+    await expect(deleteConceptSurveyLink("527", { survey_id: "jbil", source_item: "31" })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/527/survey-links", expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({ survey_id: "jbil", source_item: "31" }),
+    }));
+  });
+
+  it("runs relink-by-gloss dry-run and apply with accepted groups", async () => {
+    const dryRun = { ok: true, applied: false, algorithm: "canonical_survey_gloss:v1-strict", groups: [], fuzzy_candidates: [] };
+    fetchMock.mockResolvedValueOnce(jsonResponse(dryRun));
+    await expect(relinkConceptsByGloss()).resolves.toEqual(dryRun);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/relink-by-gloss", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ apply: false }),
+    }));
+
+    const apply = { ok: true, applied: true, algorithm: "canonical_survey_gloss:v1-strict", groups: [], backup_paths: ["backups/relink-by-gloss-1"] };
+    fetchMock.mockResolvedValueOnce(jsonResponse(apply));
+    await expect(relinkConceptsByGloss({ apply: true, accepted_groups: [{ keep_concept_id: "527", merge_concept_ids: ["991"] }] })).resolves.toEqual(apply);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/relink-by-gloss", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ apply: true, accepted_groups: [{ keep_concept_id: "527", merge_concept_ids: ["991"] }] }),
     }));
   });
 });
