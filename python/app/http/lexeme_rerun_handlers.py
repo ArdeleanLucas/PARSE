@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ai.speaker_locks import SpeakerLockError, acquire_speaker_lock as _acquire_speaker_lock, release_speaker_lock as _release_speaker_lock
+from ai.ipa_transcribe import MIN_TRANSCRIBE_SLICE_SEC
 from concept_registry import concept_label_key, load_concept_registry
 from concept_source_item import row_value
 
@@ -30,6 +31,16 @@ MAX_INTERVAL_SECONDS = 60.0
 @dataclass(frozen=True)
 class LexemeRerunHandlerError(Exception):
     status: HTTPStatus
+    message: str
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class LexemeRerunSubprocessError(Exception):
+    code: str
+    exit_code: int | None
     message: str
 
     def __str__(self) -> str:
@@ -119,6 +130,12 @@ def _parse_request(body: Mapping[str, Any], *, normalize_speaker_id: SpeakerNorm
         raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "interval end must be greater than start")
     if (end - start) > MAX_INTERVAL_SECONDS:
         raise LexemeRerunHandlerError(HTTPStatus.BAD_REQUEST, "interval duration must be <= 60.0 seconds")
+    duration_sec = end - start
+    if duration_sec < MIN_TRANSCRIBE_SLICE_SEC:
+        raise LexemeRerunHandlerError(
+            HTTPStatus.BAD_REQUEST,
+            "interval_too_short: duration_ms={0:.1f} minimum_ms=80.0".format(duration_sec * 1000.0),
+        )
 
     return _RerunRequest(
         speaker=speaker,
@@ -239,6 +256,16 @@ def _build_post_run_response(
         padded_start = max(0.0, request.start - request.pad)
         padded_end = request.end + request.pad
         text = runner(audio_path=audio_path, start=padded_start, end=padded_end, language=request.language)
+    except LexemeRerunSubprocessError as exc:
+        return JsonResponseSpec(
+            status=HTTPStatus.SERVICE_UNAVAILABLE,
+            payload={
+                "status": "error",
+                "code": exc.code,
+                "exit_code": exc.exit_code,
+                "message": exc.message,
+            },
+        )
     except LexemeRerunHandlerError:
         raise
     except Exception as exc:

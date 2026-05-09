@@ -11,6 +11,7 @@ import pytest
 from ai.speaker_locks import SpeakerLockError
 from app.http.lexeme_rerun_handlers import (
     LexemeRerunHandlerError,
+    LexemeRerunSubprocessError,
     _parse_request,
     build_post_run_ipa_response,
     build_post_run_ortho_response,
@@ -238,6 +239,80 @@ def test_run_ortho_interval_too_long(tmp_path: Path) -> None:
 
     assert getattr(exc_info.value, "status") == HTTPStatus.BAD_REQUEST
     assert "interval" in str(exc_info.value).lower()
+
+
+def test_short_ipa_interval_returns_400_before_runner_starts(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
+        _ipa_response(
+            tmp_path,
+            {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.06, "pad": 0.0},
+            runner=lambda **kwargs: calls.append(kwargs) or "should-not-run",
+        )
+
+    assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+    assert "interval_too_short" in str(exc_info.value)
+    assert calls == []
+
+
+def test_short_ortho_interval_returns_400_before_runner_starts(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
+        _ortho_response(
+            tmp_path,
+            {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.06, "pad": 0.0},
+            runner=lambda **kwargs: calls.append(kwargs) or "should-not-run",
+        )
+
+    assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+    assert "interval_too_short" in str(exc_info.value)
+    assert calls == []
+
+
+def test_subprocess_error_maps_to_503_payload(tmp_path: Path) -> None:
+    response = _ipa_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.2, "pad": 0.0},
+        runner=lambda **_kwargs: (_ for _ in ()).throw(
+            LexemeRerunSubprocessError(
+                code="subprocess_segfault",
+                exit_code=139,
+                message="lexeme IPA subprocess exited with code 139",
+            )
+        ),
+    )
+
+    assert response.status == HTTPStatus.SERVICE_UNAVAILABLE
+    assert response.payload == {
+        "status": "error",
+        "code": "subprocess_segfault",
+        "exit_code": 139,
+        "message": "lexeme IPA subprocess exited with code 139",
+    }
+
+
+def test_ortho_subprocess_error_maps_to_503_payload(tmp_path: Path) -> None:
+    response = _ortho_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.2, "pad": 0.0},
+        runner=lambda **_kwargs: (_ for _ in ()).throw(
+            LexemeRerunSubprocessError(
+                code="subprocess_oom",
+                exit_code=137,
+                message="lexeme ORTH subprocess was killed (likely OOM)",
+            )
+        ),
+    )
+
+    assert response.status == HTTPStatus.SERVICE_UNAVAILABLE
+    assert response.payload == {
+        "status": "error",
+        "code": "subprocess_oom",
+        "exit_code": 137,
+        "message": "lexeme ORTH subprocess was killed (likely OOM)",
+    }
 
 
 def test_run_ipa_does_not_mutate_record(tmp_path: Path) -> None:
