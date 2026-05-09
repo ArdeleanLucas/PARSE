@@ -1,0 +1,7 @@
+{
+  "speakers": ["${SPEAKER_ID}"],
+  "tagLabels": ["Thesis"],
+  "match": "any",
+  "field": "ortho",
+  "pad": 0.2
+}

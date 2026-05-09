@@ -7,6 +7,8 @@ import hashlib
 import math
 import server as _server
 from ai.provider import AIProvider
+from app.services.audio_paths import pipeline_audio_path_for_speaker
+from app.services.speaker_id import normalize_speaker_id as _shared_normalize_speaker_id
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
 
 
@@ -653,18 +655,7 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
     return normalized
 
 def _normalize_speaker_id(raw_speaker: _server.Any) -> str:
-    speaker = str(raw_speaker or '').strip()
-    if not speaker:
-        raise ValueError('speaker is required')
-    if speaker in {'.', '..'}:
-        raise ValueError('Invalid speaker id')
-    if '\x00' in speaker:
-        raise ValueError('speaker contains an invalid null byte')
-    if '/' in speaker or '\\' in speaker:
-        raise ValueError('speaker must not contain path separators')
-    if len(speaker) > 200:
-        raise ValueError('speaker is too long')
-    return speaker
+    return _shared_normalize_speaker_id(raw_speaker)
 
 def _annotation_record_relative_path(speaker: str) -> _server.pathlib.Path:
     return _server.pathlib.Path('annotations') / '{0}{1}'.format(speaker, _server.ANNOTATION_FILENAME_SUFFIX)
@@ -716,26 +707,22 @@ def _pipeline_audio_path_for_speaker(speaker: str) -> _server.pathlib.Path:
     exists; otherwise falls back to the raw source recording recorded in the
     annotation's ``source_audio`` field. Raises ``FileNotFoundError`` if neither
     is reachable.
+
+    Delegates to ``app.services.audio_paths.pipeline_audio_path_for_speaker``
+    so the chat-tool MCP layer (PR #328) shares the same fallback chain.
     """
-    annotation_path = _server._annotation_read_path_for_speaker(speaker)
-    if not annotation_path.is_file():
-        raise RuntimeError('No annotation found for speaker {0!r}'.format(speaker))
-    record = _server._read_json_file(annotation_path, {})
-    source_rel = ''
-    if isinstance(record, dict):
-        source_rel = str(record.get('source_audio') or record.get('source_wav') or '').strip()
-    if not source_rel:
-        source_rel = _server._annotation_primary_source_wav(speaker)
-    if not source_rel:
-        raise RuntimeError('No source_audio on annotation for {0!r}; import or onboard the speaker first'.format(speaker))
-    source_path = _server._resolve_project_path(source_rel)
-    working_dir = _server._project_root() / 'audio' / 'working' / speaker
-    normalized_path = _server.build_normalized_output_path(source_path, working_dir)
-    if normalized_path.exists():
-        return normalized_path
-    if source_path.exists():
-        return source_path
-    raise FileNotFoundError('Neither normalized ({0}) nor source audio ({1}) exists for {2!r}'.format(normalized_path, source_path, speaker))
+    def _read_record(spk: str):
+        path = _server._annotation_read_path_for_speaker(spk)
+        if not path.is_file():
+            return None
+        return _server._read_json_file(path, {})
+
+    return pipeline_audio_path_for_speaker(
+        speaker,
+        _server._project_root(),
+        read_annotation_record=_read_record,
+        primary_source_wav_for_speaker=_server._annotation_primary_source_wav,
+    )
 
 def _audio_duration_sec(path: _server.pathlib.Path) -> _server.Optional[float]:
     """Best-effort audio duration in seconds.

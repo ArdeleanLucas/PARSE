@@ -27,6 +27,8 @@ from app.services.tag_resolver import (
     select_concepts_by_tag,
 )
 
+from app.services.lexeme_rerun_loop import per_concept_rerun as _shared_per_concept_rerun
+
 from .job_observability_handlers import JsonResponseSpec
 from .lexeme_rerun_handlers import LexemeRerunHandlerError
 
@@ -268,66 +270,28 @@ def _per_concept_rerun(
 ) -> list[dict[str, Any]]:
     """Run ORTH then IPA (or one of them) for a single concept hit.
 
-    Each per-tier call goes through the existing per-interval handler, which
-    handles speaker locking, error mapping, and the actual model invocation.
+    Delegates to ``app.services.lexeme_rerun_loop.per_concept_rerun`` so
+    Lane A and the chat-tool MCP wrapper share one source of truth for
+    the per-tier dispatch + statusCode propagation.
     """
-    fields_to_run = []
-    if field in ("ortho", "both"):
-        fields_to_run.append("ortho")
-    if field in ("ipa", "both"):
-        fields_to_run.append("ipa")
-
-    common = {
-        "speaker": speaker,
-        "concept_key": hit.conceptId,
-        "start": hit.start,
-        "end": hit.end,
-        "pad": pad,
-    }
-    out: list[dict[str, Any]] = []
-    for tier_field in fields_to_run:
-        kwargs: dict[str, Any] = {
-            "project_root": project_root,
-            "normalize_speaker_id": normalize_speaker_id,
-            "annotation_read_path_for_speaker": annotation_read_path_for_speaker,
-            "read_json_any_file": read_json_any_file,
-            "normalize_annotation_record": normalize_annotation_record,
-            "resolve_audio_path_for_speaker": resolve_audio_path_for_speaker,
-            "locks_dir": locks_dir,
-        }
-        if tier_field == "ortho":
-            kwargs["run_ortho_interval"] = run_ortho_interval
-            handler = build_post_run_ortho_response
-        else:
-            kwargs["run_ipa_interval"] = run_ipa_interval
-            handler = build_post_run_ipa_response
-
-        result_entry: dict[str, Any] = {
-            "speaker": speaker,
-            "conceptId": hit.conceptId,
-            "field": tier_field,
-        }
-        try:
-            response = handler(common, **kwargs)
-            result_entry["status"] = "ok"
-            payload = getattr(response, "payload", None)
-            if isinstance(payload, dict):
-                value = payload.get(tier_field)
-                if isinstance(value, str):
-                    result_entry["text"] = value
-        except LexemeRerunHandlerError as exc:
-            # Preserve the per-interval handler's HTTP status so the caller can
-            # distinguish "concept not found" (404) from "speaker locked" (409)
-            # from "runner died" (500) without having to parse error strings.
-            result_entry["status"] = "error"
-            result_entry["statusCode"] = int(exc.status)
-            result_entry["error"] = exc.message
-        except Exception as exc:
-            result_entry["status"] = "error"
-            result_entry["statusCode"] = int(HTTPStatus.INTERNAL_SERVER_ERROR)
-            result_entry["error"] = str(exc)
-        out.append(result_entry)
-    return out
+    return _shared_per_concept_rerun(
+        speaker,
+        hit,
+        field,
+        pad,
+        project_root=project_root,
+        locks_dir=locks_dir,
+        normalize_speaker_id=normalize_speaker_id,
+        annotation_read_path_for_speaker=annotation_read_path_for_speaker,
+        read_json_any_file=read_json_any_file,
+        normalize_annotation_record=normalize_annotation_record,
+        resolve_audio_path_for_speaker=resolve_audio_path_for_speaker,
+        run_ortho_interval=run_ortho_interval,
+        run_ipa_interval=run_ipa_interval,
+        build_post_run_ortho_response=build_post_run_ortho_response,
+        build_post_run_ipa_response=build_post_run_ipa_response,
+        lexeme_rerun_handler_error=LexemeRerunHandlerError,
+    )
 
 
 def build_post_lexemes_rerun_by_tag_response(
