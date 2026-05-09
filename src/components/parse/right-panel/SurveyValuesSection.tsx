@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Database, Pencil, RotateCcw, X } from 'lucide-react';
+import { Database, Link2, Pencil, RotateCcw, X } from 'lucide-react';
 
 import type { Concept } from '../../../lib/speakerForm';
 import {
@@ -10,7 +10,8 @@ import {
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
-import type { ConceptSurveyLinksByConcept, SpeakerSurveyChoices, SurveyOverlapPatch, SurveySettingsMap } from '../../../api/types';
+import { relinkConceptsByGloss } from '../../../api/client';
+import type { ConceptSurveyLinksByConcept, RelinkByGlossGroup, SpeakerSurveyChoices, SurveyOverlapPatch, SurveySettingsMap } from '../../../api/types';
 import { CollapsibleSection } from './CollapsibleSection';
 
 interface SurveyValuesSectionProps {
@@ -22,6 +23,7 @@ interface SurveyValuesSectionProps {
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
   onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
+  onRelinkApplied?: () => void | Promise<void>;
 }
 
 const SURVEY_COLOR_PALETTE = [
@@ -53,9 +55,11 @@ export function SurveyValuesSection({
   surveySettings,
   speakerSurveyChoices,
   onSurveyOverlapUpdate,
+  onRelinkApplied,
 }: SurveyValuesSectionProps) {
   const [editingSurveyId, setEditingSurveyId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
+  const [relinkStatus, setRelinkStatus] = useState<string | null>(null);
   const conceptChoices = useMemo(() => activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [], [activeConcept]);
   const workspaceChoices = useMemo(() => {
     const concepts = workspaceConcepts.length > 0 ? workspaceConcepts : (activeConcept ? [activeConcept] : []);
@@ -98,6 +102,46 @@ export function SurveyValuesSection({
         [surveyId]: { ...existing, display_color: displayColor },
       },
     });
+  };
+
+  const summarizeRelinkGroups = (groups: RelinkByGlossGroup[]): string => {
+    if (groups.length === 0) return 'No strict cross-survey concept merges were proposed.';
+    return groups.map((group) => {
+      const label = group.canonical_gloss ?? group.labels?.[group.keep_concept_id] ?? group.keep_concept_id;
+      const links = Object.entries(group.links_by_survey ?? {})
+        .map(([surveyId, sourceItem]) => `${surveyId} ${sourceItem}`)
+        .join(', ');
+      return `${label}: keep ${group.keep_concept_id}; merge ${group.merge_concept_ids.join(', ')}${links ? `; links ${links}` : ''}`;
+    }).join('\n');
+  };
+
+  const reconcileConcepts = async () => {
+    setRelinkStatus('Checking concepts…');
+    try {
+      const dryRun = await relinkConceptsByGloss();
+      if (!dryRun.groups.length) {
+        setRelinkStatus('No strict cross-survey merges found.');
+        return;
+      }
+      const summary = summarizeRelinkGroups(dryRun.groups);
+      const confirmed = window.confirm(`Reconcile concepts across surveys?\n\n${summary}`);
+      if (!confirmed) {
+        setRelinkStatus('Reconciliation cancelled.');
+        return;
+      }
+      await relinkConceptsByGloss({
+        apply: true,
+        accepted_groups: dryRun.groups.map((group) => ({
+          keep_concept_id: group.keep_concept_id,
+          merge_concept_ids: group.merge_concept_ids,
+        })),
+      });
+      await onRelinkApplied?.();
+      setRelinkStatus('Concept reconciliation applied.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRelinkStatus(message);
+    }
   };
 
   const resetDefaults = () => {
@@ -244,6 +288,16 @@ export function SurveyValuesSection({
             </div>
 
             <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-2">
+              <button
+                type="button"
+                aria-label="Reconcile concepts across surveys"
+                onClick={() => { void reconcileConcepts(); }}
+                className="inline-flex items-center gap-1 text-left text-[10px] font-semibold text-indigo-600 hover:text-indigo-800"
+              >
+                <Link2 className="h-3 w-3" />
+                Reconcile concepts across surveys
+              </button>
+              {relinkStatus ? <div className="rounded bg-slate-50 px-2 py-1 text-[10px] text-slate-500">{relinkStatus}</div> : null}
               <button
                 type="button"
                 aria-label="Reset survey display defaults"

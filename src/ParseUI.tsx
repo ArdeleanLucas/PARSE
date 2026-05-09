@@ -1871,6 +1871,7 @@ export function ParseUI() {
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}
+          onSurveyLinksChanged={() => reloadConfig()}
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
@@ -2568,6 +2569,7 @@ export function ParseUI() {
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}
           onSurveyOverlapUpdate={handleSurveyOverlapUpdate}
+          onRelinkApplied={() => { void reloadConfig(); Object.keys(useAnnotationStore.getState().records).forEach((speaker) => { void useAnnotationStore.getState().loadSpeaker(speaker); }); }}
         />
       </div>
 

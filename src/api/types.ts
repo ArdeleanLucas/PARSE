@@ -196,6 +196,49 @@ export interface ConceptEntry {
   surveys?: ConceptSurveyLinks;
 }
 
+export interface ConceptSurveyLinkMutation {
+  survey_id: string;
+  source_item?: string;
+}
+
+export interface ConceptSurveyLinkResponse {
+  ok: true;
+  concept: ConceptEntry;
+  survey_overlap?: SurveyOverlapState;
+}
+
+export type RelinkByGlossReason = "parenthetical_stripped_match" | "comma_token_match";
+
+export interface RelinkByGlossGroup {
+  canonical_gloss?: string;
+  keep_concept_id: string;
+  merge_concept_ids: string[];
+  labels?: Record<string, string>;
+  links_by_survey?: Record<string, string>;
+  source_rows?: Array<{ concept_id: string; concept_en: string; source_survey?: string; source_item?: string }>;
+}
+
+export interface RelinkByGlossFuzzyCandidate {
+  incoming_label: string;
+  candidate_label: string;
+  candidate_concept_id?: string;
+  reason: RelinkByGlossReason;
+}
+
+export interface RelinkByGlossRequest {
+  apply?: boolean;
+  accepted_groups?: Array<Pick<RelinkByGlossGroup, "keep_concept_id" | "merge_concept_ids">>;
+}
+
+export interface RelinkByGlossResponse {
+  ok: true;
+  applied: boolean;
+  algorithm: "canonical_survey_gloss:v1-strict" | string;
+  groups: RelinkByGlossGroup[];
+  fuzzy_candidates: RelinkByGlossFuzzyCandidate[];
+  backup_paths?: string[];
+}
+
 export interface ProjectConfig {
   project_name: string;
   language_code: string;

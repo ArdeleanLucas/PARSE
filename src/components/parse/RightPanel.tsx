@@ -66,6 +66,7 @@ export function RightPanel(props: RightPanelProps) {
             surveySettings={props.surveySettings}
             speakerSurveyChoices={props.speakerSurveyChoices}
             onSurveyOverlapUpdate={props.onSurveyOverlapUpdate}
+            onRelinkApplied={props.onRelinkApplied}
           />
         )}
 

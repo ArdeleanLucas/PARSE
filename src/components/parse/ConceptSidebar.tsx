@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 
+import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
 import type { ConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { defaultSurveySettings, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
@@ -58,6 +59,7 @@ interface ConceptSidebarProps {
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
+  onSurveyLinksChanged?: () => void | Promise<void>;
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
    * src/lib/sidebarVisibility.ts so speaker-scope and tag filters are applied to each
@@ -76,6 +78,26 @@ const tagDot: Record<ConceptTag, string> = {
   confirmed: 'bg-emerald-500',
   problematic: 'bg-rose-500',
 };
+
+function surveyLinksForSidebarConcept(concept: SidebarConcept): ConceptSurveyLinks {
+  const links: ConceptSurveyLinks = {};
+  for (const [surveyId, sourceItem] of Object.entries(concept.surveys ?? {})) {
+    const key = surveyId.trim().toLocaleLowerCase();
+    const item = String(sourceItem ?? '').trim();
+    if (key && item) links[key] = item;
+  }
+  const legacySurvey = concept.sourceSurvey?.trim().toLocaleLowerCase() ?? '';
+  const legacyItem = concept.sourceItem?.trim() ?? '';
+  if (legacySurvey && legacyItem && !links[legacySurvey]) links[legacySurvey] = legacyItem;
+  return links;
+}
+
+function surveyLinkChoiceIds(concept: SidebarConcept, settings: SurveySettingsMap): string[] {
+  const ids = new Set<string>();
+  Object.keys(settings ?? {}).forEach((id) => { if (id.trim()) ids.add(id.trim().toLocaleLowerCase()); });
+  Object.keys(surveyLinksForSidebarConcept(concept)).forEach((id) => ids.add(id));
+  return [...ids].sort();
+}
 
 export function ConceptSidebar({
   query,
@@ -100,12 +122,14 @@ export function ConceptSidebar({
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
+  onSurveyLinksChanged,
   isConceptVariantVisibleInSidebar,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
+  const [surveyLinkEditor, setSurveyLinkEditor] = useState<{ concept: SidebarConcept; surveyId: string; sourceItem: string; error: string | null; saving: boolean } | null>(null);
   const [expandedConceptIds, setExpandedConceptIds] = useState<Set<number>>(() => new Set());
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -118,6 +142,58 @@ export function ConceptSidebar({
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
+  const openSurveyLinkEditor = (concept: SidebarConcept) => {
+    const surveyIds = surveyLinkChoiceIds(concept, surveySettings);
+    const currentSurveyId = resolveConceptSurvey(
+      { ...concept, key: concept.key ?? String(concept.id) },
+      activeSpeaker,
+      speakerSurveyChoices,
+      surveySettings,
+    ).surveyId || surveyIds[0] || '';
+    setSurveyLinkEditor({
+      concept,
+      surveyId: currentSurveyId,
+      sourceItem: surveyLinksForSidebarConcept(concept)[currentSurveyId] ?? concept.sourceItem ?? '',
+      error: null,
+      saving: false,
+    });
+  };
+
+  const saveSurveyLinkEditor = async () => {
+    if (!surveyLinkEditor) return;
+    const conceptKey = surveyLinkEditor.concept.key ?? String(surveyLinkEditor.concept.id);
+    const payload = { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim() };
+    if (!payload.survey_id || !payload.source_item) {
+      setSurveyLinkEditor((current) => current ? { ...current, error: 'Survey ID and source item are required.' } : current);
+      return;
+    }
+    setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
+    try {
+      await setConceptSurveyLink(conceptKey, payload);
+      await onSurveyLinksChanged?.();
+      setSurveyLinkEditor(null);
+      setContextMenu(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSurveyLinkEditor((current) => current ? { ...current, saving: false, error: message } : current);
+    }
+  };
+
+  const removeSurveyLinkEditor = async () => {
+    if (!surveyLinkEditor) return;
+    const conceptKey = surveyLinkEditor.concept.key ?? String(surveyLinkEditor.concept.id);
+    setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
+    try {
+      await deleteConceptSurveyLink(conceptKey, { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim() });
+      await onSurveyLinksChanged?.();
+      setSurveyLinkEditor(null);
+      setContextMenu(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSurveyLinkEditor((current) => current ? { ...current, saving: false, error: message } : current);
+    }
+  };
+
   const toggleStatus = (filter: ConceptStatusFilter) => {
     onStatusFilterChange(statusFilter === filter ? 'all' : filter);
   };
@@ -264,12 +340,13 @@ export function ConceptSidebar({
               : concept.sourceItem);
           const badge = sourceLabel ?? `#${concept.id}`;
           const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
-          const nextSurveyId = surveyChoices.length > 1 && resolvedSurvey.surveyId
-            ? surveyChoices[(surveyChoices.indexOf(resolvedSurvey.surveyId) + 1) % surveyChoices.length]
+          const multiSurveyBadge = surveyChoices.length >= 2;
+          const nextSurveyId = multiSurveyBadge && resolvedSurvey.surveyId
+            ? surveyChoices[((surveyChoices.indexOf(resolvedSurvey.surveyId) >= 0 ? surveyChoices.indexOf(resolvedSurvey.surveyId) : 0) + 1) % surveyChoices.length]
             : undefined;
           const nextSurveySourceItem = nextSurveyId ? surveyConcept.surveys?.[nextSurveyId] ?? '' : '';
           const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
-          const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && nextSurveyId);
+          const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && multiSurveyBadge && nextSurveyId);
           const variants = concept.variants ?? [];
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
           const hasVariants = visibleVariants.length > 1;
@@ -333,7 +410,7 @@ export function ConceptSidebar({
                     type="button"
                     aria-label={`Switch survey for ${concept.name} from ${resolvedSurveyLabel} ${resolvedSurvey.sourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
                     onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)}
-                    className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 ${surveyBadgeClassName}`}
+                    className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${surveyBadgeClassName}`}
                   >
                     {badge}
                   </button>
@@ -422,6 +499,55 @@ export function ConceptSidebar({
           >
             Duplicate (split into next variant)
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+            onClick={() => openSurveyLinkEditor(contextMenu.concept)}
+          >
+            Change survey ID…
+          </button>
+          {surveyLinkEditor && surveyLinkEditor.concept.id === contextMenu.concept.id && (
+            <div className="mt-1 space-y-1.5 border-t border-slate-100 pt-2" role="group" aria-label="Change survey ID editor">
+              <label className="block text-[10px] font-semibold text-slate-500">
+                survey_id
+                <select
+                  aria-label="survey_id"
+                  value={surveyLinkEditor.surveyId}
+                  onChange={(event) => {
+                    const surveyId = event.target.value;
+                    setSurveyLinkEditor((current) => current ? {
+                      ...current,
+                      surveyId,
+                      sourceItem: surveyLinksForSidebarConcept(current.concept)[surveyId] ?? '',
+                    } : current);
+                  }}
+                  className="mt-0.5 w-full rounded border border-slate-200 px-1 py-0.5 text-[11px] text-slate-700"
+                >
+                  {surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings).map((surveyId) => (
+                    <option key={surveyId} value={surveyId}>{surveyId}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[10px] font-semibold text-slate-500">
+                source_item
+                <input
+                  aria-label="source_item"
+                  value={surveyLinkEditor.sourceItem}
+                  onChange={(event) => setSurveyLinkEditor((current) => current ? { ...current, sourceItem: event.target.value } : current)}
+                  className="mt-0.5 w-full rounded border border-slate-200 px-1 py-0.5 text-[11px] text-slate-700"
+                />
+              </label>
+              {surveyLinkEditor.error ? <div className="text-[10px] text-rose-600">{surveyLinkEditor.error}</div> : null}
+              <div className="flex gap-1">
+                <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { void saveSurveyLinkEditor(); }} className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-60">Save</button>
+                <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { setSurveyLinkEditor(null); }} className="rounded border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600">Cancel</button>
+              </div>
+              {Object.prototype.hasOwnProperty.call(surveyLinksForSidebarConcept(surveyLinkEditor.concept), surveyLinkEditor.surveyId) ? (
+                <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { void removeSurveyLinkEditor(); }} className="text-[10px] font-semibold text-rose-600 disabled:opacity-60">Remove link</button>
+              ) : null}
+            </div>
+          )}
           {contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
             <button
               type="button"
