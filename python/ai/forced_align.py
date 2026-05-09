@@ -765,6 +765,7 @@ def align_segments(
     emit_phonemes: bool = True,
     aligner: Optional[Aligner] = None,
     audio_tensor: Optional[Any] = None,
+    allow_wsl_cuda: bool = False,
 ) -> List[List[AlignedWord]]:
     """Align every word in every segment.
 
@@ -789,7 +790,7 @@ def align_segments(
     needs_aligner = any(seg.get("words") for seg in segments)
     if needs_aligner and local_aligner is None:
         try:
-            local_aligner = Aligner.load(model_name=model_name, device=device)
+            local_aligner = Aligner.load(model_name=model_name, device=device, allow_wsl_cuda=allow_wsl_cuda)
         except RuntimeError as exc:
             print(
                 "[WARN] forced_align: {0}. All words will use proportional fallback.".format(exc),

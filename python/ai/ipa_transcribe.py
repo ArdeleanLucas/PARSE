@@ -55,6 +55,11 @@ class IpaResult(TypedDict):
     end: float
     ipa: str
     ipa_candidate: NotRequired[dict[str, Any]]
+    error: NotRequired[str]
+    duration_ms: NotRequired[float]
+
+
+MIN_TRANSCRIBE_SLICE_SEC = 0.080
 
 
 @dataclass
@@ -83,6 +88,30 @@ def _fallback_structured_decode(raw_ipa: Any) -> dict[str, Any]:
     }
 
 
+def _slice_duration_ms(start_sec: float, end_sec: float) -> float:
+    return max(0.0, (float(end_sec) - float(start_sec)) * 1000.0)
+
+
+def _validate_transcribe_slice_duration(start_sec: float, end_sec: float) -> None:
+    duration_sec = float(end_sec) - float(start_sec)
+    if 0.0 < duration_sec < MIN_TRANSCRIBE_SLICE_SEC:
+        raise ValueError(
+            "Audio slice too short for IPA: {0:.1f} ms (minimum 80 ms required)".format(
+                duration_sec * 1000.0
+            )
+        )
+
+
+def _interval_too_short_result(spec: IntervalSpec) -> IpaResult:
+    return {
+        "start": spec.start,
+        "end": spec.end,
+        "ipa": "",
+        "error": "interval_too_short",
+        "duration_ms": _slice_duration_ms(spec.start, spec.end),
+    }
+
+
 def transcribe_slice_structured(
     audio_16k: Any,
     start_sec: float,
@@ -90,6 +119,7 @@ def transcribe_slice_structured(
     aligner: Aligner,
 ) -> dict[str, Any]:
     """Run wav2vec2 CTC on one [start, end] window and keep decode metadata."""
+    _validate_transcribe_slice_duration(start_sec, end_sec)
     if end_sec <= start_sec:
         return _fallback_structured_decode("")
     total = int(audio_16k.shape[0])
@@ -128,6 +158,7 @@ def transcribe_intervals(
     model_name: str = DEFAULT_MODEL_NAME,
     device: Optional[str] = None,
     aligner: Optional[Aligner] = None,
+    allow_wsl_cuda: bool = False,
     progress_callback: Optional[Any] = None,
 ) -> List[IpaResult]:
     """Transcribe every [start, end] interval to an IPA string.
@@ -150,13 +181,18 @@ def transcribe_intervals(
 
     audio = _load_audio_mono_16k(path)
 
-    local_aligner = aligner or Aligner.load(model_name=model_name, device=device)
+    local_aligner = aligner or Aligner.load(model_name=model_name, device=device, allow_wsl_cuda=allow_wsl_cuda)
 
     total = len(parsed)
     out: List[IpaResult] = []
     for idx, spec in enumerate(parsed):
-        ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
-        out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+        try:
+            ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+            out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+        except ValueError as exc:
+            if "Audio slice too short for IPA" not in str(exc):
+                raise
+            out.append(_interval_too_short_result(spec))
         if progress_callback is not None:
             try:
                 progress_callback((idx + 1) / float(total) * 100.0, idx + 1)
@@ -179,6 +215,7 @@ def transcribe_words_with_forced_align(
     language: str = "ku",
     pad_ms: int = DEFAULT_PAD_MS,
     aligner: Optional[Aligner] = None,
+    allow_wsl_cuda: bool = False,
     progress_callback: Optional[Any] = None,
     segment_batch_size: int = 5,
     chunk_size: int = 150,
@@ -211,7 +248,7 @@ def transcribe_words_with_forced_align(
     if not path.exists():
         raise FileNotFoundError("Audio file not found: {0}".format(path))
 
-    local_aligner = aligner or Aligner.load(model_name=model_name, device=device)
+    local_aligner = aligner or Aligner.load(model_name=model_name, device=device, allow_wsl_cuda=allow_wsl_cuda)
     audio = _load_audio_mono_16k(path)
 
     seg_list = list(segments)
@@ -233,6 +270,7 @@ def transcribe_words_with_forced_align(
             pad_ms=pad_ms,
             aligner=local_aligner,
             audio_tensor=audio,
+            allow_wsl_cuda=allow_wsl_cuda,
         )
         for seg_words in aligned_batch:
             for word in seg_words:
@@ -270,6 +308,7 @@ def transcribe_words_with_forced_align(
         ]
         return transcribe_intervals(
             path, seg_intervals, aligner=local_aligner,
+            allow_wsl_cuda=allow_wsl_cuda,
             progress_callback=progress_callback,
         )
 
@@ -293,13 +332,18 @@ def transcribe_words_with_forced_align(
         chunk = word_intervals[chunk_start: chunk_start + chunk_size]
         for idx_in_chunk, spec in enumerate(chunk):
             global_idx = chunk_start + idx_in_chunk
-            if include_candidates:
-                structured = transcribe_slice_structured(audio, spec.start, spec.end, local_aligner)
-                ipa = str(structured.get("raw_ipa") or "").strip()
-                out.append({"start": spec.start, "end": spec.end, "ipa": ipa, "ipa_candidate": structured})
-            else:
-                ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
-                out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+            try:
+                if include_candidates:
+                    structured = transcribe_slice_structured(audio, spec.start, spec.end, local_aligner)
+                    ipa = str(structured.get("raw_ipa") or "").strip()
+                    out.append({"start": spec.start, "end": spec.end, "ipa": ipa, "ipa_candidate": structured})
+                else:
+                    ipa = transcribe_slice(audio, spec.start, spec.end, local_aligner)
+                    out.append({"start": spec.start, "end": spec.end, "ipa": ipa})
+            except ValueError as exc:
+                if "Audio slice too short for IPA" not in str(exc):
+                    raise
+                out.append(_interval_too_short_result(spec))
             if progress_callback is not None:
                 try:
                     # Tier 3 occupies the 50-100% range (Tier 2 took 0-50%).

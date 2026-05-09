@@ -18,6 +18,11 @@ try:
 except ImportError:
     from provider import Segment, WordSpan, get_ortho_provider, get_provider, load_ai_config  # type: ignore
 
+try:
+    from .ipa_transcribe import MIN_TRANSCRIBE_SLICE_SEC
+except ImportError:
+    from ipa_transcribe import MIN_TRANSCRIBE_SLICE_SEC  # type: ignore
+
 
 LONG_FILE_WARNING_SECONDS = 20.0 * 60.0
 
@@ -271,6 +276,8 @@ def run_ortho_on_interval(
     language: Optional[str] = None,
     config_path: Optional[Path] = None,
     provider: Optional[Any] = None,
+    device: Optional[str] = None,
+    allow_wsl_cuda: bool = False,
 ) -> str:
     """Run orthographic transcription on one bounded [start, end] interval.
 
@@ -283,8 +290,14 @@ def run_ortho_on_interval(
         raise FileNotFoundError("Input audio does not exist: {0}".format(path))
     start_f = float(start)
     end_f = float(end)
+    _ = (device, allow_wsl_cuda)  # ORTH providers own their device config; keep wav2vec2 options plumbed for caller parity.
     if not (start_f >= 0.0 and end_f > start_f):
         raise ValueError("interval must satisfy start >= 0 and end > start")
+    duration_sec = end_f - start_f
+    if duration_sec < MIN_TRANSCRIBE_SLICE_SEC:
+        raise ValueError(
+            "interval_too_short: duration_ms={0:.1f} minimum_ms=80.0".format(duration_sec * 1000.0)
+        )
 
     provider_obj = provider
     if provider_obj is None:
