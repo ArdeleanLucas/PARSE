@@ -830,9 +830,11 @@ def _shutdown_persistent_worker() -> None:
             pass
 
 _MUTATING_SPEAKER_JOB_TYPES = frozenset({"normalize", "stt", "onboard:speaker"})
-_MUTATING_SPEAKER_COMPUTE_TYPES = frozenset(
-    {"stt", "ortho", "ortho_only", "ipa", "ipa_only", "forced_align", "full_pipeline"}
-)
+_MUTATING_SPEAKER_COMPUTE_TYPES = frozenset({
+    "stt", "ortho", "ortho_only", "ipa", "ipa_only", "forced_align",
+    "full_pipeline", "lexemes_rerun_by_tag", "lexemes-rerun-by-tag",
+    "tagged_rerun", "tagged-rerun",
+})
 
 def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:
     global _chat_tools_runtime

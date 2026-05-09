@@ -428,6 +428,8 @@ def _dispatch(
         return server_mod._compute_speaker_boundaries(job_id, payload)
     if normalized in {"full_pipeline", "full-pipeline", "pipeline"}:
         return server_mod._compute_full_pipeline(job_id, payload)
+    if normalized in {"lexemes_rerun_by_tag", "lexemes-rerun-by-tag", "tagged_rerun", "tagged-rerun"}:
+        return server_mod._compute_lexemes_rerun_by_tag(job_id, payload)
     if normalized in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
         return server_mod._compute_training_job(job_id, payload)
     if normalized == "stt":

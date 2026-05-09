@@ -1,5 +1,6 @@
-import type { ConceptEntry, ConceptSurveyLinkMutation, ConceptSurveyLinkResponse, RelinkByGlossRequest, RelinkByGlossResponse } from "../types";
+import type { ConceptEntry, ConceptSurveyLinkMutation, ConceptSurveyLinkResponse, ComputeJob, RelinkByGlossRequest, RelinkByGlossResponse } from "../types";
 import { apiFetch } from "./shared";
+import { startCompute } from "./chat-and-generic-compute";
 
 export interface ConceptDuplicateResponse {
   primary: ConceptEntry;
@@ -120,9 +121,6 @@ export interface LexemeRerunByTagResponse {
 
 export async function runLexemesByTag(
   payload: LexemeRerunByTagRequest,
-): Promise<LexemeRerunByTagResponse> {
-  return apiFetch<LexemeRerunByTagResponse>("/api/lexemes/rerun-by-tag", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+): Promise<ComputeJob> {
+  return startCompute("lexemes_rerun_by_tag", payload as unknown as Record<string, unknown>);
 }

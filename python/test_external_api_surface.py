@@ -257,7 +257,10 @@ def test_build_openapi_document_covers_lexemes_rerun_by_tag_contract() -> None:
     assert operation["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/LexemesRerunByTagRequest"
     }
-    assert set(operation["responses"]) == {"200", "400", "404", "409"}
+    assert set(operation["responses"]) == {"200", "202", "400", "404", "409"}
+    assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/GenericJobResponse"
+    }
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/LexemesRerunByTagResponse"
     }

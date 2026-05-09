@@ -51,6 +51,9 @@ def _api_post_lexemes_rerun_by_tag(self) -> None:
             build_post_run_ipa_response=build_post_run_ipa_response,
             build_post_run_ortho_response=build_post_run_ortho_response,
             locks_dir=_locks_dir(),
+            create_job=_server._create_job,
+            launch_compute_runner=_server._launch_compute_runner,
+            job_conflict_error_cls=_server.JobResourceConflictError,
         )
     except TagFilteredHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
