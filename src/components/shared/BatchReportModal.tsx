@@ -13,12 +13,25 @@ import {
 
 export type { BatchSpeakerOutcome, PipelineStepId } from "./batchReportShared";
 
+/**
+ * Structured error from a tagged-only run that failed at the request level
+ * (not per-row). Mirrors Lane A's planned 400/409 contract — see
+ * useParseUIPipeline.TaggedOnlyRunError.
+ */
+export interface TaggedOnlyErrorBanner {
+  status: number | null;
+  message: string;
+  tagLabels?: string[];
+  candidates?: Record<string, string[]>;
+}
+
 export interface BatchReportModalProps {
   open: boolean;
   onClose: () => void;
   outcomes: BatchSpeakerOutcome[];
   stepsRun: PipelineStepId[];
   onRerunFailed?: (speakers: string[]) => void;
+  taggedOnlyError?: TaggedOnlyErrorBanner | null;
 }
 
 export function BatchReportModal({
@@ -27,6 +40,7 @@ export function BatchReportModal({
   outcomes,
   stepsRun,
   onRerunFailed,
+  taggedOnlyError,
 }: BatchReportModalProps): JSX.Element | null {
   const [openCells, setOpenCells] = useState<Set<string>>(new Set());
   const [openBanners, setOpenBanners] = useState<Set<string>>(new Set());
@@ -92,6 +106,33 @@ export function BatchReportModal({
           outcomesCount={outcomes.length}
           allClean={allClean}
         />
+        {taggedOnlyError ? (
+          <div
+            className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+            data-testid="batch-report-tagged-only-error"
+          >
+            <div className="font-semibold">
+              Tagged-only run failed
+              {taggedOnlyError.status != null ? ` (HTTP ${taggedOnlyError.status})` : ""}
+            </div>
+            <div className="mt-0.5">{taggedOnlyError.message}</div>
+            {taggedOnlyError.tagLabels && taggedOnlyError.tagLabels.length > 0 ? (
+              <div className="mt-1">
+                Offending tags: {taggedOnlyError.tagLabels.join(", ")}.
+              </div>
+            ) : null}
+            {taggedOnlyError.candidates && Object.keys(taggedOnlyError.candidates).length > 0 ? (
+              <div className="mt-1">
+                Candidates:{" "}
+                {Object.entries(taggedOnlyError.candidates).map(([label, ids], idx, arr) => (
+                  <span key={label}>
+                    {label} → [{ids.join(", ")}]{idx < arr.length - 1 ? "; " : ""}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {stepsRun.length === 0 ? (
           <div className="py-10 text-center text-sm text-slate-500">No steps were run.</div>

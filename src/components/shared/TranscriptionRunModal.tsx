@@ -222,11 +222,11 @@ export function TranscriptionRunModal({
 
   // Tagged-only preview: re-fire whenever speakers/tags/match change.
   const selectedSpeakersKey = useMemo(
-    () => speakers.filter((s) => selectedSpeakers.has(s)).join(""),
+    () => JSON.stringify(speakers.filter((s) => selectedSpeakers.has(s))),
     [speakers, selectedSpeakers],
   );
   const selectedTagsKey = useMemo(
-    () => selectedTagLabels.join(""),
+    () => JSON.stringify(selectedTagLabels),
     [selectedTagLabels],
   );
 
@@ -327,6 +327,14 @@ export function TranscriptionRunModal({
   const taggedOnlyError = runMode === "tagged-only" && taggedPreviewStatus === "error";
   const taggedOnlyMissingInputs = runMode === "tagged-only"
     && (selectedTagLabels.length === 0 || !hasAnySpeaker);
+  // Mirror Lane A's upcoming 409-on-ambiguous boundary: if the user picked
+  // match=ALL and the preview reports any ambiguous label, the request
+  // would be rejected server-side. Disable confirm pre-emptively.
+  const taggedOnlyAllAmbiguous = runMode === "tagged-only"
+    && tagMatch === "all"
+    && taggedPreviewStatus === "ready"
+    && taggedPreview != null
+    && Object.keys(taggedPreview.ambiguousTags).length > 0;
   const willOverwrite = summary.overwrite > 0;
   const includesPadApplicableStep = stepsToRender.some((step) => PAD_APPLICABLE_STEPS.has(step));
   const showPadSelector = runMode !== "full" && includesPadApplicableStep;
@@ -664,7 +672,28 @@ export function TranscriptionRunModal({
                 className="mt-1 text-[11px] text-amber-700"
                 data-testid="transcription-run-tagged-preview-unknown"
               >
-                Unknown tags ignored: {taggedPreview.unknownTags.join(", ")}.
+                {tagMatch === "any"
+                  ? `Unknown tags ignored: ${taggedPreview.unknownTags.join(", ")}.`
+                  : `Unknown tags ignored — note: ALL match expected every tag to resolve. Offending: ${taggedPreview.unknownTags.join(", ")}.`}
+              </div>
+            ) : null}
+            {taggedPreviewStatus === "ready"
+              && taggedPreview
+              && Object.keys(taggedPreview.ambiguousTags).length > 0 ? (
+              <div
+                className="mt-1 text-[11px] font-medium text-rose-700"
+                data-testid="transcription-run-tagged-preview-ambiguous"
+              >
+                Ambiguous tags (multiple matches found, ignored):{" "}
+                {Object.entries(taggedPreview.ambiguousTags).map(([label, ids], idx, arr) => (
+                  <span
+                    key={label}
+                    data-testid={`transcription-run-tagged-preview-ambiguous-${label}`}
+                  >
+                    {label} → [{ids.join(", ")}]{idx < arr.length - 1 ? "; " : ""}
+                  </span>
+                ))}
+                . Pick one tag id to disambiguate.
               </div>
             ) : null}
           </div>
@@ -813,6 +842,7 @@ export function TranscriptionRunModal({
                 || taggedOnlyEmpty
                 || taggedOnlyError
                 || taggedOnlyMissingInputs
+                || taggedOnlyAllAmbiguous
             }
             data-testid="transcription-run-confirm"
             className={`inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${

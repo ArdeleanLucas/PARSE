@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptionRunConfirm } from '../components/shared/TranscriptionRunModal';
 import { useBatchPipelineJob, type BatchSpeakerOutcome, type PipelineStepId, type UseBatchPipelineJobResult } from './useBatchPipelineJob';
 import { runLexemesByTag } from '../api/client';
-import type { LexemeRerunByTagField, LexemeRerunByTagResponse } from '../api/contracts/concepts';
+import { ApiError } from '../api/contracts/shared';
+import type {
+  LexemeRerunByTagField,
+  LexemeRerunByTagResponse,
+  LexemeRerunByTagResultEntry,
+} from '../api/contracts/concepts';
 
 type ScopedConceptRefreshTarget = { concept_id?: string; conceptId?: string; id?: string; start?: number; end?: number };
 
@@ -14,6 +19,25 @@ type ScopedPipelineResult = {
 };
 
 const PIPELINE_STEP_ORDER: PipelineStepId[] = ['normalize', 'stt', 'ortho', 'ipa'];
+
+// === Tagged-only error surface ===
+//
+// Lane A's fix-up will return:
+//   * 400 with body { error, tagLabels: string[] } when match=all has unknown labels
+//   * 409 with body { error, tagLabels: string[], candidates?: Record<string, string[]> }
+//     when ambiguous tags collide
+//   * 200 with result.results rows that may carry { statusCode?: number } per row
+//     so callers can distinguish 404 (concept not in registry) vs 500 (runner failure)
+//
+// We preserve that structured info verbatim so the UI surface (BatchReportModal +
+// optional banner) can render actionable messages.
+export interface TaggedOnlyRunError {
+  status: number | null;
+  message: string;
+  tagLabels?: string[];
+  candidates?: Record<string, string[]>;
+  rawBody?: unknown;
+}
 
 export interface UseParseUIPipelineArgs {
   closeRunModal: () => void;
@@ -39,6 +63,20 @@ export interface UseParseUIPipelineResult {
   cancelledCount: number;
   dismissBatchStatus: () => void;
   openBatchReport: () => void;
+  /**
+   * Outcomes the BatchReportModal should render. Falls back to batch.state.outcomes
+   * for normal runs; switches to synthesized per-speaker outcomes when a tagged-only
+   * run produced results (success or per-row errors) so error/skip rows are not
+   * silently swallowed.
+   */
+  displayedOutcomes: BatchSpeakerOutcome[];
+  /**
+   * Top-level rejection from a tagged-only run (HTTP 400 unknown labels in ALL mode,
+   * 409 ambiguous, or transport failure). Null when no error or when the most recent
+   * tagged-only run succeeded.
+   */
+  taggedOnlyError: TaggedOnlyRunError | null;
+  dismissTaggedOnlyError: () => void;
 }
 
 function buildRetryStepsBySpeaker(
@@ -85,6 +123,140 @@ function scopedConceptTargets(result: unknown): ScopedConceptRefreshTarget[] | n
   return Array.isArray(targets) ? targets : [];
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildTaggedOnlyError(err: unknown): TaggedOnlyRunError {
+  if (err instanceof ApiError) {
+    const body = err.body;
+    let tagLabels: string[] | undefined;
+    let candidates: Record<string, string[]> | undefined;
+    let bodyMessage: string | undefined;
+    if (isPlainRecord(body)) {
+      const labels = body.tagLabels;
+      if (Array.isArray(labels)) {
+        tagLabels = labels.filter((x): x is string => typeof x === 'string');
+      }
+      const cands = body.candidates;
+      if (isPlainRecord(cands)) {
+        const out: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(cands)) {
+          if (Array.isArray(v)) {
+            out[k] = v.filter((x): x is string => typeof x === 'string');
+          }
+        }
+        candidates = out;
+      }
+      const msg = body.error ?? body.message;
+      if (typeof msg === 'string') bodyMessage = msg;
+    }
+    return {
+      status: err.status,
+      message: bodyMessage ?? err.message,
+      tagLabels,
+      candidates,
+      rawBody: body,
+    };
+  }
+  return {
+    status: null,
+    message: err instanceof Error ? err.message : String(err ?? 'Tagged-only run failed'),
+  };
+}
+
+interface TaggedOnlyResultRowExt extends LexemeRerunByTagResultEntry {
+  statusCode?: number;
+}
+
+function aggregateTaggedOnlyOutcomes(
+  speakers: string[],
+  rows: TaggedOnlyResultRowExt[],
+): BatchSpeakerOutcome[] {
+  const speakerOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const sp of speakers) {
+    if (!seen.has(sp)) { speakerOrder.push(sp); seen.add(sp); }
+  }
+  for (const row of rows) {
+    if (!seen.has(row.speaker)) { speakerOrder.push(row.speaker); seen.add(row.speaker); }
+  }
+
+  return speakerOrder.map((speaker) => {
+    const speakerRows = rows.filter((r) => r.speaker === speaker);
+    if (speakerRows.length === 0) {
+      // No work at all for this speaker (e.g. zero matched concepts).
+      return {
+        speaker,
+        status: 'cancelled',
+        error: null,
+        result: null,
+      };
+    }
+    const errorRows = speakerRows.filter((r) => r.status === 'error');
+    const okRows = speakerRows.filter((r) => r.status === 'ok');
+    const skipRows = speakerRows.filter((r) => r.status === 'skip');
+
+    const results: BatchSpeakerOutcome['result'] extends infer R ? R : never =
+      {} as never;
+    // Build a synthetic PipelineRunResult with one entry per field that
+    // had any row. Aggregate status: ok if any ok, else error if any error,
+    // else skipped.
+    const fieldStatus: Partial<Record<'ortho' | 'ipa', { status: 'ok' | 'error' | 'skipped'; details: string }>> = {};
+    for (const row of speakerRows) {
+      const f = row.field;
+      const cur = fieldStatus[f];
+      const nextStatus = row.status === 'ok' ? 'ok' : row.status === 'error' ? 'error' : 'skipped';
+      if (!cur) {
+        fieldStatus[f] = { status: nextStatus, details: row.error ?? row.text ?? '' };
+      } else if (nextStatus === 'error' && cur.status !== 'error') {
+        fieldStatus[f] = { status: 'error', details: row.error ?? cur.details };
+      } else if (nextStatus === 'ok' && cur.status === 'skipped') {
+        fieldStatus[f] = { status: 'ok', details: row.text ?? cur.details };
+      }
+    }
+    const stepsRunDeduped: PipelineStepId[] = [];
+    for (const f of ['ortho', 'ipa'] as const) {
+      if (fieldStatus[f]) {
+        stepsRunDeduped.push(f);
+        (results as Record<string, unknown>)[f] = {
+          status: fieldStatus[f]!.status,
+          // Pass through error text as `error` so existing report cells render it.
+          ...(fieldStatus[f]!.status === 'error' ? { error: fieldStatus[f]!.details } : {}),
+        };
+      }
+    }
+
+    const summary = {
+      ok: okRows.length,
+      skipped: skipRows.length,
+      error: errorRows.length,
+    };
+    const status: BatchSpeakerOutcome['status'] = errorRows.length > 0
+      ? 'error'
+      : okRows.length > 0
+        ? 'complete'
+        : 'cancelled';
+    const errorMsg = errorRows.length > 0
+      ? `${errorRows.length} concept row(s) errored` +
+        (errorRows[0].statusCode != null ? ` (first status ${errorRows[0].statusCode})` : '')
+      : null;
+
+    return {
+      speaker,
+      status,
+      error: errorMsg,
+      result: {
+        speaker,
+        steps_run: stepsRunDeduped,
+        results: results as never,
+        summary,
+        run_mode: 'tagged-only' as unknown as 'full',
+      } as never,
+    };
+  });
+}
+
 export function useParseUIPipeline({
   closeRunModal,
   openBatchReport,
@@ -100,6 +272,8 @@ export function useParseUIPipeline({
   const ownedBatch = useBatchPipelineJob();
   const batch = injectedBatch ?? ownedBatch;
   const [reportStepsRun, setReportStepsRun] = useState<PipelineStepId[]>([]);
+  const [taggedOnlyOutcomes, setTaggedOnlyOutcomes] = useState<BatchSpeakerOutcome[] | null>(null);
+  const [taggedOnlyError, setTaggedOnlyError] = useState<TaggedOnlyRunError | null>(null);
   const previousBatchStatusRef = useRef<typeof batch.state.status>(batch.state.status);
 
   useEffect(() => {
@@ -153,23 +327,57 @@ export function useParseUIPipeline({
         field,
         ...(confirm.pad === undefined ? {} : { pad: confirm.pad as number }),
       };
+      // Reset prior tagged-only state before issuing the new request.
+      setTaggedOnlyOutcomes(null);
+      setTaggedOnlyError(null);
       let result: LexemeRerunByTagResponse | null = null;
       try {
         result = await runLexemesByTag(payload);
       } catch (err) {
+        // Surface to the BatchReportModal as a synthetic per-request error
+        // outcome AND populate the structured taggedOnlyError so the host
+        // can render a banner with actionable label/candidate detail.
+        const structured = buildTaggedOnlyError(err);
         console.error('[useParseUIPipeline] runLexemesByTag failed', err);
+        const syntheticOutcome: BatchSpeakerOutcome[] = confirm.speakers.map((speaker) => ({
+          speaker,
+          status: 'error',
+          error: structured.message,
+          result: null,
+        }));
+        setTaggedOnlyOutcomes(syntheticOutcome);
+        setTaggedOnlyError(structured);
+        openBatchReport();
         return;
       }
+      const rows = (result.results ?? []) as TaggedOnlyResultRowExt[];
+      const outcomes = aggregateTaggedOnlyOutcomes(confirm.speakers, rows);
+      setTaggedOnlyOutcomes(outcomes);
+      setTaggedOnlyError(null);
+      // Log per-row errors for debugging even though the modal carries them.
+      const errorRows = rows.filter((r) => r.status === 'error');
+      if (errorRows.length > 0) {
+        console.warn('[useParseUIPipeline] tagged-only run errored rows', errorRows);
+      }
+      // Fire UI refresh side-effects for speakers that produced any ok row.
       const affectedSpeakers = new Set<string>();
-      for (const row of result.results) {
+      for (const row of rows) {
         if (row.status === 'ok') affectedSpeakers.add(row.speaker);
       }
       for (const speaker of affectedSpeakers) {
         await reloadSpeakerAnnotation(speaker);
       }
       await loadEnrichments();
+      // Always surface the report so error/skip rows are visible even when
+      // no speaker had an `ok` row.
+      openBatchReport();
       return;
     }
+
+    // Non-tagged-only runs: clear any prior tagged-only state so the report
+    // modal goes back to displaying batch outcomes.
+    setTaggedOnlyOutcomes(null);
+    setTaggedOnlyError(null);
 
     await batch.run({
       speakers: confirm.speakers,
@@ -180,7 +388,7 @@ export function useParseUIPipeline({
       runMode: confirm.runMode,
       pad: confirm.pad,
     });
-  }, [batch, closeRunModal, getLanguage, loadEnrichments, reloadSpeakerAnnotation]);
+  }, [batch, closeRunModal, getLanguage, loadEnrichments, openBatchReport, reloadSpeakerAnnotation]);
 
   const handleRerunFailed = useCallback(async (speakers: string[]) => {
     if (speakers.length === 0 || reportStepsRun.length === 0) return;
@@ -202,18 +410,33 @@ export function useParseUIPipeline({
     });
   }, [batch, closeBatchReport, getLanguage, reportStepsRun]);
 
+  const displayedOutcomes = useMemo<BatchSpeakerOutcome[]>(
+    () => taggedOnlyOutcomes ?? batch.state.outcomes,
+    [taggedOnlyOutcomes, batch.state.outcomes],
+  );
+
   const completedCount = useMemo(
-    () => batch.state.outcomes.filter((outcome) => outcome.status === 'complete').length,
-    [batch.state.outcomes],
+    () => displayedOutcomes.filter((outcome) => outcome.status === 'complete').length,
+    [displayedOutcomes],
   );
   const errorCount = useMemo(
-    () => batch.state.outcomes.filter((outcome) => outcome.status === 'error').length,
-    [batch.state.outcomes],
+    () => displayedOutcomes.filter((outcome) => outcome.status === 'error').length,
+    [displayedOutcomes],
   );
   const cancelledCount = useMemo(
-    () => batch.state.outcomes.filter((outcome) => outcome.status === 'cancelled').length,
-    [batch.state.outcomes],
+    () => displayedOutcomes.filter((outcome) => outcome.status === 'cancelled').length,
+    [displayedOutcomes],
   );
+
+  const dismissTaggedOnlyError = useCallback(() => {
+    setTaggedOnlyError(null);
+  }, []);
+
+  const dismissBatchStatus = useCallback(() => {
+    setTaggedOnlyOutcomes(null);
+    setTaggedOnlyError(null);
+    batch.reset();
+  }, [batch]);
 
   return {
     batch,
@@ -224,8 +447,11 @@ export function useParseUIPipeline({
     completedCount,
     errorCount,
     cancelledCount,
-    dismissBatchStatus: batch.reset,
+    dismissBatchStatus,
     openBatchReport,
+    displayedOutcomes,
+    taggedOnlyError,
+    dismissTaggedOnlyError,
   };
 }
 

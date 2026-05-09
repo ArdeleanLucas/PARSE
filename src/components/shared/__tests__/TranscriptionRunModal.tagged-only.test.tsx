@@ -175,7 +175,7 @@ describe("TranscriptionRunModal — tagged-only mode", () => {
     expect(betaSection.textContent).toContain("Beta · 0 concepts");
   });
 
-  it("(e) with zero resolved concepts the confirm button is disabled", async () => {
+  it("(e) with zero resolved concepts the confirm button is disabled (and the unknown-tag warning is gated by tagMatch)", async () => {
     vi.mocked(getConceptsByTag).mockResolvedValue({
       totalConcepts: 0,
       perSpeaker: { Alpha: { conceptCount: 0, concepts: [] }, Beta: { conceptCount: 0, concepts: [] } },
@@ -192,6 +192,17 @@ describe("TranscriptionRunModal — tagged-only mode", () => {
     await waitFor(() => {
       const confirm = screen.getByTestId("transcription-run-confirm") as HTMLButtonElement;
       expect(confirm.disabled).toBe(true);
+    });
+    // Issue #8 — unknown-tag warning is rendered for non-empty unknownTags.
+    const warning = await screen.findByTestId("transcription-run-tagged-preview-unknown");
+    // Default match=any → benign copy.
+    expect(warning.textContent).toContain("Unknown tags ignored");
+    expect(warning.textContent).not.toContain("ALL match expected");
+    // Issue #5 — toggling to ALL switches the copy to the stricter variant.
+    fireEvent.click(screen.getByTestId("transcription-run-tagged-match-all"));
+    await waitFor(() => {
+      const w2 = screen.getByTestId("transcription-run-tagged-preview-unknown");
+      expect(w2.textContent).toContain("ALL match expected");
     });
   });
 
@@ -222,6 +233,12 @@ describe("TranscriptionRunModal — tagged-only mode", () => {
     expect(payload.tagLabels).toEqual(["Thesis", "WordList"]);
     expect(payload.tagMatch).toBe("all");
     expect(payload.speakers).toEqual(["Alpha"]);
+    // Issue #7 — payload also pins pad (default 0.2) and the steps array.
+    expect(payload.pad).toBe(0.2);
+    // The default tagged-only mode runs ortho + ipa (no normalize, no stt
+    // when none chosen by default).
+    expect(payload.steps).toEqual(expect.arrayContaining(["ortho", "ipa"]));
+    expect(payload.steps).not.toContain("normalize");
   });
 
   it("popover empty state when vocabulary is empty", async () => {
@@ -236,5 +253,42 @@ describe("TranscriptionRunModal — tagged-only mode", () => {
     expect(screen.getByTestId("transcription-run-tagged-picker-empty").textContent).toContain(
       "No tags defined. Add tags from the right panel.",
     );
+  });
+
+  it("(g) ambiguousTags from preview render in a rose-700 block; confirm is disabled when match=all+ambiguous", async () => {
+    vi.mocked(getConceptsByTag).mockResolvedValue({
+      totalConcepts: 1,
+      perSpeaker: {
+        Alpha: { conceptCount: 1, concepts: [{ conceptId: "c1", name: "x", start: 0, end: 1, tags: ["Thesis"] }] },
+        Beta: { conceptCount: 0, concepts: [] },
+      },
+      unknownTags: [],
+      ambiguousTags: { Thesis: ["t1", "t2"] },
+    });
+    await renderTaggedOnlyOpen();
+
+    fireEvent.click(screen.getByTestId("transcription-run-tagged-picker-trigger"));
+    fireEvent.click(within(screen.getByTestId("transcription-run-tagged-picker-popover"))
+      .getByTestId("transcription-run-tagged-picker-option-Thesis").querySelector("input")!);
+
+    const ambiguous = await screen.findByTestId("transcription-run-tagged-preview-ambiguous");
+    expect(ambiguous.textContent).toContain("Ambiguous tags");
+    expect(ambiguous.textContent).toContain("Thesis");
+    // Pick one tag id to disambiguate copy is present.
+    expect(ambiguous.textContent).toContain("Pick one tag id");
+    // Per-label entry is rendered with both candidate ids.
+    expect(within(ambiguous).getByTestId("transcription-run-tagged-preview-ambiguous-Thesis").textContent)
+      .toContain("t1");
+    expect(within(ambiguous).getByTestId("transcription-run-tagged-preview-ambiguous-Thesis").textContent)
+      .toContain("t2");
+    // match=any (default) → confirm is enabled (totalConcepts > 0).
+    let confirm = screen.getByTestId("transcription-run-tagged-match-any") as HTMLInputElement;
+    expect(confirm.checked).toBe(true);
+    // Toggle to match=all → ambiguous makes confirm disabled.
+    fireEvent.click(screen.getByTestId("transcription-run-tagged-match-all"));
+    await waitFor(() => {
+      const btn = screen.getByTestId("transcription-run-confirm") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+    });
   });
 });
