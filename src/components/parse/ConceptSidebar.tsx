@@ -58,7 +58,13 @@ interface ConceptSidebarProps {
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
-  isVariantVisible?: (concept: SidebarConcept, variant: SidebarVariant) => boolean;
+  /**
+   * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
+   * src/lib/sidebarVisibility.ts so speaker-scope and tag filters are applied to each
+   * raw variant key before expanded child rows are rendered or parent clicks select
+   * the first visible variant.
+   */
+  isConceptVariantVisibleInSidebar?: (concept: SidebarConcept, variant: SidebarVariant) => boolean;
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
@@ -94,7 +100,7 @@ export function ConceptSidebar({
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
-  isVariantVisible,
+  isConceptVariantVisibleInSidebar,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
@@ -265,7 +271,7 @@ export function ConceptSidebar({
           const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
           const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && nextSurveyId);
           const variants = concept.variants ?? [];
-          const visibleVariants = isVariantVisible ? variants.filter((variant) => isVariantVisible(concept, variant)) : variants;
+          const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
           const hasVariants = visibleVariants.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
           const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === firstVariantKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));

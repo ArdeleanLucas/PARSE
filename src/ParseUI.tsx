@@ -40,6 +40,7 @@ import { buildSpeakerForm } from './lib/speakerForm';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { fmtTime } from './lib/fmtTime';
+import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
   applyCanonicalDecisionImport,
@@ -1205,19 +1206,16 @@ export function ParseUI() {
       : filtered
   ), [filtered, scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys]);
 
-  const isSidebarVariantVisible = useCallback((_concept: unknown, variant: { conceptKey: string }): boolean => {
-    const conceptKey = variant.conceptKey;
-    if (scopedToSpeaker && activeSpeakerForSidebar && elicitedConceptKeys.size > 0 && !elicitedConceptKeys.has(conceptKey)) {
-      return false;
-    }
-    if (selectedTagIds.size > 0) {
-      const conceptTagIds = new Set(getTagsForConcept(conceptKey, activeTagScope).map((tag) => tag.id));
-      for (const tagId of selectedTagIds) {
-        if (!conceptTagIds.has(tagId)) return false;
-      }
-    }
-    return true;
-  }, [scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, selectedTagIds, getTagsForConcept, activeTagScope]);
+  const sidebarVariantVisibilityPredicate = useCallback((conceptForVisibility: unknown, variant: { conceptKey: string }): boolean => (
+    evaluateConceptVariantVisibleInSidebar(conceptForVisibility, variant, {
+      scopedToSpeaker,
+      activeSpeakerForSidebar,
+      elicitedConceptKeys,
+      selectedTagIds,
+      getTagsForConcept,
+      activeTagScope,
+    })
+  ), [scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, selectedTagIds, getTagsForConcept, activeTagScope]);
 
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
@@ -1876,7 +1874,7 @@ export function ParseUI() {
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
-          isVariantVisible={isSidebarVariantVisible}
+          isConceptVariantVisibleInSidebar={sidebarVariantVisibilityPredicate}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             setMergePickerPrimary(target);
