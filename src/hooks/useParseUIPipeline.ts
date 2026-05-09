@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptionRunConfirm } from '../components/shared/TranscriptionRunModal';
 import { useBatchPipelineJob, type BatchSpeakerOutcome, type PipelineStepId, type UseBatchPipelineJobResult } from './useBatchPipelineJob';
-import { runLexemesByTag } from '../api/client';
+import { pollCompute, runLexemesByTag } from '../api/client';
 import { ApiError } from '../api/contracts/shared';
 import type {
   LexemeRerunByTagField,
@@ -127,6 +127,13 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const TAGGED_ONLY_COMPUTE_TYPE = 'lexemes_rerun_by_tag';
+const TAGGED_ONLY_POLL_INTERVAL_MS = 750;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { window.setTimeout(resolve, ms); });
+}
+
 function buildTaggedOnlyError(err: unknown): TaggedOnlyRunError {
   if (err instanceof ApiError) {
     const body = err.body;
@@ -163,6 +170,35 @@ function buildTaggedOnlyError(err: unknown): TaggedOnlyRunError {
     status: null,
     message: err instanceof Error ? err.message : String(err ?? 'Tagged-only run failed'),
   };
+}
+
+function coerceTaggedOnlyJobResult(result: unknown, jobId: string): LexemeRerunByTagResponse {
+  if (!isPlainRecord(result)) {
+    throw new Error('Tagged-only compute completed without a result payload');
+  }
+  const rows = Array.isArray(result.results)
+    ? (result.results as LexemeRerunByTagResultEntry[])
+    : [];
+  return {
+    jobId,
+    resolved: result.resolved as LexemeRerunByTagResponse['resolved'],
+    total: typeof result.total === 'number' ? result.total : rows.length,
+    results: rows,
+  };
+}
+
+async function pollTaggedOnlyJob(jobId: string): Promise<LexemeRerunByTagResponse> {
+  for (;;) {
+    const status = await pollCompute(TAGGED_ONLY_COMPUTE_TYPE, jobId);
+    const normalizedStatus = status.status.toLowerCase();
+    if (normalizedStatus === 'complete' || normalizedStatus === 'completed' || normalizedStatus === 'success') {
+      return coerceTaggedOnlyJobResult(status.result, jobId);
+    }
+    if (normalizedStatus === 'error' || normalizedStatus === 'failed' || normalizedStatus === 'cancelled') {
+      throw new Error(status.error ?? status.message ?? `Tagged-only compute ${normalizedStatus}`);
+    }
+    await sleep(TAGGED_ONLY_POLL_INTERVAL_MS);
+  }
 }
 
 interface TaggedOnlyResultRowExt extends LexemeRerunByTagResultEntry {
@@ -332,7 +368,8 @@ export function useParseUIPipeline({
       setTaggedOnlyError(null);
       let result: LexemeRerunByTagResponse | null = null;
       try {
-        result = await runLexemesByTag(payload);
+        const job = await runLexemesByTag(payload);
+        result = await pollTaggedOnlyJob(job.jobId ?? job.job_id);
       } catch (err) {
         // Surface to the BatchReportModal as a synthetic per-request error
         // outcome AND populate the structured taggedOnlyError so the host

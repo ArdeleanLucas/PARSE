@@ -2567,6 +2567,138 @@ def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, 
         pass
 
 
+def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    """Run ORTH/IPA on all tag-matched concept windows as a tracked job."""
+    from app.http.lexeme_rerun_handlers import build_post_run_ipa_response, build_post_run_ortho_response
+    from app.http.tag_filtered_rerun_handlers import (
+        build_lexemes_rerun_by_tag_plan,
+        run_lexemes_rerun_by_tag_loop,
+    )
+    from server_routes.lexeme_rerun import _wav2vec2_options_with_safe_fallback
+    from server_routes.locks import _locks_dir
+
+    def _load_tags_vocab() -> _server.List[_server.Dict[str, _server.Any]]:
+        from storage import tags_store
+
+        return list(tags_store.fetch_all().get('tags', []))
+
+    plan = build_lexemes_rerun_by_tag_plan(
+        payload,
+        project_root=_server._project_root(),
+        load_tags_vocab=_load_tags_vocab,
+        annotation_read_path_for_speaker=_server._annotation_read_path_for_speaker,
+        read_json_any_file=_server._read_json_any_file,
+        normalize_annotation_record=_server._normalize_annotation_record,
+    )
+    total_concepts = sum(len(plan.by_speaker.get(speaker, [])) for speaker in plan.speakers)
+    _set_compute_progress(job_id, 1.0, message='Tagged rerun resolving {0} concept window(s)'.format(total_concepts))
+
+    ortho_provider: _server.Optional[AIProvider] = None
+    ipa_aligner: _server.Any = None
+
+    def _unload_ortho_provider() -> None:
+        nonlocal ortho_provider
+        provider = ortho_provider
+        if provider is None:
+            return
+        try:
+            unload = getattr(provider, 'unload_model', None)
+            if callable(unload):
+                unload()
+        except Exception:
+            pass
+        finally:
+            ortho_provider = None
+
+    def _release_ipa_aligner() -> None:
+        nonlocal ipa_aligner
+        if ipa_aligner is None:
+            return
+        try:
+            release = getattr(_server, '_release_ipa_aligner', None)
+            if callable(release):
+                release()
+        except Exception:
+            pass
+        finally:
+            ipa_aligner = None
+
+    try:
+        if plan.field in {'ortho', 'both'}:
+            _set_compute_progress(job_id, 2.0, message='Tagged rerun loading ORTH provider')
+            ortho_provider = _server.get_ortho_provider()
+        if plan.field in {'ipa', 'both'}:
+            _set_compute_progress(job_id, 3.0, message='Tagged rerun loading IPA aligner')
+            ipa_aligner = _server._get_ipa_aligner()
+
+        def _run_cached_ortho_interval(*, audio_path: _server.pathlib.Path, start: float, end: float, language: _server.Optional[str] = None) -> str:
+            from ai.stt_pipeline import run_ortho_on_interval
+
+            device, allow_wsl_cuda = _wav2vec2_options_with_safe_fallback()
+            return run_ortho_on_interval(
+                audio_path=audio_path,
+                start=start,
+                end=end,
+                language=language,
+                config_path=_server._config_path(),
+                provider=ortho_provider,
+                device=device,
+                allow_wsl_cuda=allow_wsl_cuda,
+            )
+
+        def _run_cached_ipa_interval(*, audio_path: _server.pathlib.Path, start: float, end: float, language: _server.Optional[str] = None) -> str:
+            _ = language
+            from ai.ipa_transcribe import transcribe_intervals
+
+            device, allow_wsl_cuda = _wav2vec2_options_with_safe_fallback()
+            results = transcribe_intervals(
+                audio_path=audio_path,
+                intervals=[{'start': start, 'end': end}],
+                device=device,
+                aligner=ipa_aligner,
+                allow_wsl_cuda=allow_wsl_cuda,
+            )
+            if not results:
+                return ''
+            first = results[0]
+            if first.get('error') == 'interval_too_short':
+                raise ValueError('interval_too_short: duration_ms={0} minimum_ms=80.0'.format(first.get('duration_ms')))
+            return str(first.get('ipa') or '').strip()
+
+        def _progress(completed: int, total: int, speaker: str, hit: _server.Any, field: str) -> None:
+            pct = 95.0 if total <= 0 else 5.0 + completed / float(total) * 90.0
+            label = getattr(hit, 'name', '') or getattr(hit, 'conceptId', '') or 'concept'
+            _set_compute_progress(
+                job_id,
+                pct,
+                message='Tagged rerun {0}/{1}: {2} ({3})'.format(completed, total, label, field),
+                segments_processed=completed,
+                total_segments=total,
+            )
+
+        result = run_lexemes_rerun_by_tag_loop(
+            plan,
+            project_root=_server._project_root(),
+            normalize_speaker_id=_server._normalize_speaker_id,
+            annotation_read_path_for_speaker=_server._annotation_read_path_for_speaker,
+            read_json_any_file=_server._read_json_any_file,
+            normalize_annotation_record=_server._normalize_annotation_record,
+            resolve_audio_path_for_speaker=_server._pipeline_audio_path_for_speaker,
+            run_ipa_interval=_run_cached_ipa_interval,
+            run_ortho_interval=_run_cached_ortho_interval,
+            build_post_run_ipa_response=build_post_run_ipa_response,
+            build_post_run_ortho_response=build_post_run_ortho_response,
+            locks_dir=_locks_dir(),
+            progress_callback=_progress,
+        )
+        _set_compute_progress(job_id, 99.0, message='Tagged rerun complete')
+        return result
+    finally:
+        _unload_ortho_provider()
+        _release_ipa_aligner()
+        _server._collect_after_unload()
+
+
 def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     import json as _json
     import multiprocessing
@@ -3196,5 +3328,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BatchSpeakerOutcome, UseBatchPipelineJobResult } from '../useBatchPipelineJob';
 import { useParseUIPipeline } from '../useParseUIPipeline';
 import type { TranscriptionRunConfirm } from '../../components/shared/TranscriptionRunModal';
 
 vi.mock('../../api/client', () => ({
+  pollCompute: vi.fn(),
   runLexemesByTag: vi.fn(),
 }));
 
-import { runLexemesByTag } from '../../api/client';
+import { pollCompute, runLexemesByTag } from '../../api/client';
 
 function makeBatchHandle(
   overrides: Partial<UseBatchPipelineJobResult['state']> = {},
@@ -35,6 +36,11 @@ function makeBatchHandle(
 }
 
 describe('useParseUIPipeline', () => {
+  beforeEach(() => {
+    vi.mocked(pollCompute).mockReset();
+    vi.mocked(runLexemesByTag).mockReset();
+  });
+
   it('closes the run modal and dispatches batch.run with the selected transcription payload', async () => {
     const batch = makeBatchHandle();
     const closeRunModal = vi.fn();
@@ -274,19 +280,23 @@ describe('useParseUIPipeline', () => {
     const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
     const loadEnrichments = vi.fn().mockResolvedValue(undefined);
 
-    vi.mocked(runLexemesByTag).mockResolvedValue({
-      jobId: null,
-      resolved: {
-        totalConcepts: 1,
-        perSpeaker: { Alpha: { conceptCount: 1, concepts: [] } },
-        unknownTags: [],
-        ambiguousTags: {},
+    vi.mocked(runLexemesByTag).mockResolvedValue({ job_id: 'job-tagged-1', jobId: 'job-tagged-1' });
+    vi.mocked(pollCompute).mockResolvedValue({
+      status: 'complete',
+      progress: 100,
+      result: {
+        resolved: {
+          totalConcepts: 1,
+          perSpeaker: { Alpha: { conceptCount: 1, concepts: [] } },
+          unknownTags: [],
+          ambiguousTags: {},
+        },
+        total: 2,
+        results: [
+          { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'x' },
+          { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'ok', text: 'y' },
+        ],
       },
-      total: 2,
-      results: [
-        { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'x' },
-        { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'ok', text: 'y' },
-      ],
     });
 
     const confirm: TranscriptionRunConfirm = {
@@ -327,6 +337,7 @@ describe('useParseUIPipeline', () => {
       field: 'both',
       pad: 0.2,
     });
+    expect(pollCompute).toHaveBeenCalledWith('lexemes_rerun_by_tag', 'job-tagged-1');
     expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Alpha');
     expect(loadEnrichments).toHaveBeenCalledOnce();
   });
@@ -436,25 +447,29 @@ describe('useParseUIPipeline', () => {
     // must aggregate ok/error/skip rows by speaker and field and expose
     // them on displayedOutcomes — not silently drop everything that is
     // not status === 'ok' (issue #2).
-    vi.mocked(runLexemesByTag).mockResolvedValueOnce({
-      jobId: null,
-      resolved: {
-        totalConcepts: 3,
-        perSpeaker: {
-          Alpha: { conceptCount: 2, concepts: [] },
-          Beta: { conceptCount: 1, concepts: [] },
+    vi.mocked(runLexemesByTag).mockResolvedValueOnce({ job_id: 'job-tagged-rows', jobId: 'job-tagged-rows' });
+    vi.mocked(pollCompute).mockResolvedValueOnce({
+      status: 'complete',
+      progress: 100,
+      result: {
+        resolved: {
+          totalConcepts: 3,
+          perSpeaker: {
+            Alpha: { conceptCount: 2, concepts: [] },
+            Beta: { conceptCount: 1, concepts: [] },
+          },
+          unknownTags: [],
+          ambiguousTags: {},
         },
-        unknownTags: [],
-        ambiguousTags: {},
+        total: 4,
+        results: [
+          // Alpha — one ok ortho, one error ipa with statusCode 404
+          { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'foo' },
+          { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'error', error: 'concept missing', statusCode: 404 } as never,
+          // Beta — one skip
+          { speaker: 'Beta', conceptId: 'c2', field: 'ortho', status: 'skip' },
+        ],
       },
-      total: 4,
-      results: [
-        // Alpha — one ok ortho, one error ipa with statusCode 404
-        { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'foo' },
-        { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'error', error: 'concept missing', statusCode: 404 } as never,
-        // Beta — one skip
-        { speaker: 'Beta', conceptId: 'c2', field: 'ortho', status: 'skip' },
-      ],
     });
 
     const batch = makeBatchHandle();

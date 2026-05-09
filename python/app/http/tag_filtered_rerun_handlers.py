@@ -48,6 +48,19 @@ class TagFilteredHandlerError(Exception):
         return self.message
 
 
+@dataclass(frozen=True)
+class LexemesRerunByTagPlan:
+    labels: list[str]
+    match: str
+    field: str
+    pad: float
+    speakers: list[str]
+    resolved: ResolvedTags
+    per_speaker: dict[str, dict[str, Any]]
+    all_hits: list[ConceptHit]
+    by_speaker: dict[str, list[ConceptHit]]
+
+
 def _coerce_match(body: Mapping[str, Any]) -> str:
     raw = body.get("match", "any")
     value = str(raw).strip().lower() if raw is not None else "any"
@@ -170,6 +183,9 @@ AudioPathResolver = Callable[[str], Path]
 IntervalRunner = Callable[..., str]
 TagsVocabLoader = Callable[[], Sequence[Mapping[str, Any]]]
 PerIntervalHandler = Callable[..., Any]
+JobCreator = Callable[[str, dict[str, Any]], str]
+ComputeLauncher = Callable[[str, str, dict[str, Any]], None]
+ProgressCallback = Callable[[int, int, str, ConceptHit, str], None]
 
 
 def _resolve_per_speaker(
@@ -294,23 +310,16 @@ def _per_concept_rerun(
     )
 
 
-def build_post_lexemes_rerun_by_tag_response(
+def build_lexemes_rerun_by_tag_plan(
     body: Mapping[str, Any],
     *,
     project_root: Path,
     load_tags_vocab: TagsVocabLoader,
-    normalize_speaker_id: SpeakerNormalizer,
     annotation_read_path_for_speaker: AnnotationPathResolver,
     read_json_any_file: JsonAnyReader,
     normalize_annotation_record: AnnotationNormalizer,
-    resolve_audio_path_for_speaker: AudioPathResolver,
-    run_ipa_interval: IntervalRunner,
-    run_ortho_interval: IntervalRunner,
-    build_post_run_ipa_response: PerIntervalHandler,
-    build_post_run_ortho_response: PerIntervalHandler,
-    locks_dir: Path | None = None,
-) -> JsonResponseSpec:
-    """Resolve a tag query and run ORTH/IPA per matched concept, sequentially."""
+) -> LexemesRerunByTagPlan:
+    """Validate and resolve a rerun-by-tag request without spending GPU."""
     labels = _coerce_tag_labels(body)
     match = _coerce_match(body)
     field = _coerce_field(body)
@@ -345,16 +354,69 @@ def build_post_lexemes_rerun_by_tag_response(
         normalize_annotation_record=normalize_annotation_record,
         id_to_label=id_to_label,
     )
+    return LexemesRerunByTagPlan(
+        labels=labels,
+        match=match,
+        field=field,
+        pad=pad,
+        speakers=speakers,
+        resolved=resolved,
+        per_speaker=per_speaker,
+        all_hits=all_hits,
+        by_speaker=by_speaker,
+    )
 
+
+def _lexemes_rerun_by_tag_result_payload(
+    plan: LexemesRerunByTagPlan,
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    summary = {
+        "ok": sum(1 for row in results if row.get("status") == "ok"),
+        "skipped": sum(1 for row in results if row.get("status") in {"skip", "skipped"}),
+        "error": sum(1 for row in results if row.get("status") == "error"),
+    }
+    return {
+        "resolved": {
+            "totalConcepts": len(plan.all_hits),
+            "perSpeaker": plan.per_speaker,
+            "unknownTags": list(plan.resolved.unknown),
+            "ambiguousTags": dict(plan.resolved.ambiguous),
+        },
+        "total": len(results),
+        "results": results,
+        "summary": summary,
+        "run_mode": "tagged-only",
+    }
+
+
+def run_lexemes_rerun_by_tag_loop(
+    plan: LexemesRerunByTagPlan,
+    *,
+    project_root: Path,
+    normalize_speaker_id: SpeakerNormalizer,
+    annotation_read_path_for_speaker: AnnotationPathResolver,
+    read_json_any_file: JsonAnyReader,
+    normalize_annotation_record: AnnotationNormalizer,
+    resolve_audio_path_for_speaker: AudioPathResolver,
+    run_ipa_interval: IntervalRunner,
+    run_ortho_interval: IntervalRunner,
+    build_post_run_ipa_response: PerIntervalHandler,
+    build_post_run_ortho_response: PerIntervalHandler,
+    locks_dir: Path | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
-    for speaker in speakers:
-        for hit in by_speaker.get(speaker, []):
+    total_concepts = sum(len(plan.by_speaker.get(speaker, [])) for speaker in plan.speakers)
+    completed = 0
+    for speaker in plan.speakers:
+        for hit in plan.by_speaker.get(speaker, []):
             results.extend(
                 _per_concept_rerun(
                     speaker,
                     hit,
-                    field,
-                    pad,
+                    plan.field,
+                    plan.pad,
                     project_root=project_root,
                     normalize_speaker_id=normalize_speaker_id,
                     annotation_read_path_for_speaker=annotation_read_path_for_speaker,
@@ -368,23 +430,91 @@ def build_post_lexemes_rerun_by_tag_response(
                     locks_dir=locks_dir,
                 )
             )
+            completed += 1
+            if progress_callback is not None:
+                progress_callback(completed, total_concepts, speaker, hit, plan.field)
+    return _lexemes_rerun_by_tag_result_payload(plan, results)
 
-    payload = {
-        "jobId": None,
-        "resolved": {
-            "totalConcepts": len(all_hits),
-            "perSpeaker": per_speaker,
-            "unknownTags": list(resolved.unknown),
-            "ambiguousTags": dict(resolved.ambiguous),
-        },
-        "total": len(results),
-        "results": results,
+
+def build_post_lexemes_rerun_by_tag_response(
+    body: Mapping[str, Any],
+    *,
+    project_root: Path,
+    load_tags_vocab: TagsVocabLoader,
+    normalize_speaker_id: SpeakerNormalizer,
+    annotation_read_path_for_speaker: AnnotationPathResolver,
+    read_json_any_file: JsonAnyReader,
+    normalize_annotation_record: AnnotationNormalizer,
+    resolve_audio_path_for_speaker: AudioPathResolver,
+    run_ipa_interval: IntervalRunner,
+    run_ortho_interval: IntervalRunner,
+    build_post_run_ipa_response: PerIntervalHandler,
+    build_post_run_ortho_response: PerIntervalHandler,
+    locks_dir: Path | None = None,
+    create_job: JobCreator | None = None,
+    launch_compute_runner: ComputeLauncher | None = None,
+    job_conflict_error_cls: type[Exception] | tuple[type[Exception], ...] | None = None,
+) -> JsonResponseSpec:
+    """Validate a tag rerun and start a tracked compute job by default.
+
+    Backwards compatibility: callers can send ``{"async": false}`` to keep
+    the old blocking 200 response temporarily while integrations migrate.
+    """
+    plan = build_lexemes_rerun_by_tag_plan(
+        body,
+        project_root=project_root,
+        load_tags_vocab=load_tags_vocab,
+        annotation_read_path_for_speaker=annotation_read_path_for_speaker,
+        read_json_any_file=read_json_any_file,
+        normalize_annotation_record=normalize_annotation_record,
+    )
+
+    if body.get("async") is False:
+        payload = run_lexemes_rerun_by_tag_loop(
+            plan,
+            project_root=project_root,
+            normalize_speaker_id=normalize_speaker_id,
+            annotation_read_path_for_speaker=annotation_read_path_for_speaker,
+            read_json_any_file=read_json_any_file,
+            normalize_annotation_record=normalize_annotation_record,
+            resolve_audio_path_for_speaker=resolve_audio_path_for_speaker,
+            run_ipa_interval=run_ipa_interval,
+            run_ortho_interval=run_ortho_interval,
+            build_post_run_ipa_response=build_post_run_ipa_response,
+            build_post_run_ortho_response=build_post_run_ortho_response,
+            locks_dir=locks_dir,
+        )
+        # Deprecated compatibility shape: legacy clients used ``jobId: null``
+        # to distinguish the old synchronous endpoint from compute jobs.
+        return JsonResponseSpec(status=HTTPStatus.OK, payload={"jobId": None, **payload})
+
+    if create_job is None or launch_compute_runner is None:
+        raise TagFilteredHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "async rerun job dependencies are not configured")
+    metadata = {
+        "computeType": "lexemes_rerun_by_tag",
+        "speakers": list(plan.speakers),
+        "tagLabels": list(plan.labels),
+        "match": plan.match,
+        "field": plan.field,
+        "totalConcepts": len(plan.all_hits),
     }
-    return JsonResponseSpec(status=HTTPStatus.OK, payload=payload)
+    if len(plan.speakers) == 1:
+        metadata["speaker"] = plan.speakers[0]
+    try:
+        job_id = create_job("compute:lexemes_rerun_by_tag", metadata)
+    except Exception as exc:
+        if job_conflict_error_cls is not None and isinstance(exc, job_conflict_error_cls):
+            raise TagFilteredHandlerError(HTTPStatus.CONFLICT, str(exc)) from exc
+        raise
+    launch_compute_runner(job_id, "lexemes_rerun_by_tag", dict(body))
+    return JsonResponseSpec(status=HTTPStatus.ACCEPTED, payload={"jobId": job_id})
 
 
 __all__ = [
+    "LexemesRerunByTagPlan",
     "TagFilteredHandlerError",
+    "build_lexemes_rerun_by_tag_plan",
     "build_post_concepts_by_tag_response",
     "build_post_lexemes_rerun_by_tag_response",
+    "run_lexemes_rerun_by_tag_loop",
 ]

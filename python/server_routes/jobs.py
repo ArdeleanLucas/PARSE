@@ -356,6 +356,8 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
             result = _server._compute_speaker_boundaries('child-{0}'.format(job_id), payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline('child-{0}'.format(job_id), payload)
+        elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
+            result = _server._compute_lexemes_rerun_by_tag('child-{0}'.format(job_id), payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job('child-{0}'.format(job_id), payload)
         elif normalized_type == 'stt':
@@ -468,16 +470,25 @@ def _append_job_log_locked(job: _server.Dict[str, _server.Any], *, level: str, e
 
 def _job_lock_resources(job_type: str, metadata: _server.Optional[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, str]]:
     meta = metadata if isinstance(metadata, dict) else {}
+    speakers_raw = meta.get('speakers')
+    speaker_ids: _server.List[str] = []
+    if isinstance(speakers_raw, list):
+        for item in speakers_raw:
+            speaker_id = str(item or '').strip()
+            if speaker_id and speaker_id not in speaker_ids:
+                speaker_ids.append(speaker_id)
     speaker = str(meta.get('speaker') or '').strip()
-    if not speaker:
+    if speaker and speaker not in speaker_ids:
+        speaker_ids.append(speaker)
+    if not speaker_ids:
         return []
     normalized_job_type = str(job_type or '').strip().lower()
     if normalized_job_type in _server._MUTATING_SPEAKER_JOB_TYPES:
-        return [{'kind': 'speaker', 'id': speaker}]
+        return [{'kind': 'speaker', 'id': speaker_id} for speaker_id in speaker_ids]
     if normalized_job_type.startswith('compute:'):
         compute_type = str(meta.get('computeType') or normalized_job_type.split(':', 1)[1] or '').strip().lower()
         if compute_type in _server._MUTATING_SPEAKER_COMPUTE_TYPES:
-            return [{'kind': 'speaker', 'id': speaker}]
+            return [{'kind': 'speaker', 'id': speaker_id} for speaker_id in speaker_ids]
     return []
 
 def _expire_job_locks_locked(job: _server.Dict[str, _server.Any], now_ts: float, *, reason: str='ttl_expired') -> None:
@@ -962,6 +973,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             result = _server._compute_speaker_boundaries(job_id, payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline(job_id, payload)
+        elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
+            result = _server._compute_lexemes_rerun_by_tag(job_id, payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job(job_id, payload)
         elif normalized_type == 'stt':
