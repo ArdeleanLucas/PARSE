@@ -415,46 +415,70 @@ def apply_relink_by_gloss(project_root: Path, accepted_groups: Sequence[Mapping[
     if merge_ids and not backup_paths:
         raise ConceptRelinkError(500, "backup_failed")
 
-    rows = read_concepts_csv_rows(root / "concepts.csv")
-    state = load_survey_overlap_state(root)
-    applied_groups = [_apply_one_group(root, group, rows, state) for group in groups_to_apply]
+    mutated_paths: list[Path] = []
+    try:
+        rows = read_concepts_csv_rows(root / "concepts.csv")
+        state = load_survey_overlap_state(root)
+        applied_groups = [_apply_one_group(root, group, rows, state) for group in groups_to_apply]
 
-    annotation_rewrites: dict[str, int] = {}
-    mapping = {merge_id: group["keep_concept_id"] for group in applied_groups for merge_id in group["merge_concept_ids"]}
-    annotations_dir = root / "annotations"
-    if annotations_dir.is_dir():
-        for path in sorted({*annotations_dir.glob("*.json"), *annotations_dir.glob("*.parse.json")}):
-            payload = _json_load(path)
-            rewritten, count = _rewrite_annotation_payload(payload, mapping)
+        annotation_rewrites: dict[str, int] = {}
+        mapping = {merge_id: group["keep_concept_id"] for group in applied_groups for merge_id in group["merge_concept_ids"]}
+        annotations_dir = root / "annotations"
+        if annotations_dir.is_dir():
+            for path in sorted({*annotations_dir.glob("*.json"), *annotations_dir.glob("*.parse.json")}):
+                payload = _json_load(path)
+                rewritten, count = _rewrite_annotation_payload(payload, mapping)
+                if count:
+                    _json_save(path, rewritten)
+                    mutated_paths.append(path)
+                    annotation_rewrites[_relative(path, root)] = count
+
+        tags_path = root / "parse-tags.json"
+        if tags_path.exists():
+            payload = _json_load(tags_path)
+            rewritten, count = _rewrite_tags_payload(payload, mapping)
             if count:
-                _json_save(path, rewritten)
-                annotation_rewrites[_relative(path, root)] = count
+                _json_save(tags_path, rewritten)
+                mutated_paths.append(tags_path)
 
-    tags_path = root / "parse-tags.json"
-    if tags_path.exists():
-        payload = _json_load(tags_path)
-        rewritten, count = _rewrite_tags_payload(payload, mapping)
-        if count:
-            _json_save(tags_path, rewritten)
+        enrichments_path = root / "parse-enrichments.json"
+        if enrichments_path.exists():
+            payload = _json_load(enrichments_path)
+            rewritten, count = _rewrite_concept_keys(payload, mapping)
+            if count:
+                _json_save(enrichments_path, rewritten)
+                mutated_paths.append(enrichments_path)
 
-    enrichments_path = root / "parse-enrichments.json"
-    if enrichments_path.exists():
-        payload = _json_load(enrichments_path)
-        rewritten, count = _rewrite_concept_keys(payload, mapping)
-        if count:
-            _json_save(enrichments_path, rewritten)
-
-    write_concepts_csv_rows(root / "concepts.csv", rows, atomic=True)
-    save_survey_overlap_state(root, state)
-    return {
-        "ok": True,
-        "applied": True,
-        "algorithm": ALGORITHM,
-        "groups": applied_groups,
-        "fuzzy_candidates": [],
-        "backup_paths": backup_paths,
-        "annotation_rewrites": annotation_rewrites,
-    }
+        concepts_path = root / "concepts.csv"
+        write_concepts_csv_rows(concepts_path, rows, atomic=True)
+        mutated_paths.append(concepts_path)
+        overlap_path = survey_overlap_path(root)
+        save_survey_overlap_state(root, state)
+        mutated_paths.append(overlap_path)
+        return {
+            "ok": True,
+            "applied": True,
+            "algorithm": ALGORITHM,
+            "groups": applied_groups,
+            "fuzzy_candidates": [],
+            "backup_paths": backup_paths,
+            "annotation_rewrites": annotation_rewrites,
+        }
+    except Exception as exc:
+        try:
+            for backup_path in backup_paths:
+                backup_rel = Path(backup_path)
+                if len(backup_rel.parts) < 3 or backup_rel.parts[0] != "backups":
+                    continue
+                original = root.joinpath(*backup_rel.parts[2:])
+                original.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(root / backup_rel, original)
+        except Exception as restore_exc:
+            raise ConceptRelinkError(
+                500,
+                f"apply_failed_restore_failed:{exc}:{restore_exc}",
+            ) from restore_exc
+        raise ConceptRelinkError(500, "apply_failed_restored_from_backup") from exc
 
 
 __all__ = ["ALGORITHM", "ConceptRelinkError", "build_relink_by_gloss_plan", "apply_relink_by_gloss"]
