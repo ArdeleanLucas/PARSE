@@ -57,6 +57,7 @@ def test_handle_api_bare_exception_returns_class_name_and_logs_traceback(
     body = json.loads(bytes(handler.wfile.data).decode("utf-8"))
     assert set(body) == {"error"}
     assert "RuntimeError" in body["error"]
+    assert "()" in body["error"]
     assert body["error"].strip()
 
     stderr = capsys.readouterr().err

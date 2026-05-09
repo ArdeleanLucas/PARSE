@@ -64,7 +64,17 @@ def resolve_device(requested: Optional[str] = None, *, allow_wsl_cuda: bool = Fa
                 import torch  # type: ignore
                 if torch.cuda.is_available():
                     return "cuda"
+                print(
+                    "[wav2vec2] allow_wsl_cuda=True but torch.cuda.is_available()=False; falling back to CPU.",
+                    file=sys.stderr,
+                    flush=True,
+                )
             except ImportError:
+                print(
+                    "[wav2vec2] allow_wsl_cuda=True but torch import failed; falling back to CPU.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return "cpu"
         return "cpu"
     try:

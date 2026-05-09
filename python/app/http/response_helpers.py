@@ -52,7 +52,7 @@ def format_error_message(message: Any) -> str:
     message_repr = repr(message)
     if len(message_repr) > 200:
         message_repr = "{0}...".format(message_repr[:197])
-    return "{0}: {1}".format(type(message).__name__, message_repr)
+    return message_repr
 
 
 def send_json_error_response(writer: JsonResponseWriter, status: HTTPStatus, message: Any) -> None:
