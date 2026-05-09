@@ -1,593 +1,665 @@
-# Cross-survey concept linking plan
+# Cross-survey concept linking pre-research plan
 
-This is the pre-research implementation contract for linking one PARSE concept to multiple survey inventories before backend and frontend implementation. It is docs-only: it changes no runtime behavior.
+This is the implementation spec for reconciling overlapping KLQ and JBIL survey items before the backend and frontend PRs ship code. The immediate fieldwork problem is that a speaker import currently ties an elicited form to one survey row, while an overlapping survey row with the same gloss can allocate a separate `concept_id`. That makes sequential review across surveys look like two concepts even when Lucas is reviewing the same comparative item.
+
+The design below is deliberately conservative: preserve the existing five-column `concepts.csv` as the durable concept list, store many-to-many survey links in `survey-overlap.json`, and use a strict normalized-gloss match for automatic linking. Ambiguous cases are previewed for human review instead of being auto-merged.
 
 ## 1. Current state
 
-PARSE already has most of the storage and display primitives for multi-survey concepts, but import-time writes still collapse each concept to one primary `source_survey`/`source_item` pair unless a sidecar link is already present.
+### Frontend API types already expose survey links
 
-### Frontend API shape
-
-`src/api/types.ts:171-197` defines the sidecar and concept-entry shape that the UI can already consume:
+`src/api/types.ts:171-181` defines the sidecar shape as `concept_survey_links` plus per-speaker `speaker_choices`:
 
 ```ts
+export type SurveySettingsMap = Record<string, SurveyDisplaySettings>;
 export type ConceptSurveyLinks = Record<string, string>;
 export type ConceptSurveyLinksByConcept = Record<string, ConceptSurveyLinks>;
-export type SpeakerSurveyChoices = Record<string, Record<string, string>>;
-```
-
-```ts
+...
   concept_survey_links: ConceptSurveyLinksByConcept;
   speaker_choices: SpeakerSurveyChoices;
-}
 ```
+
+`src/api/types.ts:190-197` also lets each `ConceptEntry` carry legacy source fields plus a `surveys` map:
 
 ```ts
 export interface ConceptEntry {
   id: string;
   label: string;
-```
-
-`src/lib/speakerForm.ts:5-24` carries the same `surveys` map into the sidebar's runtime concept model:
-
-```ts
-export interface ConceptVariant {
-  conceptKey: string;
-  conceptEn: string;
-  variantLabel: string;
+  source_item?: string;
+  source_survey?: string;
+  custom_order?: number;
   surveys?: ConceptSurveyLinks;
+}
 ```
 
+### Runtime `Concept` objects already carry `surveys`
+
+`src/lib/speakerForm.ts:12-21` carries the same projection into frontend runtime concepts:
+
 ```ts
+export interface Concept {
+  id: number;
+  key: string;
+  name: string;
+  tag: ConceptTag;
+  sourceItem?: string;
   sourceSurvey?: string;
   customOrder?: number;
   surveys?: ConceptSurveyLinks;
+  variants?: ConceptVariant[];
 ```
 
-### Concept registry and import allocation
+This matters because the new frontend affordance does not need a new concept identity model. It needs a way to add, remove, and choose among entries in `Concept.surveys`.
 
-`python/concept_registry.py:12-20` indexes concepts by a case-folded, whitespace-collapsed label key:
+### The concept registry currently matches by plain label key
+
+`python/concept_registry.py:42-65` loads `concepts.csv` and indexes labels with `concept_label_key(label)`:
 
 ```py
-@dataclass
-class ConceptRegistry:
-    label_to_id: dict[str, str]
+registry = ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[])
+...
+normalized = concept_row_from_item(row)
+normalized["id"] = cid
+normalized["concept_en"] = label
+registry.raw_rows.append(normalized)
+registry.label_to_id.setdefault(concept_label_key(label), cid)
 ```
 
-```py
-def concept_label_key(label: str) -> str:
-    return " ".join(str(label or "").strip().split()).casefold()
-```
-
-`python/concept_registry.py:71-83` resolves existing concepts by that key, otherwise allocates a new integer id:
+`python/concept_registry.py:71-83` reuses an existing concept when the plain label key matches, otherwise allocates a new row:
 
 ```py
 def resolve_or_allocate_concept_id(registry: ConceptRegistry, label: str) -> tuple[str, bool]:
     clean_label = str(label or "").strip()
     key = concept_label_key(clean_label)
+...
+    existing = registry.label_to_id.get(key)
+    if existing:
+        return existing, False
 ```
 
-```py
-    registry.raw_rows.append({"id": concept_id, "concept_en": clean_label, "source_item": "", "source_survey": "", "custom_order": ""})
-    return concept_id, True
-```
+The linking feature should not replace this registry wholesale. It should add a survey-aware normalized-gloss index beside the existing id/label behavior.
 
-The Audition import path already parses cue labels and source metadata, but it does not persist a second survey link when the same gloss appears from a different survey. `python/server_routes/media.py:226-245`:
+### `survey-overlap.json` is the right persistence target
 
-```py
-        cid, _was_allocated = resolve_or_allocate_concept_id(registry, label)
-        source_item, source_survey = source_item_from_audition_row(row)
-        resolved.append({
-```
-
-```py
-            'source_item': source_item,
-            'source_survey': source_survey,
-        })
-```
-
-### Survey-overlap sidecar
-
-`python/survey_overlap.py:46-53` defines the durable JSON shape:
+`python/survey_overlap.py:46-53` defines the sidecar root fields:
 
 ```py
 def _default_state() -> SurveyOverlapState:
     return {
         "version": 1,
-```
-
-```py
+        "color_coding_enabled": False,
+        "surveys": {},
         "concept_survey_links": {},
         "speaker_choices": {},
     }
 ```
 
-`python/survey_overlap.py:78-94` normalizes `concept_survey_links` as `concept_id -> survey_id -> source_item`:
+`python/survey_overlap.py:78-94` validates `concept_survey_links` as `{ concept_id: { survey_id: source_item } }`:
 
 ```py
-def _clean_links(raw: object) -> dict[str, dict[str, str]]:
-    out: dict[str, dict[str, str]] = {}
+for concept_id, links in raw.items():
+    cid = str(concept_id or "").strip()
+...
+    for survey_id, source_item in links.items():
+        sid = normalize_survey_id(survey_id)
+        item = str(source_item or "").strip()
+        if sid and item:
+            clean_links[sid] = item
 ```
 
+`python/survey_overlap.py:97-113` validates `speaker_choices` as `{ speaker: { concept_id: survey_id } }`, which is already per-speaker rather than global:
+
 ```py
-            if sid and item:
-                clean_links[sid] = item
+for speaker, choices in raw.items():
+    speaker_id = str(speaker or "").strip()
+...
+    for concept_id, survey_id in choices.items():
+        cid = str(concept_id or "").strip()
+        sid = normalize_survey_id(survey_id)
 ```
 
-`python/survey_overlap.py:183-191` already merges incoming sidecar patches rather than replacing the whole file:
+`python/survey_overlap.py:160-191` already supports merge-style patches and reset flags for the three sidecar sections:
 
 ```py
+# Patches merge by default; reset_* flags clear a section first so reset plus re-seed can compose in one payload.
+def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object]) -> SurveyOverlapState:
+...
     if isinstance(patch.get("concept_survey_links"), Mapping):
         incoming_links = _clean_links(patch.get("concept_survey_links"))
         for concept_id, links in incoming_links.items():
+            merged["concept_survey_links"].setdefault(concept_id, {}).update(links)
 ```
 
-`python/survey_overlap.py:194-209` makes legacy `source_survey/source_item` and sidecar links appear as one map to the frontend:
+`python/survey_overlap.py:194-209` combines legacy `source_item`/`source_survey` from `concepts.csv` with sidecar survey links for frontend config:
 
 ```py
-    legacy_item = row_value(row, "source_item", "survey_item")
-    legacy_survey = normalize_survey_id(row_value(row, "source_survey"))
-    if legacy_item and legacy_survey:
+legacy_item = row_value(row, "source_item", "survey_item")
+legacy_survey = normalize_survey_id(row_value(row, "source_survey"))
+if legacy_item and legacy_survey:
+    links[legacy_survey] = legacy_item
+...
+if isinstance(sidecar_links, Mapping):
 ```
 
-```py
-            if sid and item:
-                links[sid] = item
-```
+### `concepts.csv` stays a five-column file
 
-`python/app/services/workspace_config.py:45-50` and `:67-70` load the sidecar into `/api/config` concepts:
-
-```py
-    survey_state = load_survey_overlap_state(project_root)
-    used_survey_ids: set[str] = set()
-```
-
-```py
-        links = concept_survey_links_for_row(row, survey_state)
-        if links:
-            entry["surveys"] = links
-```
-
-### concepts.csv writer and CSV import endpoint
-
-`python/concept_source_item.py:11-17` pins `concepts.csv` to the five-column durable schema:
+`python/concept_source_item.py:11-17` pins the durable concepts header:
 
 ```py
 CONCEPT_FIELDNAMES: tuple[str, ...] = (
     "id",
     "concept_en",
-```
-
-```py
+    "source_item",
     "source_survey",
     "custom_order",
 )
 ```
 
-`python/concept_source_item.py:31-48` already recognizes KLQ, EXT, and JBIL cue-name formats:
+`python/concept_source_item.py:31-48` already parses KLQ/EXT/JBIL cue names into `(source_item, source_survey, label)`:
 
 ```py
-def parse_cue_name(cue: str) -> tuple[str | None, str | None, str]:
-    """Return ``(source_item, source_survey, label)`` for an Audition cue name.
+Recognized formats:
+    KLQ:  ``(1.2)- forehead``       -> ("1.2", "KLQ", "forehead")
+    EXT:  ``[5.1]- The boy cut...`` -> ("5.1", "EXT", "The boy cut...")
+    JBIL: ``324- we``               -> ("324", "JBIL", "we")
 ```
 
-```py
-        if match:
-            return match.group(1), survey, match.group(2).strip()
-```
-
-`python/concept_source_item.py:93-112` writes the normalized five-column rows:
+`python/concept_source_item.py:93-112` writes only that current header, so the many-to-many survey map belongs in `survey-overlap.json`, not extra CSV columns:
 
 ```py
 def write_concepts_csv_rows(
     path: Path,
     rows: Sequence[Mapping[str, object]],
-```
-
-```py
+...
         writer = csv.DictWriter(handle, fieldnames=list(CONCEPT_FIELDNAMES))
         writer.writeheader()
 ```
 
-The concepts-import route is `POST /api/concepts/import`. `python/server.py:1534-1536` dispatches it:
+### Existing import and config endpoints
+
+`python/server.py:1534-1536` routes the concepts import endpoint:
 
 ```py
-        if request_path == "/api/concepts/import":
-            self._api_post_concepts_import()
-            return
+if request_path == "/api/concepts/import":
+    self._api_post_concepts_import()
+    return
 ```
 
-`python/app/http/project_config_handlers.py:93-103` says the multipart file field is `csv`:
+`python/server_routes/exports.py:41-47` keeps the route wrapper thin and delegates to the HTTP helper:
 
 ```py
-def _read_csv_text(form: cgi.FieldStorage) -> tuple[str, str]:
-    csv_item = form["csv"] if "csv" in form else None
+def _api_post_concepts_import(self) -> None:
+    """Merge source_item/source_survey/custom_order from an uploaded CSV into concepts.csv."""
+    try:
+        response = _server._app_build_concepts_import_response(...)
 ```
 
-`python/app/http/project_config_handlers.py:158-214` currently reports exact-label/id matches and additions only:
+`python/app/http/project_config_handlers.py:107-114` defines the import helper signature. It currently receives the multipart upload, project root, id normalizer, and upload limit only:
 
 ```py
-    matched = 0
-    added = 0
-    for up in upload_rows:
+def build_concepts_import_response(
+    *,
+    headers: Any,
+    rfile: BinaryIO,
+    project_root: pathlib.Path,
+    normalize_concept_id: ConceptIdNormalizer,
 ```
+
+`python/app/http/project_config_handlers.py:158-214` reports `matched`, `added`, `total`, and `mode` after merging into `concepts.csv`:
 
 ```py
-            "matched": matched,
-            "added": added,
-            "total": len(existing),
+matched = 0
+added = 0
+for up in upload_rows:
+...
+return JsonResponseSpec(
+    status=HTTPStatus.OK,
+    payload={"ok": True, "matched": matched, "added": added, "total": len(existing), ...},
+)
 ```
 
-`src/api/contracts/enrichments-tags-notes-imports.ts:24-41` is the existing frontend caller:
+`python/server.py:1403-1404` and `python/server.py:1500-1501` already expose `/api/survey-overlap` for GET/POST:
 
-```ts
-export async function importConceptsCsv(
-  file: File,
-  mode: "merge" | "replace" = "merge",
+```py
+if request_path == "/api/config": self._api_get_config(); return
+if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
+...
+if request_path == "/api/config": self._api_update_config(); return
+if request_path == "/api/survey-overlap": self._api_post_survey_overlap(); return
 ```
 
-```ts
-    response = await fetch("/api/concepts/import", { method: "POST", body: form });
+`python/server_routes/config.py:22-29` wires those endpoints to `load_survey_overlap_state` and `update_survey_overlap_state`:
+
+```py
+def _api_get_survey_overlap(self) -> None:
+    self._send_json(_server.HTTPStatus.OK, load_survey_overlap_state(_server._project_root()))
+...
+    state = update_survey_overlap_state(_server._project_root(), patch)
 ```
 
-Note for implementation: new API clients must go through `src/api/client.ts` / `src/api/contracts/*`; this existing helper is pre-rule debt and should be touched only if the implementation PR owns that cleanup.
+### Frontend survey badge and context menu already exist
 
-### ConceptSidebar affordances
-
-`src/components/parse/ConceptSidebar.tsx:52-57` already accepts settings, speaker choices, and a per-speaker choice callback:
+`src/components/parse/ConceptSidebar.tsx:38-58` already accepts survey settings, speaker choices, and `onSurveyChoiceChange`:
 
 ```tsx
-  surveySettings?: SurveySettingsMap;
-  speakerSurveyChoices?: SpeakerSurveyChoices;
-  surveyColorCodingEnabled?: boolean;
-  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+surveySettings?: SurveySettingsMap;
+speakerSurveyChoices?: SpeakerSurveyChoices;
+surveyColorCodingEnabled?: boolean;
+onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+onMergeRequest?: (concept: SidebarConcept) => void;
 ```
 
-`src/components/parse/ConceptSidebar.tsx:257-272` resolves current and next survey choices:
+`src/components/parse/ConceptSidebar.tsx:254-272` computes available survey choices and whether the badge can flip:
 
 ```tsx
-          const resolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
-          const resolvedSurveyLabel = surveyLabelFor(resolvedSurvey.surveyId, surveySettings);
+const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
+const nextSurveyId = surveyChoices.length > 1 && resolvedSurvey.surveyId
+  ? surveyChoices[(surveyChoices.indexOf(resolvedSurvey.surveyId) + 1) % surveyChoices.length]
+  : undefined;
+const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && nextSurveyId);
 ```
 
+`src/components/parse/ConceptSidebar.tsx:331-340` renders a clickable survey badge when `canFlipSurveyBadge` is true:
+
 ```tsx
-          const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && nextSurveyId);
+{canFlipSurveyBadge ? (
+  <button
+    type="button"
+    aria-label={`Switch survey for ${concept.name} from ${resolvedSurveyLabel} ${resolvedSurvey.sourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
+    onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)}
 ```
 
-`src/components/parse/ConceptSidebar.tsx:331-340` renders the clickable badge when there is a next survey:
+`src/components/parse/ConceptSidebar.tsx:397-410` starts the existing context menu with `Merge with...`:
 
 ```tsx
-                {canFlipSurveyBadge ? (
-                  <button
-                    type="button"
+{contextMenu && (
+  <div
+    ref={menuRef}
+    role="menu"
+...
+    Merge with…
 ```
 
+`src/components/parse/ConceptSidebar.tsx:412-433` already adds duplicate and unmerge actions, so `Change survey ID...` should be a sibling menu item:
+
 ```tsx
-                    {badge}
-                  </button>
+<button
+  type="button"
+  role="menuitem"
+...
+  Duplicate (split into next variant)
+...
+{contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
 ```
 
-`src/components/parse/ConceptSidebar.tsx:397-434` has the current context menu with merge, duplicate, and unmerge actions:
+`src/ParseUI.tsx:1869-1877` passes the active speaker, survey state, and choice callback into the sidebar:
 
 ```tsx
-      {contextMenu && (
-        <div
-          ref={menuRef}
-```
-
-```tsx
-            Merge with…
-          </button>
+activeSpeaker={activeSpeakerForSidebar}
+surveySettings={surveySettings}
+speakerSurveyChoices={speakerSurveyChoices}
+surveyColorCodingEnabled={surveyColorCodingEnabled}
+onSurveyChoiceChange={handleSurveyChoiceChange}
 ```
 
 ## 2. Source-data shape
 
-The KLQ Audition exports are tab-delimited files with `.csv` suffixes. The JBIL source is a comma CSV wordlist with `JBIL` and `Eng` columns. The examples below are direct source lines from Lucas's local data.
+The real data shows why strict, reviewable matching is needed. KLQ is cue-based and sectioned; JBIL is a flat numeric wordlist with metadata rows before row 1.
 
-### KLQ-style Audition cue samples
+### KLQ samples
 
-| Source file:line | Raw cue name | Matching implication |
-|---|---|---|
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Kalh01 process/Kalh01.csv:2` | `(1.1)- hair (collective)` | Parenthetical clarifier must not auto-merge into plain `hair`. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Qasr01 process/Qasr01.csv:2` | `(1.2)- forehead` | Same gloss appears in other KLQ speakers. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Qasr01 process/Qasr01.csv:5` | `(1.5)- nose` | Cross-survey candidate for JBIL `34,nose`. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Kalh01 process/Kalh01.csv:5` | `(1.4)- eyebrow A` | Variant suffix `A` should collapse for matching. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Kalh01 process/Kalh01.csv:6` | `(1.4)- eyebrow B` | Variant suffix `B` should collapse for matching. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Saha01 process/Saha01.csv:12` | `(2.3)- father (vocative)` | Parenthetical `vocative` should remain strict in v1. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Saha01 process/Saha01.csv:13` | `(2.4)- mother (vocative)` | Confirms parenthetical pattern repeats across kinship rows. |
-| `/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Qasr01 process/Qasr01.csv:17` | `(2.7)- daughter, girl` | Comma alternatives are ambiguous; no any-token auto-link in v1. |
+`/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Qasr01 process/Qasr01.csv:2-9`:
 
-### JBIL wordlist samples
+```text
+(1.2)- forehead	3:18:56.552	0:00.902	decimal	Cue
+(1.3)- eyelid	4:20:07.000	0:00.615	decimal	Cue
+(1.4)- eyebrow	3:20:42.000	0:00.605	decimal	Cue
+(1.5)- nose	3:21:12.334	0:00.850	decimal	Cue
+(1.6)- earlobe	3:21:29.213	0:01.430	decimal	Cue
+(1.7)- elbow A	4:20:41.905	0:01.186	decimal	Cue
+(1.7)- elbow B	4:22:16.623	0:00.777	decimal	Cue
+(1.8)- armpit	3:22:12.425	0:01.185	decimal	Cue
+```
 
-| Source file:line | Row | Cross-survey note |
-|---|---|---|
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:20` | `1,one,...` | Flat numeric source item, not KLQ section numbering. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:50` | `31,head,...` | JBIL id `31`, gloss `head`. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:51` | `32,hair,...` | Fuzzy candidate for KLQ `hair (collective)`, not strict auto-link. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:52` | `33,eye,...` | Plain gloss. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:53` | `34,nose,...` | Exact strict match for KLQ `(1.5)- nose` after prefix strip. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:89` | `70,girl,...` | Comma-alternative candidate for KLQ `daughter, girl`, not strict auto-link. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:90` | `71,daughter,...` | Another comma-alternative candidate for KLQ `daughter, girl`. |
-| `/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:138` | `119,stone,...` | Plain gloss useful for control cases. |
+`/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Saha01 process/Saha01.csv:2-9`:
 
-Concrete cross-survey examples:
+```text
+(1.2)- forehead	2:19:07.403	0:01.236	decimal	Cue
+(1.3)- eyelid	2:19:25.439	0:00.664	decimal	Cue
+(1.4)- eyebrow	2:19:36.684	0:00.653	decimal	Cue
+(1.6)- earlobe	2:19:52.371	0:01.143	decimal	Cue
+(1.8)- armpit	2:20:27.571	0:01.306	decimal	Cue
+(1.10)- rib	2:20:00.556	0:00.863	decimal	Cue
+(1.11)- the baby is in the uterus	2:21:01.526	0:01.318	decimal	Cue
+(1.11)- uterus	2:20:46.774	0:00.711	decimal	Cue
+```
 
-- Strict auto-link: KLQ `(1.5)- nose` -> canonical gloss `nose`; JBIL `34,nose` -> canonical gloss `nose`.
-- Fuzzy review only: KLQ `(1.1)- hair (collective)` -> `hair (collective)`; JBIL `32,hair` -> `hair`.
-- Fuzzy review only: KLQ `(2.7)- daughter, girl`; JBIL `70,girl` and `71,daughter`.
+`/home/lucas/.openclaw/agents/dr-kurd/Audio_Original/Kalh01 process/Kalh01.csv:2-9`:
+
+```text
+(1.1)- hair (collective)	1:57:45.000	0:00.773	decimal	Cue
+(1.2)- forehead	1:58:06.686	0:00.546	decimal	Cue
+(1.3)- eyelid	1:58:27.500	0:00.682	decimal	Cue
+(1.4)- eyebrow A	1:58:47.301	0:00.698	decimal	Cue
+(1.4)- eyebrow B	1:59:09.899	0:00.600	decimal	Cue
+(1.5)- nose	1:59:17.708	0:00.643	decimal	Cue
+(1.6)- earlobe	1:59:26.455	0:01.210	decimal	Cue
+(1.7)- elbow	1:59:45.408	0:00.755	decimal	Cue
+```
+
+`Kalh01.csv:19-26` also shows parenthetical clarifiers and comma-separated alternatives:
+
+```text
+(2.1)- father	2:03:02.070	0:00.725	decimal	Cue
+(2.2)- mother	2:03:07.061	0:00.786	decimal	Cue
+(2.3)- father (vocative)	2:03:20.062	0:00.664	decimal	Cue
+(2.4)- mother (vocative)	2:03:26.000	0:00.618	decimal	Cue
+(2.5)- sister	2:03:33.500	0:00.580	decimal	Cue
+(2.6)- grandfather	2:03:40.617	0:00.882	decimal	Cue
+(2.7)- daughter, girl	2:03:59.423	0:00.526	decimal	Cue
+(2.8)- baby	2:04:14.752	0:00.679	decimal	Cue
+```
+
+### JBIL samples
+
+`/home/lucas/.openclaw/agents/dr-kurd/research/data/jbil_wordlist.csv:20-29`:
+
+```text
+1,one,yɛkʰ,,yɛkʰ,yɨk,yæk,yɛk,yɛkʰ
+2,two ,du,,du,du,dʊ,du,dʊ
+3,three,se,,sɛ,sɛ,se,sɛh,siɛ
+4,four,tʃʷɑɽ̥,,tʃʷɑɾ,tʃʷɑɾ,tʃwɑɾ,tʃʊwɑɾ,tʃʰwɑɾ
+5,five,piyɛntʃ,,pɛntʃ,pɛndʒ,pæŋdʒ,pɛndʒ,pɛnʒ
+6,six,ʂuʂ,,ʃuʃ,ʃɛʃ,sɨs,ʃʊʃ,ʃɯʃ
+7,seven,hɑftʰ,,ħɑutʰ,ħɑft,hæfʰt,ħɑft,ħɑft
+8,eight,hɛʃt,,hɛʃt,hɛʃt,hæʃt,hɛyʃtʰ,hɛʃt
+9,nine,niyɑ,,no,no,nu,nu,no
+10,ten,dɛ,,dɑ,dɑ,dɨʔ,dɛh,dɛh
+```
+
+`jbil_wordlist.csv:50-63` contains body-part overlaps with KLQ:
+
+```text
+31,head,sɛɾ̥,,sɛɾ̥,sɛɾ,sɛɾolˠ,sɛɾ,sɛɾ̥
+32,hair,mu,,qɵʃ,qɨʒ,qɨdʒ,-,qɨʒ
+33,eye,tʃʰɑw,,tʃʰɑw,tʃɑo,tʃɑw,tʃɑo,tʃʰɛɯ
+34,nose,litʰ,,lut,løtʰ,lʉtʰ,-,ɬɯitʰ
+35,ear,guʃ,,gwɛtʃʰkɑ,guʃ,gʊʃ,goʃ,guʃ
+36,mouth,dɜm,,dʌm,dɑm,dɨm,dɛm,dɛm
+37,tooth,dan,,dɨʔgɑn,dɨˈgɑn,dɨgɑn,dɨgan,dɯgɑn
+38,tongue,zəmɑn,,zuɑn,zuˈɑn,zʊɑn,zuɑn,zʊɑn
+39,neck,mɨl,,mɨl̥,mɨn,mɪl,mɨl,mɨlˠ
+40,throat,qoɽkʼ,,qʰɔɾi,qoɾɨg,qɔrɜg,qorɯq,qoɾkʰ
+41,arm,qol,,bɑl,bɑl,bɑlˠ,bal,bɑl
+42,hand,dɛst,,dɘs,dɛs,dɛs,dɛs,dɛs
+43,elbow,ɑnɨʃk,,qoɾɑnisk̚,-,ɑɾɨndʒ,-,qʊeʕɦ
+```
+
+Concrete overlaps:
+
+- KLQ `(1.5)- nose` and JBIL `34,nose` should auto-link to the same concept under strict normalization.
+- KLQ `(1.7)- elbow A/B` and JBIL `43,elbow` should auto-link after stripping a trailing single-letter variant suffix.
+- KLQ `(1.1)- hair (collective)` and JBIL `32,hair` should **not** auto-link under v1 strict rules; it should be a fuzzy preview candidate.
+- KLQ `(2.7)- daughter, girl` should **not** auto-link to either `daughter` or `girl` via comma token splitting in v1; treat it as the whole gloss and put token-level matching in future work.
 
 ## 3. Matching algorithm
 
-### Chosen v1 canonicalization
+### Canonical v1 key
 
-Define a shared backend helper, e.g. `canonical_survey_gloss(raw: str) -> str`, and use the same semantics from import-time linking and migration. Inputs should be concept labels after existing cue parsing when possible; raw cue strings are allowed for safety.
+Backend should add one shared helper, e.g. `normalize_cross_survey_gloss(label: str) -> str`, under a backend concept-linking module rather than duplicating regexes in route handlers.
 
-1. Trim outer whitespace.
-2. Strip a leading KLQ-style source prefix: `^\s*\(\s*\d+(?:\.\d+)*\s*\)\s*[-–—]?\s*`.
-3. If the input is a raw JBIL-style Audition cue (`32- hair`), reuse the existing `parse_cue_name()` behavior rather than adding a second regex.
-4. Strip one trailing variant suffix matching `\s+[A-Z]$` after prefix removal (`eyebrow A` -> `eyebrow`).
-5. Lowercase with `casefold()` and collapse internal whitespace to one space.
-6. Keep all parenthetical clarifiers in the canonical key.
-7. Treat comma-separated alternatives as one canonical string.
+Rules, in order:
 
-Pseudocode:
+1. Trim input.
+2. Strip one leading KLQ-style prefix: `^\(\s*\d+(?:\.\d+)*\s*\)\s*[-–—]?\s*`.
+3. Strip one leading JBIL-style numeric prefix only when present in an import/cue-like label string: `^\d+\s*[-–—]\s*`. For structured JBIL CSV rows, use the `Eng` cell directly and store the numeric row as `source_item`.
+4. Strip one trailing variant suffix matching `\s+[A-Z]$`, so `elbow A`, `elbow B`, and `eyebrow B` map to the base form.
+5. Lowercase and collapse internal whitespace.
+6. Keep parenthetical clarifiers.
+7. Keep comma-separated alternatives as one canonical string.
 
-```py
-def canonical_survey_gloss(raw: object) -> str:
-    text = str(raw or "").strip()
-    _source_item, _source_survey, label = parse_cue_name(text)
-    text = label.strip()
-    text = re.sub(r"^\(\s*\d+(?:\.\d+)*\s*\)\s*[-–—]?\s*", "", text)
-    text = re.sub(r"\s+[A-Z]$", "", text)
-    return " ".join(text.split()).casefold()
-```
+Example output:
 
-### Decision points and rejected alternatives
+- `(1.5)- nose` -> `nose`
+- `34- nose` -> `nose`
+- `(1.7)- elbow B` -> `elbow`
+- `(1.1)- hair (collective)` -> `hair (collective)`
+- `(2.3)- father (vocative)` -> `father (vocative)`
+- `(2.7)- daughter, girl` -> `daughter, girl`
 
-- **Parenthetical clarifiers:** choose strict auto-linking. Keep `(collective)`, `(vocative)`, and similar clarifiers in the canonical key. Rejected alternative: strip parentheticals and auto-merge; this would merge `hair` with `hair (collective)` and kinship/vocative rows without review. Safer behavior: emit fuzzy candidates where a parenthetical-stripped key matches, and show them in a review queue.
-- **Comma alternatives:** choose whole-string matching for v1. Rejected alternative: split on comma and auto-link if any token matches. That would auto-link `daughter, girl` to both JBIL `girl` and `daughter`, creating non-deterministic concept lineage. Safer behavior: include comma token matches in fuzzy candidates only.
-- **Numeric source-item matching:** reject. KLQ `(1.5)` and JBIL `34` are different survey coordinate systems; numbers cannot be used across surveys.
-- **Overwrite-only import:** reject. The current five-column row can record one legacy survey pair; multi-survey correctness requires `survey-overlap.json` updates, not only `source_survey/source_item` overwrites.
+### Rejected v1 alternatives
 
-Fuzzy candidate generation should be deterministic and non-writing. Candidate classes:
+**Parenthetical clarifiers.** Strict keeps them because the data shows semantically meaningful pairs like `father` vs `father (vocative)` and `mother` vs `mother (vocative)` (`Kalh01.csv:19-22`). Fuzzy stripping would merge too aggressively. The safer default is to compute a secondary fuzzy-preview key with trailing parentheticals removed and expose those as review candidates, not write them automatically.
 
-- `parenthetical_stripped_match`: `hair (collective)` vs `hair`.
-- `comma_token_match`: `daughter, girl` vs `girl` or `daughter`.
-- `variant_suffix_match`: exact after suffix strip, already accepted for auto-link unless other ambiguity exists.
+**Comma-separated alternatives.** Do not split and match any token in v1. `daughter, girl` is an elicitation-specific combined gloss; splitting would let it silently match whichever survey has only `daughter` or only `girl`. Record whole-string strict failures as fuzzy-preview candidates and leave token-level matching for a later reviewed migration.
+
+**IPA/form-based matching.** Do not use speaker forms or IPA for v1 linking. The problem is source concept identity, not form identity; forms vary by dialect and would make imports order-dependent.
 
 ## 4. API contract
 
-### 4a. Import-time auto-linking in `POST /api/concepts/import`
+### 4a. Import-time auto-linking
 
-Path and request remain unchanged:
+Existing path: `POST /api/concepts/import` (`python/server.py:1534-1536`, wrapper in `python/server_routes/exports.py:41-47`). Request shape remains unchanged:
 
-- Method/path: `POST /api/concepts/import`.
-- Content type: `multipart/form-data`.
-- Fields:
-  - `csv`: uploaded UTF-8 CSV file, current required field name.
-  - `mode`: optional `merge` or `replace`, default `merge`.
-- Supported row fields remain `id`, `concept_en`, `source_item`, `source_survey`, `custom_order`.
+- `multipart/form-data`
+- `csv`: required uploaded CSV file
+- `mode`: optional `merge` or `replace`
 
-New behavior:
+Behavior change:
 
-1. Build the existing id index as today.
-2. Build a gloss index using `canonical_survey_gloss(existing_row["concept_en"])`.
-3. For each uploaded row, resolve in this order:
-   - exact normalized id match, if supplied;
-   - exact canonical gloss match;
-   - allocate/create only if no id or gloss match exists.
-4. If the incoming row has non-empty `source_survey` and `source_item`, normalize `source_survey` with the existing `normalize_survey_id()` and update `survey-overlap.json`:
+1. Parse each incoming row with the existing `id`, `concept_en`, `source_item`, `source_survey`, and `custom_order` semantics.
+2. Build a normalized-gloss index over existing concept rows using the v1 canonical key from section 3.
+3. For each incoming row with non-empty `source_survey` and `source_item`:
+   - If an exact id or label match finds an existing row, keep current update behavior and also ensure `concept_survey_links[concept_id][survey_id] = source_item` when the row's normalized survey differs from or supplements the legacy source field.
+   - Else if the normalized gloss matches exactly one existing concept, do **not** allocate a new concept id. Add/update `concept_survey_links[existing_id][survey_id] = source_item` in `survey-overlap.json`.
+   - Else allocate a new concept row as today.
+4. If more than one existing concept has the same normalized-gloss key, do not auto-link; create or leave the row according to current behavior and include an ambiguity record in the response.
+5. In `replace` mode, clear legacy `source_item`/`source_survey`/`custom_order` on existing rows as today, but do **not** wholesale delete sidecar links unless an explicit future request flag is added. Cross-survey links are user-reviewed metadata and should not disappear because a one-survey CSV was reimported.
+
+Response shape extends the current payload:
 
 ```json
 {
-  "concept_survey_links": {
-    "<concept_id>": {
-      "<survey_id>": "<source_item>"
-    }
-  }
+  "ok": true,
+  "matched": 12,
+  "added": 3,
+  "linked": 7,
+  "total": 145,
+  "mode": "merge",
+  "survey_counts": {
+    "klq": { "linked_count": 2, "created_count": 1, "matched_count": 12 },
+    "jbil": { "linked_count": 5, "created_count": 2, "matched_count": 0 }
+  },
+  "ambiguous": [
+    { "label": "hair", "source_survey": "jbil", "source_item": "32", "candidate_concept_ids": ["1", "132"] }
+  ],
+  "fuzzy_preview": [
+    { "label": "hair", "source_survey": "jbil", "source_item": "32", "candidate_concept_id": "1", "reason": "parenthetical-stripped match: hair (collective)" }
+  ]
 }
 ```
 
-5. When a row links to an existing concept via canonical gloss, do **not** allocate a second concept id. Preserve the existing row's primary `source_survey/source_item` unless those columns are empty; put additional survey coordinates into the sidecar.
-6. Created concepts keep the current five-column row behavior and should also seed `concept_survey_links[concept_id][survey_id]` when survey metadata exists, so the UI has one uniform read path.
-7. `replace` mode may still clear legacy `source_*` columns as it does today, but it must not delete `survey-overlap.json` links unless the request explicitly adds a future reset flag. This avoids destructive cross-survey unlinking during CSV refreshes.
+Compatibility: existing callers that read `ok`, `matched`, `added`, `total`, and `mode` keep working. `linked`, `survey_counts`, `ambiguous`, and `fuzzy_preview` are additive.
 
-Response: keep current fields and add a deterministic per-survey summary.
-
-```ts
-interface ImportConceptsResultV2 {
-  ok: true;
-  matched: number;        // backward-compatible existing exact/id/gloss matched count
-  added: number;          // backward-compatible created concept count
-  total: number;
-  mode: "merge" | "replace";
-  link_summary: Record<string, {
-    linked_count: number;   // existing concept got this survey link
-    created_count: number;  // new concept seeded this survey link
-    updated_count: number;  // existing sidecar link changed source_item
-    skipped_count: number;  // row had no usable source_survey/source_item
-  }>;
-  fuzzy_candidates: Array<{
-    incoming_label: string;
-    candidate_concept_id: string;
-    candidate_label: string;
-    reason: "parenthetical_stripped_match" | "comma_token_match";
-  }>;
-}
-```
-
-`fuzzy_candidates` are informational only and never write links automatically.
+OpenAPI must add the additive response fields for `/api/concepts/import` in `python/external_api/openapi.py`, and `src/api/contracts/enrichments-tags-notes-imports.ts:16-22` must add optional result fields.
 
 ### 4b. Manual relabel endpoint
 
-Add a concept-scoped endpoint for deliberate user edits:
+New path: `POST /api/concepts/{conceptId}/survey-links`
 
-- `POST /api/concepts/{conceptId}/survey-links`
-- `DELETE /api/concepts/{conceptId}/survey-links`
+Body:
 
-Request body:
-
-```ts
-interface ConceptSurveyLinkMutation {
-  survey_id: string;
-  source_item: string;
-}
+```json
+{ "survey_id": "jbil", "source_item": "32" }
 ```
 
-POST semantics:
+Semantics:
 
-- Normalize `survey_id` with the existing survey id normalizer.
-- Require non-empty `survey_id` and `source_item`.
-- Require `conceptId` to exist in `concepts.csv`; otherwise `404`.
-- Persist `concept_survey_links[conceptId][survey_id] = source_item` to `survey-overlap.json`.
-- Return the updated `ConceptEntry`, including `surveys`.
+- Normalize `survey_id` with `survey_overlap.normalize_survey_id`.
+- Trim `source_item`.
+- Validate `conceptId` exists in `concepts.csv`; return `404` if missing.
+- Require both `survey_id` and `source_item`; return `400` if either is empty after normalization.
+- Persist by writing `survey-overlap.json` with `concept_survey_links[conceptId][survey_id] = source_item`.
+- Do not rewrite `concepts.csv` unless the concept has no legacy `source_survey`/`source_item` and the implementation deliberately decides to backfill the first link. Recommended v1: sidecar-only to keep the operation narrow and reversible.
+- Return the updated `ConceptEntry` projection exactly as `/api/config` would expose it for that concept, including `surveys`.
 
-DELETE semantics:
+New path: `DELETE /api/concepts/{conceptId}/survey-links`
 
-- Require non-empty `survey_id`; `source_item` may be used as an optimistic guard if present.
-- If `source_item` is present and differs from the current link, return `409` rather than deleting a different link.
-- Remove `concept_survey_links[conceptId][survey_id]` from `survey-overlap.json`; if the concept's link map becomes empty, remove that sidecar concept key.
-- Do not mutate the legacy five-column row unless a future explicit migration requires it.
-- Return the updated `ConceptEntry`.
+Body:
 
-Suggested response shape:
-
-```ts
-interface ConceptSurveyLinkResponse {
-  ok: true;
-  concept: ConceptEntry;
-  survey_overlap: SurveyOverlapState;
-}
+```json
+{ "survey_id": "jbil", "source_item": "32" }
 ```
 
-Backend may alternatively return the bare `ConceptEntry` if frontend API helpers wrap it; implementation PR must choose one shape and pin it in tests and OpenAPI.
+Semantics:
+
+- Normalize `survey_id` and trim `source_item`.
+- Validate concept exists.
+- If the sidecar has the same survey id and source item, remove that link.
+- If `source_item` is omitted or empty in a future-compatible client, remove the link by survey id only. For v1 frontend, send both values so accidental deletes are harder.
+- Remove an empty concept id object from `concept_survey_links` after deletion.
+- Do not delete legacy `source_item`/`source_survey` stored in `concepts.csv`; if the requested deletion targets the legacy link, return `409` with a message that legacy links require CSV edit/reimport.
+- Return the updated `ConceptEntry` projection.
+
+Both manual endpoints must be represented in OpenAPI as `/api/concepts/{conceptId}/survey-links` with `post` and `delete` operations.
 
 ## 5. Frontend changes
 
-All new API calls must go through `src/api/client.ts` and a concrete `src/api/contracts/*` helper; no new component-level bare `fetch()`.
+Parse-front-end should keep this feature inside `ConceptSidebar` and existing API/store seams; no modal and no new global mode.
 
-ConceptSidebar scope:
-
-1. Broaden the clickable badge predicate to “concept has at least two survey links and an active speaker/callback exists.” The current `canFlipSurveyBadge` already depends on `nextSurveyId`; implementation should make the multi-survey intent obvious and keep single-survey badges non-clickable.
-2. Cycle order is a stable sort of normalized `survey_id`s, matching `surveyChoiceKeysForConcept()` / `Object.keys(...).sort()` behavior from `src/lib/surveyOverlap.ts:84-85`.
-3. Keep choices per speaker. The UI must continue to write through the existing `speaker_choices` mechanism for viewing/elicitation choice; this is not a global survey toggle.
-4. Add exactly one context-menu item: `Change survey ID…`.
-5. The item opens an inline editor inside the existing menu/popover area, not a modal. Fields:
-   - `survey_id` select populated from existing configured survey ids plus any survey ids on the concept.
-   - `source_item` text input.
-   - Save button calls the new POST endpoint.
-   - Optional remove affordance calls DELETE for the selected survey id.
-6. Add a subtle underline-on-hover class to multi-survey clickable badges so they read as clickable without adding iconography or emoji.
-
-Current test anchors:
-
-- `src/components/parse/ConceptSidebar.test.tsx:335-374` already proves per-speaker survey pills and `onSurveyChoiceChange`.
-- `src/components/parse/ConceptSidebar.test.tsx:377-417` already proves clicking the visible survey badge flips to the next survey.
-- `src/components/parse/ConceptSidebar.test.tsx:301-332` already proves the context-menu action pattern.
+1. **Badge flip predicate.** `src/components/parse/ConceptSidebar.tsx:266-272` already computes `surveyChoices` and `nextSurveyId`. Broaden the visible affordance so a concept with two or more `survey_links` always shows as interactive when `activeSpeaker` and `onSurveyChoiceChange` exist. The cycle order remains stable sorted survey ids because `surveyChoiceKeysForConcept` returns sorted keys in `src/lib/surveyOverlap.ts:84-86`.
+2. **Per-speaker choice only.** Continue calling `onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)` as in `ConceptSidebar.tsx:331-340`. This writes through the existing `speaker_choices` mechanism; it is not a global survey toggle.
+3. **Context menu item.** Add `Change survey ID...` beside `Merge with...`, `Duplicate...`, and `Unmerge` in `ConceptSidebar.tsx:397-433`.
+4. **Inline editor.** The menu item opens a small inline editor anchored in or below the context menu. It contains:
+   - a `survey_id` select populated from existing `surveySettings` keys plus survey ids already present on the concept;
+   - a `source_item` text input;
+   - Save and Cancel buttons.
+   No modal.
+5. **API calls.** Add frontend contract helpers for `POST /api/concepts/{conceptId}/survey-links` and `DELETE /api/concepts/{conceptId}/survey-links`. These helpers must go through `src/api/client.ts`/contract barrels, not component-level bare `fetch`.
+6. **State refresh.** After a successful save/delete, reload config so `ConceptEntry.surveys`, `surveySettings`, and grouped concept projections refresh consistently.
+7. **Visual cue.** Add subtle underline-on-hover to multi-survey badges so clickable source badges are discoverable without adding visual noise.
+8. **Tests.** Update `ConceptSidebar` tests to cover multi-survey hover/clickability, context-menu editor open/save/cancel, and per-speaker `onSurveyChoiceChange` behavior. Update API contract tests for the two new helpers.
 
 ## 6. Migration
 
-Already-imported workspaces can contain split concepts that represent the same cross-survey gloss. Add a dry-run-first endpoint:
+Already-imported workspaces can contain split concepts that should be reconciled. Add one idempotent endpoint:
 
-- Method/path: `POST /api/concepts/relink-by-gloss`.
-- Default request: `{ "apply": false }`.
-- Apply request: `{ "apply": true, "accepted_groups": [...] }` after frontend confirmation.
-- Matching algorithm: strict `canonical_survey_gloss()` from section 3.
-- Fuzzy candidates: report only; never apply automatically.
+`POST /api/concepts/relink-by-gloss`
 
-Dry-run response:
+Request:
 
-```ts
-interface RelinkByGlossDryRunResponse {
-  ok: true;
-  applied: false;
-  algorithm: "canonical_survey_gloss:v1-strict";
-  groups: Array<{
-    canonical_gloss: string;
-    keep_concept_id: string;
-    merge_concept_ids: string[];
-    labels: Record<string, string>;
-    links_by_survey: Record<string, string>;
-    source_rows: Array<{ concept_id: string; concept_en: string; source_survey?: string; source_item?: string }>;
-  }>;
-  fuzzy_candidates: Array<{
-    incoming_label: string;
-    candidate_label: string;
-    reason: "parenthetical_stripped_match" | "comma_token_match";
-  }>;
+```json
+{ "apply": false }
+```
+
+Response for dry-run:
+
+```json
+{
+  "ok": true,
+  "apply": false,
+  "strict_matches": [
+    {
+      "source_concept_id": "145",
+      "target_concept_id": "34",
+      "normalized_gloss": "nose",
+      "links_to_add": { "jbil": "34" },
+      "would_remove_source_concept": true
+    }
+  ],
+  "ambiguous": [],
+  "fuzzy_preview": [
+    {
+      "source_concept_id": "146",
+      "target_concept_id": "1",
+      "normalized_gloss": "hair",
+      "reason": "parenthetical-stripped match: hair (collective)"
+    }
+  ]
 }
+```
+
+Apply request:
+
+```json
+{ "apply": true }
 ```
 
 Apply semantics:
 
-1. Only apply groups the user confirmed in the frontend review list.
-2. Choose `keep_concept_id` as the lowest numeric concept id in the strict group unless the dry run marks another id because it already has annotations; the rule must be deterministic and shown in the dry-run report.
-3. Move all source links into `survey-overlap.json` under `keep_concept_id`.
-4. Rewrite `concepts.csv` so duplicate concept rows in the accepted group are retired or merged into the kept row.
-5. Update references from retired concept ids to `keep_concept_id` across workspace data that stores concept ids, especially `annotations/*.parse.json`, legacy `annotations/*.json` where still mirrored, `parse-enrichments.json`, and `parse-tags.json` if present. The implementation must not orphan existing lexeme intervals.
-6. Write a backup before mutation, e.g. `backups/relink-by-gloss-<timestamp>/`, and return backup paths.
-7. Idempotency requirement: running the same dry run after a successful apply returns no accepted strict groups to apply.
+1. Build strict normalized-gloss groups across existing `concepts.csv` rows.
+2. For each group with one canonical target and one or more source duplicates:
+   - Choose the target deterministically: lowest numeric `concept_id`, unless a row has richer legacy `source_survey`/`source_item` metadata and the lower id is metadata-empty. If that exception is too surprising during implementation, keep lowest id and document it in the response.
+   - Merge each source row's legacy link and sidecar links into the target concept's `concept_survey_links`.
+   - Preserve `speaker_choices` by moving any choices from source ids to the target id when the chosen survey exists on the target after merge.
+   - Rewrite annotation files only if source concept ids appear in annotation intervals. This must be explicit in the dry-run report as `annotation_rewrites` and must preserve timestamps exactly.
+   - Remove duplicate source rows from `concepts.csv` only after links and annotation references are safely migrated.
+3. Fuzzy preview candidates are never applied by `apply: true` in v1; they require manual relabel or a later reviewed migration.
+4. The endpoint is idempotent: running dry-run after apply returns no strict matches for already-linked pairs.
 
-Frontend migration flow:
-
-1. User opens a reconciliation action for the active workspace.
-2. FE calls `POST /api/concepts/relink-by-gloss` with `{ apply: false }`.
-3. FE shows a confirmation list: kept id, merged ids, labels, survey links, and fuzzy candidates separately.
-4. FE calls `{ apply: true, accepted_groups: [...] }` only after user confirmation.
-5. FE reloads config and annotations after apply so the sidebar and current lexeme state reflect merged ids.
+Frontend flow: call dry-run first, show a confirmation list, then call `{ "apply": true }`. This is critical for existing Qasr01 workspaces because Lucas needs a reviewable list before PARSE merges source concept identity.
 
 ## 7. Test surface and LoC estimate
 
-### Existing tests to extend
+### Existing tests that already exercise adjacent contracts
 
-Backend:
+- `python/test_server_concepts_import.py:113-153` covers `POST /api/concepts/import` merge/add behavior and current `matched`/`added` counters.
+- `python/test_server_concepts_import.py:156-173` covers replace mode clearing optional fields.
+- `python/test_server_concepts_import.py:176-193` proves `/api/config` surfaces `source_item`, `source_survey`, and `custom_order`.
+- `python/test_app_http_project_config_handlers.py:118-177` covers the helper-level import response for merge/replace.
+- `python/test_server_project_config_http.py:109-123` covers wrapper error mapping for `_api_post_concepts_import`.
+- `python/test_external_api_surface.py:70-103` includes `/api/concepts/import` in OpenAPI route coverage, and `python/test_external_api_surface.py:132-148` covers `/api/survey-overlap` read/write contract.
+- `python/test_survey_overlap.py` already covers sidecar normalization/update/projection behavior and should receive targeted additions for manual set/delete semantics.
 
-- `python/test_app_http_project_config_handlers.py:118-148` verifies `/api/concepts/import` exact-label merge updates `source_item/source_survey` and returns `matched/added/total`.
-- `python/test_survey_overlap.py:21-28` verifies missing sidecar defaults.
-- `python/test_survey_overlap.py:31-56` verifies normalized survey ids, concept links, and speaker choices.
-- `python/test_survey_overlap.py:59-77` verifies sidecar update/persistence.
-- `python/test_survey_overlap.py:184-195` verifies speaker choices override legacy fallback.
-- `python/test_survey_overlap.py:216-236` verifies `concepts.csv` round-trip keeps canonical survey ids.
-- `python/test_server_onboard_speaker.py:313+` already covers survey choices writing the sidecar on onboard commit.
+### New backend tests
 
-Frontend:
+1. `python/test_cross_survey_concept_linking.py` or additions to `python/test_app_http_project_config_handlers.py`:
+   - normalized gloss strips KLQ prefixes, JBIL label prefixes, and trailing single-letter variants;
+   - parentheticals remain strict;
+   - comma alternatives remain strict;
+   - exact normalized match links incoming JBIL `nose` to existing KLQ `nose` without allocating a new id;
+   - ambiguous normalized match returns `ambiguous` and does not auto-link;
+   - response includes `linked`, `survey_counts[*].linked_count`, and `survey_counts[*].created_count`.
+2. `python/test_server_concept_survey_links.py`:
+   - `POST /api/concepts/{conceptId}/survey-links` persists a sidecar link and returns updated concept entry;
+   - `DELETE /api/concepts/{conceptId}/survey-links` removes only the matching sidecar link;
+   - missing concept returns `404`; malformed body returns `400`; attempted legacy-link delete returns `409`.
+3. `python/test_concepts_relink_by_gloss.py`:
+   - dry-run reports strict duplicates without writes;
+   - apply merges links and speaker choices idempotently;
+   - fuzzy parenthetical match is preview-only;
+   - annotation rewrite path preserves `start`/`end` and only changes `concept_id` when source ids are actually referenced.
+4. `python/test_external_api_surface.py`:
+   - OpenAPI includes `/api/concepts/{conceptId}/survey-links` and `/api/concepts/relink-by-gloss` with request/response shapes.
 
-- `src/api/client.test.ts:152-230` pins bare `/api/survey-overlap` GET/POST wire format.
-- `src/components/parse/ConceptSidebar.test.tsx:301-332` pins context-menu behavior.
-- `src/components/parse/ConceptSidebar.test.tsx:335-417` pins per-speaker survey choice flips and badge clicking.
-- `src/stores/configStore.test.ts:65-84` already covers survey sidecar data entering config store state.
+### New frontend tests
 
-### New tests required
+1. `src/components/parse/ConceptSidebar.test.tsx`:
+   - multi-survey badges show the hover/click affordance;
+   - clicking the badge cycles by sorted survey ids and calls `onSurveyChoiceChange` for the active speaker only;
+   - context menu opens `Change survey ID...` and inline editor submit calls the new API callback.
+2. `src/api/contracts/*.test.ts` or existing API contract test file:
+   - manual set/delete helpers call the correct routes through the API client;
+   - import result type accepts optional `linked`, `survey_counts`, `ambiguous`, and `fuzzy_preview` fields.
+3. Config reload/store test:
+   - after manual relabel save, frontend reloads config and displays the updated `surveys` projection.
 
-Backend:
+### Honest LoC estimate
 
-1. `test_canonical_survey_gloss_strict_rules`: prefix strip, suffix strip, whitespace/casefold, parenthetical retained, comma retained.
-2. `test_concepts_import_links_cross_survey_exact_gloss_without_new_id`: existing KLQ `nose` plus incoming JBIL `nose` updates `survey-overlap.json` and does not add a concept row.
-3. `test_concepts_import_reports_fuzzy_parenthetical_without_writing`: existing `hair (collective)` plus incoming `hair` returns fuzzy candidate only.
-4. `test_concepts_import_reports_comma_token_without_writing`: `daughter, girl` vs `girl` and `daughter` return fuzzy candidates only.
-5. `test_manual_survey_link_post_and_delete_persist_sidecar`: endpoint set/update/remove, normalized survey id, 404 missing concept.
-6. `test_relink_by_gloss_dry_run_is_non_writing`: report groups and fuzzy candidates; file mtimes/content unchanged.
-7. `test_relink_by_gloss_apply_is_idempotent_and_updates_annotations`: accepted group writes backup, sidecar, concepts.csv, and concept-id references.
-8. OpenAPI/schema test for `/api/concepts/{conceptId}/survey-links` and `/api/concepts/relink-by-gloss` once OpenAPI is updated.
+Backend delta: approximately 430-620 LoC.
 
-Frontend:
+- `python/concept_linking.py` or equivalent helper module: 90-130 LoC for normalization, indexing, ambiguity/fuzzy preview structs.
+- `python/app/http/project_config_handlers.py`: 80-130 LoC to integrate import-time linking and additive response fields.
+- `python/server_routes/exports.py` plus `python/server.py` route dispatch: 45-75 LoC for manual set/delete and relink route wrappers.
+- `python/survey_overlap.py`: 40-70 LoC for set/delete helpers if not implemented in route helper code.
+- `python/external_api/openapi.py`: 40-70 LoC for the new path contracts and schemas.
+- Backend tests: 135-145 LoC across import, manual relabel, migration, and OpenAPI coverage.
 
-1. API contract tests for `setConceptSurveyLink`, `deleteConceptSurveyLink`, and `relinkConceptsByGloss` helpers.
-2. ConceptSidebar test for `Change survey ID…` opening inline editor and submitting POST helper payload.
-3. ConceptSidebar test that clickable badge gets hover underline only when `surveys` has at least two ids.
-4. Migration UI test for dry-run list, confirmation, apply call, and config reload.
-5. Regression test that per-speaker `speaker_choices` remains distinct from manual global concept survey links.
+Frontend delta: approximately 260-380 LoC.
 
-### LoC estimate
+- API contract/types: 45-70 LoC for result fields and new helpers.
+- `src/components/parse/ConceptSidebar.tsx`: 90-140 LoC for context-menu item, inline editor state, and badge cue.
+- `src/ParseUI.tsx` or a config store hook seam: 35-60 LoC to call helpers and reload config.
+- Frontend tests: 90-110 LoC.
 
-| Area | Files likely touched | Estimated delta |
-|---|---|---:|
-| Backend canonicalization + import linking | `python/survey_overlap.py`, `python/app/http/project_config_handlers.py`, `python/server.py` or route-domain module | 160-240 LoC |
-| Backend manual relabel endpoint | route handler + sidecar helpers + OpenAPI | 120-180 LoC |
-| Backend relink migration | new helper/service + route + backup/reference rewrite utilities | 260-420 LoC |
-| Backend tests | import, sidecar, endpoint, migration tests | 260-380 LoC |
-| Frontend API helpers/types | `src/api/contracts/*`, `src/api/types.ts`, barrel exports | 60-100 LoC |
-| Frontend sidebar inline editor | `ConceptSidebar.tsx` + co-located test | 140-220 LoC |
-| Frontend migration review flow | likely existing config/import surface + tests | 180-300 LoC |
-
-Implementation should split into two PRs after this spec is accepted: backend first for contract + persistence, frontend second for UI/API consumption. Expected total implementation delta: roughly 1,180-1,840 LoC including tests, with backend migration breadth as the largest uncertainty.
+The first backend implementation PR should ship normalization + import-time linking + manual relabel endpoints with OpenAPI/tests. The migration endpoint can be either in that PR if small after helper extraction or a second backend PR; it rewrites concepts and potentially annotations, so it deserves its own review if it exceeds the estimate.

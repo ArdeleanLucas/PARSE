@@ -102,6 +102,7 @@ For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 - [API Reference](docs/api-reference.md) — HTTP automation reference and examples.
 - [Architecture](docs/architecture.md) — system design, data model, and runtime responsibilities.
 - [Audition CSV speaker import](docs/runtime/audition-csv-import.md) — marker-export onboarding contract for Adobe Audition CSV/TSV files.
+- [Cross-survey concept linking plan](docs/cross-survey-concept-linking-plan.md) — pre-research spec for linking overlapping KLQ/JBIL survey concepts.
 - [Developer Guide](docs/developer-guide.md) — local development flow, extension points, and contributor rules.
 - [Research Context](docs/research-context.md) — thesis framing, citation guidance, and research-software context.
 - [Models](docs/models/README.md) — model reference notes for speech and transcription support.
