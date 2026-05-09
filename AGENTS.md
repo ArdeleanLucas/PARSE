@@ -704,6 +704,44 @@ These apply to every `src/` file. Violation = stop and fix before merge.
 12. **No emoji in the UI.** Text labels only — this is a fieldwork research tool.
 13. **Every feature component and hook has a co-located test file.** "Feature" = anything under `src/components/annotate/`, `src/components/compare/`, `src/hooks/`. Shared primitives under `src/components/shared/` are exempt. The current observed frontend floor in Test Gates below (≥514 passing as of PR #224) is the enforced check; this rule is the target for new features.
 
+
+## Backend rules — long-running endpoints must be job-tracked (added 2026-05-10)
+
+Any HTTP endpoint whose typical-case latency exceeds **~1 second** of synchronous work MUST be job-tracked: return 202 + `{jobId}` immediately, run the work in a background compute runner via `_create_job` + `_launch_compute_runner`, and emit progress via `_set_compute_progress(job_id, pct, message=...)` as work advances.
+
+**Concrete checklist (all four must hold before the PR is approved):**
+
+1. The route handler returns `JsonResponseSpec(status=ACCEPTED, payload={"jobId": ...})` on the success path. **`jobId: null` is a smell.** If you find yourself returning a null jobId, either the work fits inside one HTTP request (rare; prove it with a p95 measurement) or you are skipping the job system and breaking the FE progress bar.
+2. The compute function is registered in the dispatch table at `python/server_routes/jobs.py` (both ~line 357 and ~line 963 — they are mirror sites). Use the canonical 4-alias snake/kebab/short pattern that `full_pipeline` uses (`{'foo_bar', 'foo-bar', 'foobar'}`).
+3. The runner emits `_set_compute_progress` per logical work unit so a 96-iteration loop reports 96 monotonically increasing progress events. Missing per-iteration progress means the header bar shows nothing during a long block — same UX bug as a non-job endpoint.
+4. The FE consumer calls `startCompute(...)` / `pollCompute(...)` from `src/api/contracts/chat-and-generic-compute.ts` — never a bare `apiFetch` against the start endpoint. Bare `apiFetch` blocks the request and bypasses the existing job-poll hook stack. **If you add a UI affordance to a Run dialog that already has job-tracked modes, the new mode MUST also be job-tracked.** Cross-mode UX consistency is enforced by this rule, not by review luck.
+
+**Failure mode that motivated this rule:** PR #321 added `/api/lexemes/rerun-by-tag` as a synchronous bulk endpoint that returned `jobId: null`. PR #323 then wired a `Tagged-only` run mode into the same Run dialog as `Full audio` and `All concept windows` (both of which go through `/api/compute/full_pipeline` and ARE job-tracked). Result: same dialog, same look, but Tagged-only silently blocked the FE for the duration of the per-concept loop with zero header progress. On a 96-tagged-concept Khan02 run on 2026-05-09 this was a 29-second silent freeze, made worse by the backend reloading the HF Whisper provider per concept (no caching across the loop). The fix converted the endpoint to job-tracked and cached the provider across the worker thread.
+
+Neither #321 nor #323 was wrong in isolation. The combination broke a UX invariant that nobody had codified. This rule codifies it.
+
+**Cheap pre-merge checks for any new compute-style endpoint:**
+
+```bash
+# 1. Does the success path return a non-null jobId?
+grep -n 'jobId.*None\|"jobId": null\|jobId.*null' python/app/http/<your_handler>.py
+# Should return zero matches on the success path.
+
+# 2. Is the compute_type registered in the dispatch table at both sites?
+grep -n '<your_compute_type>' python/server_routes/jobs.py
+# Should return two matches (~line 357 and ~line 963).
+
+# 3. Does the runner emit progress more than once?
+grep -c '_set_compute_progress' python/server_routes/<your_runner>.py
+# Should be > 1 for any loop-based runner.
+
+# 4. Does the FE consumer use startCompute, not bare apiFetch?
+grep -n 'apiFetch.*compute\|startCompute' src/api/contracts/<your_caller>.ts
+# Should show startCompute, not raw apiFetch against the start endpoint.
+```
+
+If any of these checks fails, the PR is not done.
+
 ## Test Gates (pre-push)
 
 Run both before pushing PARSE frontend changes:
