@@ -65,7 +65,9 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "detect_timestamp_offset_from_pair",
     "apply_timestamp_offset",
     "import_tag_csv",
+    "list_concepts_by_tag",
     "prepare_tag_import",
+    "rerun_lexemes_by_tag",
     "onboard_speaker_import",
     "import_processed_speaker",
     "csv_only_reimport",
@@ -538,6 +540,11 @@ from ai.tools.speaker_import_tools import (
     tool_onboard_speaker_import,
     tool_revert_csv_reimport,
 )
+from ai.tools.tag_filter_tools import (
+    TAG_FILTER_TOOL_SPECS,
+    tool_list_concepts_by_tag,
+    tool_rerun_lexemes_by_tag,
+)
 from ai.tools.tag_import_tools import (
     TAG_IMPORT_TOOL_SPECS,
     tool_import_tag_csv,
@@ -553,6 +560,7 @@ REGISTRY: Dict[str, ChatToolSpec] = {
     **PROJECT_READ_TOOL_SPECS,
     **PREVIEW_TOOL_SPECS,
     **JOB_STATUS_TOOL_SPECS,
+    **TAG_FILTER_TOOL_SPECS,
     **TAG_IMPORT_TOOL_SPECS,
     **OFFSET_DETECTION_TOOL_SPECS,
     **OFFSET_APPLY_TOOL_SPECS,
@@ -660,6 +668,7 @@ class ParseChatTools:
             **PROJECT_READ_TOOL_SPECS,
             **PREVIEW_TOOL_SPECS,
             **JOB_STATUS_TOOL_SPECS,
+            **TAG_FILTER_TOOL_SPECS,
             **TAG_IMPORT_TOOL_SPECS,
             **OFFSET_DETECTION_TOOL_SPECS,
             **OFFSET_APPLY_TOOL_SPECS,
@@ -835,6 +844,8 @@ class ParseChatTools:
 
         read_snapshot_tools = {
             "annotation_read",
+            "list_concepts_by_tag",
+            "rerun_lexemes_by_tag",
             "audio_normalize_status",
             "cognate_compute_preview",
             "compute_status",
@@ -1319,6 +1330,12 @@ class ParseChatTools:
 
     def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_prepare_tag_import(self, args)
+
+    def _tool_list_concepts_by_tag(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_list_concepts_by_tag(self, args)
+
+    def _tool_rerun_lexemes_by_tag(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_rerun_lexemes_by_tag(self, args)
 
     def _resolve_onboard_source(self, raw_path: str, *, must_be_audio: bool) -> Path:
         return _resolve_onboard_source(self, raw_path, must_be_audio=must_be_audio)

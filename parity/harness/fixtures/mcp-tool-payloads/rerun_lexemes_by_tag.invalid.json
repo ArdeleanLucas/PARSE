@@ -1,0 +1,5 @@
+{
+  "speakers": ["${SPEAKER_ID}"],
+  "tagLabels": ["Thesis"],
+  "field": "no-such-field"
+}
