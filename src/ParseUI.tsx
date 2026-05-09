@@ -525,6 +525,9 @@ export function ParseUI() {
     cancelledCount,
     dismissBatchStatus,
     openBatchReport,
+    displayedOutcomes,
+    taggedOnlyError,
+    dismissTaggedOnlyError,
   } = useParseUIPipeline({
     closeRunModal: modals.run.close,
     openBatchReport: modals.batchReport.open,
@@ -2594,10 +2597,11 @@ export function ParseUI() {
       />
       <BatchReportModal
         open={modals.batchReport.isOpen}
-        onClose={modals.batchReport.close}
-        outcomes={batch.state.outcomes}
+        onClose={() => { dismissTaggedOnlyError(); modals.batchReport.close(); }}
+        outcomes={displayedOutcomes}
         stepsRun={reportStepsRun}
         onRerunFailed={handleRerunFailed}
+        taggedOnlyError={taggedOnlyError}
       />
       <ClefConfigModal
         open={modals.clef.isOpen}

@@ -43,6 +43,22 @@ export function resolveSessionId(payload: unknown): string {
   return "";
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly path: string;
+  readonly method: string;
+  readonly body: unknown;
+
+  constructor(status: number, method: string, path: string, body: unknown, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.path = path;
+    this.method = method;
+    this.body = body;
+  }
+}
+
 export function networkError(path: string, options: RequestInit | undefined, error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
   if (/failed to fetch|networkerror/i.test(message)) {
@@ -68,7 +84,22 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
-    throw new Error(`API ${options?.method ?? "GET"} ${path} failed ${response.status}: ${text}`);
+    let parsedBody: unknown = undefined;
+    if (text) {
+      try {
+        parsedBody = JSON.parse(text);
+      } catch {
+        parsedBody = text;
+      }
+    }
+    const method = options?.method ?? "GET";
+    throw new ApiError(
+      response.status,
+      method,
+      path,
+      parsedBody,
+      `API ${method} ${path} failed ${response.status}: ${text}`,
+    );
   }
   if (response.status === 204) {
     return undefined as T;

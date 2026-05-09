@@ -5,6 +5,12 @@ import type { BatchSpeakerOutcome, UseBatchPipelineJobResult } from '../useBatch
 import { useParseUIPipeline } from '../useParseUIPipeline';
 import type { TranscriptionRunConfirm } from '../../components/shared/TranscriptionRunModal';
 
+vi.mock('../../api/client', () => ({
+  runLexemesByTag: vi.fn(),
+}));
+
+import { runLexemesByTag } from '../../api/client';
+
 function makeBatchHandle(
   overrides: Partial<UseBatchPipelineJobResult['state']> = {},
 ): UseBatchPipelineJobResult {
@@ -260,5 +266,241 @@ describe('useParseUIPipeline', () => {
     expect(result.current.showBatchCompleteBanner).toBe(true);
     expect(result.current.completedCount).toBe(1);
     expect(result.current.errorCount).toBe(1);
+  });
+
+  it('routes runMode tagged-only payload to runLexemesByTag instead of batch.run', async () => {
+    const batch = makeBatchHandle();
+    const closeRunModal = vi.fn();
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+    const loadEnrichments = vi.fn().mockResolvedValue(undefined);
+
+    vi.mocked(runLexemesByTag).mockResolvedValue({
+      jobId: null,
+      resolved: {
+        totalConcepts: 1,
+        perSpeaker: { Alpha: { conceptCount: 1, concepts: [] } },
+        unknownTags: [],
+        ambiguousTags: {},
+      },
+      total: 2,
+      results: [
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'x' },
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'ok', text: 'y' },
+      ],
+    });
+
+    const confirm: TranscriptionRunConfirm = {
+      speakers: ['Alpha'],
+      steps: ['ortho', 'ipa'],
+      overwrites: {},
+      runMode: 'tagged-only',
+      tagLabels: ['Thesis'],
+      tagMatch: 'any',
+      pad: 0.2,
+    };
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal,
+        openBatchReport: vi.fn(),
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => 'ku',
+        reloadSpeakerAnnotation,
+        reloadStt: vi.fn(),
+        loadEnrichments,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm(confirm);
+    });
+
+    expect(closeRunModal).toHaveBeenCalledOnce();
+    expect(batch.run).not.toHaveBeenCalled();
+    expect(runLexemesByTag).toHaveBeenCalledTimes(1);
+    expect(runLexemesByTag).toHaveBeenCalledWith({
+      speakers: ['Alpha'],
+      tagLabels: ['Thesis'],
+      match: 'any',
+      field: 'both',
+      pad: 0.2,
+    });
+    expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Alpha');
+    expect(loadEnrichments).toHaveBeenCalledOnce();
+  });
+
+  it('skips runLexemesByTag for tagged-only payloads with no tagLabels and no field-applicable steps', async () => {
+    const batch = makeBatchHandle();
+    vi.mocked(runLexemesByTag).mockClear();
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal: vi.fn(),
+        openBatchReport: vi.fn(),
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => undefined,
+        reloadSpeakerAnnotation: vi.fn(),
+        reloadStt: vi.fn(),
+        loadEnrichments: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm({
+        speakers: ['Alpha'],
+        steps: ['stt'], // not ipa nor ortho — should bail out
+        overwrites: {},
+        runMode: 'tagged-only',
+        tagLabels: ['Thesis'],
+        tagMatch: 'any',
+      });
+    });
+
+    expect(runLexemesByTag).not.toHaveBeenCalled();
+    expect(batch.run).not.toHaveBeenCalled();
+  });
+
+  it('routes runLexemesByTag rejection to the user-facing error surface (synthetic outcomes + structured taggedOnlyError) and does NOT call batch.run', async () => {
+    // Construct an ApiError-like rejection mirroring the upcoming Lane A
+    // 400 contract (match=all with unknown labels). The hook must:
+    //   1. Open the BatchReportModal (openBatchReport called once)
+    //   2. Surface synthetic per-speaker error outcomes via displayedOutcomes
+    //   3. Preserve the structured tagLabels[] from the response body in
+    //      taggedOnlyError, NOT just stringify the message
+    //   4. NOT silently swallow the failure (batch.run must not be called)
+    const { ApiError } = await import('../../api/contracts/shared');
+    const apiErr = new ApiError(
+      400,
+      'POST',
+      '/api/lexemes/rerun-by-tag',
+      { error: 'unknown tag labels in match=all', tagLabels: ['Phantom', 'Mystery'] },
+      'API POST /api/lexemes/rerun-by-tag failed 400: ...',
+    );
+    vi.mocked(runLexemesByTag).mockRejectedValueOnce(apiErr);
+
+    const batch = makeBatchHandle();
+    const openBatchReport = vi.fn();
+    const reloadSpeakerAnnotation = vi.fn();
+    const loadEnrichments = vi.fn();
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal: vi.fn(),
+        openBatchReport,
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => 'ku',
+        reloadSpeakerAnnotation,
+        reloadStt: vi.fn(),
+        loadEnrichments,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm({
+        speakers: ['Alpha', 'Beta'],
+        steps: ['ortho', 'ipa'],
+        overwrites: {},
+        runMode: 'tagged-only',
+        tagLabels: ['Phantom', 'Mystery'],
+        tagMatch: 'all',
+      });
+    });
+
+    expect(batch.run).not.toHaveBeenCalled();
+    // Synthetic outcomes appear on displayedOutcomes (not on batch.state.outcomes
+    // — the unmocked batch handle is left untouched).
+    expect(result.current.displayedOutcomes.length).toBe(2);
+    expect(result.current.displayedOutcomes.every((o) => o.status === 'error')).toBe(true);
+    // The structured error payload preserves the actionable label list from
+    // the body — NOT just an Error.message string.
+    expect(result.current.taggedOnlyError).not.toBeNull();
+    expect(result.current.taggedOnlyError!.status).toBe(400);
+    expect(result.current.taggedOnlyError!.tagLabels).toEqual(['Phantom', 'Mystery']);
+    // The modal opens so the user actually sees the failure.
+    expect(openBatchReport).toHaveBeenCalledTimes(1);
+    // No speaker reloads or enrichments fire on a hard rejection.
+    expect(reloadSpeakerAnnotation).not.toHaveBeenCalled();
+    expect(loadEnrichments).not.toHaveBeenCalled();
+    // errorCount on the hook reflects the synthetic outcomes.
+    expect(result.current.errorCount).toBe(2);
+  });
+
+  it('aggregates per-concept result rows by speaker so error and skip rows surface in displayedOutcomes', async () => {
+    // Lane A may emit `statusCode` per row in a future contract. The hook
+    // must aggregate ok/error/skip rows by speaker and field and expose
+    // them on displayedOutcomes — not silently drop everything that is
+    // not status === 'ok' (issue #2).
+    vi.mocked(runLexemesByTag).mockResolvedValueOnce({
+      jobId: null,
+      resolved: {
+        totalConcepts: 3,
+        perSpeaker: {
+          Alpha: { conceptCount: 2, concepts: [] },
+          Beta: { conceptCount: 1, concepts: [] },
+        },
+        unknownTags: [],
+        ambiguousTags: {},
+      },
+      total: 4,
+      results: [
+        // Alpha — one ok ortho, one error ipa with statusCode 404
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'foo' },
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'error', error: 'concept missing', statusCode: 404 } as never,
+        // Beta — one skip
+        { speaker: 'Beta', conceptId: 'c2', field: 'ortho', status: 'skip' },
+      ],
+    });
+
+    const batch = makeBatchHandle();
+    const openBatchReport = vi.fn();
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+    const loadEnrichments = vi.fn().mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal: vi.fn(),
+        openBatchReport,
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => 'ku',
+        reloadSpeakerAnnotation,
+        reloadStt: vi.fn(),
+        loadEnrichments,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm({
+        speakers: ['Alpha', 'Beta'],
+        steps: ['ortho', 'ipa'],
+        overwrites: {},
+        runMode: 'tagged-only',
+        tagLabels: ['Thesis'],
+        tagMatch: 'any',
+      });
+    });
+
+    expect(openBatchReport).toHaveBeenCalledTimes(1);
+    // displayedOutcomes contains both speakers, with proper aggregated status.
+    const byName = Object.fromEntries(
+      result.current.displayedOutcomes.map((o) => [o.speaker, o]),
+    );
+    expect(byName.Alpha).toBeDefined();
+    expect(byName.Beta).toBeDefined();
+    expect(byName.Alpha.status).toBe('error');
+    expect(byName.Beta.status).toBe('cancelled'); // only skip rows
+    // counts roll up
+    expect(result.current.errorCount).toBe(1);
+    expect(result.current.completedCount).toBe(0);
+    // The ok-row triggers a speaker reload; the error/skip-only speakers do not.
+    expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Alpha');
+    expect(reloadSpeakerAnnotation).not.toHaveBeenCalledWith('Beta');
   });
 });

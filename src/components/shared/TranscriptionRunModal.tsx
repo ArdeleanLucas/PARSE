@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Workflow } from "lucide-react";
+import { Workflow, X as XIcon, ChevronDown } from "lucide-react";
 import { Modal } from "./Modal";
 import { TranscriptionRunGrid } from "./TranscriptionRunGrid";
-import { getAnnotation, getPipelineState } from "../../api/client";
+import {
+  getAnnotation,
+  getConceptsByTag,
+  getPipelineState,
+} from "../../api/client";
+import type { ConceptsByTagResponse, TagMatchMode } from "../../api/contracts/concepts";
 import { LEXEME_RERUN_PAD_VALUES, type AnnotationInterval, type LexemeRerunPad } from "../../api/types";
+import { useTagStore } from "../../stores/tagStore";
 import {
   DEFAULT_SCOPE,
   STEP_ICONS,
@@ -25,6 +31,8 @@ export interface TranscriptionRunConfirm {
   refineLexemes?: boolean;
   runMode: TranscriptionRunMode;
   pad?: LexemeRerunPad;
+  tagLabels?: string[];
+  tagMatch?: TagMatchMode;
 }
 
 interface EditedConceptPreviewRow {
@@ -90,6 +98,15 @@ export function TranscriptionRunModal({
     ipa: DEFAULT_SCOPE,
   }));
 
+  // Tagged-only mode state
+  const tagVocabulary = useTagStore((s) => s.tags);
+  const [selectedTagLabels, setSelectedTagLabels] = useState<string[]>([]);
+  const [tagMatch, setTagMatch] = useState<TagMatchMode>("any");
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [taggedPreview, setTaggedPreview] = useState<ConceptsByTagResponse | null>(null);
+  const [taggedPreviewStatus, setTaggedPreviewStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [taggedPreviewError, setTaggedPreviewError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) {
       setPadSec(DEFAULT_ACTION_MENU_PAD);
@@ -102,6 +119,12 @@ export function TranscriptionRunModal({
     setPadSec(DEFAULT_ACTION_MENU_PAD);
     setEditedConceptsStatus("idle");
     setEditedConceptsError(null);
+    setSelectedTagLabels([]);
+    setTagMatch("any");
+    setTagPickerOpen(false);
+    setTaggedPreview(null);
+    setTaggedPreviewStatus("idle");
+    setTaggedPreviewError(null);
     setScopeByStep({
       normalize: DEFAULT_SCOPE,
       stt: DEFAULT_SCOPE,
@@ -197,6 +220,57 @@ export function TranscriptionRunModal({
     };
   }, [open, previewSpeaker, runMode]);
 
+  // Tagged-only preview: re-fire whenever speakers/tags/match change.
+  const selectedSpeakersKey = useMemo(
+    () => JSON.stringify(speakers.filter((s) => selectedSpeakers.has(s))),
+    [speakers, selectedSpeakers],
+  );
+  const selectedTagsKey = useMemo(
+    () => JSON.stringify(selectedTagLabels),
+    [selectedTagLabels],
+  );
+
+  useEffect(() => {
+    if (!open || runMode !== "tagged-only") {
+      setTaggedPreview(null);
+      setTaggedPreviewStatus("idle");
+      setTaggedPreviewError(null);
+      return;
+    }
+    const speakerList = speakers.filter((s) => selectedSpeakers.has(s));
+    if (speakerList.length === 0 || selectedTagLabels.length === 0) {
+      setTaggedPreview(null);
+      setTaggedPreviewStatus("idle");
+      setTaggedPreviewError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setTaggedPreviewStatus("loading");
+    setTaggedPreviewError(null);
+    getConceptsByTag({
+      speakers: speakerList,
+      tagLabels: selectedTagLabels,
+      match: tagMatch,
+    })
+      .then((resp) => {
+        if (cancelled) return;
+        setTaggedPreview(resp);
+        setTaggedPreviewStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTaggedPreview(null);
+        setTaggedPreviewStatus("error");
+        setTaggedPreviewError(err instanceof Error ? err.message : String(err ?? "Failed to load tagged concepts"));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, runMode, selectedSpeakersKey, selectedTagsKey, tagMatch]);
+
   const selectableStepOrder: PipelineStepId[] = useMemo(() => (
     runMode === "full" ? STEP_ORDER : STEP_ORDER.filter((step) => step !== "normalize")
   ), [runMode]);
@@ -246,6 +320,21 @@ export function TranscriptionRunModal({
   const editedOnlyEmpty = runMode === "edited-only" && editedConceptsStatus === "ready" && editedConcepts.length === 0;
   const editedOnlyLoading = runMode === "edited-only" && editedConceptsStatus === "loading";
   const editedOnlyError = runMode === "edited-only" && editedConceptsStatus === "error";
+  const taggedOnlyEmpty = runMode === "tagged-only"
+    && taggedPreviewStatus === "ready"
+    && (taggedPreview?.totalConcepts ?? 0) === 0;
+  const taggedOnlyLoading = runMode === "tagged-only" && taggedPreviewStatus === "loading";
+  const taggedOnlyError = runMode === "tagged-only" && taggedPreviewStatus === "error";
+  const taggedOnlyMissingInputs = runMode === "tagged-only"
+    && (selectedTagLabels.length === 0 || !hasAnySpeaker);
+  // Mirror Lane A's upcoming 409-on-ambiguous boundary: if the user picked
+  // match=ALL and the preview reports any ambiguous label, the request
+  // would be rejected server-side. Disable confirm pre-emptively.
+  const taggedOnlyAllAmbiguous = runMode === "tagged-only"
+    && tagMatch === "all"
+    && taggedPreviewStatus === "ready"
+    && taggedPreview != null
+    && Object.keys(taggedPreview.ambiguousTags).length > 0;
   const willOverwrite = summary.overwrite > 0;
   const includesPadApplicableStep = stepsToRender.some((step) => PAD_APPLICABLE_STEPS.has(step));
   const showPadSelector = runMode !== "full" && includesPadApplicableStep;
@@ -261,6 +350,22 @@ export function TranscriptionRunModal({
     setPadSec(next);
     padRefs.current[nextIndex]?.focus();
   };
+
+  const toggleTagLabel = (label: string) => {
+    setSelectedTagLabels((prev) => (
+      prev.includes(label) ? prev.filter((x) => x !== label) : [...prev, label]
+    ));
+  };
+
+  const removeTagLabel = (label: string) => {
+    setSelectedTagLabels((prev) => prev.filter((x) => x !== label));
+  };
+
+  const tagColorByLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tagVocabulary) map.set(t.label, t.color);
+    return map;
+  }, [tagVocabulary]);
 
   const handleConfirm = () => {
     const speakersArr = speakers.filter((s) => selectedSpeakers.has(s));
@@ -285,6 +390,8 @@ export function TranscriptionRunModal({
       runMode,
       pad: runMode !== "full" && includesPadApplicableStepInPayload ? padSec : undefined,
       refineLexemes: runMode === "full" && includesOrtho && refineLexemes ? true : undefined,
+      tagLabels: runMode === "tagged-only" ? selectedTagLabels.slice() : undefined,
+      tagMatch: runMode === "tagged-only" ? tagMatch : undefined,
     });
   };
 
@@ -311,12 +418,14 @@ export function TranscriptionRunModal({
               ["full", "Full audio", "Whole-file pipeline run."],
               ["concept-windows", "All concept windows", "Run selected steps on each concept window."],
               ["edited-only", "Edited concepts only", "Run selected steps on manually edited concepts."],
+              ["tagged-only", "Tagged concepts only", "Run selected steps on concepts carrying chosen tags."],
             ] as const).map(([mode, label, help]) => (
               <label key={mode} className="flex items-start gap-1.5 text-xs text-slate-700 cursor-pointer">
                 <input
                   type="radio"
                   name="transcription-run-mode"
                   value={mode}
+                  data-testid={`transcription-run-mode-${mode}`}
                   checked={runMode === mode}
                   onChange={() => {
                     setRunMode(mode);
@@ -332,6 +441,145 @@ export function TranscriptionRunModal({
             ))}
           </div>
         </fieldset>
+
+        {runMode === "tagged-only" && (
+          <fieldset
+            className="rounded-md border border-slate-200 bg-white px-3 py-2"
+            data-testid="transcription-run-tagged-controls"
+          >
+            <legend className="mb-1 text-xs font-semibold text-slate-700">Tag filter</legend>
+
+            {/* Selected tag chips */}
+            {selectedTagLabels.length > 0 && (
+              <div
+                className="mb-2 flex flex-wrap gap-1.5"
+                data-testid="transcription-run-tagged-chips"
+              >
+                {selectedTagLabels.map((label) => {
+                  const color = tagColorByLabel.get(label) ?? "#6b7280";
+                  return (
+                    <span
+                      key={label}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700"
+                      data-testid={`transcription-run-tagged-chip-${label}`}
+                    >
+                      <span
+                        className="inline-block h-2 w-2 rounded-full"
+                        style={{ backgroundColor: color }}
+                        aria-hidden="true"
+                      />
+                      <span>{label}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeTagLabel(label)}
+                        className="rounded text-slate-400 hover:text-slate-700"
+                        aria-label={`Remove tag ${label}`}
+                        data-testid={`transcription-run-tagged-chip-remove-${label}`}
+                      >
+                        <XIcon className="h-3 w-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Tag dropdown trigger */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setTagPickerOpen((v) => !v)}
+                aria-expanded={tagPickerOpen}
+                aria-haspopup="listbox"
+                data-testid="transcription-run-tagged-picker-trigger"
+                className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                <span>
+                  {selectedTagLabels.length === 0
+                    ? "Select tags…"
+                    : `${selectedTagLabels.length} tag${selectedTagLabels.length === 1 ? "" : "s"} selected`}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+              </button>
+              {tagPickerOpen && (
+                <div
+                  className="absolute z-10 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 text-xs shadow-md"
+                  role="listbox"
+                  data-testid="transcription-run-tagged-picker-popover"
+                >
+                  {tagVocabulary.length === 0 ? (
+                    <div
+                      className="px-2 py-1.5 text-slate-500"
+                      data-testid="transcription-run-tagged-picker-empty"
+                    >
+                      No tags defined. Add tags from the right panel.
+                    </div>
+                  ) : (
+                    tagVocabulary.map((tag) => {
+                      const checked = selectedTagLabels.includes(tag.label);
+                      return (
+                        <label
+                          key={tag.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-50"
+                          data-testid={`transcription-run-tagged-picker-option-${tag.label}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleTagLabel(tag.label)}
+                            className="h-3.5 w-3.5 rounded border-slate-300"
+                          />
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                            aria-hidden="true"
+                          />
+                          <span className="text-slate-700">{tag.label}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Match-mode segmented control */}
+            <div
+              className="mt-3"
+              data-testid="transcription-run-tagged-match"
+              role="radiogroup"
+              aria-label="Tag match mode"
+            >
+              <div className="flex flex-wrap gap-3">
+                {([
+                  ["any", "Match ANY tag (OR — broader)"],
+                  ["all", "Match ALL tags (AND — stricter)"],
+                ] as const).map(([value, label]) => (
+                  <label
+                    key={value}
+                    className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="transcription-run-tagged-match"
+                      value={value}
+                      checked={tagMatch === value}
+                      onChange={() => setTagMatch(value)}
+                      data-testid={`transcription-run-tagged-match-${value}`}
+                      className="h-3.5 w-3.5 border-slate-300"
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-1 text-[11px] leading-snug text-slate-500">
+                ANY = a concept that carries at least one of the selected tags.
+                <br />
+                ALL = a concept that carries every selected tag.
+              </div>
+            </div>
+          </fieldset>
+        )}
 
         {runMode === "edited-only" && (
           <div
@@ -350,6 +598,102 @@ export function TranscriptionRunModal({
                 {editedConcepts.map((row) => (
                   <div key={`${row.conceptId}-${row.start}-${row.end}`}>{formatEditedConceptPreviewRow(row)}</div>
                 ))}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {runMode === "tagged-only" && (
+          <div
+            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+            data-testid="transcription-run-tagged-preview"
+          >
+            <div className="mb-1 font-semibold text-slate-700">Tagged concept preview</div>
+            {taggedOnlyMissingInputs ? (
+              <div>Select at least one speaker and one tag to preview matching concepts.</div>
+            ) : null}
+            {taggedOnlyLoading ? <div>Loading tagged concepts…</div> : null}
+            {taggedOnlyError ? (
+              <div className="text-rose-700">
+                {taggedPreviewError ?? "Failed to load tagged concepts."}
+              </div>
+            ) : null}
+            {taggedOnlyEmpty ? (
+              <div className="text-rose-700">No concepts carry the selected tags.</div>
+            ) : null}
+            {taggedPreviewStatus === "ready"
+              && taggedPreview
+              && taggedPreview.totalConcepts > 0 ? (
+              <div
+                className="max-h-48 overflow-y-auto rounded border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-700"
+                data-testid="transcription-run-tagged-preview-list"
+              >
+                {Object.entries(taggedPreview.perSpeaker).map(([speaker, entry]) => (
+                  <div
+                    key={speaker}
+                    className="mb-2"
+                    data-testid={`transcription-run-tagged-preview-speaker-${speaker}`}
+                  >
+                    <div className="font-sans text-[11px] font-semibold text-slate-700">
+                      {speaker} · {entry.conceptCount} concept{entry.conceptCount === 1 ? "" : "s"}
+                    </div>
+                    {entry.concepts.map((c) => (
+                      <div
+                        key={`${speaker}-${c.conceptId}-${c.start}`}
+                        className="flex flex-wrap items-center gap-1.5 pl-3"
+                        data-testid={`transcription-run-tagged-preview-row-${speaker}-${c.conceptId}`}
+                      >
+                        <span>
+                          {`#${c.conceptId} "${c.name || "(untitled)"}"  ${c.start.toFixed(3)}–${c.end.toFixed(3)}`}
+                        </span>
+                        {c.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-sans text-slate-700"
+                          >
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full"
+                              style={{ backgroundColor: tagColorByLabel.get(tag) ?? "#6b7280" }}
+                              aria-hidden="true"
+                            />
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {taggedPreviewStatus === "ready"
+              && taggedPreview
+              && taggedPreview.unknownTags.length > 0 ? (
+              <div
+                className="mt-1 text-[11px] text-amber-700"
+                data-testid="transcription-run-tagged-preview-unknown"
+              >
+                {tagMatch === "any"
+                  ? `Unknown tags ignored: ${taggedPreview.unknownTags.join(", ")}.`
+                  : `Unknown tags ignored — note: ALL match expected every tag to resolve. Offending: ${taggedPreview.unknownTags.join(", ")}.`}
+              </div>
+            ) : null}
+            {taggedPreviewStatus === "ready"
+              && taggedPreview
+              && Object.keys(taggedPreview.ambiguousTags).length > 0 ? (
+              <div
+                className="mt-1 text-[11px] font-medium text-rose-700"
+                data-testid="transcription-run-tagged-preview-ambiguous"
+              >
+                Ambiguous tags (multiple matches found, ignored):{" "}
+                {Object.entries(taggedPreview.ambiguousTags).map(([label, ids], idx, arr) => (
+                  <span
+                    key={label}
+                    data-testid={`transcription-run-tagged-preview-ambiguous-${label}`}
+                  >
+                    {label} → [{ids.join(", ")}]{idx < arr.length - 1 ? "; " : ""}
+                  </span>
+                ))}
+                . Pick one tag id to disambiguate.
               </div>
             ) : null}
           </div>
@@ -468,6 +812,8 @@ export function TranscriptionRunModal({
           <span>
             {runMode === "edited-only" ? (
               <>Run on {editedConcepts.length} edited concepts × {stepsToRender.length} steps ({stepsToRender.map((step) => STEP_LABELS[step]).join(", ") || "none"}){showPadSelector ? ` · pad ${formatActionMenuPad(padSec)} s` : ""}.</>
+            ) : runMode === "tagged-only" ? (
+              <>Run on {taggedPreview?.totalConcepts ?? 0} tagged concepts × {stepsToRender.length} steps ({stepsToRender.map((step) => STEP_LABELS[step]).join(", ") || "none"}){showPadSelector ? ` · pad ${formatActionMenuPad(padSec)} s` : ""}.</>
             ) : (
               <>Running {selectedSpeakers.size} speaker{selectedSpeakers.size === 1 ? "" : "s"} × {stepsToRender.length} step{stepsToRender.length === 1 ? "" : "s"}{showPadSelector ? ` · pad ${formatActionMenuPad(padSec)} s` : ""}. <span className="text-emerald-700 font-medium">{summary.ok} ok</span>, <span className="text-sky-700 font-medium">{summary.keep} keep existing</span>, <span className="text-amber-700 font-medium">{summary.overwrite} will overwrite</span>, <span className="text-rose-700 font-medium">{summary.blocked} blocked</span> (will be skipped at runtime).</>
             )}
@@ -486,7 +832,18 @@ export function TranscriptionRunModal({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={!hasAnySpeaker || !hasAnyStep || editedOnlyLoading || editedOnlyEmpty || editedOnlyError}
+            disabled={
+              !hasAnySpeaker
+                || !hasAnyStep
+                || editedOnlyLoading
+                || editedOnlyEmpty
+                || editedOnlyError
+                || taggedOnlyLoading
+                || taggedOnlyEmpty
+                || taggedOnlyError
+                || taggedOnlyMissingInputs
+                || taggedOnlyAllAmbiguous
+            }
             data-testid="transcription-run-confirm"
             className={`inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
               willOverwrite ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
