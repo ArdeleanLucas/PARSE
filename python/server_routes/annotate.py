@@ -2368,26 +2368,32 @@ class FullPipelineMemoryPreflightError(RuntimeError):
 
     error_code = 'oom_suspect'
 
-    def __init__(self, *, mem_available_gb: float, required_gb: float, swap_total_gb: float) -> None:
+    def __init__(self, *, mem_available_gb: float, required_gb: float, swap_total_gb: float, step: str | None = None) -> None:
         self.mem_available_gb = float(mem_available_gb)
         self.required_gb = float(required_gb)
         self.swap_total_gb = float(swap_total_gb)
+        self.step = str(step).strip().lower() if step else None
+        step_phrase = ' before {0} step'.format(self.step) if self.step else ''
         super().__init__(
-            'Insufficient host memory for full pipeline: {0:.1f} GiB available, {1:.1f} GiB required. '
+            'Insufficient host memory for full pipeline{0}: {1:.1f} GiB available, {2:.1f} GiB required. '
             'Close other memory-heavy processes, run smaller step subsets, or adjust PARSE_FULL_PIPELINE_MIN_MEM_GB '
             'only if you have validated this machine can survive the run.'.format(
+                step_phrase,
                 self.mem_available_gb,
                 self.required_gb,
             )
         )
 
     @property
-    def details(self) -> _server.Dict[str, float]:
-        return {
+    def details(self) -> _server.Dict[str, _server.Any]:
+        details: _server.Dict[str, _server.Any] = {
             'mem_available_gb': self.mem_available_gb,
             'required_gb': self.required_gb,
             'swap_total_gb': self.swap_total_gb,
         }
+        if self.step:
+            details['step'] = self.step
+        return details
 
 
 def _full_pipeline_min_host_memory_gb() -> float:
@@ -2437,9 +2443,9 @@ def _host_available_memory_gb() -> _server.Optional[float]:
     return float(info.get('mem_available_gb', 0.0))
 
 
-def _ensure_host_memory_for_full_pipeline(selected_steps: _server.Sequence[str]) -> None:
-    selected = {str(step or '').strip().lower() for step in selected_steps}
-    if not (selected & _FULL_PIPELINE_HOST_MEMORY_STEPS):
+def _ensure_host_memory_for_step(step: str) -> None:
+    step_name = str(step or '').strip().lower()
+    if step_name not in _FULL_PIPELINE_HOST_MEMORY_STEPS:
         return
     required_gb = _server._full_pipeline_min_host_memory_gb()
     if required_gb <= 0:
@@ -2453,7 +2459,31 @@ def _ensure_host_memory_for_full_pipeline(selected_steps: _server.Sequence[str])
         mem_available_gb=float(available_gb),
         required_gb=float(required_gb),
         swap_total_gb=swap_total_gb,
+        step=step_name,
     )
+
+
+def _ensure_host_memory_for_full_pipeline(selected_steps: _server.Sequence[str]) -> None:
+    for step in selected_steps:
+        _ensure_host_memory_for_step(str(step or ''))
+
+
+def _collect_after_unload() -> None:
+    """Collect Python/CUDA caches after releasing heavy pipeline resources."""
+    import gc
+
+    gc.collect()
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return
+    try:
+        cuda = getattr(torch, 'cuda', None)
+        empty_cache = getattr(cuda, 'empty_cache', None)
+        if callable(empty_cache):
+            empty_cache()
+    except (RuntimeError, AttributeError, TypeError, ValueError):
+        return
 
 
 def _gpu_free_memory_gb() -> _server.Optional[float]:
@@ -2479,6 +2509,135 @@ def _ensure_free_gpu_memory_for_ipa() -> None:
                 _MIN_FREE_GB_FOR_IPA,
             )
         )
+
+
+def _full_pipeline_ipa_step_result(sub_result: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    if 'message' in sub_result and sub_result.get('total', 0) == 0:
+        return {'status': 'skipped', 'reason': sub_result['message'], **sub_result}
+    return {'status': 'ok', **sub_result}
+
+
+def _full_pipeline_ipa_subprocess_error_result(
+    exit_code: _server.Optional[int],
+    result_path: _server.Optional[str],
+    error: _server.Optional[str] = None,
+    traceback_str: _server.Optional[str] = None,
+) -> _server.Dict[str, _server.Any]:
+    killed = exit_code in (-9, 137)
+    if killed:
+        message = 'IPA subprocess was killed (likely OOM); other steps\' results are intact'
+    elif error:
+        message = error
+    elif exit_code is None:
+        message = 'IPA subprocess did not report an exit code; other steps\' results are intact'
+    else:
+        message = 'IPA subprocess exited with code {0}; other steps\' results are intact'.format(exit_code)
+    result: _server.Dict[str, _server.Any] = {
+        'status': 'error',
+        'error': message,
+        'traceback': traceback_str,
+        'exit_code': exit_code,
+    }
+    if result_path:
+        result['result_path'] = result_path
+    return result
+
+
+def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
+    import json as _json
+    import traceback as _tb
+
+    _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
+    outcome: _server.Dict[str, _server.Any] = {'ok': False}
+    try:
+        _server._compute_checkpoint('FULL_PIPELINE_IPA_CHILD.entry', job_id=job_id)
+        result = _server._compute_speaker_ipa(job_id, payload)
+        _server._compute_checkpoint('FULL_PIPELINE_IPA_CHILD.ok', job_id=job_id)
+        outcome = {'ok': True, 'result': result}
+    except BaseException as exc:  # noqa: BLE001 - child must serialize any failure instead of killing parent.
+        outcome = {'ok': False, 'error': str(exc), 'traceback': _tb.format_exc()}
+        try:
+            _server._compute_checkpoint('FULL_PIPELINE_IPA_CHILD.error', job_id=job_id, error=str(exc))
+        except Exception:
+            pass
+    try:
+        with open(result_path, 'w', encoding='utf-8') as handle:
+            _json.dump(outcome, handle)
+    except Exception:
+        pass
+
+
+def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    import json as _json
+    import multiprocessing
+    import tempfile
+
+    fd, result_path = tempfile.mkstemp(prefix='parse-full-pipeline-ipa-', suffix='.json')
+    _server.os.close(fd)
+    try:
+        _server.os.remove(result_path)
+    except OSError:
+        pass
+    checkpoint_path = _server._compute_checkpoint_path()
+    ctx = multiprocessing.get_context('spawn')
+    child_job_id = 'child-{0}-ipa'.format(job_id)
+    child = ctx.Process(
+        target=_full_pipeline_ipa_subprocess_entry,
+        name='parse-full-pipeline-ipa',
+        args=(child_job_id, payload, result_path, checkpoint_path),
+        daemon=True,
+    )
+    child.start()
+    _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.started', job_id=job_id, child_pid=child.pid, result_path=result_path)
+    try:
+        timeout_raw = _server.os.environ.get('PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC', '14400')
+        timeout_sec = max(60.0, float(timeout_raw))
+    except ValueError:
+        timeout_sec = 14400.0
+    child.join(timeout=timeout_sec)
+    if child.is_alive():
+        _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.timeout', job_id=job_id, child_pid=child.pid, timeout=timeout_sec)
+        try:
+            child.terminate()
+            child.join(timeout=10.0)
+        except Exception:
+            pass
+        return _full_pipeline_ipa_subprocess_error_result(
+            child.exitcode,
+            result_path,
+            'IPA subprocess exceeded PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC ({0}s) and was terminated; other steps\' results are intact'.format(int(timeout_sec)),
+        )
+    exit_code = child.exitcode
+    _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.exited', job_id=job_id, exit_code=exit_code)
+    if exit_code not in (0, None):
+        try:
+            if _server.os.path.exists(result_path):
+                _server.os.remove(result_path)
+        except OSError:
+            pass
+        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path)
+    if not _server.os.path.exists(result_path):
+        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path, 'IPA subprocess result file was not written; other steps\' results are intact')
+    try:
+        with open(result_path, 'r', encoding='utf-8') as handle:
+            payload_out = _json.load(handle)
+    except Exception as exc:
+        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path, 'IPA subprocess result file unreadable: {0}'.format(exc))
+    finally:
+        try:
+            _server.os.remove(result_path)
+        except OSError:
+            pass
+    if bool(payload_out.get('ok')):
+        sub_result = payload_out.get('result') if isinstance(payload_out.get('result'), dict) else {}
+        return _full_pipeline_ipa_step_result(dict(sub_result))
+    return _full_pipeline_ipa_subprocess_error_result(
+        exit_code,
+        result_path,
+        str(payload_out.get('error') or 'IPA subprocess reported failure'),
+        str(payload_out.get('traceback') or '') or None,
+    )
+
 
 def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run a user-selected subset of the speaker pipeline sequentially.
@@ -2518,8 +2677,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
         raise RuntimeError('steps must be a list, got {0}'.format(type(raw_steps).__name__))
     if not selected:
         return {'speaker': speaker, 'steps_run': [], 'results': {}, 'message': 'No steps selected'}
-    _set_compute_progress(job_id, 1.0, message='Full pipeline host-memory preflight')
-    _server._ensure_host_memory_for_full_pipeline(selected)
+    _set_compute_progress(job_id, 1.0, message='Full pipeline starting')
     overwrites_raw = payload.get('overwrites') or {}
     if not isinstance(overwrites_raw, dict):
         overwrites_raw = {}
@@ -2535,7 +2693,14 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     ortho_provider: _server.Optional[AIProvider] = None
 
     def _capture_error(exc: BaseException) -> _server.Dict[str, _server.Any]:
-        return {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
+        error_payload: _server.Dict[str, _server.Any] = {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
+        details = getattr(exc, 'details', None)
+        if isinstance(details, dict):
+            error_payload.update(details)
+        error_code = getattr(exc, 'error_code', None)
+        if error_code:
+            error_payload['error_code'] = str(error_code)
+        return error_payload
 
     def _unload_ortho_provider() -> None:
         nonlocal ortho_provider
@@ -2564,6 +2729,8 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
             step_base_pct = 5.0 + idx / total * 90.0
             _set_compute_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
             try:
+                if step in _FULL_PIPELINE_HOST_MEMORY_STEPS:
+                    _server._ensure_host_memory_for_step(step)
                 if step == 'normalize':
                     source_rel = _server._annotation_primary_source_wav(speaker)
                     if not source_rel:
@@ -2623,35 +2790,33 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                     else:
                         results['ortho'] = {'status': 'ok', **sub_result}
                     steps_run.append(step)
-                    if 'ipa' in selected:
-                        _unload_ortho_provider()
                 elif step == 'ipa':
-                    if 'ortho' in selected:
-                        _ensure_free_gpu_memory_for_ipa()
+                    _ensure_free_gpu_memory_for_ipa()
                     ipa_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ipa', False), 'run_mode': run_mode}
                     if concept_ids is not None:
                         ipa_sub_payload['concept_ids'] = list(concept_ids)
-                    sub_result = _server._compute_speaker_ipa(job_id, ipa_sub_payload)
-                    if 'message' in sub_result and sub_result.get('total', 0) == 0:
-                        results['ipa'] = {'status': 'skipped', 'reason': sub_result['message'], **sub_result}
-                    else:
-                        results['ipa'] = {'status': 'ok', **sub_result}
+                    results['ipa'] = _server._compute_full_pipeline_ipa_in_subprocess(job_id, ipa_sub_payload)
                     steps_run.append(step)
-                    _release_full_pipeline_ipa_aligner()
                 else:
                     results[step] = {'status': 'error', 'error': 'Unknown pipeline step: {0}'.format(step), 'traceback': None}
             except Exception as exc:
                 results[step] = _capture_error(exc)
                 steps_run.append(step)
-                if step == 'ortho' and 'ipa' in selected:
+                _server._reset_job_to_running(job_id)
+            finally:
+                if step in {'normalize', 'stt'}:
+                    _server._collect_after_unload()
+                elif step == 'ortho':
                     _unload_ortho_provider()
+                    _server._collect_after_unload()
                 elif step == 'ipa':
                     _release_full_pipeline_ipa_aligner()
-                _server._reset_job_to_running(job_id)
+                    _server._collect_after_unload()
     finally:
         _unload_ortho_provider()
         if 'ipa' in selected:
             _release_full_pipeline_ipa_aligner()
+        _server._collect_after_unload()
 
     _set_compute_progress(job_id, 99.0, message='Pipeline complete')
     summary = {'ok': sum((1 for r in results.values() if r.get('status') == 'ok')), 'skipped': sum((1 for r in results.values() if r.get('status') == 'skipped')), 'error': sum((1 for r in results.values() if r.get('status') == 'error'))}
@@ -3031,5 +3196,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_gpu_free_memory_gb', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

@@ -12,6 +12,17 @@ from ai.provider import get_ortho_provider  # noqa: E402
 from ai.providers.local_whisper import LocalWhisperProvider  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _inline_full_pipeline_ipa_subprocess(monkeypatch):
+    server._install_route_bindings()
+
+    def inline_ipa(_job_id, payload):
+        sub_result = server._compute_speaker_ipa(_job_id, payload)
+        return server._full_pipeline_ipa_step_result(dict(sub_result))
+
+    monkeypatch.setattr(server, "_compute_full_pipeline_ipa_in_subprocess", inline_ipa)
+
+
 class _StubOrthoProvider:
     """Returns a fixed set of razhan-style segments so tests can assert exact output."""
 
