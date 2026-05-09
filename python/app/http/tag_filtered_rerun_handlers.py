@@ -28,6 +28,7 @@ from app.services.tag_resolver import (
 )
 
 from .job_observability_handlers import JsonResponseSpec
+from .lexeme_rerun_handlers import LexemeRerunHandlerError
 
 logger = logging.getLogger(__name__)
 
@@ -97,16 +98,43 @@ def _expand(body: Mapping[str, Any], project_root: Path) -> list[str]:
         raise TagFilteredHandlerError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
 
 
-def _resolve(
-    body: Mapping[str, Any],
-    *,
-    load_tags_vocab: Callable[[], Sequence[Mapping[str, Any]]],
-) -> tuple[list[str], ResolvedTags, str]:
-    labels = _coerce_tag_labels(body)
-    match = _coerce_match(body)
-    vocab = load_tags_vocab()
-    resolved = resolve_tag_labels(labels, vocab)
-    return labels, resolved, match
+def _format_label_list(labels: Sequence[str]) -> str:
+    return ", ".join("'{0}'".format(label) for label in labels)
+
+
+def _format_ambiguous(ambiguous: Mapping[str, Sequence[str]]) -> str:
+    parts = []
+    for label, candidates in ambiguous.items():
+        parts.append("'{0}' -> [{1}]".format(label, ", ".join(candidates)))
+    return "; ".join(parts)
+
+
+def _enforce_all_match_label_strictness(match: str, resolved: ResolvedTags) -> None:
+    """When ``match='all'``, every requested label must resolve to exactly one tag.
+
+    Unknown or ambiguous labels under AND semantics would silently degrade to
+    "intersection over the resolved subset," which is not what the caller asked
+    for. Surface a 400 listing the offending labels so the FE/MCP can fix the
+    request before retrying.
+    """
+    if match != "all":
+        return
+    problems: list[str] = []
+    if resolved.unknown:
+        problems.append("unknown tagLabels: {0}".format(_format_label_list(resolved.unknown)))
+    if resolved.ambiguous:
+        problems.append(
+            "ambiguous tagLabels (resolve by id or rename in the vocab): {0}".format(
+                _format_ambiguous(resolved.ambiguous)
+            )
+        )
+    if problems:
+        raise TagFilteredHandlerError(
+            HTTPStatus.BAD_REQUEST,
+            "match='all' requires every tagLabel to resolve to exactly one tag; {0}".format(
+                "; ".join(problems)
+            ),
+        )
 
 
 def _id_to_label(vocab: Sequence[Mapping[str, Any]]) -> dict[str, str]:
@@ -191,13 +219,13 @@ def build_post_concepts_by_tag_response(
     normalize_annotation_record: AnnotationNormalizer,
 ) -> JsonResponseSpec:
     """Resolve a tag query into per-speaker concept hits without mutating state."""
-    _ = _coerce_match  # ensure name is bound for mypy in handler chain
     labels = _coerce_tag_labels(body)
     match = _coerce_match(body)
     speakers = _expand(body, project_root)
 
     vocab = list(load_tags_vocab())
     resolved = resolve_tag_labels(labels, vocab)
+    _enforce_all_match_label_strictness(match, resolved)
     id_to_label = _id_to_label(vocab)
     tag_ids = list(resolved.ids_by_label.values())
 
@@ -287,8 +315,16 @@ def _per_concept_rerun(
                 value = payload.get(tier_field)
                 if isinstance(value, str):
                     result_entry["text"] = value
+        except LexemeRerunHandlerError as exc:
+            # Preserve the per-interval handler's HTTP status so the caller can
+            # distinguish "concept not found" (404) from "speaker locked" (409)
+            # from "runner died" (500) without having to parse error strings.
+            result_entry["status"] = "error"
+            result_entry["statusCode"] = int(exc.status)
+            result_entry["error"] = exc.message
         except Exception as exc:
             result_entry["status"] = "error"
+            result_entry["statusCode"] = int(HTTPStatus.INTERNAL_SERVER_ERROR)
             result_entry["error"] = str(exc)
         out.append(result_entry)
     return out
@@ -319,6 +355,20 @@ def build_post_lexemes_rerun_by_tag_response(
 
     vocab = list(load_tags_vocab())
     resolved = resolve_tag_labels(labels, vocab)
+    # match='all' must 400 on unknown/ambiguous before any rerun spends GPU.
+    _enforce_all_match_label_strictness(match, resolved)
+    # Any ambiguous label is a 409 for rerun even under match='any', because
+    # silently disambiguating would consume GPU and overwrite annotations on a
+    # concept set the caller never explicitly approved. The error message lists
+    # the candidate ids so the caller can resubmit by id once that contract
+    # ships in a future iteration.
+    if resolved.ambiguous:
+        raise TagFilteredHandlerError(
+            HTTPStatus.CONFLICT,
+            "rerun-by-tag refuses to disambiguate; ambiguous tagLabels: {0}".format(
+                _format_ambiguous(resolved.ambiguous)
+            ),
+        )
     id_to_label = _id_to_label(vocab)
     tag_ids = list(resolved.ids_by_label.values())
 

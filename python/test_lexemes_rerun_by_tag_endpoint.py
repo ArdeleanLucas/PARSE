@@ -212,3 +212,205 @@ def test_rerun_per_concept_error_does_not_abort_remaining(tmp_path: Path) -> Non
     statuses = [r["status"] for r in response.payload["results"]]
     assert statuses == ["error", "ok"]
     assert response.payload["results"][0]["error"] == "boom"
+    # Generic exceptions stamp 500 so the caller can treat it the same as any
+    # other runner failure without parsing strings.
+    assert response.payload["results"][0]["statusCode"] == 500
+    assert isinstance(response.payload["results"][0]["statusCode"], int)
+
+
+def test_rerun_per_concept_LexemeRerunHandlerError_preserves_status_code(tmp_path: Path) -> None:
+    """A LexemeRerunHandlerError thrown by the per-interval handler must carry
+    its HTTP status into the result entry as ``statusCode`` so the caller can
+    distinguish 404 (concept not in concepts.csv) from 409 (speaker locked)
+    from 500 (runner died).
+    """
+    from http import HTTPStatus as _HTTPStatus
+
+    from app.http.lexeme_rerun_handlers import LexemeRerunHandlerError
+
+    _seed(tmp_path)
+
+    def ortho_handler(body, **kwargs):
+        raise LexemeRerunHandlerError(_HTTPStatus.NOT_FOUND, "concept not found")
+
+    response = _build(
+        {"speakers": ["Saha01"], "tagLabels": ["Thesis"], "field": "ortho"},
+        tmp_path,
+        ortho_handler=ortho_handler,
+    )
+    assert all(r["status"] == "error" for r in response.payload["results"])
+    assert all(r["statusCode"] == 404 for r in response.payload["results"])
+    assert all(r["error"] == "concept not found" for r in response.payload["results"])
+
+
+def test_rerun_by_tag_409s_on_ambiguous_tag(tmp_path: Path) -> None:
+    """Even under match='any', an ambiguous label must 409 — silently
+    disambiguating to a subset would consume GPU and overwrite annotations
+    on a concept set the caller didn't approve.
+    """
+    _seed(tmp_path)
+    ambiguous_vocab = [
+        {"id": "t1", "label": "Thesis", "color": "#111111", "concepts": [], "lexemeTargets": []},
+        {"id": "t2", "label": "thesis", "color": "#222222", "concepts": [], "lexemeTargets": []},
+    ]
+
+    def _build_with_vocab(body):
+        return build_post_lexemes_rerun_by_tag_response(
+            body,
+            project_root=tmp_path,
+            load_tags_vocab=lambda: list(ambiguous_vocab),
+            normalize_speaker_id=_normalize_speaker,
+            annotation_read_path_for_speaker=_annotation_read_path(tmp_path),
+            read_json_any_file=_read_json_any,
+            normalize_annotation_record=_normalize_record,
+            resolve_audio_path_for_speaker=lambda speaker: tmp_path / "audio" / "working" / speaker / "working.wav",
+            run_ipa_interval=lambda **kwargs: "",
+            run_ortho_interval=lambda **kwargs: "",
+            build_post_run_ipa_response=_stub_per_interval_handler("ipa")[0],
+            build_post_run_ortho_response=_stub_per_interval_handler("ortho")[0],
+            locks_dir=tmp_path / ".parse-locks",
+        )
+
+    with pytest.raises(TagFilteredHandlerError) as exc:
+        _build_with_vocab(
+            {"speakers": ["Saha01"], "tagLabels": ["Thesis"], "field": "ortho"}
+        )
+    assert exc.value.status == HTTPStatus.CONFLICT
+    assert "Thesis" in exc.value.message
+    assert "t1" in exc.value.message and "t2" in exc.value.message
+
+
+def test_rerun_by_tag_400s_on_all_match_with_unknown(tmp_path: Path) -> None:
+    """match='all' on rerun must 400 before any GPU spend if any requested
+    label is unknown.
+    """
+    _seed(tmp_path)
+    with pytest.raises(TagFilteredHandlerError) as exc:
+        _build(
+            {
+                "speakers": ["Saha01"],
+                "tagLabels": ["Thesis", "Mystery"],
+                "match": "all",
+                "field": "ortho",
+            },
+            tmp_path,
+        )
+    assert exc.value.status == HTTPStatus.BAD_REQUEST
+    assert "match='all'" in exc.value.message
+    assert "Mystery" in exc.value.message
+
+
+def test_rerun_by_tag_with_real_per_interval_handler(tmp_path: Path) -> None:
+    """End-to-end style test that wires the REAL
+    ``build_post_run_ortho_response`` / ``build_post_run_ipa_response`` from
+    ``app.http.lexeme_rerun_handlers`` instead of stubs. The interval runners
+    are still stubbed so no GPU is needed, but every other code path
+    (concepts.csv lookup, annotation read, speaker lock acquire/release,
+    pad-padded interval) is exercised. A regression that broke the
+    conceptId-to-concept-key mapping would surface here.
+    """
+    import csv
+    import json as _json
+
+    from app.http.lexeme_rerun_handlers import (
+        build_post_run_ipa_response,
+        build_post_run_ortho_response,
+    )
+
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir(parents=True, exist_ok=True)
+    audio_dir = tmp_path / "audio" / "working" / "Saha01"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "working.wav"
+    audio_path.write_bytes(b"RIFFWAVEfake")
+
+    with (tmp_path / "concepts.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "id": "1",
+                "concept_en": "hair",
+                "source_item": "hair",
+                "source_survey": "KLQ",
+                "custom_order": "",
+            }
+        )
+
+    annotation = {
+        "project_id": "parse-test",
+        "speaker": "Saha01",
+        "source_audio": "audio/working/Saha01/working.wav",
+        "source_audio_duration_sec": 10.0,
+        "concept_tags": {"1": ["t-thesis"]},
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 3,
+                "intervals": [
+                    {"start": 1.0, "end": 2.0, "text": "hair", "concept_id": "1"}
+                ],
+            },
+            "ortho": {
+                "type": "interval",
+                "display_order": 2,
+                "intervals": [{"start": 1.0, "end": 2.0, "text": "old"}],
+            },
+            "ipa": {
+                "type": "interval",
+                "display_order": 1,
+                "intervals": [{"start": 1.0, "end": 2.0, "text": "old"}],
+            },
+            "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+        },
+    }
+    (annotations_dir / "Saha01.parse.json").write_text(
+        _json.dumps(annotation, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+    response = build_post_lexemes_rerun_by_tag_response(
+        {
+            "speakers": ["Saha01"],
+            "tagLabels": ["Thesis"],
+            "field": "both",
+            "pad": 0.2,
+        },
+        project_root=tmp_path,
+        load_tags_vocab=_vocab,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_read_path(tmp_path),
+        read_json_any_file=_read_json_any,
+        normalize_annotation_record=_normalize_record,
+        resolve_audio_path_for_speaker=lambda speaker: audio_path,
+        run_ortho_interval=lambda **kwargs: "ORTHO_RESULT",
+        run_ipa_interval=lambda **kwargs: "IPA_RESULT",
+        build_post_run_ortho_response=build_post_run_ortho_response,
+        build_post_run_ipa_response=build_post_run_ipa_response,
+        locks_dir=tmp_path / ".parse-locks",
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload["resolved"]["totalConcepts"] == 1
+    assert response.payload["total"] == 2
+    fields_seen = [(r["field"], r["status"], r.get("text")) for r in response.payload["results"]]
+    assert fields_seen == [
+        ("ortho", "ok", "ORTHO_RESULT"),
+        ("ipa", "ok", "IPA_RESULT"),
+    ]
+
+
+def test_rerun_by_tag_speakers_all_with_real_workspace(tmp_path: Path) -> None:
+    """Resolver-level coverage exists; this is a route-level smoke that
+    `speakers="all"` enumerates the workspace correctly.
+    """
+    _seed(tmp_path)
+    response = _build(
+        {"speakers": "all", "tagLabels": ["Thesis"], "field": "ortho"},
+        tmp_path,
+    )
+    assert response.status == HTTPStatus.OK
+    assert "Saha01" in response.payload["resolved"]["perSpeaker"]
+    assert response.payload["resolved"]["perSpeaker"]["Saha01"]["conceptCount"] == 2

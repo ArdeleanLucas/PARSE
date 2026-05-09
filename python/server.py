@@ -1544,8 +1544,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/lexeme/run_ipa":
             self._api_post_lexeme_run_ipa()
             return
-        if request_path == "/api/concepts/by-tag": self._api_post_concepts_by_tag(); return
-        if request_path == "/api/lexemes/rerun-by-tag": self._api_post_lexemes_rerun_by_tag(); return
+        if request_path == "/api/concepts/by-tag":
+            self._api_post_concepts_by_tag()
+            return
+        if request_path == "/api/lexemes/rerun-by-tag":
+            self._api_post_lexemes_rerun_by_tag()
+            return
         if request_path == "/api/lexeme-notes":
             self._api_post_lexeme_note()
             return

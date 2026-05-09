@@ -207,3 +207,65 @@ def test_unknown_speaker_when_speakers_all_does_not_404(tmp_path: Path) -> None:
     _seed_workspace(tmp_path)
     response = _build({"speakers": "all", "tagLabels": ["Thesis"]}, tmp_path)
     assert response.status == HTTPStatus.OK
+
+
+def test_concepts_by_tag_all_match_400s_on_unknown_label(tmp_path: Path) -> None:
+    """match='all' must 400 if any requested label is unknown; the resolver
+    silently dropping it would degrade AND semantics into intersection-over-
+    the-resolved-subset and contradict the caller's request.
+    """
+    _seed_workspace(tmp_path)
+    with pytest.raises(TagFilteredHandlerError) as exc:
+        _build(
+            {"speakers": ["Saha01"], "tagLabels": ["Thesis", "Mystery"], "match": "all"},
+            tmp_path,
+        )
+    assert exc.value.status == HTTPStatus.BAD_REQUEST
+    assert "match='all'" in exc.value.message
+    assert "Mystery" in exc.value.message
+
+
+def test_concepts_by_tag_all_match_400s_on_ambiguous_label(tmp_path: Path) -> None:
+    """match='all' must 400 if any requested label is ambiguous in the vocab."""
+    vocab = [
+        {"id": "t1", "label": "Thesis", "color": "#111111", "concepts": [], "lexemeTargets": []},
+        {"id": "t2", "label": "thesis", "color": "#222222", "concepts": [], "lexemeTargets": []},
+        {"id": "t3", "label": "WordList", "color": "#333333", "concepts": [], "lexemeTargets": []},
+    ]
+    _seed_workspace(tmp_path)
+    with pytest.raises(TagFilteredHandlerError) as exc:
+        _build(
+            {"speakers": ["Saha01"], "tagLabels": ["Thesis", "WordList"], "match": "all"},
+            tmp_path,
+            vocab=vocab,
+        )
+    assert exc.value.status == HTTPStatus.BAD_REQUEST
+    assert "match='all'" in exc.value.message
+    assert "Thesis" in exc.value.message
+    assert "t1" in exc.value.message and "t2" in exc.value.message
+
+
+def test_concepts_by_tag_any_match_keeps_unknown_in_response(tmp_path: Path) -> None:
+    """match='any' keeps existing degrade-gracefully behaviour: unknown labels
+    surface in unknownTags but the route still returns 200 with the resolved
+    subset so the FE can show a warning without blocking.
+    """
+    _seed_workspace(tmp_path)
+    response = _build(
+        {"speakers": ["Saha01"], "tagLabels": ["Thesis", "Mystery"], "match": "any"},
+        tmp_path,
+    )
+    assert response.status == HTTPStatus.OK
+    assert response.payload["unknownTags"] == ["Mystery"]
+    assert response.payload["perSpeaker"]["Saha01"]["conceptCount"] == 2
+
+
+def test_concepts_by_tag_with_empty_speakers_list_returns_empty(tmp_path: Path) -> None:
+    """Documented edge case: empty `speakers` list short-circuits to a 200
+    with empty perSpeaker and totalConcepts=0.
+    """
+    _seed_workspace(tmp_path)
+    response = _build({"speakers": [], "tagLabels": ["Thesis"]}, tmp_path)
+    assert response.status == HTTPStatus.OK
+    assert response.payload["totalConcepts"] == 0
+    assert response.payload["perSpeaker"] == {}

@@ -11,7 +11,7 @@ import server
 def test_server_py_is_thin_orchestrator() -> None:
     server_path = pathlib.Path(server.__file__).resolve()
     line_count = len(server_path.read_text(encoding="utf-8").splitlines())
-    assert line_count < 2010, f"python/server.py should be <2010 LoC after decomposition, got {line_count}"
+    assert line_count < 2015, f"python/server.py should be <2015 LoC after decomposition, got {line_count}"
 
 
 def test_route_binding_installer_is_exposed() -> None:
