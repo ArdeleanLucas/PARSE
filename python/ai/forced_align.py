@@ -75,7 +75,6 @@ def resolve_device(requested: Optional[str] = None, *, allow_wsl_cuda: bool = Fa
                     file=sys.stderr,
                     flush=True,
                 )
-                return "cpu"
         return "cpu"
     try:
         import torch  # type: ignore

@@ -154,6 +154,20 @@ def test_resolve_device_warns_when_wsl_cuda_opt_in_but_cuda_unavailable(
     assert "torch.cuda.is_available()=False" in stderr
 
 
+def test_resolve_device_warns_when_wsl_cuda_opt_in_but_torch_import_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(fa, "_is_wsl", lambda: True)
+
+    assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cpu"
+
+    stderr = capsys.readouterr().err
+    assert "allow_wsl_cuda=True" in stderr
+    assert "torch import failed" in stderr
+
+
 def test_aligner_load_plumbs_wsl_cuda_opt_in_to_model_device(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fa, "_CPU_THREAD_LIMITS_CONFIGURED", False)
     monkeypatch.setattr(fa, "_PRELOADED_ALIGNER", None)
