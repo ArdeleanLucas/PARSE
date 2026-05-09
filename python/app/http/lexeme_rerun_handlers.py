@@ -42,6 +42,7 @@ class LexemeRerunSubprocessError(Exception):
     code: str
     exit_code: int | None
     message: str
+    stderr_tail: str | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -257,15 +258,15 @@ def _build_post_run_response(
         padded_end = request.end + request.pad
         text = runner(audio_path=audio_path, start=padded_start, end=padded_end, language=request.language)
     except LexemeRerunSubprocessError as exc:
-        return JsonResponseSpec(
-            status=HTTPStatus.SERVICE_UNAVAILABLE,
-            payload={
-                "status": "error",
-                "code": exc.code,
-                "exit_code": exc.exit_code,
-                "message": exc.message,
-            },
-        )
+        payload: dict[str, Any] = {
+            "status": "error",
+            "code": exc.code,
+            "exit_code": exc.exit_code,
+            "message": exc.message,
+        }
+        if exc.stderr_tail:
+            payload["stderr_tail"] = exc.stderr_tail
+        return JsonResponseSpec(status=HTTPStatus.SERVICE_UNAVAILABLE, payload=payload)
     except LexemeRerunHandlerError:
         raise
     except Exception as exc:
