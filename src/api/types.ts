@@ -216,6 +216,7 @@ export interface RelinkByGlossGroup {
   labels?: Record<string, string>;
   links_by_survey?: Record<string, string>;
   source_rows?: Array<{ concept_id: string; concept_en: string; source_survey?: string; source_item?: string }>;
+  keep_reason?: "lowest_numeric_id" | "metadata_rich_over_lowest_empty" | string;
 }
 
 export interface RelinkByGlossFuzzyCandidate {
@@ -237,6 +238,7 @@ export interface RelinkByGlossResponse {
   groups: RelinkByGlossGroup[];
   fuzzy_candidates: RelinkByGlossFuzzyCandidate[];
   backup_paths?: string[];
+  annotation_rewrites?: Record<string, number>;
 }
 
 export interface ProjectConfig {
