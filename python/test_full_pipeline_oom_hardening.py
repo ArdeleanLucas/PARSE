@@ -26,7 +26,7 @@ def _install_routes_and_clear_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: pa
     server._jobs.clear()
 
 
-def test_full_pipeline_preflight_rejects_low_host_memory_before_any_step(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_full_pipeline_preflight_records_low_host_memory_at_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PARSE_FULL_PIPELINE_MIN_MEM_GB", "2.5")
     monkeypatch.setattr(server, "_host_available_memory_gb", lambda: 1.25, raising=False)
 
@@ -35,17 +35,20 @@ def test_full_pipeline_preflight_rejects_low_host_memory_before_any_step(monkeyp
 
     monkeypatch.setattr(server, "_compute_speaker_stt", fail_if_step_runs)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        server._compute_full_pipeline("job-low-mem", {"speaker": "anon-rss", "steps": ["stt"]})
+    result = server._compute_full_pipeline("job-low-mem", {"speaker": "anon-rss", "steps": ["stt"]})
 
-    message = str(excinfo.value)
+    stt_result = result["results"]["stt"]
+    assert stt_result["status"] == "error"
+    message = stt_result["error"]
     assert "Insufficient host memory for full pipeline" in message
+    assert "before stt step" in message
     assert "1.2 GiB available" in message
     assert "2.5 GiB required" in message
     assert "PARSE_FULL_PIPELINE_MIN_MEM_GB" in message
+    assert stt_result["error_code"] == "oom_suspect"
 
 
-def test_full_pipeline_preflight_error_carries_structured_details(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_full_pipeline_preflight_result_carries_structured_details(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PARSE_FULL_PIPELINE_MIN_MEM_GB", "3.5")
     monkeypatch.setattr(
         server,
@@ -64,23 +67,19 @@ def test_full_pipeline_preflight_error_carries_structured_details(monkeypatch: p
 
     snapshot = server._get_job_snapshot(job_id)
     assert snapshot is not None
-    assert snapshot["status"] == "error"
-    assert snapshot["mem_available_gb"] == pytest.approx(1.25)
-    assert snapshot["required_gb"] == pytest.approx(3.5)
-    assert snapshot["swap_total_gb"] == pytest.approx(0.5)
-    persisted_error_logs = [
-        entry
-        for entry in snapshot.get("logs", [])
-        if entry.get("event") in {"job.error", "job.failed"}
-    ]
-    assert len(persisted_error_logs) == 1
-    payload = server._job_response_payload(snapshot)
-    assert payload["mem_available_gb"] == pytest.approx(1.25)
-    assert payload["required_gb"] == pytest.approx(3.5)
-    assert payload["swap_total_gb"] == pytest.approx(0.5)
+    assert snapshot["status"] == "complete"
+    result = snapshot["result"]
+    stt_result = result["results"]["stt"]
+    assert stt_result["status"] == "error"
+    assert stt_result["mem_available_gb"] == pytest.approx(1.25)
+    assert stt_result["required_gb"] == pytest.approx(3.5)
+    assert stt_result["swap_total_gb"] == pytest.approx(0.5)
+    assert stt_result["step"] == "stt"
+    assert stt_result["error_code"] == "oom_suspect"
+    assert result["summary"] == {"ok": 0, "skipped": 0, "error": 1}
 
 
-def test_full_pipeline_preflight_marks_job_error_code_as_oom_suspect(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_full_pipeline_preflight_marks_step_error_code_as_oom_suspect(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PARSE_FULL_PIPELINE_MIN_MEM_GB", "4")
     monkeypatch.setattr(
         server,
@@ -99,7 +98,8 @@ def test_full_pipeline_preflight_marks_job_error_code_as_oom_suspect(monkeypatch
 
     snapshot = server._get_job_snapshot(job_id)
     assert snapshot is not None
-    assert snapshot["error_code"] == "oom_suspect"
+    assert snapshot["status"] == "complete"
+    assert snapshot["result"]["results"]["stt"]["error_code"] == "oom_suspect"
 
 
 def test_full_pipeline_preflight_passes_through_when_memory_is_abundant(monkeypatch: pytest.MonkeyPatch) -> None:
