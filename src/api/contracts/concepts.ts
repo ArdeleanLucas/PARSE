@@ -51,3 +51,78 @@ export async function relinkConceptsByGloss(
     body: JSON.stringify({ apply: false, ...payload }),
   });
 }
+
+
+// === Tagged-concept queries (Lane A contract — see PR #321) ===
+
+export type TagMatchMode = "any" | "all";
+
+export interface ConceptHit {
+  conceptId: string;
+  name: string;
+  start: number;
+  end: number;
+  tags: string[];
+}
+
+export interface PerSpeakerConceptHits {
+  conceptCount: number;
+  concepts: ConceptHit[];
+}
+
+export interface ConceptsByTagResponse {
+  totalConcepts: number;
+  perSpeaker: Record<string, PerSpeakerConceptHits>;
+  unknownTags: string[];
+  ambiguousTags: Record<string, string[]>;
+}
+
+export interface ConceptsByTagRequest {
+  speakers: string[] | "all";
+  tagLabels: string[];
+  match?: TagMatchMode;
+}
+
+export async function getConceptsByTag(
+  payload: ConceptsByTagRequest,
+): Promise<ConceptsByTagResponse> {
+  return apiFetch<ConceptsByTagResponse>("/api/concepts/by-tag", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type LexemeRerunByTagField = "ipa" | "ortho" | "both";
+
+export interface LexemeRerunByTagRequest {
+  speakers: string[] | "all";
+  tagLabels: string[];
+  match?: TagMatchMode;
+  field: LexemeRerunByTagField;
+  pad?: number;
+}
+
+export interface LexemeRerunByTagResultEntry {
+  speaker: string;
+  conceptId: string;
+  field: "ipa" | "ortho";
+  status: "ok" | "error" | "skip";
+  text?: string;
+  error?: string;
+}
+
+export interface LexemeRerunByTagResponse {
+  jobId: string | null;
+  resolved: ConceptsByTagResponse;
+  total: number;
+  results: LexemeRerunByTagResultEntry[];
+}
+
+export async function runLexemesByTag(
+  payload: LexemeRerunByTagRequest,
+): Promise<LexemeRerunByTagResponse> {
+  return apiFetch<LexemeRerunByTagResponse>("/api/lexemes/rerun-by-tag", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

@@ -5,6 +5,12 @@ import type { BatchSpeakerOutcome, UseBatchPipelineJobResult } from '../useBatch
 import { useParseUIPipeline } from '../useParseUIPipeline';
 import type { TranscriptionRunConfirm } from '../../components/shared/TranscriptionRunModal';
 
+vi.mock('../../api/client', () => ({
+  runLexemesByTag: vi.fn(),
+}));
+
+import { runLexemesByTag } from '../../api/client';
+
 function makeBatchHandle(
   overrides: Partial<UseBatchPipelineJobResult['state']> = {},
 ): UseBatchPipelineJobResult {
@@ -260,5 +266,101 @@ describe('useParseUIPipeline', () => {
     expect(result.current.showBatchCompleteBanner).toBe(true);
     expect(result.current.completedCount).toBe(1);
     expect(result.current.errorCount).toBe(1);
+  });
+
+  it('routes runMode tagged-only payload to runLexemesByTag instead of batch.run', async () => {
+    const batch = makeBatchHandle();
+    const closeRunModal = vi.fn();
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+    const loadEnrichments = vi.fn().mockResolvedValue(undefined);
+
+    vi.mocked(runLexemesByTag).mockResolvedValue({
+      jobId: null,
+      resolved: {
+        totalConcepts: 1,
+        perSpeaker: { Alpha: { conceptCount: 1, concepts: [] } },
+        unknownTags: [],
+        ambiguousTags: {},
+      },
+      total: 2,
+      results: [
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ortho', status: 'ok', text: 'x' },
+        { speaker: 'Alpha', conceptId: 'c1', field: 'ipa', status: 'ok', text: 'y' },
+      ],
+    });
+
+    const confirm: TranscriptionRunConfirm = {
+      speakers: ['Alpha'],
+      steps: ['ortho', 'ipa'],
+      overwrites: {},
+      runMode: 'tagged-only',
+      tagLabels: ['Thesis'],
+      tagMatch: 'any',
+      pad: 0.2,
+    };
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal,
+        openBatchReport: vi.fn(),
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => 'ku',
+        reloadSpeakerAnnotation,
+        reloadStt: vi.fn(),
+        loadEnrichments,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm(confirm);
+    });
+
+    expect(closeRunModal).toHaveBeenCalledOnce();
+    expect(batch.run).not.toHaveBeenCalled();
+    expect(runLexemesByTag).toHaveBeenCalledTimes(1);
+    expect(runLexemesByTag).toHaveBeenCalledWith({
+      speakers: ['Alpha'],
+      tagLabels: ['Thesis'],
+      match: 'any',
+      field: 'both',
+      pad: 0.2,
+    });
+    expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Alpha');
+    expect(loadEnrichments).toHaveBeenCalledOnce();
+  });
+
+  it('skips runLexemesByTag for tagged-only payloads with no tagLabels and no field-applicable steps', async () => {
+    const batch = makeBatchHandle();
+    vi.mocked(runLexemesByTag).mockClear();
+
+    const { result } = renderHook(() =>
+      useParseUIPipeline({
+        batch,
+        closeRunModal: vi.fn(),
+        openBatchReport: vi.fn(),
+        closeBatchReport: vi.fn(),
+        isBatchReportOpen: false,
+        getLanguage: () => undefined,
+        reloadSpeakerAnnotation: vi.fn(),
+        reloadStt: vi.fn(),
+        loadEnrichments: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRunConfirm({
+        speakers: ['Alpha'],
+        steps: ['stt'], // not ipa nor ortho — should bail out
+        overwrites: {},
+        runMode: 'tagged-only',
+        tagLabels: ['Thesis'],
+        tagMatch: 'any',
+      });
+    });
+
+    expect(runLexemesByTag).not.toHaveBeenCalled();
+    expect(batch.run).not.toHaveBeenCalled();
   });
 });

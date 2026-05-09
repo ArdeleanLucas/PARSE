@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptionRunConfirm } from '../components/shared/TranscriptionRunModal';
 import { useBatchPipelineJob, type BatchSpeakerOutcome, type PipelineStepId, type UseBatchPipelineJobResult } from './useBatchPipelineJob';
+import { runLexemesByTag } from '../api/client';
+import type { LexemeRerunByTagField, LexemeRerunByTagResponse } from '../api/contracts/concepts';
 
 type ScopedConceptRefreshTarget = { concept_id?: string; conceptId?: string; id?: string; start?: number; end?: number };
 
@@ -129,6 +131,46 @@ export function useParseUIPipeline({
     closeRunModal();
     setReportStepsRun(confirm.steps);
     if (confirm.speakers.length === 0 || confirm.steps.length === 0) return;
+
+    if (confirm.runMode === 'tagged-only') {
+      const tagLabels = (confirm.tagLabels ?? []).slice();
+      if (tagLabels.length === 0) return;
+      const stepsArr = confirm.steps;
+      const wantsIpa = stepsArr.includes('ipa');
+      const wantsOrtho = stepsArr.includes('ortho');
+      const field: LexemeRerunByTagField | null = wantsIpa && wantsOrtho
+        ? 'both'
+        : wantsIpa
+          ? 'ipa'
+          : wantsOrtho
+            ? 'ortho'
+            : null;
+      if (field === null) return;
+      const payload = {
+        speakers: confirm.speakers,
+        tagLabels,
+        match: confirm.tagMatch ?? 'any',
+        field,
+        ...(confirm.pad === undefined ? {} : { pad: confirm.pad as number }),
+      };
+      let result: LexemeRerunByTagResponse | null = null;
+      try {
+        result = await runLexemesByTag(payload);
+      } catch (err) {
+        console.error('[useParseUIPipeline] runLexemesByTag failed', err);
+        return;
+      }
+      const affectedSpeakers = new Set<string>();
+      for (const row of result.results) {
+        if (row.status === 'ok') affectedSpeakers.add(row.speaker);
+      }
+      for (const speaker of affectedSpeakers) {
+        await reloadSpeakerAnnotation(speaker);
+      }
+      await loadEnrichments();
+      return;
+    }
+
     await batch.run({
       speakers: confirm.speakers,
       steps: confirm.steps,
@@ -138,7 +180,7 @@ export function useParseUIPipeline({
       runMode: confirm.runMode,
       pad: confirm.pad,
     });
-  }, [batch, closeRunModal, getLanguage]);
+  }, [batch, closeRunModal, getLanguage, loadEnrichments, reloadSpeakerAnnotation]);
 
   const handleRerunFailed = useCallback(async (speakers: string[]) => {
     if (speakers.length === 0 || reportStepsRun.length === 0) return;
