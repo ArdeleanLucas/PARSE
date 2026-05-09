@@ -36,8 +36,11 @@ import json
 import logging
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from app.services.audio_paths import pipeline_audio_path_for_speaker
+from app.services.lexeme_rerun_loop import per_concept_rerun as _shared_per_concept_rerun
+from app.services.speaker_id import normalize_speaker_id as _shared_normalize_speaker_id
 from app.services.tag_resolver import (
     ConceptHit,
     ResolvedTags,
@@ -346,20 +349,12 @@ def _load_record(annotations_dir: Path, speaker: str) -> Dict[str, Any] | None:
 
 
 def _normalize_speaker(value: Any) -> str:
-    """Same sanitizer Lane A's HTTP route uses — kept local to avoid a
-    server-only import (`server_routes.annotate._normalize_speaker_id`)
-    here in a pure chat-tool module.
+    """Delegate to the shared sanitizer in ``app.services.speaker_id``.
+
+    Lane A's HTTP route uses the same helper, so the chat-tool wrapper
+    matches the route's exact behaviour and error wording.
     """
-    speaker = str(value or "").strip()
-    if not speaker:
-        raise ValueError("speaker is required")
-    if speaker in {".", ".."}:
-        raise ValueError("Invalid speaker id")
-    if "\x00" in speaker or "/" in speaker or "\\" in speaker:
-        raise ValueError("speaker must not contain path separators or null bytes")
-    if len(speaker) > 200:
-        raise ValueError("speaker is too long")
-    return speaker
+    return _shared_normalize_speaker_id(value)
 
 
 def _read_json_any_file(path: Path) -> Any:
@@ -372,14 +367,23 @@ def _read_json_any_file(path: Path) -> Any:
 
 
 def _normalize_annotation_record(payload: Any, speaker: str) -> Dict[str, Any]:
-    """Identity normalizer — the on-disk record is already in canonical
-    shape for chat-tool callers. The HTTP route uses a richer normalizer
-    that auto-fills concept_tags / metadata; chat callers don't need it.
+    """Auto-fill the keys the per-interval rerun handler reads.
+
+    Mirrors the minimum auto-fills in
+    ``server_routes/annotate.py::_normalize_annotation_record`` —
+    legacy speaker records (no ``concept_tags``, no ``tiers``) need
+    these defaults so ``_load_record`` downstream doesn't raise on a
+    ``record["concept_tags"]`` lookup. The HTTP normalizer also
+    rebuilds tiers / metadata / source_audio_duration_sec; that's
+    overkill for the chat-tool callers, which only walk concept-tier
+    intervals and read metadata.language_code.
     """
     if not isinstance(payload, dict):
         return {"speaker": speaker, "tiers": {}, "concept_tags": {}}
     record = dict(payload)
     record.setdefault("speaker", speaker)
+    record.setdefault("concept_tags", {})
+    record.setdefault("tiers", {})
     return record
 
 
@@ -396,8 +400,43 @@ def _annotation_read_path(project_root: Path) -> Callable[[str], Path]:
 
 
 def _resolve_audio_path(project_root: Path) -> Callable[[str], Path]:
+    """Mirror Lane A's HTTP route via ``app.services.audio_paths``.
+
+    The previous implementation hardcoded
+    ``audio/working/<speaker>/working.wav``, which silently failed for
+    Lucas's thesis corpus where Audition writes per-speaker filenames
+    (``audio/working/Saha01/Saha01.wav``). The shared helper reads the
+    annotation's ``source_audio`` field and computes the normalized
+    working-copy path the same way the HTTP route does.
+
+    Chat-tool callers don't have access to the source-index payload that
+    backs ``server._annotation_primary_source_wav``, so
+    ``primary_source_wav_for_speaker`` is left ``None`` — modern speakers
+    have an explicit ``source_audio`` on the annotation record.
+    """
+    annotations_dir = project_root / "annotations"
+
+    def read_record(speaker: str) -> Optional[Dict[str, Any]]:
+        # Distinguish "no annotation file" (return None → resolver raises
+        # 'No annotation found') from "exists but unparseable / non-dict"
+        # (return {} → resolver continues source lookup chain and
+        # raises 'No source_audio on annotation').
+        for suffix in (".parse.json", ".json"):
+            path = annotations_dir / "{0}{1}".format(speaker, suffix)
+            if path.is_file():
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    return {}
+                return payload if isinstance(payload, dict) else {}
+        return None
+
     def resolver(speaker: str) -> Path:
-        return project_root / "audio" / "working" / speaker / "working.wav"
+        return pipeline_audio_path_for_speaker(
+            speaker,
+            project_root,
+            read_annotation_record=read_record,
+        )
 
     return resolver
 
@@ -423,72 +462,32 @@ def _per_concept_rerun(
     project_root: Path,
     locks_dir: Path,
 ) -> List[Dict[str, Any]]:
-    """Run ORTH then IPA (or one of them) for a single concept hit.
+    """Delegate to ``app.services.lexeme_rerun_loop.per_concept_rerun``.
 
-    Mirrors ``tag_filtered_rerun_handlers._per_concept_rerun`` including
-    the ``statusCode`` propagation Lane A's fix-up cabc9a9 added.
+    The shared helper is also used by Lane A's HTTP route so any contract
+    change (per-tier ordering, statusCode propagation, etc.) lands in one
+    place.
     """
     _ensure_rerun_imports()
 
-    fields_to_run: List[str] = []
-    if field in ("ortho", "both"):
-        fields_to_run.append("ortho")
-    if field in ("ipa", "both"):
-        fields_to_run.append("ipa")
-
-    body = {
-        "speaker": speaker,
-        "concept_key": hit.conceptId,
-        "start": hit.start,
-        "end": hit.end,
-        "pad": pad,
-    }
-    annotation_read = _annotation_read_path(project_root)
-    audio_resolve = _resolve_audio_path(project_root)
-    out: List[Dict[str, Any]] = []
-    for tier in fields_to_run:
-        entry: Dict[str, Any] = {"speaker": speaker, "conceptId": hit.conceptId, "field": tier}
-        try:
-            if tier == "ortho":
-                response = build_post_run_ortho_response(
-                    body,
-                    project_root=project_root,
-                    normalize_speaker_id=_normalize_speaker,
-                    annotation_read_path_for_speaker=annotation_read,
-                    read_json_any_file=_read_json_any_file,
-                    normalize_annotation_record=_normalize_annotation_record,
-                    resolve_audio_path_for_speaker=audio_resolve,
-                    run_ortho_interval=_run_ortho_interval,
-                    locks_dir=locks_dir,
-                )
-            else:
-                response = build_post_run_ipa_response(
-                    body,
-                    project_root=project_root,
-                    normalize_speaker_id=_normalize_speaker,
-                    annotation_read_path_for_speaker=annotation_read,
-                    read_json_any_file=_read_json_any_file,
-                    normalize_annotation_record=_normalize_annotation_record,
-                    resolve_audio_path_for_speaker=audio_resolve,
-                    run_ipa_interval=_run_ipa_interval,
-                    locks_dir=locks_dir,
-                )
-            payload = getattr(response, "payload", None)
-            entry["status"] = "ok"
-            if isinstance(payload, dict):
-                value = payload.get(tier)
-                if isinstance(value, str):
-                    entry["text"] = value
-        except LexemeRerunHandlerError as exc:
-            entry["status"] = "error"
-            entry["statusCode"] = int(exc.status)
-            entry["error"] = exc.message
-        except Exception as exc:
-            entry["status"] = "error"
-            entry["statusCode"] = int(HTTPStatus.INTERNAL_SERVER_ERROR)
-            entry["error"] = str(exc)
-        out.append(entry)
-    return out
+    return _shared_per_concept_rerun(
+        speaker,
+        hit,
+        field,
+        pad,
+        project_root=project_root,
+        locks_dir=locks_dir,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_read_path(project_root),
+        read_json_any_file=_read_json_any_file,
+        normalize_annotation_record=_normalize_annotation_record,
+        resolve_audio_path_for_speaker=_resolve_audio_path(project_root),
+        run_ortho_interval=_run_ortho_interval,
+        run_ipa_interval=_run_ipa_interval,
+        build_post_run_ortho_response=build_post_run_ortho_response,
+        build_post_run_ipa_response=build_post_run_ipa_response,
+        lexeme_rerun_handler_error=LexemeRerunHandlerError,
+    )
 
 
 def tool_list_concepts_by_tag(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:

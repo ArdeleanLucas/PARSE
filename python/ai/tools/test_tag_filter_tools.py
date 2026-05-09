@@ -602,3 +602,155 @@ def test_parse_chat_tools_dispatch_routes_to_handlers(tmp_path: Path) -> None:
     payload = response["result"]
     assert payload["ok"] is True
     assert payload["totalConcepts"] == 1
+
+
+# ----------------------------------------------------------------------
+# Review fix-up regressions (PR #328 review).
+# ----------------------------------------------------------------------
+
+
+def _seed_speaker_with_source_audio(
+    tools: _FakeTools,
+    speaker: str,
+    *,
+    source_audio: str,
+    concept_tags: Dict[str, List[str]],
+    intervals: List[Dict[str, Any]],
+) -> Path:
+    """Seed an annotation record carrying ``source_audio`` so the new
+    audio-path resolver mirrors Lane A's HTTP route logic.
+    """
+    annotations = tools.project_root / "annotations"
+    annotations.mkdir(parents=True, exist_ok=True)
+    record = {
+        "speaker": speaker,
+        "source_audio": source_audio,
+        "concept_tags": concept_tags,
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 3,
+                "intervals": intervals,
+            }
+        },
+    }
+    path = annotations / "{0}.parse.json".format(speaker)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def test_rerun_uses_speaker_audio_when_working_wav_absent(tmp_path: Path, monkeypatch) -> None:
+    """Lucas's thesis corpus stores per-speaker filenames (Saha01.wav),
+    not the legacy ``working.wav``. The chat-tool resolver must follow
+    Lane A's HTTP route — read ``source_audio`` from the annotation —
+    rather than hardcoding ``working.wav``. The handler invokes the
+    audio resolver for real here (not the stub from earlier tests) so
+    we exercise the real path-resolution code.
+    """
+    tools = _FakeTools(tmp_path)
+    _seed_tags(tools, _vocab({"id": "t-thesis", "label": "Thesis", "color": "#111111"}))
+    _seed_concepts_csv(tools, ["c1"])
+
+    # Stash the source recording at the per-speaker name; do NOT create
+    # ``audio/working/Saha01/working.wav``. The new resolver should still
+    # find the file because the annotation declares source_audio.
+    raw_dir = tools.project_root / "audio" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_wav = raw_dir / "Saha01.wav"
+    raw_wav.write_bytes(b"RIFFWAVEfake")
+
+    _seed_speaker_with_source_audio(
+        tools,
+        "Saha01",
+        source_audio="audio/raw/Saha01.wav",
+        concept_tags={"c1": ["t-thesis"]},
+        intervals=[{"start": 1.0, "end": 2.0, "text": "c1", "concept_id": "c1"}],
+    )
+
+    seen_audio: List[Path] = []
+
+    def fake_ortho(body: Dict[str, Any], **kwargs: Any) -> Any:
+        # The resolver is wired in via ``resolve_audio_path_for_speaker`` —
+        # invoke it the way the real per-interval handler does and record
+        # the resulting path.
+        resolver = kwargs["resolve_audio_path_for_speaker"]
+        seen_audio.append(resolver(body["speaker"]))
+        return _stub_per_interval("ortho")(body, **kwargs)
+
+    import ai.tools.tag_filter_tools as module
+
+    monkeypatch.setattr(module, "build_post_run_ortho_response", fake_ortho)
+
+    result = tool_rerun_lexemes_by_tag(
+        tools,  # type: ignore[arg-type]
+        {"speakers": ["Saha01"], "tagLabels": ["Thesis"], "field": "ortho"},
+    )
+
+    assert result["ok"] is True
+    assert result["total"] == 1
+    # Resolver returned the speaker-named source file — proving the
+    # ``working.wav`` hardcode is gone.
+    assert seen_audio == [raw_wav]
+
+
+def test_list_concepts_by_tag_legacy_record_without_concept_tags(tmp_path: Path) -> None:
+    """A legacy speaker record predating concept_tags must not crash the
+    list tool — the normalizer auto-fills missing fields and
+    ``select_concepts_by_tag`` returns zero hits without an exception.
+    Regression guard for PR #328 review issue #3.
+    """
+    tools = _FakeTools(tmp_path)
+    _seed_tags(tools, _vocab({"id": "t-thesis", "label": "Thesis", "color": "#111111"}))
+
+    annotations = tools.project_root / "annotations"
+    annotations.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "speaker": "LegacySpeaker",
+        # No concept_tags field at all.
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 3,
+                "intervals": [
+                    {"start": 1.0, "end": 2.0, "text": "root", "concept_id": "c1"},
+                ],
+            }
+        },
+    }
+    (annotations / "LegacySpeaker.parse.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    result = tool_list_concepts_by_tag(
+        tools,  # type: ignore[arg-type]
+        {"speakers": ["LegacySpeaker"], "tagLabels": ["Thesis"]},
+    )
+    assert result["ok"] is True
+    assert result["totalConcepts"] == 0
+    assert result["perSpeaker"]["LegacySpeaker"]["conceptCount"] == 0
+
+
+def test_rerun_lexemes_by_tag_postconditions_match_classification() -> None:
+    """``rerun_lexemes_by_tag`` runs synchronous compute (acquires locks
+    under .parse-locks/, consumes GPU) — it isn't a pure ``read_snapshot``
+    tool. The default postcondition must signal that, while
+    ``list_concepts_by_tag`` keeps its inspection-payload contract.
+    Regression guard for PR #328 review issue #2.
+    """
+    from ai.chat_tools import (
+        ParseChatTools,
+        TOOL_MUTABILITY_READ_ONLY,
+    )
+
+    tools = ParseChatTools(project_root=Path.cwd())
+
+    rerun_posts = tools._default_postconditions_for_tool(
+        "rerun_lexemes_by_tag", TOOL_MUTABILITY_READ_ONLY
+    )
+    rerun_ids = [str(p.id) for p in rerun_posts]
+    assert "lexeme_rerun_completed" in rerun_ids
+    assert "inspection_payload_returned" not in rerun_ids
+
+    list_posts = tools._default_postconditions_for_tool(
+        "list_concepts_by_tag", TOOL_MUTABILITY_READ_ONLY
+    )
+    list_ids = [str(p.id) for p in list_posts]
+    assert list_ids == ["inspection_payload_returned"]
