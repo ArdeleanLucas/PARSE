@@ -199,7 +199,10 @@ Relevant knobs and files:
 - `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`
 - `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for synchronous reviewer-triggered interval reruns with pad values `0.0`, `0.2`, `0.5`
 - `GET /api/survey-overlap` and `POST /api/survey-overlap` for source/survey labels, color coding, concept links, and per-speaker survey choices
-- `POST /api/concepts/{conceptId}/duplicate` for A/B concept-row creation with a prewrite backup
+- `POST /api/concepts/{conceptId}/duplicate` for n-ary concept-row variant creation with a prewrite backup; first call rewrites the source row to `X (A)` and appends `X (B)`, subsequent calls on the same source item append `(C)`, `(D)`, … until the alphabet is exhausted
+- `POST /api/concepts/{conceptId}/survey-links` and `DELETE /api/concepts/{conceptId}/survey-links` for cross-survey link CRUD against the `concept_survey_links` sidecar (not `concepts.csv`)
+- `POST /api/concepts/relink-by-gloss` for cross-survey concept consolidation by canonical gloss (dry-run + apply with backups; fuzzy candidates are never auto-applied)
+- `POST /api/concepts/by-tag` and `POST /api/lexemes/rerun-by-tag` for tag-filtered concept queries and tag-filtered ORTH/IPA reruns (shared resolution code in `python/app/services/tag_resolver.py`; handlers in `python/app/http/tag_filtered_rerun_handlers.py`; route shim in `python/server_routes/tag_filtered_rerun.py`)
 - `POST /api/locks/cleanup` plus startup cleanup for stale speaker-lock recovery; cleanup deletes stale `*.lock` files only and never kills processes
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.
