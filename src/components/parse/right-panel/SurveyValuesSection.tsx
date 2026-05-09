@@ -11,8 +11,16 @@ import {
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
 import { relinkConceptsByGloss } from '../../../api/client';
-import type { ConceptSurveyLinksByConcept, RelinkByGlossGroup, SpeakerSurveyChoices, SurveyOverlapPatch, SurveySettingsMap } from '../../../api/types';
+import type {
+  ConceptSurveyLinksByConcept,
+  RelinkByGlossRequest,
+  RelinkByGlossResponse,
+  SpeakerSurveyChoices,
+  SurveyOverlapPatch,
+  SurveySettingsMap,
+} from '../../../api/types';
 import { CollapsibleSection } from './CollapsibleSection';
+import { RelinkReviewDialog } from './RelinkReviewDialog';
 
 interface SurveyValuesSectionProps {
   activeConcept?: Concept | null;
@@ -60,6 +68,7 @@ export function SurveyValuesSection({
   const [editingSurveyId, setEditingSurveyId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
   const [relinkStatus, setRelinkStatus] = useState<string | null>(null);
+  const [relinkReview, setRelinkReview] = useState<RelinkByGlossResponse | null>(null);
   const conceptChoices = useMemo(() => activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [], [activeConcept]);
   const workspaceChoices = useMemo(() => {
     const concepts = workspaceConcepts.length > 0 ? workspaceConcepts : (activeConcept ? [activeConcept] : []);
@@ -104,40 +113,40 @@ export function SurveyValuesSection({
     });
   };
 
-  const summarizeRelinkGroups = (groups: RelinkByGlossGroup[]): string => {
-    if (groups.length === 0) return 'No strict cross-survey concept merges were proposed.';
-    return groups.map((group) => {
-      const label = group.canonical_gloss ?? group.labels?.[group.keep_concept_id] ?? group.keep_concept_id;
-      const links = Object.entries(group.links_by_survey ?? {})
-        .map(([surveyId, sourceItem]) => `${surveyId} ${sourceItem}`)
-        .join(', ');
-      return `${label}: keep ${group.keep_concept_id}; merge ${group.merge_concept_ids.join(', ')}${links ? `; links ${links}` : ''}`;
-    }).join('\n');
+  const summarizeAppliedRelink = (acceptedGroups: NonNullable<RelinkByGlossRequest['accepted_groups']>, response: RelinkByGlossResponse): string => {
+    const rewrites = response.annotation_rewrites ?? {};
+    const rewriteTotal = Object.values(rewrites).reduce((sum, count) => sum + count, 0);
+    const fileCount = Object.keys(rewrites).length;
+    const conceptCount = acceptedGroups.length;
+    return `Reconciled ${conceptCount} concepts; rewrote ${rewriteTotal} annotation occurrences across ${fileCount} files.`;
+  };
+
+  const applyRelinkReview = async (acceptedGroups: NonNullable<RelinkByGlossRequest['accepted_groups']>) => {
+    setRelinkStatus('Applying concept reconciliation…');
+    try {
+      const applied = await relinkConceptsByGloss({
+        apply: true,
+        accepted_groups: acceptedGroups,
+      });
+      setRelinkReview(null);
+      await onRelinkApplied?.();
+      setRelinkStatus(summarizeAppliedRelink(acceptedGroups, applied));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRelinkStatus(message);
+    }
   };
 
   const reconcileConcepts = async () => {
     setRelinkStatus('Checking concepts…');
     try {
       const dryRun = await relinkConceptsByGloss();
-      if (!dryRun.groups.length) {
+      if (!dryRun.groups.length && !dryRun.fuzzy_candidates.length) {
         setRelinkStatus('No strict cross-survey merges found.');
         return;
       }
-      const summary = summarizeRelinkGroups(dryRun.groups);
-      const confirmed = window.confirm(`Reconcile concepts across surveys?\n\n${summary}`);
-      if (!confirmed) {
-        setRelinkStatus('Reconciliation cancelled.');
-        return;
-      }
-      await relinkConceptsByGloss({
-        apply: true,
-        accepted_groups: dryRun.groups.map((group) => ({
-          keep_concept_id: group.keep_concept_id,
-          merge_concept_ids: group.merge_concept_ids,
-        })),
-      });
-      await onRelinkApplied?.();
-      setRelinkStatus('Concept reconciliation applied.');
+      setRelinkReview(dryRun);
+      setRelinkStatus(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setRelinkStatus(message);
@@ -153,7 +162,8 @@ export function SurveyValuesSection({
   };
 
   return (
-    <CollapsibleSection
+    <>
+      <CollapsibleSection
       title="Survey Values"
       icon={<Database className="h-3 w-3" />}
       meta={<span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-500">{workspaceChoices.length}</span>}
@@ -320,6 +330,17 @@ export function SurveyValuesSection({
           </>
         )}
       </div>
-    </CollapsibleSection>
+      </CollapsibleSection>
+      {relinkReview ? (
+        <RelinkReviewDialog
+          response={relinkReview}
+          onApply={(acceptedGroups) => { void applyRelinkReview(acceptedGroups); }}
+          onCancel={() => {
+            setRelinkReview(null);
+            setRelinkStatus('Reconciliation cancelled.');
+          }}
+        />
+      ) : null}
+    </>
   );
 }
