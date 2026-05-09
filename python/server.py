@@ -170,7 +170,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun")
+_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun", "tag_filtered_rerun")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -1537,6 +1537,12 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
         if request_path == "/api/lexeme/run_ipa":
             self._api_post_lexeme_run_ipa()
+            return
+        if request_path == "/api/concepts/by-tag":
+            self._api_post_concepts_by_tag()
+            return
+        if request_path == "/api/lexemes/rerun-by-tag":
+            self._api_post_lexemes_rerun_by_tag()
             return
         if request_path == "/api/lexeme-notes":
             self._api_post_lexeme_note()
