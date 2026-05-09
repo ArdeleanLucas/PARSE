@@ -86,6 +86,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/chat/run/status",
         "/api/tags/merge",
         "/api/concepts/import",
+        "/api/concepts/relink-by-gloss",
         "/api/concepts/{conceptId}/duplicate",
         "/api/concepts/{conceptId}/survey-links",
         "/api/tags/import",
@@ -128,6 +129,27 @@ def test_build_openapi_document_covers_concept_duplicate_contract() -> None:
         "$ref": "#/components/schemas/ConceptDuplicateResponse"
     }
     assert operation["x-parse"] == {"idempotent": False}
+
+
+def test_build_openapi_document_covers_relink_by_gloss_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/concepts/relink-by-gloss"]["post"]
+
+    assert operation["operationId"] == "relinkConceptsByGloss"
+    assert operation["requestBody"]["required"] is False
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/RelinkByGlossRequest"
+    }
+    assert set(operation["responses"]) == {"200", "400", "500"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/RelinkByGlossResponse"
+    }
+    components = spec["components"]["schemas"]
+    assert components["RelinkByGlossResponse"]["required"] == ["ok", "applied", "algorithm", "groups", "fuzzy_candidates"]
+    assert components["RelinkByGlossResponse"]["properties"]["annotation_rewrites"] == {
+        "type": "object",
+        "additionalProperties": {"type": "integer"},
+    }
 
 
 def test_build_openapi_document_covers_concept_survey_links_contract() -> None:

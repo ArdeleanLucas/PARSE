@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import server as _server
+from concept_relink import ConceptRelinkError, apply_relink_by_gloss, build_relink_by_gloss_plan
 from concepts_io import ConceptDuplicateError, duplicate_concept_variant
 
 def _api_get_export_lingpy(self) -> None:
@@ -45,6 +46,31 @@ def _api_post_concepts_import(self) -> None:
     except _server._app_ProjectConfigHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
+
+
+def _api_post_concepts_relink_by_gloss(self) -> None:
+    """Dry-run or apply strict canonical-gloss concept relinking."""
+    payload = self._read_json_body(required=False)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, "request body must be a JSON object")
+    try:
+        if bool(payload.get("apply")):
+            result = apply_relink_by_gloss(
+                _server._project_root(),
+                accepted_groups=payload.get("accepted_groups") if "accepted_groups" in payload else None,
+            )
+            if result.get("error") == "fuzzy_candidates_require_manual_relabel":
+                raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, "fuzzy_candidates_require_manual_relabel")
+        else:
+            result = build_relink_by_gloss_plan(_server._project_root())
+    except ConceptRelinkError as exc:
+        raise _server.ApiError(_server.HTTPStatus(exc.status), exc.message) from exc
+    except OSError as exc:
+        raise _server.ApiError(_server.HTTPStatus.INTERNAL_SERVER_ERROR, str(exc)) from exc
+    self._send_json(_server.HTTPStatus.OK, result)
+
 
 def _api_post_tags_import(self) -> None:
     """Import a custom concept list as a TAG with auto-assigned concepts."""
@@ -122,4 +148,4 @@ def _api_delete_concept_survey_link(self, concept_id: str) -> None:
     self._send_json(response.status, response.payload)
 
 
-__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_post_concept_survey_link', '_api_delete_concept_survey_link']
+__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_concepts_relink_by_gloss', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_post_concept_survey_link', '_api_delete_concept_survey_link']
