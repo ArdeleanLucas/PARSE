@@ -1529,6 +1529,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_concepts_import()
             return
 
+        if request_path == "/api/concepts/relink-by-gloss": self._api_post_concepts_relink_by_gloss(); return
         if request_path == "/api/tags/import":
             self._api_post_tags_import()
             return

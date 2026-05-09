@@ -182,6 +182,77 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": False,
             },
+            "RelinkByGlossGroup": {
+                "type": "object",
+                "required": ["keep_concept_id", "merge_concept_ids"],
+                "properties": {
+                    "canonical_gloss": {"type": "string"},
+                    "keep_concept_id": {"type": "string"},
+                    "merge_concept_ids": {"type": "array", "items": {"type": "string"}},
+                    "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "links_by_survey": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "source_rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["concept_id", "concept_en"],
+                            "properties": {
+                                "concept_id": {"type": "string"},
+                                "concept_en": {"type": "string"},
+                                "source_survey": {"type": "string"},
+                                "source_item": {"type": "string"},
+                            },
+                            "additionalProperties": True,
+                        },
+                    },
+                    "keep_reason": {"type": "string"},
+                },
+                "additionalProperties": True,
+            },
+            "RelinkByGlossFuzzyCandidate": {
+                "type": "object",
+                "required": ["incoming_label", "candidate_label", "reason"],
+                "properties": {
+                    "incoming_label": {"type": "string"},
+                    "candidate_label": {"type": "string"},
+                    "candidate_concept_id": {"type": "string"},
+                    "reason": {"type": "string", "enum": ["parenthetical_stripped_match", "comma_token_match"]},
+                },
+                "additionalProperties": False,
+            },
+            "RelinkByGlossRequest": {
+                "type": "object",
+                "properties": {
+                    "apply": {"type": "boolean"},
+                    "accepted_groups": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["keep_concept_id", "merge_concept_ids"],
+                            "properties": {
+                                "keep_concept_id": {"type": "string"},
+                                "merge_concept_ids": {"type": "array", "items": {"type": "string"}},
+                            },
+                            "additionalProperties": True,
+                        },
+                    },
+                },
+                "additionalProperties": True,
+            },
+            "RelinkByGlossResponse": {
+                "type": "object",
+                "required": ["ok", "applied", "algorithm", "groups", "fuzzy_candidates"],
+                "properties": {
+                    "ok": {"type": "boolean", "const": True},
+                    "applied": {"type": "boolean"},
+                    "algorithm": {"type": "string"},
+                    "groups": {"type": "array", "items": _schema_ref("RelinkByGlossGroup")},
+                    "fuzzy_candidates": {"type": "array", "items": _schema_ref("RelinkByGlossFuzzyCandidate")},
+                    "backup_paths": {"type": "array", "items": {"type": "string"}},
+                    "annotation_rewrites": {"type": "object", "additionalProperties": {"type": "integer"}},
+                },
+                "additionalProperties": True,
+            },
             "ConceptDuplicateResponse": {
                 "type": "object",
                 "required": ["primary", "sibling"],
@@ -419,6 +490,21 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/concepts/import": {
             "post": {"tags": ["Annotations"], "summary": "Import concepts CSV", "operationId": "importConcepts", "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}, "required": ["file"]}}}}, "responses": {"200": _response("Imported concepts summary", _schema_ref("GenericObject"))}},
+        },
+        "/api/concepts/relink-by-gloss": {
+            "post": {
+                "tags": ["Annotations"],
+                "summary": "Dry-run or apply strict cross-survey concept relinking by canonical gloss",
+                "description": "Dry-run returns strict canonical-gloss groups and fuzzy manual-review candidates. apply=true migrates accepted strict groups, backs up touched files, unions survey links, rewrites concept_id references, and removes merged concepts.csv rows. Fuzzy candidates are never applied automatically.",
+                "operationId": "relinkConceptsByGloss",
+                "requestBody": {"required": False, "content": _json_content(_schema_ref("RelinkByGlossRequest"))},
+                "responses": {
+                    "200": _response("Relink-by-gloss dry-run or apply response", _schema_ref("RelinkByGlossResponse")),
+                    "400": _response("Invalid accepted group, stale group, or fuzzy candidate submitted for apply", _schema_ref("ErrorResponse")),
+                    "500": _response("Backup or write failure", _schema_ref("ErrorResponse")),
+                },
+                "x-parse": {"idempotent": False, "algorithm": "canonical_survey_gloss:v1-strict"},
+            },
         },
         "/api/concepts/{conceptId}/duplicate": {
             "post": {"tags": ["Annotations"], "summary": "Duplicate one concept row into a new variant", "operationId": "duplicateConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "requestBody": {"required": False, "content": _json_content({"type": "object", "maxProperties": 0, "additionalProperties": False})}, "responses": {"200": _response("Duplicated concept rows", _schema_ref("ConceptDuplicateResponse")), "400": _response("Invalid concept id or malformed path", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept row cannot be duplicated (no free variant labels remain)", _schema_ref("ErrorResponse")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False}},
