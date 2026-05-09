@@ -20,6 +20,7 @@ class _FakeProcess:
         daemon: bool,
         exitcode: int | None,
         write_success: bool = False,
+        write_log: bool = False,
         stay_alive: bool = False,
     ) -> None:
         self.target = target
@@ -28,6 +29,7 @@ class _FakeProcess:
         self.daemon = daemon
         self.exitcode = exitcode
         self.write_success = write_success
+        self.write_log = write_log
         self.stay_alive = stay_alive
         self.pid = 4321
         self.terminated = False
@@ -35,6 +37,12 @@ class _FakeProcess:
 
     def start(self) -> None:
         self.started = True
+        if self.write_log:
+            kind = str(self.args[0])
+            Path(f"/tmp/parse-lexeme-rerun-{kind}-{self.pid}.log").write_text(
+                "DIAGNOSTIC_SMOKE_TEST: about to crash on purpose\n",
+                encoding="utf-8",
+            )
         if self.write_success:
             result_path = Path(self.args[2])
             result_path.write_text(json.dumps({"ok": True, "result": "ʃ"}), encoding="utf-8")
@@ -85,6 +93,29 @@ def test_lexeme_subprocess_success_returns_child_result(tmp_path: Path, monkeypa
 
 
 @pytest.mark.parametrize(
+    ("runner", "kind"),
+    [
+        (lexeme_rerun._run_ipa_interval_in_subprocess, "ipa"),
+        (lexeme_rerun._run_ortho_interval_in_subprocess, "ortho"),
+    ],
+)
+def test_lexeme_subprocess_success_cleans_child_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: Callable[..., str],
+    kind: str,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    process = _FakeProcess(target=lambda: None, name="", args=(), daemon=True, exitcode=0, write_success=True, write_log=True)
+    _install_fake_process(monkeypatch, process)
+
+    assert runner(audio_path=audio_path, start=1.0, end=1.2) == "ʃ"
+
+    assert not Path(f"/tmp/parse-lexeme-rerun-{kind}-{process.pid}.log").exists()
+
+
+@pytest.mark.parametrize(
     ("exitcode", "code"),
     [
         (139, "subprocess_segfault"),
@@ -111,6 +142,51 @@ def test_lexeme_subprocess_exit_codes_map_to_structured_errors(
     assert exc_info.value.code == code
     assert exc_info.value.exit_code == exitcode
     assert "lexeme IPA subprocess" in exc_info.value.message
+
+
+@pytest.mark.parametrize(
+    ("runner", "kind", "tier_label"),
+    [
+        (lexeme_rerun._run_ipa_interval_in_subprocess, "ipa", "IPA"),
+        (lexeme_rerun._run_ortho_interval_in_subprocess, "ortho", "ORTH"),
+    ],
+)
+def test_lexeme_subprocess_exit_error_includes_child_log_tail_and_cleans_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: Callable[..., str],
+    kind: str,
+    tier_label: str,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    process = _FakeProcess(target=lambda: None, name="", args=(), daemon=True, exitcode=139, write_log=True)
+    _install_fake_process(monkeypatch, process)
+
+    with pytest.raises(LexemeRerunSubprocessError) as exc_info:
+        runner(audio_path=audio_path, start=1.0, end=1.2)
+
+    assert exc_info.value.code == "subprocess_segfault"
+    assert exc_info.value.exit_code == 139
+    assert f"lexeme {tier_label} subprocess" in exc_info.value.message
+    assert exc_info.value.stderr_tail == "DIAGNOSTIC_SMOKE_TEST: about to crash on purpose"
+    assert not Path(f"/tmp/parse-lexeme-rerun-{kind}-{process.pid}.log").exists()
+
+
+def test_lexeme_subprocess_missing_child_log_leaves_stderr_tail_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    process = _FakeProcess(target=lambda: None, name="", args=(), daemon=True, exitcode=139)
+    _install_fake_process(monkeypatch, process)
+
+    with pytest.raises(LexemeRerunSubprocessError) as exc_info:
+        lexeme_rerun._run_ipa_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
+
+    assert exc_info.value.code == "subprocess_segfault"
+    assert exc_info.value.stderr_tail is None
 
 
 def test_lexeme_subprocess_timeout_terminates_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

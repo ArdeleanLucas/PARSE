@@ -90,7 +90,47 @@ def _lexeme_subprocess_message(tier_label: str, code: str, exit_code: int | None
     return "lexeme {0} subprocess exited with code {1}".format(tier_label, exit_code)
 
 
+def _child_log_path(child_pid: int, kind: str) -> str:
+    return "/tmp/parse-lexeme-rerun-{0}-{1}.log".format(kind, child_pid)
+
+
+def _cleanup_child_log(child_pid: int | None, kind: str) -> None:
+    if child_pid is None:
+        return
+    try:
+        _server.os.remove(_child_log_path(child_pid, kind))
+    except OSError:
+        pass
+
+
+def _read_child_log_tail(child_pid: int | None, kind: str, max_lines: int = 50) -> str | None:
+    if child_pid is None:
+        return None
+    log_path = _child_log_path(child_pid, kind)
+    lines: list[str] = []
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+    finally:
+        _cleanup_child_log(child_pid, kind)
+    if not lines:
+        return None
+    return "".join(lines[-max_lines:]).strip() or None
+
+
 def _lexeme_rerun_subprocess_entry(kind: str, payload: dict[str, Any], result_path: str) -> None:
+    import faulthandler
+    import os as _os
+    import sys as _sys
+
+    log_path = _child_log_path(_os.getpid(), kind)
+    log_fh = open(log_path, "w", buffering=1, encoding="utf-8")
+    _sys.stdout = log_fh
+    _sys.stderr = log_fh
+    faulthandler.enable(file=log_fh, all_threads=True)
+
     import json as _json
     import traceback as _traceback
 
@@ -148,6 +188,7 @@ def _run_interval_in_subprocess(
         daemon=True,
     )
     child.start()
+    child_pid = child.pid
     timeout_sec = _lexeme_rerun_subprocess_timeout_sec()
     child.join(timeout=timeout_sec)
     if child.is_alive():
@@ -163,6 +204,7 @@ def _run_interval_in_subprocess(
                 tier_label,
                 int(timeout_sec) if timeout_sec.is_integer() else timeout_sec,
             ),
+            stderr_tail=_read_child_log_tail(child_pid, kind),
         )
 
     exit_code = child.exitcode
@@ -173,13 +215,19 @@ def _run_interval_in_subprocess(
         except OSError:
             pass
         code = _lexeme_subprocess_code(exit_code)
-        raise LexemeRerunSubprocessError(code=code, exit_code=exit_code, message=_lexeme_subprocess_message(tier_label, code, exit_code))
+        raise LexemeRerunSubprocessError(
+            code=code,
+            exit_code=exit_code,
+            message=_lexeme_subprocess_message(tier_label, code, exit_code),
+            stderr_tail=_read_child_log_tail(child_pid, kind),
+        )
 
     if not _server.os.path.exists(result_path):
         raise LexemeRerunSubprocessError(
             code="subprocess_failed",
             exit_code=exit_code,
             message="lexeme {0} subprocess result file was not written".format(tier_label),
+            stderr_tail=_read_child_log_tail(child_pid, kind),
         )
     try:
         with open(result_path, "r", encoding="utf-8") as handle:
@@ -189,6 +237,7 @@ def _run_interval_in_subprocess(
             code="subprocess_failed",
             exit_code=exit_code,
             message="lexeme {0} subprocess result file unreadable: {1}".format(tier_label, exc),
+            stderr_tail=_read_child_log_tail(child_pid, kind),
         ) from exc
     finally:
         try:
@@ -197,11 +246,13 @@ def _run_interval_in_subprocess(
             pass
 
     if bool(outcome.get("ok")):
+        _cleanup_child_log(child_pid, kind)
         return str(outcome.get("result") or "").strip()
     raise LexemeRerunSubprocessError(
         code="subprocess_failed",
         exit_code=exit_code,
         message=str(outcome.get("error") or "lexeme {0} subprocess reported failure".format(tier_label)),
+        stderr_tail=_read_child_log_tail(child_pid, kind),
     )
 
 

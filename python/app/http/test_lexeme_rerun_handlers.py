@@ -293,6 +293,41 @@ def test_subprocess_error_maps_to_503_payload(tmp_path: Path) -> None:
     }
 
 
+def test_subprocess_error_maps_stderr_tail_to_503_payload(tmp_path: Path) -> None:
+    response = _ipa_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.2, "pad": 0.0},
+        runner=lambda **_kwargs: (_ for _ in ()).throw(
+            LexemeRerunSubprocessError(
+                code="subprocess_segfault",
+                exit_code=-11,
+                message="lexeme IPA subprocess exited with code -11",
+                stderr_tail="DIAGNOSTIC_SMOKE_TEST: about to crash on purpose",
+            )
+        ),
+    )
+
+    assert response.status == HTTPStatus.SERVICE_UNAVAILABLE
+    assert response.payload == {
+        "status": "error",
+        "code": "subprocess_segfault",
+        "exit_code": -11,
+        "message": "lexeme IPA subprocess exited with code -11",
+        "stderr_tail": "DIAGNOSTIC_SMOKE_TEST: about to crash on purpose",
+    }
+
+
+def test_success_payload_does_not_include_stderr_tail(tmp_path: Path) -> None:
+    response = _ipa_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 1.2, "pad": 0.0},
+        runner=lambda **_kwargs: "ʃari:",
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert "stderr_tail" not in response.payload
+
+
 def test_ortho_subprocess_error_maps_to_503_payload(tmp_path: Path) -> None:
     response = _ortho_response(
         tmp_path,
