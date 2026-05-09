@@ -89,6 +89,8 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/concepts/relink-by-gloss",
         "/api/concepts/{conceptId}/duplicate",
         "/api/concepts/{conceptId}/survey-links",
+        "/api/concepts/by-tag",
+        "/api/lexemes/rerun-by-tag",
         "/api/tags/import",
         "/api/lexeme-notes",
         "/api/lexeme-notes/import",
@@ -211,6 +213,72 @@ def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
     assert components["ConceptSurveyLinkResponse"]["properties"]["ok"] == {"type": "boolean", "const": True}
     assert components["ConceptSurveyLinkResponse"]["properties"]["concept"] == {"$ref": "#/components/schemas/ConceptEntry"}
     assert components["ConceptSurveyLinkResponse"]["properties"]["survey_overlap"] == {"$ref": "#/components/schemas/SurveyOverlapState"}
+
+
+def test_build_openapi_document_covers_concepts_by_tag_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/concepts/by-tag"]["post"]
+
+    assert operation["operationId"] == "listConceptsByTag"
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptsByTagRequest"
+    }
+    assert set(operation["responses"]) == {"200", "400", "404"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptsByTagResponse"
+    }
+    assert operation["x-parse"] == {"idempotent": True}
+
+    components = spec["components"]["schemas"]
+    assert components["ConceptsByTagRequest"]["required"] == ["tagLabels"]
+    assert components["ConceptsByTagRequest"]["properties"]["match"]["enum"] == ["any", "all"]
+    assert components["ConceptsByTagRequest"]["properties"]["speakers"] == {
+        "$ref": "#/components/schemas/TagFilteredSpeakerSelector"
+    }
+    assert components["ConceptsByTagResponse"]["required"] == [
+        "totalConcepts",
+        "perSpeaker",
+        "unknownTags",
+        "ambiguousTags",
+    ]
+    assert components["ConceptByTagHit"]["required"] == ["conceptId", "name", "start", "end", "tags"]
+    speaker_selector = components["TagFilteredSpeakerSelector"]
+    assert speaker_selector["oneOf"][0] == {"type": "string", "enum": ["all"]}
+    assert speaker_selector["oneOf"][1] == {"type": "array", "items": {"type": "string"}}
+
+
+def test_build_openapi_document_covers_lexemes_rerun_by_tag_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/lexemes/rerun-by-tag"]["post"]
+
+    assert operation["operationId"] == "rerunLexemesByTag"
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LexemesRerunByTagRequest"
+    }
+    assert set(operation["responses"]) == {"200", "400", "404", "409"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LexemesRerunByTagResponse"
+    }
+    assert operation["x-parse"] == {"idempotent": False}
+
+    components = spec["components"]["schemas"]
+    assert components["LexemesRerunByTagRequest"]["required"] == ["tagLabels", "field"]
+    assert components["LexemesRerunByTagRequest"]["properties"]["field"]["enum"] == ["ipa", "ortho", "both"]
+    assert components["LexemesRerunByTagRequest"]["properties"]["pad"]["enum"] == [0.0, 0.2, 0.5]
+    assert components["LexemesRerunByTagResponse"]["required"] == ["jobId", "resolved", "total", "results"]
+    assert components["LexemesRerunByTagResponse"]["properties"]["resolved"] == {
+        "$ref": "#/components/schemas/ConceptsByTagResponse"
+    }
+    assert components["LexemeRerunByTagResultEntry"]["required"] == [
+        "speaker",
+        "conceptId",
+        "field",
+        "status",
+    ]
+    assert components["LexemeRerunByTagResultEntry"]["properties"]["status"]["enum"] == ["ok", "error"]
+    assert components["LexemeRerunByTagResultEntry"]["properties"]["field"]["enum"] == ["ipa", "ortho"]
 
 
 def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> None:

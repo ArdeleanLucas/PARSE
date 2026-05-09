@@ -262,6 +262,109 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": False,
             },
+            "TagFilteredSpeakerSelector": {
+                "description": "Either the literal string 'all' (every workspace speaker) or an explicit list of speaker ids.",
+                "oneOf": [
+                    {"type": "string", "enum": ["all"]},
+                    {"type": "array", "items": {"type": "string"}},
+                ],
+            },
+            "ConceptsByTagRequest": {
+                "type": "object",
+                "required": ["tagLabels"],
+                "properties": {
+                    "tagLabels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "Non-empty list of tag labels to resolve against the global tag vocabulary.",
+                    },
+                    "match": {
+                        "type": "string",
+                        "enum": ["any", "all"],
+                        "default": "any",
+                        "description": "'any' selects concepts carrying at least one resolved tag; 'all' requires every label to resolve unambiguously and every concept to carry every resolved tag.",
+                    },
+                    "speakers": _schema_ref("TagFilteredSpeakerSelector"),
+                },
+                "additionalProperties": False,
+            },
+            "ConceptByTagHit": {
+                "type": "object",
+                "required": ["conceptId", "name", "start", "end", "tags"],
+                "properties": {
+                    "conceptId": {"type": "string"},
+                    "name": {"type": "string"},
+                    "start": {"type": "number"},
+                    "end": {"type": "number"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Resolved tag labels (not ids)."},
+                },
+                "additionalProperties": False,
+            },
+            "ConceptsByTagPerSpeaker": {
+                "type": "object",
+                "required": ["conceptCount", "concepts"],
+                "properties": {
+                    "conceptCount": {"type": "integer"},
+                    "concepts": {"type": "array", "items": _schema_ref("ConceptByTagHit")},
+                },
+                "additionalProperties": False,
+            },
+            "ConceptsByTagResponse": {
+                "type": "object",
+                "required": ["totalConcepts", "perSpeaker", "unknownTags", "ambiguousTags"],
+                "properties": {
+                    "totalConcepts": {"type": "integer"},
+                    "perSpeaker": {
+                        "type": "object",
+                        "additionalProperties": _schema_ref("ConceptsByTagPerSpeaker"),
+                    },
+                    "unknownTags": {"type": "array", "items": {"type": "string"}},
+                    "ambiguousTags": {
+                        "type": "object",
+                        "additionalProperties": {"type": "array", "items": {"type": "string"}},
+                        "description": "Map from requested label to the candidate tag ids that share it; rerun refuses to disambiguate.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            "LexemesRerunByTagRequest": {
+                "type": "object",
+                "required": ["tagLabels", "field"],
+                "properties": {
+                    "tagLabels": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                    "match": {"type": "string", "enum": ["any", "all"], "default": "any"},
+                    "field": {"type": "string", "enum": ["ipa", "ortho", "both"]},
+                    "pad": {"type": "number", "enum": [0.0, 0.2, 0.5], "default": 0.2},
+                    "speakers": _schema_ref("TagFilteredSpeakerSelector"),
+                },
+                "additionalProperties": False,
+            },
+            "LexemeRerunByTagResultEntry": {
+                "type": "object",
+                "required": ["speaker", "conceptId", "field", "status"],
+                "properties": {
+                    "speaker": {"type": "string"},
+                    "conceptId": {"type": "string"},
+                    "field": {"type": "string", "enum": ["ipa", "ortho"]},
+                    "status": {"type": "string", "enum": ["ok", "error"]},
+                    "text": {"type": "string", "description": "Decoded ortho/ipa value when status='ok'."},
+                    "statusCode": {"type": "integer", "description": "Per-interval HTTP status preserved when status='error' (404 concept, 409 lock, 500 runner)."},
+                    "error": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "LexemesRerunByTagResponse": {
+                "type": "object",
+                "required": ["jobId", "resolved", "total", "results"],
+                "properties": {
+                    "jobId": {"type": ["string", "null"], "description": "Always null today; reserved for a future async/job-backed mode."},
+                    "resolved": _schema_ref("ConceptsByTagResponse"),
+                    "total": {"type": "integer"},
+                    "results": {"type": "array", "items": _schema_ref("LexemeRerunByTagResultEntry")},
+                },
+                "additionalProperties": False,
+            },
             "GenericJobResponse": {
                 "type": "object",
                 "properties": {
@@ -541,6 +644,37 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/tags/import": {
             "post": {"tags": ["Tags"], "summary": "Import tags from CSV", "operationId": "importTags", "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}, "required": ["file"]}}}}, "responses": {"200": _response("Imported tags summary", _schema_ref("GenericObject"))}},
+        },
+        "/api/concepts/by-tag": {
+            "post": {
+                "tags": ["Annotations"],
+                "summary": "List concepts carrying selected tags, grouped by speaker",
+                "description": "Resolves tagLabels against the global tag vocabulary, expands the speakers selector, and returns matched concepts per speaker without mutating any state. match='all' rejects unknown or ambiguous tagLabels with HTTP 400; match='any' returns them in unknownTags / ambiguousTags so the caller can surface them.",
+                "operationId": "listConceptsByTag",
+                "requestBody": {"required": True, "content": _json_content(_schema_ref("ConceptsByTagRequest"))},
+                "responses": {
+                    "200": _response("Per-speaker concept hits", _schema_ref("ConceptsByTagResponse")),
+                    "400": _response("Invalid tagLabels, match, speakers shape, or 'all'-mode unresolved labels", _schema_ref("ErrorResponse")),
+                    "404": _response("Unknown named speaker in speakers list", _schema_ref("ErrorResponse")),
+                },
+                "x-parse": {"idempotent": True},
+            },
+        },
+        "/api/lexemes/rerun-by-tag": {
+            "post": {
+                "tags": ["Annotations"],
+                "summary": "Run ORTH/IPA/both per concept matched by tags, sequentially",
+                "description": "Resolves tagLabels and speakers, then loops over the matched concept windows running per-interval ORTH and/or IPA through the same speaker-locked rerun path used by /api/lexeme/run_ortho and /api/lexeme/run_ipa. pad must be one of 0.0, 0.2, 0.5. Ambiguous tagLabels return HTTP 409 (rerun refuses to disambiguate so it never spends GPU on a concept set the caller did not approve). match='all' with unresolved labels returns HTTP 400. Per-concept errors are surfaced inside results[*] without aborting the batch.",
+                "operationId": "rerunLexemesByTag",
+                "requestBody": {"required": True, "content": _json_content(_schema_ref("LexemesRerunByTagRequest"))},
+                "responses": {
+                    "200": _response("Per-concept rerun results plus resolved query", _schema_ref("LexemesRerunByTagResponse")),
+                    "400": _response("Invalid tagLabels, match, field, pad, speakers, or 'all'-mode unresolved labels", _schema_ref("ErrorResponse")),
+                    "404": _response("Unknown named speaker in speakers list", _schema_ref("ErrorResponse")),
+                    "409": _response("Ambiguous tagLabels (rerun refuses to disambiguate)", _schema_ref("ErrorResponse")),
+                },
+                "x-parse": {"idempotent": False},
+            },
         },
         "/api/lexeme-notes": {
             "post": {"tags": ["Compare"], "summary": "Write or delete a lexeme note", "operationId": "writeLexemeNote", "requestBody": {"required": True, "content": _json_content(_schema_ref("GenericObject"))}, "responses": {"200": _response("Lexeme notes result", _schema_ref("GenericObject"))}},
