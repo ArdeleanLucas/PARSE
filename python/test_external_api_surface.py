@@ -87,6 +87,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/tags/merge",
         "/api/concepts/import",
         "/api/concepts/{conceptId}/duplicate",
+        "/api/concepts/{conceptId}/survey-links",
         "/api/tags/import",
         "/api/lexeme-notes",
         "/api/lexeme-notes/import",
@@ -127,6 +128,67 @@ def test_build_openapi_document_covers_concept_duplicate_contract() -> None:
         "$ref": "#/components/schemas/ConceptDuplicateResponse"
     }
     assert operation["x-parse"] == {"idempotent": False}
+
+
+def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    path = spec["paths"]["/api/concepts/{conceptId}/survey-links"]
+
+    assert set(path) == {"post", "delete"}
+    shared_parameter = {
+        "name": "conceptId",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string", "pattern": "^[0-9]+$"},
+    }
+
+    post = path["post"]
+    assert post["operationId"] == "setConceptSurveyLink"
+    assert post["parameters"] == [shared_parameter]
+    assert post["requestBody"]["required"] is True
+    assert post["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptSurveyLinkPostRequest"
+    }
+    assert set(post["responses"]) == {"200", "400", "404", "409"}
+    assert post["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptSurveyLinkResponse"
+    }
+
+    delete = path["delete"]
+    assert delete["operationId"] == "deleteConceptSurveyLink"
+    assert delete["parameters"] == [shared_parameter]
+    assert delete["requestBody"]["required"] is True
+    assert delete["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptSurveyLinkDeleteRequest"
+    }
+    assert set(delete["responses"]) == {"200", "400", "404", "409"}
+    assert delete["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptSurveyLinkResponse"
+    }
+
+    components = spec["components"]["schemas"]
+    assert components["ConceptSurveyLinkPostRequest"] == {
+        "type": "object",
+        "required": ["survey_id", "source_item"],
+        "properties": {
+            "survey_id": {"type": "string"},
+            "source_item": {"type": "string"},
+        },
+        "additionalProperties": False,
+    }
+    assert components["ConceptSurveyLinkDeleteRequest"] == {
+        "type": "object",
+        "required": ["survey_id"],
+        "properties": {
+            "survey_id": {"type": "string"},
+            "source_item": {"type": "string"},
+        },
+        "additionalProperties": False,
+    }
+    assert components["ConceptSurveyLinkResponse"]["required"] == ["ok", "concept"]
+    assert components["ConceptSurveyLinkResponse"]["properties"]["ok"] == {"type": "boolean", "const": True}
+    assert components["ConceptSurveyLinkResponse"]["properties"]["concept"] == {"$ref": "#/components/schemas/ConceptEntry"}
+    assert components["ConceptSurveyLinkResponse"]["properties"]["survey_overlap"] == {"$ref": "#/components/schemas/SurveyOverlapState"}
 
 
 def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> None:
