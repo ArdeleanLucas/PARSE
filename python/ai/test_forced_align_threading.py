@@ -1,12 +1,12 @@
-"""Characterisation tests for the recurring PARSE IPA threading failure.
+"""Regression tests for PARSE IPA device and CPU-thread handling.
 
-These tests document the current failure mode rather than fixing it:
+These tests document the current safety contract:
 
-- WSL forces wav2vec2 IPA alignment onto CPU.
+- WSL forces wav2vec2 IPA alignment onto CPU unless explicitly opted into CUDA.
 - The CPU branch of ``Aligner.load()`` configures PyTorch's global thread
   settings.
-- The real repository code path raises the exact observed RuntimeError once
-  PyTorch considers inter-op thread configuration frozen for the process.
+- A late lazy load must tolerate PyTorch inter-op settings that are already
+  frozen for the process.
 """
 from __future__ import annotations
 
@@ -114,10 +114,50 @@ def _system_python_has_torch() -> bool:
 REAL_TORCH_SUBPROCESS_AVAILABLE = _system_python_has_torch()
 
 
-def test_resolve_device_forces_cpu_on_wsl_even_if_cuda_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_device_forces_cpu_on_wsl_by_default_even_if_cuda_requested(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
     assert fa.resolve_device("cuda") == "cpu"
     assert fa.resolve_device(None) == "cpu"
+
+
+def test_resolve_device_allows_wsl_cuda_when_explicitly_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(fa, "_is_wsl", lambda: True)
+
+    assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cuda"
+
+
+def test_resolve_device_cpu_request_wins_even_when_wsl_cuda_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(fa, "_is_wsl", lambda: True)
+
+    assert fa.resolve_device("cpu", allow_wsl_cuda=True) == "cpu"
+
+
+def test_aligner_load_plumbs_wsl_cuda_opt_in_to_model_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fa, "_CPU_THREAD_LIMITS_CONFIGURED", False)
+    monkeypatch.setattr(fa, "_PRELOADED_ALIGNER", None)
+    monkeypatch.setattr(fa, "_is_wsl", lambda: True)
+    fake_torch = _build_fake_torch_module()
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    fake_transformers, model_events = _build_fake_transformers_module()
+
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+
+    aligner = fa.Aligner.load(model_name="dummy", device="cuda", allow_wsl_cuda=True)
+
+    assert aligner.device == "cuda"
+    assert fake_torch.calls == []  # type: ignore[attr-defined]
+    assert model_events == [
+        ("from_pretrained", "dummy"),
+        ("to", "cuda"),
+        ("eval", None),
+    ]
 
 
 def test_aligner_load_cpu_path_sets_thread_limits_before_model_load(

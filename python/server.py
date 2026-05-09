@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -1090,7 +1091,6 @@ def _publish_job_stream_event(
     )
 
 
-
 def _publish_stt_partial_segment(job_id: str, segment: Dict[str, Any]) -> None:
     job = _get_job_snapshot(job_id)
     if job is None:
@@ -1132,20 +1132,21 @@ def _get_ipa_aligner() -> Any:
         file=sys.stderr,
         flush=True,
     )
-    # Honour wav2vec2.force_cpu from ai_config.json, or auto-detect via
-    # resolve_device() which forces CPU on WSL to avoid GPU driver crashes.
+    # Honour wav2vec2 settings from the canonical workspace-aware AI config
+    # reader used by STT/ORTH; otherwise auto-detect in forced_align.
     try:
-        import json as _json
-        _ai_cfg = _json.loads((_project_root() / "config" / "ai_config.json").read_text())
+        from ai import provider as _ai_provider
+        _ai_cfg = _ai_provider.load_ai_config()
         _w2v = _ai_cfg.get("wav2vec2", {})
         if _w2v.get("force_cpu"):
             _ipa_device: Optional[str] = "cpu"
         else:
             _ipa_device = _w2v.get("device") or None
+        _allow_wsl_cuda = _w2v.get("allow_wsl_cuda") is True
     except Exception:
-        _ai_cfg = {}
-        _w2v = {}
+        _ai_cfg = _w2v = {}
         _ipa_device = None
+        _allow_wsl_cuda = False
 
     from ai.forced_align import _is_wsl as _fa_is_wsl
     if _fa_is_wsl():
@@ -1155,7 +1156,7 @@ def _get_ipa_aligner() -> Any:
 
     try:
         _compute_checkpoint("ALIGNER.load_begin")
-        _IPA_ALIGNER = Aligner.load(device=_ipa_device)
+        _IPA_ALIGNER = Aligner.load(device=_ipa_device, allow_wsl_cuda=_allow_wsl_cuda)
         _compute_checkpoint("ALIGNER.load_done", elapsed=round(_time.time() - t0, 2))
     except Exception as exc:
         elapsed = _time.time() - t0
@@ -1304,7 +1305,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
-    def _send_json_error(self, status: HTTPStatus, message: str) -> None:
+    def _send_json_error(self, status: HTTPStatus, message: Any) -> None:
         _app_send_json_error_response(self, status, message)
 
     def _handle_builtin_docs_get(self) -> bool:
@@ -1339,8 +1340,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         except ApiError as exc:
             self._send_json_error(exc.status, exc.message)
         except Exception as exc:
-            self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
-
+            traceback.print_exc(file=sys.stderr)
+            self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, exc)
         return True
 
     def _dispatch_api_get(self, request_path: str) -> None:
