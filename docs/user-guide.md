@@ -174,6 +174,18 @@ The transcription run modal now supports three run modes for pipeline-style reru
 
 Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexemes where they do not make sense, can preview the manually adjusted concepts, and use backend `affected_concepts` metadata to refresh processed rows opportunistically. The run grid is mode-aware: in `concept-windows` or `edited-only`, an IPA cell can be shown as runnable when stale full-mode `pipeline_state.ipa.can_run` is false but ORTH/concept-tier presence is observable (`ortho.intervals > 0` or `ortho.can_run`); full-speaker IPA without ORTH and pure-empty concept-window speakers remain blocked. After IPA, ORTH, STT, or BND compute completion, PARSE still reloads the completed speaker annotation from disk so intervals written by concept-window or edited-only runs become visible even when the scoped row refresh succeeds. If an edited-only run has no matching edited concepts, PARSE returns a structured no-op instead of starting an empty job.
 
+#### Tagged-concepts-only run mode
+
+The transcription run modal also exposes a fourth scope filter targeting tag membership. When one or more global tag labels are selected, IPA / ORTH / Full pipeline runs restrict the rerun set to concepts that carry those tags on the selected speakers. This is meant for review-driven sweeps such as "rerun every concept I tagged `needs-second-pass`" or "rerun only the borrowing-suspect set on speakers KLQ-03..05".
+
+Behavior worth knowing before you trigger a tagged-only run:
+
+- Match semantics default to `any`: a concept matches if it carries at least one of the selected tags. Switch to `all` to require every selected tag on the same concept; in that mode, unknown or ambiguous tag labels are rejected up-front so an AND query never silently degrades to "intersection over the resolved subset".
+- Ambiguous labels (the same label resolved to multiple tag ids in the global vocabulary) are rejected before any rerun work runs. Resolve the label by id or rename in the vocabulary and resubmit. This guarantees the rerun never spends GPU on a concept set the reviewer did not explicitly approve.
+- The post-run batch report lists per-concept results and surfaces per-concept errors (concept missing on the speaker, speaker locked, runner failure) inside the report rather than aborting the whole batch.
+
+The same tag-resolution backend is reused by the read-only `POST /api/concepts/by-tag` endpoint, so the modal preview and any agent or script that wants to know "which concepts would this rerun touch" share one source of truth.
+
 ### Manual review and timing correction
 
 Automation in PARSE is intentionally review-first.
@@ -274,7 +286,7 @@ The current Compare interface provides:
 - grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
 - per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
 - manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals; merge overrides are Compare-mode-only and do not collapse Annotate navigation
-- right-click concept duplication that renames the selected row to `X (A)` and appends a new `X (B)` row with the same `source_item` / `source_survey` and a fresh numeric id
+- right-click concept duplication that rewrites the selected row to `X (A)` and appends a new `X (B)` row with the same `source_item` / `source_survey` and a fresh numeric id; repeated calls on the same source item produce `(C)`, `(D)`, … so n-ary variants are built up by repeating the duplicate action rather than as a single batched operation
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
@@ -294,13 +306,27 @@ Typical use:
 2. Review the forms side by side
 3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations
 4. Use concept merge/unmerge when two source concepts should be compared as one analytical row, while preserving the original concept ids underneath
-5. Duplicate a concept into A/B rows when a single source item needs parallel lexical realizations rather than a reversible Compare-only merge
+5. Duplicate a concept into multiple variant rows when a single source item needs parallel lexical realizations rather than a reversible Compare-only merge; the first duplicate produces an `X (A)` / `X (B)` pair, and repeating the action on any row sharing that `source_item` extends the variant series with `(C)`, `(D)`, … until the alphabet is exhausted
 6. Accept, split, merge, or cycle cognate groups
 7. Mark speaker-level irregularities or flags where needed
 8. Consult enrichment overlays and contact-language evidence
 9. Preserve manual adjudications for export
 
 The goal is not just visualization — it is structured decision-making for downstream comparative analysis.
+
+### Cross-survey concept linking
+
+Surveys often elicit the same gloss under different `source_item` numbers (KLQ-12 and JBIL-204 both meaning "rain"). Compare mode treats those as separate concept rows by default, but the right-side **Survey Values** panel lets a reviewer explicitly link them so survey-overlap chips, color coding, and downstream comparison data treat them as one analytical row without rewriting `concepts.csv`.
+
+There are three ways linking can happen:
+
+1. **Automatic on import.** When a new speaker is onboarded with a survey CSV, PARSE checks each incoming concept against existing concepts that already carry an explicit primary survey link. Strict matches on canonical gloss are linked automatically. Fuzzy candidates (parenthetical-stripped or comma-token matches) are never auto-linked.
+2. **Manual per concept.** Use the right-panel **Survey Values** section to add or remove one cross-survey link at a time. Each row corresponds to one survey-overlap entry: pick the survey, type the `source_item`, and confirm. PARSE writes the change into the `concept_survey_links` sidecar inside `survey-overlap.json` (not `concepts.csv`), so the link can be removed cleanly without touching the source-data row. Trying to remove a link that lives in `concepts.csv` (a legacy primary-survey link) returns a 409 with a message asking the reviewer to migrate that link first via the bulk relink flow.
+3. **Bulk relink-by-gloss review.** When two surveys overlap heavily, the per-concept dialog is too slow. The **Review cross-survey relink groups** action runs a dry-run consolidation by canonical gloss and shows two lists:
+   - **Strict groups** are concept rows that resolve to the same canonical gloss across surveys. Accepting a group keeps one concept id (`keep_concept_id`), unions the survey links of the rest into it, rewrites annotation/enrichment references, and removes the merged rows. PARSE writes a backup of `concepts.csv`, `parse-enrichments.json`, and any annotation files it touches before applying. If anything fails mid-apply, the backups are restored automatically.
+   - **Fuzzy candidates** (parenthetical-stripped or comma-token matches) are surfaced for manual decision only. PARSE never applies a fuzzy candidate automatically, even when the reviewer confirms a strict group; the reviewer must choose to merge them through the per-concept tool.
+
+What this is *not*: cross-survey linking does not collapse Annotate navigation, does not retime any interval, and does not change the underlying `concepts.csv` row identity for the concepts that stay. It is a sidecar-level join used by Compare-mode display, color coding, and survey-aware sorting.
 
 ## CLEF — Contact Lexeme Explorer Feature
 
