@@ -412,7 +412,7 @@ Rules, in order:
 
 1. Trim input.
 2. Strip one leading KLQ-style prefix: `^\(\s*\d+(?:\.\d+)*\s*\)\s*[-–—]?\s*`.
-3. Strip one leading JBIL-style numeric prefix only when present in an import/cue-like label string: `^\d+\s*[-–—]\s*`. For structured JBIL CSV rows, use the `Eng` cell directly and store the numeric row as `source_item`.
+3. For raw JBIL bare-prefix cues such as `34- nose`, call the existing `parse_cue_name()` helper first; it already strips the numeric prefix and returns `nose` as the label. After that call, the step-2 KLQ parenthesized-prefix regex is intentionally a no-op for JBIL. For structured JBIL CSV rows, use the `Eng` cell directly and store the numeric row as `source_item`.
 4. Strip one trailing variant suffix matching `\s+[A-Z]$`, so `elbow A`, `elbow B`, and `eyebrow B` map to the base form.
 5. Lowercase and collapse internal whitespace.
 6. Keep parenthetical clarifiers.
@@ -530,15 +530,15 @@ Parse-front-end should keep this feature inside `ConceptSidebar` and existing AP
 1. **Badge flip predicate.** `src/components/parse/ConceptSidebar.tsx:266-272` already computes `surveyChoices` and `nextSurveyId`. Broaden the visible affordance so a concept with two or more `survey_links` always shows as interactive when `activeSpeaker` and `onSurveyChoiceChange` exist. The cycle order remains stable sorted survey ids because `surveyChoiceKeysForConcept` returns sorted keys in `src/lib/surveyOverlap.ts:84-86`.
 2. **Per-speaker choice only.** Continue calling `onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)` as in `ConceptSidebar.tsx:331-340`. This writes through the existing `speaker_choices` mechanism; it is not a global survey toggle.
 3. **Context menu item.** Add `Change survey ID...` beside `Merge with...`, `Duplicate...`, and `Unmerge` in `ConceptSidebar.tsx:397-433`.
-4. **Inline editor.** The menu item opens a small inline editor anchored in or below the context menu. It contains:
+4. **Editor affordance.** The menu item opens a compact editor, not a modal. If an existing inline-picker pattern is available and wide enough, reuse it; otherwise default to a popover anchored from the context-menu item so the survey select, source-item input, Save, and Remove controls are not cramped into the current narrow context menu. It contains:
    - a `survey_id` select populated from existing `surveySettings` keys plus survey ids already present on the concept;
    - a `source_item` text input;
    - Save and Cancel buttons.
    No modal.
 5. **API calls.** Add frontend contract helpers for `POST /api/concepts/{conceptId}/survey-links` and `DELETE /api/concepts/{conceptId}/survey-links`. These helpers must go through `src/api/client.ts`/contract barrels, not component-level bare `fetch`.
 6. **State refresh.** After a successful save/delete, reload config so `ConceptEntry.surveys`, `surveySettings`, and grouped concept projections refresh consistently.
-7. **Visual cue.** Add subtle underline-on-hover to multi-survey badges so clickable source badges are discoverable without adding visual noise.
-8. **Tests.** Update `ConceptSidebar` tests to cover multi-survey hover/clickability, context-menu editor open/save/cancel, and per-speaker `onSurveyChoiceChange` behavior. Update API contract tests for the two new helpers.
+7. **Visual and non-mouse cues.** Add subtle underline-on-hover to multi-survey badges so clickable source badges are discoverable without adding visual noise, plus a `title` and accessible label that name the current and next survey/source item for keyboard and screen-reader users.
+8. **Tests.** Update `ConceptSidebar` tests to cover multi-survey hover/clickability, `title`/accessible-label cues, context-menu editor or popover open/save/cancel, and per-speaker `onSurveyChoiceChange` behavior. Update API contract tests for the two new helpers.
 
 ## 6. Migration
 
@@ -614,7 +614,7 @@ Frontend flow: call dry-run first, show a confirmation list, then call `{ "apply
 ### New backend tests
 
 1. `python/test_cross_survey_concept_linking.py` or additions to `python/test_app_http_project_config_handlers.py`:
-   - normalized gloss strips KLQ prefixes, JBIL label prefixes, and trailing single-letter variants;
+   - normalized gloss strips KLQ prefixes, uses `parse_cue_name()` for raw JBIL bare-prefix cues, and strips trailing single-letter variants;
    - parentheticals remain strict;
    - comma alternatives remain strict;
    - exact normalized match links incoming JBIL `nose` to existing KLQ `nose` without allocating a new id;
@@ -637,29 +637,36 @@ Frontend flow: call dry-run first, show a confirmation list, then call `{ "apply
 1. `src/components/parse/ConceptSidebar.test.tsx`:
    - multi-survey badges show the hover/click affordance;
    - clicking the badge cycles by sorted survey ids and calls `onSurveyChoiceChange` for the active speaker only;
-   - context menu opens `Change survey ID...` and inline editor submit calls the new API callback.
+   - context menu opens `Change survey ID...` and the editor/popover submit calls the new API callback;
 2. `src/api/contracts/*.test.ts` or existing API contract test file:
    - manual set/delete helpers call the correct routes through the API client;
    - import result type accepts optional `linked`, `survey_counts`, `ambiguous`, and `fuzzy_preview` fields.
 3. Config reload/store test:
    - after manual relabel save, frontend reloads config and displays the updated `surveys` projection.
 
-### Honest LoC estimate
+### Honest LoC estimate and implementation split
 
-Backend delta: approximately 430-620 LoC.
+Backend total is likely above a comfortable single-review threshold if `§4a`, `§4b`, and `§6` are bundled. Split the backend implementation unless Lucas explicitly asks to batch it:
+
+**Backend PR 1: import-time auto-linking + manual relabel (`§4a` + `§4b`) — roughly 420-640 LoC including tests.**
 
 - `python/concept_linking.py` or equivalent helper module: 90-130 LoC for normalization, indexing, ambiguity/fuzzy preview structs.
 - `python/app/http/project_config_handlers.py`: 80-130 LoC to integrate import-time linking and additive response fields.
-- `python/server_routes/exports.py` plus `python/server.py` route dispatch: 45-75 LoC for manual set/delete and relink route wrappers.
+- `python/server_routes/exports.py` plus `python/server.py` route dispatch: 45-75 LoC for manual set/delete route wrappers.
 - `python/survey_overlap.py`: 40-70 LoC for set/delete helpers if not implemented in route helper code.
-- `python/external_api/openapi.py`: 40-70 LoC for the new path contracts and schemas.
-- Backend tests: 135-145 LoC across import, manual relabel, migration, and OpenAPI coverage.
+- `python/external_api/openapi.py`: 30-50 LoC for import/manual-link path contracts.
+- Backend PR 1 tests: 135-185 LoC across import, manual relabel, and OpenAPI coverage.
 
-Frontend delta: approximately 260-380 LoC.
+**Backend PR 2: relink-by-gloss migration (`§6`) — roughly 380-620 LoC including tests.**
+
+- Migration service/helper: 150-240 LoC for dry-run grouping, strict/fuzzy reports, idempotent apply, and backup paths.
+- Reference rewrites: 80-140 LoC for concepts.csv, survey-overlap.json, annotations, tags, and enrichments.
+- Route/OpenAPI wiring: 40-70 LoC.
+- Backend PR 2 tests: 110-170 LoC for dry-run, apply, idempotency, backup, and reference-preservation coverage.
+
+Frontend delta: approximately 260-380 LoC for badge/editor/API consumption. If Backend PR 2 is not merged when frontend work starts, ship badge flip + manual relabel UI first and split the relink-by-gloss migration UI into a follow-up.
 
 - API contract/types: 45-70 LoC for result fields and new helpers.
-- `src/components/parse/ConceptSidebar.tsx`: 90-140 LoC for context-menu item, inline editor state, and badge cue.
+- `src/components/parse/ConceptSidebar.tsx`: 90-140 LoC for context-menu item, editor/popover state, badge title/accessibility cue, and save/delete calls.
 - `src/ParseUI.tsx` or a config store hook seam: 35-60 LoC to call helpers and reload config.
 - Frontend tests: 90-110 LoC.
-
-The first backend implementation PR should ship normalization + import-time linking + manual relabel endpoints with OpenAPI/tests. The migration endpoint can be either in that PR if small after helper extraction or a second backend PR; it rewrites concepts and potentially annotations, so it deserves its own review if it exceeds the estimate.
