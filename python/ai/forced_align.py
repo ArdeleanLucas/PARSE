@@ -46,21 +46,40 @@ def _is_wsl() -> bool:
     return "microsoft" in release or "wsl" in release
 
 
-def resolve_device(requested: Optional[str] = None) -> str:
-    """Resolve compute device, forcing CPU on WSL to avoid GPU driver crashes.
+def resolve_device(requested: Optional[str] = None, *, allow_wsl_cuda: bool = False) -> str:
+    """Resolve the wav2vec2 compute device.
 
-    WSL2 GPU passthrough is unstable for sustained CTC workloads on RTX 5090
-    (Blackwell/sm_120): repeated kernel errors from bad CTC inputs destabilise
-    the Hyper-V VM host and crash WSL with E_UNEXPECTED. CPU is slower but
-    completes reliably. WSL always wins — even if config says "cuda".
+    WSL remains CPU-first by default because earlier sustained CTC workloads
+    on RTX 5090/Blackwell could destabilize the VM. Operators may opt in to
+    CUDA from WSL with ``wav2vec2.allow_wsl_cuda=true``; even then CUDA is
+    returned only for an explicit ``requested="cuda"`` and only when PyTorch
+    reports that CUDA is available.
     """
-    if requested == "cpu":
+    normalized = requested.strip().lower() if isinstance(requested, str) else requested
+    if normalized == "cpu":
         return "cpu"
     if _is_wsl():
+        if normalized == "cuda" and allow_wsl_cuda:
+            try:
+                import torch  # type: ignore
+                if torch.cuda.is_available():
+                    return "cuda"
+                print(
+                    "[wav2vec2] allow_wsl_cuda=True but torch.cuda.is_available()=False; falling back to CPU.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except ImportError:
+                print(
+                    "[wav2vec2] allow_wsl_cuda=True but torch import failed; falling back to CPU.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return "cpu"
         return "cpu"
     try:
         import torch  # type: ignore
-        return requested or ("cuda" if torch.cuda.is_available() else "cpu")
+        return normalized or ("cuda" if torch.cuda.is_available() else "cpu")
     except ImportError:
         return "cpu"
 
@@ -178,6 +197,7 @@ class Aligner:
         cls,
         model_name: str = DEFAULT_MODEL_NAME,
         device: Optional[str] = None,
+        allow_wsl_cuda: bool = False,
     ) -> "Aligner":
         """Lazy import of torch/transformers so the module is importable
         even in environments that lack them (tests stub ``Aligner.load``).
@@ -206,7 +226,7 @@ class Aligner:
             # This is a safety net: if someone later passes device="cuda"
             # we do NOT silently hand them the CPU version that the worker
             # pre-loaded under WSL force-CPU rules.
-            and (device is None or resolve_device(device) == _PRELOADED_ALIGNER.device)
+            and (device is None or resolve_device(device, allow_wsl_cuda=allow_wsl_cuda) == _PRELOADED_ALIGNER.device)
         ):
             return _PRELOADED_ALIGNER
 
@@ -224,7 +244,7 @@ class Aligner:
                 "Install: pip install torch torchaudio transformers"
             ) from exc
 
-        resolved_device = resolve_device(device)
+        resolved_device = resolve_device(device, allow_wsl_cuda=allow_wsl_cuda)
 
         # On CPU, PyTorch spawns one worker thread per core for every inference
         # call. With 3500+ sequential calls in a single server process this

@@ -61,6 +61,8 @@
     "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
     "device": "cuda",
     "force_cpu": false,
+    "allow_wsl_cuda": false,
+    "_allow_wsl_cuda_comment": "Off by default for WSL safety. Set true only on machines where torch.cuda.is_available() is confirmed and wav2vec2 should run on CUDA.",
     "chunk_size": 150
   }
 }

@@ -45,6 +45,9 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         "engine": "wav2vec2",
         "model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
     },
+    "wav2vec2": {
+        "allow_wsl_cuda": False,
+    },
     "ortho": {
         "backend": "hf",
         # ORTH defaults to the original HF Transformers Razhan SDH model. The

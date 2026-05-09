@@ -44,5 +44,16 @@ def send_json_response(writer: JsonResponseWriter, status: HTTPStatus, payload: 
 
 
 
-def send_json_error_response(writer: JsonResponseWriter, status: HTTPStatus, message: str) -> None:
-    send_json_response(writer, status, {"error": str(message)})
+def format_error_message(message: Any) -> str:
+    text = str(message)
+    if text.strip() or not isinstance(message, BaseException):
+        return text
+
+    message_repr = repr(message)
+    if len(message_repr) > 200:
+        message_repr = "{0}...".format(message_repr[:197])
+    return message_repr
+
+
+def send_json_error_response(writer: JsonResponseWriter, status: HTTPStatus, message: Any) -> None:
+    send_json_response(writer, status, {"error": format_error_message(message)})
