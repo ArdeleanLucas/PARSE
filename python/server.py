@@ -53,13 +53,7 @@ from app.http.job_observability_handlers import (
     build_jobs_response as _app_build_jobs_response,
     build_worker_status_response as _app_build_worker_status_response,
 )
-from app.http.project_config_handlers import (
-    ProjectConfigHandlerError as _app_ProjectConfigHandlerError,
-    build_concepts_import_response as _app_build_concepts_import_response,
-    build_get_config_response as _app_build_get_config_response,
-    build_tags_import_response as _app_build_tags_import_response,
-    build_update_config_response as _app_build_update_config_response,
-)
+from app.http.project_config_handlers import (ProjectConfigHandlerError as _app_ProjectConfigHandlerError, build_concept_survey_link_delete_response as _app_build_concept_survey_link_delete_response, build_concept_survey_link_post_response as _app_build_concept_survey_link_post_response, build_concepts_import_response as _app_build_concepts_import_response, build_get_config_response as _app_build_get_config_response, build_tags_import_response as _app_build_tags_import_response, build_update_config_response as _app_build_update_config_response)
 from app.http.project_artifact_handlers import (
     ProjectArtifactHandlerError as _app_ProjectArtifactHandlerError,
     build_get_export_lingpy_response as _app_build_get_export_lingpy_response,
@@ -1566,7 +1560,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         parts = self._path_parts(request_path)
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "duplicate": self._api_post_concept_duplicate(parts[2]); return
-        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts": raise ApiError(HTTPStatus.BAD_REQUEST, "Malformed concept duplicate path")
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links": self._api_post_concept_survey_link(parts[2]); return
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts": raise ApiError(HTTPStatus.BAD_REQUEST, "Malformed concept path")
 
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "mcp" and parts[2] == "tools":
             self._api_post_mcp_tool(parts[3])
@@ -1613,6 +1608,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_delete(self, request_path: str) -> None:
+        parts = self._path_parts(request_path)
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links":
+            self._api_delete_concept_survey_link(parts[2])
+            return
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
 def _parse_single_range(self, range_header: str, file_size: int) -> Tuple[int, int]:

@@ -139,7 +139,12 @@ def test_build_concepts_import_response_merges_matching_rows(tmp_path: pathlib.P
     rows_by_id = {row["id"]: row for row in rows}
 
     assert response.status == HTTPStatus.OK
-    assert response.payload == {"ok": True, "matched": 2, "added": 0, "total": 2, "mode": "merge"}
+    assert response.payload["ok"] is True
+    assert response.payload["matched"] == 2
+    assert response.payload["added"] == 0
+    assert response.payload["linked"] == 0
+    assert response.payload["total"] == 2
+    assert response.payload["mode"] == "merge"
     assert rows_by_id["1"]["source_item"] == "1.1"
     assert rows_by_id["1"]["source_survey"] == "KLQ"
     assert rows_by_id["1"]["custom_order"] == "10"

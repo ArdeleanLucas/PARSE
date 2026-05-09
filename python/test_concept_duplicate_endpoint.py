@@ -251,7 +251,7 @@ def test_duplicate_returns_400_for_malformed_concepts_duplicate_path(tmp_path: p
     assert handler._handle_api("POST") is True
 
     assert int(handler.status or 0) == HTTPStatus.BAD_REQUEST
-    assert handler.wfile.payload() == {"error": "Malformed concept duplicate path"}
+    assert handler.wfile.payload() == {"error": "Malformed concept path"}
 
 
 def test_duplicate_restores_backup_when_atomic_write_fails(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

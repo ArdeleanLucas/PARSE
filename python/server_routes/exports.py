@@ -91,4 +91,35 @@ def _api_post_concept_duplicate(self, concept_id: str) -> None:
     )
     self._send_json(_server.HTTPStatus.OK, payload)
 
-__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import', '_api_post_concept_duplicate']
+
+def _api_post_concept_survey_link(self, concept_id: str) -> None:
+    """Add a sidecar concept_survey_links entry for an existing concept."""
+    try:
+        response = _server._app_build_concept_survey_link_post_response(
+            headers=self.headers,
+            rfile=self.rfile,
+            project_root=_server._project_root(),
+            concept_id=concept_id,
+            upload_limit=_server.ONBOARD_MAX_UPLOAD_BYTES,
+        )
+    except _server._app_ProjectConfigHandlerError as exc:
+        raise _server.ApiError(exc.status, exc.message) from exc
+    self._send_json(response.status, response.payload)
+
+
+def _api_delete_concept_survey_link(self, concept_id: str) -> None:
+    """Remove a sidecar concept_survey_links entry; legacy CSV link returns 409."""
+    try:
+        response = _server._app_build_concept_survey_link_delete_response(
+            headers=self.headers,
+            rfile=self.rfile,
+            project_root=_server._project_root(),
+            concept_id=concept_id,
+            upload_limit=_server.ONBOARD_MAX_UPLOAD_BYTES,
+        )
+    except _server._app_ProjectConfigHandlerError as exc:
+        raise _server.ApiError(exc.status, exc.message) from exc
+    self._send_json(response.status, response.payload)
+
+
+__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_post_concept_survey_link', '_api_delete_concept_survey_link']
