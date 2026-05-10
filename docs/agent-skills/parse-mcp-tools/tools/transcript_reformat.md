@@ -82,6 +82,59 @@ curl "$PARSE_BASE_URL/api/mcp/tools/transcript_reformat?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Use `dryRun: true` or omit `outputPath` to preview the normalized `CoarseTranscript` object without writing a file:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/transcript_reformat?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "inputPath": "alignment/Speaker01_session_coarse.json",
+    "speaker": "Speaker01",
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "durationSec": 8.4,
+    "dryRun": true
+  }'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "inputPath": "alignment/Speaker01_session_coarse.json",
+  "speaker": "Speaker01",
+  "sourceWav": "audio/working/Speaker01/source.wav",
+  "durationSec": 8.4,
+  "dryRun": true
+}
+```
+
+Expected dry-run response shape:
+
+```json
+{
+  "tool": "transcript_reformat",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "result": {
+      "speaker": "Speaker01",
+      "source_wav": "audio/working/Speaker01/source.wav",
+      "duration_sec": 8.4,
+      "segments": [
+        {"start": 0.0, "end": 1.42, "text": "sample opening phrase"},
+        {"start": 1.42, "end": 2.85, "text": "second phrase"}
+      ]
+    },
+    "mode": "read-only"
+  }
+}
+```
+
+To write the reformatted transcript, add an `outputPath` inside the project and set `dryRun: false`; the write response includes `success: true`, `outputPath`, `previewOnly: false`, and `mode: "write-allowed"`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `transcript_reformat` is currently exposed.

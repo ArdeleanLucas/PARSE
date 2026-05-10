@@ -80,6 +80,67 @@ curl "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Poll the `jobId` returned by `stt_word_level_start`; keep `maxSegments` bounded when returning nested `words[]` arrays:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_status?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{"jobId":"6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4","includeSegments":true,"includeWords":true,"maxSegments":1}'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+  "includeSegments": true,
+  "includeWords": true,
+  "maxSegments": 1
+}
+```
+
+Representative completed response shape:
+
+```json
+{
+  "tool": "stt_word_level_status",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+    "status": "complete",
+    "progress": 100.0,
+    "segmentsProcessed": 1,
+    "totalSegments": 1,
+    "error": null,
+    "speaker": "Speaker01",
+    "sourceWav": "<PROJECT_ROOT>/audio/working/Speaker01/source.wav",
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.42,
+        "text": "sample opening phrase",
+        "confidence": 0.82,
+        "words": [
+          {"word": "sample", "start": 0.0, "end": 0.48, "prob": 0.91},
+          {"word": "opening", "start": 0.48, "end": 1.02, "prob": 0.88},
+          {"word": "phrase", "start": 1.02, "end": 1.42, "prob": 0.84}
+        ]
+      }
+    ],
+    "segmentsTruncated": false,
+    "segmentCount": 1,
+    "tier": "tier1_word_level",
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
+Set `includeWords: false` to keep segment timing/text while omitting nested word spans; the response then includes `wordsOmitted: true`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `stt_word_level_status` is currently exposed.

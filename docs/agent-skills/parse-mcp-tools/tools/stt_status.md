@@ -79,6 +79,64 @@ curl "$PARSE_BASE_URL/api/mcp/tools/stt_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Poll the UUID returned by `stt_start`; set `includeSegments: true` only when the caller needs segment text/timing in the status response:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_status?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{"jobId":"6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4","includeSegments":true,"maxSegments":2}'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+  "includeSegments": true,
+  "maxSegments": 2
+}
+```
+
+Representative completed response shape:
+
+```json
+{
+  "tool": "stt_status",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+    "status": "complete",
+    "progress": 100.0,
+    "segmentsProcessed": 2,
+    "totalSegments": 2,
+    "error": null,
+    "speaker": "Speaker01",
+    "sourceWav": "<PROJECT_ROOT>/audio/working/Speaker01/source.wav",
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.42,
+        "text": "sample opening phrase",
+        "confidence": 0.82
+      },
+      {
+        "start": 1.42,
+        "end": 2.85,
+        "text": "second phrase",
+        "confidence": 0.79
+      }
+    ],
+    "segmentsTruncated": false,
+    "segmentCount": 2,
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `stt_status` is currently exposed.

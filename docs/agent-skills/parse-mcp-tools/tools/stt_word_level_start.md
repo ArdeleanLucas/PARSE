@@ -82,6 +82,59 @@ curl "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_start?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Preview first to verify the speaker ID and intended Tier 1 semantics without launching Whisper:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_start?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "speaker": "Speaker01",
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "language": "ku",
+    "dryRun": true
+  }'
+```
+
+Expected dry-run response shape:
+
+```json
+{
+  "tool": "stt_word_level_start",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "status": "dry_run",
+    "tool": "stt_word_level_start",
+    "speaker": "Speaker01",
+    "note": "Dry run. Tier 1 STT would run with word_timestamps=True; segments would include a nested words[] array.",
+    "mode": "read-only"
+  }
+}
+```
+
+Set `dryRun: false` to launch the job. The returned `jobId` is a UUID and should be polled with `stt_word_level_status`:
+
+```json
+{
+  "tool": "stt_word_level_start",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+    "status": "running",
+    "speaker": "Speaker01",
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "tier": "tier1_word_level",
+    "message": "Word-level STT job started. Poll with stt_word_level_status.",
+    "mode": "read-only"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `stt_word_level_start` is currently exposed.
