@@ -63,6 +63,7 @@ def _api_post_lexemes_rerun_by_tag(self) -> None:
             annotation_writer=_write_tagged_rerun_annotation,
             annotation_touch_metadata=_server._annotation_touch_metadata,
             align_ortho_words=_server._align_partial_ortho_words,
+            pick_lexeme_word=_server._pick_lexeme_word_for_concept,
         )
     except TagFilteredHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc

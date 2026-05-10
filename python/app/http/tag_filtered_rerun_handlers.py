@@ -191,6 +191,7 @@ ProgressCallback = Callable[[int, int, str, ConceptHit, str], None]
 AnnotationWriter = Callable[[str, Path, dict[str, Any]], None]
 AnnotationMetadataToucher = Callable[[dict[str, Any], bool], None]
 OrthoWordsAligner = Callable[[Path, list[dict[str, Any]]], list[dict[str, Any]]]
+LexemeWordPicker = Callable[[float, float, Sequence[Mapping[str, Any]]], Mapping[str, Any] | None]
 
 
 def _resolve_per_speaker(
@@ -444,6 +445,7 @@ def _persist_speaker_rerun_writes(
     annotation_writer: AnnotationWriter,
     resolve_audio_path_for_speaker: AudioPathResolver,
     align_ortho_words: OrthoWordsAligner | None = None,
+    pick_lexeme_word: LexemeWordPicker | None = None,
 ) -> None:
     """Merge ok rerun rows into ``tiers.ortho`` / ``tiers.ipa`` and write to disk.
 
@@ -525,6 +527,25 @@ def _persist_speaker_rerun_writes(
             existing_words = [iv for iv in word_tier.get("intervals") or [] if isinstance(iv, dict)]
             word_tier["intervals"] = _merge_intervals_for_windows(existing_words, aligned_words, ortho_windows)
             tiers["ortho_words"] = word_tier
+            if pick_lexeme_word is not None:
+                ortho_tier = tiers.get("ortho") if isinstance(tiers.get("ortho"), dict) else None
+                ortho_intervals = ortho_tier.get("intervals") if isinstance(ortho_tier, dict) else []
+                for row in ortho_rows:
+                    picked = pick_lexeme_word(float(row["start"]), float(row["end"]), aligned_words)
+                    picked_text = picked.get("text") if isinstance(picked, Mapping) else None
+                    if not isinstance(picked_text, str) or not picked_text.strip():
+                        continue
+                    for interval in ortho_intervals or []:
+                        if not isinstance(interval, Mapping):
+                            continue
+                        try:
+                            same_start = abs(float(interval.get("start", 0.0) or 0.0) - float(row["start"])) <= 0.0005
+                            same_end = abs(float(interval.get("end", 0.0) or 0.0) - float(row["end"])) <= 0.0005
+                        except (TypeError, ValueError):
+                            continue
+                        if same_start and same_end:
+                            interval["text"] = picked_text.strip()
+                            break
             changed = True
 
     if not changed:
@@ -571,6 +592,7 @@ def run_lexemes_rerun_by_tag_loop(
     annotation_writer: AnnotationWriter | None = None,
     annotation_touch_metadata: AnnotationMetadataToucher | None = None,
     align_ortho_words: OrthoWordsAligner | None = None,
+    pick_lexeme_word: LexemeWordPicker | None = None,
 ) -> dict[str, Any]:
     writer = annotation_writer or _default_annotation_writer
     touch_metadata = annotation_touch_metadata or _default_annotation_touch_metadata
@@ -617,6 +639,7 @@ def run_lexemes_rerun_by_tag_loop(
                     annotation_writer=writer,
                     resolve_audio_path_for_speaker=resolve_audio_path_for_speaker,
                     align_ortho_words=align_ortho_words,
+                    pick_lexeme_word=pick_lexeme_word,
                 )
             except Exception:  # pragma: no cover - persistence must not abort the loop
                 logger.exception(
@@ -647,6 +670,7 @@ def build_post_lexemes_rerun_by_tag_response(
     annotation_writer: AnnotationWriter | None = None,
     annotation_touch_metadata: AnnotationMetadataToucher | None = None,
     align_ortho_words: OrthoWordsAligner | None = None,
+    pick_lexeme_word: LexemeWordPicker | None = None,
 ) -> JsonResponseSpec:
     """Validate a tag rerun and start a tracked compute job by default.
 
@@ -679,6 +703,7 @@ def build_post_lexemes_rerun_by_tag_response(
             annotation_writer=annotation_writer,
             annotation_touch_metadata=annotation_touch_metadata,
             align_ortho_words=align_ortho_words,
+            pick_lexeme_word=pick_lexeme_word,
         )
         # Deprecated compatibility shape: legacy clients used ``jobId: null``
         # to distinguish the old synchronous endpoint from compute jobs.

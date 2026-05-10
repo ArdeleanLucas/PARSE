@@ -144,6 +144,7 @@ def _run_tagged_ortho(
         build_post_run_ortho_response=ortho_response_builder,
         build_post_run_ipa_response=lambda *a, **kw: None,
         locks_dir=tmp_path / ".parse-locks",
+        pick_lexeme_word=annotate._pick_lexeme_word_for_concept,
         **extra_dependencies,
     )
 
@@ -198,6 +199,39 @@ def test_rerun_by_tag_rebuilds_ortho_words_for_successful_windows(tmp_path: Path
     outside_after = [iv for iv in after_words if float(iv["end"]) <= 1.0 or float(iv["start"]) >= 4.0]
     assert outside_after == outside_before
 
+
+
+def test_rerun_by_tag_writes_picked_lexeme_to_ortho_tier(tmp_path: Path) -> None:
+    _seed_concepts_csv(tmp_path)
+    audio_path = _seed_audio(tmp_path)
+    annotation_path, _legacy_path = _seed_annotation(tmp_path)
+
+    def align_words(_audio_path: Path, _rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"start": 1.0, "end": 1.3, "text": "the", "source": "test-aligner"},
+            {"start": 1.35, "end": 1.65, "text": "hair", "source": "test-aligner"},
+            {"start": 1.7, "end": 2.0, "text": "is", "source": "test-aligner"},
+            {"start": 3.0, "end": 3.3, "text": "a", "source": "test-aligner"},
+            {"start": 3.35, "end": 3.65, "text": "leaf", "source": "test-aligner"},
+            {"start": 3.7, "end": 4.0, "text": "there", "source": "test-aligner"},
+        ]
+
+    response = _run_tagged_ortho(tmp_path, audio_path, align_ortho_words=align_words)
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload["summary"]["ok"] == 2
+    assert _ortho_by_window(annotation_path) == {
+        (1.0, 2.0): "hair",
+        (3.0, 4.0): "leaf",
+    }
+    assert [iv["text"] for iv in _ortho_words(annotation_path) if iv["source"] == "test-aligner"] == [
+        "the",
+        "hair",
+        "is",
+        "a",
+        "leaf",
+        "there",
+    ]
 
 def test_rerun_by_tag_handles_ortho_word_align_failure_gracefully(tmp_path: Path) -> None:
     """Tagged-only ORTH must persist text even when secondary word alignment fails."""
