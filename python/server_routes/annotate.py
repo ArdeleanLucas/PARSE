@@ -950,13 +950,13 @@ def _partial_ortho_rows_to_word_segments(rows: _server.Sequence[_server.Dict[str
     return segments
 
 
-def _align_partial_ortho_words(audio_path: _server.pathlib.Path, rows: _server.Sequence[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, _server.Any]]:
+def _align_partial_ortho_words(audio_path: _server.pathlib.Path, rows: _server.Sequence[_server.Dict[str, _server.Any]], *, progress_callback: _server.Optional[Callable[[int, int], None]] = None) -> _server.List[_server.Dict[str, _server.Any]]:
     # Partial ORTH reruns emit coarse {start,end,text} rows, not Whisper word segments;
     # seed provisional token spans so Tier-2 can rebuild only the affected windows.
-    return _server._ortho_tier2_align_to_words(audio_path, _partial_ortho_rows_to_word_segments(rows))
+    return _server._ortho_tier2_align_to_words(audio_path, _partial_ortho_rows_to_word_segments(rows), progress_callback=progress_callback)
 
 
-def _ortho_tier2_align_to_words(audio_path: _server.pathlib.Path, segments: _server.List[_server.Dict[str, _server.Any]]) -> _server.List[_server.Dict[str, _server.Any]]:
+def _ortho_tier2_align_to_words(audio_path: _server.pathlib.Path, segments: _server.List[_server.Dict[str, _server.Any]], *, progress_callback: _server.Optional[Callable[[int, int], None]] = None) -> _server.List[_server.Dict[str, _server.Any]]:
     """Run Tier-2 forced alignment on ORTH segments, returning a flat word tier.
 
     Takes the full raw segment list (with Whisper ``words[]`` per segment)
@@ -979,7 +979,7 @@ def _ortho_tier2_align_to_words(audio_path: _server.pathlib.Path, segments: _ser
         print('[ORTH] Tier-2 import failed: {0}'.format(exc), file=_server.sys.stderr)
         return []
     try:
-        aligned = align_segments(audio_path=audio_path, segments=segments)
+        aligned = align_segments(audio_path=audio_path, segments=segments, progress_callback=progress_callback)
     except Exception as exc:
         print('[ORTH] Tier-2 alignment failed: {0}'.format(exc), file=_server.sys.stderr)
         return []
@@ -1344,6 +1344,7 @@ def _run_step_on_concept_windows(
     language: _server.Optional[str] = None,
     pad_sec: float = 0.2,
     should_cancel: _server.Optional[Callable[[], bool]] = None,
+    progress_max: float = 95.0,
 ) -> _server.List[_server.Dict[str, _server.Any]]:
     """Run one provider over ±pad_sec short clips around concept intervals.
 
@@ -1475,7 +1476,7 @@ def _run_step_on_concept_windows(
         rows.append(row)
         print("[{0}] concept-window {1}/{2} concept='{3}' → '{4}'".format(step_name.upper(), idx + 1, total, concept_id[:40], text[:40]), file=_server.sys.stderr, flush=True)
         if job_id:
-            pct = 10.0 + 85.0 * (idx + 1) / max(total, 1)
+            pct = 10.0 + max(0.0, progress_max - 10.0) * (idx + 1) / max(total, 1)
             _set_compute_progress(job_id, pct, message='{0} concept window {1}/{2}'.format(step_name.upper(), idx + 1, total))
     return rows
 
@@ -1684,6 +1685,9 @@ def _compute_speaker_ortho_concept_windows(
     should_cancel = make_should_cancel(job_id)
     cancelled_requested = False
     try:
+        # Reserve 70..95% for the post-loop Tier-2 alignment + write phases —
+        # without that headroom the UI froze on 'ORTHO concept window N/N' for
+        # 10–20 min while align_segments ran silently (MC-363).
         rows = _server._run_step_on_concept_windows(
             audio_path=audio_path,
             concept_intervals=concept_intervals,
@@ -1693,6 +1697,7 @@ def _compute_speaker_ortho_concept_windows(
             language=language,
             pad_sec=pad_sec,
             should_cancel=should_cancel,
+            progress_max=70.0,
         )
         cancelled_requested = should_cancel()
     finally:
@@ -1707,8 +1712,22 @@ def _compute_speaker_ortho_concept_windows(
     if ortho_words_tier is None:
         ortho_words_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
     existing_words = [iv for iv in ortho_words_tier.get('intervals') or [] if isinstance(iv, dict)]
+    if job_id:
+        _set_compute_progress(job_id, 70.0, message='Aligning ortho_words (Tier-2)')
+
+    def _tier2_progress_cb(done: int, total: int) -> None:
+        if not job_id:
+            return
+        denom = max(int(total), 1)
+        pct = 70.0 + 20.0 * min(int(done), denom) / denom
+        _set_compute_progress(
+            job_id,
+            pct,
+            message='Aligning ortho_words (Tier-2) {0}/{1}'.format(int(done), int(total)),
+        )
+
     try:
-        partial_words = _server._align_partial_ortho_words(audio_path, rows)
+        partial_words = _server._align_partial_ortho_words(audio_path, rows, progress_callback=_tier2_progress_cb)
         ortho_words_tier['intervals'] = _server._merge_concept_window_rows(existing_words, partial_words, concept_intervals)
         tiers['ortho_words'] = ortho_words_tier
         for ortho_row in ortho_tier.get('intervals') or []:
@@ -1737,7 +1756,11 @@ def _compute_speaker_ortho_concept_windows(
         logger.exception("concept-window ORTH: failed to rebuild ortho_words for speaker %s", speaker)
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
+    if job_id:
+        _set_compute_progress(job_id, 92.0, message='Writing annotation')
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+    if job_id:
+        _set_compute_progress(job_id, 95.0, message='ORTH concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
     result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,

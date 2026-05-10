@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 
 def _is_wsl() -> bool:
@@ -766,6 +766,7 @@ def align_segments(
     aligner: Optional[Aligner] = None,
     audio_tensor: Optional[Any] = None,
     allow_wsl_cuda: bool = False,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> List[List[AlignedWord]]:
     """Align every word in every segment.
 
@@ -799,7 +800,8 @@ def align_segments(
             local_aligner = None
 
     results: List[List[AlignedWord]] = []
-    for seg in segments:
+    total_segments = len(segments)
+    for idx, seg in enumerate(segments):
         words = seg.get("words") or []
         segment_results: List[AlignedWord] = []
         for word_span in words:
@@ -814,6 +816,14 @@ def align_segments(
                 )
             )
         results.append(segment_results)
+        if progress_callback is not None:
+            try:
+                progress_callback(idx + 1, total_segments)
+            except Exception:
+                # Progress is observability-only; never abort alignment on a
+                # callback bug — the loop must always complete so callers see
+                # the full alignment result.
+                pass
     return results
 
 

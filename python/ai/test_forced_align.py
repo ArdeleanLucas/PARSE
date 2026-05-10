@@ -244,6 +244,70 @@ def test_align_segments_handles_mixed_segments(monkeypatch, tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# align_segments — progress_callback (MC-363)
+# ---------------------------------------------------------------------------
+
+
+def test_align_segments_emits_progress_callback_per_segment(monkeypatch, tmp_path) -> None:
+    """Tier-2 forced alignment must tick a per-segment callback so callers can
+    forward progress to long-running compute jobs. The concept-windows ORTH
+    pipeline relies on this to keep the UI moving between 70% and 90%; without
+    it the UI freezes on 'ORTH concept window N/N' for the entire alignment
+    pass (10–20 min on thesis-corpus WAVs).
+    """
+    monkeypatch.setattr(fa, "_load_audio_mono_16k", lambda path: _FakeTensor(16000 * 10))
+    monkeypatch.setattr(fa, "_g2p_word", lambda word, language=None: ["j"])
+
+    fake_aligner = _StubAligner(phoneme_tokens_result=[(0, 5)])
+
+    fake_audio = tmp_path / "clip.wav"
+    fake_audio.write_bytes(b"")
+
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "a", "words": [{"word": "a", "start": 0.1, "end": 0.5}]},
+        {"start": 1.0, "end": 2.0, "text": "b", "words": [{"word": "b", "start": 1.1, "end": 1.5}]},
+        {"start": 2.0, "end": 3.0, "text": "c", "words": [{"word": "c", "start": 2.1, "end": 2.5}]},
+    ]
+    ticks: list[tuple[int, int]] = []
+    align_segments(
+        audio_path=fake_audio,
+        segments=segments,
+        aligner=fake_aligner,  # type: ignore[arg-type]
+        progress_callback=lambda done, total: ticks.append((done, total)),
+    )
+    assert ticks == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_align_segments_progress_callback_exceptions_are_swallowed(monkeypatch, tmp_path) -> None:
+    """A misbehaving progress_callback must not abort alignment — progress is
+    observability-only. Compute jobs would otherwise lose results on a UI
+    plumbing bug."""
+    monkeypatch.setattr(fa, "_load_audio_mono_16k", lambda path: _FakeTensor(16000 * 10))
+    monkeypatch.setattr(fa, "_g2p_word", lambda word, language=None: ["j"])
+
+    fake_aligner = _StubAligner(phoneme_tokens_result=[(0, 5)])
+
+    fake_audio = tmp_path / "clip.wav"
+    fake_audio.write_bytes(b"")
+
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "a", "words": [{"word": "a", "start": 0.1, "end": 0.5}]},
+        {"start": 1.0, "end": 2.0, "text": "b", "words": [{"word": "b", "start": 1.1, "end": 1.5}]},
+    ]
+
+    def boom(done: int, total: int) -> None:
+        raise RuntimeError("UI is on fire")
+
+    out = align_segments(
+        audio_path=fake_audio,
+        segments=segments,
+        aligner=fake_aligner,  # type: ignore[arg-type]
+        progress_callback=boom,
+    )
+    assert len(out) == 2  # both segments processed despite callback exception
+
+
+# ---------------------------------------------------------------------------
 # CLI I/O helpers
 # ---------------------------------------------------------------------------
 

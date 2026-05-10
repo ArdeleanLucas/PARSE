@@ -131,7 +131,7 @@ def test_compute_speaker_ortho_concept_windows_rebuilds_ortho_words(tmp_path: pa
     calls = _capture_concept_window_runner(monkeypatch)
     align_calls: list[dict[str, Any]] = []
 
-    def fake_align(audio_path: pathlib.Path, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def fake_align(audio_path: pathlib.Path, segments: list[dict[str, Any]], **_kwargs: Any) -> list[dict[str, Any]]:
         align_calls.append({"audio_path": audio_path, "segments": segments})
         words = segments[0]["words"]
         return [
@@ -329,3 +329,131 @@ def test_concept_windows_result_payload_reports_pad(tmp_path: pathlib.Path, monk
     assert calls[0]["pad_sec"] == 0.5
     assert result["pad"] == 0.5
     assert isinstance(result["pad"], float)
+# ---------------------------------------------------------------------------
+# MC-363: concept-windows ORTH must emit progress through the Tier-2 pass.
+# ---------------------------------------------------------------------------
+
+
+def test_run_step_on_concept_windows_honors_progress_max(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-window pct cap is callsite-controlled. The ORTH concept-windows
+    path needs headroom (>=20%) for the Tier-2 alignment pass that follows;
+    other steps (STT, IPA) can keep the historical 95% cap.
+    """
+    server._install_route_bindings()
+    progress_events: list[tuple[float, str]] = []
+
+    def fake_set_job_progress(job_id, progress, *, message="", **_):
+        progress_events.append((float(progress), str(message)))
+
+    monkeypatch.setattr(server, "_set_job_progress", fake_set_job_progress)
+
+    # Stub forced_align audio loader and minimal numpy-y waveform.
+    import numpy as np
+
+    monkeypatch.setattr(
+        "ai.forced_align._load_audio_mono_16k",
+        lambda path: type("_T", (), {"squeeze": lambda self: self, "detach": lambda self: self,
+                                      "cpu": lambda self: self, "numpy": lambda self: np.zeros(16000 * 30, dtype=np.float32)})(),
+    )
+
+    class _OrthoStub:
+        def transcribe_clip(self, clip, **kw):
+            return ("ok", 1.0)
+
+    intervals = [
+        {"start": float(i), "end": float(i) + 0.5, "concept_id": str(i)}
+        for i in range(5)
+    ]
+
+    server._run_step_on_concept_windows(
+        audio_path=tmp_path / "x.wav",
+        concept_intervals=intervals,
+        provider=_OrthoStub(),
+        step="ortho",
+        job_id="job-progmax",
+        progress_max=70.0,
+    )
+
+    pct_values = [pct for pct, _msg in progress_events]
+    assert pct_values, "expected at least one progress event"
+    assert max(pct_values) <= 70.0 + 1e-6, (
+        f"progress should cap at 70.0 when progress_max=70.0; saw max={max(pct_values)}"
+    )
+    # Last event should be near (but not exceeding) the cap.
+    assert pct_values[-1] >= 60.0
+
+
+def test_compute_speaker_ortho_concept_windows_emits_tier2_and_write_progress(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Between the per-window loop and the function return,
+    `_compute_speaker_ortho_concept_windows` must emit progress events for the
+    Tier-2 forced-alignment phase, the per-segment alignment ticks, the write
+    phase, and the final 'concept-windows complete' marker. Without these the
+    UI freezes at the loop's last event for the duration of forced alignment
+    (~16 min on thesis-corpus WAVs)."""
+    server._install_route_bindings()
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+
+    progress_events: list[tuple[float, str]] = []
+
+    def fake_set_job_progress(job_id, progress, *, message="", **_):
+        progress_events.append((float(progress), str(message)))
+
+    monkeypatch.setattr(server, "_set_job_progress", fake_set_job_progress)
+
+    # Stub the heavy ORTH provider + concept-window runner so we test the
+    # progress envelope, not the runner internals.
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: _ClipProvider())
+
+    def fake_runner(*, job_id, progress_max=95.0, **kwargs):
+        # Simulate the runner's progress emissions reaching its cap.
+        if job_id:
+            fake_set_job_progress(job_id, float(progress_max), message="ORTHO concept window 1/1")
+        return [{"start": 1.0, "end": 1.5, "text": "ok", "conceptId": "1", "source": "concept_window_ortho"}]
+
+    monkeypatch.setattr(server, "_run_step_on_concept_windows", fake_runner)
+
+    # Stub Tier-2 aligner so we can verify it received a progress_callback and that
+    # the callback emits compute-progress events into the 70..90 band.
+    callback_holder: dict[str, Any] = {}
+
+    def fake_align_partial(audio_path, rows, *, progress_callback=None):
+        callback_holder["cb"] = progress_callback
+        if progress_callback is not None:
+            progress_callback(1, 2)
+            progress_callback(2, 2)
+        # Return at least one word interval so merge runs.
+        return [{"start": 1.0, "end": 1.2, "text": "x", "source": "stub-align"}]
+
+    monkeypatch.setattr(server, "_align_partial_ortho_words", fake_align_partial)
+
+    server._compute_speaker_ortho(
+        "job-prog",
+        {"speaker": "Fail02", "run_mode": "concept-windows"},
+    )
+
+    messages = [msg for _pct, msg in progress_events]
+    pcts = [pct for pct, _msg in progress_events]
+
+    # Loop emission stays at-or-below 70 (the new ortho budget).
+    loop_pcts = [p for p, m in progress_events if "ORTHO concept window" in m]
+    assert loop_pcts and max(loop_pcts) <= 70.0 + 1e-6
+
+    # Tier-2 phase announcement before alignment starts.
+    assert any("Aligning ortho_words" in m for m in messages), messages
+
+    # Tier-2 callback was wired and produced events strictly between 70 and 92.
+    assert callback_holder.get("cb") is not None
+    tier2_band = [p for p, m in progress_events if "Aligning ortho_words" in m and m != "Aligning ortho_words (Tier-2)"]
+    # Per-segment ticks land in (70, 92).
+    inside_band = [p for p in tier2_band if 70.0 < p < 92.0]
+    assert inside_band, progress_events
+
+    # Write phase event.
+    assert any("Writing annotation" in m for m in messages), messages
+
+    # Final concept-windows-complete event at 95.
+    final = [p for p, m in progress_events if "concept-windows complete" in m.lower()]
+    assert final and abs(final[-1] - 95.0) < 1e-6, progress_events
