@@ -82,6 +82,7 @@ def _ortho_response(
     acquire = acquire or (lambda speaker, locks_dir: locks_dir / f"{speaker}.lock")
     release = release or (lambda speaker, locks_dir: None)
     _annotation_path_file, audio_path = _write_workspace(root)
+    body = {"async": False, **body}
     return build_post_run_ortho_response(
         body,
         project_root=root,
@@ -105,6 +106,7 @@ def _ipa_response(
 ):
     runner = runner or (lambda **kwargs: "")
     _annotation_path_file, audio_path = _write_workspace(root)
+    body = {"async": False, **body}
     return build_post_run_ipa_response(
         body,
         project_root=root,
@@ -138,6 +140,7 @@ def test_run_ortho_happy_path(tmp_path: Path) -> None:
         "ortho": "ریشەم",
         "interval": {"start": 2795.918, "end": 2796.698},
         "source": "rerun",
+        "jobId": None,
     }
     assert calls and calls[0]["start"] == pytest.approx(2795.718)
     assert calls[0]["end"] == pytest.approx(2796.898)
@@ -155,7 +158,133 @@ def test_run_ipa_happy_path(tmp_path: Path) -> None:
         "ipa": "ʃari:",
         "interval": {"start": 2795.918, "end": 2796.698},
         "source": "rerun",
+        "jobId": None,
     }
+
+
+def _async_dependencies(root: Path, tier: str = "ortho"):
+    created: list[tuple[str, dict[str, Any]]] = []
+    launched: list[tuple[str, str, dict[str, Any]]] = []
+
+    def create_job(job_type: str, metadata: dict[str, Any]) -> str:
+        created.append((job_type, metadata))
+        return f"job-{tier}-1"
+
+    def launch_compute_runner(job_id: str, compute_type: str, payload: dict[str, Any]) -> None:
+        launched.append((job_id, compute_type, payload))
+
+    return created, launched, create_job, launch_compute_runner
+
+
+def test_run_ortho_default_starts_compute_job_without_running_subprocess(tmp_path: Path) -> None:
+    _annotation_path_file, audio_path = _write_workspace(tmp_path)
+    calls: list[dict[str, Any]] = []
+    lock_calls: list[str] = []
+    created, launched, create_job, launch_compute_runner = _async_dependencies(tmp_path, "ortho")
+
+    response = build_post_run_ortho_response(
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0, "pad": 0.5},
+        project_root=tmp_path,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_path(tmp_path),
+        read_json_any_file=_read_json_any,
+        normalize_annotation_record=_normalize_record,
+        resolve_audio_path_for_speaker=lambda speaker: audio_path,
+        run_ortho_interval=lambda **kwargs: calls.append(kwargs) or "should-not-run",
+        locks_dir=tmp_path / ".parse-locks",
+        acquire_speaker_lock=lambda speaker, locks_dir: lock_calls.append(speaker) or locks_dir / f"{speaker}.lock",
+        release_speaker_lock=lambda speaker, locks_dir: None,
+        create_job=create_job,
+        launch_compute_runner=launch_compute_runner,
+    )
+
+    assert response.status == HTTPStatus.ACCEPTED
+    assert response.payload == {"jobId": "job-ortho-1"}
+    assert calls == []
+    assert lock_calls == []
+    assert created == [("compute:lexeme_rerun_ortho", {
+        "computeType": "lexeme_rerun_ortho",
+        "speaker": "Saha01",
+        "concept_key": "root",
+        "tier": "ortho",
+        "interval": {"start": 1.0, "end": 2.0},
+        "pad": 0.5,
+    })]
+    assert launched == [("job-ortho-1", "lexeme_rerun_ortho", {
+        "speaker": "Saha01",
+        "concept_key": "root",
+        "start": 1.0,
+        "end": 2.0,
+        "language": None,
+        "pad": 0.5,
+    })]
+
+
+def test_run_ipa_default_starts_compute_job(tmp_path: Path) -> None:
+    _annotation_path_file, audio_path = _write_workspace(tmp_path)
+    created, launched, create_job, launch_compute_runner = _async_dependencies(tmp_path, "ipa")
+
+    response = build_post_run_ipa_response(
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0},
+        project_root=tmp_path,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_path(tmp_path),
+        read_json_any_file=_read_json_any,
+        normalize_annotation_record=_normalize_record,
+        resolve_audio_path_for_speaker=lambda speaker: audio_path,
+        run_ipa_interval=lambda **kwargs: "should-not-run",
+        locks_dir=tmp_path / ".parse-locks",
+        create_job=create_job,
+        launch_compute_runner=launch_compute_runner,
+    )
+
+    assert response.status == HTTPStatus.ACCEPTED
+    assert response.payload == {"jobId": "job-ipa-1"}
+    assert created[0][0] == "compute:lexeme_rerun_ipa"
+    assert created[0][1]["computeType"] == "lexeme_rerun_ipa"
+    assert launched[0][1] == "lexeme_rerun_ipa"
+
+
+def test_run_ortho_async_false_retains_legacy_success_shape(tmp_path: Path) -> None:
+    response = _ortho_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0, "async": False},
+        runner=lambda **kwargs: "ڕیشە",
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload == {
+        "ortho": "ڕیشە",
+        "interval": {"start": 1.0, "end": 2.0},
+        "source": "rerun",
+        "jobId": None,
+    }
+
+
+def test_create_job_conflict_maps_to_409(tmp_path: Path) -> None:
+    class Conflict(Exception):
+        pass
+
+    _write_workspace(tmp_path)
+
+    with pytest.raises(LexemeRerunHandlerError) as exc_info:
+        build_post_run_ortho_response(
+            {"speaker": "Saha01", "concept_key": "root", "start": 1.0, "end": 2.0},
+            project_root=tmp_path,
+            normalize_speaker_id=_normalize_speaker,
+            annotation_read_path_for_speaker=_annotation_path(tmp_path),
+            read_json_any_file=_read_json_any,
+            normalize_annotation_record=_normalize_record,
+            resolve_audio_path_for_speaker=lambda speaker: tmp_path / "audio" / "working" / speaker / "working.wav",
+            run_ortho_interval=lambda **kwargs: "unused",
+            locks_dir=tmp_path / ".parse-locks",
+            create_job=lambda _job_type, _metadata: (_ for _ in ()).throw(Conflict("speaker locked by job")),
+            launch_compute_runner=lambda *_args: None,
+            job_conflict_error_cls=Conflict,
+        )
+
+    assert exc_info.value.status == HTTPStatus.CONFLICT
+    assert str(exc_info.value) == "speaker locked by job"
 
 
 def test_run_ortho_invalid_interval(tmp_path: Path) -> None:
@@ -355,7 +484,7 @@ def test_run_ipa_does_not_mutate_record(tmp_path: Path) -> None:
     before = annotation_path.read_bytes()
 
     response = build_post_run_ipa_response(
-        {"speaker": "Saha01", "concept_key": "root", "start": 2795.918, "end": 2796.698},
+        {"speaker": "Saha01", "concept_key": "root", "start": 2795.918, "end": 2796.698, "async": False},
         project_root=tmp_path,
         normalize_speaker_id=_normalize_speaker,
         annotation_read_path_for_speaker=_annotation_path(tmp_path),

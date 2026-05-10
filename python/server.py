@@ -833,7 +833,8 @@ _MUTATING_SPEAKER_JOB_TYPES = frozenset({"normalize", "stt", "onboard:speaker"})
 _MUTATING_SPEAKER_COMPUTE_TYPES = frozenset({
     "stt", "ortho", "ortho_only", "ipa", "ipa_only", "forced_align",
     "full_pipeline", "lexemes_rerun_by_tag", "lexemes-rerun-by-tag",
-    "tagged_rerun", "tagged-rerun",
+    "tagged_rerun", "tagged-rerun", "lexeme_rerun_ipa", "lexeme-rerun-ipa",
+    "lexeme_ipa", "lexeme-ipa", "lexeme_rerun_ortho", "lexeme-rerun-ortho", "lexeme_ortho", "lexeme-ortho",
 })
 
 def _get_chat_runtime() -> Tuple[ParseChatTools, ChatOrchestrator]:

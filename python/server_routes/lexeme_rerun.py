@@ -318,6 +318,9 @@ def _api_post_lexeme_run_ortho(self) -> None:
             resolve_audio_path_for_speaker=_server._pipeline_audio_path_for_speaker,
             run_ortho_interval=_run_ortho_interval_in_subprocess,
             locks_dir=_locks_dir(),
+            create_job=_server._create_job,
+            launch_compute_runner=_server._launch_compute_runner,
+            job_conflict_error_cls=_server.JobResourceConflictError,
         )
     except LexemeRerunHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
@@ -337,6 +340,9 @@ def _api_post_lexeme_run_ipa(self) -> None:
             resolve_audio_path_for_speaker=_server._pipeline_audio_path_for_speaker,
             run_ipa_interval=_run_ipa_interval_in_subprocess,
             locks_dir=_locks_dir(),
+            create_job=_server._create_job,
+            launch_compute_runner=_server._launch_compute_runner,
+            job_conflict_error_cls=_server.JobResourceConflictError,
         )
     except LexemeRerunHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc

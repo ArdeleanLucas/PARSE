@@ -2567,6 +2567,62 @@ def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, 
         pass
 
 
+
+def _compute_lexeme_rerun(
+    job_id: str,
+    payload: _server.Dict[str, _server.Any],
+    *,
+    tier_key: str,
+    runner: _server.Any,
+) -> _server.Dict[str, _server.Any]:
+    from app.http.lexeme_rerun_handlers import (
+        _build_lexeme_rerun_plan,
+        _run_lexeme_rerun_plan_sync,
+    )
+    from server_routes.locks import _locks_dir
+
+    _set_compute_progress(job_id, 5.0, message='Loading record')
+    plan = _build_lexeme_rerun_plan(
+        payload,
+        tier_key=tier_key,
+        project_root=_server._project_root(),
+        normalize_speaker_id=_server._normalize_speaker_id,
+        annotation_read_path_for_speaker=_server._annotation_read_path_for_speaker,
+        read_json_any_file=_server._read_json_any_file,
+        normalize_annotation_record=_server._normalize_annotation_record,
+    )
+    _set_compute_progress(job_id, 30.0, message='Running subprocess')
+    response = _run_lexeme_rerun_plan_sync(
+        plan,
+        project_root=_server._project_root(),
+        resolve_audio_path_for_speaker=_server._pipeline_audio_path_for_speaker,
+        runner=runner,
+        locks_dir=_locks_dir(),
+        subprocess_errors_as_response=False,
+    )
+    _set_compute_progress(job_id, 95.0, message='Finalising')
+    text = str((response.payload or {}).get(tier_key) or '').strip()
+    return {
+        tier_key: text,
+        'tier': tier_key,
+        'text': text,
+        'interval': {'start': plan.start, 'end': plan.end},
+        'source': 'rerun',
+    }
+
+
+def _compute_lexeme_rerun_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    from server_routes.lexeme_rerun import _run_ipa_interval_in_subprocess
+
+    return _compute_lexeme_rerun(job_id, payload, tier_key='ipa', runner=_run_ipa_interval_in_subprocess)
+
+
+def _compute_lexeme_rerun_ortho(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    from server_routes.lexeme_rerun import _run_ortho_interval_in_subprocess
+
+    return _compute_lexeme_rerun(job_id, payload, tier_key='ortho', runner=_run_ortho_interval_in_subprocess)
+
+
 def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run ORTH/IPA on all tag-matched concept windows as a tracked job."""
     from app.http.lexeme_rerun_handlers import build_post_run_ipa_response, build_post_run_ortho_response
@@ -3328,5 +3384,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

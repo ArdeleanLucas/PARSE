@@ -358,6 +358,10 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
             result = _server._compute_full_pipeline('child-{0}'.format(job_id), payload)
         elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
             result = _server._compute_lexemes_rerun_by_tag('child-{0}'.format(job_id), payload)
+        elif normalized_type in {'lexeme_rerun_ipa', 'lexeme-rerun-ipa', 'lexeme_ipa', 'lexeme-ipa'}:
+            result = _server._compute_lexeme_rerun_ipa('child-{0}'.format(job_id), payload)
+        elif normalized_type in {'lexeme_rerun_ortho', 'lexeme-rerun-ortho', 'lexeme_ortho', 'lexeme-ortho'}:
+            result = _server._compute_lexeme_rerun_ortho('child-{0}'.format(job_id), payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job('child-{0}'.format(job_id), payload)
         elif normalized_type == 'stt':
@@ -975,6 +979,10 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             result = _server._compute_full_pipeline(job_id, payload)
         elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
             result = _server._compute_lexemes_rerun_by_tag(job_id, payload)
+        elif normalized_type in {'lexeme_rerun_ipa', 'lexeme-rerun-ipa', 'lexeme_ipa', 'lexeme-ipa'}:
+            result = _server._compute_lexeme_rerun_ipa(job_id, payload)
+        elif normalized_type in {'lexeme_rerun_ortho', 'lexeme-rerun-ortho', 'lexeme_ortho', 'lexeme-ortho'}:
+            result = _server._compute_lexeme_rerun_ortho(job_id, payload)
         elif normalized_type in {'train_ipa_model', 'train-ipa-model', 'train_ipa'}:
             result = _server._compute_training_job(job_id, payload)
         elif normalized_type == 'stt':
