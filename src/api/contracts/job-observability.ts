@@ -4,6 +4,9 @@ export interface ActiveJobSnapshot {
   jobId: string;
   type: string;
   status: string;
+  /**
+   * 0–1 fraction. Backend serves 0–100 percentage; the `listActiveJobs` parser normalizes to fraction so downstream components and the legacy state slices share one convention.
+   */
   progress: number;
   message?: string;
   etaMs?: number;
@@ -28,7 +31,7 @@ export async function listActiveJobs(): Promise<ActiveJobSnapshot[]> {
       jobId,
       type,
       status: String(record.status ?? "running"),
-      progress: Number.isFinite(progressRaw) ? progressRaw : 0,
+      progress: Number.isFinite(progressRaw) ? Math.max(0, Math.min(1, progressRaw / 100)) : 0,
     };
     if (typeof record.message === "string" && record.message.trim()) {
       snapshot.message = record.message;

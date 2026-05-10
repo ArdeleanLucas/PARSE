@@ -685,6 +685,26 @@ describe("ParseUI", () => {
     expect(screen.queryByTestId("topbar-batch-status")).toBeNull();
   });
 
+  it("renders mid-flight progress correctly when /api/jobs/active returns the backend's 0-100 percentage scale", async () => {
+    seedSingleSpeakerProject();
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      {
+        jobId: "khan02-tagged-orth-job",
+        type: "compute:lexeme_rerun_ortho",
+        status: "running",
+        // Post-parser snapshot fraction from the backend's 42% wire value; the API contract test pins that conversion.
+        progress: 0.42,
+        message: "Tagged rerun loading ORTH provider",
+      },
+    ]);
+
+    render(<ParseUI />);
+
+    const row = await screen.findByTestId("topbar-job-strip-row-khan02-tagged-orth-job");
+    expect(row.textContent).toContain("42%");
+    expect(row.textContent).not.toContain("100%");
+  });
+
   it("shows the terminal state from /api/jobs/active when the backend retains a recently-completed job, then auto-dismisses after the configured delay", async () => {
     vi.useFakeTimers();
     seedSingleSpeakerProject();
