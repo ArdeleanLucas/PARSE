@@ -94,7 +94,19 @@ def _seed_annotation(tmp_path: Path, *, include_legacy: bool = False) -> tuple[P
                 ],
             },
             "ipa": {"type": "interval", "display_order": 1, "intervals": []},
-            "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+            "ortho_words": {
+                "type": "interval",
+                "display_order": 4,
+                "intervals": [
+                    {"start": 0.2, "end": 0.4, "text": "OUTSIDE_BEFORE", "source": "seed"},
+                    {"start": 1.0, "end": 1.5, "text": "OLD", "source": "seed"},
+                    {"start": 1.5, "end": 2.0, "text": "HAIR", "source": "seed"},
+                    {"start": 3.0, "end": 3.5, "text": "OLD", "source": "seed"},
+                    {"start": 3.5, "end": 4.0, "text": "LEAF", "source": "seed"},
+                    {"start": 4.5, "end": 4.7, "text": "OUTSIDE_AFTER", "source": "seed"},
+                ],
+            },
+            "speaker": {"type": "interval", "display_order": 5, "intervals": []},
         },
     }
     canonical_path = annotations_dir / "Saha01.parse.json"
@@ -127,7 +139,7 @@ def _run_tagged_ortho(
         read_json_any_file=_read_json_any,
         normalize_annotation_record=_normalize_record,
         resolve_audio_path_for_speaker=lambda speaker: audio_path,
-        run_ortho_interval=lambda **kwargs: f"RERUN_TEXT_{kwargs['start']:.1f}_{kwargs['end']:.1f}",
+        run_ortho_interval=lambda **kwargs: f"RERUN_TEXT_{kwargs['start'] + 0.2:.1f}_{kwargs['end'] - 0.2:.1f}",
         run_ipa_interval=lambda **kwargs: "",
         build_post_run_ortho_response=ortho_response_builder,
         build_post_run_ipa_response=lambda *a, **kw: None,
@@ -142,6 +154,69 @@ def _ortho_by_window(annotation_path: Path) -> dict[tuple[float, float], str]:
         (round(float(iv["start"]), 3), round(float(iv["end"]), 3)): iv["text"]
         for iv in persisted["tiers"]["ortho"]["intervals"]
     }
+
+
+def _ortho_words(annotation_path: Path) -> list[dict[str, Any]]:
+    persisted = json.loads(annotation_path.read_text(encoding="utf-8"))
+    return list(persisted["tiers"]["ortho_words"]["intervals"])
+
+
+def _split_words(_audio_path: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        tokens = str(row["text"]).split("_")
+        start = float(row["start"])
+        end = float(row["end"])
+        step = (end - start) / max(len(tokens), 1)
+        for idx, token in enumerate(tokens):
+            out.append(
+                {
+                    "start": start + idx * step,
+                    "end": start + (idx + 1) * step,
+                    "text": token,
+                    "source": "test-aligner",
+                }
+            )
+    return out
+
+
+def test_rerun_by_tag_rebuilds_ortho_words_for_successful_windows(tmp_path: Path) -> None:
+    """Tagged-only ORTH persistence must refresh word-click targets inside rerun windows only."""
+    _seed_concepts_csv(tmp_path)
+    audio_path = _seed_audio(tmp_path)
+    annotation_path, _legacy_path = _seed_annotation(tmp_path)
+    before_words = _ortho_words(annotation_path)
+    outside_before = [iv for iv in before_words if float(iv["end"]) <= 1.0 or float(iv["start"]) >= 4.0]
+
+    response = _run_tagged_ortho(tmp_path, audio_path, align_ortho_words=_split_words)
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload["summary"]["ok"] == 2
+    after_words = _ortho_words(annotation_path)
+    inside_first = [iv["text"] for iv in after_words if 1.0 <= float(iv["start"]) and float(iv["end"]) <= 2.0]
+    assert "_".join(inside_first) == "RERUN_TEXT_1.0_2.0"
+    outside_after = [iv for iv in after_words if float(iv["end"]) <= 1.0 or float(iv["start"]) >= 4.0]
+    assert outside_after == outside_before
+
+
+def test_rerun_by_tag_handles_ortho_word_align_failure_gracefully(tmp_path: Path) -> None:
+    """Tagged-only ORTH must persist text even when secondary word alignment fails."""
+    _seed_concepts_csv(tmp_path)
+    audio_path = _seed_audio(tmp_path)
+    annotation_path, _legacy_path = _seed_annotation(tmp_path)
+    before_words = _ortho_words(annotation_path)
+
+    def fail_align(_audio_path: Path, _rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        raise RuntimeError("wav2vec2 unavailable")
+
+    response = _run_tagged_ortho(tmp_path, audio_path, align_ortho_words=fail_align)
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload["summary"]["ok"] == 2
+    by_window = _ortho_by_window(annotation_path)
+    assert by_window[(1.0, 2.0)].startswith("RERUN_TEXT"), by_window
+    assert by_window[(3.0, 4.0)].startswith("RERUN_TEXT"), by_window
+    assert _ortho_words(annotation_path) == before_words
 
 
 def test_rerun_by_tag_loop_persists_text_to_annotation_file(tmp_path: Path) -> None:
