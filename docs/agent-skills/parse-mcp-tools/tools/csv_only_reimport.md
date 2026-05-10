@@ -36,6 +36,61 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `commentsCsv` (type=string; maxLength=1024) — Optional path to the companion Audition comments CSV.
 - `dryRun` (type=boolean) — If true, validate and preview the backup path without writing or re-importing.
 
+### Example response formats
+
+Dry-run request:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "sourceCsv": "imports/refreshed/<SPEAKER_ID>.csv",
+  "commentsCsv": "imports/refreshed/<SPEAKER_ID>_comments.csv",
+  "dryRun": true
+}
+```
+
+Representative dry-run result payload:
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "speaker": "<SPEAKER_ID>",
+  "backupDir": "annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport",
+  "lexemesImported": null,
+  "commentsImported": null,
+  "conceptsAdded": null,
+  "conceptTotal": null,
+  "annotationPath": null,
+  "wavPath": "audio/working/<SPEAKER_ID>/<SPEAKER_ID>.wav",
+  "csvPath": "imports/refreshed/<SPEAKER_ID>.csv",
+  "commentsCsvPath": "imports/refreshed/<SPEAKER_ID>_comments.csv",
+  "message": "Preview only. Run again with dryRun=false to take the backup and re-import."
+}
+```
+
+Representative live execution result payload after rerunning the same request with `dryRun: false`:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "speaker": "<SPEAKER_ID>",
+  "backupDir": "annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport",
+  "lexemesImported": 128,
+  "commentsImported": 12,
+  "conceptsAdded": 3,
+  "conceptTotal": 420,
+  "annotationPath": "annotations/<SPEAKER_ID>.parse.json",
+  "wavPath": "audio/working/<SPEAKER_ID>/<SPEAKER_ID>.wav",
+  "csvPath": "imports/refreshed/<SPEAKER_ID>.csv",
+  "commentsCsvPath": "imports/refreshed/<SPEAKER_ID>_comments.csv",
+  "message": "Re-imported '<SPEAKER_ID>': 128 lexemes, 12 notes. Backup at annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport."
+}
+```
+
+The timestamped `backupDir` is generated at runtime; always archive it in the validation note before inspecting the rewritten annotation.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`

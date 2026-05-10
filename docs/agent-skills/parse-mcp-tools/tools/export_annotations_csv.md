@@ -35,6 +35,31 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `outputPath` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path inside project root to write CSV.
 - `dryRun` (type=boolean) — Preview only — never writes.
 
+### Dry-run preview example
+
+Input for a merged all-speaker preview:
+
+```json
+{
+  "speaker": "all",
+  "dryRun": true
+}
+```
+
+Representative result payload:
+
+```json
+{
+  "readOnly": true,
+  "previewOnly": true,
+  "previewLines": "speaker,concept_id,concept_en,start_sec,end_sec,duration_sec,ipa,ortho,source_file\n<SPEAKER_ID>,<CONCEPT_ID>,water,12.000000,12.780000,0.780000,wɑtər,water,<SPEAKER_ID>.wav",
+  "totalLines": 129,
+  "truncated": true
+}
+```
+
+The preview returns the first 20 CSV lines joined into one string; use `outputPath` plus `dryRun: false` only after checking row counts and scope.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`

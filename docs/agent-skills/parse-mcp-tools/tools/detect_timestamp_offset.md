@@ -38,6 +38,57 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `minMatchScore` (type=number; minimum=0.0; maximum=1.0)
 - `anchorDistribution` (type=string; enum=`quantile`, `earliest`)
 
+### Example request/response
+
+Input for a completed STT job:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "sttJobId": "stt-<ID>",
+  "nAnchors": 12,
+  "bucketSec": 1.0,
+  "minMatchScore": 0.56,
+  "anchorDistribution": "quantile"
+}
+```
+
+Representative result payload:
+
+```json
+{
+  "readOnly": true,
+  "speaker": "<SPEAKER_ID>",
+  "offsetSec": 2.375,
+  "confidence": 0.87,
+  "nAnchors": 9,
+  "totalAnchors": 12,
+  "totalSegments": 184,
+  "method": "monotonic_alignment",
+  "spreadSec": 0.42,
+  "direction": "later",
+  "directionLabel": "2.375 s later (toward the end)",
+  "anchorDistribution": "quantile",
+  "reliable": true,
+  "warnings": [],
+  "matches": [
+    {
+      "anchor_index": 0,
+      "anchor_text": "water",
+      "anchor_start": 12.0,
+      "segment_index": 17,
+      "segment_text": "water",
+      "segment_start": 14.375,
+      "score": 0.94,
+      "offset_sec": 2.375
+    }
+  ],
+  "annotationPath": "annotations/<SPEAKER_ID>.parse.json"
+}
+```
+
+Treat non-empty `warnings`, low `confidence`, or high `spreadSec` as a stop sign before passing `offsetSec` to `apply_timestamp_offset`.
+
 ### MCP annotations
 
 - `destructiveHint`: `False`

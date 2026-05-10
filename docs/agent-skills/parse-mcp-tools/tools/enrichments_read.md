@@ -33,6 +33,30 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 
 - `keys` (type=array) — Optional list of top-level keys to return (e.g. ["cognate_sets", "lexeme_notes"]). Omit to return the full payload.
 
+Example input and result payload for reading only cognate sets:
+
+```json
+{
+  "keys": ["cognate_sets"]
+}
+```
+
+```json
+{
+  "readOnly": true,
+  "enrichments": {
+    "cognate_sets": {
+      "<CONCEPT_ID>": {
+        "1": ["<SPEAKER_ID>", "<OTHER_SPEAKER_ID>"],
+        "2": ["<THIRD_SPEAKER_ID>"]
+      }
+    }
+  }
+}
+```
+
+The filter is top-level only: absent requested keys are omitted rather than returned as `null`.
+
 ### MCP annotations
 
 - `destructiveHint`: `False`

@@ -34,6 +34,68 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `with_contact_lexemes` (type=boolean) — If true, run contact_lexeme_lookup before the export steps.
 - `dryRun` (type=boolean) — Preview the export bundle and planned artifacts without writing files.
 
+### Dry-run command and expected output
+
+HTTP MCP dry-run call:
+
+```bash
+curl -s "$PARSE_BASE_URL/api/mcp/tools/export_complete_lingpy_dataset?mode=active" \
+  -H 'Content-Type: application/json' \
+  -d '{"with_contact_lexemes":false,"dryRun":true}' \
+  | python3 -m json.tool
+```
+
+Representative MCP HTTP response shape:
+
+```json
+{
+  "tool": "export_complete_lingpy_dataset",
+  "ok": true,
+  "result": {
+    "dryRun": true,
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "with_contact_lexemes": false,
+    "artifacts": {
+      "lingpy_tsv": "exports/lingpy/wordlist.tsv",
+      "nexus": "exports/lingpy/dataset.nex"
+    },
+    "stages": [
+      {
+        "stage": "lingpy_tsv",
+        "tool": "export_lingpy_tsv",
+        "status": "preview",
+        "payload": {
+          "readOnly": true,
+          "previewOnly": true,
+          "previewLines": "ID\tCONCEPT\tDOCULECT\tIPA\tCOGID\tTOKENS\tBORROWING",
+          "totalLines": 129,
+          "truncated": true,
+          "rowCount": 128
+        }
+      },
+      {
+        "stage": "nexus",
+        "tool": "export_nexus",
+        "status": "preview",
+        "payload": {
+          "readOnly": true,
+          "previewOnly": true,
+          "preview": "#NEXUS\n\nBEGIN TAXA;",
+          "truncated": false,
+          "totalChars": 321
+        }
+      }
+    ],
+    "final_status": "preview",
+    "exported_at": "2026-05-10T19:24:00Z"
+  }
+}
+```
+
+If `with_contact_lexemes` is true, expect an additional first stage for `contact_lexeme_lookup`; keep dry-run evidence before any live export write.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`

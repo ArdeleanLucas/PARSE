@@ -35,6 +35,31 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `outputPath` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path inside project root (e.g. exports/speaker.TextGrid).
 - `dryRun` (type=boolean) — Preview only — never writes.
 
+### Dry-run preview example
+
+Input:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "dryRun": true
+}
+```
+
+Representative result payload:
+
+```json
+{
+  "readOnly": true,
+  "previewOnly": true,
+  "preview": "File type = \"ooTextFile\"\nObject class = \"TextGrid\"\n\nxmin = 0\nxmax = 123.45\ntiers? <exists>",
+  "truncated": false,
+  "totalChars": 1842
+}
+```
+
+The preview is capped at the first 2000 characters; use `outputPath` plus `dryRun: false` to write the full `.TextGrid` file after validating the speaker scope.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`

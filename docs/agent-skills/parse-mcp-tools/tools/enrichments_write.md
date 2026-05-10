@@ -35,6 +35,37 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `merge` (type=boolean) — If true (default), shallow-merge into existing data. If false, replace entirely.
 - `dryRun` (type=boolean) — If true, preview the resulting top-level keys without writing parse-enrichments.json.
 
+### Example enrichments payload
+
+Valid dry-run payload for a shallow merge:
+
+```json
+{
+  "enrichments": {
+    "cognate_sets": {
+      "<CONCEPT_ID>": {
+        "1": ["<SPEAKER_ID>", "<OTHER_SPEAKER_ID>"]
+      }
+    },
+    "similarity": {
+      "<SPEAKER_ID>": {
+        "<OTHER_SPEAKER_ID>": 0.82
+      }
+    },
+    "borrowing_flags": {
+      "<CONCEPT_ID>": {
+        "<SPEAKER_ID>": false
+      }
+    },
+    "manual_overrides": {}
+  },
+  "merge": true,
+  "dryRun": true
+}
+```
+
+With `dryRun: true`, expect a preview result containing `incomingKeys`, `resultingKeys`, `merge`, and `path`; only `dryRun: false` writes `parse-enrichments.json`.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`

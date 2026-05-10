@@ -43,6 +43,43 @@ The response shape is the same as detect_timestamp_offset, so the offsetSec can 
 - `conceptId` (type=string; minLength=1; maxLength=128)
 - `pairs` (type=array)
 
+### Example input payloads
+
+Single trusted pair using an explicit CSV/annotation timestamp:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "csvTimeSec": 12.0,
+  "audioTimeSec": 14.375
+}
+```
+
+Single trusted pair using a concept ID to resolve the annotation-side timestamp:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "conceptId": "<CONCEPT_ID>",
+  "audioTimeSec": 14.375
+}
+```
+
+Multiple trusted pairs; the tool returns the median offset and MAD-style spread:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "pairs": [
+    {"csvTimeSec": 12.0, "audioTimeSec": 14.375},
+    {"csvTimeSec": 48.5, "audioTimeSec": 50.875},
+    {"conceptId": "<CONCEPT_ID>", "audioTimeSec": 91.25}
+  ]
+}
+```
+
+Every pair must include `audioTimeSec` plus either `csvTimeSec` or `conceptId`; do not mix in STT segments for this manual-anchor path.
+
 ### MCP annotations
 
 - `destructiveHint`: `False`

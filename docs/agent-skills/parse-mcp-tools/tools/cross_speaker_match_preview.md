@@ -38,6 +38,37 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `minConfidence` (type=number; minimum=0.0; maximum=1.0)
 - `maxConcepts` (type=integer; minimum=1; maximum=500)
 
+### Example input payload
+
+Valid inline-STT request shape:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "sttSegments": [
+    {
+      "start": 12.34,
+      "end": 12.78,
+      "text": "water",
+      "ortho": "water",
+      "ipa": "wɑtər"
+    },
+    {
+      "startSec": 18.1,
+      "endSec": 18.72,
+      "text": "fire",
+      "ortho": "fire",
+      "ipa": "faɪr"
+    }
+  ],
+  "topK": 5,
+  "minConfidence": 0.35,
+  "maxConcepts": 25
+}
+```
+
+Use `sttJobId` instead of `sttSegments` when a completed STT job is available; do not provide unbounded full-record annotation JSON here.
+
 ### MCP annotations
 
 - `destructiveHint`: `False`

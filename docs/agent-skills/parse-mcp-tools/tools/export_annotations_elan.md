@@ -35,6 +35,18 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 - `outputPath` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path inside project root (e.g. exports/speaker.eaf).
 - `dryRun` (type=boolean) — Preview only — never writes.
 
+Example write payload using a project-relative output path:
+
+```json
+{
+  "speaker": "<SPEAKER_ID>",
+  "outputPath": "exports/elan/<SPEAKER_ID>.eaf",
+  "dryRun": false
+}
+```
+
+For preview-only validation, omit `outputPath` or set `dryRun: true`; live writes must stay inside the PARSE project root.
+
 ### MCP annotations
 
 - `destructiveHint`: `True`
