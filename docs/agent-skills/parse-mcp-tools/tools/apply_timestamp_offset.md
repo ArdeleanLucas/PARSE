@@ -80,6 +80,30 @@ curl "$PARSE_BASE_URL/api/mcp/tools/apply_timestamp_offset?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run output example
+
+Always run with `dryRun: true` first. A representative successful preview looks like:
+
+```json
+{
+  "readOnly": true,
+  "dryRun": true,
+  "speaker": "<SPEAKER_ID>",
+  "offsetSec": 0.25,
+  "wouldShiftIntervals": 4,
+  "wouldShiftConcepts": 2,
+  "preview": [
+    {
+      "tier": "ortho",
+      "from": [1.0, 1.5],
+      "to": [1.25, 1.75]
+    }
+  ]
+}
+```
+
+Only the subsequent `dryRun: false` call is allowed to write; after applying, re-read `annotations/<Speaker>.parse.json` and verify the shifted interval counts match the preview.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `apply_timestamp_offset` is currently exposed.

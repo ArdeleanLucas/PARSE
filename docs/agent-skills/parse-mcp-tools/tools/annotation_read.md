@@ -68,6 +68,22 @@ For the HTTP MCP bridge, discover the live schema before calling:
 curl "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active"
 ```
 
+Schema-first inspection example:
+
+```bash
+# 1. Fetch the live contract for the active MCP exposure mode.
+curl -s "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active" \
+  | python3 -m json.tool
+
+# 2. Only after checking the live inputSchema, make a bounded read call.
+curl -s "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active" \
+  -H 'Content-Type: application/json' \
+  -d '{"speaker":"<SPEAKER_ID>","includeTiers":["ortho"],"maxIntervals":200}' \
+  | python3 -m json.tool
+```
+
+Do not copy an old argument shape from this document if the first curl shows a newer schema; treat the live catalog response as authoritative.
+
 ## Workflow
 
 1. **Discover** – Confirm `annotation_read` is exposed by the active MCP catalog and inspect its current `inputSchema`.

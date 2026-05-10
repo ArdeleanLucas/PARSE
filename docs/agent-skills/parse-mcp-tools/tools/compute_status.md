@@ -78,6 +78,42 @@ curl "$PARSE_BASE_URL/api/mcp/tools/compute_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Example request/response
+
+Request a typed status check so accidentally polling the wrong job class fails visibly:
+
+```json
+{
+  "jobId": "compute-<ID>",
+  "computeType": "full_pipeline"
+}
+```
+
+Representative completed response:
+
+```json
+{
+  "readOnly": true,
+  "jobId": "compute-<ID>",
+  "type": "compute:full_pipeline",
+  "status": "complete",
+  "progress": 100.0,
+  "message": "Compute complete",
+  "error": null,
+  "result": {
+    "speaker": "<SPEAKER_ID>",
+    "steps_run": ["ortho", "ipa"],
+    "results": {
+      "ortho": {"status": "ok", "filled": 128},
+      "ipa": {"status": "ok", "filled": 129}
+    },
+    "summary": {"ok": 2, "skipped": 0, "error": 0}
+  }
+}
+```
+
+If the response is `status: "invalid_job_type"`, keep the job evidence but re-check the original start call before making any pipeline success claim.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `compute_status` is currently exposed.

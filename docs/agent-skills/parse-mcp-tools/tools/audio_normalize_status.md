@@ -77,6 +77,25 @@ curl "$PARSE_BASE_URL/api/mcp/tools/audio_normalize_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Sample response
+
+Representative polling output while a normalization job is still running:
+
+```json
+{
+  "readOnly": true,
+  "jobId": "normalize-<ID>",
+  "type": "normalize",
+  "status": "running",
+  "progress": 42.0,
+  "message": "Running ffmpeg loudnorm pass 2",
+  "error": null,
+  "result": null
+}
+```
+
+At terminal state, expect `status` such as `complete`, `completed`, `error`, or `failed`; if `error` is non-null, report the error and do not claim the normalized audio is ready.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `audio_normalize_status` is currently exposed.

@@ -47,6 +47,8 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 
 - The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
 
+The returned payload is structured inspection data for the BND job: it is safe to archive in validation notes, compare across polls, and cite as evidence that the job reached a terminal state.
+
 ## Portable setup
 
 Use placeholders instead of machine-specific paths:
