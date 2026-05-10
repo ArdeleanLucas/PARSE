@@ -67,7 +67,17 @@ def _seed_annotation(
             },
             "ortho": {"type": "interval", "display_order": 2, "intervals": ortho_intervals or []},
             "ipa": {"type": "interval", "display_order": 1, "intervals": []},
-            "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+            "ortho_words": {
+                "type": "interval",
+                "display_order": 4,
+                "intervals": [
+                    {"start": 0.2, "end": 0.4, "text": "OUTSIDE_BEFORE", "source": "seed"},
+                    {"start": 1.0, "end": 1.25, "text": "OLD", "source": "seed"},
+                    {"start": 1.25, "end": 1.5, "text": "ROOT", "source": "seed"},
+                    {"start": 2.0, "end": 2.2, "text": "OUTSIDE_AFTER", "source": "seed"},
+                ],
+            },
+            "speaker": {"type": "interval", "display_order": 5, "intervals": []},
         },
         "metadata": {"language_code": "sdh"},
     }
@@ -115,6 +125,37 @@ def test_compute_speaker_ortho_concept_windows_default_pad_is_0_20(tmp_path: pat
 
     assert calls[0]["pad_sec"] == 0.2
     assert result["pad"] == 0.2
+
+
+def test_compute_speaker_ortho_concept_windows_rebuilds_ortho_words(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _capture_concept_window_runner(monkeypatch)
+    align_calls: list[dict[str, Any]] = []
+
+    def fake_align(audio_path: pathlib.Path, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        align_calls.append({"audio_path": audio_path, "segments": segments})
+        words = segments[0]["words"]
+        return [
+            {"start": float(word["start"]), "end": float(word["end"]), "text": str(word["word"]), "source": "stub-align"}
+            for word in words
+        ]
+
+    monkeypatch.setattr(server, "_ortho_tier2_align_to_words", fake_align)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {})
+
+    assert result["filled"] == 1
+    assert calls[0]["step"] == "ortho"
+    assert align_calls and align_calls[0]["segments"][0]["words"]
+    annotation_path = tmp_path / "annotations" / "Fail02.parse.json"
+    persisted = json.loads(annotation_path.read_text(encoding="utf-8"))
+    words = persisted["tiers"]["ortho_words"]["intervals"]
+    inside = [iv["text"] for iv in words if 1.0 <= float(iv["start"]) and float(iv["end"]) <= 1.5]
+    assert "-".join(inside) == "ortho-window"
+    outside = [iv for iv in words if float(iv["end"]) <= 1.0 or float(iv["start"]) >= 1.5]
+    assert outside == [
+        {"start": 0.2, "end": 0.4, "text": "OUTSIDE_BEFORE", "source": "seed"},
+        {"start": 2.0, "end": 2.2, "text": "OUTSIDE_AFTER", "source": "seed"},
+    ]
 
 
 def test_compute_speaker_ortho_concept_windows_explicit_pad_0_0(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -466,6 +466,12 @@ def _run_ipa_interval(audio_path: Path, start: float, end: float, language: str 
     return _impl(audio_path=audio_path, start=start, end=end, language=language)
 
 
+def _align_partial_ortho_words(audio_path: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from server_routes.annotate import _align_partial_ortho_words as _impl
+
+    return _impl(audio_path, rows)
+
+
 def _per_concept_rerun(
     speaker: str,
     hit: ConceptHit,
@@ -639,6 +645,7 @@ def tool_rerun_lexemes_by_tag(tools: "ParseChatTools", args: Dict[str, Any]) -> 
         build_post_run_ipa_response=build_post_run_ipa_response,
         locks_dir=locks_dir,
         annotation_writer=_annotation_writer(tools.project_root),
+        align_ortho_words=_align_partial_ortho_words,
     )
 
     return {

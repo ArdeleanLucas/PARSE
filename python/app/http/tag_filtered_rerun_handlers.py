@@ -190,6 +190,7 @@ ComputeLauncher = Callable[[str, str, dict[str, Any]], None]
 ProgressCallback = Callable[[int, int, str, ConceptHit, str], None]
 AnnotationWriter = Callable[[str, Path, dict[str, Any]], None]
 AnnotationMetadataToucher = Callable[[dict[str, Any], bool], None]
+OrthoWordsAligner = Callable[[Path, list[dict[str, Any]]], list[dict[str, Any]]]
 
 
 def _resolve_per_speaker(
@@ -394,6 +395,43 @@ def _lexemes_rerun_by_tag_result_payload(
     }
 
 
+def _interval_overlaps_any_window(interval: Mapping[str, Any], windows: Sequence[Mapping[str, Any]]) -> bool:
+    try:
+        start_sec = float(interval.get("start", 0.0) or 0.0)
+        end_sec = float(interval.get("end", start_sec) or start_sec)
+    except (TypeError, ValueError):
+        return False
+    for window in windows:
+        try:
+            win_start = float(window.get("start", 0.0) or 0.0)
+            win_end = float(window.get("end", win_start) or win_start)
+        except (TypeError, ValueError):
+            continue
+        if start_sec < win_end and end_sec > win_start:
+            return True
+    return False
+
+
+def _merge_intervals_for_windows(
+    existing: Sequence[Mapping[str, Any]],
+    replacements: Sequence[Mapping[str, Any]],
+    windows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    kept = [
+        dict(row)
+        for row in existing
+        if isinstance(row, Mapping) and not _interval_overlaps_any_window(row, windows)
+    ]
+    combined = kept + [dict(row) for row in replacements if isinstance(row, Mapping)]
+    combined.sort(
+        key=lambda iv: (
+            float(iv.get("start", 0.0) or 0.0),
+            float(iv.get("end", 0.0) or 0.0),
+        )
+    )
+    return combined
+
+
 def _persist_speaker_rerun_writes(
     speaker: str,
     hits: Sequence[ConceptHit],
@@ -404,6 +442,8 @@ def _persist_speaker_rerun_writes(
     normalize_annotation_record: AnnotationNormalizer,
     annotation_touch_metadata: AnnotationMetadataToucher,
     annotation_writer: AnnotationWriter,
+    resolve_audio_path_for_speaker: AudioPathResolver,
+    align_ortho_words: OrthoWordsAligner | None = None,
 ) -> None:
     """Merge ok rerun rows into ``tiers.ortho`` / ``tiers.ipa`` and write to disk.
 
@@ -463,34 +503,29 @@ def _persist_speaker_rerun_writes(
         if tier is None:
             tier = {"type": "interval", "display_order": 2 if field == "ortho" else 1, "intervals": []}
         existing = [iv for iv in tier.get("intervals") or [] if isinstance(iv, dict)]
-        # Drop any existing intervals that overlap the targeted concept windows,
-        # then append the rerun rows. This mirrors `_merge_concept_window_rows`
-        # from `python/server_routes/annotate.py` without importing it.
-        kept: list[dict[str, Any]] = []
-        for iv in existing:
-            try:
-                iv_start = float(iv.get("start", 0.0) or 0.0)
-                iv_end = float(iv.get("end", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                kept.append(iv)
-                continue
-            overlaps = False
-            for window in field_windows:
-                if iv_start < window["end"] and window["start"] < iv_end:
-                    overlaps = True
-                    break
-            if not overlaps:
-                kept.append(iv)
-        combined = kept + [dict(row) for row in new_rows]
-        combined.sort(
-            key=lambda iv: (
-                float(iv.get("start", 0.0) or 0.0),
-                float(iv.get("end", 0.0) or 0.0),
-            )
-        )
-        tier["intervals"] = combined
+        tier["intervals"] = _merge_intervals_for_windows(existing, new_rows, field_windows)
         tiers[field] = tier
         changed = True
+
+    ortho_rows = rows_by_field["ortho"]
+    if align_ortho_words is not None and ortho_rows:
+        ortho_windows = [
+            {"start": float(row["start"]), "end": float(row["end"])}
+            for row in ortho_rows
+        ]
+        try:
+            audio_path = resolve_audio_path_for_speaker(speaker)
+            aligned_words = align_ortho_words(audio_path, [dict(row) for row in ortho_rows])
+        except Exception:  # pragma: no cover - word alignment must not abort text persistence
+            logger.exception("tagged-only rerun: failed to rebuild ortho_words for speaker %s", speaker)
+        else:
+            word_tier = tiers.get("ortho_words") if isinstance(tiers.get("ortho_words"), dict) else None
+            if word_tier is None:
+                word_tier = {"type": "interval", "display_order": 4, "intervals": []}
+            existing_words = [iv for iv in word_tier.get("intervals") or [] if isinstance(iv, dict)]
+            word_tier["intervals"] = _merge_intervals_for_windows(existing_words, aligned_words, ortho_windows)
+            tiers["ortho_words"] = word_tier
+            changed = True
 
     if not changed:
         return
@@ -535,6 +570,7 @@ def run_lexemes_rerun_by_tag_loop(
     progress_callback: ProgressCallback | None = None,
     annotation_writer: AnnotationWriter | None = None,
     annotation_touch_metadata: AnnotationMetadataToucher | None = None,
+    align_ortho_words: OrthoWordsAligner | None = None,
 ) -> dict[str, Any]:
     writer = annotation_writer or _default_annotation_writer
     touch_metadata = annotation_touch_metadata or _default_annotation_touch_metadata
@@ -579,6 +615,8 @@ def run_lexemes_rerun_by_tag_loop(
                     normalize_annotation_record=normalize_annotation_record,
                     annotation_touch_metadata=touch_metadata,
                     annotation_writer=writer,
+                    resolve_audio_path_for_speaker=resolve_audio_path_for_speaker,
+                    align_ortho_words=align_ortho_words,
                 )
             except Exception:  # pragma: no cover - persistence must not abort the loop
                 logger.exception(
@@ -608,6 +646,7 @@ def build_post_lexemes_rerun_by_tag_response(
     job_conflict_error_cls: type[Exception] | tuple[type[Exception], ...] | None = None,
     annotation_writer: AnnotationWriter | None = None,
     annotation_touch_metadata: AnnotationMetadataToucher | None = None,
+    align_ortho_words: OrthoWordsAligner | None = None,
 ) -> JsonResponseSpec:
     """Validate a tag rerun and start a tracked compute job by default.
 
@@ -639,6 +678,7 @@ def build_post_lexemes_rerun_by_tag_response(
             locks_dir=locks_dir,
             annotation_writer=annotation_writer,
             annotation_touch_metadata=annotation_touch_metadata,
+            align_ortho_words=align_ortho_words,
         )
         # Deprecated compatibility shape: legacy clients used ``jobId: null``
         # to distinguish the old synchronous endpoint from compute jobs.
@@ -668,6 +708,7 @@ def build_post_lexemes_rerun_by_tag_response(
 
 __all__ = [
     "LexemesRerunByTagPlan",
+    "OrthoWordsAligner",
     "TagFilteredHandlerError",
     "build_lexemes_rerun_by_tag_plan",
     "build_post_concepts_by_tag_response",
