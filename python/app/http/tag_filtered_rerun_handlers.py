@@ -11,9 +11,11 @@ injected as a callable. This mirrors the pattern in
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -186,6 +188,8 @@ PerIntervalHandler = Callable[..., Any]
 JobCreator = Callable[[str, dict[str, Any]], str]
 ComputeLauncher = Callable[[str, str, dict[str, Any]], None]
 ProgressCallback = Callable[[int, int, str, ConceptHit, str], None]
+AnnotationWriter = Callable[[str, Path, dict[str, Any]], None]
+AnnotationMetadataToucher = Callable[[dict[str, Any], bool], None]
 
 
 def _resolve_per_speaker(
@@ -390,6 +394,130 @@ def _lexemes_rerun_by_tag_result_payload(
     }
 
 
+def _persist_speaker_rerun_writes(
+    speaker: str,
+    hits: Sequence[ConceptHit],
+    speaker_results: Sequence[Mapping[str, Any]],
+    *,
+    annotation_read_path_for_speaker: AnnotationPathResolver,
+    read_json_any_file: JsonAnyReader,
+    normalize_annotation_record: AnnotationNormalizer,
+    annotation_touch_metadata: AnnotationMetadataToucher,
+    annotation_writer: AnnotationWriter,
+) -> None:
+    """Merge ok rerun rows into ``tiers.ortho`` / ``tiers.ipa`` and write to disk.
+
+    Regression fix for the tagged-only batch rerun (2026-05-10): the loop
+    previously returned text that no caller persisted, so disk-side
+    annotation files never reflected ``ok`` rows.
+    """
+    by_window = {
+        (round(float(hit.start), 6), round(float(hit.end), 6)): hit for hit in hits
+    }
+    if not by_window:
+        return
+
+    rows_by_field: dict[str, list[dict[str, Any]]] = {"ortho": [], "ipa": []}
+    for row in speaker_results:
+        if row.get("status") != "ok":
+            continue
+        field = row.get("field")
+        if field not in rows_by_field:
+            continue
+        text = row.get("text")
+        if not isinstance(text, str):
+            continue
+        concept_id = row.get("conceptId")
+        hit = next((h for h in hits if h.conceptId == concept_id), None)
+        if hit is None:
+            continue
+        rows_by_field[field].append(
+            {"start": float(hit.start), "end": float(hit.end), "text": text}
+        )
+
+    if not any(rows_by_field.values()):
+        return
+
+    annotation_path = annotation_read_path_for_speaker(speaker)
+    if not annotation_path.is_file():
+        return
+    payload = read_json_any_file(annotation_path)
+    try:
+        record = normalize_annotation_record(payload, speaker)
+    except Exception:  # pragma: no cover - prod normalizer logs internally
+        return
+    if not isinstance(record, dict):
+        return
+
+    tiers = record.get("tiers") if isinstance(record.get("tiers"), dict) else {}
+    record["tiers"] = tiers
+    changed = False
+    for field, new_rows in rows_by_field.items():
+        if not new_rows:
+            continue
+        field_windows = [
+            {"start": float(row["start"]), "end": float(row["end"])}
+            for row in new_rows
+        ]
+        tier = tiers.get(field) if isinstance(tiers.get(field), dict) else None
+        if tier is None:
+            tier = {"type": "interval", "display_order": 2 if field == "ortho" else 1, "intervals": []}
+        existing = [iv for iv in tier.get("intervals") or [] if isinstance(iv, dict)]
+        # Drop any existing intervals that overlap the targeted concept windows,
+        # then append the rerun rows. This mirrors `_merge_concept_window_rows`
+        # from `python/server_routes/annotate.py` without importing it.
+        kept: list[dict[str, Any]] = []
+        for iv in existing:
+            try:
+                iv_start = float(iv.get("start", 0.0) or 0.0)
+                iv_end = float(iv.get("end", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                kept.append(iv)
+                continue
+            overlaps = False
+            for window in field_windows:
+                if iv_start < window["end"] and window["start"] < iv_end:
+                    overlaps = True
+                    break
+            if not overlaps:
+                kept.append(iv)
+        combined = kept + [dict(row) for row in new_rows]
+        combined.sort(
+            key=lambda iv: (
+                float(iv.get("start", 0.0) or 0.0),
+                float(iv.get("end", 0.0) or 0.0),
+            )
+        )
+        tier["intervals"] = combined
+        tiers[field] = tier
+        changed = True
+
+    if not changed:
+        return
+
+    annotation_touch_metadata(record, True)
+    annotation_writer(speaker, annotation_path, record)
+
+
+def _default_annotation_touch_metadata(record: dict[str, Any], preserve_created: bool) -> None:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    record["metadata"] = metadata
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if not preserve_created or not str(metadata.get("created") or "").strip():
+        metadata["created"] = now_iso
+    metadata["modified"] = now_iso
+
+
+def _default_annotation_writer(_speaker: str, path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def run_lexemes_rerun_by_tag_loop(
     plan: LexemesRerunByTagPlan,
     *,
@@ -405,12 +533,18 @@ def run_lexemes_rerun_by_tag_loop(
     build_post_run_ortho_response: PerIntervalHandler,
     locks_dir: Path | None = None,
     progress_callback: ProgressCallback | None = None,
+    annotation_writer: AnnotationWriter | None = None,
+    annotation_touch_metadata: AnnotationMetadataToucher | None = None,
 ) -> dict[str, Any]:
+    writer = annotation_writer or _default_annotation_writer
+    touch_metadata = annotation_touch_metadata or _default_annotation_touch_metadata
     results: list[dict[str, Any]] = []
     total_concepts = sum(len(plan.by_speaker.get(speaker, [])) for speaker in plan.speakers)
     completed = 0
     for speaker in plan.speakers:
-        for hit in plan.by_speaker.get(speaker, []):
+        speaker_hits = plan.by_speaker.get(speaker, [])
+        speaker_start_idx = len(results)
+        for hit in speaker_hits:
             results.extend(
                 _per_concept_rerun(
                     speaker,
@@ -433,6 +567,24 @@ def run_lexemes_rerun_by_tag_loop(
             completed += 1
             if progress_callback is not None:
                 progress_callback(completed, total_concepts, speaker, hit, plan.field)
+        speaker_results = results[speaker_start_idx:]
+        if speaker_hits and speaker_results:
+            try:
+                _persist_speaker_rerun_writes(
+                    speaker,
+                    speaker_hits,
+                    speaker_results,
+                    annotation_read_path_for_speaker=annotation_read_path_for_speaker,
+                    read_json_any_file=read_json_any_file,
+                    normalize_annotation_record=normalize_annotation_record,
+                    annotation_touch_metadata=touch_metadata,
+                    annotation_writer=writer,
+                )
+            except Exception:  # pragma: no cover - persistence must not abort the loop
+                logger.exception(
+                    "tagged-only rerun: failed to persist annotation writes for speaker %s",
+                    speaker,
+                )
     return _lexemes_rerun_by_tag_result_payload(plan, results)
 
 
@@ -454,6 +606,8 @@ def build_post_lexemes_rerun_by_tag_response(
     create_job: JobCreator | None = None,
     launch_compute_runner: ComputeLauncher | None = None,
     job_conflict_error_cls: type[Exception] | tuple[type[Exception], ...] | None = None,
+    annotation_writer: AnnotationWriter | None = None,
+    annotation_touch_metadata: AnnotationMetadataToucher | None = None,
 ) -> JsonResponseSpec:
     """Validate a tag rerun and start a tracked compute job by default.
 
@@ -483,6 +637,8 @@ def build_post_lexemes_rerun_by_tag_response(
             build_post_run_ipa_response=build_post_run_ipa_response,
             build_post_run_ortho_response=build_post_run_ortho_response,
             locks_dir=locks_dir,
+            annotation_writer=annotation_writer,
+            annotation_touch_metadata=annotation_touch_metadata,
         )
         # Deprecated compatibility shape: legacy clients used ``jobId: null``
         # to distinguish the old synchronous endpoint from compute jobs.

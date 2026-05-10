@@ -2732,6 +2732,11 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
                 total_segments=total,
             )
 
+        def _write_tagged_rerun_annotation(speaker: str, annotation_path: _server.pathlib.Path, annotation: _server.Dict[str, _server.Any]) -> None:
+            canonical_path = _server._annotation_record_path_for_speaker(speaker)
+            legacy_path = _server._annotation_legacy_record_path_for_speaker(speaker)
+            _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+
         result = run_lexemes_rerun_by_tag_loop(
             plan,
             project_root=_server._project_root(),
@@ -2746,6 +2751,8 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
             build_post_run_ortho_response=build_post_run_ortho_response,
             locks_dir=_locks_dir(),
             progress_callback=_progress,
+            annotation_writer=_write_tagged_rerun_annotation,
+            annotation_touch_metadata=_server._annotation_touch_metadata,
         )
         _set_compute_progress(job_id, 99.0, message='Tagged rerun complete')
         return result
