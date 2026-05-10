@@ -165,7 +165,7 @@ def test_compute_speaker_ortho_concept_windows_writes_picked_lexeme_to_ortho_tie
 ) -> None:
     _capture_concept_window_runner(monkeypatch)
 
-    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]], **_kwargs: Any) -> list[dict[str, Any]]:
         return [
             {"start": 1.0, "end": 1.18, "text": "the", "source": "stub-align"},
             {"start": 1.18, "end": 1.36, "text": "head", "source": "stub-align"},
@@ -196,11 +196,10 @@ def test_compute_speaker_ortho_concept_windows_handles_align_failure_gracefully(
     _seed_annotation(tmp_path)
     calls = _capture_concept_window_runner(monkeypatch)
     monkeypatch.setattr(server, "get_ortho_provider", lambda: _ClipProvider())
-    monkeypatch.setattr(
-        server,
-        "_align_partial_ortho_words",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("wav2vec2 unavailable")),
-    )
+    def _raise_align_failure(*_args, **_kwargs):
+        raise RuntimeError("wav2vec2 unavailable")
+
+    monkeypatch.setattr(server, "_align_partial_ortho_words", _raise_align_failure)
     annotation_path = tmp_path / "annotations" / "Fail02.parse.json"
     before = json.loads(annotation_path.read_text(encoding="utf-8"))
     before_words = before["tiers"]["ortho_words"]["intervals"]
@@ -226,7 +225,7 @@ def test_compute_speaker_ortho_concept_windows_keeps_multi_word_ortho_when_no_wo
 ) -> None:
     _capture_concept_window_runner(monkeypatch)
 
-    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]], **_kwargs: Any) -> list[dict[str, Any]]:
         return [
             {"start": 0.1, "end": 0.4, "text": "outside", "source": "stub-align"},
             {"start": 1.6, "end": 1.9, "text": "after", "source": "stub-align"},
@@ -268,10 +267,13 @@ def test_compute_speaker_ortho_concept_windows_invalid_pad_rejected(monkeypatch:
     handler = _HandlerHarness({"speaker": "Fail02", "run_mode": "concept-windows", "pad": 0.123})
     monkeypatch.setattr(server, "_compute_concept_scoped_noop_payload", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(server, "_job_callback_url_from_mapping", lambda _body: None)
+    def _raise_invalid_pad(*_args, **_kwargs):
+        raise AssertionError("invalid pad must not start a job")
+
     monkeypatch.setattr(
         server,
         "_app_build_post_compute_start_response",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("invalid pad must not start a job")),
+        _raise_invalid_pad,
         raising=False,
     )
 
@@ -312,7 +314,10 @@ def test_compute_full_run_mode_ignores_pad(tmp_path: pathlib.Path, monkeypatch: 
     _patch_common(monkeypatch, tmp_path)
     _seed_annotation(tmp_path)
     provider = _FullOrthoProvider()
-    monkeypatch.setattr(server, "_run_step_on_concept_windows", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("full mode must not run concept windows")))
+    def _raise_full_mode_unexpected(**_kwargs):
+        raise AssertionError("full mode must not run concept windows")
+
+    monkeypatch.setattr(server, "_run_step_on_concept_windows", _raise_full_mode_unexpected)
 
     result = server._compute_speaker_ortho("job-ortho", {"speaker": "Fail02", "run_mode": "full", "pad": 0.5}, provider=provider)
 

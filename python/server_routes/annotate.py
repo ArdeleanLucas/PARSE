@@ -1752,7 +1752,7 @@ def _compute_speaker_ortho_concept_windows(
                     if isinstance(picked_text, str) and picked_text.strip():
                         ortho_row['text'] = picked_text.strip()
                 break
-    except Exception:  # pragma: no cover - word alignment must not abort text persistence
+    except Exception:
         logger.exception("concept-window ORTH: failed to rebuild ortho_words for speaker %s", speaker)
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
