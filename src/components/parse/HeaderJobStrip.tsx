@@ -77,9 +77,9 @@ export function HeaderJobStrip({
   }
 
   useEffect(() => {
-    const completeJobs = jobs.filter((job) => isCompleteStatus(job.status) && !dismissed.has(job.jobId));
-    if (completeJobs.length === 0) return;
-    const timers = completeJobs.map((job) => window.setTimeout(() => {
+    const terminalJobs = jobs.filter((job) => (isCompleteStatus(job.status) || isErrorStatus(job.status)) && !dismissed.has(job.jobId));
+    if (terminalJobs.length === 0) return;
+    const timers = terminalJobs.map((job) => window.setTimeout(() => {
       setDismissed((existing) => {
         const next = new Set(existing);
         next.add(job.jobId);

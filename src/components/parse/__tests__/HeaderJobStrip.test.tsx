@@ -82,6 +82,17 @@ describe("HeaderJobStrip", () => {
     expect(screen.queryByTestId("topbar-job-strip-row-job-1")).toBeNull();
   });
 
+  it("auto-dismisses errored jobs after the configured delay", async () => {
+    render(<HeaderJobStrip jobs={[baseJob({ status: "error", error: "boom" })]} autoDismissMs={4000} />);
+
+    expect(screen.getByText("Lexeme ORTH failed")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-job-1")).toBeNull();
+  });
+
   it("renders errored jobs with crash-log affordance", () => {
     const onOpenLogs = vi.fn();
     render(<HeaderJobStrip jobs={[baseJob({ status: "error", error: "CUDA exploded while transcribing a very long chunk" })]} onOpenLogs={onOpenLogs} />);
