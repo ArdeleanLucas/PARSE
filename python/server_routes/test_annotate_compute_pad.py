@@ -158,6 +158,37 @@ def test_compute_speaker_ortho_concept_windows_rebuilds_ortho_words(tmp_path: pa
     ]
 
 
+def test_compute_speaker_ortho_concept_windows_handles_align_failure_gracefully(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_common(monkeypatch, tmp_path)
+    _seed_annotation(tmp_path)
+    calls = _capture_concept_window_runner(monkeypatch)
+    monkeypatch.setattr(server, "get_ortho_provider", lambda: _ClipProvider())
+    monkeypatch.setattr(
+        server,
+        "_align_partial_ortho_words",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("wav2vec2 unavailable")),
+    )
+    annotation_path = tmp_path / "annotations" / "Fail02.parse.json"
+    before = json.loads(annotation_path.read_text(encoding="utf-8"))
+    before_words = before["tiers"]["ortho_words"]["intervals"]
+
+    result = server._compute_speaker_ortho("job-ortho", {"speaker": "Fail02", "run_mode": "concept-windows"})
+
+    assert result["filled"] == 1
+    assert calls[0]["step"] == "ortho"
+    persisted = json.loads(annotation_path.read_text(encoding="utf-8"))
+    ortho_inside = [
+        iv["text"]
+        for iv in persisted["tiers"]["ortho"]["intervals"]
+        if 1.0 <= float(iv["start"]) and float(iv["end"]) <= 1.5
+    ]
+    assert ortho_inside == ["ortho-window"]
+    assert persisted["tiers"]["ortho_words"]["intervals"] == before_words
+
+
 def test_compute_speaker_ortho_concept_windows_explicit_pad_0_0(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _capture_concept_window_runner(monkeypatch)
 

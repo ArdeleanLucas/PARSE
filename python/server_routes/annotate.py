@@ -4,12 +4,15 @@ from __future__ import annotations
 from typing import Callable, Set
 
 import hashlib
+import logging
 import math
 import server as _server
 from ai.provider import AIProvider
 from app.services.audio_paths import pipeline_audio_path_for_speaker
 from app.services.speaker_id import normalize_speaker_id as _shared_normalize_speaker_id
 from concept_registry import load_concept_registry, persist_concept_registry, resolve_or_allocate_concept_id
+
+logger = logging.getLogger(__name__)
 
 
 def _release_registered_ipa_aligner() -> None:
@@ -1632,9 +1635,12 @@ def _compute_speaker_ortho_concept_windows(
     if ortho_words_tier is None:
         ortho_words_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
     existing_words = [iv for iv in ortho_words_tier.get('intervals') or [] if isinstance(iv, dict)]
-    partial_words = _server._align_partial_ortho_words(audio_path, rows)
-    ortho_words_tier['intervals'] = _server._merge_concept_window_rows(existing_words, partial_words, concept_intervals)
-    tiers['ortho_words'] = ortho_words_tier
+    try:
+        partial_words = _server._align_partial_ortho_words(audio_path, rows)
+        ortho_words_tier['intervals'] = _server._merge_concept_window_rows(existing_words, partial_words, concept_intervals)
+        tiers['ortho_words'] = ortho_words_tier
+    except Exception:  # pragma: no cover - word alignment must not abort text persistence
+        logger.exception("concept-window ORTH: failed to rebuild ortho_words for speaker %s", speaker)
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)

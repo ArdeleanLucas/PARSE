@@ -199,6 +199,26 @@ def test_rerun_by_tag_rebuilds_ortho_words_for_successful_windows(tmp_path: Path
     assert outside_after == outside_before
 
 
+def test_rerun_by_tag_handles_ortho_word_align_failure_gracefully(tmp_path: Path) -> None:
+    """Tagged-only ORTH must persist text even when secondary word alignment fails."""
+    _seed_concepts_csv(tmp_path)
+    audio_path = _seed_audio(tmp_path)
+    annotation_path, _legacy_path = _seed_annotation(tmp_path)
+    before_words = _ortho_words(annotation_path)
+
+    def fail_align(_audio_path: Path, _rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        raise RuntimeError("wav2vec2 unavailable")
+
+    response = _run_tagged_ortho(tmp_path, audio_path, align_ortho_words=fail_align)
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload["summary"]["ok"] == 2
+    by_window = _ortho_by_window(annotation_path)
+    assert by_window[(1.0, 2.0)].startswith("RERUN_TEXT"), by_window
+    assert by_window[(3.0, 4.0)].startswith("RERUN_TEXT"), by_window
+    assert _ortho_words(annotation_path) == before_words
+
+
 def test_rerun_by_tag_loop_persists_text_to_annotation_file(tmp_path: Path) -> None:
     """Ortho transcripts produced by tagged-only batch must hit disk."""
     _seed_concepts_csv(tmp_path)
