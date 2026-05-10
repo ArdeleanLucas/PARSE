@@ -93,6 +93,39 @@ describe("HeaderJobStrip", () => {
     expect(screen.queryByTestId("topbar-job-strip-row-job-1")).toBeNull();
   });
 
+  it("renders cancelled jobs with the amber terminal chip and no Cancel button", () => {
+    render(<HeaderJobStrip jobs={[baseJob({ status: "cancelled", progress: 1 })]} />);
+
+    const row = screen.getByTestId("topbar-job-strip-row-job-1");
+    expect(row.className).toContain("border-amber-200");
+    expect(row.className).toContain("bg-amber-50");
+    expect(within(row).getByText("Lexeme ORTH cancelled").className).toContain("text-amber-900");
+    expect(screen.queryByRole("button", { name: /Cancel/i })).toBeNull();
+    expect(screen.queryByTestId("topbar-job-progress-job-1")).toBeNull();
+    expect(screen.queryByTestId("topbar-job-progress-placeholder-job-1")).toBeNull();
+  });
+
+  it("auto-dismisses cancelled jobs after the configured delay", async () => {
+    render(<HeaderJobStrip jobs={[baseJob({ status: "cancelled", progress: 1 })]} autoDismissMs={4000} />);
+
+    expect(screen.getByText("Lexeme ORTH cancelled")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-job-1")).toBeNull();
+  });
+
+  it("treats both 'cancelled' and 'canceled' as the same terminal state", () => {
+    render(<HeaderJobStrip jobs={[
+      baseJob({ jobId: "cancelled-job", status: "cancelled", progress: 1 }),
+      baseJob({ jobId: "canceled-job", status: "canceled", progress: 1 }),
+    ]} />);
+
+    expect(within(screen.getByTestId("topbar-job-strip-row-cancelled-job")).getByText("Lexeme ORTH cancelled")).toBeTruthy();
+    expect(within(screen.getByTestId("topbar-job-strip-row-canceled-job")).getByText("Lexeme ORTH cancelled")).toBeTruthy();
+  });
+
   it("renders errored jobs with crash-log affordance", () => {
     const onOpenLogs = vi.fn();
     render(<HeaderJobStrip jobs={[baseJob({ status: "error", error: "CUDA exploded while transcribing a very long chunk" })]} onOpenLogs={onOpenLogs} />);

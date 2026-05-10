@@ -746,6 +746,39 @@ describe("ParseUI", () => {
     expect(screen.queryByTestId("topbar-job-strip-row-lexeme-ortho-error")).toBeNull();
   });
 
+  it("shows the cancelled state from /api/jobs/active for a recently-cancelled terminal snapshot and dismisses it on the same cadence", async () => {
+    vi.useFakeTimers();
+    seedSingleSpeakerProject();
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      terminalSnapshot({
+        jobId: "stt-cancelled",
+        type: "compute:stt",
+        status: "cancelled",
+        progress: 1,
+      }),
+    ]);
+
+    render(<ParseUI />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const strip = screen.getByTestId("topbar-job-strip");
+    const row = screen.getByTestId("topbar-job-strip-row-stt-cancelled");
+    expect(strip).toBeTruthy();
+    expect(row.textContent).toContain("STT cancelled");
+    expect(row.className).toContain("border-amber-200");
+    expect(row.className).toContain("bg-amber-50");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-stt-cancelled")).toBeNull();
+    expect(screen.getByTestId("topbar-job-strip")).toBeTruthy();
+  });
+
   it("keeps a terminal snapshot dismissed even when /api/jobs/active keeps returning it during the backend dwell window", async () => {
     vi.useFakeTimers();
     seedSingleSpeakerProject();
