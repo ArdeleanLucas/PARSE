@@ -83,6 +83,86 @@ curl "$PARSE_BASE_URL/api/mcp/tools/rerun_lexemes_by_tag?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Call the HTTP MCP bridge with the same argument object an MCP adapter would pass to `rerun_lexemes_by_tag`:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/rerun_lexemes_by_tag?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "speakers": ["Speaker01", "Speaker02"],
+    "tagLabels": ["weather"],
+    "match": "any",
+    "field": "both",
+    "pad": 0.2
+  }'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "speakers": ["Speaker01", "Speaker02"],
+  "tagLabels": ["weather"],
+  "match": "any",
+  "field": "both",
+  "pad": 0.2
+}
+```
+
+Typical synchronous success shape; `jobId` stays `null` and each ORTH/IPA cell is reported independently:
+
+```json
+{
+  "tool": "rerun_lexemes_by_tag",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "jobId": null,
+    "resolved": {
+      "totalConcepts": 2,
+      "perSpeaker": {
+        "Speaker01": {
+          "conceptCount": 1,
+          "concepts": [
+            {
+              "conceptId": "12",
+              "name": "rain",
+              "start": 10.25,
+              "end": 11.1,
+              "tags": ["weather"]
+            }
+          ]
+        }
+      },
+      "unknownTags": [],
+      "ambiguousTags": {}
+    },
+    "total": 2,
+    "results": [
+      {
+        "speaker": "Speaker01",
+        "conceptId": "12",
+        "field": "ortho",
+        "status": "ok",
+        "text": "baran"
+      },
+      {
+        "speaker": "Speaker01",
+        "conceptId": "12",
+        "field": "ipa",
+        "status": "ok",
+        "text": "baɾan"
+      }
+    ],
+    "mode": "read-only",
+    "readOnly": true,
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `rerun_lexemes_by_tag` is currently exposed.

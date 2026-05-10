@@ -76,6 +76,32 @@ curl "$PARSE_BASE_URL/api/mcp/tools/speakers_list?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+`speakers_list` takes no arguments; call it with an empty JSON object over the HTTP MCP bridge:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/speakers_list?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{}'
+```
+
+Expected JSON response shape:
+
+```json
+{
+  "tool": "speakers_list",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "speakers": ["Speaker01", "Speaker02"],
+    "count": 2,
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `speakers_list` is currently exposed.

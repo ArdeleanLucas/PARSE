@@ -79,6 +79,59 @@ curl "$PARSE_BASE_URL/api/mcp/tools/spectrogram_preview?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+A valid preview request must stay within project audio roots and use `endSec > startSec`:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/spectrogram_preview?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "startSec": 10.0,
+    "endSec": 14.5,
+    "windowSize": 2048
+  }'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "sourceWav": "audio/working/Speaker01/source.wav",
+  "startSec": 10.0,
+  "endSec": 14.5,
+  "windowSize": 2048
+}
+```
+
+Current placeholder response shape:
+
+```json
+{
+  "tool": "spectrogram_preview",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "status": "placeholder",
+    "message": "Spectrogram preview backend hook acknowledged, but binary/image generation is not wired in this MVP.",
+    "request": {
+      "sourceWav": "audio/working/Speaker01/source.wav",
+      "startSec": 10.0,
+      "endSec": 14.5,
+      "windowSize": 2048
+    },
+    "backendHook": {
+      "implemented": false,
+      "plannedEndpoint": "/api/compute/spectrograms",
+      "notes": "Client-side spectrogram worker remains the active rendering path."
+    },
+    "mode": "read-only"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `spectrogram_preview` is currently exposed.

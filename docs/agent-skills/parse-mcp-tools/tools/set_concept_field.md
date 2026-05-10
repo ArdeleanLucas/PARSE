@@ -79,6 +79,60 @@ curl "$PARSE_BASE_URL/api/mcp/tools/set_concept_field?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+The `filter` object must contain exactly one selector. These are all valid selector shapes:
+
+```json
+{
+  "id_range": [1, 136]
+}
+```
+
+```json
+{
+  "ids": [1, 3, 9]
+}
+```
+
+```json
+{
+  "all": true
+}
+```
+
+Full invocation to set `source_survey` for an inclusive concept-id range:
+
+```json
+{
+  "column": "source_survey",
+  "value": "KLQ",
+  "filter": {
+    "id_range": [1, 136]
+  }
+}
+```
+
+Typical response shape after the CSV write:
+
+```json
+{
+  "tool": "set_concept_field",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "column": "source_survey",
+    "value": "KLQ",
+    "matched": 136,
+    "updated": 136,
+    "conceptsPath": "concepts.csv",
+    "previewOnly": false,
+    "readOnly": false,
+    "mode": "write-allowed"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `set_concept_field` is currently exposed.

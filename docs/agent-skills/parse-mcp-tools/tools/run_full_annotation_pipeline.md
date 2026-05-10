@@ -84,6 +84,76 @@ curl "$PARSE_BASE_URL/api/mcp/tools/run_full_annotation_pipeline?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Construct `speaker_id` from the PARSE speaker identifier, `concept_list` as the non-empty concept IDs you want reported in the summary, and `run_mode` as one of `full`, `concept-windows`, or `edited-only`:
+
+```json
+{
+  "speaker_id": "Speaker01",
+  "concept_list": ["12", "13", "14"],
+  "run_mode": "concept-windows",
+  "concept_ids": ["12", "13"],
+  "dryRun": true
+}
+```
+
+For a legacy speaker-wide dry run, keep the same `speaker_id` and `concept_list` but set `run_mode` to `full` and omit `concept_ids`:
+
+```json
+{
+  "speaker_id": "Speaker01",
+  "concept_list": ["12", "13", "14"],
+  "run_mode": "full",
+  "dryRun": true
+}
+```
+
+Typical scoped dry-run response shape:
+
+```json
+{
+  "tool": "run_full_annotation_pipeline",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "dryRun": true,
+    "speaker_id": "Speaker01",
+    "concept_list": ["12", "13", "14"],
+    "run_mode": "concept-windows",
+    "concept_ids": ["12", "13"],
+    "source_wav": "audio/working/Speaker01/source.wav",
+    "stages": [
+      {
+        "stage": "stt",
+        "tool": "pipeline_run",
+        "status": "planned",
+        "run_mode": "concept-windows"
+      },
+      {
+        "stage": "ortho",
+        "tool": "pipeline_run",
+        "status": "planned",
+        "run_mode": "concept-windows"
+      },
+      {
+        "stage": "ipa",
+        "tool": "pipeline_run",
+        "status": "planned",
+        "run_mode": "concept-windows"
+      }
+    ],
+    "progress": {
+      "completedStages": 0,
+      "totalStages": 3,
+      "currentStage": "stt"
+    },
+    "mode": "read-only"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `run_full_annotation_pipeline` is currently exposed.

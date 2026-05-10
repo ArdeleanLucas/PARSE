@@ -77,6 +77,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/retranscribe_with_boundaries_status?mode=act
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Poll the `jobId` returned by `retranscribe_with_boundaries_start` until `status` is terminal:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/retranscribe_with_boundaries_status?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{"jobId":"8f3f2e14-3d1c-46f9-9c78-92a0fb0e9a31"}'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "jobId": "8f3f2e14-3d1c-46f9-9c78-92a0fb0e9a31"
+}
+```
+
+Expected response shape after completion:
+
+```json
+{
+  "tool": "retranscribe_with_boundaries_status",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobId": "8f3f2e14-3d1c-46f9-9c78-92a0fb0e9a31",
+    "tier": "boundary_constrained_stt",
+    "status": "completed",
+    "progress": 100.0,
+    "message": "Writing STT cache",
+    "error": null,
+    "result": {
+      "speaker": "Speaker01",
+      "language": "ku",
+      "boundary_intervals": 64,
+      "segments_written": 64,
+      "source": "boundary_constrained"
+    },
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `retranscribe_with_boundaries_status` is currently exposed.

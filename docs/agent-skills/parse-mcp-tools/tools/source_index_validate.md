@@ -84,6 +84,97 @@ curl "$PARSE_BASE_URL/api/mcp/tools/source_index_validate?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+A `speakerData` object must carry a non-empty `wav_files` list plus speaker-level fields such as `has_csv`:
+
+```json
+{
+  "mode": "speaker",
+  "speakerId": "Speaker01",
+  "speakerData": {
+    "wav_files": [
+      {
+        "path": "audio/original/Speaker01/source.wav",
+        "duration_sec": 12.34,
+        "file_size_bytes": 123456,
+        "bit_depth": 16,
+        "sample_rate": 16000,
+        "channels": 1,
+        "is_primary": true,
+        "lexicon_start_sec": 0.0
+      }
+    ],
+    "has_csv": true,
+    "notes": "Optional source-index note"
+  }
+}
+```
+
+For `mode: "full"`, wrap the same speaker entries under top-level `manifest.speakers`; use `dryRun: true` when you only want the constructed payload and not an `outputPath` write:
+
+```json
+{
+  "mode": "full",
+  "manifest": {
+    "speakers": {
+      "Speaker01": {
+        "wav_files": [
+          {
+            "path": "audio/original/Speaker01/source.wav",
+            "duration_sec": 12.34,
+            "file_size_bytes": 123456,
+            "bit_depth": 16,
+            "sample_rate": 16000,
+            "channels": 1,
+            "is_primary": true,
+            "lexicon_start_sec": 0.0
+          }
+        ],
+        "has_csv": true
+      }
+    }
+  },
+  "outputPath": "source_index.json",
+  "dryRun": true
+}
+```
+
+Typical speaker-mode validation response:
+
+```json
+{
+  "tool": "source_index_validate",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "mode": "speaker",
+    "speakerId": "Speaker01",
+    "valid": true,
+    "errors": [],
+    "transformed": {
+      "source_wavs": [
+        {
+          "filename": "audio/original/Speaker01/source.wav",
+          "duration_sec": 12.34,
+          "file_size_bytes": 123456,
+          "bit_depth": 16,
+          "sample_rate": 16000,
+          "channels": 1,
+          "lexicon_start_sec": 0.0,
+          "is_primary": true
+        }
+      ],
+      "peaks_file": "peaks/Speaker01.json",
+      "transcript_file": "coarse_transcripts/Speaker01.json",
+      "has_csv": true,
+      "notes": "Optional source-index note"
+    },
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `source_index_validate` is currently exposed.

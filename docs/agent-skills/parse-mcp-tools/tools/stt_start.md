@@ -82,6 +82,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/stt_start?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Start with `dryRun: true` when validating a path; omit it or set `false` to launch the background STT job:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_start?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "speaker": "Speaker01",
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "language": "ku",
+    "dryRun": false
+  }'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "speaker": "Speaker01",
+  "sourceWav": "audio/working/Speaker01/source.wav",
+  "language": "ku",
+  "dryRun": false
+}
+```
+
+Expected launch response shape; poll the returned UUID with `stt_status`:
+
+```json
+{
+  "tool": "stt_start",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+    "status": "running",
+    "speaker": "Speaker01",
+    "sourceWav": "audio/working/Speaker01/source.wav",
+    "message": "STT job started. Poll with stt_status.",
+    "mode": "read-only"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `stt_start` is currently exposed.

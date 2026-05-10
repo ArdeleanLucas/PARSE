@@ -80,6 +80,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/revert_csv_reimport?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Use `dryRun: true` first to confirm which manifest-listed files would be restored from the selected backup directory:
+
+```bash
+curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/revert_csv_reimport?mode=active" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "speaker": "Speaker01",
+    "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
+    "dryRun": true
+  }'
+```
+
+Equivalent MCP arguments:
+
+```json
+{
+  "speaker": "Speaker01",
+  "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
+  "dryRun": true
+}
+```
+
+Dry-run response shape:
+
+```json
+{
+  "tool": "revert_csv_reimport",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "dryRun": true,
+    "speaker": "Speaker01",
+    "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
+    "restoredFiles": ["Speaker01.parse.json", "parse-enrichments.json", "concepts.csv"],
+    "skippedFiles": [],
+    "message": "Would restore 3 file(s) for 'Speaker01' from annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z.",
+    "previewOnly": true,
+    "readOnly": true,
+    "mode": "read-only"
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `revert_csv_reimport` is currently exposed.
