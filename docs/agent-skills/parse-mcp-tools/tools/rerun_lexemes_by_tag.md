@@ -17,6 +17,8 @@ tags:
 Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `rerun_lexemes_by_tag` for any research project, speaker set, language, or corpus hosted in PARSE.
 
 > Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+>
+> Contract distinction: this page describes the MCP/chat tool wrapper, whose catalog snapshot is synchronous and returns `jobId: null`. The HTTP endpoint `POST /api/lexemes/rerun-by-tag` is intentionally different for new UI/API callers: it defaults to a tracked compute job and returns `202 + jobId` unless `async=false` is set for deprecated synchronous compatibility.
 
 ## Tool contract snapshot
 
