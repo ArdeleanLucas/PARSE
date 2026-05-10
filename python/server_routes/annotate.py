@@ -1137,19 +1137,45 @@ def _ipa_candidate_from_structured(structured: _server.Dict[str, _server.Any]) -
     }
 
 
-def _transcribe_ipa_window_structured(provider: _server.Any, window: _server.Any) -> _server.Dict[str, _server.Any]:
+def _transcribe_ipa_window_structured(
+    provider: _server.Any,
+    window: _server.Any,
+    *,
+    language: _server.Optional[str] = None,
+) -> _server.Dict[str, _server.Any]:
     structured_fn = getattr(provider, 'transcribe_window_structured', None)
     if callable(structured_fn):
-        structured = structured_fn(window)
+        try:
+            structured = structured_fn(window, language=language)
+        except TypeError as exc:
+            message = str(exc)
+            if 'language' not in message and 'unexpected' not in message:
+                raise
+            structured = structured_fn(window)
         if isinstance(structured, dict):
             return dict(structured)
-    raw_ipa = provider.transcribe_window(window)
+    try:
+        raw_ipa = provider.transcribe_window(window, language=language)
+    except TypeError as exc:
+        message = str(exc)
+        if 'language' not in message and 'unexpected' not in message:
+            raise
+        raw_ipa = provider.transcribe_window(window)
     return {
         'raw_ipa': raw_ipa,
         'model': 'wav2vec2-xlsr-53-espeak-cv-ft',
         'model_version': 'facebook/wav2vec2-xlsr-53-espeak-cv-ft',
         'decoded_at': _server._utc_now_iso(),
     }
+
+
+class _LanguageAwareIpaProvider:
+    def __init__(self, provider: _server.Any, language: _server.Optional[str]) -> None:
+        self._provider = provider
+        self._language = language
+
+    def transcribe_window_structured(self, window: _server.Any) -> _server.Dict[str, _server.Any]:
+        return _transcribe_ipa_window_structured(self._provider, window, language=self._language)
 
 
 def _annotation_append_ipa_candidate(annotation: _server.Dict[str, _server.Any], key: str, candidate: _server.Dict[str, _server.Any]) -> None:
@@ -1355,7 +1381,7 @@ def _run_step_on_concept_windows(
                 clip_for_ipa = tensor[s0:s1]
             except Exception:
                 clip_for_ipa = audio_np[s0:s1]
-            structured_ipa = _transcribe_ipa_window_structured(provider, clip_for_ipa)
+            structured_ipa = _transcribe_ipa_window_structured(provider, clip_for_ipa, language=language)
             text = structured_ipa.get('raw_ipa')
             ipa_candidate = _ipa_candidate_from_structured(structured_ipa)
             ipa_candidate_key = _ipa_candidate_key(concept_iv, 'concept', idx)
@@ -1674,7 +1700,10 @@ def _compute_speaker_ipa_concept_windows(
     run_mode: str,
     concept_ids: _server.Optional[_server.Sequence[str]],
     pad_sec: float = 0.2,
+    language: _server.Optional[str] = None,
 ) -> _server.Dict[str, _server.Any]:
+    if not language:
+        language = _transcription_language_from_payload_or_annotation({}, annotation, speaker=speaker, step='ipa')
     concept_intervals = _server._concept_intervals_for_run_mode(annotation, run_mode, concept_ids)
     if not concept_intervals:
         return _server._concept_window_no_op_result(
@@ -1696,6 +1725,7 @@ def _compute_speaker_ipa_concept_windows(
         provider=aligner,
         step='ipa',
         job_id=job_id,
+        language=language,
         pad_sec=pad_sec,
     )
     clean_rows: _server.List[_server.Dict[str, _server.Any]] = []
@@ -1772,6 +1802,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     _server._compute_checkpoint('IPA.read_json_done')
     if not isinstance(annotation, dict):
         raise RuntimeError('Annotation is not a JSON object')
+    language_str = _transcription_language_from_payload_or_annotation(payload, annotation, speaker=speaker, step='ipa')
     tiers = annotation.get('tiers') or {}
     if run_mode != 'full':
         return _server._compute_speaker_ipa_concept_windows(
@@ -1785,6 +1816,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             run_mode=run_mode,
             concept_ids=concept_ids,
             pad_sec=pad_sec,
+            language=language_str,
         )
     ortho_words_tier = tiers.get('ortho_words') or {}
     ortho_words_intervals = list(ortho_words_tier.get('intervals') or [])
@@ -1813,6 +1845,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 tiers=tiers,
                 run_mode='concept-windows',
                 concept_ids=concept_ids,
+                language=language_str,
             )
             result['message'] = (
                 'Auto-routed to concept-windows mode: no ortho/ortho_words '
@@ -1878,7 +1911,15 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             _chunk_size = int(_ai_cfg2.get('wav2vec2', {}).get('chunk_size', 150))
         except Exception:
             _chunk_size = 150
-        word_results = transcribe_words_with_forced_align(audio_path, stt_segments, aligner=aligner, progress_callback=_word_progress, chunk_size=_chunk_size, include_candidates=True)
+        word_results = transcribe_words_with_forced_align(
+            audio_path,
+            stt_segments,
+            aligner=aligner,
+            language=language_str or 'ku',
+            progress_callback=_word_progress,
+            chunk_size=_chunk_size,
+            include_candidates=True,
+        )
         _server._compute_checkpoint('IPA.forced_align_done', word_count=len(word_results))
         print('[IPA] forced-align IPA: {0} word intervals'.format(len(word_results)), file=_server.sys.stderr, flush=True)
         ipa_intervals = []
@@ -1934,7 +1975,8 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
                 _server._compute_checkpoint('IPA.iv_begin', idx=idx, start=start_sec, end=end_sec)
             try:
                 from ai.ipa_transcribe import transcribe_slice_structured
-                structured_ipa = transcribe_slice_structured(audio_tensor, start_sec, end_sec, aligner)
+                language_aware_aligner = _LanguageAwareIpaProvider(aligner, language_str)
+                structured_ipa = transcribe_slice_structured(audio_tensor, start_sec, end_sec, language_aware_aligner)
                 new_ipa = structured_ipa.get('raw_ipa')
             except Exception as exc:
                 skipped += 1
