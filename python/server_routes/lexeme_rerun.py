@@ -120,6 +120,37 @@ def _read_child_log_tail(child_pid: int | None, kind: str, max_lines: int = 50) 
     return "".join(lines[-max_lines:]).strip() or None
 
 
+class _LexemeRerunTee:
+    """Best-effort write-side tee for lexeme rerun child streams."""
+
+    def __init__(self, *streams: Any) -> None:
+        self._streams = tuple(stream for stream in streams if stream is not None)
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            try:
+                stream.write(data)
+                stream.flush()
+            except Exception:
+                # A closed inherited terminal fd must never turn child inference
+                # into a failed rerun; the per-PID log remains best-effort truth.
+                pass
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            try:
+                stream.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise OSError("LexemeRerunTee has no single fileno")
+
+
 def _lexeme_rerun_subprocess_entry(kind: str, payload: dict[str, Any], result_path: str) -> None:
     import faulthandler
     import os as _os
@@ -127,8 +158,18 @@ def _lexeme_rerun_subprocess_entry(kind: str, payload: dict[str, Any], result_pa
 
     log_path = _child_log_path(_os.getpid(), kind)
     log_fh = open(log_path, "w", buffering=1, encoding="utf-8")
-    _sys.stdout = log_fh
-    _sys.stderr = log_fh
+    inherited_out = None
+    inherited_err = None
+    try:
+        inherited_out = _os.fdopen(_os.dup(1), "w", buffering=1, encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    try:
+        inherited_err = _os.fdopen(_os.dup(2), "w", buffering=1, encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    _sys.stdout = _LexemeRerunTee(log_fh, inherited_out)
+    _sys.stderr = _LexemeRerunTee(log_fh, inherited_err)
     faulthandler.enable(file=log_fh, all_threads=True)
 
     import json as _json

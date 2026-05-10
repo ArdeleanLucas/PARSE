@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import pytest
 
@@ -74,6 +77,96 @@ def _install_fake_process(monkeypatch: pytest.MonkeyPatch, process: _FakeProcess
     monkeypatch.setattr("multiprocessing.get_context", lambda method: _FakeContext(process))
 
 
+class _ForkedProcess:
+    """Minimal real child process that preserves monkeypatches via fork()."""
+
+    def __init__(self, *, target: Callable[..., None], name: str, args: tuple[Any, ...], daemon: bool) -> None:
+        self.target = target
+        self.name = name
+        self.args = args
+        self.daemon = daemon
+        self.pid: int | None = None
+        self.exitcode: int | None = None
+        self._waited = False
+
+    def start(self) -> None:
+        pid = os.fork()
+        if pid == 0:
+            try:
+                self.target(*self.args)
+            except BaseException:  # pragma: no cover - defensive child hard-exit path
+                os._exit(1)
+            os._exit(0)
+        self.pid = pid
+
+    def join(self, timeout: float | None = None) -> None:
+        _ = timeout
+        if self.pid is None or self._waited:
+            return
+        _, status = os.waitpid(self.pid, 0)
+        self._waited = True
+        self.exitcode = os.waitstatus_to_exitcode(status)
+
+    def is_alive(self) -> bool:
+        if self.pid is None or self._waited:
+            return False
+        try:
+            waited_pid, status = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            self._waited = True
+            return False
+        if waited_pid == 0:
+            return True
+        self._waited = True
+        self.exitcode = os.waitstatus_to_exitcode(status)
+        return False
+
+    def terminate(self) -> None:
+        if self.pid is not None and not self._waited:
+            os.kill(self.pid, 9)
+
+
+class _ForkedContext:
+    def Process(self, *, target: Callable[..., None], name: str, args: tuple[Any, ...], daemon: bool) -> _ForkedProcess:
+        return _ForkedProcess(target=target, name=name, args=args, daemon=daemon)
+
+
+def _install_forked_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("multiprocessing.get_context", lambda method: _ForkedContext())
+
+
+@contextmanager
+def _capture_fd(fd: int) -> Iterator[Callable[[], str]]:
+    sys.stdout.flush()
+    sys.stderr.flush()
+    read_fd, write_fd = os.pipe()
+    saved_fd = os.dup(fd)
+    os.dup2(write_fd, fd)
+    os.close(write_fd)
+    output = ""
+
+    def read_output() -> str:
+        return output
+
+    try:
+        yield read_output
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved_fd, fd)
+        os.close(saved_fd)
+        chunks: list[bytes] = []
+        try:
+            while True:
+                chunk = os.read(read_fd, 4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        finally:
+            os.close(read_fd)
+        output = b"".join(chunks).decode("utf-8", errors="replace")
+
+
 def test_lexeme_subprocess_success_returns_child_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     audio_path = tmp_path / "audio.wav"
     audio_path.write_bytes(b"fake")
@@ -90,6 +183,88 @@ def test_lexeme_subprocess_success_returns_child_result(tmp_path: Path, monkeypa
     assert result == "ʃ"
     assert process.started is True
     assert process.name == "parse-lexeme-rerun-ipa"
+
+
+def test_child_stderr_reaches_parent_fd2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    line = "[ORTH] concept-window 1/1 concept='c1' → 'hello'"
+
+    def fake_ortho_interval(**kwargs: Any) -> str:
+        _ = kwargs
+        print(line, file=sys.stderr)
+        return "hello"
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    with _capture_fd(2) as captured:
+        result = lexeme_rerun._run_ortho_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
+
+    assert result == "hello"
+    assert line in captured()
+
+
+def test_child_stdout_reaches_parent_fd1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    line = "[ORTH] stdout concept-window 1/1 concept='c1' → 'hello'"
+
+    def fake_ortho_interval(**kwargs: Any) -> str:
+        _ = kwargs
+        print(line)
+        return "hello"
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    with _capture_fd(1) as captured:
+        result = lexeme_rerun._run_ortho_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
+
+    assert result == "hello"
+    assert line in captured()
+
+
+def test_child_log_still_captured_on_failure_and_tee_reaches_parent_fd2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    line_1 = "[ORTH] failure diagnostic before model call"
+    line_2 = "[ORTH] failure diagnostic after model call"
+
+    def fake_ortho_interval(**kwargs: Any) -> str:
+        _ = kwargs
+        print(line_1, file=sys.stderr)
+        print(line_2, file=sys.stderr)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    with _capture_fd(2) as captured:
+        with pytest.raises(LexemeRerunSubprocessError) as exc_info:
+            lexeme_rerun._run_ortho_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
+
+    assert exc_info.value.code == "subprocess_failed"
+    assert "boom" in exc_info.value.message
+    assert line_1 in (exc_info.value.stderr_tail or "")
+    assert line_2 in (exc_info.value.stderr_tail or "")
+    assert line_1 in captured()
+    assert line_2 in captured()
+
+
+def test_tee_swallows_closed_inherited_stream() -> None:
+    devnull = open(os.devnull, "w", encoding="utf-8")
+    closed = open(os.devnull, "w", encoding="utf-8")
+    closed.close()
+    try:
+        tee = lexeme_rerun._LexemeRerunTee(devnull, closed)
+        assert tee.write("still reaches open stream\n") == len("still reaches open stream\n")
+        tee.flush()
+    finally:
+        devnull.close()
 
 
 @pytest.mark.parametrize(
