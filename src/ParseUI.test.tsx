@@ -2,6 +2,7 @@
 import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
+import type { ActiveJobSnapshot } from "./api/contracts/job-observability";
 import { useTranscriptionLanesStore } from "./stores/transcriptionLanesStore";
 
 const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
@@ -638,7 +639,7 @@ afterEach(() => {
 
 describe("ParseUI", () => {
 
-  it("renders any active backend job in the generic header strip and removes legacy header job chips", async () => {
+  function seedSingleSpeakerProject() {
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
@@ -650,6 +651,19 @@ describe("ParseUI", () => {
     mockRecords = {
       Fail01: makeRecord("Fail01", [{ conceptText: "water", conceptId: "1", ipa: "aw", ortho: "ئاو", start: 1, end: 2 }]),
     };
+  }
+
+  const terminalSnapshot = (overrides: Partial<ActiveJobSnapshot>): ActiveJobSnapshot => ({
+    jobId: "terminal-job",
+    type: "compute:full_pipeline",
+    status: "complete",
+    progress: 1,
+    startedTs: 1_716_000_000,
+    ...overrides,
+  });
+
+  it("renders any active backend job in the generic header strip and removes legacy header job chips", async () => {
+    seedSingleSpeakerProject();
     vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
       {
         jobId: "lexeme-ortho-job",
@@ -669,6 +683,101 @@ describe("ParseUI", () => {
     expect(row.textContent).toContain("40%");
     expect(screen.queryByTestId("topbar-action-statuses")).toBeNull();
     expect(screen.queryByTestId("topbar-batch-status")).toBeNull();
+  });
+
+  it("shows the terminal state from /api/jobs/active when the backend retains a recently-completed job, then auto-dismisses after the configured delay", async () => {
+    vi.useFakeTimers();
+    seedSingleSpeakerProject();
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      terminalSnapshot({
+        jobId: "full-pipeline-complete",
+        type: "compute:full_pipeline",
+        status: "complete",
+        progress: 1,
+      }),
+    ]);
+
+    render(<ParseUI />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const strip = screen.getByTestId("topbar-job-strip");
+    const row = screen.getByTestId("topbar-job-strip-row-full-pipeline-complete");
+    expect(strip).toBeTruthy();
+    expect(row.textContent).toContain("Pipeline done");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-full-pipeline-complete")).toBeNull();
+    expect(screen.getByTestId("topbar-job-strip")).toBeTruthy();
+  });
+
+  it.skip("shows the error state from /api/jobs/active for a recently-failed terminal snapshot and dismisses it on the same cadence (deferred: 2026-05-10-header-strip-error-auto-dismiss)", async () => {
+    vi.useFakeTimers();
+    seedSingleSpeakerProject();
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      terminalSnapshot({
+        jobId: "lexeme-ortho-error",
+        type: "compute:lexeme_rerun_ortho",
+        status: "error",
+        progress: 1,
+        error: "CUDA OOM at chunk 42",
+      }),
+    ]);
+
+    render(<ParseUI />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const row = screen.getByTestId("topbar-job-strip-row-lexeme-ortho-error");
+    expect(row.textContent).toContain("Lexeme ORTH failed");
+    expect(row.textContent).toContain("CUDA OOM");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-lexeme-ortho-error")).toBeNull();
+  });
+
+  it("keeps a terminal snapshot dismissed even when /api/jobs/active keeps returning it during the backend dwell window", async () => {
+    vi.useFakeTimers();
+    seedSingleSpeakerProject();
+    const snapshot = terminalSnapshot({
+      jobId: "dwell-job",
+      type: "compute:ortho",
+      status: "complete",
+      progress: 1,
+    });
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([snapshot]);
+
+    render(<ParseUI />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const row = screen.getByTestId("topbar-job-strip-row-dwell-job");
+    expect(row.textContent).toContain("ORTH done");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(screen.queryByTestId("topbar-job-strip-row-dwell-job")).toBeNull();
+
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([snapshot]);
+    await act(async () => {
+      window.dispatchEvent(new Event("parse:active-jobs-refresh"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("topbar-job-strip-row-dwell-job")).toBeNull();
   });
 
   it("scopes Annotate sidebar and reviewed counter to the active speaker's elicited concepts by default", async () => {
