@@ -263,4 +263,8 @@ def test_concept_window_outputs_never_include_configured_initial_prompt(
     rows = annotation["tiers"]["ortho"]["intervals"]
     assert rows
     assert all(DISTINCTIVE_MARKER_PROMPT not in str(row.get("text") or "") for row in rows)
-    assert [row["text"] for row in rows] == [CLEAN_TRANSCRIPT]
+    # Concept-window ORTH now stores the picked midpoint lexeme while leaving the
+    # full word list in tiers.ortho_words for picker overrides.
+    assert [row["text"] for row in rows] == ["lexical"]
+    word_rows = annotation["tiers"]["ortho_words"]["intervals"]
+    assert [row["text"] for row in word_rows] == CLEAN_TRANSCRIPT.split()

@@ -1093,6 +1093,52 @@ def _payload_pad(payload: _server.Dict[str, _server.Any]) -> float:
     return value
 
 
+def _pick_lexeme_word_for_concept(
+    concept_start: float,
+    concept_end: float,
+    ortho_words: _server.Sequence[_server.Dict[str, _server.Any]],
+) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    try:
+        c_start = float(concept_start)
+        c_end = float(concept_end)
+    except (TypeError, ValueError):
+        return None
+    if c_end <= c_start:
+        return None
+    midpoint = (c_start + c_end) / 2.0
+    best: _server.Optional[_server.Dict[str, _server.Any]] = None
+    best_key: _server.Optional[_server.Tuple[float, float, float, int]] = None
+    for idx, word in enumerate(ortho_words or []):
+        if not isinstance(word, dict):
+            continue
+        text_value = word.get('text')
+        if not isinstance(text_value, str) or not text_value.strip():
+            continue
+        try:
+            w_start = float(word.get('start', 0.0) or 0.0)
+            w_end = float(word.get('end', w_start) or w_start)
+        except (TypeError, ValueError):
+            continue
+        if w_start >= c_end or w_end <= c_start:
+            continue
+        overlap = min(c_end, w_end) - max(c_start, w_start)
+        if overlap <= 0.0:
+            continue
+        distance = abs(((w_start + w_end) / 2.0) - midpoint)
+        raw_conf = word.get('confidence')
+        confidence = float('-inf')
+        if raw_conf is not None:
+            try:
+                confidence = float(raw_conf)
+            except (TypeError, ValueError):
+                confidence = float('-inf')
+        key = (distance, -overlap, -confidence, idx)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = word
+    return best
+
+
 def _concept_id_from_interval(interval: _server.Dict[str, _server.Any]) -> str:
     for key in ('conceptId', 'concept_id', 'id', 'text'):
         raw = interval.get(key)
@@ -1639,6 +1685,28 @@ def _compute_speaker_ortho_concept_windows(
         partial_words = _server._align_partial_ortho_words(audio_path, rows)
         ortho_words_tier['intervals'] = _server._merge_concept_window_rows(existing_words, partial_words, concept_intervals)
         tiers['ortho_words'] = ortho_words_tier
+        for ortho_row in ortho_tier.get('intervals') or []:
+            if not isinstance(ortho_row, dict):
+                continue
+            try:
+                row_start = float(ortho_row.get('start', 0.0) or 0.0)
+                row_end = float(ortho_row.get('end', row_start) or row_start)
+            except (TypeError, ValueError):
+                continue
+            for concept_iv in concept_intervals:
+                try:
+                    c_start = float(concept_iv.get('start', 0.0) or 0.0)
+                    c_end = float(concept_iv.get('end', c_start) or c_start)
+                except (TypeError, ValueError):
+                    continue
+                if abs(row_start - c_start) > _server.ANNOTATION_MATCH_EPSILON or abs(row_end - c_end) > _server.ANNOTATION_MATCH_EPSILON:
+                    continue
+                picked = _server._pick_lexeme_word_for_concept(c_start, c_end, partial_words)
+                if picked is not None:
+                    picked_text = picked.get('text')
+                    if isinstance(picked_text, str) and picked_text.strip():
+                        ortho_row['text'] = picked_text.strip()
+                break
     except Exception:  # pragma: no cover - word alignment must not abort text persistence
         logger.exception("concept-window ORTH: failed to rebuild ortho_words for speaker %s", speaker)
     annotation['tiers'] = tiers
@@ -3443,5 +3511,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_partial_ortho_rows_to_word_segments', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

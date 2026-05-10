@@ -158,6 +158,36 @@ def test_compute_speaker_ortho_concept_windows_rebuilds_ortho_words(tmp_path: pa
     ]
 
 
+
+def test_compute_speaker_ortho_concept_windows_writes_picked_lexeme_to_ortho_tier(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _capture_concept_window_runner(monkeypatch)
+
+    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"start": 1.0, "end": 1.18, "text": "the", "source": "stub-align"},
+            {"start": 1.18, "end": 1.36, "text": "head", "source": "stub-align"},
+            {"start": 1.36, "end": 1.5, "text": "is", "source": "stub-align"},
+        ]
+
+    monkeypatch.setattr(server, "_align_partial_ortho_words", fake_align)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {})
+
+    assert result["filled"] == 1
+    annotation_path = tmp_path / "annotations" / "Fail02.parse.json"
+    persisted = json.loads(annotation_path.read_text(encoding="utf-8"))
+    assert persisted["tiers"]["ortho"]["intervals"] == [
+        {"start": 1.0, "end": 1.5, "text": "head", "conceptId": "1", "source": "concept_window_ortho"}
+    ]
+    assert [iv["text"] for iv in persisted["tiers"]["ortho_words"]["intervals"] if iv["source"] == "stub-align"] == [
+        "the",
+        "head",
+        "is",
+    ]
+
 def test_compute_speaker_ortho_concept_windows_handles_align_failure_gracefully(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -188,6 +218,33 @@ def test_compute_speaker_ortho_concept_windows_handles_align_failure_gracefully(
     assert ortho_inside == ["ortho-window"]
     assert persisted["tiers"]["ortho_words"]["intervals"] == before_words
 
+
+
+def test_compute_speaker_ortho_concept_windows_keeps_multi_word_ortho_when_no_word_overlaps(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _capture_concept_window_runner(monkeypatch)
+
+    def fake_align(_audio_path: pathlib.Path, _segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"start": 0.1, "end": 0.4, "text": "outside", "source": "stub-align"},
+            {"start": 1.6, "end": 1.9, "text": "after", "source": "stub-align"},
+        ]
+
+    monkeypatch.setattr(server, "_align_partial_ortho_words", fake_align)
+
+    result = _run_ortho_concept_windows(tmp_path, monkeypatch, {})
+
+    assert result["filled"] == 1
+    annotation_path = tmp_path / "annotations" / "Fail02.parse.json"
+    persisted = json.loads(annotation_path.read_text(encoding="utf-8"))
+    ortho_inside = [
+        iv["text"]
+        for iv in persisted["tiers"]["ortho"]["intervals"]
+        if 1.0 <= float(iv["start"]) and float(iv["end"]) <= 1.5
+    ]
+    assert ortho_inside == ["ortho-window"]
 
 def test_compute_speaker_ortho_concept_windows_explicit_pad_0_0(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _capture_concept_window_runner(monkeypatch)

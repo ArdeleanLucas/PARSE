@@ -472,6 +472,16 @@ def _align_partial_ortho_words(audio_path: Path, rows: list[dict[str, Any]]) -> 
     return _impl(audio_path, rows)
 
 
+def _pick_lexeme_word_for_concept(
+    concept_start: float,
+    concept_end: float,
+    ortho_words: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    from server_routes.annotate import _pick_lexeme_word_for_concept as _impl
+
+    return _impl(concept_start, concept_end, ortho_words)
+
+
 def _per_concept_rerun(
     speaker: str,
     hit: ConceptHit,
@@ -646,6 +656,7 @@ def tool_rerun_lexemes_by_tag(tools: "ParseChatTools", args: Dict[str, Any]) -> 
         locks_dir=locks_dir,
         annotation_writer=_annotation_writer(tools.project_root),
         align_ortho_words=_align_partial_ortho_words,
+        pick_lexeme_word=_pick_lexeme_word_for_concept,
     )
 
     return {
