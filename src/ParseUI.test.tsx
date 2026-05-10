@@ -373,6 +373,7 @@ vi.mock("./api/client", () => ({
   saveClefConfig: vi.fn().mockResolvedValue(undefined),
   startContactLexemeFetch: vi.fn().mockResolvedValue({ job_id: 'contact-fetch-job-1' }),
   listActiveJobs: vi.fn().mockResolvedValue([]),
+  cancelComputeJob: vi.fn().mockResolvedValue({ cancelled: true, job_id: 'compute-job-1' }),
   duplicateConcept: vi.fn().mockResolvedValue({
     primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
     sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
@@ -611,6 +612,7 @@ beforeEach(() => {
   vi.mocked(apiClient.saveClefConfig).mockClear();
   vi.mocked(apiClient.startContactLexemeFetch).mockClear();
   vi.mocked(apiClient.listActiveJobs).mockClear();
+  vi.mocked(apiClient.cancelComputeJob).mockClear();
 
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
@@ -635,6 +637,39 @@ afterEach(() => {
 });
 
 describe("ParseUI", () => {
+
+  it("renders any active backend job in the generic header strip and removes legacy header job chips", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "water", conceptId: "1", ipa: "aw", ortho: "ئاو", start: 1, end: 2 }]),
+    };
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      {
+        jobId: "lexeme-ortho-job",
+        type: "compute:lexeme_rerun_ortho",
+        status: "running",
+        progress: 0.4,
+        message: "Running ORTH rerun",
+      },
+    ]);
+
+    render(<ParseUI />);
+
+    const strip = await screen.findByTestId("topbar-job-strip");
+    const row = await screen.findByTestId("topbar-job-strip-row-lexeme-ortho-job");
+    expect(strip).toBeTruthy();
+    expect(row.textContent).toContain("Lexeme ORTH");
+    expect(row.textContent).toContain("40%");
+    expect(screen.queryByTestId("topbar-action-statuses")).toBeNull();
+    expect(screen.queryByTestId("topbar-batch-status")).toBeNull();
+  });
 
   it("scopes Annotate sidebar and reviewed counter to the active speaker's elicited concepts by default", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
@@ -2184,11 +2219,18 @@ describe("ParseUI", () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      { jobId: "boundaries-job-chip", type: "compute:boundaries", status: "running", progress: 0.2 },
+    ]);
+
     const button = await screen.findByTestId("phonetic-refine-boundaries");
     fireEvent.click(button);
+    window.dispatchEvent(new Event("parse:active-jobs-refresh"));
 
-    const topbarStatus = await screen.findByTestId("topbar-action-statuses");
-    expect(within(topbarStatus).getByText("Refining word boundaries…")).toBeTruthy();
+    const topbarStatus = await screen.findByTestId("topbar-job-strip");
+    expect(await screen.findByTestId("topbar-job-strip-row-boundaries-job-chip")).toBeTruthy();
+    expect(within(topbarStatus).getByText("Boundaries")).toBeTruthy();
+    expect(within(topbarStatus).getByText("20%")).toBeTruthy();
     expect(button.textContent ?? "").not.toMatch(/\d+%/);
     expect(button.parentElement?.textContent ?? "").not.toMatch(/~\d.*left/);
   });
@@ -2222,11 +2264,18 @@ describe("ParseUI", () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      { jobId: "bnd-stt-job-chip", type: "compute:retranscribe_with_boundaries", status: "running", progress: 0.3 },
+    ]);
+
     const button = await screen.findByTestId("phonetic-retranscribe-with-boundaries");
     fireEvent.click(button);
+    window.dispatchEvent(new Event("parse:active-jobs-refresh"));
 
-    const topbarStatus = await screen.findByTestId("topbar-action-statuses");
-    expect(within(topbarStatus).getByText("Re-transcribing with BND…")).toBeTruthy();
+    const topbarStatus = await screen.findByTestId("topbar-job-strip");
+    expect(await screen.findByTestId("topbar-job-strip-row-bnd-stt-job-chip")).toBeTruthy();
+    expect(within(topbarStatus).getByText("BND retranscribe")).toBeTruthy();
+    expect(within(topbarStatus).getByText("30%")).toBeTruthy();
     expect(button.textContent ?? "").not.toMatch(/\d+%/);
     expect(button.parentElement?.textContent ?? "").not.toMatch(/~\d.*left/);
   });
@@ -2658,8 +2707,9 @@ describe("ParseUI", () => {
     await switchCompareComputeMode('contact-lexemes');
 
     await waitFor(() => expect(apiClient.pollCompute).toHaveBeenCalledWith('contact-lexemes', 'contact-job-chip'));
-    const chip = screen.getByTestId('topbar-action-statuses');
-    expect(chip.textContent).toContain('Populating CLEF reference data');
+    const chip = screen.getByTestId('topbar-job-strip');
+    expect(screen.getByTestId('topbar-job-strip-row-contact-job-chip')).toBeTruthy();
+    expect(chip.textContent).toContain('Contact lexemes');
     expect(chip.textContent).toContain('25%');
     expect(screen.queryByText(/Running… 25%/i)).toBeNull();
   });

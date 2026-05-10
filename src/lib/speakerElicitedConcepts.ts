@@ -11,7 +11,7 @@ export function speakerElicitedConceptKeys(
   record: AnnotationRecord | null | undefined,
 ): Set<string> {
   const keys = new Set<string>();
-  for (const interval of record?.tiers.concept?.intervals ?? []) {
+  for (const interval of record?.tiers?.concept?.intervals ?? []) {
     const key = interval.concept_id == null ? '' : String(interval.concept_id).trim();
     if (key) keys.add(key);
   }

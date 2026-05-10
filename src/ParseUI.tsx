@@ -9,7 +9,7 @@ import {
   Workflow, Network, Trash2, ChevronDown as CDown,
   Download,
   Anchor,
-  Sun, Moon, XCircle, Play,
+  Sun, Moon, Play,
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
@@ -54,9 +54,10 @@ import { useAnnotationStore } from './stores/annotationStore';
 import { useTranscriptionLanesStore } from './stores/transcriptionLanesStore';
 import { useAnnotationSync } from './hooks/useAnnotationSync';
 import { useComputeJob } from './hooks/useComputeJob';
-import { useActionJob, formatEta } from './hooks/useActionJob';
+import { useActionJob } from './hooks/useActionJob';
 import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
+import { useActiveJobsFeed } from './hooks/useActiveJobsFeed';
 import { listActiveJobs } from './api/client';
 import { duplicateConcept } from './api/client';
 import { useConfigStore } from './stores/configStore';
@@ -84,6 +85,7 @@ import { ClefConfigModal } from './components/compute/ClefConfigModal';
 import { ClefPopulateSummaryBanner, type PopulateSummary } from './components/compute/ClefPopulateSummaryBanner';
 import { ClefSourcesReportModal } from './components/compute/ClefSourcesReportModal';
 import { ConceptSidebar, type ConceptStatusFilter } from './components/parse/ConceptSidebar';
+import { HeaderJobStrip } from './components/parse/HeaderJobStrip';
 import { ConceptMergePicker } from './components/parse/sidebar/ConceptMergePicker';
 import { RightPanel } from './components/parse/RightPanel';
 import {
@@ -519,12 +521,6 @@ export function ParseUI() {
     reportStepsRun,
     handleRunConfirm,
     handleRerunFailed,
-    showBatchCompleteBanner,
-    completedCount,
-    errorCount,
-    cancelledCount,
-    dismissBatchStatus,
-    openBatchReport,
     displayedOutcomes,
     taggedOnlyError,
     dismissTaggedOnlyError,
@@ -660,12 +656,7 @@ export function ParseUI() {
     autoDismissMs: 4000,
   });
 
-  const activeJobs = [
-    ...(crossSpeakerJob.state.status !== 'idle' ? [crossSpeakerJob] : []),
-    ...(similarityJob.state.status !== 'idle' ? [similarityJob] : []),
-    ...(boundariesJob.state.status !== 'idle' ? [boundariesJob] : []),
-    ...(bndSttJob.state.status !== 'idle' ? [bndSttJob] : []),
-  ];
+  const { jobs: headerJobs } = useActiveJobsFeed();
 
   // Drawer "Run" button. ``contact-lexemes`` (Borrowing detection / CLEF)
   // routes through ``crossSpeakerJob`` so progress / ETA / completion
@@ -689,11 +680,10 @@ export function ParseUI() {
     void startComputeJob();
   }, [computeMode, clefConfigured, startComputeJob, crossSpeakerJob]);
 
-  // On mount, adopt any in-flight backend jobs so progress bars survive
-  // a page reload. STT (and similar) run in a background thread that
-  // outlives the browser tab — before this, the UI had no way to
-  // reconnect, making the process look dead even though it was still
-  // burning GPU cycles on the PC.
+  // On mount, adopt select in-flight backend jobs so trigger-hook side effects
+  // still survive a reload. Visual rehydration is now owned by the
+  // useActiveJobsFeed-powered HeaderJobStrip, which renders every active job
+  // from /api/jobs/active rather than requiring per-feature header wiring.
   // Rehydrate cross-speaker-match jobs on mount — it's the only remaining
   // long-lived job that runs outside the batch runner. Per-speaker
   // transcription jobs (STT / normalize / ortho / ipa / full_pipeline)
@@ -1397,55 +1387,8 @@ export function ParseUI() {
               to live here are now left-panel tag pills (so this row
               has room to show batch status during long GPU runs). */}
 
-          {/* ===== Inline batch status — reclaims the space freed by
-               moving the filter tabs down into the left panel. Only
-               renders when a batch is running / cancelling / has just
-               completed. ===== */}
-          {(batch.state.status === 'running' || batch.state.status === 'cancelling') && (
-            <div
-              className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
-                batch.state.status === 'cancelling'
-                  ? 'border-amber-200 bg-amber-50'
-                  : 'border-indigo-200 bg-indigo-50'
-              }`}
-              data-testid="topbar-batch-status"
-            >
-              <Loader2 className={`h-3 w-3 shrink-0 animate-spin ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} />
-              <span className={`text-[11px] font-medium ${batch.state.status === 'cancelling' ? 'text-amber-900' : 'text-indigo-900'}`}>
-                {batch.state.status === 'cancelling'
-                  ? 'Cancelling…'
-                  : `Batch ${Math.min(batch.state.currentSpeakerIndex !== null ? batch.state.currentSpeakerIndex + 1 : batch.state.completedSpeakers, batch.state.totalSpeakers)}/${batch.state.totalSpeakers}`}
-              </span>
-              {batch.state.currentSpeaker && (
-                <span className={`text-[11px] ${batch.state.status === 'cancelling' ? 'text-amber-700' : 'text-indigo-700'}`}>— {batch.state.currentSpeaker}</span>
-              )}
-              <div className={`h-1.5 w-16 shrink-0 overflow-hidden rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-100' : 'bg-indigo-100'}`}>
-                {batch.state.currentProgress < 0.02 ? (
-                  <div className={`h-full w-1/3 animate-pulse rounded-full ${batch.state.status === 'cancelling' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
-                ) : (
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${batch.state.status === 'cancelling' ? 'bg-amber-600' : 'bg-indigo-600'}`}
-                    style={{ width: `${Math.round(batch.state.currentProgress * 100)}%` }}
-                  />
-                )}
-              </div>
-              {batch.state.currentMessage && (
-                <span className={`hidden max-w-[180px] truncate text-[11px] lg:inline ${batch.state.status === 'cancelling' ? 'text-amber-600' : 'text-indigo-600'}`} title={batch.state.currentMessage}>
-                  {batch.state.currentMessage}
-                </span>
-              )}
-              {batch.state.status === 'running' && (
-                <button
-                  onClick={() => batch.cancel()}
-                  className="rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                  data-testid="topbar-batch-cancel"
-                  title="Cancel the batch immediately. Back-end GPU will finish its current chunk in the background and the UI will discard the result."
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          )}
+          <HeaderJobStrip jobs={headerJobs} onOpenLogs={openJobLogs} />
+
           {/* Persistent offset-job status chip. Survives modal dismissal
               (even though we now lock the modal while the job runs, a
               separate header indicator matters for the applying phase
@@ -1517,38 +1460,6 @@ export function ParseUI() {
               </div>
             );
           })()}
-
-          {showBatchCompleteBanner && (
-            <div
-              className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
-                batch.state.cancelled
-                  ? 'border-amber-200 bg-amber-50'
-                  : 'border-emerald-200 bg-emerald-50'
-              }`}
-              data-testid="topbar-batch-complete"
-            >
-              <Check className={`h-3 w-3 shrink-0 ${batch.state.cancelled ? 'text-amber-600' : 'text-emerald-600'}`} />
-              <span className={`text-[11px] font-medium ${batch.state.cancelled ? 'text-amber-900' : 'text-emerald-900'}`}>
-                {batch.state.cancelled ? 'Cancelled' : 'Done'} · {completedCount} ok
-                {errorCount > 0 && `, ${errorCount} err`}
-                {cancelledCount > 0 && `, ${cancelledCount} skip`}
-              </span>
-              <button
-                onClick={openBatchReport}
-                className={`rounded px-1.5 py-0.5 text-[11px] font-semibold underline ${batch.state.cancelled ? 'text-amber-700 hover:text-amber-800' : 'text-emerald-700 hover:text-emerald-800'}`}
-                data-testid="topbar-batch-view-report"
-              >
-                View report
-              </button>
-              <button
-                onClick={dismissBatchStatus}
-                className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
-                aria-label="Dismiss batch status"
-              >
-                ×
-              </button>
-            </div>
-          )}
 
           <div className="flex items-center gap-2">
             {/* Mode dropdown */}
@@ -1725,86 +1636,6 @@ export function ParseUI() {
               )}
             </div>
 
-            {/* Batch banners moved INTO the header above — previously
-                floated below the topbar and obscured the mode tabs +
-                Actions menu + waveform controls. */}
-            {activeJobs.length > 0 && (
-              <div className="pointer-events-auto absolute right-5 top-full z-40 mt-1 flex flex-col gap-1 rounded-md border border-slate-200 bg-white/95 px-3 py-1 shadow-sm backdrop-blur" data-testid="topbar-action-statuses">
-                {activeJobs.map((job, i) => (
-                  <div key={i} className="flex items-center gap-2 text-[11px]">
-                    {job.state.status === 'running' && (
-                      <>
-                        <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
-                        <span className="text-slate-600">{job.state.label}</span>
-                        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-                          {job.state.progress < 0.05 ? (
-                            <div className="h-full w-2/5 animate-pulse rounded-full bg-indigo-400" />
-                          ) : (
-                            <div
-                              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-                              style={{ width: `${Math.round(job.state.progress * 100)}%` }}
-                            />
-                          )}
-                        </div>
-                        {job.state.progress < 0.05 ? (
-                          <span className="text-slate-400">{job.state.message ?? 'Starting…'}</span>
-                        ) : (
-                          <span className="tabular-nums text-slate-400">{Math.round(job.state.progress * 100)}%</span>
-                        )}
-                        {job.state.etaMs !== null && job.state.etaMs > 0 && (
-                          <span className="tabular-nums text-slate-400" title="Estimated time remaining">
-                            · ~{formatEta(job.state.etaMs)} left
-                          </span>
-                        )}
-                      </>
-                    )}
-                    {job.state.status === 'complete' && (
-                      <>
-                        <Check className="h-3 w-3 text-emerald-500" />
-                        <span className="text-emerald-600">{job.state.label?.replace('…', '')} done</span>
-                      </>
-                    )}
-                    {job.state.status === 'error' && (
-                      <>
-                        <XCircle className="h-3 w-3 text-rose-500" />
-                        <span
-                          className="max-w-[560px] truncate text-rose-600"
-                          title={job.state.error ?? ''}
-                          data-testid="job-error-text"
-                        >
-                          {job.state.error}
-                        </span>
-                        <button
-                          onClick={() => {
-                            if (job.state.error) {
-                              console.error('[PARSE action job]', job.state.label, job.state.error);
-                              alert(`${job.state.label}\n\n${job.state.error}`);
-                            }
-                          }}
-                          className="text-[10px] text-rose-600 underline hover:text-rose-700"
-                          title="Show full error"
-                          data-testid="job-error-details"
-                        >
-                          Details
-                        </button>
-                        <button
-                          onClick={() => { void job.run(); }}
-                          className="text-[10px] text-rose-600 underline hover:text-rose-700"
-                        >
-                          Retry
-                        </button>
-                        <button
-                          onClick={job.reset}
-                          className="text-[10px] text-slate-500 underline hover:text-slate-700"
-                        >
-                          Dismiss
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
 
             <button
               onClick={() => setDarkMode(v => !v)}

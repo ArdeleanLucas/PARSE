@@ -6,9 +6,11 @@ export interface ActiveJobSnapshot {
   status: string;
   progress: number;
   message?: string;
+  etaMs?: number;
   error?: string;
   speaker?: string;
   language?: string;
+  startedTs?: number;
 }
 
 export async function listActiveJobs(): Promise<ActiveJobSnapshot[]> {
@@ -30,6 +32,14 @@ export async function listActiveJobs(): Promise<ActiveJobSnapshot[]> {
     };
     if (typeof record.message === "string" && record.message.trim()) {
       snapshot.message = record.message;
+    }
+    const etaRaw = Number(record.etaMs ?? record.eta_ms);
+    if (Number.isFinite(etaRaw) && etaRaw > 0) {
+      snapshot.etaMs = etaRaw;
+    }
+    const startedRaw = Number(record.startedTs ?? record.started_ts ?? record.startedAt ?? record.started_at);
+    if (Number.isFinite(startedRaw) && startedRaw > 0) {
+      snapshot.startedTs = startedRaw;
     }
     if (typeof record.error === "string" && record.error.trim()) {
       snapshot.error = record.error;

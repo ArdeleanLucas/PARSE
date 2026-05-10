@@ -70,7 +70,11 @@ export async function startCompute(
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  return { job_id: resolveJobId(payload), jobId: resolveJobId(payload) };
+  const jobId = resolveJobId(payload);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("parse:active-jobs-refresh"));
+  }
+  return { job_id: jobId, jobId };
 }
 
 export async function pollCompute(computeType: string, jobId: string): Promise<ComputeStatus> {
