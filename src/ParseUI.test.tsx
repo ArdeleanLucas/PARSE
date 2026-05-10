@@ -716,7 +716,7 @@ describe("ParseUI", () => {
     expect(screen.getByTestId("topbar-job-strip")).toBeTruthy();
   });
 
-  it.skip("shows the error state from /api/jobs/active for a recently-failed terminal snapshot and dismisses it on the same cadence (deferred: 2026-05-10-header-strip-error-auto-dismiss)", async () => {
+  it("shows the error state from /api/jobs/active for a recently-failed terminal snapshot and dismisses it on the same cadence", async () => {
     vi.useFakeTimers();
     seedSingleSpeakerProject();
     vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
