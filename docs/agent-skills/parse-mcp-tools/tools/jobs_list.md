@@ -80,6 +80,55 @@ curl "$PARSE_BASE_URL/api/mcp/tools/jobs_list?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Filtered HTTP MCP call example
+
+Use `statuses` and `types` arrays when calling the MCP tool over HTTP; bound the result size with `limit`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/jobs_list?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"statuses":["running","queued"],"types":["compute:full_pipeline"],"speaker":"Khan01","limit":5}'
+```
+
+Equivalent tool arguments:
+
+```json
+{
+  "statuses": ["running", "queued"],
+  "types": ["compute:full_pipeline"],
+  "speaker": "Khan01",
+  "limit": 5
+}
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "jobs_list",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobs": [
+      {
+        "jobId": "9df2d820-4f7d-4f02-a6b0-2eb4e33f5c8a",
+        "type": "compute:full_pipeline",
+        "status": "running",
+        "progress": 42.5,
+        "message": "Running ORTH for Khan01",
+        "meta": {"speaker": "Khan01", "language": "sdh"},
+        "done": false,
+        "success": false,
+        "logCount": 7
+      }
+    ],
+    "count": 1,
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `jobs_list` is currently exposed.

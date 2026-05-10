@@ -77,6 +77,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/jobs_list_active?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Active jobs response example
+
+The tool takes no arguments:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/jobs_list_active?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{}'
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "jobs_list_active",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobs": [
+      {
+        "jobId": "b38f8a2d-b29f-4f17-a4ac-8b7e8c4b1a6d",
+        "type": "stt",
+        "status": "running",
+        "progress": 50.0,
+        "result": null,
+        "startedTs": 1778436000.0,
+        "message": "Halfway there",
+        "segmentsProcessed": 12,
+        "totalSegments": 24,
+        "locks": {"active": true, "resources": ["speaker:Khan01"]},
+        "done": false,
+        "success": false,
+        "speaker": "Khan01",
+        "language": "sdh"
+      }
+    ],
+    "count": 1,
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
+Terminal jobs may briefly appear here during the active-job dwell window so UI/agents can recover completion/error chips after reloads.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `jobs_list_active` is currently exposed.

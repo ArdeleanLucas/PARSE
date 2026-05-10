@@ -78,6 +78,57 @@ curl "$PARSE_BASE_URL/api/mcp/tools/list_concepts_by_tag?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Valid `speakers` input examples
+
+The `speakers` field is a `oneOf`: either an explicit array of speaker IDs or the literal string `"all"`.
+
+Explicit speaker subset:
+
+```json
+{
+  "speakers": ["Khan01", "Khan02"],
+  "tagLabels": ["weather"],
+  "match": "any"
+}
+```
+
+All currently registered speakers:
+
+```json
+{
+  "speakers": "all",
+  "tagLabels": ["weather", "confirmed"],
+  "match": "all"
+}
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "list_concepts_by_tag",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "ok": true,
+    "totalConcepts": 1,
+    "perSpeaker": {
+      "Khan01": {
+        "conceptCount": 1,
+        "concepts": [
+          {"conceptId": "17", "name": "rain", "start": 12.34, "end": 13.1, "tags": ["weather"]}
+        ]
+      },
+      "Khan02": {"conceptCount": 0, "concepts": []}
+    },
+    "unknownTags": [],
+    "ambiguousTags": {},
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `list_concepts_by_tag` is currently exposed.

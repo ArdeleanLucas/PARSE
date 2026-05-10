@@ -82,6 +82,50 @@ curl "$PARSE_BASE_URL/api/mcp/tools/onboard_speaker_import?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Multi-source dry-run example
+
+For a second WAV on an existing speaker, call dry-run first and make the primary/non-primary choice explicit:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/onboard_speaker_import?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","sourceWav":"/imports/Khan01/session-b.wav","sourceCsv":"/imports/Khan01/session-b.csv","isPrimary":false,"dryRun":true}'
+```
+
+Expected preview shape for a multi-source speaker:
+
+```json
+{
+  "tool": "onboard_speaker_import",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "dryRun": true,
+    "readOnly": true,
+    "previewOnly": true,
+    "plan": {
+      "speaker": "Khan01",
+      "sourceWav": "/imports/Khan01/session-b.wav",
+      "sourceCsv": "/imports/Khan01/session-b.csv",
+      "wavDest": "audio/original/Khan01/session-b.wav",
+      "csvDest": "audio/original/Khan01/session-b.csv",
+      "isPrimary": false,
+      "newSpeaker": false,
+      "alreadyRegistered": false,
+      "wavSizeBytes": 24832000,
+      "csvSizeBytes": 4096,
+      "projectedSourceCount": 2,
+      "virtualTimelineRequired": true,
+      "virtualTimelineNote": "Speaker 'Khan01' will have 2 source WAVs after this import. PARSE does not yet auto-align multiple WAVs on a shared virtual timeline."
+    },
+    "message": "Preview only. Run again with dryRun=false to copy the audio into audio/original/Khan01/ and register it in source_index.json.",
+    "mode": "read-only"
+  }
+}
+```
+
+Run the live call only after confirming the preview; multi-source imports require downstream virtual-timeline coordination before assuming annotations transfer across WAVs.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `onboard_speaker_import` is currently exposed.

@@ -79,6 +79,39 @@ curl "$PARSE_BASE_URL/api/mcp/tools/parse_memory_upsert_section?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run upsert example
+
+Preview the section replacement before writing `parse-memory.md`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/parse_memory_upsert_section?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"section":"User Preferences","body":"- Prefer dry-run previews before mutating imports.","dryRun":true}'
+```
+
+Expected preview response:
+
+```json
+{
+  "tool": "parse_memory_upsert_section",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "dryRun": true,
+    "readOnly": true,
+    "previewOnly": true,
+    "path": "parse-memory.md",
+    "section": "User Preferences",
+    "action": "create",
+    "previewSection": "## User Preferences\n- Prefer dry-run previews before mutating imports.\n",
+    "totalBytesAfter": 92,
+    "mode": "read-only"
+  }
+}
+```
+
+`action` is `"replace"` instead of `"create"` when a matching `## User Preferences` section already exists.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `parse_memory_upsert_section` is currently exposed.

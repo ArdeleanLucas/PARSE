@@ -77,6 +77,37 @@ curl "$PARSE_BASE_URL/api/mcp/tools/parse_memory_read?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Section read example
+
+Pass the heading text without the leading `##`. For a section headed `## User Preferences`, use `"User Preferences"`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/parse_memory_read?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"section":"User Preferences","maxBytes":4096}'
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "parse_memory_read",
+  "ok": true,
+  "result": {
+    "ok": true,
+    "path": "parse-memory.md",
+    "exists": true,
+    "section": "User Preferences",
+    "content": "## User Preferences\n- Prefer dry-run previews before mutating imports.",
+    "truncated": false,
+    "sections": ["User Preferences", "Speakers"],
+    "readOnly": true,
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `parse_memory_read` is currently exposed.

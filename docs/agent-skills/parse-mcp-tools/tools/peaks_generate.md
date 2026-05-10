@@ -81,6 +81,37 @@ curl "$PARSE_BASE_URL/api/mcp/tools/peaks_generate?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run peaks preview example
+
+Use dry-run to confirm the resolved audio and waveform size before writing `peaks/<speaker>.json`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/peaks_generate?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","samplesPerPixel":512,"dryRun":true}'
+```
+
+Expected preview output:
+
+```json
+{
+  "tool": "peaks_generate",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "sampleRate": 44100,
+    "samplesPerPixel": 512,
+    "totalSamples": 5292000,
+    "peakCount": 10336,
+    "durationSec": 120.0,
+    "mode": "read-only"
+  }
+}
+```
+
+A live write uses the same arguments with `"dryRun": false` and returns `success`, `outputPath`, `sampleRate`, `samplesPerPixel`, `totalSamples`, `peakCount`, and `durationSec`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `peaks_generate` is currently exposed.

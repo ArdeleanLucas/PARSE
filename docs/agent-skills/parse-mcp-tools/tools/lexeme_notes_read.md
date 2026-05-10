@@ -77,6 +77,41 @@ curl "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_read?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Filtered read example
+
+Read notes for one speaker/concept pair:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_read?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","conceptId":"17"}'
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "lexeme_notes_read",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "lexeme_notes": {
+      "Khan01": {
+        "17": {
+          "user_note": "Check this rain-form boundary against the source CSV.",
+          "import_note": "Imported from Audition marker row 42.",
+          "updated_at": "2026-05-10T18:42:00Z"
+        }
+      }
+    },
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
+Omit `speaker` to scan all speakers, omit `conceptId` to return all notes for a speaker, or omit both to return the full `lexeme_notes` block.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `lexeme_notes_read` is currently exposed.

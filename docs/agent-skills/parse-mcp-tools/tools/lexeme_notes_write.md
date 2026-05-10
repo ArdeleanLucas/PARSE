@@ -83,6 +83,44 @@ curl "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_write?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run write example
+
+Preview a `userNote` update before writing `parse-enrichments.json`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_write?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","conceptId":"17","userNote":"Verify vowel length before cognate grouping.","dryRun":true}'
+```
+
+Expected preview shape:
+
+```json
+{
+  "tool": "lexeme_notes_write",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "dryRun": true,
+    "speaker": "Khan01",
+    "conceptId": "17",
+    "delete": false,
+    "lexeme_notes": {
+      "Khan01": {
+        "17": {
+          "user_note": "Verify vowel length before cognate grouping.",
+          "updated_at": "2026-05-10T18:42:00Z"
+        }
+      }
+    },
+    "mode": "read-only"
+  }
+}
+```
+
+After the preview is approved, repeat the same call with `"dryRun": false` to persist the note; use `"delete": true` to preview/remove the entry.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `lexeme_notes_write` is currently exposed.

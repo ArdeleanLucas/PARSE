@@ -77,6 +77,39 @@ curl "$PARSE_BASE_URL/api/mcp/tools/mcp_get_exposure_mode?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Exposure payload example
+
+Call with an empty JSON object:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/mcp_get_exposure_mode?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{}'
+```
+
+Current PARSE returns tool counts as top-level count fields:
+
+```json
+{
+  "tool": "mcp_get_exposure_mode",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "exposeAllTools": false,
+    "configSource": ".parse/mcp-exposure.json",
+    "parseChatToolCount": 64,
+    "workflowToolCount": 4,
+    "mcpToolCount": 44,
+    "defaultParseMcpToolCount": 40,
+    "defaultWorkflowMcpToolCount": 4
+  }
+}
+```
+
+If `configSource` is `null`, PARSE is using its built-in default exposure set rather than a project config file.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `mcp_get_exposure_mode` is currently exposed.
