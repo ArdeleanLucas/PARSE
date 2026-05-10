@@ -42,6 +42,8 @@ import time
 import traceback
 from typing import Any, Callable, Dict, Optional
 
+from shared.subprocess_tee import install_child_tee
+
 
 # =====================================================================
 # Parent-side: WorkerHandle
@@ -458,9 +460,7 @@ def worker_main(job_queue: Any, event_queue: Any) -> None:
     # Dedicated stderr log so worker output doesn't intermix with the
     # parent's /tmp/parse_api_stderr.log and so post-mortems are clean.
     try:
-        sys.stderr = open(
-            "/tmp/parse-compute-worker.stderr.log", "w", encoding="utf-8"
-        )
+        install_child_tee("/tmp/parse-compute-worker.stderr.log")
     except Exception:
         pass
 
