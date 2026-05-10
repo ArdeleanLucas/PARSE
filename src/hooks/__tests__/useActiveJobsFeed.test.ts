@@ -52,6 +52,69 @@ describe("useActiveJobsFeed", () => {
     expect(listActiveJobs).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps polling on the fast cadence even when consecutive responses are field-equal", async () => {
+    const steadyJob: ActiveJobSnapshot = {
+      ...runningJob("steady-job"),
+      message: "Working",
+      startedTs: 123,
+    };
+    vi.mocked(listActiveJobs).mockResolvedValue([steadyJob]);
+
+    const { result } = renderHook(() => useActiveJobsFeed());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(vi.mocked(listActiveJobs).mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(result.current.jobs).toEqual([steadyJob]);
+  });
+
+  it("keeps the polling loop alive across hidden -> visible transitions when consecutive polls are field-equal", async () => {
+    const steadyJob: ActiveJobSnapshot = {
+      ...runningJob("visible-steady-job"),
+      message: "Working",
+      startedTs: 456,
+    };
+    vi.mocked(listActiveJobs).mockResolvedValue([steadyJob]);
+
+    renderHook(() => useActiveJobsFeed());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(listActiveJobs).toHaveBeenCalledTimes(1);
+
+    act(() => setVisibilityState("hidden"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(listActiveJobs).toHaveBeenCalledTimes(1);
+
+    act(() => setVisibilityState("visible"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(listActiveJobs).toHaveBeenCalledTimes(2);
+
+    act(() => setVisibilityState("hidden"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(listActiveJobs).toHaveBeenCalledTimes(2);
+
+    act(() => setVisibilityState("visible"));
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(listActiveJobs).toHaveBeenCalledTimes(4);
+  });
+
   it("drops to a slow heartbeat when empty, then resumes fast cadence after a non-empty response", async () => {
     vi.mocked(listActiveJobs)
       .mockResolvedValueOnce([])

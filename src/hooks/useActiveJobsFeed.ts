@@ -32,8 +32,18 @@ function sameJobs(a: ActiveJobSnapshot[], b: ActiveJobSnapshot[]): boolean {
 export function useActiveJobsFeed(): { jobs: ActiveJobSnapshot[]; refresh: () => Promise<void> } {
   const [jobs, setJobs] = useState<ActiveJobSnapshot[]>([]);
   const [pollMs, setPollMs] = useState(FAST_POLL_MS);
+  const pollMsRef = useRef(FAST_POLL_MS);
   const hiddenRef = useRef(typeof document !== "undefined" ? document.visibilityState === "hidden" : false);
   const inFlightRef = useRef(false);
+
+  useEffect(() => {
+    pollMsRef.current = pollMs;
+  }, [pollMs]);
+
+  const updatePollMs = useCallback((nextPollMs: number) => {
+    pollMsRef.current = nextPollMs;
+    setPollMs(nextPollMs);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (hiddenRef.current || inFlightRef.current) return;
@@ -41,38 +51,55 @@ export function useActiveJobsFeed(): { jobs: ActiveJobSnapshot[]; refresh: () =>
     try {
       const nextJobs = await listActiveJobs();
       setJobs((previous) => sameJobs(previous, nextJobs) ? previous : nextJobs);
-      setPollMs(nextJobs.length > 0 && hasNonTerminalJob(nextJobs) ? FAST_POLL_MS : SLOW_POLL_MS);
+      updatePollMs(nextJobs.length > 0 && hasNonTerminalJob(nextJobs) ? FAST_POLL_MS : SLOW_POLL_MS);
     } catch {
       setJobs((previous) => previous.length === 0 ? previous : []);
-      setPollMs(SLOW_POLL_MS);
+      updatePollMs(SLOW_POLL_MS);
     } finally {
       inFlightRef.current = false;
     }
-  }, []);
+  }, [updatePollMs]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    if (hiddenRef.current) return;
-    const timer = window.setTimeout(() => {
-      void refresh();
-    }, pollMs);
-    return () => window.clearTimeout(timer);
-  }, [pollMs, jobs, refresh]);
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      // Await the refresh before scheduling the next timer so slow network
+      // responses cannot create overlapping active-jobs fetches, and the
+      // next delay observes any fast/slow cadence update from the response.
+      if (!hiddenRef.current) {
+        await refresh();
+      }
+      if (cancelled) return;
+      timerId = window.setTimeout(tick, pollMsRef.current);
+    };
+
+    timerId = window.setTimeout(tick, pollMsRef.current);
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [pollMs, refresh]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       hiddenRef.current = document.visibilityState === "hidden";
       if (!hiddenRef.current) {
-        setPollMs(FAST_POLL_MS);
+        updatePollMs(FAST_POLL_MS);
         void refresh();
       }
     };
     const handleExternalRefresh = () => {
       if (hiddenRef.current) return;
-      setPollMs(FAST_POLL_MS);
+      updatePollMs(FAST_POLL_MS);
       void refresh();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -81,7 +108,7 @@ export function useActiveJobsFeed(): { jobs: ActiveJobSnapshot[]; refresh: () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener(ACTIVE_JOBS_REFRESH_EVENT, handleExternalRefresh);
     };
-  }, [refresh]);
+  }, [refresh, updatePollMs]);
 
   return { jobs, refresh };
 }
