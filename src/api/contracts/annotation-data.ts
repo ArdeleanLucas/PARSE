@@ -1,5 +1,6 @@
 import type { AnnotationRecord, IpaCandidatesPayload, IpaReviewState, IpaReviewUpdate, LexemeRerunIpaResponse, LexemeRerunOrthoResponse, LexemeRerunRequest, SttSegmentsPayload } from "../types";
 import { apiFetch } from "./shared";
+import { pollCompute, startCompute } from "./chat-and-generic-compute";
 
 type SaveAnnotationResponse = AnnotationRecord | { annotation?: AnnotationRecord };
 
@@ -46,16 +47,38 @@ export async function putIpaReview(
 }
 
 
+const LEXEME_RERUN_POLL_INTERVAL_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function rerunLexemeViaCompute<T extends LexemeRerunIpaResponse | LexemeRerunOrthoResponse>(
+  computeType: "lexeme_rerun_ipa" | "lexeme_rerun_ortho",
+  request: LexemeRerunRequest,
+): Promise<T> {
+  const job = await startCompute(computeType, { ...request });
+  const jobId = job.jobId ?? job.job_id;
+  if (!jobId) {
+    throw new Error("Lexeme rerun did not return a jobId");
+  }
+
+  while (true) {
+    const status = await pollCompute(computeType, jobId);
+    if (status.status === "complete") {
+      return status.result as T;
+    }
+    if (status.status === "error") {
+      throw new Error(status.error || status.message || "Lexeme rerun failed");
+    }
+    await sleep(LEXEME_RERUN_POLL_INTERVAL_MS);
+  }
+}
+
 export async function rerunLexemeIpa(request: LexemeRerunRequest): Promise<LexemeRerunIpaResponse> {
-  return apiFetch<LexemeRerunIpaResponse>("/api/lexeme/run_ipa", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
+  return rerunLexemeViaCompute<LexemeRerunIpaResponse>("lexeme_rerun_ipa", request);
 }
 
 export async function rerunLexemeOrtho(request: LexemeRerunRequest): Promise<LexemeRerunOrthoResponse> {
-  return apiFetch<LexemeRerunOrthoResponse>("/api/lexeme/run_ortho", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
+  return rerunLexemeViaCompute<LexemeRerunOrthoResponse>("lexeme_rerun_ortho", request);
 }

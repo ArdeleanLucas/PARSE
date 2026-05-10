@@ -76,6 +76,7 @@ def per_concept_rerun(
         "start": hit.start,
         "end": hit.end,
         "pad": pad,
+        "async": False,
     }
 
     out: List[dict] = []

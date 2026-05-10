@@ -1,4 +1,4 @@
-"""Synchronous lexeme interval ORTH/IPA rerun HTTP helpers.
+"""Job-tracked lexeme interval ORTH/IPA rerun HTTP helpers.
 
 Requests accept ``pad`` values ``0.0``, ``0.2`` (default), or ``0.5``.
 The pad widens the acoustic window passed to the ORTH/IPA runner while the
@@ -48,6 +48,13 @@ class LexemeRerunSubprocessError(Exception):
         return self.message
 
 
+class LexemeRerunComputeError(RuntimeError):
+    def __init__(self, message: str, *, error_code: str, details: Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.details = dict(details or {})
+
+
 SpeakerNormalizer = Callable[[Any], str]
 AnnotationPathResolver = Callable[[str], Path]
 JsonAnyReader = Callable[[Path], Any]
@@ -56,6 +63,9 @@ AudioPathResolver = Callable[[str], Path]
 IntervalRunner = Callable[..., str]
 LockAcquire = Callable[[str, Path], Path]
 LockRelease = Callable[[str, Path], None]
+JobCreator = Callable[[str, dict[str, Any]], str]
+ComputeLauncher = Callable[[str, str, dict[str, Any]], None]
+ExceptionSpec = type[BaseException] | tuple[type[BaseException], ...] | None
 
 
 @dataclass(frozen=True)
@@ -66,6 +76,25 @@ class _RerunRequest:
     end: float
     language: Optional[str]
     pad: float
+
+
+@dataclass(frozen=True)
+class _RerunPlan:
+    tier_key: str
+    speaker: str
+    concept_key: str
+    start: float
+    end: float
+    language: Optional[str]
+    pad: float
+
+    @property
+    def padded_start(self) -> float:
+        return max(0.0, self.start - self.pad)
+
+    @property
+    def padded_end(self) -> float:
+        return self.end + self.pad
 
 
 def _request_string(body: Mapping[str, Any], *names: str) -> str:
@@ -207,7 +236,7 @@ def _load_record(
     return normalized
 
 
-def _build_post_run_response(
+def _build_lexeme_rerun_plan(
     body: Mapping[str, Any],
     *,
     tier_key: str,
@@ -216,12 +245,7 @@ def _build_post_run_response(
     annotation_read_path_for_speaker: AnnotationPathResolver,
     read_json_any_file: JsonAnyReader,
     normalize_annotation_record: AnnotationNormalizer,
-    resolve_audio_path_for_speaker: AudioPathResolver,
-    runner: IntervalRunner,
-    locks_dir: Path | None = None,
-    acquire_speaker_lock: LockAcquire = _acquire_speaker_lock,
-    release_speaker_lock: LockRelease = _release_speaker_lock,
-) -> JsonResponseSpec:
+) -> _RerunPlan:
     # Speaker validation needs the normalized speaker first, but interval/language
     # parsing also depends on the read-only annotation metadata. Do this in two
     # deliberate phases so missing-speaker returns 404 instead of provider errors.
@@ -243,53 +267,162 @@ def _build_post_run_response(
     request = _parse_request(body, normalize_speaker_id=normalize_speaker_id, record=record)
     if not _concept_key_exists(project_root, request.concept_key):
         raise LexemeRerunHandlerError(HTTPStatus.NOT_FOUND, "concept not found")
+    return _RerunPlan(
+        tier_key=tier_key,
+        speaker=request.speaker,
+        concept_key=request.concept_key,
+        start=request.start,
+        end=request.end,
+        language=request.language,
+        pad=request.pad,
+    )
 
+
+def _subprocess_error_payload(exc: LexemeRerunSubprocessError) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "error",
+        "code": exc.code,
+        "exit_code": exc.exit_code,
+        "message": exc.message,
+    }
+    if exc.stderr_tail:
+        payload["stderr_tail"] = exc.stderr_tail
+    return payload
+
+
+def _run_lexeme_rerun_plan_sync(
+    plan: _RerunPlan,
+    *,
+    project_root: Path,
+    resolve_audio_path_for_speaker: AudioPathResolver,
+    runner: IntervalRunner,
+    locks_dir: Path | None = None,
+    acquire_speaker_lock: LockAcquire = _acquire_speaker_lock,
+    release_speaker_lock: LockRelease = _release_speaker_lock,
+    subprocess_errors_as_response: bool = True,
+) -> JsonResponseSpec:
     resolved_locks_dir = Path(locks_dir) if locks_dir is not None else Path(project_root) / ".parse-locks"
     lock_file: Path | None = None
     try:
-        lock_file = acquire_speaker_lock(request.speaker, resolved_locks_dir)
+        lock_file = acquire_speaker_lock(plan.speaker, resolved_locks_dir)
     except SpeakerLockError as exc:
-        raise LexemeRerunHandlerError(HTTPStatus.CONFLICT, "speaker locked") from exc
+        if subprocess_errors_as_response:
+            raise LexemeRerunHandlerError(HTTPStatus.CONFLICT, "speaker locked") from exc
+        raise LexemeRerunComputeError("speaker locked", error_code="speaker_locked") from exc
 
     started = time.monotonic()
     try:
-        audio_path = resolve_audio_path_for_speaker(request.speaker)
-        padded_start = max(0.0, request.start - request.pad)
-        padded_end = request.end + request.pad
-        text = runner(audio_path=audio_path, start=padded_start, end=padded_end, language=request.language)
+        audio_path = resolve_audio_path_for_speaker(plan.speaker)
+        text = runner(audio_path=audio_path, start=plan.padded_start, end=plan.padded_end, language=plan.language)
     except LexemeRerunSubprocessError as exc:
-        payload: dict[str, Any] = {
-            "status": "error",
-            "code": exc.code,
-            "exit_code": exc.exit_code,
-            "message": exc.message,
-        }
-        if exc.stderr_tail:
-            payload["stderr_tail"] = exc.stderr_tail
-        return JsonResponseSpec(status=HTTPStatus.SERVICE_UNAVAILABLE, payload=payload)
+        if not subprocess_errors_as_response:
+            details = _subprocess_error_payload(exc)
+            raise LexemeRerunComputeError(exc.message, error_code="lexeme_rerun_subprocess", details=details) from exc
+        return JsonResponseSpec(status=HTTPStatus.SERVICE_UNAVAILABLE, payload=_subprocess_error_payload(exc))
     except LexemeRerunHandlerError:
         raise
     except Exception as exc:
-        logger.error("lexeme %s rerun failed: %s", tier_key, exc)
+        logger.error("lexeme %s rerun failed: %s", plan.tier_key, exc)
         raise LexemeRerunHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc)) from exc
     finally:
         if lock_file is not None:
             try:
-                release_speaker_lock(request.speaker, resolved_locks_dir)
+                release_speaker_lock(plan.speaker, resolved_locks_dir)
             except Exception:
-                logger.warning("failed to release lexeme rerun speaker lock for %s", request.speaker, exc_info=True)
+                logger.warning("failed to release lexeme rerun speaker lock for %s", plan.speaker, exc_info=True)
 
     elapsed_ms = (time.monotonic() - started) * 1000.0
-    logger.info("lexeme %s rerun completed in %.1f ms", tier_key, elapsed_ms)
+    logger.info("lexeme %s rerun completed in %.1f ms", plan.tier_key, elapsed_ms)
     return JsonResponseSpec(
         status=HTTPStatus.OK,
         payload={
-            tier_key: str(text or "").strip(),
-            "interval": {"start": request.start, "end": request.end},
+            plan.tier_key: str(text or "").strip(),
+            "interval": {"start": plan.start, "end": plan.end},
             "source": "rerun",
+            "jobId": None,
         },
     )
 
+
+def _build_lexeme_rerun_job_response(
+    plan: _RerunPlan,
+    *,
+    create_job: JobCreator | None,
+    launch_compute_runner: ComputeLauncher | None,
+    job_conflict_error_cls: ExceptionSpec = None,
+) -> JsonResponseSpec:
+    if create_job is None or launch_compute_runner is None:
+        raise LexemeRerunHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "async lexeme rerun job dependencies are not configured")
+    compute_type = "lexeme_rerun_{0}".format(plan.tier_key)
+    metadata: dict[str, Any] = {
+        "computeType": compute_type,
+        "speaker": plan.speaker,
+        "concept_key": plan.concept_key,
+        "tier": plan.tier_key,
+        "interval": {"start": plan.start, "end": plan.end},
+        "pad": plan.pad,
+    }
+    payload = {
+        "speaker": plan.speaker,
+        "concept_key": plan.concept_key,
+        "start": plan.start,
+        "end": plan.end,
+        "language": plan.language,
+        "pad": plan.pad,
+    }
+    try:
+        job_id = create_job("compute:{0}".format(compute_type), metadata)
+    except Exception as exc:
+        if job_conflict_error_cls is not None and isinstance(exc, job_conflict_error_cls):
+            raise LexemeRerunHandlerError(HTTPStatus.CONFLICT, str(exc)) from exc
+        raise
+    launch_compute_runner(job_id, compute_type, payload)
+    return JsonResponseSpec(status=HTTPStatus.ACCEPTED, payload={"jobId": job_id})
+
+
+def _build_post_run_response(
+    body: Mapping[str, Any],
+    *,
+    tier_key: str,
+    project_root: Path,
+    normalize_speaker_id: SpeakerNormalizer,
+    annotation_read_path_for_speaker: AnnotationPathResolver,
+    read_json_any_file: JsonAnyReader,
+    normalize_annotation_record: AnnotationNormalizer,
+    resolve_audio_path_for_speaker: AudioPathResolver,
+    runner: IntervalRunner,
+    locks_dir: Path | None = None,
+    acquire_speaker_lock: LockAcquire = _acquire_speaker_lock,
+    release_speaker_lock: LockRelease = _release_speaker_lock,
+    create_job: JobCreator | None = None,
+    launch_compute_runner: ComputeLauncher | None = None,
+    job_conflict_error_cls: ExceptionSpec = None,
+) -> JsonResponseSpec:
+    plan = _build_lexeme_rerun_plan(
+        body,
+        tier_key=tier_key,
+        project_root=project_root,
+        normalize_speaker_id=normalize_speaker_id,
+        annotation_read_path_for_speaker=annotation_read_path_for_speaker,
+        read_json_any_file=read_json_any_file,
+        normalize_annotation_record=normalize_annotation_record,
+    )
+    if body.get("async") is False:
+        return _run_lexeme_rerun_plan_sync(
+            plan,
+            project_root=project_root,
+            resolve_audio_path_for_speaker=resolve_audio_path_for_speaker,
+            runner=runner,
+            locks_dir=locks_dir,
+            acquire_speaker_lock=acquire_speaker_lock,
+            release_speaker_lock=release_speaker_lock,
+        )
+    return _build_lexeme_rerun_job_response(
+        plan,
+        create_job=create_job,
+        launch_compute_runner=launch_compute_runner,
+        job_conflict_error_cls=job_conflict_error_cls,
+    )
 
 def build_post_run_ortho_response(
     body: Mapping[str, Any],
@@ -304,6 +437,9 @@ def build_post_run_ortho_response(
     locks_dir: Path | None = None,
     acquire_speaker_lock: LockAcquire = _acquire_speaker_lock,
     release_speaker_lock: LockRelease = _release_speaker_lock,
+    create_job: JobCreator | None = None,
+    launch_compute_runner: ComputeLauncher | None = None,
+    job_conflict_error_cls: ExceptionSpec = None,
 ) -> JsonResponseSpec:
     return _build_post_run_response(
         body,
@@ -318,6 +454,9 @@ def build_post_run_ortho_response(
         locks_dir=locks_dir,
         acquire_speaker_lock=acquire_speaker_lock,
         release_speaker_lock=release_speaker_lock,
+        create_job=create_job,
+        launch_compute_runner=launch_compute_runner,
+        job_conflict_error_cls=job_conflict_error_cls,
     )
 
 
@@ -334,6 +473,9 @@ def build_post_run_ipa_response(
     locks_dir: Path | None = None,
     acquire_speaker_lock: LockAcquire = _acquire_speaker_lock,
     release_speaker_lock: LockRelease = _release_speaker_lock,
+    create_job: JobCreator | None = None,
+    launch_compute_runner: ComputeLauncher | None = None,
+    job_conflict_error_cls: ExceptionSpec = None,
 ) -> JsonResponseSpec:
     return _build_post_run_response(
         body,
@@ -348,4 +490,7 @@ def build_post_run_ipa_response(
         locks_dir=locks_dir,
         acquire_speaker_lock=acquire_speaker_lock,
         release_speaker_lock=release_speaker_lock,
+        create_job=create_job,
+        launch_compute_runner=launch_compute_runner,
+        job_conflict_error_cls=job_conflict_error_cls,
     )

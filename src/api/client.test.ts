@@ -289,49 +289,67 @@ describe("annotation API client contracts", () => {
     vi.unstubAllGlobals();
   });
 
-  it("rerunLexemeIpa posts the exact lexeme window and returns the rerun IPA payload", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({ ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
-    });
+  it("rerunLexemeIpa starts and polls the compute job, then returns the rerun IPA payload", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ jobId: "job-ipa" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ status: "complete", progress: 100, result: { ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" } }),
+      });
 
     await expect(rerunLexemeIpa({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 })).resolves.toEqual({
       ipa: "ʃari:",
       interval: { start: 2795.918, end: 2796.698 },
       source: "rerun",
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/lexeme/run_ipa", expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/compute/lexeme_rerun_ipa", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 }),
     }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/compute/lexeme_rerun_ipa/status", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ job_id: "job-ipa" }),
+    }));
   });
 
-  it("rerunLexemeOrtho posts the exact lexeme window and returns the rerun ORTH payload", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
-    });
+  it("rerunLexemeOrtho starts and polls the compute job, then returns the rerun ORTH payload", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ jobId: "job-ortho" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ status: "complete", progress: 100, result: { ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" } }),
+      });
 
     await expect(rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 })).resolves.toEqual({
       ortho: "شار",
       interval: { start: 2795.918, end: 2796.698 },
       source: "rerun",
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/lexeme/run_ortho", expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/compute/lexeme_rerun_ortho", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 }),
     }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/compute/lexeme_rerun_ortho/status", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ job_id: "job-ortho" }),
+    }));
   });
 
-  it("rerunLexemeOrtho posts pad=0.5 when provided", async () => {
+  it("rerunLexemeOrtho passes pad=0.5 to compute start when provided", async () => {
     expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
-    });
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ jobId: "job-ortho-pad" }) })
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ status: "complete", progress: 100, result: { ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" } }) });
 
     await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
 
@@ -345,13 +363,11 @@ describe("annotation API client contracts", () => {
     });
   });
 
-  it("rerunLexemeOrtho omits pad when not provided", async () => {
+  it("rerunLexemeOrtho omits pad from compute start when not provided", async () => {
     expect([...LEXEME_RERUN_PAD_VALUES]).toContain(0.2);
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({ ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
-    });
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ jobId: "job-ortho-default" }) })
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ status: "complete", progress: 100, result: { ortho: "شار", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" } }) });
 
     await rerunLexemeOrtho({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698 });
 
@@ -361,11 +377,9 @@ describe("annotation API client contracts", () => {
 
   it("rerunLexemeIpa accepts pad too", async () => {
     expect([...LEXEME_RERUN_PAD_VALUES]).toEqual([0.0, 0.2, 0.5]);
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({ ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" }),
-    });
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ jobId: "job-ipa-pad" }) })
+      .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: async () => ({ status: "complete", progress: 100, result: { ipa: "ʃari:", interval: { start: 2795.918, end: 2796.698 }, source: "rerun" } }) });
 
     await rerunLexemeIpa({ speaker: "Saha01", concept_key: "root", start: 2795.918, end: 2796.698, pad: 0.5 });
 

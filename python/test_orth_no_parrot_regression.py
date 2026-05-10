@@ -200,7 +200,7 @@ def test_lexeme_rerun_outputs_never_include_configured_initial_prompt(
     """
     provider = _provider_with_distinctive_prompt()
     _annotation_path, audio_path = _write_workspace(tmp_path)
-    body = {"speaker": "Saha01", "concept_key": "distinctive-root", "start": 0.6, "end": 1.1, "pad": pad}
+    body = {"speaker": "Saha01", "concept_key": "distinctive-root", "start": 0.6, "end": 1.1, "pad": pad, "async": False}
     common_kwargs = {
         "body": body,
         "project_root": tmp_path,

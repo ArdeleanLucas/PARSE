@@ -430,6 +430,10 @@ def _dispatch(
         return server_mod._compute_full_pipeline(job_id, payload)
     if normalized in {"lexemes_rerun_by_tag", "lexemes-rerun-by-tag", "tagged_rerun", "tagged-rerun"}:
         return server_mod._compute_lexemes_rerun_by_tag(job_id, payload)
+    if normalized in {"lexeme_rerun_ipa", "lexeme-rerun-ipa", "lexeme_ipa", "lexeme-ipa"}:
+        return server_mod._compute_lexeme_rerun_ipa(job_id, payload)
+    if normalized in {"lexeme_rerun_ortho", "lexeme-rerun-ortho", "lexeme_ortho", "lexeme-ortho"}:
+        return server_mod._compute_lexeme_rerun_ortho(job_id, payload)
     if normalized in {"train_ipa_model", "train-ipa-model", "train_ipa"}:
         return server_mod._compute_training_job(job_id, payload)
     if normalized == "stt":
