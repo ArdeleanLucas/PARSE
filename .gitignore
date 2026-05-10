@@ -20,8 +20,10 @@ parity/harness/output/
 # Claude Code agent state
 .claude/
 
-# Agent prompt/handoff queue state (kept local; not repo source)
+# Agent prompt/handoff/report state (kept local; not repo source)
 .hermes/automation/handoffs/
+.hermes/automation/state/
+.hermes/reports/
 .hermes/plans/
 .hermes/handoffs/**
 !.hermes/handoffs/
