@@ -30,6 +30,7 @@ _MINIMAL_PAYLOADS: dict[str, dict[str, Any]] = {
         "speaker": "Test01",
         "pairs": [{"audioTimeSec": 1.0, "csvTimeSec": 1.0}],
     },
+    "lexemes_rerun_by_tag": {"speaker": "Test01", "tagLabels": ["Smoke"], "field": "ortho"},
 }
 
 
