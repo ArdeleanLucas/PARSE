@@ -1,3 +1,0 @@
-Flow: rename tag
-Oracle result: PASS — tags-parity-oracle renamed to tags-parity-renamed.
-Rebuild result: PASS — tags-parity-rebuild renamed to tags-parity-renamed.
