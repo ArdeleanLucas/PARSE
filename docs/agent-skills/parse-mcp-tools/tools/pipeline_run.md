@@ -85,6 +85,74 @@ curl "$PARSE_BASE_URL/api/mcp/tools/pipeline_run?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+A complete HTTP MCP dry-run call for a concept-window pipeline run looks like this:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/pipeline_run?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","steps":["normalize","stt","ortho","ipa"],"overwrites":{"normalize":false,"stt":false,"ortho":true,"ipa":true},"language":"sd","run_mode":"concept-windows","concept_ids":["1","2","3"],"dryRun":true}'
+```
+
+Dry-run response shape:
+
+```json
+{
+  "tool": "pipeline_run",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "status": "dry_run",
+    "tool": "pipeline_run",
+    "plan": {
+      "speaker": "Khan01",
+      "steps": ["normalize", "stt", "ortho", "ipa"],
+      "overwrites": {
+        "normalize": false,
+        "stt": false,
+        "ortho": true,
+        "ipa": true
+      },
+      "language": "sd",
+      "run_mode": "concept-windows",
+      "concept_ids": ["1", "2", "3"]
+    },
+    "message": "Dry run. Would start a full_pipeline compute job for this speaker."
+  }
+}
+```
+
+After review, repeat the same payload with `dryRun: false`. A successful live start returns a job ID to poll with `compute_status` and `compute_type="full_pipeline"`:
+
+```json
+{
+  "tool": "pipeline_run",
+  "ok": true,
+  "result": {
+    "previewOnly": false,
+    "readOnly": false,
+    "mode": "write-allowed",
+    "jobId": "9b662f0e-9dcf-4faa-9de2-a11f9b9d4de5",
+    "status": "running",
+    "speaker": "Khan01",
+    "steps": ["normalize", "stt", "ortho", "ipa"],
+    "overwrites": {
+      "normalize": false,
+      "stt": false,
+      "ortho": true,
+      "ipa": true
+    },
+    "computeType": "full_pipeline",
+    "run_mode": "concept-windows",
+    "concept_ids": ["1", "2", "3"],
+    "message": "Pipeline job started. Poll with compute_status."
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `pipeline_run` is currently exposed.

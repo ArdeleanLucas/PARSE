@@ -81,6 +81,67 @@ curl "$PARSE_BASE_URL/api/mcp/tools/prepare_tag_import?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Response examples
+
+Dry-run first with the intended tag name, color, and concept IDs:
+
+```json
+{
+  "tagName": "Weather shortlist",
+  "color": "#4461d4",
+  "conceptIds": ["12", "18", "42"],
+  "dryRun": true,
+  "propagateToSpeakers": true
+}
+```
+
+Expected dry-run output:
+
+```json
+{
+  "tool": "prepare_tag_import",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "ok": true,
+    "dryRun": true,
+    "preview": true,
+    "tagId": "weather-shortlist",
+    "tagName": "Weather shortlist",
+    "color": "#4461d4",
+    "conceptCount": 3,
+    "message": "Will create tag 'Weather shortlist' (id=weather-shortlist) with 3 concepts. Call with dryRun=false to apply."
+  }
+}
+```
+
+After user confirmation, `dryRun: false` writes `parse-tags.json` and, when propagation is enabled, updates matching speaker annotations:
+
+```json
+{
+  "tool": "prepare_tag_import",
+  "ok": true,
+  "result": {
+    "readOnly": false,
+    "previewOnly": false,
+    "mode": "write-allowed",
+    "ok": true,
+    "dryRun": false,
+    "tagId": "weather-shortlist",
+    "tagName": "Weather shortlist",
+    "color": "#4461d4",
+    "assignedCount": 3,
+    "totalTagsInFile": 5,
+    "propagatedSpeakerCount": 2,
+    "propagatedConceptAssignments": 6,
+    "removedConceptAssignments": 0,
+    "message": "Tag 'Weather shortlist' created with 3 concepts. Refresh Compare to see it."
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `prepare_tag_import` is currently exposed.

@@ -77,6 +77,49 @@ curl "$PARSE_BASE_URL/api/mcp/tools/read_csv_preview?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Omit `csvPath` to preview the default `concepts.csv`, or pass a project-relative CSV path. Bound `maxRows` for agent-readable output:
+
+```json
+{
+  "csvPath": "concepts.csv",
+  "maxRows": 2
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "tool": "read_csv_preview",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "ok": true,
+    "path": "<PROJECT_ROOT>/concepts.csv",
+    "delimiter": ",",
+    "columns": ["id", "concept_en", "concept_source"],
+    "totalRows": 250,
+    "sampleRows": [
+      {
+        "id": "1",
+        "concept_en": "water",
+        "concept_source": "Swadesh"
+      },
+      {
+        "id": "2",
+        "concept_en": "fire",
+        "concept_source": "Swadesh"
+      }
+    ],
+    "maxRowsShown": 2
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `read_csv_preview` is currently exposed.

@@ -79,6 +79,40 @@ curl "$PARSE_BASE_URL/api/mcp/tools/read_text_preview?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Read a bounded preview from a Markdown/text file under the project workspace or docs root:
+
+```json
+{
+  "path": "README.md",
+  "startLine": 1,
+  "maxLines": 5,
+  "maxChars": 1200
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "tool": "read_text_preview",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "ok": true,
+    "path": "<PROJECT_ROOT>/README.md",
+    "lineStart": 1,
+    "lineEnd": 5,
+    "totalLines": 120,
+    "truncated": false,
+    "content": "# PARSE\n\nFieldwork-first linguistic annotation workstation."
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `read_text_preview` is currently exposed.

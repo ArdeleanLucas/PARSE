@@ -31,7 +31,7 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 
 ### Parameters
 
-- `concept_range` (type=unspecified) — Either a range string like '1-25' or an explicit concept ID list.
+- `concept_range` (type=unspecified) — Either a range string like `"1-25"`, a single ID like `"42"`, or an explicit concept ID list such as `["1", "2", "3"]`.
 - `speakers` (type=array)
 - `dryRun` (type=boolean) — Preview the resolved speaker + concept scope without computing the full compare bundle.
 
@@ -79,6 +79,47 @@ curl "$PARSE_BASE_URL/api/mcp/tools/prepare_compare_mode?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+
+## Worked example
+
+Valid `concept_range` inputs include a numeric range string, a single numeric ID, or an explicit ID list. Prefer `dryRun: true` first to confirm the resolved scope:
+
+```json
+{
+  "concept_range": "1-25",
+  "speakers": ["Khan01", "Khan02"],
+  "dryRun": true
+}
+```
+
+Equivalent explicit-list form for the first three concepts:
+
+```json
+{
+  "concept_range": ["1", "2", "3"],
+  "speakers": ["Khan01", "Khan02"],
+  "dryRun": true
+}
+```
+
+Dry-run response shape:
+
+```json
+{
+  "tool": "prepare_compare_mode",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "dryRun": true,
+    "concept_ids": ["1", "2", "3"],
+    "speakers": ["Khan01", "Khan02"],
+    "speaker_count": 2,
+    "note": "Dry run only. No compare preview computations were executed."
+  }
+}
+```
 
 ## Quality checklist
 

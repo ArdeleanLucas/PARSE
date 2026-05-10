@@ -83,6 +83,99 @@ curl "$PARSE_BASE_URL/api/mcp/tools/phonetic_rules_apply?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked examples
+
+These examples use inline rules so the results are deterministic across projects. Omit `rules` to use the project's `phonetic_rules.json`. In wrapped HTTP/MCP responses, `result.mode` stays `read-only`; the requested operation is visible from the distinct result keys (`normalized`, `variants`, or `isEquivalent`/`similarityScore`).
+
+Normalize strips IPA delimiters, lowercases, and normalizes whitespace:
+
+```json
+{
+  "form": " /Yek/ ",
+  "mode": "normalize"
+}
+```
+
+```json
+{
+  "tool": "phonetic_rules_apply",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "form": "/Yek/",
+    "normalized": "yek"
+  }
+}
+```
+
+Apply returns the canonical rule-applied form in `variants`:
+
+```json
+{
+  "form": "pa",
+  "mode": "apply",
+  "rules": [
+    {
+      "from": "p",
+      "to": "b",
+      "context": "onset",
+      "bidirectional": false
+    }
+  ]
+}
+```
+
+```json
+{
+  "tool": "phonetic_rules_apply",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "form": "pa",
+    "normalized": "pa",
+    "variants": "ba"
+  }
+}
+```
+
+Equivalence compares two forms and returns a boolean plus rounded similarity score:
+
+```json
+{
+  "form": "pa",
+  "form2": "ba",
+  "mode": "equivalence",
+  "rules": [
+    {
+      "from": "p",
+      "to": "b",
+      "context": "onset",
+      "bidirectional": false
+    }
+  ]
+}
+```
+
+```json
+{
+  "tool": "phonetic_rules_apply",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "form": "pa",
+    "form2": "ba",
+    "isEquivalent": true,
+    "similarityScore": 1.0
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `phonetic_rules_apply` is currently exposed.

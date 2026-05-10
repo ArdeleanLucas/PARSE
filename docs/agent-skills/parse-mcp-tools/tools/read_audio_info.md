@@ -31,7 +31,7 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 
 ### Parameters
 
-- `sourceWav` (type=string; minLength=1; maxLength=512)
+- `sourceWav` (type=string; minLength=1; maxLength=512) — Project-audio-relative WAV path such as `audio/working/Khan01/Khan01.wav`, or an allowed absolute path when external read roots are configured.
 
 ### MCP annotations
 
@@ -75,6 +75,38 @@ curl "$PARSE_BASE_URL/api/mcp/tools/read_audio_info?mode=active"
 - It is suitable for reconnaissance, schema validation, reports, and preflight checks.
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+
+## Worked example
+
+`sourceWav` may be a project-relative path under the audio directory, such as `audio/working/<Speaker>/<file>.wav`:
+
+```json
+{
+  "sourceWav": "audio/working/Khan01/Khan01.wav"
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "tool": "read_audio_info",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "ok": true,
+    "path": "audio/working/Khan01/Khan01.wav",
+    "channels": 1,
+    "sampleWidthBytes": 2,
+    "sampleRateHz": 16000,
+    "numFrames": 4800000,
+    "durationSec": 300.0,
+    "fileSizeBytes": 9600044
+  }
+}
+```
 
 ## Quality checklist
 

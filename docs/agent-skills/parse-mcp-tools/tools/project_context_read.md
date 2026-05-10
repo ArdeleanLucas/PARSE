@@ -31,7 +31,7 @@ Use this portable skill when calling, validating, reviewing, or documenting the 
 
 ### Parameters
 
-- `include` (type=array)
+- `include` (type=array) — Optional subset of context blocks, e.g. `["project", "source_index", "annotation_inventory"]`; valid values are `project`, `source_index`, `annotation_inventory`, `enrichments_summary`, `ai_config`, and `constraints`.
 - `maxSpeakers` (type=integer; minimum=1; maximum=500)
 
 ### MCP annotations
@@ -76,6 +76,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/project_context_read?mode=active"
 - It is suitable for reconnaissance, schema validation, reports, and preflight checks.
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+
+## Worked example
+
+Use `include` to request only the high-level blocks needed for the current audit. Valid values include `project`, `source_index`, `annotation_inventory`, `enrichments_summary`, `ai_config`, and `constraints`:
+
+```json
+{
+  "include": ["project", "source_index", "annotation_inventory"],
+  "maxSpeakers": 25
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "tool": "project_context_read",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "fetchedAt": "2026-05-10T17:37:02Z",
+    "project": {},
+    "source_index": {
+      "speakerCount": 2,
+      "speakers": {
+        "Khan01": {
+          "sourceCount": 1,
+          "primarySource": "Khan01.wav",
+          "hasCsv": true
+        }
+      },
+      "truncated": false,
+      "maxSpeakers": 25
+    },
+    "annotation_inventory": {
+      "directory": "<PROJECT_ROOT>/annotations",
+      "exists": true,
+      "fileCount": 2,
+      "sample": ["Khan01.parse.json", "Khan02.parse.json"]
+    }
+  }
+}
+```
 
 ## Quality checklist
 

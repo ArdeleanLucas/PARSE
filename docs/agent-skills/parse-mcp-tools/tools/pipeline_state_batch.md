@@ -76,6 +76,75 @@ curl "$PARSE_BASE_URL/api/mcp/tools/pipeline_state_batch?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Restrict the preflight to a speaker subset by passing `speakers`:
+
+```json
+{
+  "speakers": ["Khan01", "Khan02"]
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "tool": "pipeline_state_batch",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "count": 2,
+    "blockedSpeakers": 1,
+    "partialCoverageSpeakers": 1,
+    "rows": [
+      {
+        "speaker": "Khan01",
+        "duration_sec": 300.0,
+        "stt": {
+          "done": true,
+          "can_run": true,
+          "reason": null,
+          "segments": 82,
+          "full_coverage": true,
+          "coverage_fraction": 0.99
+        },
+        "ortho": {
+          "done": true,
+          "can_run": true,
+          "reason": null,
+          "intervals": 82,
+          "full_coverage": true,
+          "coverage_fraction": 0.99
+        },
+        "ipa": {
+          "done": false,
+          "can_run": true,
+          "reason": null,
+          "intervals": 0,
+          "full_coverage": false,
+          "coverage_fraction": 0.0
+        }
+      },
+      {
+        "speaker": "Khan02",
+        "duration_sec": 420.0,
+        "ipa": {
+          "done": false,
+          "can_run": false,
+          "reason": "No ortho intervals yet — run ORTH first",
+          "intervals": 0,
+          "full_coverage": false,
+          "coverage_fraction": 0.0
+        }
+      }
+    ]
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `pipeline_state_batch` is currently exposed.

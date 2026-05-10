@@ -76,6 +76,68 @@ curl "$PARSE_BASE_URL/api/mcp/tools/pipeline_state_read?mode=active"
 - If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Successful response example
+
+Call one speaker by ID:
+
+```json
+{
+  "speaker": "Khan01"
+}
+```
+
+A successful preflight response includes `done`, `full_coverage`, and coverage fields per step. Gate reruns on `full_coverage`, not only `done`:
+
+```json
+{
+  "tool": "pipeline_state_read",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "mode": "read-only",
+    "speaker": "Khan01",
+    "duration_sec": 300.0,
+    "normalize": {
+      "done": true,
+      "can_run": true,
+      "reason": null,
+      "path": "audio/working/Khan01/Khan01.wav"
+    },
+    "stt": {
+      "done": true,
+      "can_run": true,
+      "reason": null,
+      "segments": 82,
+      "coverage_start_sec": 0.0,
+      "coverage_end_sec": 299.2,
+      "coverage_fraction": 0.997,
+      "full_coverage": true
+    },
+    "ortho": {
+      "done": true,
+      "can_run": true,
+      "reason": null,
+      "intervals": 82,
+      "coverage_start_sec": 0.0,
+      "coverage_end_sec": 30.0,
+      "coverage_fraction": 0.1,
+      "full_coverage": false
+    },
+    "ipa": {
+      "done": false,
+      "can_run": true,
+      "reason": null,
+      "intervals": 0,
+      "coverage_start_sec": null,
+      "coverage_end_sec": null,
+      "coverage_fraction": 0.0,
+      "full_coverage": false
+    }
+  }
+}
+```
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `pipeline_state_read` is currently exposed.
