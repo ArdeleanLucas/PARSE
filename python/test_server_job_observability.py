@@ -337,6 +337,108 @@ def test_api_get_jobs_active_returns_active_job_payloads() -> None:
 
 
 
+def _seed_active_job(job_id: str, *, status: str, now: float, completed_age_sec: float | None = None) -> None:
+    completed_ts = None if completed_age_sec is None else now - completed_age_sec
+    server._jobs[job_id] = {
+        "jobId": job_id,
+        "type": "compute:full_pipeline",
+        "status": status,
+        "progress": 100.0 if completed_ts is not None else 50.0,
+        "result": {"ok": True} if status in {"complete", "completed", "done"} else None,
+        "error": "boom" if status == "error" else None,
+        "message": "terminal" if completed_ts is not None else "running",
+        "segmentsProcessed": 1,
+        "totalSegments": 1,
+        "created_ts": now - 60.0,
+        "updated_ts": completed_ts or now,
+        "completed_ts": completed_ts,
+        "meta": {"speaker": "Fail08", "language": "sdh"},
+        "locks": {"active": False, "resources": []},
+    }
+
+
+
+def test_active_jobs_includes_recently_completed_terminal_job(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "10")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("recent-complete", status="complete", now=now, completed_age_sec=3.0)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert [item["jobId"] for item in snapshots] == ["recent-complete"]
+
+
+
+def test_active_jobs_omits_terminal_job_past_dwell(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "10")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("old-complete", status="complete", now=now, completed_age_sec=30.0)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert snapshots == []
+
+
+
+def test_active_jobs_includes_recently_errored_job(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "10")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("recent-error", status="error", now=now, completed_age_sec=3.0)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert [item["jobId"] for item in snapshots] == ["recent-error"]
+
+
+
+def test_active_jobs_running_jobs_unaffected_by_dwell(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "0")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("still-running", status="running", now=now)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert [item["jobId"] for item in snapshots] == ["still-running"]
+
+
+
+def test_active_jobs_dwell_zero_disables_terminal_inclusion(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "0")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("recent-complete", status="complete", now=now, completed_age_sec=1.0)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert snapshots == []
+
+
+
+def test_active_jobs_payload_includes_started_ts_and_completed_ts(monkeypatch) -> None:
+    server._jobs.clear()
+    now = 1000.0
+    monkeypatch.setenv("PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC", "10")
+    monkeypatch.setattr(server.time, "time", lambda: now)
+    _seed_active_job("recent-complete", status="complete", now=now, completed_age_sec=3.0)
+
+    snapshots = server._list_active_jobs_snapshots()
+
+    assert isinstance(snapshots[0]["startedTs"], (int, float))
+    assert snapshots[0]["startedTs"] == 940.0
+    assert isinstance(snapshots[0]["completedTs"], (int, float))
+    assert snapshots[0]["completedTs"] == 997.0
+
+
+
 def test_api_get_job_error_logs_returns_traceback_and_stderr_tails(monkeypatch) -> None:
     server._jobs.clear()
     job_id = server._create_job("normalize", {"speaker": "Fail09"})
