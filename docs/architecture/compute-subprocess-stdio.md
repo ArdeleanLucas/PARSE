@@ -1,7 +1,7 @@
 # Compute subprocess stdio contract
 
 **Date:** 2026-05-10  
-**Related PRs:** #339 (`fix(lexeme): tee rerun child output`), #340 (`fix(compute): tee child stderr to parent terminal`)  
+**Related PRs:** #339 (`fix(lexeme): tee rerun child output`), #340 (`fix(compute): tee child stderr to parent terminal`), #344 (`refactor: reuse shared subprocess tee for lexeme reruns`)
 **Coordinator audit:** compute-child stdout/stderr fence regression introduced by PR #334 and made visible in job-tracked reruns by PR #338.
 
 ## Contract
@@ -32,13 +32,13 @@ The canonical helper is `python/shared/subprocess_tee.py::install_child_tee(log_
 
 PR #334 fenced lexeme rerun ORTH/IPA work in child processes so GPU/model failures could not poison the parent process. The entry function opened a per-PID log and rebound child stdout/stderr there. That preserved failure tails but removed live parent-terminal progress. PR #338 then made tagged reruns job-tracked, so Lucas saw only `/api/compute/lexemes_rerun_by_tag/status` polling while `[ORTH]`, `[IPA]`, `[STT]`, and concept-window lines disappeared.
 
-PR #339 restored lexeme-rerun live output. PR #340 generalized the fix for compute subprocesses and persistent workers.
+PR #339 restored lexeme-rerun live output with a narrow local tee. PR #340 generalized the fix for compute subprocesses and persistent workers. PR #344 then moved lexeme-rerun children onto the shared `install_child_tee` helper so all spawned compute children share one stdio contract.
 
 ## Entry inventory
 
 | Entry | File/lines at audit | Current stdio behavior | Status |
 |---|---:|---|---|
-| Lexeme rerun child | `python/server_routes/lexeme_rerun.py:154` | Local `_LexemeRerunTee` writes to per-PID log + inherited fd 1/2. | Fixed by #339; dedupe queued in `.hermes/handoffs/parse-back-end/2026-05-10-consolidate-subprocess-tee.md`. |
+| Lexeme rerun child | `python/server_routes/lexeme_rerun.py:127-129` | Calls `install_child_tee('/tmp/parse-lexeme-rerun-<kind>-<pid>.log')` and keeps the returned handles alive for the child lifetime. | Fixed by #339 and consolidated by #344. |
 | Compute subprocess child | `python/server_routes/jobs.py:321`, install at `:337` | Calls `install_child_tee('/tmp/parse-compute-{job_id}.stderr.log')`. | Fixed by #340. |
 | Persistent compute worker | `python/workers/compute_worker.py:454`, install at `:463` | Calls `install_child_tee('/tmp/parse-compute-worker.stderr.log')`. | Fixed by #340. |
 
@@ -60,4 +60,4 @@ Run this before approving new spawn-child compute work:
 grep -rn 'sys\.stderr *= *open' python/ | grep -v test_ | grep -v shared/subprocess_tee.py
 ```
 
-Expected result after #340: no output. If a future match appears in a `multiprocessing.spawn` child entry, replace it with `install_child_tee(log_path)` or prove the child is not a live progress path.
+Expected result after #344: no output. If a future match appears in a `multiprocessing.spawn` child entry, replace it with `install_child_tee(log_path)` or prove the child is not a live progress path.

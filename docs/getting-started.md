@@ -204,7 +204,7 @@ The template also explains the current ORTH runtime contract:
 - HF ORTH consumes the decode-level anti-cascade guards: `condition_on_previous_text=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, `temperature=0.0`, `do_sample=false`, and prompt ids from `initial_prompt`. `compute_type`, `vad_filter`, and `vad_parameters` remain legacy faster-whisper/CT2 options and are logged as ignored by HF.
 - If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; set `"initial_prompt": ""` explicitly to opt out.
 - Concept-window short clips do not seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out.
-- STT/ORTH language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing Whisper auto-detect.
+- STT/ORTH/IPA language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing auto-detect.
 - `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime and using the same language-resolution guard.
 
 #### `ipa` and `wav2vec2`
