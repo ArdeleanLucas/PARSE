@@ -99,7 +99,7 @@ function pickLongestInterval(intervals: readonly AnnotationInterval[]): Annotati
 }
 
 function conceptIntervalsForKey(record: AnnotationRecord | null | undefined, conceptKey: string): AnnotationInterval[] {
-  return (record?.tiers.concept?.intervals ?? []).filter((interval) => String(interval.concept_id ?? '') === conceptKey);
+  return (record?.tiers?.concept?.intervals ?? []).filter((interval) => String(interval.concept_id ?? '') === conceptKey);
 }
 
 function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: AnnotationInterval): boolean {
@@ -114,7 +114,7 @@ function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: An
 }
 
 function ipaIntervalsForConceptIntervals(record: AnnotationRecord | null | undefined, conceptIntervals: readonly AnnotationInterval[]): AnnotationInterval[] {
-  const ipaIntervals = record?.tiers.ipa?.intervals ?? [];
+  const ipaIntervals = record?.tiers?.ipa?.intervals ?? [];
   return ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval)));
 }
 
@@ -165,7 +165,7 @@ export function buildSpeakerForm(
   flagged: boolean,
   primaryContactCodes: readonly string[],
 ): SpeakerForm {
-  const conceptIntervals = (record?.tiers.concept?.intervals ?? []).filter((interval) => conceptIntervalMatchesSpeakerFormConcept(concept, interval));
+  const conceptIntervals = (record?.tiers?.concept?.intervals ?? []).filter((interval) => conceptIntervalMatchesSpeakerFormConcept(concept, interval));
   const matchingIpaIntervals = ipaIntervalsForConceptIntervals(record, conceptIntervals);
   const utterances = matchingIpaIntervals.length;
 
