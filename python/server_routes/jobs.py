@@ -4,6 +4,47 @@ from __future__ import annotations
 import server as _server
 from shared.subprocess_tee import install_child_tee
 
+_ACTIVE_JOBS_TERMINAL_DWELL_ENV = 'PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC'
+_ACTIVE_JOBS_TERMINAL_STATUSES = {'complete', 'completed', 'done', 'error', 'failed', 'cancelled', 'canceled'}
+_ACTIVE_JOBS_SUCCESS_STATUSES = {'complete', 'completed', 'done'}
+
+
+def _coerce_job_timestamp(job: _server.Dict[str, _server.Any], *keys: str) -> _server.Optional[float]:
+    for key in keys:
+        if key not in job:
+            continue
+        value = job.get(key)
+        if value is None:
+            continue
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            continue
+        return timestamp
+    return None
+
+
+def _active_jobs_terminal_dwell_seconds() -> float:
+    raw_value = str(_server.os.environ.get(_ACTIVE_JOBS_TERMINAL_DWELL_ENV, '10')).strip()
+    try:
+        dwell_seconds = float(raw_value)
+    except (TypeError, ValueError):
+        dwell_seconds = 10.0
+    return max(0.0, min(dwell_seconds, 120.0))
+
+
+def _should_include_active_job_snapshot(job: _server.Dict[str, _server.Any], *, now_ts: float, dwell_seconds: float) -> bool:
+    status = str(job.get('status') or '').strip().lower()
+    if status == 'running':
+        return True
+    if status not in _ACTIVE_JOBS_TERMINAL_STATUSES or dwell_seconds <= 0.0:
+        return False
+    completed_ts = _coerce_job_timestamp(job, 'completed_ts', 'completedTs')
+    if completed_ts is None:
+        return False
+    return completed_ts >= now_ts - dwell_seconds
+
+
 def _resolve_compute_mode() -> str:
     """Return the active compute mode — 'thread' (default), 'subprocess',
     or 'persistent'.
@@ -871,11 +912,18 @@ def _list_jobs_snapshots(*, statuses: _server.Optional[_server.Sequence[str]]=No
 
 def _job_response_payload(job: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     status = str(job.get('status') or 'error')
+    normalized_status = status.strip().lower()
     job_id = str(job.get('jobId') or '')
     payload: _server.Dict[str, _server.Any] = {'jobId': job_id, 'status': status, 'progress': _server._clamp_progress(job.get('progress', 0.0)), 'result': job.get('result')}
     job_type = str(job.get('type') or '')
     if job_type:
         payload['type'] = job_type
+    started_ts = _coerce_job_timestamp(job, 'started_ts', 'startedTs', 'created_ts', 'createdTs')
+    if started_ts is not None:
+        payload['startedTs'] = started_ts
+    completed_ts = _coerce_job_timestamp(job, 'completed_ts', 'completedTs')
+    if completed_ts is not None:
+        payload['completedTs'] = completed_ts
     meta = job.get('meta') if isinstance(job.get('meta'), dict) else {}
     if isinstance(meta, dict):
         session_id = str(meta.get('sessionId') or '').strip()
@@ -900,22 +948,24 @@ def _job_response_payload(job: _server.Dict[str, _server.Any]) -> _server.Dict[s
     if job_type == 'chat:run':
         payload['runId'] = job_id
         payload.update(_server._chat_public_policy_payload())
-    done = status in {'complete', 'error'}
+    done = normalized_status in _ACTIVE_JOBS_TERMINAL_STATUSES
     payload['done'] = done
-    payload['success'] = status == 'complete'
+    payload['success'] = normalized_status in _ACTIVE_JOBS_SUCCESS_STATUSES
     return payload
 
 def _list_active_jobs_snapshots() -> _server.List[_server.Dict[str, _server.Any]]:
-    """Return public snapshots for all currently-running jobs.
+    """Return public snapshots for currently-running and recent terminal jobs.
 
-    Used by the frontend on page load to rehydrate in-flight progress bars
-    (STT, normalize, IPA, etc.) after a reload — backend threads outlive the
-    browser, so the job is still running; the UI just lost its ``job_id``.
+    Running jobs rehydrate in-flight progress bars after a reload. Terminal
+    jobs dwell briefly so the header strip can render completion/error chips
+    before its local auto-dismiss removes them from view.
     """
     results: _server.List[_server.Dict[str, _server.Any]] = []
+    now_ts = _server.time.time()
+    dwell_seconds = _active_jobs_terminal_dwell_seconds()
     with _server._jobs_lock:
         for job in _server._jobs.values():
-            if job.get('status') != 'running':
+            if not _should_include_active_job_snapshot(job, now_ts=now_ts, dwell_seconds=dwell_seconds):
                 continue
             payload = _server._job_response_payload(job)
             meta = job.get('meta') if isinstance(job.get('meta'), dict) else {}
