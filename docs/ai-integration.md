@@ -190,6 +190,7 @@ Current behavior described in the README:
 - On WSL, the aligner now resolves to **CPU by default** for long wav2vec2 CTC workloads
 - `config/ai_config.json` exposes `wav2vec2.force_cpu` and `wav2vec2.chunk_size` so long runs can be tuned without code changes
 - recent fixes also cache `EspeakBackend` instances per language and report progress during Tier 2 forced alignment, which matters most on slower CPU-heavy WSL runs
+- For per-language empirical evidence, configuration knobs, and tuning recommendations, see [`wav2vec2-xlsr-53-espeak-cv-ft`](models/wav2vec2-xlsr-53-espeak-cv-ft.md)
 
 ### Silero VAD
 
