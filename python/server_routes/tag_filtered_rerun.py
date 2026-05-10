@@ -18,6 +18,12 @@ def _load_tags_vocab() -> list[dict]:
     return list(tags_store.fetch_all().get("tags", []))
 
 
+def _write_tagged_rerun_annotation(speaker: str, annotation_path: _server.pathlib.Path, annotation: dict) -> None:
+    canonical_path = _server._annotation_record_path_for_speaker(speaker)
+    legacy_path = _server._annotation_legacy_record_path_for_speaker(speaker)
+    _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+
+
 def _api_post_concepts_by_tag(self) -> None:
     try:
         body = self._expect_object(self._read_json_body(), "body")
@@ -54,6 +60,8 @@ def _api_post_lexemes_rerun_by_tag(self) -> None:
             create_job=_server._create_job,
             launch_compute_runner=_server._launch_compute_runner,
             job_conflict_error_cls=_server.JobResourceConflictError,
+            annotation_writer=_write_tagged_rerun_annotation,
+            annotation_touch_metadata=_server._annotation_touch_metadata,
         )
     except TagFilteredHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc

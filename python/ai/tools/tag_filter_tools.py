@@ -399,6 +399,19 @@ def _annotation_read_path(project_root: Path) -> Callable[[str], Path]:
     return resolver
 
 
+def _annotation_writer(project_root: Path) -> Callable[[str, Path, Dict[str, Any]], None]:
+    annotations_dir = project_root / "annotations"
+
+    def writer(speaker: str, annotation_path: Path, record: Dict[str, Any]) -> None:
+        canonical = annotations_dir / "{0}.parse.json".format(speaker)
+        legacy = annotations_dir / "{0}.json".format(speaker)
+        for path in (annotation_path, canonical, legacy):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    return writer
+
+
 def _resolve_audio_path(project_root: Path) -> Callable[[str], Path]:
     """Mirror Lane A's HTTP route via ``app.services.audio_paths``.
 
@@ -597,31 +610,43 @@ def tool_rerun_lexemes_by_tag(tools: "ParseChatTools", args: Dict[str, Any]) -> 
     )
 
     locks_dir = tools.project_root / ".parse-locks"
-    results: List[Dict[str, Any]] = []
-    for speaker in speakers or []:
-        for hit in by_speaker.get(speaker, []):
-            results.extend(
-                _per_concept_rerun(
-                    speaker,
-                    hit,
-                    field,
-                    pad,
-                    project_root=tools.project_root,
-                    locks_dir=locks_dir,
-                )
-            )
+    _ensure_rerun_imports()
+    from app.http.tag_filtered_rerun_handlers import LexemesRerunByTagPlan, run_lexemes_rerun_by_tag_loop
+
+    all_hits = [hit for speaker in speakers or [] for hit in by_speaker.get(speaker, [])]
+    plan = LexemesRerunByTagPlan(
+        labels=labels,
+        match=match,
+        field=field,
+        pad=pad,
+        speakers=list(speakers or []),
+        resolved=resolved,
+        per_speaker=per_speaker,
+        all_hits=all_hits,
+        by_speaker=by_speaker,
+    )
+    payload = run_lexemes_rerun_by_tag_loop(
+        plan,
+        project_root=tools.project_root,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_read_path(tools.project_root),
+        read_json_any_file=_read_json_any_file,
+        normalize_annotation_record=_normalize_annotation_record,
+        resolve_audio_path_for_speaker=_resolve_audio_path(tools.project_root),
+        run_ortho_interval=_run_ortho_interval,
+        run_ipa_interval=_run_ipa_interval,
+        build_post_run_ortho_response=build_post_run_ortho_response,
+        build_post_run_ipa_response=build_post_run_ipa_response,
+        locks_dir=locks_dir,
+        annotation_writer=_annotation_writer(tools.project_root),
+    )
 
     return {
         "ok": True,
         "jobId": None,
-        "resolved": {
-            "totalConcepts": sum(entry["conceptCount"] for entry in per_speaker.values()),
-            "perSpeaker": per_speaker,
-            "unknownTags": list(resolved.unknown),
-            "ambiguousTags": dict(resolved.ambiguous),
-        },
-        "total": len(results),
-        "results": results,
+        "resolved": payload["resolved"],
+        "total": payload["total"],
+        "results": payload["results"],
     }
 
 
