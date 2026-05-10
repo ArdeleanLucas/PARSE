@@ -379,10 +379,10 @@ The in-app assistant works through `python/ai/chat_tools.py` (registry/orchestra
 
 Current counts:
 
-- **58** built-in PARSE chat tools
-- **58** default MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
-- **62** total default MCP adapter tools including 3 workflow macros + `mcp_get_exposure_mode`
-- **42** total legacy curated opt-out tools when `config/mcp_config.json` sets `{ "expose_all_tools": false }`
+- **60** built-in PARSE chat tools
+- **60** default MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
+- **64** total default MCP adapter tools including 3 workflow macros + `mcp_get_exposure_mode`
+- **44** total legacy curated opt-out tools when `config/mcp_config.json` sets `{ "expose_all_tools": false }`
 
 This separation matters architecturally:
 

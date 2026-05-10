@@ -1,0 +1,132 @@
+---
+name: parse-mcp-tool-lexeme-notes-read
+description: "Use PARSE MCP tool `lexeme_notes_read`: Read lexeme-level notes from parse-enrichments.json. Optionally filter by speaker and/or conceptId."
+version: 1.0.0
+source: PARSE MCP catalog
+source_generated_at: 2026-05-10T17:37:02Z
+license: MIT
+tags:
+  - parse
+  - mcp
+  - tool
+  - chat
+---
+
+# PARSE MCP Tool Skill — `lexeme_notes_read`
+
+Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `lexeme_notes_read` for any research project, speaker set, language, or corpus hosted in PARSE.
+
+> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+
+## Tool contract snapshot
+
+- **Tool name:** `lexeme_notes_read`
+- **Skill name:** `parse-mcp-tool-lexeme-notes-read`
+- **Family:** `chat`
+- **Mutability:** `read_only`
+- **Supports dry-run:** `No`
+- **Required inputs:** None
+- **`additionalProperties`:** `False`
+- **Catalog description:** Read lexeme-level notes from parse-enrichments.json. Optionally filter by speaker and/or conceptId.
+
+### Parameters
+
+- `speaker` (type=string; minLength=1; maxLength=200) — Filter to a single speaker.
+- `conceptId` (type=string; minLength=1; maxLength=128) — Filter to a single concept ID.
+
+### MCP annotations
+
+- `destructiveHint`: `False`
+- `idempotentHint`: `True`
+- `readOnlyHint`: `True`
+
+### Preconditions advertised by catalog
+
+- The PARSE project root must be available and readable. (`project_state`, `required`)
+
+### Postconditions advertised by catalog
+
+- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
+
+## Portable setup
+
+Use placeholders instead of machine-specific paths:
+
+```bash
+cd <PARSE_REPO>
+export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
+# Optional when input files live outside the PARSE project root:
+export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
+PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+```
+
+For the HTTP MCP bridge, discover the live schema before calling:
+
+```bash
+curl "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_read?mode=active"
+```
+
+## Workflow
+
+1. **Discover** – Confirm `lexeme_notes_read` is exposed by the active MCP catalog and inspect its current `inputSchema`.
+2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
+3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
+4. **Apply safety policy**:
+- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
+- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
+- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
+5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+
+## Filtered read example
+
+Read notes for one speaker/concept pair:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_read?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"speaker":"Khan01","conceptId":"17"}'
+```
+
+Representative response shape:
+
+```json
+{
+  "tool": "lexeme_notes_read",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "lexeme_notes": {
+      "Khan01": {
+        "17": {
+          "user_note": "Check this rain-form boundary against the source CSV.",
+          "import_note": "Imported from Audition marker row 42.",
+          "updated_at": "2026-05-10T18:42:00Z"
+        }
+      }
+    },
+    "mode": "read-only",
+    "previewOnly": true
+  }
+}
+```
+
+Omit `speaker` to scan all speakers, omit `conceptId` to return all notes for a speaker, or omit both to return the full `lexeme_notes` block.
+
+## Quality checklist
+
+- [ ] Live catalog confirms `lexeme_notes_read` is currently exposed.
+- [ ] The current live schema was inspected before constructing arguments.
+- [ ] Required arguments were provided and optional result limits were bounded.
+- [ ] Dry-run/preview was used first when advertised by the catalog.
+- [ ] Any returned `jobId` was polled to terminal state.
+- [ ] Any file mutation was independently audited after apply.
+- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+
+## Anti-patterns
+
+- Calling internal helper functions and presenting that as MCP validation.
+- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
+- Copying local workstation paths into reusable docs, scripts, or handoffs.
+- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
+- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
+- Reporting before a started job reaches terminal state.

@@ -239,11 +239,11 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (58 tools)
+## Full built-in chat tool surface (60 tools)
 
-The in-app assistant currently exposes **58 PARSE-specific tools**.
+The in-app assistant currently exposes **60 PARSE-specific tools**.
 
-### Read-only / preview tools (15)
+### Read-only / preview tools (16)
 
 | Tool | Description |
 |---|---|
@@ -262,6 +262,7 @@ The in-app assistant currently exposes **58 PARSE-specific tools**.
 | `enrichments_read` | Read computed enrichments with optional top-level filtering |
 | `lexeme_notes_read` | Read stored lexeme notes with optional speaker/concept filtering |
 | `phonetic_rules_apply` | Apply or inspect phonetic-rule normalization / equivalence logic |
+| `list_concepts_by_tag` | Resolve tag queries to matched concepts per speaker without launching compute work |
 
 ### Job observability tools (4)
 
@@ -272,7 +273,7 @@ The in-app assistant currently exposes **58 PARSE-specific tools**.
 | `job_status` | Read one generic job snapshot, including `errorCode`, progress, lock metadata, and log counts |
 | `job_logs` | Read structured per-job logs and surfaced crash-log tails |
 
-### Job-triggering tools (16)
+### Job-triggering tools (17)
 
 | Tool | Description |
 |---|---|
@@ -292,6 +293,7 @@ The in-app assistant currently exposes **58 PARSE-specific tools**.
 | `pipeline_run` | Start a one-speaker pipeline or ORTH-only run with explicit steps and overwrites |
 | `ipa_transcribe_acoustic_start` | Start Tier 3 acoustic IPA transcription for one speaker |
 | `ipa_transcribe_acoustic_status` | Poll status/result of a Tier 3 acoustic IPA job |
+| `rerun_lexemes_by_tag` | Run ORTH and/or IPA over concepts matched by a tag query |
 
 ### Alignment / correction tools (3)
 
@@ -308,7 +310,7 @@ The in-app assistant currently exposes **58 PARSE-specific tools**.
 | `prepare_tag_import` | Validate and preview a tag CSV before import |
 | `import_tag_csv` | Import tags from a prepared CSV file |
 
-### Write / export / merge tools (17)
+### Write / export / merge tools (18)
 
 | Tool | Description |
 |---|---|
@@ -350,15 +352,15 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 58-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 60-tool chat surface.
 
-- **Built-in chat tools**: 58
-- **Default MCP task tools**: 58
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 62
-- **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 42
-- **Full MCP adapter surface with `expose_all_tools=true`**: 62
+- **Built-in chat tools**: 60
+- **Default MCP task tools**: 60
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 64
+- **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 44
+- **Full MCP adapter surface with `expose_all_tools=true`**: 64
 
-The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 38-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
+The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 40-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

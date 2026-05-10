@@ -8,12 +8,12 @@ This document is now primarily a **status record**, not a speculative roadmap. T
 
 PARSE now ships a full workstation-local external-agent surface:
 
-- **58** in-app `ParseChatTools`
-- **58** default MCP task tools
+- **60** in-app `ParseChatTools`
+- **60** default MCP task tools
 - **3** workflow macros
-- **62** tools on the default adapter surface including `mcp_get_exposure_mode`
-- **62** tools on the full adapter surface when `expose_all_tools=true`
-- **42** tools on the legacy curated opt-out surface when `expose_all_tools=false` is configured explicitly
+- **64** tools on the default adapter surface including `mcp_get_exposure_mode`
+- **64** tools on the full adapter surface when `expose_all_tools=true`
+- **44** tools on the legacy curated opt-out surface when `expose_all_tools=false` is configured explicitly
 - **OpenAPI 3.1** docs at `GET /openapi.json`, `GET /docs`, and `GET /redoc`
 - **HTTP MCP bridge** on the main PARSE server
 - **stdio MCP adapter** for MCP-native clients
@@ -29,7 +29,7 @@ In other words: PARSE is already usable as an agent-facing workstation API, not 
 **Status:** ✅ Complete
 
 **Shipped on `main`:**
-- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) exposes the shipped **58-tool** default task surface from `DEFAULT_MCP_TOOL_NAMES`.
+- `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) exposes the shipped **60-tool** default task surface from `DEFAULT_MCP_TOOL_NAMES`.
 - `python/ai/workflow_tools.py` adds **3** workflow macros on top of that base.
 - `mcp_get_exposure_mode` is always available so clients can inspect the active exposure mode.
 - `config/mcp_config.json` (or fallback root `mcp_config.json`) can opt into the legacy curated surface or explicitly force full exposure:
@@ -45,9 +45,9 @@ or
 ```
 
 **Current totals:**
-- default adapter surface: **62** tools total
-- legacy curated opt-out surface: **42** tools total
-- full adapter surface: **62** tools total
+- default adapter surface: **64** tools total
+- legacy curated opt-out surface: **44** tools total
+- full adapter surface: **64** tools total
 
 **Why this matters:**
 PARSE no longer requires external agents to tunnel through the browser chat dock to reach core workstation actions.
