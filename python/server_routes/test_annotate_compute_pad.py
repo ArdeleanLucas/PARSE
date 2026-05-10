@@ -400,4 +400,3 @@ def test_compute_speaker_ortho_concept_windows_emits_tier2_and_write_progress(
     # Final concept-windows-complete event at 95.
     final = [p for p, m in progress_events if "concept-windows complete" in m.lower()]
     assert final and abs(final[-1] - 95.0) < 1e-6, progress_events
-
