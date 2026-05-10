@@ -83,6 +83,50 @@ curl "$PARSE_BASE_URL/api/mcp/tools/import_processed_speaker?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run example
+
+Sample dry-run invocation. Relative paths resolve under `PARSE_PROJECT_ROOT`; absolute paths must sit under an allowed external read root.
+
+```json
+{
+  "speaker": "Fail02",
+  "workingWav": "processed/Fail02/speaker.wav",
+  "annotationJson": "processed/Fail02/Fail02.parse.json",
+  "peaksJson": "processed/Fail02/peaks.json",
+  "transcriptCsv": "processed/Fail02/transcript.csv",
+  "dryRun": true
+}
+```
+
+Expected dry-run output format:
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "plan": {
+    "speaker": "Fail02",
+    "workingWav": "<PROJECT_ROOT>/processed/Fail02/speaker.wav",
+    "annotationJson": "<PROJECT_ROOT>/processed/Fail02/Fail02.parse.json",
+    "peaksJson": "<PROJECT_ROOT>/processed/Fail02/peaks.json",
+    "transcriptCsv": "<PROJECT_ROOT>/processed/Fail02/transcript.csv",
+    "audioDest": "audio/working/Fail02/speaker.wav",
+    "annotationDest": "annotations/Fail02.json",
+    "peaksDest": "peaks/Fail02.json",
+    "transcriptDest": "imports/legacy/Fail02/transcript.csv",
+    "conceptCount": 128,
+    "languageCode": "ku",
+    "projectId": "parse-project",
+    "wavSizeBytes": 1048576,
+    "annotationSizeBytes": 65536,
+    "peaksSizeBytes": 32768
+  },
+  "message": "Preview only. Run again with dryRun=false to copy processed artifacts and register the speaker."
+}
+```
+
+Do not proceed to `dryRun: false` until the destination paths and `conceptCount` match the intended import.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `import_processed_speaker` is currently exposed.

@@ -79,6 +79,34 @@ curl "$PARSE_BASE_URL/api/mcp/tools/export_nexus?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run example
+
+Successful HTTP MCP dry-run command:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/export_nexus?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"dryRun":true}'
+```
+
+Representative response shape and preview:
+
+```json
+{
+  "tool": "export_nexus",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "previewOnly": true,
+    "preview": "#NEXUS\n\nBEGIN TAXA;\n    DIMENSIONS NTAX=2;\n    TAXLABELS\n        Fail01\n        Fail02\n    ;\nEND;\n\nBEGIN CHARACTERS;",
+    "truncated": true,
+    "totalChars": 3210
+  }
+}
+```
+
+A live write uses the same endpoint with `{"outputPath":"exports/cognates.nex","dryRun":false}` and returns `success`, `outputPath`, and `totalChars`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `export_nexus` is currently exposed.

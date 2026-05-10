@@ -81,6 +81,36 @@ curl "$PARSE_BASE_URL/api/mcp/tools/ipa_transcribe_acoustic_start?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run example
+
+Sample dry-run tool arguments:
+
+```json
+{
+  "speaker": "Fail02",
+  "overwrite": false,
+  "dryRun": true
+}
+```
+
+Expected result payload:
+
+```json
+{
+  "readOnly": true,
+  "previewOnly": true,
+  "status": "dry_run",
+  "tool": "ipa_transcribe_acoustic_start",
+  "plan": {
+    "speaker": "Fail02",
+    "overwrite": false
+  },
+  "note": "Dry run. Would launch the ipa_only compute job, running facebook/wav2vec2-xlsr-53-espeak-cv-ft CTC on each ortho interval's audio window. No text-based IPA paths exist."
+}
+```
+
+When `dryRun` is false, the tool starts an `ipa_only` compute job and returns a UUID `jobId`; poll it with `ipa_transcribe_acoustic_status`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `ipa_transcribe_acoustic_start` is currently exposed.

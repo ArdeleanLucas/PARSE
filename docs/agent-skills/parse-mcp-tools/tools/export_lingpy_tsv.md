@@ -79,6 +79,29 @@ curl "$PARSE_BASE_URL/api/mcp/tools/export_lingpy_tsv?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Worked example
+
+Use a project-relative `outputPath` such as `exports/lingpy_wordlist.tsv`; PARSE resolves it under `PARSE_PROJECT_ROOT` and creates the parent directory before writing.
+
+```json
+{
+  "outputPath": "exports/lingpy_wordlist.tsv",
+  "dryRun": false
+}
+```
+
+Representative write response:
+
+```json
+{
+  "success": true,
+  "outputPath": "<PROJECT_ROOT>/exports/lingpy_wordlist.tsv",
+  "rowCount": 128
+}
+```
+
+For a no-write preview, omit `outputPath` or set `dryRun: true`; the result includes `previewLines`, `totalLines`, `truncated`, and `rowCount`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `export_lingpy_tsv` is currently exposed.

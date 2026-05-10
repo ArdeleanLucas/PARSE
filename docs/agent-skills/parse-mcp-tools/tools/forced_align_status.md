@@ -77,6 +77,37 @@ curl "$PARSE_BASE_URL/api/mcp/tools/forced_align_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Example request/response
+
+Sample HTTP MCP status call using the UUID `jobId` returned by `forced_align_start`:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/forced_align_status?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"jobId":"550e8400-e29b-41d4-a716-446655440000"}'
+```
+
+Representative running response:
+
+```json
+{
+  "tool": "forced_align_status",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobId": "550e8400-e29b-41d4-a716-446655440000",
+    "tier": "tier2_forced_align",
+    "status": "running",
+    "progress": 42.0,
+    "message": "Aligning Tier 1 word windows",
+    "error": null,
+    "result": null
+  }
+}
+```
+
+If the `jobId` belongs to another job class, expect `status: "invalid_job_type"` with `expected` and `actual` fields.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `forced_align_status` is currently exposed.

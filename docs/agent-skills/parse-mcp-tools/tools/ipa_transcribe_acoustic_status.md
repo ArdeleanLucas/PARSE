@@ -77,6 +77,37 @@ curl "$PARSE_BASE_URL/api/mcp/tools/ipa_transcribe_acoustic_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Job ID example
+
+A valid `jobId` is the UUID string returned by `ipa_transcribe_acoustic_start` when called with `dryRun: false`; for example:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Representative status response:
+
+```json
+{
+  "readOnly": true,
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "tier": "tier3_acoustic_ipa",
+  "status": "complete",
+  "progress": 100.0,
+  "message": "Acoustic IPA complete",
+  "error": null,
+  "result": {
+    "speaker": "Fail02",
+    "filled": 96,
+    "skipped": 4
+  }
+}
+```
+
+If the original start response is lost, recover candidate IDs with `jobs_list` or `jobs_list_active` filtered to compute jobs for the speaker.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `ipa_transcribe_acoustic_status` is currently exposed.

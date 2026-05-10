@@ -83,6 +83,55 @@ curl "$PARSE_BASE_URL/api/mcp/tools/import_tag_csv?mode=active"
 - If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run example
+
+Sample dry-run input JSON for a custom tag CSV:
+
+```json
+{
+  "csvPath": "imports/tags/thesis-priority.csv",
+  "labelColumn": "concept_en",
+  "tagName": "Thesis priority",
+  "color": "#4461d4",
+  "dryRun": true,
+  "matchAllVariants": true,
+  "propagateToSpeakers": true
+}
+```
+
+Expected output format:
+
+```json
+{
+  "ok": true,
+  "matchedCount": 2,
+  "unmatchedCount": 1,
+  "matched": [
+    {
+      "csvLabel": "rain",
+      "conceptId": "12",
+      "conceptIds": ["12"],
+      "conceptLabel": "rain"
+    },
+    {
+      "csvLabel": "ice",
+      "conceptId": "34-a",
+      "conceptIds": ["34-a", "34-b"],
+      "conceptLabel": "ice (A)"
+    }
+  ],
+  "unmatched": [
+    {"csvLabel": "hail"}
+  ],
+  "matchedConceptCount": 3,
+  "dryRun": true,
+  "preview": true,
+  "message": "Will create tag 'Thesis priority' with 3 concepts. Call again with dryRun=false to confirm."
+}
+```
+
+If `tagName` is omitted, the dry-run result sets `needsTagName: true` and asks what the tag should be called; provide the name only after reviewing matched/unmatched rows.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `import_tag_csv` is currently exposed.

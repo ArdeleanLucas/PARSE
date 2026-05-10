@@ -77,6 +77,53 @@ curl "$PARSE_BASE_URL/api/mcp/tools/job_status?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Example API call/response
+
+Successful HTTP MCP call for a known job UUID:
+
+```bash
+curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/job_status?mode=active" \
+  -H 'Content-Type: application/json' \
+  --data '{"jobId":"550e8400-e29b-41d4-a716-446655440000"}'
+```
+
+Representative response:
+
+```json
+{
+  "tool": "job_status",
+  "ok": true,
+  "result": {
+    "readOnly": true,
+    "jobId": "550e8400-e29b-41d4-a716-446655440000",
+    "type": "compute:forced_align",
+    "status": "running",
+    "progress": 42.0,
+    "message": "Aligning Tier 1 word windows",
+    "error": null,
+    "errorCode": null,
+    "result": null,
+    "createdAt": "2026-05-10T20:15:00Z",
+    "updatedAt": "2026-05-10T20:15:08Z",
+    "completedAt": null,
+    "meta": {
+      "speaker": "Fail02",
+      "computeType": "forced_align"
+    },
+    "locks": {
+      "active": true,
+      "resources": [
+        {"kind": "speaker", "id": "Fail02"}
+      ],
+      "ttl_seconds": 600
+    },
+    "logCount": 3
+  }
+}
+```
+
+For unknown IDs, the tool returns `status: "not_found"`; do not retry blindly—recover a current ID with `jobs_list` or `jobs_list_active`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `job_status` is currently exposed.

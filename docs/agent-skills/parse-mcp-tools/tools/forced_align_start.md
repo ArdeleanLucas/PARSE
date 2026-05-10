@@ -84,6 +84,42 @@ curl "$PARSE_BASE_URL/api/mcp/tools/forced_align_start?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Dry-run example
+
+Sample dry-run tool arguments:
+
+```json
+{
+  "speaker": "Fail02",
+  "language": "ku",
+  "overwrite": false,
+  "padMs": 100,
+  "emitPhonemes": true,
+  "dryRun": true
+}
+```
+
+Expected result payload:
+
+```json
+{
+  "readOnly": true,
+  "previewOnly": true,
+  "status": "dry_run",
+  "tool": "forced_align_start",
+  "plan": {
+    "speaker": "Fail02",
+    "overwrite": false,
+    "language": "ku",
+    "padMs": 100,
+    "emitPhonemes": true
+  },
+  "note": "Dry run. Would launch a forced_align compute job against facebook/wav2vec2-xlsr-53-espeak-cv-ft. G2P output is used only to build CTC targets and is never persisted."
+}
+```
+
+When `dryRun` is false, the tool starts a `forced_align` compute job and returns a UUID `jobId`; poll it with `forced_align_status`.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `forced_align_start` is currently exposed.

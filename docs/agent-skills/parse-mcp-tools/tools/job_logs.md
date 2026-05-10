@@ -79,6 +79,51 @@ curl "$PARSE_BASE_URL/api/mcp/tools/job_logs?mode=active"
 - For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
 5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
 
+## Job ID example
+
+`jobId` is the UUID returned by any PARSE job-start tool or HTTP endpoint, such as `forced_align_start`, `ipa_transcribe_acoustic_start`, `stt_start`, `audio_normalize_start`, or `run_full_annotation_pipeline`.
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "offset": 0,
+  "limit": 50
+}
+```
+
+Representative response:
+
+```json
+{
+  "readOnly": true,
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "count": 3,
+  "offset": 0,
+  "limit": 50,
+  "logs": [
+    {
+      "ts": "2026-05-10T20:15:00Z",
+      "level": "info",
+      "event": "job.created",
+      "message": "Job created",
+      "source": "server",
+      "progress": 0.0
+    },
+    {
+      "ts": "2026-05-10T20:15:08Z",
+      "level": "info",
+      "event": "job.progress",
+      "message": "Aligning Tier 1 word windows",
+      "source": "server",
+      "progress": 42.0
+    }
+  ],
+  "logCount": 2
+}
+```
+
+Use `offset` plus `limit` to page through long logs; `count` is the total log entries currently retained for the job.
+
 ## Quality checklist
 
 - [ ] Live catalog confirms `job_logs` is currently exposed.
