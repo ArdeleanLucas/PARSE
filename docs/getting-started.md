@@ -34,7 +34,7 @@ The current PARSE launcher supports two common cases after you install `python/r
 - **Windows `python.exe` from WSL**, typically a conda environment such as:
 
 ```bash
-/mnt/c/Users/Lucas/anaconda3/envs/kurdish_asr/python.exe
+/path/to/your/python
 ```
 
 This second setup matters because some local speech/model stacks may already be installed in a Windows-side conda environment.
@@ -111,13 +111,13 @@ For real fieldwork workspaces, PARSE is designed to keep generated runtime state
 Use the workspace initializer once:
 
 ```bash
-# Scaffold a standalone workspace once
-scripts/parse-init-workspace.sh /path/to/parse-workspace
+# Scaffold a standalone project workspace once
+scripts/parse-init-workspace.sh <PROJECT_ROOT>
 
 # Then launch PARSE against that workspace
-PARSE_WORKSPACE_ROOT="/path/to/parse-workspace" \
-  PARSE_CHAT_MEMORY_PATH="/path/to/parse-workspace/parse-memory.md" \
-  PARSE_EXTERNAL_READ_ROOTS="/mnt/c/Users/Lucas/Thesis" \
+PARSE_WORKSPACE_ROOT="<PROJECT_ROOT>" \
+  PARSE_CHAT_MEMORY_PATH="<PROJECT_ROOT>/parse-memory.md" \
+  PARSE_EXTERNAL_READ_ROOTS="<OPTIONAL_READ_ROOTS>" \
   ./scripts/parse-run.sh
 ```
 
@@ -279,8 +279,8 @@ For persistent machine-local settings, create a gitignored `.parse-env` file at 
 Example:
 
 ```bash
-PARSE_EXTERNAL_READ_ROOTS=/mnt/c/Users/Lucas/Thesis
-PARSE_PY=/mnt/c/Users/Lucas/miniconda3/python.exe
+PARSE_EXTERNAL_READ_ROOTS=/absolute/path/to/optional/read/root
+PARSE_PY=/path/to/your/python
 PARSE_CHAT_MEMORY_PATH=/path/to/parse-memory.md
 ```
 
@@ -296,7 +296,7 @@ cp config/ai_config.example.json config/ai_config.json
 
 # Terminal 1 — Python API backend
 cd /path/to/parse
-/path/to/anaconda3/envs/kurdish_asr/python.exe python/server.py
+/path/to/your/python python/server.py
 
 # Terminal 2 — Vite frontend
 cd /path/to/parse
