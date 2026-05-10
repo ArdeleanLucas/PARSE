@@ -2,10 +2,11 @@
 agent: parse-back-end
 queued_by: parse-coordinator
 queued_at: 2026-05-10T14:20:00Z
-status: queued
+status: done
 related_prs:
   - 339
   - 340
+  - 344
 ---
 
 # Consolidate lexeme rerun child tee onto shared subprocess helper
@@ -58,6 +59,6 @@ grep -rn 'sys\.stderr *= *open' python/ | grep -v test_ | grep -v shared/subproc
 
 The final grep must produce no output.
 
-## What comes after
+## Completion
 
-Coordinator re-runs the grep audit and updates `docs/architecture/compute-subprocess-stdio.md` if line references changed materially.
+Completed by PR #344 (`refactor: reuse shared subprocess tee for lexeme reruns`). Coordinator re-ran the stderr-fence audit (`search_files` for `sys\.stderr\s*=\s*open`) and refreshed `docs/architecture/compute-subprocess-stdio.md` so the active queue no longer points at a shipped follow-up.

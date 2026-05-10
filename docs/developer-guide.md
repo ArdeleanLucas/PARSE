@@ -194,15 +194,16 @@ Relevant knobs and files:
 - `PARSE_USE_PERSISTENT_WORKER=true` for the persistent-worker path
 - `PARSE_FULL_PIPELINE_MIN_MEM_GB` for the host-memory preflight that turns low-memory full-pipeline starts into structured `oom_suspect` job errors
 - `PARSE_JOB_SNAPSHOT_DIR` for durable job snapshots; otherwise snapshots live under the workspace `.parse/jobs` directory and non-terminal records recover after restart as `server_restarted`
+- `PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC` for how long `/api/jobs/active` keeps terminal complete/error/cancelled jobs visible to the header strip (default 10s, clamped to 0-120s)
 - `GET /api/worker/status` for persistent-worker health checks
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
 - `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`
-- `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for synchronous reviewer-triggered interval reruns with pad values `0.0`, `0.2`, `0.5`
+- `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for reviewer-triggered interval reruns; default behavior starts tracked compute jobs `lexeme_rerun_ortho` / `lexeme_rerun_ipa`, and `async=false` is deprecated synchronous compatibility
 - `GET /api/survey-overlap` and `POST /api/survey-overlap` for source/survey labels, color coding, concept links, and per-speaker survey choices
 - `POST /api/concepts/{conceptId}/duplicate` for n-ary concept-row variant creation with a prewrite backup; first call rewrites the source row to `X (A)` and appends `X (B)`, subsequent calls on the same source item append `(C)`, `(D)`, … until the alphabet is exhausted
 - `POST /api/concepts/{conceptId}/survey-links` and `DELETE /api/concepts/{conceptId}/survey-links` for cross-survey link CRUD against the `concept_survey_links` sidecar (not `concepts.csv`)
 - `POST /api/concepts/relink-by-gloss` for cross-survey concept consolidation by canonical gloss (dry-run + apply with backups; fuzzy candidates are never auto-applied)
-- `POST /api/concepts/by-tag` and `POST /api/lexemes/rerun-by-tag` for tag-filtered concept queries and tag-filtered ORTH/IPA reruns (shared resolution code in `python/app/services/tag_resolver.py`; handlers in `python/app/http/tag_filtered_rerun_handlers.py`; route shim in `python/server_routes/tag_filtered_rerun.py`)
+- `POST /api/concepts/by-tag` and `POST /api/lexemes/rerun-by-tag` for tag-filtered concept queries and job-tracked tag-filtered ORTH/IPA reruns (`lexemes_rerun_by_tag`; `async=false` only for deprecated synchronous compatibility). Shared resolution lives in `python/app/services/tag_resolver.py`; handlers in `python/app/http/tag_filtered_rerun_handlers.py`; route shim in `python/server_routes/tag_filtered_rerun.py`.
 - `POST /api/locks/cleanup` plus startup cleanup for stale speaker-lock recovery; cleanup deletes stale `*.lock` files only and never kills processes
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.

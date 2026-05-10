@@ -105,7 +105,7 @@ Key behavior:
 - HF ORTH consumes decode-level anti-cascade guards: `condition_on_previous_text=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, `temperature=0.0`, `do_sample=false`, and prompt ids from `initial_prompt`. `compute_type`, `vad_filter`, and `vad_parameters` remain legacy faster-whisper/CT2 options and are logged as ignored by HF.
 - If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; an explicit `"initial_prompt": ""` remains the opt-out.
 - Concept-window ORTH/refine short clips deliberately do **not** seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out.
-- STT/ORTH language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing Whisper auto-detect.
+- STT/ORTH/IPA language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing auto-detect.
 - `refine_lexemes=true` adds a short-clip lexeme refinement pass after forced alignment and uses the same language-resolution guard.
 - Full-pipeline runs unload HF ORTH before wav2vec2 IPA and can cooperatively cancel ORTH through `POST /api/compute/{jobId}/cancel`, returning `partial_cancelled` with already-persisted intervals when cancellation lands mid-run.
 

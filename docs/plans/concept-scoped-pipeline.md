@@ -57,7 +57,7 @@ PR #196 tightened the ORTH/STT behavior for concept-window short clips:
 - PARSE does **not** seed Whisper with English concept IDs or gloss labels as `initial_prompt` for concept-window clips; after PR #216, those clips may still inherit the built-in Southern Kurdish Arabic-script ORTH decoder prime unless the config explicitly sets `"initial_prompt": ""`.
 - Transcription language resolves from payload first, then `annotation.metadata.language_code`.
 - If neither source supplies language, PARSE warns to stderr before allowing Whisper auto-detect.
-- The resolved ORTH language applies to full/concept-window ORTH and short-clip refine calls.
+- The resolved language applies to STT/ORTH/IPA scoped compute where the provider accepts an explicit language, including ORTH short-clip refine calls.
 
 ## Terminology lock
 

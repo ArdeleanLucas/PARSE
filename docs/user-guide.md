@@ -96,7 +96,7 @@ Current runtime truth:
 - HF ORTH uses 30-second low-level `WhisperForConditionalGeneration.generate()` chunks for whole-file transcription, resamples non-16 kHz in-memory clips, keeps concept-window timing from caller-supplied windows, and avoids `return_timestamps=True` in concept-window generation.
 - HF ORTH applies decode-level anti-cascade guards: `condition_on_previous_text=False`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and explicit prompt ids only when a caller opts in; legacy `compute_type`/VAD options are logged as ignored by HF.
 - Full-file, concept-window, and per-lexeme HF ORTH now suppress configured `ortho.initial_prompt` by default so short clips do not parrot the decoder prime. See [ORTH initial prompt suppression](./orth-initial-prompt-suppression.md) for the 2026-05-07 regression audit.
-- Concept-window ORTH/refine clips deliberately avoid English concept-ID/gloss seeding; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before Whisper auto-detect.
+- Concept-window STT/ORTH/IPA clips deliberately avoid English concept-ID/gloss seeding where Whisper-style decoding is involved; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before auto-detect.
 - Long ORTH jobs observe backend cancellation cooperatively. When cancellation arrives after some windows were written, PARSE can persist partial ORTH output and return `status: partial_cancelled` with `cancelled_at_interval` metadata.
 
 #### Forced alignment
@@ -182,7 +182,7 @@ Behavior worth knowing before you trigger a tagged-only run:
 
 - Match semantics default to `any`: a concept matches if it carries at least one of the selected tags. Switch to `all` to require every selected tag on the same concept; in that mode, unknown or ambiguous tag labels are rejected up-front so an AND query never silently degrades to "intersection over the resolved subset".
 - Ambiguous labels (the same label resolved to multiple tag ids in the global vocabulary) are rejected before any rerun work runs. Resolve the label by id or rename in the vocabulary and resubmit. This guarantees the rerun never spends GPU on a concept set the reviewer did not explicitly approve.
-- The post-run batch report lists per-concept results and surfaces per-concept errors (concept missing on the speaker, speaker locked, runner failure) inside the report rather than aborting the whole batch.
+- Tagged-only runs are tracked jobs: the global header shows active progress, then briefly shows complete/error/cancelled terminal chips before auto-dismiss. The post-run batch report lists per-concept results and surfaces per-concept errors (concept missing on the speaker, speaker locked, runner failure) inside the report rather than aborting the whole batch. Successful tagged ORTH/IPA results are persisted into the selected speakers' annotations; ORTH results also rebuild affected `ortho_words` so word-level displays do not desync after a partial rerun.
 
 The same tag-resolution backend is reused by the read-only `POST /api/concepts/by-tag` endpoint, so the modal preview and any agent or script that wants to know "which concepts would this rerun touch" share one source of truth.
 
@@ -193,13 +193,13 @@ Automation in PARSE is intentionally review-first.
 Annotate mode supports:
 
 - inline lane editing on STT / IPA / ORTH with context-menu split, merge-with-next, and delete actions; the ORTHOGRAPHIC editor prefers direct `tiers.ortho` text before falling back to imported/derived `ortho_words`, and saves still write through the reviewed `tiers.ortho` path
-- single-lexeme **Rerun ORTH** and **Rerun IPA** actions that call `/api/lexeme/run_ortho` or `/api/lexeme/run_ipa`, offer pad choices `0.0`, `0.2` (default), and `0.5`, and auto-save the confirmed tier text back into the selected interval
+- single-lexeme **Rerun ORTH** and **Rerun IPA** actions that start tracked `lexeme_rerun_ortho` / `lexeme_rerun_ipa` compute jobs through `/api/lexeme/run_ortho` or `/api/lexeme/run_ipa`, offer pad choices `0.0`, `0.2` (default), and `0.5`, and auto-save the confirmed tier text back into the selected interval
 - concept-window and edited-only STT / ORTH / IPA action-menu reruns that use the same pad vocabulary, so hard tokens can widen acoustic context without changing the reviewed interval bounds
 - per-speaker undo/redo with merge recovery and operation-labelled toasts
 - draggable lexeme timestamp editing plus waveform drag-select quick retime for the active concept
 - quick-retime cancel/Escape dismissal before commit
 - identity-only concept lookup: the active concept matches annotation rows by `concept_id` only, so legacy rows without `concept_id` remain visibly unannotated until reimported or saved through the concept-id gate
-- server-normalized Save Annotation refresh: success copy and visual bounds come back from the saved annotation, including `concept`, `ipa`, `ortho`, and `ortho_words`/BND changes
+- server-normalized Save Annotation and rerun refresh: success copy, confirmed rerun text, and visual bounds come back from the saved annotation, including `concept`, `ipa`, `ortho`, and `ortho_words`/BND changes; after ORTH partial reruns, the displayed lexeme word comes from the overlapping Tier-2 word whose midpoint best matches the concept window
 - strict header status badges: `Annotated` means concept plus IPA or strict `ortho`, while `Complete` requires concept plus IPA plus strict `ortho`; auto-imported `ortho_words` can help display BND/word text but no longer counts as reviewed orthography
 - per-lexeme speaker notes saved as `(speaker, concept_id, user_note)` and persisted when changed from Annotate
 - Mark Done flushes pending inline edits first, so confirmation does not silently discard an unsaved ORTH/IPA/STT edit
