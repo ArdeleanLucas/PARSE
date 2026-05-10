@@ -742,6 +742,15 @@ grep -n 'apiFetch.*compute\|startCompute' src/api/contracts/<your_caller>.ts
 
 If any of these checks fails, the PR is not done.
 
+
+## Backend rules — compute children must tee stderr, not redirect (added 2026-05-10)
+
+Any `multiprocessing.get_context("spawn")` child entry that opens a per-PID/per-job logfile MUST tee output instead of replacing the inherited streams. Use `install_child_tee(log_path)` from `python/shared/subprocess_tee.py` so stdout/stderr still reach parent fd 1/2 while the log remains available for OOM/segfault tails.
+
+This rule came from PR #334's lexeme-rerun stdout fence regression, fixed in PR #339 and generalized in PR #340. Replacing `sys.stderr` silently hides live `[ORTH]`/`[IPA]`/`[STT]`/`[WORKER]` progress from the parent terminal.
+
+Only add a child logfile when the parent tails it for crash diagnostics (for example `_read_child_log_tail`); pure progress-streaming children should inherit fd 2 directly. If a new child still contains `sys.stderr = open(...)`, the PR is not done.
+
 ## Test Gates (pre-push)
 
 Run both before pushing PARSE frontend changes:
