@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import server as _server
+from shared.subprocess_tee import install_child_tee
 
 def _resolve_compute_mode() -> str:
     """Return the active compute mode — 'thread' (default), 'subprocess',
@@ -333,8 +334,7 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
     import json as _json
     import traceback as _tb
     try:
-        child_stderr = open('/tmp/parse-compute-{0}.stderr.log'.format(job_id), 'w', encoding='utf-8')
-        _server.sys.stderr = child_stderr
+        install_child_tee('/tmp/parse-compute-{0}.stderr.log'.format(job_id))
     except Exception:
         pass
     _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
