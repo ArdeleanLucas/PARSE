@@ -24,7 +24,7 @@ For the high-level mapping of "task → provider", see [`ai-integration.md`](../
 | Model | Task | Languages | Doc |
 |---|---|---|---|
 | `razhan/whisper-base-sdh` | ORTH (orthographic transcription) | Southern Kurdish (`sd` / `sdh` → `fa` mapping) | [`razhan-whisper-base-sdh.md`](razhan-whisper-base-sdh.md) |
-| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | IPA (phoneme transcription) + Tier-2 forced alignment | Multilingual (single-language model — language input is inert at acoustic decode; espeak-ng G2P uses language for forced-align targets only) | [`wav2vec2-xlsr-53-espeak-cv-ft.md`](wav2vec2-xlsr-53-espeak-cv-ft.md) |
+| `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | IPA acoustic decode + forced alignment | multilingual (Kurdish via espeak G2P) | [`wav2vec2-xlsr-53-espeak-cv-ft.md`](wav2vec2-xlsr-53-espeak-cv-ft.md) |
 
 ## Adding a new model doc
 

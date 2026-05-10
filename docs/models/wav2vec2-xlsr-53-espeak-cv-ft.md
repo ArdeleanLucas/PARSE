@@ -78,12 +78,22 @@ Phase 1   V0 (None) vs V1 (sdh) vs V_ku vs V_en on 4 Fail01     proves language 
 
 #### Phase 0 — Provider signature inspection
 
-Exact signatures from the loaded production module:
+Exact signatures from the loaded production module (`python/ai/forced_align.py:351,386` — the methods that the `_LanguageAwareIpaProvider` wrapper ultimately calls):
 
 ```
 Aligner.transcribe_window           (self, audio_16k: 'Any') -> 'str'
 Aligner.transcribe_window_structured (self, audio_16k: 'Any') -> 'Dict[str, Any]'
 ```
+
+Both methods take no `language` parameter. This is the underlying inertness: `facebook/wav2vec2-xlsr-53-espeak-cv-ft` is a self-supervised XLS-R fine-tune with no language-conditioning input baked into the encoder. The CTC head emits espeak-style IPA phoneme posteriors derived purely from the encoder representation; espeak-ng only supplies G2P **target** sequences for Tier 2 forced alignment, not for the encoder forward pass. There is no place in the model's forward pass where a language code could change the CTC output.
+
+##### Code traceability — where the `language=` argument lives and dies
+
+The three PARSE call sites that touch wav2vec2 IPA, with the exact files and function names that decide whether language reaches the model:
+
+- **Concept-window path** — `python/server_routes/annotate.py:_transcribe_ipa_window_structured` (line 1186) and `_LanguageAwareIpaProvider` (line 1218). The wrapper attempts `provider.transcribe_window_structured(window, language=language)`, catches `TypeError` whose message contains `'language'` or `'unexpected'`, and retries without the kwarg (lines 1196-1200, mirrored at 1205-1209 for `transcribe_window`). This is correct defensive plumbing from PR #355 — on the production `Aligner`, the `TypeError` retry branch is the one that always fires, because the methods at `forced_align.py:351,386` do not accept `language=`.
+- **Per-lexeme path** — `python/ai/ipa_transcribe.py:transcribe_slice_structured` (line 115) and the thin wrapper `transcribe_slice` (line 139). Both call `aligner.transcribe_window_structured(window)` / `aligner.transcribe_window(window)` directly with **no** `language=` forwarding. The language string is silently discarded here before the PR #355 `TypeError` fallback even gets a chance to fire — it never reaches a call frame that tries to pass it through.
+- **Full-mode IPA path** — `python/ai/ipa_transcribe.py:transcribe_words_with_forced_align` (line 209, signature `(audio_path, segments, *, language: str = "ku", ...)`). Language IS used here, but only as input to Tier 2 forced alignment via `align_segments` (imported as `_align_segments` inside the function) in `python/ai/forced_align.py:757`. `align_segments` calls `_g2p_word(word, language=language)` (line 530) → espeak-ng G2P, which produces target phoneme sequences for `torchaudio.functional.forced_align`. Tier 3 then calls `aligner.transcribe_window(window)` per refined word window — again, **no language forwarding** to the acoustic decode.
 
 Direct call probe:
 
@@ -135,7 +145,7 @@ Even though all four V1 outputs are identical to V0, the more important question
 - *three* → `tɪŋlaftiː` — `ɪŋ`, `ft`, `iː`: English-pattern reading "thinking left-y".
 - *tree* → `br` — short, no vowels resolved on the 0.6 s window.
 
-The model is honestly transcribing English-pattern audio. The Fail01 concept-window audio at these timestamps appears to contain English speech (researcher-side English explanation captured on the same channel as the speaker), and wav2vec2-xlsr-53-espeak-cv-ft has no setting that would make it ignore the audio it actually hears. PR #355's language-fallback fix does not address this class of defect — it cannot, because the model has no language conditioning input.
+The model is honestly transcribing English-pattern audio. The Fail01 concept-window audio at these timestamps appears to contain English speech (researcher-side English explanation captured on the same channel as the speaker), and `facebook/wav2vec2-xlsr-53-espeak-cv-ft` has no setting that would make it ignore the audio it actually hears. PR #355's language-fallback fix does not address this class of defect — it cannot, because the model has no language conditioning input.
 
 #### Verdict
 
@@ -145,8 +155,8 @@ The fix's only operational effect on real model output is in the **full-mode** I
 
 ### Phases not measured this session
 
-- **Phase 2 — full-mode IPA G2P language sweep**: would require running `transcribe_words_with_forced_align` with `language='ku'` vs `language='en'` on a stable ortho_words tier and comparing the per-word IPA outputs. Not run this session — the test machinery for full-mode 3-tier is not in the isolated workspace, and the run is long enough to compete with Lucas's GPU.
-- **Phase 3 — concept-window stress test on 20 random Fail01 concepts**: would characterize the English-leak rate quantitatively rather than on 4 windows. Not run this session — Phase 1's V0==V1 across 4 windows + the model's lack of a language input together make a 20-window expansion redundant for the PR-merge question.
+- **Phase 2 — full-mode boundary impact on Fail01**: sweep `language` across `sdh`, `ku`, `fa`, `ar` for `transcribe_words_with_forced_align` on a Fail01 ortho_words tier and diff the per-word IPA outputs. Expected effect: changes Tier-2 boundary placement (because `_g2p_word` produces different target phonemes per language → different forced-alignment paths → slightly shifted word windows fed to Tier 3) but **not** the Tier-3 phoneme inventory itself. Estimated 5-10 minutes on this host for a single 4-concept slice; the same isolated workspace from Phase 1 can be reused. Actionable: rerun the Phase 1 harness against `transcribe_words_with_forced_align` instead of `_transcribe_ipa_window_structured`.
+- **Phase 3 — concept-window stress test on 20 random Fail01 concepts**: would characterize the English-leak rate quantitatively rather than on 4 windows. Not motivated given Phase 1's V0==V1 null result across 4 windows + the model's lack of a language input — a 20-window expansion would re-prove the same negative.
 
 ## Known limitations
 
