@@ -37,6 +37,8 @@ from .lexeme_rerun_handlers import LexemeRerunHandlerError
 logger = logging.getLogger(__name__)
 
 
+# Mirror python/server.py:156 ANNOTATION_MATCH_EPSILON without importing server into this pure handler.
+_ANNOTATION_MATCH_EPSILON = 0.0005
 _PAD_VALUES = (0.0, 0.2, 0.5)
 _VALID_FIELDS = ("ipa", "ortho", "both")
 
@@ -518,7 +520,7 @@ def _persist_speaker_rerun_writes(
         try:
             audio_path = resolve_audio_path_for_speaker(speaker)
             aligned_words = align_ortho_words(audio_path, [dict(row) for row in ortho_rows])
-        except Exception:  # pragma: no cover - word alignment must not abort text persistence
+        except Exception:
             logger.exception("tagged-only rerun: failed to rebuild ortho_words for speaker %s", speaker)
         else:
             word_tier = tiers.get("ortho_words") if isinstance(tiers.get("ortho_words"), dict) else None
@@ -539,8 +541,8 @@ def _persist_speaker_rerun_writes(
                         if not isinstance(interval, Mapping):
                             continue
                         try:
-                            same_start = abs(float(interval.get("start", 0.0) or 0.0) - float(row["start"])) <= 0.0005
-                            same_end = abs(float(interval.get("end", 0.0) or 0.0) - float(row["end"])) <= 0.0005
+                            same_start = abs(float(interval.get("start", 0.0) or 0.0) - float(row["start"])) <= _ANNOTATION_MATCH_EPSILON
+                            same_end = abs(float(interval.get("end", 0.0) or 0.0) - float(row["end"])) <= _ANNOTATION_MATCH_EPSILON
                         except (TypeError, ValueError):
                             continue
                         if same_start and same_end:
