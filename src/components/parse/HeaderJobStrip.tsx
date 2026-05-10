@@ -53,6 +53,11 @@ function isErrorStatus(status: string): boolean {
   return normalized === "error" || normalized === "failed";
 }
 
+function isCancelledStatus(status: string): boolean {
+  const normalized = status.toLowerCase();
+  return normalized === "cancelled" || normalized === "canceled";
+}
+
 interface HeaderJobStripProps {
   jobs: ActiveJobSnapshot[];
   onCancel?: (jobId: string) => Promise<unknown> | unknown;
@@ -77,7 +82,7 @@ export function HeaderJobStrip({
   }
 
   useEffect(() => {
-    const terminalJobs = jobs.filter((job) => (isCompleteStatus(job.status) || isErrorStatus(job.status)) && !dismissed.has(job.jobId));
+    const terminalJobs = jobs.filter((job) => (isCompleteStatus(job.status) || isErrorStatus(job.status) || isCancelledStatus(job.status)) && !dismissed.has(job.jobId));
     if (terminalJobs.length === 0) return;
     const timers = terminalJobs.map((job) => window.setTimeout(() => {
       setDismissed((existing) => {
@@ -110,14 +115,20 @@ export function HeaderJobStrip({
         const error = job.error || job.message || "Job failed";
         const complete = isCompleteStatus(job.status);
         const errored = isErrorStatus(job.status);
+        const cancelled = isCancelledStatus(job.status);
 
         return (
           <div
             key={job.jobId}
             data-testid={`topbar-job-strip-row-${job.jobId}`}
-            className={`flex items-center gap-2 rounded-md border px-2.5 py-1 text-[11px] ${errored ? "border-rose-200 bg-rose-50" : complete ? "border-emerald-200 bg-emerald-50" : "border-indigo-200 bg-indigo-50"}`}
+            className={`flex items-center gap-2 rounded-md border px-2.5 py-1 text-[11px] ${cancelled ? "border-amber-200 bg-amber-50" : errored ? "border-rose-200 bg-rose-50" : complete ? "border-emerald-200 bg-emerald-50" : "border-indigo-200 bg-indigo-50"}`}
           >
-            {errored ? (
+            {cancelled ? (
+              <>
+                <AlertCircle className="h-3 w-3 shrink-0 text-amber-600" />
+                <span className="font-medium text-amber-900">{label} cancelled</span>
+              </>
+            ) : errored ? (
               <>
                 <AlertCircle className="h-3 w-3 shrink-0 text-rose-600" />
                 <span className="font-medium text-rose-900">{label} failed</span>
