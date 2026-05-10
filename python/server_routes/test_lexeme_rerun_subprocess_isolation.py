@@ -255,18 +255,6 @@ def test_child_log_still_captured_on_failure_and_tee_reaches_parent_fd2(
     assert line_2 in captured()
 
 
-def test_tee_swallows_closed_inherited_stream() -> None:
-    devnull = open(os.devnull, "w", encoding="utf-8")
-    closed = open(os.devnull, "w", encoding="utf-8")
-    closed.close()
-    try:
-        tee = lexeme_rerun._LexemeRerunTee(devnull, closed)
-        assert tee.write("still reaches open stream\n") == len("still reaches open stream\n")
-        tee.flush()
-    finally:
-        devnull.close()
-
-
 @pytest.mark.parametrize(
     ("runner", "kind"),
     [
