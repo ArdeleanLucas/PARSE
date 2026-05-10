@@ -1,6 +1,6 @@
 # `.hermes/handoffs/` convention
 
-This directory is the canonical coordinator-owned task queue for PARSE lanes.
+This directory is the local-only coordinator-owned task queue for PARSE lanes. Prompt handoff files are intentionally ignored by git and should not be committed to PARSE; only this convention README remains tracked.
 
 ## Layout
 
@@ -49,7 +49,8 @@ Keep the body structure aligned with the old queue-prompt docs:
 
 ## Migration rule
 
-- New queueing should happen here, not through merge-to-main `docs: queue ...` PRs.
-- Human-facing lane names are `parse-front-end`, `parse-back-end`, and `parse-coordinator`; preserve the historical on-disk directories unless a dedicated migration PR changes them.
+- New queueing should happen here as local-only files, not through merge-to-main `docs: queue ...` PRs.
+- Prompt handoff files under `.hermes/handoffs/`, `.hermes/plans/`, and `.hermes/automation/handoffs/` are ignored by `.gitignore`; keep them in local agent workspaces rather than in PARSE history.
+- Human-facing lane names are `parse-front-end`, `parse-back-end`, and `parse-coordinator`; preserve the historical on-disk directories unless a dedicated migration changes them.
 - Historical queue-prompt PRs remain the audit trail and are indexed in `docs/reports/2026-04-26-historical-queue-prompt-prs.md`.
-- If a lane already has an old-pattern queue PR open, that PR can serve as historical context, but the durable task source should move here.
+- If a lane already has an old-pattern queue PR open, that PR can serve as historical context, but the durable task source should move here locally.
