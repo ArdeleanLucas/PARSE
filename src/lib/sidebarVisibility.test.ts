@@ -11,8 +11,34 @@ const baseOptions = {
 };
 
 describe('isConceptVariantVisibleInSidebar', () => {
-  it('hides variants outside the active speaker elicited concept set when scoped', () => {
-    expect(isConceptVariantVisibleInSidebar({}, { conceptKey: '599' }, {
+  it('keeps a sibling visible when the parent group has any elicited variant', () => {
+    const concept = {
+      key: '1.1',
+      variants: [
+        { conceptKey: '1' },
+        { conceptKey: '599' },
+      ],
+    };
+
+    expect(isConceptVariantVisibleInSidebar(concept, { conceptKey: '599' }, {
+      ...baseOptions,
+      scopedToSpeaker: true,
+      activeSpeakerForSidebar: 'Saha01',
+      elicitedConceptKeys: new Set(['1']),
+    })).toBe(true);
+  });
+
+  it('hides variants when neither they nor any parent sibling are elicited', () => {
+    const concept = {
+      key: '1.1',
+      variants: [
+        { conceptKey: '599' },
+        { conceptKey: '600' },
+      ],
+      mergedKeys: ['601'],
+    };
+
+    expect(isConceptVariantVisibleInSidebar(concept, { conceptKey: '599' }, {
       ...baseOptions,
       scopedToSpeaker: true,
       activeSpeakerForSidebar: 'Saha01',

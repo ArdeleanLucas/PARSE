@@ -676,14 +676,111 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
-
       expect(screen.getByTestId('concept-variant-row-365').textContent ?? '').toContain('new (A)');
       const rowB = screen.getByTestId('concept-variant-row-618');
       expect(rowB.textContent ?? '').toContain('new (B)');
       expect(rowB.className).toContain('bg-indigo-50');
       fireEvent.click(rowB);
       expect(onSelect).toHaveBeenCalledWith(3, '618');
+    });
+
+    it('auto-expands a grouped parent when activeConceptKey matches one of its variants', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey="618"
+          onConceptSelect={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId('concept-variant-toggle-3').getAttribute('aria-expanded')).toBe('true');
+      expect(screen.getByTestId('concept-variant-row-618').textContent ?? '').toContain('new (B)');
+    });
+
+    it('renders the NEW badge on the recently duplicated variant row', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey="618"
+          onConceptSelect={vi.fn()}
+          recentlyDuplicatedSiblingKey="618"
+        />,
+      );
+
+      const row = screen.getByTestId('concept-variant-row-618');
+      expect(row.textContent ?? '').toContain('NEW');
+      expect(row.className).toContain('ring-2');
+      expect(row.className).toContain('ring-emerald-400');
+    });
+
+    it('does not auto-expand when activeConceptKey is null', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey={null}
+          onConceptSelect={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId('concept-variant-toggle-3').getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByTestId('concept-variant-row-618')).toBeNull();
+    });
+
+    it('does not auto-expand when the active concept has zero or one variant', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortMode="az"
+          onSortModeChange={vi.fn()}
+          hasSourceItems
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={1}
+          activeConceptKey="1"
+          onConceptSelect={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByTestId('concept-variant-toggle-1')).toBeNull();
+      expect(screen.queryByTestId('concept-variant-toggle-4')).toBeNull();
     });
 
     it("right-click on a B child fires onDuplicateConcept with B's conceptKey", () => {
