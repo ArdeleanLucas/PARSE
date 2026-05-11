@@ -192,6 +192,9 @@ vi.mock("./hooks/useWaveSurfer", () => ({
       scrollToTimeAtFraction: mockScrollToTimeAtFraction,
       skip: mockSkip,
       addRegion: mockAddRegion,
+      clearQuickRetimeSelection: vi.fn(),
+      enableDragToCreate: vi.fn(() => vi.fn()),
+      disableDragToCreate: vi.fn(),
       setZoom: mockSetWaveZoom,
       setRate: mockSetRate,
       setVolume: vi.fn(),
@@ -1181,7 +1184,9 @@ describe("ParseUI", () => {
 
   it("marks the current concept confirmed from annotate mode", async () => {
     mockRecords = {
-      Fail01: makeRecord("Fail01", []),
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", conceptId: "1", start: 1, end: 2 },
+      ]),
     };
 
     render(<ParseUI />);
@@ -1193,7 +1198,9 @@ describe("ParseUI", () => {
 
   it("turns the sidebar dot green after Mark Done", async () => {
     mockRecords = {
-      Fail01: makeRecord("Fail01", []),
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", conceptId: "1", start: 1, end: 2 },
+      ]),
     };
 
     const { rerender } = render(<ParseUI />);
@@ -2831,6 +2838,12 @@ describe("ParseUI", () => {
   });
 
   it("supports app-mode hotkeys a/c/t", async () => {
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", conceptId: "1", start: 1, end: 2 },
+      ]),
+    };
+
     render(<ParseUI />);
 
     fireEvent.keyDown(window, { key: "a" });

@@ -30,6 +30,7 @@ import { useEnrichmentStore } from "../../../stores/enrichmentStore";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
 
+import { CreateLexemePanel } from "./CreateLexemePanel";
 import { SpeakerHeader } from "./SpeakerHeader";
 import { findAnnotationForConcept, formatPlaybackTime, formatPlayhead, pickOrthoIntervalForConcept } from "./shared";
 import type { AnnotateViewProps } from "./types";
@@ -309,6 +310,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     skip,
     addRegion,
     clearQuickRetimeSelection,
+    enableDragToCreate,
+    disableDragToCreate,
     setZoom: wsSetZoom,
     setRate,
     setVolume: wsSetVolume,
@@ -1071,171 +1074,173 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Lexeme timestamp (seconds)</label>
-              {conceptInterval ? (
-                <span className="font-mono text-[10px] text-slate-400">{fmt(conceptInterval.start)}–{fmt(conceptInterval.end)}</span>
-              ) : (
-                <span className="font-mono text-[10px] text-slate-400">no interval</span>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium text-slate-500">Start</span>
-                <input
-                  data-testid="lexeme-start"
-                  type="number"
-                  step={0.001}
-                  min={0}
-                  value={editStart}
-                  onChange={(e) => setEditStart(e.target.value)}
-                  disabled={!conceptInterval}
-                  className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
-                />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium text-slate-500">End</span>
-                <input
-                  data-testid="lexeme-end"
-                  type="number"
-                  step={0.001}
-                  min={0}
-                  value={editEnd}
-                  onChange={(e) => setEditEnd(e.target.value)}
-                  disabled={!conceptInterval}
-                  className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
-                />
-              </div>
-              <button
-                type="button"
-                data-testid="confirm-time"
-                disabled={!conceptInterval}
-                aria-pressed={Boolean(confirmedAnchor)}
-                title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
-                onClick={() => {
-                  if (!conceptInterval) return;
-                  if (confirmedAnchor) {
-                    setConfirmedAnchor(speaker, concept.key, null);
-                    setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
-                    return;
-                  }
-                  const nextStart = parseFloat(editStart);
-                  const nextEnd = parseFloat(editEnd);
-                  const start = Number.isFinite(nextStart) ? nextStart : conceptInterval.start;
-                  const end = Number.isFinite(nextEnd) ? nextEnd : conceptInterval.end;
-                  setConfirmedAnchor(speaker, concept.key, {
-                    start,
-                    end,
-                    source: "user+boundary_only",
-                    confirmed_at: new Date().toISOString(),
-                  });
-                  setTimestampMessage({ kind: "ok", text: "Boundary confirmed." });
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${confirmedAnchor ? "bg-emerald-600 text-white" : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"}`}
-              >
-                <Check className="h-3.5 w-3.5" /> Confirm time
-              </button>
-              {timestampMessage && (
-                <span data-testid="lexeme-timestamp-msg" className={`ml-auto text-[11px] ${timestampMessage.kind === "ok" ? "text-emerald-600" : "text-rose-600"}`}>
-                  {timestampMessage.text}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              data-testid="save-lexeme-annotation"
-              disabled={!conceptInterval || timestampSaving}
-              onClick={async () => {
-                if (!conceptInterval) return;
-                const nextStart = parseFloat(editStart);
-                const nextEnd = parseFloat(editEnd);
-                setTimestampSaving(true);
-                try {
-                  const result = saveLexemeAnnotation({
-                    speaker,
-                    oldStart: conceptInterval.start,
-                    oldEnd: conceptInterval.end,
-                    newStart: nextStart,
-                    newEnd: nextEnd,
-                    ipaText: ipa,
-                    orthoText: saveOrthoText,
-                    orthoEdited: orthoUserEdited,
-                    conceptName: concept.name,
-                  });
-                  if (!result.ok) {
-                    setTimestampMessage({ kind: "err", text: result.error });
-                  } else {
-                    const saveResult = await saveSpeaker(speaker, record);
-                    const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
-                    const savedStart = savedConceptInterval?.start ?? nextStart;
-                    const savedEnd = savedConceptInterval?.end ?? nextEnd;
-                    const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;
-                    storedIntervalRef.current = { start: savedStart, end: savedEnd };
-                    setEditStart(savedStart.toFixed(3));
-                    setEditEnd(savedEnd.toFixed(3));
-                    setTimestampMessage({ kind: "ok", text: `Saved (${changedTierCount} tier${changedTierCount === 1 ? "" : "s"} updated).` });
-                    addRegion(savedStart, savedEnd);
-                    seek(savedStart);
-                  }
-                } catch (err) {
-                  setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
-                } finally {
-                  setTimestampSaving(false);
-                }
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              <Save className="h-4 w-4" /> Save Annotation
-            </button>
-            <div className="relative">
-              <button
-                type="button"
-                data-testid="annotate-mark-done"
-                aria-pressed={isConfirmed}
-                onClick={handleMarkDone}
-                className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-sm transition ${
-                  isConfirmed
-                    ? "bg-emerald-700 text-white hover:bg-emerald-700"
-                    : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
-                }`}
-              >
-                <Check className="h-4 w-4" /> {isConfirmed ? "Confirmed" : "Mark Done"}
-              </button>
-              {doneToast && (
-                <div
-                  role="status"
-                  data-testid="annotate-mark-done-toast"
-                  className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
-                >
-                  {doneToast}
+          {conceptInterval ? (
+            <>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Lexeme timestamp (seconds)</label>
+                  <span className="font-mono text-[10px] text-slate-400">{fmt(conceptInterval.start)}–{fmt(conceptInterval.end)}</span>
                 </div>
-              )}
-            </div>
-            {onCaptureOffsetAnchor && (
-              <div className="relative">
-                <button
-                  onClick={onCaptureOffsetAnchor}
-                  data-testid="annotate-capture-anchor"
-                  title="Anchor offset detection to this lexeme + the current playback time. Locks this lexeme against future global offset passes."
-                  className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                >
-                  <Anchor className="h-4 w-4" /> Anchor offset here
-                </button>
-                {captureToast && (
-                  <div
-                    role="status"
-                    data-testid="annotate-capture-toast"
-                    className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-slate-500">Start</span>
+                    <input
+                      data-testid="lexeme-start"
+                      type="number"
+                      step={0.001}
+                      min={0}
+                      value={editStart}
+                      onChange={(e) => setEditStart(e.target.value)}
+                      className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-slate-500">End</span>
+                    <input
+                      data-testid="lexeme-end"
+                      type="number"
+                      step={0.001}
+                      min={0}
+                      value={editEnd}
+                      onChange={(e) => setEditEnd(e.target.value)}
+                      className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="confirm-time"
+                    aria-pressed={Boolean(confirmedAnchor)}
+                    title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
+                    onClick={() => {
+                      if (confirmedAnchor) {
+                        setConfirmedAnchor(speaker, concept.key, null);
+                        setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
+                        return;
+                      }
+                      const nextStart = parseFloat(editStart);
+                      const nextEnd = parseFloat(editEnd);
+                      const start = Number.isFinite(nextStart) ? nextStart : conceptInterval.start;
+                      const end = Number.isFinite(nextEnd) ? nextEnd : conceptInterval.end;
+                      setConfirmedAnchor(speaker, concept.key, {
+                        start,
+                        end,
+                        source: "user+boundary_only",
+                        confirmed_at: new Date().toISOString(),
+                      });
+                      setTimestampMessage({ kind: "ok", text: "Boundary confirmed." });
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${confirmedAnchor ? "bg-emerald-600 text-white" : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"}`}
                   >
-                    {captureToast}
+                    <Check className="h-3.5 w-3.5" /> Confirm time
+                  </button>
+                  {timestampMessage && (
+                    <span data-testid="lexeme-timestamp-msg" className={`ml-auto text-[11px] ${timestampMessage.kind === "ok" ? "text-emerald-600" : "text-rose-600"}`}>
+                      {timestampMessage.text}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  data-testid="save-lexeme-annotation"
+                  disabled={timestampSaving}
+                  onClick={async () => {
+                    const nextStart = parseFloat(editStart);
+                    const nextEnd = parseFloat(editEnd);
+                    setTimestampSaving(true);
+                    try {
+                      const result = saveLexemeAnnotation({
+                        speaker,
+                        oldStart: conceptInterval.start,
+                        oldEnd: conceptInterval.end,
+                        newStart: nextStart,
+                        newEnd: nextEnd,
+                        ipaText: ipa,
+                        orthoText: saveOrthoText,
+                        orthoEdited: orthoUserEdited,
+                        conceptName: concept.name,
+                      });
+                      if (!result.ok) {
+                        setTimestampMessage({ kind: "err", text: result.error });
+                      } else {
+                        const saveResult = await saveSpeaker(speaker, record);
+                        const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+                        const savedStart = savedConceptInterval?.start ?? nextStart;
+                        const savedEnd = savedConceptInterval?.end ?? nextEnd;
+                        const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;
+                        storedIntervalRef.current = { start: savedStart, end: savedEnd };
+                        setEditStart(savedStart.toFixed(3));
+                        setEditEnd(savedEnd.toFixed(3));
+                        setTimestampMessage({ kind: "ok", text: `Saved (${changedTierCount} tier${changedTierCount === 1 ? "" : "s"} updated).` });
+                        addRegion(savedStart, savedEnd);
+                        seek(savedStart);
+                      }
+                    } catch (err) {
+                      setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+                    } finally {
+                      setTimestampSaving(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  <Save className="h-4 w-4" /> Save Annotation
+                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="annotate-mark-done"
+                    aria-pressed={isConfirmed}
+                    onClick={handleMarkDone}
+                    className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-sm transition ${
+                      isConfirmed
+                        ? "bg-emerald-700 text-white hover:bg-emerald-700"
+                        : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                    }`}
+                  >
+                    <Check className="h-4 w-4" /> {isConfirmed ? "Confirmed" : "Mark Done"}
+                  </button>
+                  {doneToast && (
+                    <div
+                      role="status"
+                      data-testid="annotate-mark-done-toast"
+                      className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                    >
+                      {doneToast}
+                    </div>
+                  )}
+                </div>
+                {onCaptureOffsetAnchor && (
+                  <div className="relative">
+                    <button
+                      onClick={onCaptureOffsetAnchor}
+                      data-testid="annotate-capture-anchor"
+                      title="Anchor offset detection to this lexeme + the current playback time. Locks this lexeme against future global offset passes."
+                      className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                    >
+                      <Anchor className="h-4 w-4" /> Anchor offset here
+                    </button>
+                    {captureToast && (
+                      <div
+                        role="status"
+                        data-testid="annotate-capture-toast"
+                        className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
+                      >
+                        {captureToast}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <CreateLexemePanel
+              speaker={speaker}
+              conceptKey={concept.key}
+              enableDragToCreate={enableDragToCreate}
+              disableDragToCreate={disableDragToCreate}
+            />
+          )}
         </div>
       </section>
 

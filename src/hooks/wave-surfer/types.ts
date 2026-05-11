@@ -18,6 +18,16 @@ export interface QuickRetimeSelectionOptions {
   onContextMenu: (selection: QuickRetimeSelection, event: MouseEvent) => void;
 }
 
+export interface DragToCreateSelection {
+  start: number;
+  end: number;
+}
+
+export interface DragToCreateOptions {
+  onRegionCreated: (selection: DragToCreateSelection) => void;
+  onRegionUpdated: (selection: DragToCreateSelection) => void;
+}
+
 export interface UseWaveSurferOptions {
   containerRef: RefObject<HTMLDivElement | null>;
   audioUrl: string;
@@ -36,6 +46,7 @@ export interface WsRegion {
   id: string;
   start: number;
   end: number;
+  data?: Record<string, unknown>;
   element?: HTMLElement | null;
   play: () => void;
   remove: () => void;
@@ -69,6 +80,8 @@ export interface WaveSurferRegionsControls {
   addRegion: (start: number, end: number, id?: string) => void;
   clearRegions: () => void;
   clearQuickRetimeSelection: () => void;
+  enableDragToCreate: (options: DragToCreateOptions) => () => void;
+  disableDragToCreate: () => void;
   playRegion: () => void;
 }
 

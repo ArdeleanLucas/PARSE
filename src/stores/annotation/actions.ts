@@ -438,6 +438,25 @@ export function createAnnotationActionsSlice(
       commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "tag concept");
     },
 
+    createConceptInterval: (speaker: string, conceptId: string, start: number, end: number) => {
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return;
+
+      const key = String(conceptId);
+      const clone = deepClone(pre);
+      const conceptTier = ensureAnnotationTier(clone, "concept");
+      if (conceptTier.intervals.some((interval) => String(interval.concept_id ?? "") === key)) return;
+
+      conceptTier.intervals = [
+        ...conceptTier.intervals,
+        { start, end, text: "", concept_id: key },
+      ].sort((left, right) => left.start - right.start);
+      clone.modified_at = nowIsoUtc();
+
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "create concept interval");
+    },
+
     clearConceptTag: (speaker: string, conceptId: string, tagId: string) => {
       const pre = selectSpeakerRecord(get(), speaker);
       if (!pre) return;
