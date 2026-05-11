@@ -212,9 +212,20 @@ def replace_all(tags: list[Tag]) -> TagsData:
         if not isinstance(tags, list):
             raise TagValidationError("tags must be a list")
 
+        existing_by_id = {tag["id"]: tag for tag in _load()["tags"]}
         seen_ids: set[str] = set()
         seen_labels: set[str] = set()
-        normalized_tags = [_clean_tag(entry, seen_ids, seen_labels) for entry in tags]
+        normalized_tags: list[Tag] = []
+        for entry in tags:
+            normalized_tag = _clean_tag(entry, seen_ids, seen_labels)
+            existing_tag = existing_by_id.get(normalized_tag["id"])
+            if isinstance(entry, dict) and existing_tag is not None:
+                if not entry.get("concepts"):
+                    normalized_tag["concepts"] = list(existing_tag["concepts"])
+                if not entry.get("lexemeTargets"):
+                    normalized_tag["lexemeTargets"] = list(existing_tag["lexemeTargets"])
+            normalized_tags.append(normalized_tag)
+
         normalized: TagsData = {"version": 2, "tags": normalized_tags}
         _save(normalized)
         return normalized
