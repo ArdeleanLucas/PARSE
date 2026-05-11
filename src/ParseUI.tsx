@@ -9,9 +9,9 @@ import {
   Workflow, Network, Trash2, ChevronDown as CDown,
   Download,
   Anchor,
-  Sun, Moon, Play,
+  Sun, Moon,
 } from 'lucide-react';
-import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob } from './api/client';
+import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
@@ -38,9 +38,9 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
+import { normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
-import { fmtTime } from './lib/fmtTime';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
@@ -72,11 +72,10 @@ import {
   TranscriptionRunModal,
 } from './components/shared/TranscriptionRunModal';
 import { BatchReportModal } from './components/shared/BatchReportModal';
-import { LexemeDetail } from './components/compare/LexemeDetail';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ManageTagsView } from './components/compare/ManageTagsView';
-import { CognateCell, SimBar } from './components/compare/CognateCell';
+import { CompareBundleTable } from './components/compare/CompareBundleTable';
 import { Pill, SectionCard } from './components/compare/UIPrimitives';
 import { AnnotateView } from './components/annotate/AnnotateView';
 import { JobLogsModal } from './components/annotate/JobLogsModal';
@@ -95,7 +94,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { AnnotationRecord, ClefConfigStatus, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
+import type { AnnotationRecord, ClefConfigStatus, CompareBundle, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -348,16 +347,10 @@ export function ParseUI() {
   const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [expandedLexemes, setExpandedLexemes] = useState<Set<string>>(new Set());
+  const [compareBundles, setCompareBundles] = useState<CompareBundle[]>([]);
+  const [compareBundlesLoading, setCompareBundlesLoading] = useState(false);
+  const [compareBundlesError, setCompareBundlesError] = useState<string | null>(null);
 
-  const toggleLexemeExpanded = (speaker: string) => {
-    setExpandedLexemes((prev) => {
-      const next = new Set(prev);
-      if (next.has(speaker)) next.delete(speaker);
-      else next.add(speaker);
-      return next;
-    });
-  };
 
   const writeSpeakerCognate = (conceptKey: string, speaker: string, nextGroup: string | null) => {
     const store = useEnrichmentStore.getState();
@@ -410,18 +403,6 @@ export function ParseUI() {
     void store.save(patch);
   };
 
-  const setCanonicalRealization = (conceptForOverride: Concept, speaker: string, idx: number) => {
-    const store = useEnrichmentStore.getState();
-    const safeIdx = Math.max(0, Math.floor(idx));
-    const patch = { manual_overrides: { canonical_realizations: { [conceptForOverride.key]: { [speaker]: safeIdx } } } };
-    void store.save(patch);
-  };
-
-  const dismissAutoDetect = (conceptKey: string, speaker: string) => {
-    const store = useEnrichmentStore.getState();
-    const patch = { manual_overrides: { auto_detect_dismissed: { [conceptKey]: { [speaker]: true } } } };
-    void store.save(patch);
-  };
 
   const setConceptMerge = (primaryKey: string, absorbedKeys: readonly string[]) => {
     const patch = { manual_overrides: { concept_merges: { [primaryKey]: [...absorbedKeys] } } };
@@ -1246,6 +1227,67 @@ export function ParseUI() {
       primaryContactCodes,
     ));
   }, [annotationRecords, concept, enrichmentData, getTagsForConcept, activeTagScopeKey, selectedSpeakers, speakers, primaryContactCodes]);
+  const fallbackCompareBundle = useMemo<CompareBundle | null>(() => {
+    if (speakerForms.length === 0) return null;
+    const rowId = concept.key;
+    const candidates: NonNullable<CompareBundle['candidates']> = {};
+    for (const form of speakerForms) {
+      if (!form.ipa && !form.ortho) continue;
+      candidates[form.speaker] = {
+        [rowId]: {
+          csv_row_id: rowId,
+          ipa: form.ipa || null,
+          ortho: form.ortho || null,
+          start_sec: form.startSec,
+          end_sec: form.endSec,
+          source_wav: annotationRecords[form.speaker]?.source_audio ?? annotationRecords[form.speaker]?.source_wav,
+          realization_index: form.selectedIdx ?? 0,
+        },
+      };
+    }
+    return {
+      bundle_id: rowId,
+      label: concept.name,
+      row_ids: [rowId],
+      buckets: [{
+        bucket_key: `legacy\u0000${rowId}`,
+        survey_id: (concept.sourceSurvey ?? 'legacy').toLowerCase(),
+        source_item: concept.sourceItem ?? rowId,
+        variants: [{ csv_row_id: rowId, concept_en: concept.name, variant_label: 'A' }],
+      }],
+      candidates,
+      canonical: {},
+    };
+  }, [annotationRecords, concept, speakerForms]);
+  const activeCompareBundle = useMemo(() => {
+    const keys = new Set([concept.key, concept.name, String(concept.id)].map((value) => value.toLowerCase()));
+    return compareBundles.find((bundle) => keys.has(bundle.bundle_id.toLowerCase()) || keys.has(bundle.label.toLowerCase())) ?? compareBundles[0] ?? fallbackCompareBundle;
+  }, [compareBundles, concept, fallbackCompareBundle]);
+  const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
+  const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
+    setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
+  }, []);
+  useEffect(() => {
+    if (currentMode !== 'compare') return;
+    let cancelled = false;
+    setCompareBundlesLoading(true);
+    setCompareBundlesError(null);
+    getCompareBundles({ bundleId: concept.key })
+      .then((payload) => {
+        if (cancelled) return;
+        const normalized = normalizeBundles(payload);
+        setCompareBundles(normalized.bundles);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCompareBundles([]);
+        setCompareBundlesError(err instanceof Error ? err.message : 'Could not load Compare bundles.');
+      })
+      .finally(() => {
+        if (!cancelled) setCompareBundlesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentMode, concept.key]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
   const activeSpeakerProgress = currentMode === 'annotate' && activeSpeakerForSidebar ? activeSpeakerForSidebar : null;
@@ -2056,225 +2098,27 @@ export function ParseUI() {
 
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
-                <div className="overflow-hidden rounded-lg border border-slate-100">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-500">
-                        <th className="px-3 py-2 text-left font-semibold">Speaker</th>
-                        <th className="px-3 py-2 text-left font-semibold">IPA & utterances</th>
-                        {primaryContactCodes.map((code) => (
-                          <th
-                            key={code}
-                            className="px-3 py-2 text-left font-semibold"
-                            data-testid={`sim-col-header-${code}`}
-                          >
-                            {(contactLanguageNames[code] ?? code.toUpperCase())} sim.
-                          </th>
-                        ))}
-                        <th className="px-3 py-2 text-left font-semibold">Cognate</th>
-                        <th className="px-3 py-2 text-right font-semibold">Flag</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {speakerForms.map(f => {
-                        const isExpanded = expandedLexemes.has(f.speaker);
-                        const cognateColor =
-                          f.cognate === 'A' ? '#dcfce7' :
-                          f.cognate === 'B' ? '#dbeafe' :
-                          f.cognate === 'C' ? '#fef9c3' :
-                          null;
-                        return (
-                        <React.Fragment key={f.speaker}>
-                        <tr
-                          data-testid={`speaker-row-${f.speaker}`}
-                          role="button"
-                          onClick={() => toggleLexemeExpanded(f.speaker)}
-                          className={`cursor-pointer bg-white transition hover:bg-indigo-50/30 ${isExpanded ? 'bg-indigo-50/40' : ''}`}
-                        >
-                          <td className="px-3 py-2.5 font-mono text-[11px] font-medium text-slate-700">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span>{f.speaker}</span>
-                              {f.pastEndOfAudio ? (
-                                <span
-                                  data-testid={`past-eoa-badge-${f.speaker}`}
-                                  className="inline-flex items-center rounded bg-amber-50 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200"
-                                  title={`Realization at ${typeof f.startSec === 'number' ? f.startSec.toFixed(1) : '?'}s is past the end of this speaker's working WAV. Audio cannot play yet.`}
-                                >
-                                  past EOA
-                                </span>
-                              ) : null}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <span
-                                data-testid={`lexeme-toggle-${f.speaker}`}
-                                className="font-mono text-[13px] text-indigo-700"
-                              >
-                                /{f.ipa || '—'}/
-                              </span>
-                            </div>
-                            {f.realizations.length > 1 ? (
-                              <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                {f.realizations.map((r, i) => {
-                                  const label = f.realizationsSource === 'source-item'
-                                    ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                    : f.realizationsSource === 'merged'
-                                      ? concept.mergedVariants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                      : String.fromCharCode(65 + i);
-                                  const isCanonical = f.selectedIdx === i;
-                                  return (
-                                    <button
-                                      key={i}
-                                      data-testid={`realization-pill-${f.speaker}-${label}`}
-                                      onClick={() => setCanonicalRealization(concept, f.speaker, i)}
-                                      title={`Realization ${label}: /${r.ipa}/${isCanonical ? ' (canonical)' : ' — click to set canonical'}`}
-                                      aria-label={`Realization ${label}`}
-                                      aria-pressed={isCanonical}
-                                      className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded px-1 font-mono text-[9px] font-bold transition ${
-                                        isCanonical
-                                          ? 'bg-indigo-600 text-white'
-                                          : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200 hover:bg-slate-200'
-                                      }`}
-                                    >
-                                      {label}
-                                    </button>
-                                  );
-                                })}
-                                <button
-                                  data-testid={`lexeme-chevron-${f.speaker}`}
-                                  onClick={() => toggleLexemeExpanded(f.speaker)}
-                                  className="ml-0.5 inline-grid h-4 w-4 place-items-center text-slate-400 hover:text-indigo-600"
-                                  title={isExpanded ? 'Hide realizations' : 'Show realizations'}
-                                >
-                                  <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="text-[10px] text-slate-400">{f.utterances} utterance{f.utterances!==1?'s':''}</div>
-                            )}
-                          </td>
-                          {primaryContactCodes.map((code) => (
-                            <td
-                              key={code}
-                              className="px-3 py-2.5"
-                              data-testid={`sim-cell-${f.speaker}-${code}`}
-                            >
-                              <SimBar value={f.similarityByLang[code] ?? null}/>
-                            </td>
-                          ))}
-                          <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                            <CognateCell
-                              speaker={f.speaker}
-                              group={f.cognate}
-                              onCycle={() => cycleSpeakerCognate(concept.key, f.speaker, f.cognate)}
-                              onReset={() => resetSpeakerCognate(concept.key, f.speaker)}
-                            />
-                          </td>
-                          <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              data-testid={`speaker-flag-${f.speaker}`}
-                              title={`Toggle flag for ${f.speaker}`}
-                              onClick={() => toggleSpeakerFlag(concept.key, f.speaker, f.flagged)}
-                              className={`inline-grid h-6 w-6 place-items-center rounded-md ${f.flagged?'bg-amber-100 text-amber-600':'text-slate-300 hover:bg-slate-100 hover:text-slate-500'}`}
-                            >
-                              <Flag className="h-3 w-3"/>
-                            </button>
-                          </td>
-                        </tr>
-                        {isExpanded && (
-                          <tr data-testid={`lexeme-detail-row-${f.speaker}`}>
-                            {/* Speaker + IPA + N sim columns + Cognate + Flag. */}
-                            <td colSpan={4 + primaryContactCodes.length} className="bg-slate-50 p-2">
-                              {f.realizations.length > 1 && (
-                                <div className="mb-3 ml-4 space-y-1.5 border-l-2 border-indigo-200 pl-4">
-                                  <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
-                                    <AudioLines className="h-3 w-3 text-indigo-500" />
-                                    {f.realizationsSource === 'auto-detect' ? (
-                                      <>
-                                        <span>Auto-detected realizations · pick one as canonical, or</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => dismissAutoDetect(concept.key, f.speaker)}
-                                          className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-600 hover:bg-indigo-50"
-                                        >
-                                          Dismiss auto-detection
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <span>Realizations · pick one as canonical for BEAST2 export</span>
-                                    )}
-                                  </div>
-                                  {f.realizations.map((r, i) => {
-                                    const isCanonical = f.selectedIdx === i;
-                                    const label = f.realizationsSource === 'source-item'
-                                      ? concept.variants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                      : f.realizationsSource === 'merged'
-                                        ? concept.mergedVariants?.[i]?.variantLabel ?? String.fromCharCode(65 + i)
-                                        : String.fromCharCode(65 + i);
-                                    return (
-                                      <div
-                                        key={i}
-                                        data-testid={`realization-row-${f.speaker}-${label}`}
-                                        className={`flex items-center gap-3 rounded-md px-2.5 py-1.5 ring-1 transition ${
-                                          isCanonical
-                                            ? 'bg-white ring-indigo-300 shadow-sm'
-                                            : 'bg-white/60 ring-slate-200 hover:bg-white'
-                                        }`}
-                                      >
-                                        <span className={`inline-flex h-5 w-5 items-center justify-center rounded font-mono text-[10px] font-bold ${
-                                          isCanonical ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
-                                        }`}>{label}</span>
-                                        <button
-                                          data-testid={`realization-play-${f.speaker}-${label}`}
-                                          className="inline-grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                          title={`Play ${fmtTime(r.startSec)}–${fmtTime(r.endSec)}`}
-                                          aria-label={`Play realization ${label}`}
-                                        >
-                                          <Play className="h-3 w-3 fill-current" />
-                                        </button>
-                                        <div className="min-w-[110px] font-mono text-[12px] text-slate-800">/{r.ipa}/</div>
-                                        <div className="min-w-[100px] text-[11px] italic text-slate-500">"{r.ortho}"</div>
-                                        <div className="font-mono text-[10px] tabular-nums text-slate-400">
-                                          {fmtTime(r.startSec)}–{fmtTime(r.endSec)}
-                                        </div>
-                                        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5">
-                                          <input
-                                            type="radio"
-                                            name={`canonical-${f.speaker}`}
-                                            checked={isCanonical}
-                                            onChange={() => setCanonicalRealization(concept, f.speaker, i)}
-                                            className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
-                                          />
-                                          <span className={`text-[10px] uppercase tracking-wider ${
-                                            isCanonical ? 'font-semibold text-indigo-700' : 'text-slate-500'
-                                          }`}>{isCanonical ? 'Canonical' : 'Set canonical'}</span>
-                                        </label>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              <LexemeDetail
-                                speaker={f.speaker}
-                                conceptId={concept.key}
-                                conceptLabel={concept.name}
-                                ipa={f.ipa}
-                                ortho={f.ortho}
-                                startSec={f.startSec}
-                                endSec={f.endSec}
-                                cognateGroup={f.cognate !== '—' ? f.cognate : null}
-                                cognateColor={cognateColor}
-                              />
-                            </td>
-                          </tr>
-                        )}
-                        </React.Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                {compareBundlesLoading && !activeCompareBundle ? (
+                  <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500">Loading Compare bundle…</div>
+                ) : compareBundlesError && !activeCompareBundle ? (
+                  <div className="rounded-lg border border-rose-100 bg-rose-50 p-4 text-xs text-rose-700" data-testid="compare-bundle-error">{compareBundlesError}</div>
+                ) : activeCompareBundle ? (
+                  <CompareBundleTable
+                    bundle={activeCompareBundle}
+                    speakers={selectedCompareSpeakers}
+                    speakerForms={speakerForms}
+                    primaryContactCodes={primaryContactCodes}
+                    contactLanguageNames={contactLanguageNames}
+                    onBundleUpdated={handleCompareBundleUpdated}
+                    onCycleCognate={(speaker, current) => cycleSpeakerCognate(concept.key, speaker, current)}
+                    onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
+                    onToggleSpeakerFlag={(speaker, current) => toggleSpeakerFlag(concept.key, speaker, current)}
+                  />
+                ) : (
+                  <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-empty">
+                    No Compare bundle is available for this concept yet.
+                  </div>
+                )}
               </SectionCard>
 
               <SectionCard title="Cognate decision" aside={<Pill tone="indigo">2 groups proposed</Pill>}>
