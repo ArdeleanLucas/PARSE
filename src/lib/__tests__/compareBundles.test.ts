@@ -4,6 +4,7 @@ import {
   activeCandidateFor,
   canonicalFor,
   enumerateVariants,
+  findBundleForConcept,
   migrateCanonicalRealizationToSelection,
   normalizeBundles,
   resolveActiveBucketForSpeaker,
@@ -96,6 +97,26 @@ describe("normalizeBundles", () => {
       end_sec: 1.8,
       source_wav: "audio/saha.wav",
     });
+  });
+});
+
+describe("findBundleForConcept", () => {
+  it("matches singleton concepts by row id before considering labels", () => {
+    const decoy = bigBundle({ bundle_id: "bundle:label-decoy", label: "not big", row_ids: ["999"] });
+
+    expect(findBundleForConcept([decoy, bigBundle()], { key: "53", name: "not big" })?.bundle_id).toBe("bundle:big");
+  });
+
+  it("falls back from grouped source-item keys to normalized bundle labels", () => {
+    expect(findBundleForConcept([bigBundle()], { key: "4.1", name: "big" })?.bundle_id).toBe("bundle:big");
+  });
+
+  it("uses case-insensitive trimmed label matching without a row match", () => {
+    expect(findBundleForConcept([bigBundle({ label: "  BIG  " })], { key: "missing", name: " big " })?.bundle_id).toBe("bundle:big");
+  });
+
+  it("returns null when neither row ids nor labels match", () => {
+    expect(findBundleForConcept([bigBundle()], { key: "999", name: "small" })).toBeNull();
   });
 });
 

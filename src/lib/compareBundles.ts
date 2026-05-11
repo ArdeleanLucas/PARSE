@@ -135,6 +135,21 @@ export function normalizeBundles(payload: unknown): CompareBundlesResponse {
   return { bundles, warnings };
 }
 
+export function findBundleForConcept(
+  bundles: readonly CompareBundle[],
+  concept: { key: string; name: string },
+): CompareBundle | null {
+  const conceptKey = cleanString(concept.key);
+  if (conceptKey) {
+    const byRowId = bundles.find((bundle) => bundle.row_ids.some((rowId) => cleanString(rowId) === conceptKey));
+    if (byRowId) return byRowId;
+  }
+
+  const conceptLabel = cleanString(concept.name).toLocaleLowerCase();
+  if (!conceptLabel) return null;
+  return bundles.find((bundle) => cleanString(bundle.label).toLocaleLowerCase() === conceptLabel) ?? null;
+}
+
 export function enumerateVariants(bundle: CompareBundle): EnumeratedCompareVariant[] {
   const out: EnumeratedCompareVariant[] = [];
   for (const bucket of bundle.buckets) {
