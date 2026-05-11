@@ -99,6 +99,8 @@ export function RightPanel(props: RightPanelProps) {
             offsetPhase={props.offsetPhase}
             onDetectOffset={props.onDetectOffset}
             onOpenManualOffset={props.onOpenManualOffset}
+            onCaptureOffsetAnchor={props.onCaptureOffsetAnchor}
+            captureToast={props.captureToast}
             currentConceptId={props.currentConceptId}
             annotateSpeakerTools={props.annotateSpeakerTools}
             annotateAuxTools={props.annotateAuxTools}

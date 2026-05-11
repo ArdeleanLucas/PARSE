@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  Anchor,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -79,8 +78,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   peaksUrl,
   surveyLabel,
   surveySourceItem,
-  onCaptureOffsetAnchor,
-  captureToast,
 }) => {
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
@@ -1219,27 +1216,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 </div>
               )}
             </div>
-            {onCaptureOffsetAnchor && (
-              <div className="relative">
-                <button
-                  onClick={onCaptureOffsetAnchor}
-                  data-testid="annotate-capture-anchor"
-                  title="Anchor offset detection to this lexeme + the current playback time. Locks this lexeme against future global offset passes."
-                  className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                >
-                  <Anchor className="h-4 w-4" /> Anchor offset here
-                </button>
-                {captureToast && (
-                  <div
-                    role="status"
-                    data-testid="annotate-capture-toast"
-                    className="absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] text-emerald-700 shadow-md"
-                  >
-                    {captureToast}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </section>

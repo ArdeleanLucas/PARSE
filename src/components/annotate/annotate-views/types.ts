@@ -25,8 +25,6 @@ export interface AnnotateViewProps {
   peaksUrl?: string;
   surveyLabel?: string;
   surveySourceItem?: string;
-  onCaptureOffsetAnchor?: () => void;
-  captureToast?: string | null;
 }
 
 export interface AnnotationPanelProps {
