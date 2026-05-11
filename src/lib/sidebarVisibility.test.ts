@@ -6,12 +6,13 @@ const baseOptions = {
   activeSpeakerForSidebar: null,
   elicitedConceptKeys: new Set<string>(),
   selectedTagIds: new Set<string>(),
+  activeSpeakerFreshKeys: new Set<string>(),
   getTagsForConcept: vi.fn(() => []),
   activeTagScope: undefined,
 };
 
 describe('isConceptVariantVisibleInSidebar', () => {
-  it('keeps a sibling visible when the parent group has any elicited variant', () => {
+  it("hides a sibling whose conceptKey is absent from the active speaker's elicited set, even when another sibling under the same parent is elicited", () => {
     const concept = {
       key: '1.1',
       variants: [
@@ -25,6 +26,24 @@ describe('isConceptVariantVisibleInSidebar', () => {
       scopedToSpeaker: true,
       activeSpeakerForSidebar: 'Saha01',
       elicitedConceptKeys: new Set(['1']),
+    })).toBe(false);
+  });
+
+  it('keeps a fresh-duplicate variant visible even when the active speaker has not annotated it', () => {
+    const concept = {
+      key: '1.1',
+      variants: [
+        { conceptKey: '1' },
+        { conceptKey: '599' },
+      ],
+    };
+
+    expect(isConceptVariantVisibleInSidebar(concept, { conceptKey: '599' }, {
+      ...baseOptions,
+      scopedToSpeaker: true,
+      activeSpeakerForSidebar: 'Saha01',
+      elicitedConceptKeys: new Set(['1']),
+      activeSpeakerFreshKeys: new Set(['599']),
     })).toBe(true);
   });
 

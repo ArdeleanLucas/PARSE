@@ -1794,39 +1794,119 @@ describe("ParseUI", () => {
     expect(within(sidebar).queryByTestId("sidebar-action-feedback")).toBeNull();
   });
 
-  it("duplicates the active raw variant when right-clicking a grouped parent", async () => {
+
+  it("right-click duplicate keeps the new sibling visible in scoped view for the duplicating speaker", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
-      speakers: ["Qasr01"],
+      speakers: ["Fail01", "Kalh01"],
       concepts: [
-        { id: "247", label: "head (A)", source_item: "31", source_survey: "JBIL" },
-        { id: "248", label: "head (B)", source_item: "31", source_survey: "JBIL" },
-        { id: "527", label: "head", source_item: "31", source_survey: "JBIL" },
-        { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
+        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
       ],
       audio_dir: "audio",
       annotations_dir: "annotations",
     };
-    mockRecords = { Qasr01: makeRecord("Qasr01", [{ conceptText: "head", conceptId: "622", start: 1, end: 2 }]) };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "JBIL 154", conceptId: "365", start: 1, end: 2 }]),
+      Kalh01: makeRecord("Kalh01", [{ conceptText: "other", conceptId: "888", start: 3, end: 4 }]),
+    };
     vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
-      sibling: { id: "623", label: "head (D)", source_item: "31", source_survey: "JBIL" },
+      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+      sibling: { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+    });
+    mockReloadConfig.mockImplementationOnce(async () => {
+      mockConfig = {
+        ...(mockConfig as ProjectConfig),
+        concepts: [
+          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+          { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+        ],
+      };
     });
 
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-622")).toBeTruthy());
-    fireEvent.click(within(sidebar).getByTestId("concept-variant-row-622"));
-    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /head.*JBIL 31/i }));
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /JBIL 154/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
-    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("622"));
-    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("247");
+    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
   });
 
+  it("switching speakers scopes the fresh duplicate only to the duplicating speaker", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [
+        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
+        { id: "888", label: "other" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "JBIL 154", conceptId: "365", start: 1, end: 2 }]),
+      Kalh01: makeRecord("Kalh01", [{ conceptText: "other", conceptId: "888", start: 3, end: 4 }]),
+    };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+      sibling: { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+    });
+    mockReloadConfig.mockImplementationOnce(async () => {
+      mockConfig = {
+        ...(mockConfig as ProjectConfig),
+        concepts: [
+          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
+          { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
+          { id: "888", label: "other" },
+        ],
+      };
+    });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /JBIL 154/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Kalh01" })[0]);
+    await waitFor(() => expect(within(sidebar).queryByTestId("concept-variant-row-999")).toBeNull());
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Fail01" })[0]);
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
+  });
+
+  it("other speakers' annotated variants do not appear in a scoped grouped row", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [
+        { id: "247", label: "head (A)", source_item: "31", source_survey: "JBIL" },
+        { id: "527", label: "head", source_item: "31", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", start: 1, end: 2 }]),
+      Kalh01: makeRecord("Kalh01", [{ conceptText: "head (A)", conceptId: "247", start: 3, end: 4 }]),
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    const parent = await within(sidebar).findByRole("button", { name: /head.*JBIL 31/i });
+
+    expect(parent).toBeTruthy();
+    expect(within(sidebar).queryByTestId("concept-variant-row-247")).toBeNull();
+  });
 
   it("right-click → Delete variant opens the confirmation modal", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
