@@ -390,10 +390,12 @@ vi.mock("./api/client", () => ({
     primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
     sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
   }),
+  deleteConcept: vi.fn().mockResolvedValue({ ok: true, deleted_id: '618' }),
 }));
 
 import { ParseUI } from "./ParseUI";
 import * as apiClient from "./api/client";
+import { ApiError } from "./api/contracts/shared";
 
 function makeFakeBundleMatchingConceptKey() {
   const firstConcept = mockConfig?.concepts?.[0];
@@ -732,6 +734,8 @@ beforeEach(() => {
     primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
     sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
   });
+  vi.mocked(apiClient.deleteConcept).mockReset();
+  vi.mocked(apiClient.deleteConcept).mockResolvedValue({ ok: true, deleted_id: '618' });
 
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
@@ -1626,7 +1630,7 @@ describe("ParseUI", () => {
     expect(originalRow.className).toContain("bg-indigo-50");
     expect(siblingRow.className).not.toContain("bg-indigo-50");
     expect(siblingRow.textContent ?? "").toContain("NEW");
-    expect(screen.getByRole("alert").textContent ?? "").toContain("Duplicated new (B) → new (C)");
+    expect(screen.queryByRole("alert")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(5000);
@@ -1665,6 +1669,97 @@ describe("ParseUI", () => {
 
     await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("622"));
     expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("247");
+  });
+
+
+  it("right-click → Delete variant opens the confirmation modal", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
+
+    expect(screen.getByText("Delete new (B)?")).toBeTruthy();
+    expect(screen.getByText(/permanently removes new \(B\)/i)).toBeTruthy();
+  });
+
+  it("successful delete reloads config and fires a warning toast", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockResolvedValueOnce({ ok: true, deleted_id: "618" });
+    mockReloadConfig.mockClear();
+    mockSyncTagsFromServer.mockClear();
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("618"));
+    await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
+    expect(mockSyncTagsFromServer).toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent ?? "").toContain("Deleted new (B)");
+  });
+
+  it("409 delete keeps the modal open and surfaces blocking speakers", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockRejectedValueOnce(
+      new ApiError(409, "DELETE", "/api/concepts/618", { error: "blocked", blocking_speakers: ["Qasr01"] }, "API DELETE /api/concepts/618 failed 409"),
+    );
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("618"));
+    expect(screen.getByText("Delete new (B)?")).toBeTruthy();
+    expect(screen.getByText(/1 speaker\(s\) have annotated this lexeme: Qasr01/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("treats an explicit empty annotate tag scope as untagged", () => {

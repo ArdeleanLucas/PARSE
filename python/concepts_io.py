@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -23,6 +24,16 @@ class ConceptDuplicateError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+class ConceptDeleteError(Exception):
+    """Raised when concept deletion cannot be completed safely."""
+
+    def __init__(self, status: HTTPStatus, message: str, *, blocking_speakers: Sequence[str] | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+        self.blocking_speakers = list(blocking_speakers or [])
 
 
 def _numeric_id(value: object) -> str:
@@ -48,6 +59,10 @@ def _backup_timestamp(now: datetime | None = None) -> str:
 
 def _backup_path(concepts_path: Path, concept_id: str, now: datetime | None = None) -> Path:
     return concepts_path.with_name("concepts.csv.bak-{0}-pre-duplicate-{1}".format(_backup_timestamp(now), concept_id))
+
+
+def _delete_backup_path(concepts_path: Path, concept_id: str, now: datetime | None = None) -> Path:
+    return concepts_path.with_name("concepts.csv.bak-{0}-pre-delete-{1}".format(_backup_timestamp(now), concept_id))
 
 
 def _max_numeric_id(rows: Sequence[Mapping[str, Any]]) -> int:
@@ -97,6 +112,41 @@ def _next_free_variant_label(
     while label_num in numeric_labels:
         label_num += 1
     return str(label_num)
+
+
+def _speaker_name_from_annotation(path: Path, payload: Mapping[str, Any]) -> str:
+    speaker = str(payload.get("speaker") or "").strip()
+    if speaker:
+        return speaker
+    stem = path.stem
+    return stem.removesuffix(".parse")
+
+
+def _speakers_annotating(project_root: Path, concept_id: str) -> list[str]:
+    """Return speaker ids whose concept tier references ``concept_id``."""
+
+    target_id = str(concept_id)
+    annotations_dir = Path(project_root) / "annotations"
+    if not annotations_dir.is_dir():
+        return []
+    blocking: set[str] = set()
+    for annotation_path in sorted(annotations_dir.glob("*.json")):
+        try:
+            payload = json.loads(annotation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        tiers = payload.get("tiers")
+        concept_tier = tiers.get("concept") if isinstance(tiers, Mapping) else None
+        intervals = concept_tier.get("intervals") if isinstance(concept_tier, Mapping) else None
+        if not isinstance(intervals, list):
+            continue
+        for interval in intervals:
+            if isinstance(interval, Mapping) and str(interval.get("concept_id") or "").strip() == target_id:
+                blocking.add(_speaker_name_from_annotation(annotation_path, payload))
+                break
+    return sorted(blocking)
 
 
 def duplicate_concept_variant(
@@ -189,3 +239,56 @@ def duplicate_concept_variant(
             raise ConceptDuplicateError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to duplicate concept") from exc
 
     return {"primary": primary, "sibling": sibling}
+
+
+def delete_concept_variant(
+    project_root: Path,
+    concept_id: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Delete one unannotated concepts.csv row with backup/rollback safety."""
+
+    normalized_id = _numeric_id(concept_id)
+    if not normalized_id:
+        raise ConceptDeleteError(HTTPStatus.BAD_REQUEST, "conceptId must be numeric")
+
+    concepts_path = Path(project_root) / "concepts.csv"
+    try:
+        rows = read_concepts_csv_rows(concepts_path)
+    except (OSError, csv.Error, UnicodeDecodeError) as exc:
+        raise ConceptDeleteError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to delete concept") from exc
+
+    target_index: int | None = None
+    for index, row in enumerate(rows):
+        if _numeric_id(row.get("id")) == normalized_id:
+            target_index = index
+            break
+    if target_index is None:
+        raise ConceptDeleteError(HTTPStatus.NOT_FOUND, "concept not found")
+
+    blocking_speakers = _speakers_annotating(Path(project_root), normalized_id)
+    if blocking_speakers:
+        raise ConceptDeleteError(
+            HTTPStatus.CONFLICT,
+            "concept is annotated by one or more speakers",
+            blocking_speakers=blocking_speakers,
+        )
+
+    backup_path = _delete_backup_path(concepts_path, normalized_id, now)
+    try:
+        original_bytes = concepts_path.read_bytes()
+        backup_path.write_bytes(original_bytes)
+    except OSError as exc:
+        raise ConceptDeleteError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to delete concept") from exc
+
+    updated_rows = [dict(row) for index, row in enumerate(rows) if index != target_index]
+    try:
+        write_concepts_csv_rows(concepts_path, updated_rows, atomic=True)
+    except OSError as exc:
+        try:
+            _restore_from_backup(concepts_path, backup_path)
+        finally:
+            raise ConceptDeleteError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to delete concept") from exc
+
+    return {"ok": True, "deleted_id": normalized_id}

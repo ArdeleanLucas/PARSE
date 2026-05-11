@@ -770,7 +770,7 @@ describe('ConceptSidebar', () => {
       { id: 4, key: '4', name: 'branch', tag: 'untagged' as const, sourceItem: '101' },
     ];
 
-    function renderWith(onDuplicateConcept: (concept: unknown) => void) {
+    function renderWith(onDuplicateConcept: (concept: unknown) => void, onDeleteConcept: (concept: unknown) => void = vi.fn()) {
       return render(
         <ConceptSidebar
           query=""
@@ -791,6 +791,7 @@ describe('ConceptSidebar', () => {
           activeConceptId={1}
           onConceptSelect={vi.fn()}
           onDuplicateConcept={onDuplicateConcept}
+          onDeleteConcept={onDeleteConcept}
         />,
       );
     }
@@ -978,6 +979,31 @@ describe('ConceptSidebar', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ }));
 
       expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
+    });
+
+    it("renders Delete variant on a child variant row's context menu", () => {
+      renderWith(vi.fn());
+      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+
+      expect(screen.getByRole('menuitem', { name: /Delete variant/i })).toBeTruthy();
+    });
+
+    it("does not render Delete variant on a grouped parent row's context menu", () => {
+      renderWith(vi.fn());
+      openMenuFor(/^new/);
+
+      expect(screen.queryByRole('menuitem', { name: /Delete variant/i })).toBeNull();
+    });
+
+    it("calls onDeleteConcept with the child variant's conceptKey", () => {
+      const onDelete = vi.fn();
+      renderWith(vi.fn(), onDelete);
+      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Delete variant/i }));
+
+      expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
     });
 
     it('does not disable a stem-named concept when no variants are present', () => {

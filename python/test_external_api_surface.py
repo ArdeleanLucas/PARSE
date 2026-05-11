@@ -90,6 +90,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/tags/merge",
         "/api/concepts/import",
         "/api/concepts/relink-by-gloss",
+        "/api/concepts/{conceptId}",
         "/api/concepts/{conceptId}/duplicate",
         "/api/concepts/{conceptId}/survey-links",
         "/api/concepts/by-tag",
@@ -134,6 +135,29 @@ def test_build_openapi_document_covers_concept_duplicate_contract() -> None:
         "$ref": "#/components/schemas/ConceptDuplicateResponse"
     }
     assert operation["x-parse"] == {"idempotent": False}
+
+
+def test_build_openapi_document_covers_concept_delete_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/concepts/{conceptId}"]["delete"]
+
+    assert operation["operationId"] == "deleteConcept"
+    assert operation["parameters"] == [
+        {
+            "name": "conceptId",
+            "in": "path",
+            "required": True,
+            "schema": {"type": "string", "pattern": "^[0-9]+$"},
+        }
+    ]
+    assert set(operation["responses"]) == {"200", "400", "404", "409", "500"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptDeleteResponse"
+    }
+    assert operation["responses"]["409"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptDeleteConflict"
+    }
+    assert operation["x-parse"] == {"idempotent": False, "destructive": True}
 
 
 def test_build_openapi_document_covers_relink_by_gloss_contract() -> None:

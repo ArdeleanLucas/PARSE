@@ -168,3 +168,25 @@ def copy_canonical_references(project_root: Path, *, source_row_id: str, sibling
         overrides["canonical_lexemes"] = canonical
         save_enrichments_atomic(project_root, payload)
     return changed
+
+
+def drop_canonical_references_for(project_root: Path, *, row_id: str) -> bool:
+    """Remove canonical lexeme selections that reference one deleted CSV row."""
+
+    payload = load_enrichments(project_root)
+    payload = copy.deepcopy(payload)
+    overrides = _manual_overrides(payload)
+    canonical = normalize_canonical_lexemes(overrides.get("canonical_lexemes"))
+    target_id = str(row_id)
+    changed = False
+    for bundle_id, speaker_map in list(canonical.items()):
+        for speaker, selection in list(speaker_map.items()):
+            if selection.get("csv_row_id") == target_id:
+                speaker_map.pop(speaker, None)
+                changed = True
+        if not speaker_map:
+            canonical.pop(bundle_id, None)
+    if changed:
+        overrides["canonical_lexemes"] = canonical
+        save_enrichments_atomic(project_root, payload)
+    return changed

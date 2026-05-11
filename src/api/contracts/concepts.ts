@@ -7,6 +7,16 @@ export interface ConceptDuplicateResponse {
   sibling: ConceptEntry;
 }
 
+export interface ConceptDeleteResponse {
+  ok: true;
+  deleted_id: string;
+}
+
+export interface ConceptDeleteConflict {
+  error: string;
+  blocking_speakers: string[];
+}
+
 /**
  * Duplicate a concept into A/B siblings.
  *
@@ -20,6 +30,13 @@ export async function duplicateConcept(conceptId: string): Promise<ConceptDuplic
   return apiFetch<ConceptDuplicateResponse>(
     `/api/concepts/${encodeURIComponent(conceptId)}/duplicate`,
     { method: "POST" },
+  );
+}
+
+export async function deleteConcept(conceptId: string): Promise<ConceptDeleteResponse> {
+  return apiFetch<ConceptDeleteResponse>(
+    `/api/concepts/${encodeURIComponent(conceptId)}`,
+    { method: "DELETE" },
   );
 }
 
