@@ -1921,12 +1921,6 @@ export function ParseUI() {
             // active raw variant so the duplicate action does not yank the
             // editor away from the variant the user was working on.
             const target = concepts.find((c) => c.id === sidebarConcept.id) ?? null;
-            const variantKey = sidebarConcept.key && target?.variants?.some((variant) => variant.conceptKey === sidebarConcept.key)
-              ? sidebarConcept.key
-              : null;
-            const activeVariantKey = activeRawKey && target?.variants?.some((variant) => variant.conceptKey === activeRawKey)
-              ? activeRawKey
-              : null;
             const visibilityConcept = target ?? sidebarConcept;
             const clickElicitedConceptKeys = speakerElicitedConceptKeys(
               activeSpeakerForSidebar ? useAnnotationStore.getState().records[activeSpeakerForSidebar] : null,
@@ -1939,6 +1933,14 @@ export function ParseUI() {
                 && String(candidate.source_survey ?? (candidate as { sourceSurvey?: unknown }).sourceSurvey ?? '') === sidebarSourceSurvey
                 && (clickElicitedConceptKeys.has(String(candidate.id)) || activeSpeakerFreshKeys.has(String(candidate.id)))
               ))?.id
+              : null;
+            const variantKey = sidebarConcept.key && target?.variants?.some((variant) => variant.conceptKey === sidebarConcept.key)
+              ? sidebarConcept.key
+              : null;
+            const activeVariantKey = activeRawKey
+              && target?.variants?.some((variant) => variant.conceptKey === activeRawKey)
+              && (clickElicitedConceptKeys.has(activeRawKey) || activeSpeakerFreshKeys.has(activeRawKey))
+              ? activeRawKey
               : null;
             const firstVisibleVariantKey = sourceScopedRawKey != null
               ? String(sourceScopedRawKey)

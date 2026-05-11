@@ -1795,6 +1795,51 @@ describe("ParseUI", () => {
   });
 
 
+  it("duplicates the active speaker's visible variant when right-clicking a grouped parent", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [
+        { id: "247", label: "head (A)", source_item: "31", source_survey: "JBIL" },
+        { id: "527", label: "head", source_item: "31", source_survey: "JBIL" },
+        { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    // Fail01 ONLY annotated row 527. Other rows (247, 622) are Kalh01's.
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", start: 1, end: 2 }]),
+      Kalh01: makeRecord("Kalh01", [
+        { conceptText: "head (A)", conceptId: "247", start: 3, end: 4 },
+        { conceptText: "head (C)", conceptId: "622", start: 5, end: 6 },
+      ]),
+    };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "527", label: "head (D)", source_item: "31", source_survey: "JBIL" },
+      sibling: { id: "999", label: "head (E)", source_item: "31", source_survey: "JBIL" },
+    });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(screen.queryAllByText((_text, element) => (
+      element?.textContent?.includes("reviewed for Fail01") ?? false
+    )).length).toBeGreaterThan(0));
+    // Strict per-variant scope (MC-371-F): the parent renders as a single-row group
+    // because only row 527 is visible to Fail01.
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /head.*JBIL 31/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+
+    // The firstVisibleVariantKey fallback MUST pick 527 (Fail01's only-visible variant),
+    // NOT variants[0] which is "247" (Kalh01's variant).
+    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("527"));
+    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("247");
+    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("622");
+  });
+
   it("right-click duplicate keeps the new sibling visible in scoped view for the duplicating speaker", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
