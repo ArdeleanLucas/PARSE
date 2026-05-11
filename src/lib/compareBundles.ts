@@ -31,15 +31,18 @@ function normalizeVariant(raw: unknown): CompareVariant | null {
   const csvRowId = cleanString(raw.csv_row_id ?? raw.csvRowId ?? raw.id ?? raw.concept_id);
   const surveyId = cleanString(raw.survey_id ?? raw.surveyId ?? raw.source_survey).toLowerCase();
   const sourceItem = cleanString(raw.source_item ?? raw.sourceItem);
-  if (!csvRowId || !surveyId || !sourceItem) return null;
+  const variantLabel = cleanString(raw.variant_label ?? raw.variantLabel);
+  const conceptEn = cleanString(raw.concept_en ?? raw.conceptEn ?? raw.label);
+  if (!csvRowId || (!variantLabel && !conceptEn)) return null;
   return {
     csv_row_id: csvRowId,
     concept_key: cleanString(raw.concept_key ?? raw.conceptKey) || undefined,
+    concept_en: conceptEn || undefined,
     label: cleanString(raw.label) || undefined,
-    variant_label: cleanString(raw.variant_label ?? raw.variantLabel) || undefined,
-    survey_id: surveyId,
-    source_item: sourceItem,
-    bucket_key: cleanString(raw.bucket_key ?? raw.bucketKey) || bucketKey(surveyId, sourceItem),
+    variant_label: variantLabel || undefined,
+    survey_id: surveyId || undefined,
+    source_item: sourceItem || undefined,
+    bucket_key: cleanString(raw.bucket_key ?? raw.bucketKey) || undefined,
   };
 }
 
@@ -83,11 +86,11 @@ function normalizeCandidate(raw: unknown, csvRowId: string): CompareCandidate | 
   return {
     csv_row_id: cleanString(raw.csv_row_id ?? raw.csvRowId) || csvRowId,
     speaker: cleanString(raw.speaker) || undefined,
-    form: typeof raw.form === "string" ? raw.form : null,
     ipa: typeof raw.ipa === "string" || raw.ipa === null ? raw.ipa : undefined,
     ortho: typeof raw.ortho === "string" || raw.ortho === null ? raw.ortho : undefined,
-    start: typeof raw.start === "number" || raw.start === null ? raw.start : undefined,
-    end: typeof raw.end === "number" || raw.end === null ? raw.end : undefined,
+    start_sec: typeof raw.start_sec === "number" || raw.start_sec === null ? raw.start_sec : undefined,
+    end_sec: typeof raw.end_sec === "number" || raw.end_sec === null ? raw.end_sec : undefined,
+    source_wav: cleanString(raw.source_wav) || undefined,
     realization_index: typeof raw.realization_index === "number" ? raw.realization_index : undefined,
   };
 }
@@ -146,7 +149,7 @@ function variantForRow(bundle: CompareBundle, csvRowId: string): EnumeratedCompa
 
 function candidateEntries(bundle: CompareBundle, speaker: string): Array<[string, CompareCandidate]> {
   const byRow = bundle.candidates?.[speaker] ?? {};
-  return Object.entries(byRow).filter((entry): entry is [string, CompareCandidate] => entry[1] !== null && entry[1].form !== null);
+  return Object.entries(byRow).filter((entry): entry is [string, CompareCandidate] => entry[1] !== null);
 }
 
 export function canonicalFor(bundle: CompareBundle, speaker: string): CanonicalLexemeSelection | null {
@@ -159,8 +162,8 @@ export function canonicalFor(bundle: CompareBundle, speaker: string): CanonicalL
   if (!entry) return null;
   return {
     csv_row_id: csvRowId,
-    survey_id: entry.variant.survey_id,
-    source_item: entry.variant.source_item,
+    survey_id: entry.variant.survey_id ?? entry.bucket.survey_id,
+    source_item: entry.variant.source_item ?? entry.bucket.source_item,
     bucket_key: entry.bucket.bucket_key,
     realization_index: candidate.realization_index,
     source: "default:single-candidate",
@@ -221,8 +224,8 @@ export function migrateCanonicalRealizationToSelection(
   const { bucket, variant } = variants[legacyIdx];
   return {
     csv_row_id: variant.csv_row_id,
-    survey_id: variant.survey_id,
-    source_item: variant.source_item,
+    survey_id: variant.survey_id ?? bucket.survey_id,
+    source_item: variant.source_item ?? bucket.source_item,
     bucket_key: bucket.bucket_key,
     realization_index: legacyIdx,
     source: "migration:canonical_realizations",

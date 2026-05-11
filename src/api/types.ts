@@ -279,11 +279,11 @@ export interface CanonicalLexemeSelection {
 export interface CompareCandidate {
   csv_row_id: string;
   speaker?: string;
-  form: string | null;
   ipa?: string | null;
   ortho?: string | null;
-  start?: number | null;
-  end?: number | null;
+  start_sec?: number | null;
+  end_sec?: number | null;
+  source_wav?: string;
   realization_index?: number;
   warnings?: string[];
 }
@@ -291,10 +291,11 @@ export interface CompareCandidate {
 export interface CompareVariant {
   csv_row_id: string;
   concept_key?: string;
+  concept_en?: string;
   label?: string;
   variant_label?: string;
-  survey_id: string;
-  source_item: string;
+  survey_id?: string;
+  source_item?: string;
   bucket_key?: string;
 }
 
@@ -329,13 +330,10 @@ export interface CanonicalLexemePutRequest {
 }
 
 export interface CanonicalLexemePutResponse {
-  ok: true;
-  selection: CanonicalLexemeSelection;
   bundle: CompareBundle;
 }
 
 export interface CanonicalLexemeDeleteResponse {
-  ok: true;
   bundle: CompareBundle;
 }
 

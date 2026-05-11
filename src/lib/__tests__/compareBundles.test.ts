@@ -22,8 +22,8 @@ function bigBundle(overrides: Partial<CompareBundle> = {}): CompareBundle {
         survey_id: "klq",
         source_item: "4.1",
         variants: [
-          { csv_row_id: "53", survey_id: "klq", source_item: "4.1", variant_label: "A", label: "big (A)", bucket_key: "klq\u00004.1" },
-          { csv_row_id: "619", survey_id: "klq", source_item: "4.1", variant_label: "B", label: "big (B)", bucket_key: "klq\u00004.1" },
+          { csv_row_id: "53", variant_label: "A", label: "big (A)" },
+          { csv_row_id: "619", variant_label: "B", label: "big (B)" },
         ],
       },
       {
@@ -31,19 +31,19 @@ function bigBundle(overrides: Partial<CompareBundle> = {}): CompareBundle {
         survey_id: "jbil",
         source_item: "169",
         variants: [
-          { csv_row_id: "150", survey_id: "jbil", source_item: "169", variant_label: "A", label: "big (A)", bucket_key: "jbil\u0000169" },
+          { csv_row_id: "150", variant_label: "A", label: "big (A)" },
         ],
       },
     ],
     candidates: {
       Saha01: {
-        "53": { csv_row_id: "53", speaker: "Saha01", form: "gawra", ipa: "gawra", realization_index: 0 },
+        "53": { csv_row_id: "53", speaker: "Saha01", ipa: "gawra", start_sec: 1.1, end_sec: 1.8, source_wav: "audio/saha.wav", realization_index: 0 },
         "619": null,
         "150": null,
       },
       Fail02: {
-        "53": { csv_row_id: "53", speaker: "Fail02", form: "mez", realization_index: 0 },
-        "619": { csv_row_id: "619", speaker: "Fail02", form: "gewre", realization_index: 1 },
+        "53": { csv_row_id: "53", speaker: "Fail02", start_sec: 2.1, end_sec: 2.7, source_wav: "audio/fail.wav", realization_index: 0 },
+        "619": { csv_row_id: "619", speaker: "Fail02", start_sec: 2.8, end_sec: 3.4, source_wav: "audio/fail.wav", realization_index: 1 },
         "150": null,
       },
     },
@@ -58,8 +58,8 @@ describe("normalizeBundles", () => {
         {
           bundle_id: "bundle:hair",
           label: "hair",
-          buckets: [{ survey_id: "KLQ", source_item: "2.1", variants: [{ csv_row_id: "42", survey_id: "KLQ", source_item: "2.1", label: "hair" }] }],
-          candidates: { Fail01: { "42": { form: "por" } } },
+          buckets: [{ survey_id: "KLQ", source_item: "2.1", variants: [{ csv_row_id: "42", label: "hair" }] }],
+          candidates: { Fail01: { "42": { start_sec: 0.1, end_sec: 0.6, source_wav: "audio/fail01.wav" } } },
         },
         { label: "bad", buckets: [] },
       ],
@@ -71,7 +71,7 @@ describe("normalizeBundles", () => {
       bundle_id: "bundle:hair",
       row_ids: ["42"],
       buckets: [{ survey_id: "klq", source_item: "2.1" }],
-      candidates: { Fail01: { "42": { csv_row_id: "42", form: "por" } } },
+      candidates: { Fail01: { "42": { csv_row_id: "42", start_sec: 0.1, end_sec: 0.6, source_wav: "audio/fail01.wav" } } },
     });
     expect(payload.warnings).toEqual(["beta"]);
   });
@@ -81,6 +81,21 @@ describe("normalizeBundles", () => {
 
     expect(payload.bundles[0].row_ids).toEqual(["53", "619", "150"]);
     expect(enumerateVariants(payload.bundles[0]).map(({ variant }) => variant.csv_row_id)).toEqual(["53", "619", "150"]);
+  });
+
+  it("accepts MC-368-B emitted variant and candidate shapes without filtering variants", () => {
+    const payload = normalizeBundles({ bundles: [bigBundle()] });
+    const [bundle] = payload.bundles;
+
+    expect(bundle.buckets).toHaveLength(2);
+    expect(bundle.buckets[0].variants).toHaveLength(2);
+    expect(bundle.buckets[1].variants).toHaveLength(1);
+    expect(enumerateVariants(bundle).map(({ variant }) => variant.csv_row_id)).toEqual(["53", "619", "150"]);
+    expect(bundle.candidates?.Saha01?.["53"]).toMatchObject({
+      start_sec: 1.1,
+      end_sec: 1.8,
+      source_wav: "audio/saha.wav",
+    });
   });
 });
 
@@ -93,10 +108,10 @@ describe("canonical selectors", () => {
     });
 
     expect(canonicalFor(bundle, "Fail02")?.csv_row_id).toBe("619");
-    expect(activeCandidateFor(bundle, "Fail02")?.form).toBe("gewre");
+    expect(activeCandidateFor(bundle, "Fail02")?.csv_row_id).toBe("619");
   });
 
-  it("synthesizes a non-persisted default when exactly one candidate has a form", () => {
+  it("synthesizes a non-persisted default when exactly one candidate is available", () => {
     const selection = canonicalFor(bigBundle(), "Saha01");
 
     expect(selection).toMatchObject({
@@ -105,7 +120,7 @@ describe("canonical selectors", () => {
       survey_id: "klq",
       source_item: "4.1",
     });
-    expect(activeCandidateFor(bigBundle(), "Saha01")?.form).toBe("gawra");
+    expect(activeCandidateFor(bigBundle(), "Saha01")?.csv_row_id).toBe("53");
   });
 
   it("returns no canonical for multiple candidates or zero candidates", () => {
@@ -113,8 +128,8 @@ describe("canonical selectors", () => {
     expect(canonicalFor(bigBundle(), "Nope01")).toBeNull();
   });
 
-  it("keeps form:null candidates visible but not default-selectable", () => {
-    const bundle = bigBundle({ candidates: { Saha01: { "53": null, "619": null, "150": { csv_row_id: "150", form: null } } } });
+  it("treats null candidate entries as unavailable and not default-selectable", () => {
+    const bundle = bigBundle({ candidates: { Saha01: { "53": null, "619": null, "150": null } } });
 
     expect(enumerateVariants(bundle).map(({ variant }) => variant.csv_row_id)).toContain("150");
     expect(canonicalFor(bundle, "Saha01")).toBeNull();
