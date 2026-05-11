@@ -38,7 +38,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
-import { normalizeBundles } from './lib/compareBundles';
+import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
@@ -1260,9 +1260,11 @@ export function ParseUI() {
     };
   }, [annotationRecords, concept, speakerForms]);
   const activeCompareBundle = useMemo(() => {
-    const keys = new Set([concept.key, concept.name, String(concept.id)].map((value) => value.toLowerCase()));
-    return compareBundles.find((bundle) => keys.has(bundle.bundle_id.toLowerCase()) || keys.has(bundle.label.toLowerCase())) ?? compareBundles[0] ?? fallbackCompareBundle;
-  }, [compareBundles, concept, fallbackCompareBundle]);
+    const matchedBundle = findBundleForConcept(compareBundles, concept);
+    if (matchedBundle) return matchedBundle;
+    if (compareBundlesError !== null && compareBundles.length === 0) return fallbackCompareBundle;
+    return null;
+  }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
@@ -1272,7 +1274,7 @@ export function ParseUI() {
     let cancelled = false;
     setCompareBundlesLoading(true);
     setCompareBundlesError(null);
-    getCompareBundles({ bundleId: concept.key })
+    getCompareBundles({})
       .then((payload) => {
         if (cancelled) return;
         const normalized = normalizeBundles(payload);
@@ -1287,7 +1289,7 @@ export function ParseUI() {
         if (!cancelled) setCompareBundlesLoading(false);
       });
     return () => { cancelled = true; };
-  }, [currentMode, concept.key]);
+  }, [currentMode]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
   const total = concepts.length;
   const activeSpeakerProgress = currentMode === 'annotate' && activeSpeakerForSidebar ? activeSpeakerForSidebar : null;
@@ -2098,10 +2100,11 @@ export function ParseUI() {
 
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
+                {compareBundlesError && (
+                  <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50 p-4 text-xs text-rose-700" data-testid="compare-bundle-error">{compareBundlesError}</div>
+                )}
                 {compareBundlesLoading && !activeCompareBundle ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500">Loading Compare bundle…</div>
-                ) : compareBundlesError && !activeCompareBundle ? (
-                  <div className="rounded-lg border border-rose-100 bg-rose-50 p-4 text-xs text-rose-700" data-testid="compare-bundle-error">{compareBundlesError}</div>
                 ) : activeCompareBundle ? (
                   <CompareBundleTable
                     bundle={activeCompareBundle}
@@ -2114,9 +2117,13 @@ export function ParseUI() {
                     onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
                     onToggleSpeakerFlag={(speaker, current) => toggleSpeakerFlag(concept.key, speaker, current)}
                   />
-                ) : (
+                ) : compareBundlesError ? null : compareBundles.length === 0 ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-empty">
                     No Compare bundle is available for this concept yet.
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-no-match">
+                    No Compare bundle matches &quot;{concept.name}&quot;.
                   </div>
                 )}
               </SectionCard>

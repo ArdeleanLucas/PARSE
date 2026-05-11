@@ -392,7 +392,7 @@ vi.mock("./api/client", () => ({
 import { ParseUI } from "./ParseUI";
 import * as apiClient from "./api/client";
 
-function makeDefaultCompareBundles() {
+function makeFakeBundleMatchingConceptKey() {
   const firstConcept = mockConfig?.concepts?.[0];
   if (!firstConcept) return { bundles: [] };
   const rowId = String(firstConcept.id);
@@ -414,6 +414,57 @@ function makeDefaultCompareBundles() {
       buckets: [{ bucket_key: `default\u0000${rowId}`, survey_id: 'default', source_item: rowId, variants: [{ csv_row_id: rowId, concept_en: label, variant_label: 'A' }] }],
       candidates,
       canonical: {},
+    }],
+  };
+}
+
+function makeBeShapedBigCompareBundles() {
+  return {
+    bundles: [{
+      bundle_id: "bundle:big",
+      label: "big",
+      row_ids: ["53", "619", "150"],
+      buckets: [
+        {
+          bucket_key: "klq\u00004.1",
+          survey_id: "klq",
+          source_item: "4.1",
+          variants: [
+            { csv_row_id: "53", concept_en: "big", variant_label: "A" },
+            { csv_row_id: "619", concept_en: "big", variant_label: "B" },
+          ],
+        },
+        {
+          bucket_key: "jbil\u0000169",
+          survey_id: "jbil",
+          source_item: "169",
+          variants: [{ csv_row_id: "150", concept_en: "big", variant_label: "A" }],
+        },
+      ],
+      candidates: {
+        Fail01: {
+          "53": { csv_row_id: "53", ipa: "gawra", ortho: "big", start_sec: 1, end_sec: 2, realization_index: 0 },
+          "619": null,
+          "150": null,
+        },
+        Kalh01: {
+          "53": null,
+          "619": { csv_row_id: "619", ipa: "gewr", ortho: "big", start_sec: 3, end_sec: 4, realization_index: 1 },
+          "150": null,
+        },
+      },
+      canonical: { Fail01: null, Kalh01: null },
+    }],
+  };
+}
+
+function makeUnmatchedCompareBundles() {
+  return {
+    bundles: [{
+      ...makeBeShapedBigCompareBundles().bundles[0],
+      bundle_id: "bundle:small",
+      label: "small",
+      row_ids: ["999"],
     }],
   };
 }
@@ -443,6 +494,28 @@ function makeRecord(
     created_at: "2026-01-01T00:00:00.000Z",
     modified_at: "2026-01-01T00:00:00.000Z",
     source_wav: `${speaker}.wav`,
+  };
+}
+
+function configureBigCompareWorkspace(concepts = [
+  { id: "53", label: "big" },
+  { id: "999", label: "small" },
+]) {
+  mockConfig = {
+    project_name: "PARSE",
+    language_code: "ku",
+    speakers: ["Fail01", "Kalh01"],
+    concepts,
+    audio_dir: "audio",
+    annotations_dir: "annotations",
+  };
+  mockRecords = {
+    Fail01: makeRecord("Fail01", [
+      { conceptText: "big", conceptId: "53", ipa: "gawra", ortho: "big", start: 1, end: 2 },
+    ]),
+    Kalh01: makeRecord("Kalh01", [
+      { conceptText: "big", conceptId: "619", ipa: "gewr", ortho: "big", start: 3, end: 4 },
+    ]),
   };
 }
 
@@ -581,7 +654,7 @@ beforeEach(() => {
   mockEnrichmentData = {};
   mockEnrichmentSaveUsesDeepMerge = false;
   mockGetCompareBundles.mockReset();
-  mockGetCompareBundles.mockImplementation(() => Promise.resolve(makeDefaultCompareBundles()));
+  mockGetCompareBundles.mockImplementation(() => Promise.resolve(makeFakeBundleMatchingConceptKey()));
   mockPatchCanonicalLexeme.mockClear();
   mockSelectedRegion = { start: 1.25, end: 2.5 };
   mockCurrentTime = 0;
@@ -1550,8 +1623,8 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     // Sanity: both speaker rows are in the DOM.
-    expect(screen.getByText("/aw/")).toBeTruthy();
-    expect(screen.getByText("/awa/")).toBeTruthy();
+    expect(await screen.findByText("/aw/")).toBeTruthy();
+    expect(await screen.findByText("/awa/")).toBeTruthy();
     // CLEF config loads async; wait for the dynamic headers to mount.
     await waitFor(() => expect(screen.getByTestId("sim-col-header-ar")).toBeTruthy());
     expect(screen.getByTestId("sim-col-header-fa")).toBeTruthy();
@@ -1901,6 +1974,56 @@ describe("ParseUI", () => {
     expect(mockPatchCanonicalLexeme).toHaveBeenCalledWith("1", "Fail01", expect.objectContaining({ csv_row_id: "1", source: "manual" }));
   });
 
+  it("fetches all Compare bundles and matches BE-shaped bundle ids by row id", async () => {
+    configureBigCompareWorkspace();
+    mockGetCompareBundles.mockImplementation((query?: { bundleId?: string }) => {
+      if (query?.bundleId && query.bundleId !== "bundle:big") return Promise.resolve({ bundles: [] });
+      return Promise.resolve(makeBeShapedBigCompareBundles());
+    });
+
+    render(<ParseUI />);
+
+    expect(await screen.findByTestId("compare-bucket-klq\u00004.1")).toBeTruthy();
+    expect(screen.getByTestId("compare-bucket-jbil\u0000169")).toBeTruthy();
+    expect(mockGetCompareBundles).toHaveBeenCalledWith({});
+  });
+
+  it("loads Compare bundles once when entering Compare mode and reuses them on concept switches", async () => {
+    configureBigCompareWorkspace();
+    mockGetCompareBundles.mockResolvedValue(makeBeShapedBigCompareBundles());
+
+    render(<ParseUI />);
+
+    expect(await screen.findByTestId("compare-bucket-klq\u00004.1")).toBeTruthy();
+    expect(mockGetCompareBundles).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(screen.getByTestId("concept-sidebar")).getByRole("button", { name: /small/i }));
+
+    await screen.findByTestId("compare-bundle-no-match");
+    expect(mockGetCompareBundles).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces Compare bundle errors while rendering the fallback bundle for unreachable BE", async () => {
+    configureBigCompareWorkspace();
+    mockGetCompareBundles.mockRejectedValue(new Error("network down"));
+
+    render(<ParseUI />);
+
+    const error = await screen.findByTestId("compare-bundle-error");
+    expect(error.textContent).toContain("network down");
+    expect(await screen.findByTestId("compare-bundle-table")).toBeTruthy();
+  });
+
+  it("renders a no-match empty state instead of a fallback when BE returns nonmatching bundles", async () => {
+    configureBigCompareWorkspace();
+    mockGetCompareBundles.mockResolvedValue(makeUnmatchedCompareBundles());
+
+    render(<ParseUI />);
+
+    expect(await screen.findByTestId("compare-bundle-no-match")).toBeTruthy();
+    expect(screen.queryByTestId("compare-bundle-table")).toBeNull();
+    expect(screen.queryByTestId("compare-bundle-error")).toBeNull();
+  });
 
   const configureHeadMergeWorkspace = () => {
     mockConfig = {
@@ -2149,10 +2272,10 @@ describe("ParseUI", () => {
     expect(mockSetConceptTag).toHaveBeenCalledWith("Kalh01", "1", "confirmed");
   });
 
-  it("compare table row flag button targets a single speaker via enrichment overrides", () => {
+  it("compare table row flag button targets a single speaker via enrichment overrides", async () => {
     render(<ParseUI />);
 
-    fireEvent.click(screen.getByTestId("speaker-flag-Fail01"));
+    fireEvent.click(await screen.findByTestId("speaker-flag-Fail01"));
     expect(mockClearConceptTag).not.toHaveBeenCalled();
     expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "problematic");
     expect(mockSaveEnrichments).toHaveBeenCalledWith({
