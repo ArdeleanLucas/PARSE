@@ -22,11 +22,11 @@ Generated at `2026-05-10T17:37:02Z` from `python/external_api/catalog.py::build_
 | Full/default MCP surface | 64 |
 | Legacy curated opt-out surface (`expose_all_tools=false`) | 44 |
 
-`INDEX.md` lists every generated tool skill and links to the per-tool pages under `tools/`.
+`index.md` lists every generated tool skill and links to the per-tool pages under `skills/<bucket>/` (annotation, comparison, export, project, advanced).
 
 ## How agents should use these skills
 
-1. Start with the relevant tool page from `tools/`.
+1. Start with the relevant tool page from `skills/<bucket>/`.
 2. Re-discover the live tool schema from the active PARSE instance before execution.
 3. Use dry-run/preview first whenever the tool advertises it.
 4. For mutating tools, snapshot relevant project artifacts and verify by read-back.
