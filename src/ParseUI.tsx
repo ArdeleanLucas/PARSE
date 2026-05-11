@@ -962,6 +962,7 @@ export function ParseUI() {
   }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode]);
 
   const sourceSortDisabled = selectedSpeakers.length !== 1;
+  const effectiveSortParent: ConceptSortParent = sortParent === 'source' && sourceSortDisabled ? 'concept' : sortParent;
 
   useEffect(() => {
     try {
@@ -972,13 +973,6 @@ export function ParseUI() {
       }));
     } catch { /* localStorage disabled — non-fatal */ }
   }, [sortParent, conceptSortSub, sourceSortSub]);
-
-  useEffect(() => {
-    if (sortParent !== 'source') return;
-    if (selectedSpeakers.length === 1) return;
-    if (selectedSpeakers.length === 0 && rawSpeakers.length > 0) return;
-    setSortParent('concept');
-  }, [sortParent, selectedSpeakers.length, rawSpeakers.length]);
 
   const speakerSortKeys = useMemo(() => {
     if (selectedSpeakers.length !== 1) return null;
@@ -1187,13 +1181,13 @@ export function ParseUI() {
     if (currentMode === 'annotate') {
       // No synthetic filtering — show the full concept list
     }
-    if (sortParent === 'concept' || !speakerSortKeys) {
+    if (effectiveSortParent === 'concept') {
       list = [...list].sort(
         conceptSortSub === 'az'
           ? (a, b) => a.name.localeCompare(b.name)
           : (a, b) => a.id - b.id,
       );
-    } else {
+    } else if (speakerSortKeys) {
       const keys = sourceSortSub === 'time' ? speakerSortKeys.byStart : speakerSortKeys.byImportIndex;
       const valueForConcept = (candidate: Concept): number | undefined => {
         let best: number | undefined;
@@ -1212,9 +1206,11 @@ export function ParseUI() {
         const byKey = ka - kb;
         return byKey !== 0 ? byKey : a.id - b.id;
       });
+    } else {
+      list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, sortParent, conceptSortSub, sourceSortSub, speakerSortKeys, currentMode, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
+  }, [query, statusFilter, selectedTagIds, effectiveSortParent, conceptSortSub, sourceSortSub, speakerSortKeys, currentMode, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
 
   const baseConcept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const concept = useMemo<Concept>(() => {
@@ -1834,7 +1830,7 @@ export function ParseUI() {
         <ConceptSidebar
           query={query}
           onQueryChange={setQuery}
-          sortParent={sortParent}
+          sortParent={effectiveSortParent}
           conceptSub={conceptSortSub}
           sourceSub={sourceSortSub}
           onSortParentChange={handleConceptSortParentChange}
