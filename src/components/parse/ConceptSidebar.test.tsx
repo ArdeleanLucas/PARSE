@@ -18,14 +18,109 @@ afterEach(() => {
 });
 
 describe('ConceptSidebar', () => {
+  it('renders Concept and Source parent pills with only the active sub-row visible', () => {
+    const onSortParentChange = vi.fn();
+    const { rerender } = render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={onSortParentChange}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+      />,
+    );
+
+    expect(screen.getByTestId('concept-sort-parent-concept').className).toContain('bg-white');
+    expect(screen.getByTestId('concept-sort-1n')).toBeTruthy();
+    expect(screen.queryByTestId('concept-sort-source-time')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('concept-sort-parent-source'));
+    expect(onSortParentChange).toHaveBeenCalledWith('source');
+
+    rerender(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={onSortParentChange}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+      />,
+    );
+    expect(screen.queryByTestId('concept-sort-1n')).toBeNull();
+    expect(screen.getByTestId('concept-sort-source-time').className).toContain('bg-sky-600');
+    expect(screen.getByText('Fail01')).toBeTruthy();
+  });
+
+  it('keeps Source disabled as a no-op until exactly one speaker is selected', () => {
+    const onSortParentChange = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="row"
+        onSortParentChange={onSortParentChange}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    const source = screen.getByTestId('concept-sort-parent-source');
+    expect(source.getAttribute('aria-disabled')).toBe('true');
+    expect(source.title).toBe('Select one speaker to enable Source ordering');
+    fireEvent.click(source);
+    expect(onSortParentChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('concept-sort-az').className).toContain('bg-white');
+  });
+
   it('renders the provided concept list with the active concept highlighted', () => {
     render(
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="az"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -54,9 +149,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={onQueryChange}
-        sortMode="survey"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={onStatusFilterChange}
@@ -87,9 +186,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -125,9 +228,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -155,9 +262,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={baseConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
@@ -185,9 +296,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2', sourceSurvey: 'KLQ' }]}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -207,9 +322,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="az"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2' }]}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -231,9 +350,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="survey"
-        onSortModeChange={vi.fn()}
-        hasSourceItems={false}
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled
         filteredConcepts={[{ id: 42, name: 'forehead', tag: 'untagged' as const }]}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -253,9 +376,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -276,9 +403,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[
           { id: 42, name: 'forehead', tag: 'untagged' as const, sourceItem: '1.2', sourceSurvey: 'KLQ' },
           { id: 43, name: 'hair', tag: 'confirmed' as const },
@@ -295,7 +426,7 @@ describe('ConceptSidebar', () => {
 
     expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('KLQ 1.2');
     expect(screen.getByTestId('concept-row-43').textContent ?? '').toContain('#43');
-    expect(screen.getByTestId('concept-sort-survey').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('concept-sort-parent-source').getAttribute('aria-disabled')).toBeNull();
   });
 
   it('opens a context menu on right-click with merge and unmerge actions', () => {
@@ -305,9 +436,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="az"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{ id: 1, name: 'head', tag: 'untagged' as const, mergedKeys: ['527', '247'], key: '527' }]}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -338,9 +473,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="survey"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{
           id: 7,
           key: 'rain',
@@ -380,9 +519,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="survey"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{
           id: 7,
           key: 'rain',
@@ -422,9 +565,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="az"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{
           id: 1,
           name: 'head',
@@ -450,9 +597,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[
           { id: 1, key: '1', name: 'water', tag: 'untagged' as const },
           { id: 2, key: '2', name: 'fire', tag: 'confirmed' as const },
@@ -487,9 +638,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="survey"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[{
           id: 1,
           key: '1.1',
@@ -530,9 +685,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={[
           { id: 1, key: '1', name: 'water', tag: 'untagged' as const },
           { id: 2, key: '2', name: 'fire', tag: 'confirmed' as const },
@@ -565,9 +724,13 @@ describe('ConceptSidebar', () => {
       <ConceptSidebar
         query=""
         onQueryChange={vi.fn()}
-        sortMode="1n"
-        onSortModeChange={vi.fn()}
-        hasSourceItems
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
         filteredConcepts={baseConcepts}
         statusFilter="all"
         onStatusFilterChange={vi.fn()}
@@ -612,9 +775,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}
@@ -661,9 +828,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}
@@ -689,9 +860,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}
@@ -713,9 +888,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}
@@ -740,9 +919,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}
@@ -764,9 +947,13 @@ describe('ConceptSidebar', () => {
         <ConceptSidebar
           query=""
           onQueryChange={vi.fn()}
-          sortMode="az"
-          onSortModeChange={vi.fn()}
-          hasSourceItems
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
           filteredConcepts={concepts}
           statusFilter="all"
           onStatusFilterChange={vi.fn()}

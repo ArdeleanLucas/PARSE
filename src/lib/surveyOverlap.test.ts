@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Concept } from "./speakerForm";
 import {
   aggregateWorkspaceSurveys,
-  compareConceptsByResolvedSurvey,
   defaultSurveySettings,
   normalizeSurveyId,
   resolveConceptSurvey,
@@ -77,22 +76,4 @@ describe("survey-overlap frontend helpers", () => {
     })).toEqual(["abvd", "jbil", "klq", "sswl", "wals"]);
   });
 
-  it("sorts by each speaker's resolved survey item with missing items last", () => {
-    const rain = makeConcept({ id: 1, key: "rain", name: "rain", sourceItem: "KLQ_1.10", surveys: { klq: "KLQ_1.10", jbil: "JBIL_100" } });
-    const fire = makeConcept({ id: 2, key: "fire", name: "fire", sourceItem: "KLQ_2.1", surveys: { klq: "KLQ_2.1", jbil: "JBIL_2" } });
-    const unknown = makeConcept({ id: 3, key: "unknown", name: "unknown", sourceItem: undefined, sourceSurvey: undefined, surveys: undefined });
-
-    const choices = { Saha01: { rain: "jbil", fire: "jbil" } };
-
-    expect([fire, rain, unknown].sort((a, b) => compareConceptsByResolvedSurvey(a, b, "Fail01", {}, {})).map((c) => c.key)).toEqual([
-      "rain",
-      "fire",
-      "unknown",
-    ]);
-    expect([rain, fire, unknown].sort((a, b) => compareConceptsByResolvedSurvey(a, b, "Saha01", choices, {})).map((c) => c.key)).toEqual([
-      "fire",
-      "rain",
-      "unknown",
-    ]);
-  });
 });

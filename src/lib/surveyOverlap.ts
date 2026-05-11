@@ -6,7 +6,6 @@ import type {
   SurveySettingsMap,
 } from "../api/types";
 import type { Concept } from "./speakerForm";
-import { compareSurveyKeys } from "./surveySort";
 
 const DEFAULT_DISPLAY_COLOR = "slate";
 
@@ -167,21 +166,4 @@ export function aggregateWorkspaceSurveys(
   }
 
   return [...surveyIds].sort();
-}
-
-export function compareConceptsByResolvedSurvey(
-  left: Concept,
-  right: Concept,
-  speaker: string | null | undefined,
-  choices: SpeakerSurveyChoices | undefined,
-  settings: SurveySettingsMap | undefined,
-): number {
-  const leftResolved = resolveConceptSurvey(left, speaker, choices, settings);
-  const rightResolved = resolveConceptSurvey(right, speaker, choices, settings);
-  const leftMissing = !leftResolved.sourceItem;
-  const rightMissing = !rightResolved.sourceItem;
-  if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
-  const bySurveyItem = compareSurveyKeys(leftResolved.sourceItem, rightResolved.sourceItem);
-  if (bySurveyItem !== 0) return bySurveyItem;
-  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
 }

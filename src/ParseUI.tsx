@@ -18,7 +18,6 @@ import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
 import { resolveSurveyLinksForSpeaker } from './lib/surveyLinksForSpeaker';
 import {
-  compareConceptsByResolvedSurvey,
   resolveConceptSurvey,
   surveyLabelFor,
 } from './lib/surveyOverlap';
@@ -40,6 +39,7 @@ import {
 import { buildSpeakerForm } from './lib/speakerForm';
 import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
+import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
@@ -102,7 +102,36 @@ interface LingTag {
   id: string; name: string; color: string; dotClass: string; count: number;
 }
 
-type ConceptSortMode = 'az' | '1n' | 'survey';
+type ConceptSortParent = 'concept' | 'source';
+type ConceptSortConceptSub = 'az' | '1n';
+type ConceptSortSourceSub = 'time' | 'row';
+
+const CONCEPT_SORT_STORAGE_KEY = 'parse.concept-sort.v1';
+interface StoredConceptSortState {
+  parent: ConceptSortParent;
+  concept_sub: ConceptSortConceptSub;
+  source_sub: ConceptSortSourceSub;
+}
+
+const DEFAULT_CONCEPT_SORT_STATE: StoredConceptSortState = {
+  parent: 'concept',
+  concept_sub: '1n',
+  source_sub: 'time',
+};
+
+function readStoredConceptSortState(): StoredConceptSortState {
+  try {
+    const raw = window.localStorage.getItem(CONCEPT_SORT_STORAGE_KEY);
+    if (!raw) return DEFAULT_CONCEPT_SORT_STATE;
+    const parsed = JSON.parse(raw) as Partial<StoredConceptSortState>;
+    const parent = parsed.parent === 'source' ? 'source' : 'concept';
+    const concept_sub = parsed.concept_sub === 'az' ? 'az' : '1n';
+    const source_sub = parsed.source_sub === 'row' ? 'row' : 'time';
+    return { parent, concept_sub, source_sub };
+  } catch {
+    return DEFAULT_CONCEPT_SORT_STATE;
+  }
+}
 
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
 
@@ -191,12 +220,19 @@ export function ParseUI() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [query, setQuery] = useState('');
-  const [sortMode, setSortMode] = useState<ConceptSortMode>('1n');
-  const sortModeUserTouchedRef = useRef(false);
-  const sourceSortAutoPromotedRef = useRef(false);
-  const handleConceptSortModeChange = useCallback((mode: ConceptSortMode) => {
-    sortModeUserTouchedRef.current = true;
-    setSortMode(mode);
+  const [sortParent, setSortParent] = useState<ConceptSortParent>(() => readStoredConceptSortState().parent);
+  const [conceptSortSub, setConceptSortSub] = useState<ConceptSortConceptSub>(() => readStoredConceptSortState().concept_sub);
+  const [sourceSortSub, setSourceSortSub] = useState<ConceptSortSourceSub>(() => readStoredConceptSortState().source_sub);
+  const handleConceptSortParentChange = useCallback((parent: ConceptSortParent) => {
+    setSortParent(parent);
+  }, []);
+  const handleConceptSortSubChange = useCallback((sub: ConceptSortConceptSub) => {
+    setConceptSortSub(sub);
+    setSortParent('concept');
+  }, []);
+  const handleSourceSortSubChange = useCallback((sub: ConceptSortSourceSub) => {
+    setSourceSortSub(sub);
+    setSortParent('source');
   }, []);
   const handleSurveyOverlapUpdate = useCallback((patch: SurveyOverlapPatch) => {
     void updateSurveyOverlap(patch);
@@ -917,13 +953,30 @@ export function ParseUI() {
     }, mergesForCurrentMode);
   }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode]);
 
-  const hasSourceItems = useMemo(() => concepts.some(c => !!c.sourceItem), [concepts]);
+  const sourceSortDisabled = selectedSpeakers.length !== 1;
 
   useEffect(() => {
-    if (!hasSourceItems || sourceSortAutoPromotedRef.current || sortModeUserTouchedRef.current) return;
-    sourceSortAutoPromotedRef.current = true;
-    setSortMode('survey');
-  }, [hasSourceItems]);
+    try {
+      window.localStorage.setItem(CONCEPT_SORT_STORAGE_KEY, JSON.stringify({
+        parent: sortParent,
+        concept_sub: conceptSortSub,
+        source_sub: sourceSortSub,
+      }));
+    } catch { /* localStorage disabled — non-fatal */ }
+  }, [sortParent, conceptSortSub, sourceSortSub]);
+
+  useEffect(() => {
+    if (sortParent !== 'source') return;
+    if (selectedSpeakers.length === 1) return;
+    if (selectedSpeakers.length === 0 && rawSpeakers.length > 0) return;
+    setSortParent('concept');
+  }, [sortParent, selectedSpeakers.length, rawSpeakers.length]);
+
+  const speakerSortKeys = useMemo(() => {
+    if (selectedSpeakers.length !== 1) return null;
+    const speaker = selectedSpeakers[0];
+    return buildSpeakerSortKeys(annotationRecords[speaker]);
+  }, [annotationRecords, selectedSpeakers]);
 
   const selectedConcept = concepts.find((c) => c.id === conceptId) ?? null;
   const activeRawKey = useMemo<string | null>(() => {
@@ -1126,21 +1179,34 @@ export function ParseUI() {
     if (currentMode === 'annotate') {
       // No synthetic filtering — show the full concept list
     }
-    if (sortMode === 'az') {
-      list = [...list].sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortMode === 'survey') {
-      list = [...list].sort((a, b) => compareConceptsByResolvedSurvey(
-        a,
-        b,
-        selectedSpeakers[0] ?? null,
-        speakerSurveyChoices,
-        surveySettings,
-      ));
+    if (sortParent === 'concept' || !speakerSortKeys) {
+      list = [...list].sort(
+        conceptSortSub === 'az'
+          ? (a, b) => a.name.localeCompare(b.name)
+          : (a, b) => a.id - b.id,
+      );
     } else {
-      list = [...list].sort((a, b) => a.id - b.id);
+      const keys = sourceSortSub === 'time' ? speakerSortKeys.byStart : speakerSortKeys.byImportIndex;
+      const valueForConcept = (candidate: Concept): number | undefined => {
+        let best: number | undefined;
+        for (const key of conceptUnderlyingKeys(candidate)) {
+          const value = keys.get(key);
+          if (value !== undefined && (best === undefined || value < best)) best = value;
+        }
+        return best;
+      };
+      list = [...list].sort((a, b) => {
+        const ka = valueForConcept(a);
+        const kb = valueForConcept(b);
+        if (ka === undefined && kb === undefined) return a.id - b.id;
+        if (ka === undefined) return 1;
+        if (kb === undefined) return -1;
+        const byKey = ka - kb;
+        return byKey !== 0 ? byKey : a.id - b.id;
+      });
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, sortMode, currentMode, selectedSpeakers, speakerSurveyChoices, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
+  }, [query, statusFilter, selectedTagIds, sortParent, conceptSortSub, sourceSortSub, speakerSortKeys, currentMode, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
 
   const baseConcept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const concept = useMemo<Concept>(() => {
@@ -1760,9 +1826,13 @@ export function ParseUI() {
         <ConceptSidebar
           query={query}
           onQueryChange={setQuery}
-          sortMode={sortMode}
-          onSortModeChange={handleConceptSortModeChange}
-          hasSourceItems={hasSourceItems}
+          sortParent={sortParent}
+          conceptSub={conceptSortSub}
+          sourceSub={sourceSortSub}
+          onSortParentChange={handleConceptSortParentChange}
+          onConceptSubChange={handleConceptSortSubChange}
+          onSourceSubChange={handleSourceSortSubChange}
+          sourceDisabled={sourceSortDisabled}
           filteredConcepts={speakerScopedConcepts}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}

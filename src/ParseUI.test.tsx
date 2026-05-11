@@ -471,7 +471,7 @@ function makeUnmatchedCompareBundles() {
 
 function makeRecord(
   speaker: string,
-  concepts: Array<{ conceptText: string; conceptId?: string; ipa?: string; ortho?: string; start: number; end: number }>,
+  concepts: Array<{ conceptText: string; conceptId?: string; ipa?: string; ortho?: string; start: number; end: number; importIndex?: number }>,
 ): AnnotationRecord {
   const tier = (intervals: AnnotationInterval[]) => ({
     name: "tier",
@@ -487,7 +487,7 @@ function makeRecord(
       concept: {
         name: "concept",
         display_order: 3,
-        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: c.conceptId ?? '1' })),
+        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: c.conceptId ?? '1', ...(c.importIndex !== undefined ? { import_index: c.importIndex } : {}) })),
       },
       speaker: { name: "speaker", display_order: 4, intervals: [] },
     },
@@ -1061,14 +1061,111 @@ describe("ParseUI", () => {
     expect(screen.getByText("1 / 2 reviewed")).toBeTruthy();
   });
 
-  it("auto-promotes the default concept sort to Source when loaded concepts include source values", async () => {
+  const sidebarConceptNames = () => Array.from(screen.getByTestId("concept-sidebar").querySelectorAll('[data-testid^="concept-row-"]'))
+    .map((row) => row.querySelector('button[aria-label] span.flex-1')?.childNodes[0]?.textContent?.trim() ?? "")
+    .filter(Boolean);
+
+  function configureSourceSortFixture(sourceSub: "time" | "row") {
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: sourceSub }));
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [
+        { id: "1", label: "one" },
+        { id: "2", label: "two" },
+        { id: "3", label: "three" },
+        { id: "4", label: "four" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [
+        { conceptText: "one", conceptId: "1", start: 5.0, end: 5.5, importIndex: 3 },
+        { conceptText: "two", conceptId: "2", start: 0.5, end: 1.0, importIndex: 0 },
+        { conceptText: "three", conceptId: "3", start: 12.0, end: 12.5, importIndex: 1 },
+        { conceptText: "four", conceptId: "4", start: 2.0, end: 2.5, importIndex: 2 },
+      ]),
+    };
+  }
+
+  it("orders the sidebar by per-speaker concept start time when Source / Time is restored", async () => {
+    configureSourceSortFixture("time");
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(sidebarConceptNames()).toEqual(["two", "four", "one", "three"]));
+  });
+
+  it("orders the sidebar by per-speaker import_index when Source / Row is restored", async () => {
+    configureSourceSortFixture("row");
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(sidebarConceptNames()).toEqual(["two", "three", "four", "one"]));
+  });
+
+  it("sinks concepts without active-speaker source keys to the bottom in 1–N order", async () => {
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: "time" }));
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [
+        { id: "1", label: "one" },
+        { id: "2", label: "two" },
+        { id: "3", label: "three" },
+        { id: "4", label: "four" },
+        { id: "5", label: "five" },
+        { id: "6", label: "six" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [
+        { conceptText: "three", conceptId: "3", start: 12.0, end: 12.5, importIndex: 1 },
+        { conceptText: "one", conceptId: "1", start: 5.0, end: 5.5, importIndex: 3 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(sidebarConceptNames()).toEqual(["one", "three", "two", "four", "five", "six"]));
+  });
+
+  it("disables Source ordering without exactly one selected speaker and preserves the Concept sub-mode", async () => {
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "az", source_sub: "row" }));
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: [],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+
+    const { unmount } = render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
+    expect(screen.getByTestId("concept-sort-parent-concept").className).toContain("bg-white");
+    expect(screen.getByTestId("concept-sort-az").className).toContain("bg-white");
+
+    unmount();
+    cleanup();
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "az", source_sub: "row" }));
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
       speakers: ["Fail01", "Kalh01"],
       concepts: [
-        { id: "2", label: "forehead", source_item: "1.2", source_survey: "KLQ" },
         { id: "1", label: "water" },
+        { id: "2", label: "fire" },
       ],
       audio_dir: "audio",
       annotations_dir: "annotations",
@@ -1076,10 +1173,38 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("concept-sort-survey").className).toContain("bg-white");
-    });
-    expect(screen.getByRole("button", { name: /forehead.*KLQ 1\.2/i })).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
+    expect(screen.getByTestId("concept-sort-parent-concept").className).toContain("bg-white");
+    expect(screen.getByTestId("concept-sort-az").className).toContain("bg-white");
+  });
+
+  it("persists the split concept sort state under parse.concept-sort.v1", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [
+        { id: "1", label: "one" },
+        { id: "2", label: "two" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Qasr01: makeRecord("Qasr01", [{ conceptText: "one", conceptId: "1", start: 1, end: 2, importIndex: 1 }]) };
+
+    const { unmount } = render(<ParseUI />);
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBeNull());
+    fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
+    fireEvent.click(screen.getByTestId("concept-sort-source-row"));
+
+    await waitFor(() => expect(window.localStorage.getItem("parse.concept-sort.v1")).toBe(JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: "row" })));
+    unmount();
+    cleanup();
+
+    render(<ParseUI />);
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").className).toContain("bg-sky-600"));
+    expect(screen.getByTestId("concept-sort-source-row").className).toContain("bg-sky-600");
   });
 
   it("groups source_item sibling rows into one sidebar entry while leaving singleton concepts visible", () => {
