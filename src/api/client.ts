@@ -17,3 +17,4 @@ export * from "./contracts/job-observability";
 export * from "./contracts/export-and-media";
 export * from "./contracts/clef-contact-lexeme";
 export * from "./contracts/concepts";
+export * from "./contracts/compare";

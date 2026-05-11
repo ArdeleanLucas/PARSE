@@ -17,6 +17,9 @@ import {
   setConceptSurveyLink,
   deleteConceptSurveyLink,
   relinkConceptsByGloss,
+  getCompareBundles,
+  putCanonicalLexeme,
+  deleteCanonicalLexeme,
 } from "./client";
 import { LEXEME_RERUN_PAD_VALUES } from "./types";
 
@@ -564,5 +567,51 @@ describe("concept survey-link/relink contract", () => {
       method: "POST",
       body: JSON.stringify({ apply: true, accepted_groups: [{ keep_concept_id: "527", merge_concept_ids: ["991"] }] }),
     }));
+  });
+});
+
+
+describe("compare bundle API client contract", () => {
+  const fetchMock = vi.fn();
+  const jsonResponse = (body: unknown) => ({ ok: true, status: 200, headers: new Headers(), json: async () => body });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches compare bundles with optional speaker and bundle_id query params", async () => {
+    const payload = { bundles: [{ bundle_id: "bundle:big", label: "big", row_ids: ["53"], buckets: [] }] };
+    fetchMock.mockResolvedValue(jsonResponse(payload));
+
+    await expect(getCompareBundles({ speaker: "Saha01", bundleId: "bundle:big" })).resolves.toEqual(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/compare/bundles?speaker=Saha01&bundle_id=bundle%3Abig",
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+  });
+
+  it("puts and deletes canonical lexeme selections at the bundle/speaker endpoint", async () => {
+    const putPayload = { ok: true, selection: { csv_row_id: "53", survey_id: "klq", source_item: "4.1", source: "manual", selected_at: "now" }, bundle: { bundle_id: "bundle:big" } };
+    fetchMock.mockResolvedValueOnce(jsonResponse(putPayload));
+
+    await expect(putCanonicalLexeme("bundle:big", "Saha01", { csv_row_id: "53", realization_index: 0 })).resolves.toEqual(putPayload);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/compare/canonical-lexemes/bundle%3Abig/Saha01",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ csv_row_id: "53", realization_index: 0 }) }),
+    );
+
+    const deletePayload = { ok: true, bundle: { bundle_id: "bundle:big" } };
+    fetchMock.mockResolvedValueOnce(jsonResponse(deletePayload));
+    await expect(deleteCanonicalLexeme("bundle:big", "Saha01")).resolves.toEqual(deletePayload);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/compare/canonical-lexemes/bundle%3Abig/Saha01",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });

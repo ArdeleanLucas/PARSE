@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { getEnrichments, saveEnrichments } from "../api/client";
-import type { EnrichmentsPayload } from "../api/types";
+import type { CanonicalLexemeSelection, EnrichmentsPayload } from "../api/types";
 
 interface EnrichmentStore {
   data: Record<string, unknown>;
@@ -8,6 +8,7 @@ interface EnrichmentStore {
   load: () => Promise<void>;
   save: (patch: Record<string, unknown>) => Promise<void>;
   replace: (nextData: Record<string, unknown>) => Promise<void>;
+  patchCanonicalLexeme: (bundleId: string, speaker: string, selection: CanonicalLexemeSelection | null) => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,6 +28,33 @@ function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>
   }
 
   return merged;
+}
+
+
+function patchCanonicalLexemeData(
+  data: Record<string, unknown>,
+  bundleId: string,
+  speaker: string,
+  selection: CanonicalLexemeSelection | null,
+): Record<string, unknown> {
+  const overrides = isRecord(data.manual_overrides) ? data.manual_overrides : {};
+  const canonicalLexemes = isRecord(overrides.canonical_lexemes) ? overrides.canonical_lexemes : {};
+  const bundleBlock = isRecord(canonicalLexemes[bundleId]) ? { ...canonicalLexemes[bundleId] } : {};
+  if (selection === null) {
+    delete bundleBlock[speaker];
+  } else {
+    bundleBlock[speaker] = selection;
+  }
+  return {
+    ...data,
+    manual_overrides: {
+      ...overrides,
+      canonical_lexemes: {
+        ...canonicalLexemes,
+        [bundleId]: bundleBlock,
+      },
+    },
+  };
 }
 
 export const useEnrichmentStore = create<EnrichmentStore>()((set, get) => ({
@@ -53,5 +81,9 @@ export const useEnrichmentStore = create<EnrichmentStore>()((set, get) => ({
   replace: async (nextData: Record<string, unknown>) => {
     set({ data: nextData });
     await saveEnrichments(nextData as EnrichmentsPayload);
+  },
+
+  patchCanonicalLexeme: (bundleId: string, speaker: string, selection: CanonicalLexemeSelection | null) => {
+    set({ data: patchCanonicalLexemeData(get().data, bundleId, speaker, selection) });
   },
 }));

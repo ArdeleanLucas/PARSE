@@ -157,6 +157,23 @@ function readAutoDetectDismissed(
   return conceptDismissed?.[speaker] === true;
 }
 
+
+export function legacyCanonicalIdxFor(
+  bundleKey: string,
+  speaker: string,
+  enrichments: Record<string, unknown> | null | undefined,
+): number | null {
+  const overrides = enrichments && isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
+  const canonicalOverrides = overrides && isRecord(overrides.canonical_realizations)
+    ? overrides.canonical_realizations as Record<string, unknown>
+    : null;
+  const conceptCanonical = canonicalOverrides && isRecord(canonicalOverrides[bundleKey])
+    ? canonicalOverrides[bundleKey] as Record<string, unknown>
+    : null;
+  const rawIdx = conceptCanonical?.[speaker];
+  return typeof rawIdx === 'number' && Number.isInteger(rawIdx) && rawIdx >= 0 ? rawIdx : null;
+}
+
 export function buildSpeakerForm(
   record: AnnotationRecord | null | undefined,
   concept: Concept,

@@ -260,6 +260,85 @@ export interface ProjectConfig {
   [key: string]: unknown;
 }
 
+
+export type CanonicalLexemeSource =
+  | "manual"
+  | "migration:canonical_realizations"
+  | "default:single-candidate";
+
+export interface CanonicalLexemeSelection {
+  csv_row_id: string;
+  survey_id: string;
+  source_item: string;
+  bucket_key?: string;
+  realization_index?: number;
+  source: CanonicalLexemeSource;
+  selected_at: string;
+}
+
+export interface CompareCandidate {
+  csv_row_id: string;
+  speaker?: string;
+  form: string | null;
+  ipa?: string | null;
+  ortho?: string | null;
+  start?: number | null;
+  end?: number | null;
+  realization_index?: number;
+  warnings?: string[];
+}
+
+export interface CompareVariant {
+  csv_row_id: string;
+  concept_key?: string;
+  label?: string;
+  variant_label?: string;
+  survey_id: string;
+  source_item: string;
+  bucket_key?: string;
+}
+
+export interface CompareBucket {
+  bucket_key: string;
+  survey_id: string;
+  source_item: string;
+  variants: CompareVariant[];
+}
+
+export interface CompareBundle {
+  bundle_id: string;
+  label: string;
+  row_ids: string[];
+  buckets: CompareBucket[];
+  candidates?: Record<string, Record<string, CompareCandidate | null>>;
+  canonical?: Record<string, CanonicalLexemeSelection | null>;
+  concept_survey_links?: ConceptSurveyLinksByConcept;
+  speaker_choices?: SpeakerSurveyChoices;
+  speaker_concept_survey_links?: SpeakerConceptSurveyLinks;
+  warnings?: string[];
+}
+
+export interface CompareBundlesResponse {
+  bundles: CompareBundle[];
+  warnings?: string[];
+}
+
+export interface CanonicalLexemePutRequest {
+  csv_row_id: string;
+  realization_index?: number;
+}
+
+export interface CanonicalLexemePutResponse {
+  ok: true;
+  selection: CanonicalLexemeSelection;
+  bundle: CompareBundle;
+}
+
+export interface CanonicalLexemeDeleteResponse {
+  ok: true;
+  bundle: CompareBundle;
+}
+
 export type EnrichmentsPayload = Record<string, unknown>;
 
 export interface Tag {
