@@ -11,6 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from concept_source_item import read_concepts_csv_rows, write_concepts_csv_rows
 from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
+from canonical_lexemes import copy_canonical_references
 
 _VARIANT_SUFFIX_RE = re.compile(r"\(([A-Z]|\d+)\)\s*$")
 
@@ -180,6 +181,7 @@ def duplicate_concept_variant(
                     "speaker_concept_survey_links": new_speaker_root,
                 },
             )
+        copy_canonical_references(project_root, source_row_id=normalized_id, sibling_row_id=sibling["id"])
     except Exception as exc:
         try:
             _restore_from_backup(concepts_path, backup_path)

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Callable, Dict, List, Mapping, Tuple
 
+from compare_bundles import build_compare_bundles, candidate_for_selection, effective_canonical_for_bundle
 from .job_observability_handlers import JsonResponseSpec
 
 
@@ -144,6 +145,7 @@ def build_get_export_nexus_response(
     read_json_file: ReadJsonFile,
     default_enrichments_payload: DefaultPayloadFactory,
     concept_sort_key: ConceptSortKey,
+    project_root: pathlib.Path | None = None,
 ) -> BinaryResponseSpec:
     enrichments = read_json_file(enrichments_path, default_enrichments_payload())
     overrides = enrichments.get("manual_overrides") or {}
@@ -196,6 +198,33 @@ def build_get_export_nexus_response(
             present.update(members)
         has_form[key] = present
 
+    export_warnings: List[str] = []
+    if project_root is not None:
+        bundle_payload = build_compare_bundles(project_root, speakers=speakers)
+        bundle_by_key: Dict[str, Mapping[str, Any]] = {}
+        for bundle in bundle_payload.get("bundles", []):
+            if isinstance(bundle, Mapping):
+                bundle_by_key[str(bundle.get("bundle_id") or "")] = bundle
+                bundle_by_key[str(bundle.get("label") or "")] = bundle
+        for key in list(has_form.keys()):
+            bundle = bundle_by_key.get(str(key))
+            if bundle is None:
+                continue
+            allowed: set[str] = set()
+            for speaker in speakers:
+                selection = effective_canonical_for_bundle(bundle, speaker)
+                candidate = candidate_for_selection(bundle, speaker, selection)
+                if selection and candidate:
+                    allowed.add(speaker)
+                else:
+                    candidates = bundle.get("candidates", {}).get(speaker, {}) if isinstance(bundle.get("candidates"), Mapping) else {}
+                    count = sum(1 for candidate_value in candidates.values() if candidate_value is not None) if isinstance(candidates, Mapping) else 0
+                    if count >= 2:
+                        export_warnings.append(f"{speaker}/{key}: 2+ candidates, no canonical chosen")
+                    else:
+                        export_warnings.append(f"{speaker}/{key}: no annotation form for this speaker")
+            has_form[key] = allowed
+
     characters: List[Tuple[str, str, str]] = []
     for key in sorted(concept_keys, key=concept_sort_key):
         for group in sorted(concept_group_members[key].keys()):
@@ -206,16 +235,18 @@ def build_get_export_nexus_response(
         chars: List[str] = []
         for key, group, _label in characters:
             members = concept_group_members[key].get(group, [])
-            if speaker in members:
-                chars.append("1")
-            elif speaker in has_form.get(key, set()):
-                chars.append("0")
+            if speaker in has_form.get(key, set()):
+                chars.append("1" if speaker in members else "0")
             else:
                 chars.append("?")
         return "".join(chars)
 
     lines: List[str] = []
     lines.append("#NEXUS")
+    if export_warnings:
+        lines.append("[export.warnings]")
+        for warning in export_warnings:
+            lines.append("[warning: {0}]".format(warning.replace("]", ")")))
     lines.append("")
     lines.append("BEGIN TAXA;")
     lines.append("    DIMENSIONS NTAX={0};".format(len(speakers)))
