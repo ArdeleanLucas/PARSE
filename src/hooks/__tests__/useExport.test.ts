@@ -8,6 +8,7 @@ let mockData: Record<string, unknown> = {};
 vi.mock("../../api/client", () => ({
   getLingPyExport: vi.fn(),
   getNEXUSExport: vi.fn(),
+  getCanonicalLexemesReport: vi.fn(),
 }));
 
 vi.mock("../../stores/enrichmentStore", () => ({
@@ -15,7 +16,7 @@ vi.mock("../../stores/enrichmentStore", () => ({
     selector({ data: mockData }),
 }));
 
-import { getLingPyExport, getNEXUSExport } from "../../api/client";
+import { getLingPyExport, getNEXUSExport, getCanonicalLexemesReport } from "../../api/client";
 
 const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
 const mockRevokeObjectURL = vi.fn();
@@ -102,6 +103,24 @@ describe("useExport", () => {
 
     expect(getLingPyExport).toHaveBeenCalledOnce();
     expect(mockCreateObjectURL).toHaveBeenCalledWith(lingpyBlob);
+  });
+
+  it("exportCanonicalLexemesReport calls client.ts getCanonicalLexemesReport and keeps the backend filename hint", async () => {
+    const reportBlob = new Blob(["concept_id\tspeaker\n"], { type: "text/tab-separated-values" });
+    vi.mocked(getCanonicalLexemesReport).mockResolvedValueOnce(reportBlob);
+
+    const { result } = renderHook(() => useExport());
+
+    await act(async () => {
+      await (result.current as typeof result.current & { exportCanonicalLexemesReport: () => Promise<void> }).exportCanonicalLexemesReport();
+    });
+
+    expect(getCanonicalLexemesReport).toHaveBeenCalledOnce();
+    expect(mockCreateObjectURL).toHaveBeenCalledWith(reportBlob);
+    const anchor = vi.mocked(document.createElement).mock.results.find(
+      (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",
+    )?.value as HTMLAnchorElement | undefined;
+    expect(anchor?.download).toBe("canonical-lexemes.tsv");
   });
 
   it("exportNEXUS calls client.ts getNEXUSExport", async () => {

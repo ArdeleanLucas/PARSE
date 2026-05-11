@@ -13,6 +13,7 @@ const mockLoad = vi.fn(async () => {});
 const mockSave = vi.fn(async () => {});
 
 const mockExportLingPyTSV = vi.fn(async () => {});
+const mockExportCanonicalLexemesReport = vi.fn(async () => {});
 const mockComputeStart = vi.fn(async () => {});
 let mockComputeState: { status: "idle" | "running" | "complete" | "error"; progress: number; error: string | null } = {
   status: "idle",
@@ -39,6 +40,7 @@ vi.mock("../../hooks/useExport", () => ({
   useExport: () => ({
     exportLingPyTSV: mockExportLingPyTSV,
     exportNEXUS: vi.fn(),
+    exportCanonicalLexemesReport: mockExportCanonicalLexemesReport,
     exportCSV: vi.fn(),
   }),
 }));
@@ -84,6 +86,7 @@ beforeEach(() => {
   mockLoad.mockClear();
   mockSave.mockClear();
   mockExportLingPyTSV.mockClear();
+  mockExportCanonicalLexemesReport.mockClear();
   mockComputeStart.mockClear();
   mockComputeState = { status: "idle", progress: 0, error: null };
   mockSelectedSpeakers = ["S1"];
@@ -177,6 +180,21 @@ describe("EnrichmentsPanel", () => {
       manual_overrides: {
         cognate_sets: { "42": { A: ["spk1"] } },
       },
+    });
+  });
+
+  it("downloads the canonical-lexemes report from the Enrichments actions", async () => {
+    mockData = {
+      "42": {
+        cognate_sets: { A: ["spk1"] },
+      },
+    };
+
+    render(<EnrichmentsPanel activeConcept="42" />);
+    fireEvent.click(screen.getByRole("button", { name: "Download canonical-lexemes report (TSV)" }));
+
+    await vi.waitFor(() => {
+      expect(mockExportCanonicalLexemesReport).toHaveBeenCalledOnce();
     });
   });
 

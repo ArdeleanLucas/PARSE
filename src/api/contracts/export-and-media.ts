@@ -36,3 +36,14 @@ export async function getNEXUSExport(): Promise<Blob> {
   }
   return response.blob();
 }
+
+export async function getCanonicalLexemesReport(): Promise<Blob> {
+  const response = await fetch("/api/exports/canonical-lexemes-report", {
+    method: "GET",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`GET /api/exports/canonical-lexemes-report failed ${response.status}: ${text}`);
+  }
+  return response.blob();
+}
