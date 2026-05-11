@@ -1,131 +1,97 @@
----
-name: parse-mcp-tool-enrichments-write
-description: "Use PARSE MCP tool `enrichments_write`: Write keys into parse-enrichments.json. By default merges (shallow) into the existing file; pass merge=false for a full replacement. Use with care — this file contains cognate sets and borrowing flags."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# enrichments_write
 
-# PARSE MCP Tool Skill — `enrichments_write`
+**Category:** Project
+**Mutability:** mutating (merges into or replaces `parse-enrichments.json`)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Medium
+**Estimated Tokens:** ~240 (short) / ~520 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `enrichments_write` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Writes keys into `parse-enrichments.json` — shallow-merges by default, or fully replaces if `merge: false` — for cognate sets, borrowing flags, similarity scores, lexeme notes, and manual overrides.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Persisting cognate decisions after `cognate_compute_preview` review.
+- Committing borrowing flags (`borrowing_flags`) after adjudication in compare mode.
+- Storing similarity scores from external computation that should be available to downstream exports.
+- Bulk update of multiple enrichment fields at once (single call with a complex `enrichments` object).
+- Full replacement (rare) when migrating from an external enrichments store — `merge: false`.
 
-## Tool contract snapshot
+## When NOT to Use
+- For single lexeme notes — `lexeme_notes_write` (Comparison bucket) is the focused alternative.
+- Without first reading the current state. Shallow merge means *top-level keys* in your payload replace top-level keys in the file. If you want to add ONE cognate set without losing others, read the existing `cognate_sets` block first, modify it, and write the whole modified block.
+- Without `dryRun: true` first. The file holds load-bearing data (cognate sets, borrowing flags) — always preview the resulting top-level keys before writing.
+- For arbitrary JSON without schema awareness. The file has a known shape (`cognate_sets`, `similarity`, `borrowing_flags`, `lexeme_notes`, `manual_overrides`, ...); writing arbitrary keys works but downstream tools won't consume them.
 
-- **Tool name:** `enrichments_write`
-- **Skill name:** `parse-mcp-tool-enrichments-write`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `enrichments`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Write keys into parse-enrichments.json. By default merges (shallow) into the existing file; pass merge=false for a full replacement. Use with care — this file contains cognate sets and borrowing flags.
+## Parameters
 
-### Parameters
+| Parameter   | Type    | Required | Description                                                                                              | Default | Example                              |
+|-------------|---------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------------------|
+| enrichments | object  | Yes      | Object to merge into (or replace) `parse-enrichments.json`.                                              | —       | `{"cognate_sets": {"42": {"1": ["Khan01"]}}}` |
+| merge       | boolean | No       | `true` shallow-merges top-level keys; `false` replaces the whole file.                                   | `true`  | `true`                               |
+| dryRun      | boolean | No       | If `true`, preview the resulting top-level keys without writing.                                          | `false` | `true`                               |
 
-- `enrichments` (type=object) — Object to merge into (or replace) parse-enrichments.json.
-- `merge` (type=boolean) — If true (default), shallow-merge into existing data. If false, replace entirely.
-- `dryRun` (type=boolean) — If true, preview the resulting top-level keys without writing parse-enrichments.json.
+**Shallow merge semantics:** Top-level keys in `enrichments` replace top-level keys in the file. Nested structure under those keys is NOT merged — the new top-level value wins entirely.
 
-### Example enrichments payload
+## Expected Output
+On `dryRun: true`: returns `{ readOnly, incomingKeys, resultingKeys, merge, path }` — preview of which keys would end up in the file.
 
-Valid dry-run payload for a shallow merge:
+On `dryRun: false`: rewrites `parse-enrichments.json` and returns `{ ok: true, keysWritten, merge, path }`.
 
+## Example Successful Call
+Dry run, shallow merge:
 ```json
 {
   "enrichments": {
     "cognate_sets": {
-      "<CONCEPT_ID>": {
-        "1": ["<SPEAKER_ID>", "<OTHER_SPEAKER_ID>"]
-      }
-    },
-    "similarity": {
-      "<SPEAKER_ID>": {
-        "<OTHER_SPEAKER_ID>": 0.82
-      }
+      "42": {"1": ["Khan01", "Khan02"]}
     },
     "borrowing_flags": {
-      "<CONCEPT_ID>": {
-        "<SPEAKER_ID>": false
-      }
-    },
-    "manual_overrides": {}
+      "42": {"Khan03": true}
+    }
   },
   "merge": true,
   "dryRun": true
 }
 ```
 
-With `dryRun: true`, expect a preview result containing `incomingKeys`, `resultingKeys`, `merge`, and `path`; only `dryRun: false` writes `parse-enrichments.json`.
-
-### MCP annotations
-
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The caller must supply an enrichments object to merge or replace. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, parse-enrichments.json is merged or replaced with the supplied payload. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+Live merge:
+```json
+{
+  "enrichments": {
+    "cognate_sets": {
+      "42": {"1": ["Khan01", "Khan02"]}
+    }
+  },
+  "merge": true,
+  "dryRun": false
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/enrichments_write?mode=active"
+Full replacement (rare):
+```json
+{
+  "enrichments": { "cognate_sets": {...}, "similarity": {...}, "borrowing_flags": {...} },
+  "merge": false,
+  "dryRun": false
+}
 ```
 
-## Workflow
+## Common Failure Modes & How to Recover
 
-1. **Discover** – Confirm `enrichments_write` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+| Failure                                  | Symptom                                                              | Recovery                                                                                              |
+|------------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Shallow merge dropped nested data        | Wrote `cognate_sets: {42: {...}}` and lost `cognate_sets: {41: {...}}` | Read existing `cognate_sets` first, modify in place, write the whole block. Shallow merge doesn't deep-merge. |
+| `merge: false` wiped everything          | Whole file replaced with partial payload                             | No auto-backup. Use git to restore, or rebuild from scratch.                                          |
+| Unknown / typo'd top-level key           | New key appears but downstream tools ignore it                       | Use canonical keys (`cognate_sets`, `similarity`, `borrowing_flags`, `lexeme_notes`, `manual_overrides`). |
+| Schema mismatch under a key              | `enrichments_write` accepts the payload but `cognate_compute_preview` errors later | The tool doesn't validate inner schema. Match the existing shape; inspect via `enrichments_read` first. |
 
-## Quality checklist
+## Agent Reasoning Notes
+The shallow-merge semantics is the load-bearing gotcha — it's not deep-merge. For modifying one entry inside `cognate_sets`, the right pattern is (1) `enrichments_read keys=["cognate_sets"]`, (2) modify the returned `cognate_sets` block, (3) write the *whole modified block* back via this tool with `merge: true`. The `merge: true` mechanic only protects unrelated top-level keys (e.g. `lexeme_notes` won't be touched if you only write `cognate_sets`).
 
-- [ ] Live catalog confirms `enrichments_write` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+Always `dryRun: true` first. Always git-commit before bulk writes — there's no auto-backup, and `parse-enrichments.json` carries decisions that may have taken hours of human review to produce.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `enrichments_read` — read existing state before writing (mandatory for safe shallow-merge).
+- `lexeme_notes_write` (Comparison bucket) — focused single-entry alternative.
+- `cognate_compute_preview` (Comparison bucket) — preview cognate grouping before persisting.
+- `read_text_preview` — raw file view of `parse-enrichments.json`.

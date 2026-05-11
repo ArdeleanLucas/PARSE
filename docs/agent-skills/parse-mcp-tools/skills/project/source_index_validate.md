@@ -1,138 +1,66 @@
----
-name: parse-mcp-tool-source-index-validate
-description: "Use PARSE MCP tool `source_index_validate`: Validate a speaker manifest entry or full manifest against the SourceIndex schema. Two modes:\n  speaker — validate + transform one speaker entry; returns errors and transformed shape\n  full    — validate + build the complete source_index.json; optionally write to outputPath inside the project"
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# source_index_validate
 
-# PARSE MCP Tool Skill — `source_index_validate`
+**Category:** Project
+**Mutability:** mutating in `mode: "full"` with `outputPath` set and `dryRun: false` (writes `source_index.json`)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Medium
+**Estimated Tokens:** ~250 (short) / ~530 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `source_index_validate` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Validates a speaker manifest entry or a full manifest against the SourceIndex schema — two modes: `speaker` (validate + transform one entry) or `full` (validate + build the complete `source_index.json`, optionally writing it).
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Repairing a malformed `source_index.json` entry that's preventing onboarding / re-import from finding a speaker.
+- Validating an external manifest before importing it as the project's `source_index.json`.
+- Diagnosing why `csv_only_reimport` says "speaker not registered" — run `mode: "speaker"` against the entry to see schema errors.
+- Bulk-rebuilding `source_index.json` from a known-good manifest source (`mode: "full"`).
 
-## Tool contract snapshot
+## When NOT to Use
+- For one-off speaker-registration writes — use `onboard_speaker_import` (Annotation bucket). It registers entries automatically and is the safer path for new sources.
+- For arbitrary JSON validation. The tool is specific to the SourceIndex schema; for general JSON validation, use external tooling.
+- To inspect the file's content. Use `read_text_preview` for that.
+- Without a clear understanding of which mode is appropriate. `mode: "speaker"` validates ONE entry; `mode: "full"` works on the whole `speakers` map.
 
-- **Tool name:** `source_index_validate`
-- **Skill name:** `parse-mcp-tool-source-index-validate`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** Validate a speaker manifest entry or full manifest against the SourceIndex schema. Two modes:
-  speaker — validate + transform one speaker entry; returns errors and transformed shape
-  full    — validate + build the complete source_index.json; optionally write to outputPath inside the project
+## Parameters
 
-### Parameters
+| Parameter   | Type    | Required | Description                                                                                              | Default     | Example                              |
+|-------------|---------|----------|----------------------------------------------------------------------------------------------------------|-------------|--------------------------------------|
+| mode        | string  | No       | `speaker` validates + transforms one entry; `full` validates + builds the complete `source_index.json`.   | `"speaker"` | `"full"`                             |
+| speakerId   | string  | Yes for `mode: "speaker"` | Speaker ID. `minLength=1`, `maxLength=200`.                                                | —           | `"Khan01"`                           |
+| speakerData | object  | Yes for `mode: "speaker"` | Speaker manifest entry to validate.                                                       | —           | `{"sources": [...], ...}`            |
+| manifest    | object  | Yes for `mode: "full"` | Full manifest with top-level `speakers` key.                                                  | —           | `{"speakers": {"Khan01": {...}, ...}}` |
+| outputPath  | string  | No (only meaningful with `mode: "full"`) | Where to write `source_index.json`. `minLength=1`, `maxLength=512`.            | —           | `"source_index.json"`                |
+| dryRun      | boolean | No       | If `true`, never writes `outputPath` even when provided. Returns the validated payload only.             | `false`     | `true`                               |
 
-- `mode` (type=string; enum=`speaker`, `full`) — Validation scope (default: speaker).
-- `speakerId` (type=string; minLength=1; maxLength=200) — Speaker ID (required for mode=speaker).
-- `speakerData` (type=object) — Speaker manifest entry to validate (required for mode=speaker).
-- `manifest` (type=object) — Full manifest with top-level 'speakers' key (required for mode=full).
-- `outputPath` (type=string; minLength=1; maxLength=512) — Write built source_index.json here (mode=full only, project-relative or absolute inside project).
-- `dryRun` (type=boolean) — If true, never writes outputPath even when provided; returns the validated/constructed payload only.
+## Expected Output
+**`mode: "speaker"`**: returns `{ readOnly, mode: "speaker", speakerId, valid, errors: [...], transformed: {...} }`. `errors` is empty when valid; `transformed` is the schema-compliant version of the input.
 
-### MCP annotations
+**`mode: "full"` + `dryRun: true`** (or no `outputPath`): returns `{ readOnly, mode: "full", valid, errors: [...], built: {...} }`. `built` is the constructed manifest.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+**`mode: "full"` + `outputPath` + `dryRun: false`**: writes `source_index.json` and returns `{ ok: true, mode: "full", path, valid }`.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/source_index_validate?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `source_index_validate` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-A `speakerData` object must carry a non-empty `wav_files` list plus speaker-level fields such as `has_csv`:
-
+## Example Successful Call
+Validate one speaker entry:
 ```json
 {
   "mode": "speaker",
-  "speakerId": "Speaker01",
+  "speakerId": "Khan01",
   "speakerData": {
-    "wav_files": [
-      {
-        "path": "audio/original/Speaker01/source.wav",
-        "duration_sec": 12.34,
-        "file_size_bytes": 123456,
-        "bit_depth": 16,
-        "sample_rate": 16000,
-        "channels": 1,
-        "is_primary": true,
-        "lexicon_start_sec": 0.0
-      }
-    ],
-    "has_csv": true,
-    "notes": "Optional source-index note"
+    "sources": [
+      {"path": "audio/original/Khan01/Khan01.wav", "is_primary": true}
+    ]
   }
 }
 ```
 
-For `mode: "full"`, wrap the same speaker entries under top-level `manifest.speakers`; use `dryRun: true` when you only want the constructed payload and not an `outputPath` write:
-
+Build full manifest, dry-run preview:
 ```json
 {
   "mode": "full",
   "manifest": {
     "speakers": {
-      "Speaker01": {
-        "wav_files": [
-          {
-            "path": "audio/original/Speaker01/source.wav",
-            "duration_sec": 12.34,
-            "file_size_bytes": 123456,
-            "bit_depth": 16,
-            "sample_rate": 16000,
-            "channels": 1,
-            "is_primary": true,
-            "lexicon_start_sec": 0.0
-          }
-        ],
-        "has_csv": true
-      }
+      "Khan01": {"sources": [{"path": "audio/original/Khan01/Khan01.wav", "is_primary": true}]},
+      "Khan02": {"sources": [{"path": "audio/original/Khan02/Khan02.wav", "is_primary": true}]}
     }
   },
   "outputPath": "source_index.json",
@@ -140,56 +68,30 @@ For `mode: "full"`, wrap the same speaker entries under top-level `manifest.spea
 }
 ```
 
-Typical speaker-mode validation response:
-
+Build and write:
 ```json
 {
-  "tool": "source_index_validate",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "mode": "speaker",
-    "speakerId": "Speaker01",
-    "valid": true,
-    "errors": [],
-    "transformed": {
-      "source_wavs": [
-        {
-          "filename": "audio/original/Speaker01/source.wav",
-          "duration_sec": 12.34,
-          "file_size_bytes": 123456,
-          "bit_depth": 16,
-          "sample_rate": 16000,
-          "channels": 1,
-          "lexicon_start_sec": 0.0,
-          "is_primary": true
-        }
-      ],
-      "peaks_file": "peaks/Speaker01.json",
-      "transcript_file": "coarse_transcripts/Speaker01.json",
-      "has_csv": true,
-      "notes": "Optional source-index note"
-    },
-    "previewOnly": true
-  }
+  "mode": "full",
+  "manifest": { ... },
+  "outputPath": "source_index.json",
+  "dryRun": false
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `source_index_validate` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| `valid: false` with errors             | `errors` array describes schema violations                            | Fix the input per the errors, re-validate. Common issues: missing `is_primary` on multi-source speakers, paths outside project. |
+| Wrong mode for the input shape         | Schema errors that don't match the input                              | `mode: "speaker"` expects a single entry, not a `{speakers: {...}}` wrapper. `mode: "full"` expects the wrapper. |
+| Overwrote a known-good `source_index.json` | `outputPath` set with a partial manifest replaced the full one    | No auto-backup. Snapshot or use git before any `mode: "full"` write.                                  |
+| Speaker fields missing from output     | Validated input was already incomplete; the output is too             | The tool validates and transforms — it doesn't invent missing fields. Provide the complete entry.      |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the schema-enforcement gate for `source_index.json`. Most agents won't need it — `onboard_speaker_import` and `csv_only_reimport` handle registration automatically. Reach for `source_index_validate` when (1) something has gone wrong with the manifest (typically after manual editing), (2) you're bulk-rebuilding from an external source, or (3) you want to validate a candidate entry before committing it. The `speaker` vs `full` mode distinction is load-bearing — pick `speaker` for one-entry validation, `full` for whole-file operations.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `onboard_speaker_import` (Annotation bucket) — the canonical write path for new sources.
+- `csv_only_reimport` — consumes existing `source_index.json` entries.
+- `read_text_preview` — inspect the current `source_index.json` before validating.
+- `speakers_list` — enumerate speakers currently visible to the project.

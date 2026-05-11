@@ -1,132 +1,73 @@
----
-name: parse-mcp-tool-parse-memory-upsert-section
-description: "Use PARSE MCP tool `parse_memory_upsert_section`: Create or replace a `## Section` block in parse-memory.md. Use for persisting user preferences, speaker notes, onboarding decisions, and file provenance that should survive across chat turns. Gated by dryRun — call dryRun=true first to preview the resulting block, then dryRun=false after the user confirms. The existing block under the same heading is overwritten; other sections are left untouched."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# parse_memory_upsert_section
 
-# PARSE MCP Tool Skill — `parse_memory_upsert_section`
+**Category:** Project
+**Mutability:** mutating (creates / replaces one `## Section` block in `parse-memory.md`)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~220 (short) / ~470 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `parse_memory_upsert_section` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Creates or replaces a `## Section` block in `parse-memory.md` — for persisting user preferences, speaker notes, onboarding decisions, and file provenance that should survive across chat turns.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Persisting a user preference the agent should remember next session ("user prefers Praat for review").
+- Recording speaker-onboarding decisions (which raw files were used, what filtering was applied, language overrides).
+- Storing file-provenance trails (where this annotation came from, which import run produced it).
+- Capturing context decisions the agent should not have to re-discover (corpus conventions, naming rules, language family decisions).
 
-## Tool contract snapshot
+## When NOT to Use
+- For project data — cognates, borrowing flags, similarity scores, lexeme notes belong in `parse-enrichments.json`, not chat memory. Use `enrichments_write` / `lexeme_notes_write` (Comparison bucket).
+- For interval-level annotation — use the Annotation-bucket tools that write `annotations/<speaker>.parse.json`.
+- Without first reading the existing section via `parse_memory_read`. Upsert *replaces* the section's body — any prior content under that heading is lost. Always read, merge, write.
+- Without `dryRun: true` first. The dry-run shows the rewritten file preview; user confirmation should come before live writes.
 
-- **Tool name:** `parse_memory_upsert_section`
-- **Skill name:** `parse-mcp-tool-parse-memory-upsert-section`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `section`, `body`, `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Create or replace a `## Section` block in parse-memory.md. Use for persisting user preferences, speaker notes, onboarding decisions, and file provenance that should survive across chat turns. Gated by dryRun — call dryRun=true first to preview the resulting block, then dryRun=false after the user confirms. The existing block under the same heading is overwritten; other sections are left untouched.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                  | Default | Example                                  |
+|-----------|---------|----------|----------------------------------------------------------------------------------------------|---------|------------------------------------------|
+| section   | string  | Yes      | Heading text without leading `##`. `minLength=1`, `maxLength=200`.                           | —       | `"Speaker provenance"`                   |
+| body      | string  | Yes      | Markdown body for this section. `minLength=1`, `maxLength=16000`.                            | —       | `"- Khan01: imported 2026-05-10 from..."` |
+| dryRun    | boolean | Yes      | If `true`, return the rewritten file preview without writing.                                | —       | `true`                                   |
 
-- `section` (type=string; minLength=1; maxLength=200)
-- `body` (type=string; minLength=1; maxLength=16000)
-- `dryRun` (type=boolean) — If true, return the rewritten file preview without writing.
+**Upsert semantics:** Other sections in `parse-memory.md` are left untouched. Only the block under the matching `## <section>` heading is replaced (or created if absent).
 
-### MCP annotations
+## Expected Output
+On `dryRun: true`: returns `{ readOnly, preview, section, replacedExisting }`. `preview` is the resulting full-file content; `replacedExisting` indicates whether the section existed before.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+On `dryRun: false`: rewrites `parse-memory.md` and returns `{ ok: true, section, action }` (`action` ∈ `"created"`, `"updated"`).
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/parse_memory_upsert_section?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `parse_memory_upsert_section` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Dry-run upsert example
-
-Preview the section replacement before writing `parse-memory.md`:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/parse_memory_upsert_section?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"section":"User Preferences","body":"- Prefer dry-run previews before mutating imports.","dryRun":true}'
-```
-
-Expected preview response:
-
+## Example Successful Call
+Dry run (preview):
 ```json
 {
-  "tool": "parse_memory_upsert_section",
-  "ok": true,
-  "result": {
-    "ok": true,
-    "dryRun": true,
-    "readOnly": true,
-    "previewOnly": true,
-    "path": "parse-memory.md",
-    "section": "User Preferences",
-    "action": "create",
-    "previewSection": "## User Preferences\n- Prefer dry-run previews before mutating imports.\n",
-    "totalBytesAfter": 92,
-    "mode": "read-only"
-  }
+  "section": "Speaker provenance",
+  "body": "- Khan01: imported 2026-05-10 from /external/recordings/khan01_2026.wav (primary)\n- Khan02: imported 2026-05-10 from /external/recordings/khan02_2026.wav (primary)",
+  "dryRun": true
 }
 ```
 
-`action` is `"replace"` instead of `"create"` when a matching `## User Preferences` section already exists.
+Live apply:
+```json
+{
+  "section": "Speaker provenance",
+  "body": "- Khan01: ...\n- Khan02: ...",
+  "dryRun": false
+}
+```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `parse_memory_upsert_section` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                  | Symptom                                                              | Recovery                                                                                              |
+|------------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Overwrote prior section content          | Previous notes under the same heading lost                            | No auto-backup. Always (1) `parse_memory_read section="<name>"`, (2) merge with new content, (3) write.|
+| Section heading drift                    | Created a duplicate section because of slight heading variation       | Headings match exactly — `"Speaker provenance"` and `"Speaker Provenance"` are different. Verify via `parse_memory_read` first. |
+| Body too long                            | Validation error (`maxLength=16000`)                                  | Split the content across multiple sections, or trim before writing.                                    |
+| Memory file missing                      | Tool creates the file from scratch                                    | Expected behavior — the first upsert creates the file with the requested section.                     |
 
-## Anti-patterns
+## Agent Reasoning Notes
+The "upsert" name is precise: insert if absent, replace if present. The replace is **whole-section**, not a delta — read the existing section before writing if you want to preserve prior content. The mandatory `dryRun` is the gate against silently destroying chat-memory context users may have built over multiple sessions. Pair with `parse_memory_read` for the canonical read-then-write pattern.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `parse_memory_read` — read the section before overwriting.
+- `enrichments_write` — for cognate / borrowing / similarity data (not chat memory).
+- `lexeme_notes_write` (Comparison bucket) — for per-lexeme notes (separate from chat memory).

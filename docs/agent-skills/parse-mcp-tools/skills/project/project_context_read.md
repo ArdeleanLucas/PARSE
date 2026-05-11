@@ -1,142 +1,76 @@
----
-name: parse-mcp-tool-project-context-read
-description: "Use PARSE MCP tool `project_context_read`: Read high-level PARSE project context (project metadata, source index summary, annotation inventory, and enrichment summary). Read-only."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# project_context_read
 
-# PARSE MCP Tool Skill — `project_context_read`
+**Category:** Project
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only)
+**Complexity:** Low
+**Estimated Tokens:** ~210 (short) / ~460 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `project_context_read` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads high-level PARSE project context — project metadata, source-index summary, annotation inventory, enrichment summary, AI config, and constraints — the canonical "what's in this project?" probe.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- At the start of almost any chat session — establish situational awareness (speakers, concepts, project name, status) before deciding what to do.
+- Validating speaker / concept IDs before passing them to mutating tools.
+- Inspecting AI config (which provider, which model is set on the project).
+- Capturing project state as audit evidence in PR / handoff documentation.
+- As a scope check before broad operations (`pipeline_state_batch`, bulk exports, etc.).
 
-## Tool contract snapshot
+## When NOT to Use
+- For detailed annotation-interval data — that's `annotation_read` (Annotation bucket).
+- For per-tier coverage / can_run analysis — that's `pipeline_state_read` / `pipeline_state_batch` (Advanced bucket).
+- For cognate / enrichment data — that's `enrichments_read`.
+- For chat-memory recall — that's `parse_memory_read`.
+- For full annotation dumps. The `annotation_inventory` block is a summary (counts, names, status), not interval data.
 
-- **Tool name:** `project_context_read`
-- **Skill name:** `parse-mcp-tool-project-context-read`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read high-level PARSE project context (project metadata, source index summary, annotation inventory, and enrichment summary). Read-only.
+## Parameters
 
-### Parameters
+| Parameter   | Type     | Required | Description                                                                                              | Default              | Example                                  |
+|-------------|----------|----------|----------------------------------------------------------------------------------------------------------|----------------------|------------------------------------------|
+| include     | string[] | No       | Subset of context blocks. Valid: `project`, `source_index`, `annotation_inventory`, `enrichments_summary`, `ai_config`, `constraints`. | (all) | `["project", "annotation_inventory"]` |
+| maxSpeakers | integer  | No       | Cap on per-speaker rows in inventory blocks. `minimum=1`, `maximum=500`.                                  | (server default)     | `100`                                    |
 
-- `include` (type=array) — Optional subset of context blocks, e.g. `["project", "source_index", "annotation_inventory"]`; valid values are `project`, `source_index`, `annotation_inventory`, `enrichments_summary`, `ai_config`, and `constraints`.
-- `maxSpeakers` (type=integer; minimum=1; maximum=500)
+## Expected Output
+Returns `{ readOnly, project?, source_index?, annotation_inventory?, enrichments_summary?, ai_config?, constraints? }` — each requested block is present; unrequested ones are omitted.
 
-### MCP annotations
+- `project` — name, root path, language, configured tiers.
+- `source_index` — speakers with registered sources, primary WAV per speaker.
+- `annotation_inventory` — per-speaker counts (concepts, intervals, tier coverage summary).
+- `enrichments_summary` — counts of cognate sets, borrowing flags, lexeme notes.
+- `ai_config` — active provider, model, exposure mode.
+- `constraints` — project-level policy constraints exposed by the catalog.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+Does not mutate project state.
 
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+Default (all blocks):
+```json
+{}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/project_context_read?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `project_context_read` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Use `include` to request only the high-level blocks needed for the current audit. Valid values include `project`, `source_index`, `annotation_inventory`, `enrichments_summary`, `ai_config`, and `constraints`:
-
+Scoped to project + inventory:
 ```json
 {
-  "include": ["project", "source_index", "annotation_inventory"],
-  "maxSpeakers": 25
+  "include": ["project", "annotation_inventory"],
+  "maxSpeakers": 100
 }
 ```
 
-Expected response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "project_context_read",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "fetchedAt": "2026-05-10T17:37:02Z",
-    "project": {},
-    "source_index": {
-      "speakerCount": 2,
-      "speakers": {
-        "Khan01": {
-          "sourceCount": 1,
-          "primarySource": "Khan01.wav",
-          "hasCsv": true
-        }
-      },
-      "truncated": false,
-      "maxSpeakers": 25
-    },
-    "annotation_inventory": {
-      "directory": "<PROJECT_ROOT>/annotations",
-      "exists": true,
-      "fileCount": 2,
-      "sample": ["Khan01.parse.json", "Khan02.parse.json"]
-    }
-  }
-}
-```
+| Failure                                  | Symptom                                                              | Recovery                                                                                              |
+|------------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Truncated inventory                      | Speaker rows in `annotation_inventory` cut off                       | Increase `maxSpeakers` (up to 500), or scope by speaker via `pipeline_state_batch` with explicit list.|
+| Missing `enrichments_summary`            | Block absent or empty                                                 | `parse-enrichments.json` may not exist yet. Use `enrichments_read` directly to confirm.               |
+| Wrong AI config visible                  | `ai_config` shows unexpected provider/model                          | Verify `~/.parse/config.yaml` or env vars. The tool reflects active config, not desired config.       |
 
-## Quality checklist
+## Agent Reasoning Notes
+This is the cheapest "where am I, what do I have?" probe. Most session-loop agents should call it first thing — it's read-only, bounded, and answers most "is this valid?" questions without per-tool drilling. For deeper inspection, pivot to bucket-specific tools (`pipeline_state_*` for compute readiness, `annotation_read` for interval data, `enrichments_read` for cognate state). The `include` filter is worth using on every call — most tasks only need 1–2 blocks, and the response shrinks significantly.
 
-- [ ] Live catalog confirms `project_context_read` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `speakers_list` — narrower alternative when you only need the speaker enumeration.
+- `pipeline_state_batch`, `pipeline_state_read` (Advanced bucket) — per-tier coverage detail.
+- `annotation_read` (Annotation bucket) — interval-level data for one speaker.
+- `enrichments_read` — full cognate / borrowing / similarity data.
+- `parse_memory_read` — persistent chat memory (separate from project state).
+- `mcp_get_exposure_mode` — adapter configuration (separate from project config).

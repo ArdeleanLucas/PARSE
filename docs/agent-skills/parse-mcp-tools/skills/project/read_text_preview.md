@@ -1,133 +1,71 @@
----
-name: parse-mcp-tool-read-text-preview
-description: "Use PARSE MCP tool `read_text_preview`: Read a Markdown/text file preview from workspace or docs root. Allowed extensions: .md, .markdown, .txt, .rst. Read-only."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# read_text_preview
 
-# PARSE MCP Tool Skill — `read_text_preview`
+**Category:** Project
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only)
+**Complexity:** Low
+**Estimated Tokens:** ~190 (short) / ~410 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `read_text_preview` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads a bounded preview of a Markdown / text file from the workspace or docs root — `.md`, `.markdown`, `.txt`, `.rst` only — with `startLine` / `maxLines` / `maxChars` bounds.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Inspecting docs, plans, READMEs, agent-skill notes inside the project.
+- Reading a slice of a long markdown file with explicit line bounds (`startLine: 200, maxLines: 100`).
+- Pre-flight before edits to project documentation — read the relevant section first.
+- Generic text inspection — when `read_csv_preview` and `parse_memory_read` don't fit.
 
-## Tool contract snapshot
+## When NOT to Use
+- For CSV files. `read_csv_preview` does CSV-aware parsing (columns, delimiter, total rows).
+- For chat memory (`parse-memory.md`). `parse_memory_read` is section-aware and tailored to that file specifically.
+- For binary files, code files, or unsupported extensions. The tool restricts to `.md`, `.markdown`, `.txt`, `.rst`.
+- For unbounded reads. `maxLines` and `maxChars` cap the response — use them deliberately.
 
-- **Tool name:** `read_text_preview`
-- **Skill name:** `parse-mcp-tool-read-text-preview`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `path`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read a Markdown/text file preview from workspace or docs root. Allowed extensions: .md, .markdown, .txt, .rst. Read-only.
+## Parameters
 
-### Parameters
+| Parameter  | Type    | Required | Description                                                              | Default | Example                              |
+|------------|---------|----------|--------------------------------------------------------------------------|---------|--------------------------------------|
+| path       | string  | Yes      | Project-relative or absolute path inside workspace / docs. `minLength=1`, `maxLength=1024`. | — | `"docs/architecture.md"` |
+| startLine  | integer | No       | First line to return (1-indexed). `minimum=1`, `maximum=200000`.         | `1`     | `200`                                |
+| maxLines   | integer | No       | Cap on returned lines. `minimum=1`, `maximum=400`.                       | `120`   | `100`                                |
+| maxChars   | integer | No       | Cap on returned characters. `minimum=200`, `maximum=50000`.              | `12000` | `8000`                               |
 
-- `path` (type=string; minLength=1; maxLength=1024)
-- `startLine` (type=integer; minimum=1; maximum=200000; default=1)
-- `maxLines` (type=integer; minimum=1; maximum=400; default=120)
-- `maxChars` (type=integer; minimum=200; maximum=50000; default=12000)
+## Expected Output
+Returns `{ readOnly, path, content, startLine, endLine, totalLines, truncated }`. `content` is the text slice; `truncated: true` when bounds cut off content.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/read_text_preview?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `read_text_preview` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Read a bounded preview from a Markdown/text file under the project workspace or docs root:
-
+## Example Successful Call
+First 120 lines:
 ```json
 {
-  "path": "README.md",
-  "startLine": 1,
-  "maxLines": 5,
-  "maxChars": 1200
+  "path": "docs/architecture.md"
 }
 ```
 
-Expected response shape:
-
+Specific slice:
 ```json
 {
-  "tool": "read_text_preview",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "ok": true,
-    "path": "<PROJECT_ROOT>/README.md",
-    "lineStart": 1,
-    "lineEnd": 5,
-    "totalLines": 120,
-    "truncated": false,
-    "content": "# PARSE\n\nFieldwork-first linguistic annotation workstation."
-  }
+  "path": "docs/architecture.md",
+  "startLine": 200,
+  "maxLines": 100
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `read_text_preview` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Unsupported extension                  | Validation error                                                     | The tool restricts to `.md`, `.markdown`, `.txt`, `.rst`. For other formats, use a project-appropriate reader.|
+| Path outside allowed roots             | Path-validation error                                                | Use a project-relative path or place the file inside the workspace / docs root.                       |
+| Truncated read                         | `truncated: true`                                                    | Increase `maxLines` (up to 400) and `maxChars` (up to 50000), or paginate by `startLine`.             |
+| Wrong section                          | Returned content from start of file when you wanted section X        | Use `startLine` to skip ahead, or grep externally to locate the section.                              |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the generic text reader. Reach for it when no domain-specific tool fits — `read_csv_preview` for CSVs, `parse_memory_read` for `parse-memory.md`, `enrichments_read` for `parse-enrichments.json`. The line-bound semantics make it suitable for long files where you only care about a slice; use `startLine` rather than reading the whole file just to discard the prefix.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `read_csv_preview` — CSV-aware alternative.
+- `parse_memory_read` — section-aware reader for `parse-memory.md`.
+- `enrichments_read` — structured reader for `parse-enrichments.json`.
+- `project_context_read` — overview of project state (not raw file content).
