@@ -99,6 +99,7 @@ For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 - [AI Integration](docs/ai-integration.md) — providers, model configuration, the chat tool surface, and workflow macros.
 - [MCP Guide](docs/mcp-guide.md) — automation setup, authentication, tool catalog, and `parse-mcp` usage.
 - [MCP Schema](docs/mcp-schema.md) — low-level MCP reference for developers.
+- [Agent skill index](docs/agent-skills/parse-mcp-tools/skills/index.md) — categorized per-tool skill docs (annotation, comparison, export, project, advanced) for agents driving PARSE via MCP.
 - [API Reference](docs/api-reference.md) — HTTP automation reference and examples.
 - [Architecture](docs/architecture.md) — system design, data model, and runtime responsibilities.
 - [Audition CSV speaker import](docs/runtime/audition-csv-import.md) — marker-export onboarding contract for Adobe Audition CSV/TSV files.
