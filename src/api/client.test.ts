@@ -532,6 +532,22 @@ describe("concept survey-link/relink contract", () => {
     }));
   });
 
+  it("preserves comma-separated concept ids and sends optional speaker-scoped payloads", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, concept: { id: "53", label: "big", speaker_surveys: { klq: "4.2" } } }));
+    await expect(setConceptSurveyLink("53,619", { survey_id: "klq", source_item: "4.2", speaker: "Saha01" })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/53,619/survey-links", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ survey_id: "klq", source_item: "4.2", speaker: "Saha01" }),
+    }));
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, concept: { id: "53", label: "big" } }));
+    await expect(deleteConceptSurveyLink("53,619", { survey_id: "klq", speaker: "Saha01" })).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/53,619/survey-links", expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({ survey_id: "klq", speaker: "Saha01" }),
+    }));
+  });
+
   it("runs relink-by-gloss dry-run and apply with accepted groups", async () => {
     const dryRun = { ok: true, applied: false, algorithm: "canonical_survey_gloss:v1-strict", groups: [], fuzzy_candidates: [] };
     fetchMock.mockResolvedValueOnce(jsonResponse(dryRun));

@@ -25,23 +25,27 @@ export async function duplicateConcept(conceptId: string): Promise<ConceptDuplic
 
 
 export async function setConceptSurveyLink(
-  conceptId: string,
+  conceptIdOrList: string,
   payload: ConceptSurveyLinkMutation,
 ): Promise<ConceptSurveyLinkResponse> {
   return apiFetch<ConceptSurveyLinkResponse>(
-    `/api/concepts/${encodeURIComponent(conceptId)}/survey-links`,
+    `/api/concepts/${encodeConceptIdOrList(conceptIdOrList)}/survey-links`,
     { method: "POST", body: JSON.stringify(payload) },
   );
 }
 
 export async function deleteConceptSurveyLink(
-  conceptId: string,
+  conceptIdOrList: string,
   payload: ConceptSurveyLinkMutation,
 ): Promise<ConceptSurveyLinkResponse> {
   return apiFetch<ConceptSurveyLinkResponse>(
-    `/api/concepts/${encodeURIComponent(conceptId)}/survey-links`,
+    `/api/concepts/${encodeConceptIdOrList(conceptIdOrList)}/survey-links`,
     { method: "DELETE", body: JSON.stringify(payload) },
   );
+}
+
+function encodeConceptIdOrList(conceptIdOrList: string): string {
+  return conceptIdOrList.split(",").map((part) => encodeURIComponent(part.trim())).join(",");
 }
 
 export async function relinkConceptsByGloss(
