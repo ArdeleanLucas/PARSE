@@ -143,6 +143,7 @@ function readStoredConceptSortState(): StoredConceptSortState {
 
 const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 const SIDEBAR_SCOPE_STORAGE_PREFIX = 'parse.sidebar.scopedToSpeaker';
+const EMPTY_FRESH_KEYS: ReadonlySet<string> = new Set<string>();
 
 function seedLoadedDuplicateSiblingTags(primaryId: string, siblingId: string): void {
   useAnnotationStore.setState((state) => {
@@ -882,6 +883,7 @@ export function ParseUI() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
   const [recentlyDuplicatedSiblingKey, setRecentlyDuplicatedSiblingKey] = useState<string | null>(null);
+  const [freshDuplicateKeysBySpeaker, setFreshDuplicateKeysBySpeaker] = useState<Record<string, Set<string>>>({});
   const recentlyDuplicatedSiblingTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const actionFeedbackTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
@@ -1297,23 +1299,31 @@ export function ParseUI() {
     () => speakerElicitedConceptKeys(activeSpeakerForSidebar ? annotationRecords[activeSpeakerForSidebar] : null),
     [annotationRecords, activeSpeakerForSidebar],
   );
+  const activeSpeakerFreshKeys = useMemo<ReadonlySet<string>>(() => {
+    if (!activeSpeakerForSidebar) return EMPTY_FRESH_KEYS;
+    return freshDuplicateKeysBySpeaker[activeSpeakerForSidebar] ?? EMPTY_FRESH_KEYS;
+  }, [activeSpeakerForSidebar, freshDuplicateKeysBySpeaker]);
 
-  const speakerScopedConcepts = useMemo(() => (
-    scopedToSpeaker && activeSpeakerForSidebar && elicitedConceptKeys.size > 0
-      ? filtered.filter((candidate) => conceptMatchesElicitedKeys(candidate, elicitedConceptKeys))
-      : filtered
-  ), [filtered, scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys]);
+  const speakerScopedConcepts = useMemo(() => {
+    if (!scopedToSpeaker || !activeSpeakerForSidebar) return filtered;
+    if (elicitedConceptKeys.size === 0 && activeSpeakerFreshKeys.size === 0) return filtered;
+    return filtered.filter((candidate) => {
+      const underlyingKeys = conceptUnderlyingKeys(candidate);
+      return underlyingKeys.some((key) => elicitedConceptKeys.has(key) || activeSpeakerFreshKeys.has(key));
+    });
+  }, [filtered, scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, activeSpeakerFreshKeys]);
 
   const sidebarVariantVisibilityPredicate = useCallback((conceptForVisibility: unknown, variant: { conceptKey: string }): boolean => (
     evaluateConceptVariantVisibleInSidebar(conceptForVisibility, variant, {
       scopedToSpeaker,
       activeSpeakerForSidebar,
       elicitedConceptKeys,
+      activeSpeakerFreshKeys,
       selectedTagIds,
       getTagsForConcept,
       activeTagScope,
     })
-  ), [scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, selectedTagIds, getTagsForConcept, activeTagScope]);
+  ), [scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, activeSpeakerFreshKeys, selectedTagIds, getTagsForConcept, activeTagScope]);
 
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
@@ -1917,7 +1927,23 @@ export function ParseUI() {
             const activeVariantKey = activeRawKey && target?.variants?.some((variant) => variant.conceptKey === activeRawKey)
               ? activeRawKey
               : null;
-            const underlyingKey = variantKey ?? activeVariantKey ?? target?.variants?.[0]?.conceptKey ?? target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
+            const visibilityConcept = target ?? sidebarConcept;
+            const clickElicitedConceptKeys = speakerElicitedConceptKeys(
+              activeSpeakerForSidebar ? useAnnotationStore.getState().records[activeSpeakerForSidebar] : null,
+            );
+            const sidebarSourceItem = String(sidebarConcept.sourceItem ?? (sidebarConcept as { source_item?: unknown }).source_item ?? '');
+            const sidebarSourceSurvey = String(sidebarConcept.sourceSurvey ?? (sidebarConcept as { source_survey?: unknown }).source_survey ?? '');
+            const sourceScopedRawKey = sidebarSourceItem
+              ? rawConcepts.find((candidate) => (
+                String(candidate.source_item ?? (candidate as { sourceItem?: unknown }).sourceItem ?? '') === sidebarSourceItem
+                && String(candidate.source_survey ?? (candidate as { sourceSurvey?: unknown }).sourceSurvey ?? '') === sidebarSourceSurvey
+                && (clickElicitedConceptKeys.has(String(candidate.id)) || activeSpeakerFreshKeys.has(String(candidate.id)))
+              ))?.id
+              : null;
+            const firstVisibleVariantKey = sourceScopedRawKey != null
+              ? String(sourceScopedRawKey)
+              : conceptUnderlyingKeys(visibilityConcept).find((key) => clickElicitedConceptKeys.has(key) || activeSpeakerFreshKeys.has(key)) ?? null;
+            const underlyingKey = variantKey ?? activeVariantKey ?? firstVisibleVariantKey ?? target?.variants?.[0]?.conceptKey ?? target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
             // Capture the grouping inputs at click-time so the post-reload
             // regrouping mirrors the live `concepts` memo at line 880 — in
             // particular `conceptMerges` matters when a duplicated concept
@@ -1941,6 +1967,15 @@ export function ParseUI() {
                   setSelectedConceptKey(underlyingKey);
                   const siblingKey = duplicated.sibling.id;
                   setRecentlyDuplicatedSiblingKey(siblingKey);
+                  if (activeSpeakerForSidebar) {
+                    setFreshDuplicateKeysBySpeaker((prev) => {
+                      const existing = prev[activeSpeakerForSidebar] ?? new Set<string>();
+                      if (existing.has(siblingKey)) return prev;
+                      const nextSet = new Set(existing);
+                      nextSet.add(siblingKey);
+                      return { ...prev, [activeSpeakerForSidebar]: nextSet };
+                    });
+                  }
                   if (recentlyDuplicatedSiblingTimeoutRef.current) {
                     window.clearTimeout(recentlyDuplicatedSiblingTimeoutRef.current);
                   }
