@@ -13,6 +13,7 @@ const mockLoad = vi.fn(async () => {});
 const mockSave = vi.fn(async () => {});
 
 const mockExportLingPyTSV = vi.fn(async () => {});
+const mockExportNEXUS = vi.fn(async () => {});
 const mockExportCanonicalLexemesReport = vi.fn(async () => {});
 const mockComputeStart = vi.fn(async () => {});
 let mockComputeState: { status: "idle" | "running" | "complete" | "error"; progress: number; error: string | null } = {
@@ -39,7 +40,7 @@ vi.mock("../../stores/enrichmentStore", () => ({
 vi.mock("../../hooks/useExport", () => ({
   useExport: () => ({
     exportLingPyTSV: mockExportLingPyTSV,
-    exportNEXUS: vi.fn(),
+    exportNEXUS: mockExportNEXUS,
     exportCanonicalLexemesReport: mockExportCanonicalLexemesReport,
     exportCSV: vi.fn(),
   }),
@@ -86,6 +87,7 @@ beforeEach(() => {
   mockLoad.mockClear();
   mockSave.mockClear();
   mockExportLingPyTSV.mockClear();
+  mockExportNEXUS.mockClear();
   mockExportCanonicalLexemesReport.mockClear();
   mockComputeStart.mockClear();
   mockComputeState = { status: "idle", progress: 0, error: null };
@@ -180,6 +182,27 @@ describe("EnrichmentsPanel", () => {
       manual_overrides: {
         cognate_sets: { "42": { A: ["spk1"] } },
       },
+    });
+  });
+
+  it("co-locates NEXUS immediately before the canonical-lexemes report action", async () => {
+    mockData = {
+      "42": {
+        cognate_sets: { A: ["spk1"] },
+      },
+    };
+
+    render(<EnrichmentsPanel activeConcept="42" />);
+
+    const actionLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim());
+    const nexusIndex = actionLabels.indexOf("Export NEXUS");
+    const reportIndex = actionLabels.indexOf("Download canonical-lexemes report (TSV)");
+    expect(nexusIndex).toBeGreaterThanOrEqual(0);
+    expect(reportIndex).toBe(nexusIndex + 1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export NEXUS" }));
+    await vi.waitFor(() => {
+      expect(mockExportNEXUS).toHaveBeenCalledOnce();
     });
   });
 
