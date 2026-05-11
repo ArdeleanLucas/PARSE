@@ -91,3 +91,5 @@ export interface UseWaveSurferResult extends WaveSurferControls, WaveSurferRegio
 }
 
 export const WAVE_SURFER_REGION_COLOR = "rgba(255,165,0,0.22)";
+// Draft drag-to-create selections use emerald to match the CreateLexemePanel border and stay visually distinct from committed lexeme regions.
+export const WAVE_SURFER_DRAFT_REGION_COLOR = "rgba(16, 185, 129, 0.22)";

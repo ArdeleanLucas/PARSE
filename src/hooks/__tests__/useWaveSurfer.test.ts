@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { WAVE_SURFER_DRAFT_REGION_COLOR } from "../wave-surfer/types";
 
 // vi.hoisted ensures these are available inside vi.mock factories (which are hoisted)
 const { mockWsInstance, mockRegionInstance, mockRegionsPlugin, mockSetState, mockDisableQuickRetimeSelection } =
@@ -347,7 +348,7 @@ describe("useWaveSurfer", () => {
     });
 
     expect(mockRegionsPlugin.enableDragSelection).toHaveBeenCalledWith(
-      expect.objectContaining({ id: expect.stringContaining("create-lexeme-selection"), drag: true, resize: true }),
+      expect.objectContaining({ id: expect.stringContaining("create-lexeme-selection"), color: WAVE_SURFER_DRAFT_REGION_COLOR, drag: true, resize: true }),
       1,
     );
 
