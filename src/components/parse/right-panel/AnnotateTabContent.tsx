@@ -1,4 +1,4 @@
-import { Activity, Anchor, AudioLines, Layers, Mic, Save, Scissors, SlidersHorizontal, Video } from 'lucide-react';
+import { Activity, Anchor, Save } from 'lucide-react';
 
 import type { RightPanelProps } from './types';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -15,14 +15,6 @@ type AnnotateTabContentProps = Pick<
   | 'annotateAuxTools'
   | 'onSaveAnnotations'
 >;
-
-const phoneticToolCards = [
-  { icon: AudioLines, label: 'Waveform view', hint: 'Segment-aware' },
-  { icon: Video, label: 'Video clip', hint: 'Synced to timeline' },
-  { icon: Scissors, label: 'Segment controls', hint: 'Split · Trim · Join' },
-  { icon: SlidersHorizontal, label: 'Formant tracker', hint: 'Praat-compatible' },
-  { icon: Mic, label: 'Re-record utterance', hint: 'Overlay on segment' },
-] as const;
 
 export function AnnotateTabContent({
   activeActionSpeaker,
@@ -74,24 +66,6 @@ export function AnnotateTabContent({
 
         {annotateSpeakerTools}
         {annotateAuxTools}
-
-        <button className="mb-1.5 flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 hover:bg-indigo-100">
-          <Layers className="h-3.5 w-3.5" />
-          <span className="flex-1 text-left">Spectrogram workspace</span>
-          <span className="rounded bg-white/70 px-1 font-mono text-[9px] text-indigo-600">ON</span>
-        </button>
-
-        <div className="space-y-1">
-          {phoneticToolCards.map(({ icon: Icon, label, hint }) => (
-            <button key={label} className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-slate-50">
-              <Icon className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-600" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-medium text-slate-700">{label}</div>
-                <div className="truncate text-[9px] text-slate-400">{hint}</div>
-              </div>
-            </button>
-          ))}
-        </div>
       </CollapsibleSection>
 
       <CollapsibleSection title="Annotation write" icon={<Save className="h-3 w-3" />} className="p-4">
