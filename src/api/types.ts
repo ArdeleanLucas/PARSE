@@ -172,6 +172,7 @@ export type SurveySettingsMap = Record<string, SurveyDisplaySettings>;
 export type ConceptSurveyLinks = Record<string, string>;
 export type ConceptSurveyLinksByConcept = Record<string, ConceptSurveyLinks>;
 export type SpeakerSurveyChoices = Record<string, Record<string, string>>;
+export type SpeakerConceptSurveyLinks = Record<string, ConceptSurveyLinksByConcept>;
 
 export interface SurveyOverlapState {
   version: number;
@@ -179,6 +180,7 @@ export interface SurveyOverlapState {
   surveys: SurveySettingsMap;
   concept_survey_links: ConceptSurveyLinksByConcept;
   speaker_choices: SpeakerSurveyChoices;
+  speaker_concept_survey_links?: SpeakerConceptSurveyLinks;
 }
 
 export type SurveyOverlapPatch = Partial<SurveyOverlapState> & {
@@ -199,11 +201,12 @@ export interface ConceptEntry {
 export interface ConceptSurveyLinkMutation {
   survey_id: string;
   source_item?: string;
+  speaker?: string;
 }
 
 export interface ConceptSurveyLinkResponse {
   ok: true;
-  concept: ConceptEntry;
+  concept: ConceptEntry & { speaker_surveys?: ConceptSurveyLinks };
   survey_overlap?: SurveyOverlapState;
 }
 
@@ -249,6 +252,8 @@ export interface ProjectConfig {
   survey_settings?: SurveySettingsMap;
   survey_color_coding_enabled?: boolean;
   speaker_survey_choices?: SpeakerSurveyChoices;
+  concept_survey_links?: ConceptSurveyLinksByConcept;
+  speaker_concept_survey_links?: SpeakerConceptSurveyLinks;
   audio_dir: string;
   annotations_dir: string;
   schema_version?: number;

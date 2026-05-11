@@ -16,6 +16,7 @@ import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
+import { resolveSurveyLinksForSpeaker } from './lib/surveyLinksForSpeaker';
 import {
   compareConceptsByResolvedSurvey,
   resolveConceptSurvey,
@@ -164,6 +165,8 @@ export function ParseUI() {
   const surveySettings   = useConfigStore(s => s.config?.survey_settings ?? {});
   const surveyColorCodingEnabled = useConfigStore(s => s.config?.survey_color_coding_enabled ?? false);
   const speakerSurveyChoices = useConfigStore(s => s.config?.speaker_survey_choices ?? {});
+  const conceptSurveyLinks = useConfigStore(s => s.config?.concept_survey_links ?? {});
+  const speakerConceptSurveyLinks = useConfigStore(s => s.config?.speaker_concept_survey_links ?? {});
   const updateSurveyOverlap = useConfigStore(s => s.updateSurveyOverlap);
   const configError      = useConfigStore(s => s.error);
   const [dismissedConfigError, setDismissedConfigError] = useState<string | null>(null);
@@ -1168,10 +1171,30 @@ export function ParseUI() {
     }
     return baseConcept;
   }, [baseConcept, activeRawKey, currentMode]);
-  const activeResolvedSurvey = useMemo(
-    () => resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings),
-    [concept, selectedSpeakers, speakerSurveyChoices, surveySettings],
-  );
+  const activeResolvedSurvey = useMemo(() => {
+    if (currentMode !== 'annotate') {
+      return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);
+    }
+    const rowId = concept.key;
+    const buckets = resolveSurveyLinksForSpeaker(
+      rowId ? [rowId] : [],
+      selectedSpeakers[0] ?? null,
+      { ...(rowId ? { [rowId]: conceptSurveyLinks[rowId] ?? concept.surveys ?? {} } : {}) },
+      speakerConceptSurveyLinks,
+    );
+    const bucket = buckets[0];
+    if (!bucket) return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);
+    const display = surveySettings[bucket.surveyId] ?? { display_label: bucket.surveyId.toLocaleUpperCase(), display_color: 'slate' };
+    return {
+      conceptKey: concept.key,
+      surveyId: bucket.surveyId,
+      sourceItem: bucket.sourceItem,
+      displayLabel: display.display_label,
+      displayColor: display.display_color,
+      hasOverlap: buckets.length > 1,
+      availableSurveys: Object.fromEntries(buckets.map((candidate) => [candidate.surveyId, candidate.sourceItem])),
+    };
+  }, [concept, conceptSurveyLinks, currentMode, selectedSpeakers, speakerConceptSurveyLinks, speakerSurveyChoices, surveySettings]);
   const activeSurveyLabel = activeResolvedSurvey.surveyId
     ? surveyLabelFor(activeResolvedSurvey.surveyId, surveySettings)
     : undefined;
@@ -1702,6 +1725,8 @@ export function ParseUI() {
           }}
           activeSpeaker={activeSpeakerForSidebar}
           surveySettings={surveySettings}
+          conceptSurveyLinks={conceptSurveyLinks}
+          speakerConceptSurveyLinks={speakerConceptSurveyLinks}
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
-import type { ConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
+import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
-import { defaultSurveySettings, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
+import { resolveSurveyLinksForSpeaker, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
+import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 type ConceptSortMode = 'az' | '1n' | 'survey';
@@ -29,6 +30,18 @@ export interface SidebarConcept {
 }
 
 type SidebarVariant = NonNullable<SidebarConcept['variants']>[number];
+type SurveyLinkEditorMode = 'edit' | 'add';
+
+interface SurveyLinkEditorState {
+  concept: SidebarConcept;
+  mode: SurveyLinkEditorMode;
+  bucket: SpeakerSurveyLinkBucket | null;
+  rowIds: string[];
+  surveyId: string;
+  sourceItem: string;
+  error: string | null;
+  saving: boolean;
+}
 
 interface SidebarTag {
   id: string;
@@ -53,6 +66,8 @@ interface ConceptSidebarProps {
   onConceptSelect: (conceptId: number, conceptKey?: string) => void;
   activeSpeaker?: string | null;
   surveySettings?: SurveySettingsMap;
+  conceptSurveyLinks?: ConceptSurveyLinksByConcept;
+  speakerConceptSurveyLinks?: SpeakerConceptSurveyLinks;
   speakerSurveyChoices?: SpeakerSurveyChoices;
   surveyColorCodingEnabled?: boolean;
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
@@ -92,11 +107,51 @@ function surveyLinksForSidebarConcept(concept: SidebarConcept): ConceptSurveyLin
   return links;
 }
 
-function surveyLinkChoiceIds(concept: SidebarConcept, settings: SurveySettingsMap): string[] {
+function bundleRowIds(concept: SidebarConcept): string[] {
+  if (concept.variants && concept.variants.length > 0) {
+    return concept.variants.map((variant) => variant.conceptKey).filter(Boolean);
+  }
+  return [String(concept.key ?? concept.id)].filter(Boolean);
+}
+
+function variantLabelForRowId(concept: SidebarConcept, rowId: string): string {
+  const variant = concept.variants?.find((candidate) => candidate.conceptKey === rowId);
+  return variant?.variantLabel ?? concept.mergedVariants?.find((candidate) => candidate.conceptKey === rowId)?.variantLabel ?? concept.name;
+}
+
+function rowPreview(concept: SidebarConcept, rowIds: readonly string[]): string {
+  return rowIds.map((rowId) => `${variantLabelForRowId(concept, rowId)} (id ${rowId})`).join(', ');
+}
+
+function globalLinksForConcept(concept: SidebarConcept, conceptSurveyLinks: ConceptSurveyLinksByConcept): ConceptSurveyLinksByConcept {
+  const links: ConceptSurveyLinksByConcept = {};
+  const fallback = surveyLinksForSidebarConcept(concept);
+  for (const rowId of bundleRowIds(concept)) {
+    links[rowId] = conceptSurveyLinks[rowId] ?? fallback;
+  }
+  return links;
+}
+
+function bucketsForConcept(
+  concept: SidebarConcept,
+  activeSpeaker: string | null | undefined,
+  conceptSurveyLinks: ConceptSurveyLinksByConcept,
+  speakerConceptSurveyLinks: SpeakerConceptSurveyLinks,
+): SpeakerSurveyLinkBucket[] {
+  return resolveSurveyLinksForSpeaker(
+    bundleRowIds(concept),
+    activeSpeaker,
+    globalLinksForConcept(concept, conceptSurveyLinks),
+    speakerConceptSurveyLinks,
+  );
+}
+
+function surveyLinkChoiceIds(concept: SidebarConcept, settings: SurveySettingsMap, buckets: readonly SpeakerSurveyLinkBucket[] = []): string[] {
   const ids = new Set<string>();
-  Object.keys(settings ?? {}).forEach((id) => { if (id.trim()) ids.add(id.trim().toLocaleLowerCase()); });
-  Object.keys(surveyLinksForSidebarConcept(concept)).forEach((id) => ids.add(id));
-  return [...ids].sort();
+  Object.keys(settings ?? {}).forEach((id) => { const normalized = normalizeSurveyId(id); if (normalized) ids.add(normalized); });
+  Object.keys(surveyLinksForSidebarConcept(concept)).forEach((id) => ids.add(normalizeSurveyId(id)));
+  buckets.forEach((bucket) => ids.add(bucket.surveyId));
+  return [...ids].filter(Boolean).sort();
 }
 
 export function ConceptSidebar({
@@ -116,6 +171,8 @@ export function ConceptSidebar({
   onConceptSelect,
   activeSpeaker = null,
   surveySettings = {},
+  conceptSurveyLinks = {},
+  speakerConceptSurveyLinks = {},
   speakerSurveyChoices = {},
   surveyColorCodingEnabled = false,
   onSurveyChoiceChange,
@@ -129,7 +186,7 @@ export function ConceptSidebar({
   elicitedConceptKeys = new Set<string>(),
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
-  const [surveyLinkEditor, setSurveyLinkEditor] = useState<{ concept: SidebarConcept; surveyId: string; sourceItem: string; error: string | null; saving: boolean } | null>(null);
+  const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
   const [expandedConceptIds, setExpandedConceptIds] = useState<Set<number>>(() => new Set());
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -143,33 +200,68 @@ export function ConceptSidebar({
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
   const openSurveyLinkEditor = (concept: SidebarConcept) => {
-    const surveyIds = surveyLinkChoiceIds(concept, surveySettings);
-    const currentSurveyId = resolveConceptSurvey(
+    const buckets = bucketsForConcept(concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
+    const resolved = resolveConceptSurvey(
       { ...concept, key: concept.key ?? String(concept.id) },
       activeSpeaker,
       speakerSurveyChoices,
       surveySettings,
-    ).surveyId || surveyIds[0] || '';
+    );
+    const firstBucket = buckets.find((bucket) => bucket.surveyId === resolved.surveyId) ?? buckets[0] ?? null;
+    const surveyIds = surveyLinkChoiceIds(concept, surveySettings, buckets);
     setSurveyLinkEditor({
       concept,
-      surveyId: currentSurveyId,
-      sourceItem: surveyLinksForSidebarConcept(concept)[currentSurveyId] ?? concept.sourceItem ?? '',
+      mode: firstBucket ? 'edit' : 'add',
+      bucket: firstBucket,
+      rowIds: firstBucket?.rowIds ?? bundleRowIds(concept),
+      surveyId: firstBucket?.surveyId ?? surveyIds[0] ?? '',
+      sourceItem: firstBucket?.sourceItem ?? '',
       error: null,
       saving: false,
     });
   };
 
+  const selectSurveyBucket = (bucket: SpeakerSurveyLinkBucket) => {
+    setSurveyLinkEditor((current) => current ? {
+      ...current,
+      mode: 'edit',
+      bucket,
+      rowIds: bucket.rowIds,
+      surveyId: bucket.surveyId,
+      sourceItem: bucket.sourceItem,
+      error: null,
+    } : current);
+  };
+
+  const startAddSurveyLink = () => {
+    setSurveyLinkEditor((current) => {
+      if (!current) return current;
+      const buckets = bucketsForConcept(current.concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
+      const used = new Set(buckets.map((bucket) => bucket.surveyId));
+      const nextSurveyId = surveyLinkChoiceIds(current.concept, surveySettings, buckets).find((surveyId) => !used.has(surveyId)) ?? '';
+      return {
+        ...current,
+        mode: 'add',
+        bucket: null,
+        rowIds: bundleRowIds(current.concept),
+        surveyId: nextSurveyId,
+        sourceItem: '',
+        error: null,
+      };
+    });
+  };
+
   const saveSurveyLinkEditor = async () => {
     if (!surveyLinkEditor) return;
-    const conceptKey = surveyLinkEditor.concept.key ?? String(surveyLinkEditor.concept.id);
-    const payload = { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim() };
-    if (!payload.survey_id || !payload.source_item) {
+    const conceptIdOrList = surveyLinkEditor.rowIds.join(',');
+    const payload = { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim(), ...(activeSpeaker ? { speaker: activeSpeaker } : {}) };
+    if (!conceptIdOrList || !payload.survey_id || !payload.source_item) {
       setSurveyLinkEditor((current) => current ? { ...current, error: 'Survey ID and source item are required.' } : current);
       return;
     }
     setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
     try {
-      await setConceptSurveyLink(conceptKey, payload);
+      await setConceptSurveyLink(conceptIdOrList, payload);
       await onSurveyLinksChanged?.();
       setSurveyLinkEditor(null);
       setContextMenu(null);
@@ -180,11 +272,11 @@ export function ConceptSidebar({
   };
 
   const removeSurveyLinkEditor = async () => {
-    if (!surveyLinkEditor) return;
-    const conceptKey = surveyLinkEditor.concept.key ?? String(surveyLinkEditor.concept.id);
+    if (!surveyLinkEditor || surveyLinkEditor.mode !== 'edit') return;
+    const conceptIdOrList = surveyLinkEditor.rowIds.join(',');
     setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
     try {
-      await deleteConceptSurveyLink(conceptKey, { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim() });
+      await deleteConceptSurveyLink(conceptIdOrList, { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim(), ...(activeSpeaker ? { speaker: activeSpeaker } : {}) });
       await onSurveyLinksChanged?.();
       setSurveyLinkEditor(null);
       setContextMenu(null);
@@ -331,7 +423,19 @@ export function ConceptSidebar({
           const isElicited = !hasElicitedScope || conceptMatchesElicitedKeys(concept, elicitedConceptKeys);
           const inactiveRowClass = isElicited ? 'text-slate-600' : 'text-slate-400';
           const surveyConcept = { ...concept, key: concept.key ?? String(concept.id) };
-          const resolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
+          const hasSpeakerAwareSurveyLinks = Object.keys(conceptSurveyLinks).length > 0 || Object.keys(speakerConceptSurveyLinks).length > 0;
+          const speakerBuckets = hasSpeakerAwareSurveyLinks ? bucketsForConcept(surveyConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks) : [];
+          const fallbackResolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
+          const firstSpeakerBucket = speakerBuckets[0];
+          const resolvedSurvey = firstSpeakerBucket ? {
+            conceptKey: surveyConcept.key,
+            surveyId: firstSpeakerBucket.surveyId,
+            sourceItem: firstSpeakerBucket.sourceItem,
+            displayLabel: surveyLabelFor(firstSpeakerBucket.surveyId, surveySettings),
+            displayColor: (surveySettings[firstSpeakerBucket.surveyId] ?? defaultSurveySettings(firstSpeakerBucket.surveyId)).display_color,
+            hasOverlap: speakerBuckets.length > 1,
+            availableSurveys: Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
+          } : fallbackResolvedSurvey;
           const resolvedSurveyLabel = surveyLabelFor(resolvedSurvey.surveyId, surveySettings);
           const sourceLabel = resolvedSurvey.surveyId && resolvedSurvey.sourceItem
             ? `${resolvedSurveyLabel} ${resolvedSurvey.sourceItem}`
@@ -339,12 +443,12 @@ export function ConceptSidebar({
               ? `${concept.sourceSurvey} ${concept.sourceItem}`
               : concept.sourceItem);
           const badge = sourceLabel ?? `#${concept.id}`;
-          const surveyChoices = surveyChoiceKeysForConcept(surveyConcept);
+          const surveyChoices = speakerBuckets.length > 0 ? speakerBuckets.map((bucket) => bucket.surveyId).sort() : surveyChoiceKeysForConcept(surveyConcept);
           const multiSurveyBadge = surveyChoices.length >= 2;
           const nextSurveyId = multiSurveyBadge && resolvedSurvey.surveyId
             ? surveyChoices[((surveyChoices.indexOf(resolvedSurvey.surveyId) >= 0 ? surveyChoices.indexOf(resolvedSurvey.surveyId) : 0) + 1) % surveyChoices.length]
             : undefined;
-          const nextSurveySourceItem = nextSurveyId ? surveyConcept.surveys?.[nextSurveyId] ?? '' : '';
+          const nextSurveySourceItem = nextSurveyId ? resolvedSurvey.availableSurveys?.[nextSurveyId] ?? '' : '';
           const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
           const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && multiSurveyBadge && nextSurveyId);
           const variants = concept.variants ?? [];
@@ -449,7 +553,7 @@ export function ConceptSidebar({
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">
                   {surveyChoices.map((surveyId) => {
-                    const sourceItem = surveyConcept.surveys?.[surveyId] ?? '';
+                    const sourceItem = resolvedSurvey.availableSurveys?.[surveyId] ?? '';
                     const label = surveyLabelFor(surveyId, surveySettings);
                     const selected = resolvedSurvey.surveyId === surveyId;
                     const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
@@ -507,8 +611,38 @@ export function ConceptSidebar({
           >
             Change survey ID…
           </button>
-          {surveyLinkEditor && surveyLinkEditor.concept.id === contextMenu.concept.id && (
-            <div className="mt-1 space-y-1.5 border-t border-slate-100 pt-2" role="group" aria-label="Change survey ID editor">
+          {surveyLinkEditor && surveyLinkEditor.concept.id === contextMenu.concept.id && (() => {
+            const buckets = bucketsForConcept(surveyLinkEditor.concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
+            const selectedBucketKey = surveyLinkEditor.bucket ? `${surveyLinkEditor.bucket.surveyId} ${surveyLinkEditor.bucket.sourceItem}` : '';
+            const usedSurveyIds = new Set(buckets.map((bucket) => bucket.surveyId));
+            const selectableSurveyIds = surveyLinkEditor.mode === 'add'
+              ? surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings, buckets).filter((surveyId) => !usedSurveyIds.has(surveyId) || surveyId === surveyLinkEditor.surveyId)
+              : surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings, buckets);
+            return (
+            <div className="mt-1 w-64 space-y-1.5 border-t border-slate-100 pt-2" role="group" aria-label="Change survey ID editor">
+              <div className="text-[10px] font-semibold text-slate-500">Current buckets</div>
+              <div className="space-y-1">
+                {buckets.map((bucket) => {
+                  const bucketKey = `${bucket.surveyId} ${bucket.sourceItem}`;
+                  const selected = surveyLinkEditor.mode === 'edit' && selectedBucketKey === bucketKey;
+                  return (
+                    <button
+                      key={bucketKey}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => selectSurveyBucket(bucket)}
+                      className={`block w-full rounded border px-2 py-1 text-left text-[10px] ${selected ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <span className="font-semibold">{surveyLabelFor(bucket.surveyId, surveySettings)} {bucket.sourceItem}</span>
+                      <span className="block text-slate-400">variants: {rowPreview(surveyLinkEditor.concept, bucket.rowIds)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button type="button" onClick={startAddSurveyLink} className="text-[10px] font-semibold text-indigo-600">+ Add new link</button>
+              <div className="rounded bg-slate-50 px-2 py-1 text-[10px] text-slate-500">
+                Will update variants: {rowPreview(surveyLinkEditor.concept, surveyLinkEditor.rowIds)}
+              </div>
               <label className="block text-[10px] font-semibold text-slate-500">
                 survey_id
                 <select
@@ -516,15 +650,16 @@ export function ConceptSidebar({
                   value={surveyLinkEditor.surveyId}
                   onChange={(event) => {
                     const surveyId = event.target.value;
+                    const existing = buckets.find((bucket) => bucket.surveyId === surveyId);
                     setSurveyLinkEditor((current) => current ? {
                       ...current,
                       surveyId,
-                      sourceItem: surveyLinksForSidebarConcept(current.concept)[surveyId] ?? '',
+                      sourceItem: current.mode === 'edit' ? existing?.sourceItem ?? current.sourceItem : current.sourceItem,
                     } : current);
                   }}
                   className="mt-0.5 w-full rounded border border-slate-200 px-1 py-0.5 text-[11px] text-slate-700"
                 >
-                  {surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings).map((surveyId) => (
+                  {selectableSurveyIds.map((surveyId) => (
                     <option key={surveyId} value={surveyId}>{surveyId}</option>
                   ))}
                 </select>
@@ -543,11 +678,12 @@ export function ConceptSidebar({
                 <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { void saveSurveyLinkEditor(); }} className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-60">Save</button>
                 <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { setSurveyLinkEditor(null); }} className="rounded border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600">Cancel</button>
               </div>
-              {Object.prototype.hasOwnProperty.call(surveyLinksForSidebarConcept(surveyLinkEditor.concept), surveyLinkEditor.surveyId) ? (
+              {surveyLinkEditor.mode === 'edit' ? (
                 <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { void removeSurveyLinkEditor(); }} className="text-[10px] font-semibold text-rose-600 disabled:opacity-60">Remove link</button>
               ) : null}
             </div>
-          )}
+            );
+          })()}
           {contextMenu.concept.mergedKeys && contextMenu.concept.mergedKeys.length > 1 && (
             <button
               type="button"

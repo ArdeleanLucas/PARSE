@@ -23,6 +23,8 @@ function mergeSurveyOverlapProjection(config: ProjectConfig, state: SurveyOverla
     survey_settings: state.surveys,
     survey_color_coding_enabled: state.color_coding_enabled,
     speaker_survey_choices: state.speaker_choices,
+    concept_survey_links: state.concept_survey_links,
+    speaker_concept_survey_links: state.speaker_concept_survey_links,
   };
 }
 
