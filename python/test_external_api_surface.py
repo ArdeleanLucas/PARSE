@@ -163,7 +163,7 @@ def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
         "name": "conceptId",
         "in": "path",
         "required": True,
-        "schema": {"type": "string", "pattern": "^[0-9]+$"},
+        "schema": {"type": "string", "pattern": "^[0-9]+(,[0-9]+)*$"},
     }
 
     post = path["post"]
@@ -197,6 +197,7 @@ def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
         "properties": {
             "survey_id": {"type": "string"},
             "source_item": {"type": "string"},
+            "speaker": {"type": "string"},
         },
         "additionalProperties": False,
     }
@@ -206,8 +207,25 @@ def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
         "properties": {
             "survey_id": {"type": "string"},
             "source_item": {"type": "string"},
+            "speaker": {"type": "string"},
         },
         "additionalProperties": False,
+    }
+    assert components["ConceptEntry"]["properties"]["speaker_surveys"] == {"$ref": "#/components/schemas/ConceptSurveyLinks"}
+    assert components["SurveyOverlapState"]["required"] == [
+        "version",
+        "color_coding_enabled",
+        "surveys",
+        "concept_survey_links",
+        "speaker_choices",
+        "speaker_concept_survey_links",
+    ]
+    assert components["SurveyOverlapState"]["properties"]["speaker_concept_survey_links"] == {
+        "type": "object",
+        "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/components/schemas/ConceptSurveyLinks"},
+        },
     }
     assert components["ConceptSurveyLinkResponse"]["required"] == ["ok", "concept"]
     assert components["ConceptSurveyLinkResponse"]["properties"]["ok"] == {"type": "boolean", "const": True}

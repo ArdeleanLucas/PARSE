@@ -50,6 +50,7 @@ def _default_state() -> SurveyOverlapState:
         "surveys": {},
         "concept_survey_links": {},
         "speaker_choices": {},
+        "speaker_concept_survey_links": {},
     }
 
 
@@ -113,6 +114,20 @@ def _clean_speaker_choices(raw: object) -> dict[str, dict[str, str]]:
     return out
 
 
+def _clean_speaker_concept_links(raw: object) -> dict[str, dict[str, dict[str, str]]]:
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    if not isinstance(raw, Mapping):
+        return out
+    for speaker, concept_links in raw.items():
+        speaker_id = str(speaker or "").strip()
+        if not speaker_id or not isinstance(concept_links, Mapping):
+            continue
+        clean_concept_links = _clean_links(concept_links)
+        if clean_concept_links:
+            out[speaker_id] = clean_concept_links
+    return out
+
+
 def normalize_survey_overlap_state(raw: object) -> SurveyOverlapState:
     state = _default_state()
     if not isinstance(raw, Mapping):
@@ -129,6 +144,7 @@ def normalize_survey_overlap_state(raw: object) -> SurveyOverlapState:
     state["surveys"] = surveys
     state["concept_survey_links"] = _clean_links(raw.get("concept_survey_links"))
     state["speaker_choices"] = _clean_speaker_choices(raw.get("speaker_choices"))
+    state["speaker_concept_survey_links"] = _clean_speaker_concept_links(raw.get("speaker_concept_survey_links"))
     return state
 
 
@@ -166,6 +182,10 @@ def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object])
         "surveys": dict(current["surveys"]),
         "concept_survey_links": {cid: dict(links) for cid, links in current["concept_survey_links"].items()},
         "speaker_choices": {speaker: dict(choices) for speaker, choices in current["speaker_choices"].items()},
+        "speaker_concept_survey_links": {
+            speaker: {cid: dict(links) for cid, links in concept_links.items()}
+            for speaker, concept_links in current["speaker_concept_survey_links"].items()
+        },
     }
     if patch.get("reset_surveys") is True:
         merged["surveys"] = {}
@@ -173,6 +193,8 @@ def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object])
         merged["concept_survey_links"] = {}
     if patch.get("reset_speaker_choices") is True:
         merged["speaker_choices"] = {}
+    if patch.get("reset_speaker_concept_survey_links") is True:
+        merged["speaker_concept_survey_links"] = {}
     if "color_coding_enabled" in patch:
         merged["color_coding_enabled"] = bool(patch.get("color_coding_enabled"))
     if isinstance(patch.get("surveys"), Mapping):
@@ -188,6 +210,12 @@ def update_survey_overlap_state(project_root: Path, patch: Mapping[str, object])
         incoming_choices = _clean_speaker_choices(patch.get("speaker_choices"))
         for speaker, choices in incoming_choices.items():
             merged["speaker_choices"].setdefault(speaker, {}).update(choices)
+    if isinstance(patch.get("speaker_concept_survey_links"), Mapping):
+        incoming_speaker_links = _clean_speaker_concept_links(patch.get("speaker_concept_survey_links"))
+        for speaker, concept_links in incoming_speaker_links.items():
+            speaker_links = merged["speaker_concept_survey_links"].setdefault(speaker, {})
+            for concept_id, links in concept_links.items():
+                speaker_links.setdefault(concept_id, {}).update(links)
     return save_survey_overlap_state(project_root, merged)
 
 
@@ -207,6 +235,22 @@ def concept_survey_links_for_row(row: Mapping[str, object], state: Mapping[str, 
             if sid and item:
                 links[sid] = item
     return links
+
+
+def speaker_concept_survey_links_for_id(concept_id: object, speaker: object, state: Mapping[str, object]) -> dict[str, str]:
+    cid = str(concept_id or "").strip()
+    speaker_id = str(speaker or "").strip()
+    if not cid or not speaker_id:
+        return {}
+    root = state.get("speaker_concept_survey_links") if isinstance(state, Mapping) else None
+    speaker_links = root.get(speaker_id) if isinstance(root, Mapping) else None
+    concept_links = speaker_links.get(cid) if isinstance(speaker_links, Mapping) else None
+    if not isinstance(concept_links, Mapping):
+        return {}
+    return {
+        sid: item
+        for sid, item in _clean_links({cid: concept_links}).get(cid, {}).items()
+    }
 
 
 def survey_settings_for_ids(state: Mapping[str, object], survey_ids: set[str]) -> dict[str, dict[str, str]]:

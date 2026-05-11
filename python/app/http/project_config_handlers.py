@@ -16,6 +16,7 @@ from concept_source_item import normalize_concept_csv_row, row_value, write_conc
 from survey_overlap import (
     load_survey_overlap_state,
     normalize_survey_id,
+    speaker_concept_survey_links_for_id,
     update_survey_overlap_state,
 )
 
@@ -471,7 +472,33 @@ def _load_concept_row(project_root: pathlib.Path, concept_id: str) -> Dict[str, 
     return None
 
 
-def _build_concept_entry(row: Dict[str, str], state: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_concept_id_list(raw: str) -> list[str]:
+    parts = [part.strip() for part in str(raw or "").split(",")]
+    if not parts or any(not part for part in parts):
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "conceptId list must be non-empty comma-separated ids")
+    return parts
+
+
+def _load_concept_rows(project_root: pathlib.Path, concept_ids: list[str]) -> list[Dict[str, str]]:
+    rows: list[Dict[str, str]] = []
+    for concept_id in concept_ids:
+        row = _load_concept_row(project_root, concept_id)
+        if row is None:
+            raise ProjectConfigHandlerError(HTTPStatus.NOT_FOUND, "concept not found: {0}".format(concept_id))
+        rows.append(row)
+    return rows
+
+
+def _request_speaker(payload: Dict[str, Any]) -> str | None:
+    if "speaker" not in payload:
+        return None
+    speaker = str(payload.get("speaker") or "").strip()
+    if not speaker:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "speaker must be a non-empty string")
+    return speaker
+
+
+def _build_concept_entry(row: Dict[str, str], state: Dict[str, Any], *, speaker: str | None = None) -> Dict[str, Any]:
     from survey_overlap import concept_survey_links_for_row
 
     cid = str(row.get("id") or "").strip()
@@ -495,6 +522,8 @@ def _build_concept_entry(row: Dict[str, str], state: Dict[str, Any]) -> Dict[str
     links = concept_survey_links_for_row(row, state)
     if links:
         entry["surveys"] = links
+    if speaker is not None:
+        entry["speaker_surveys"] = speaker_concept_survey_links_for_id(cid, speaker, state)
     return entry
 
 
@@ -509,20 +538,34 @@ def build_concept_survey_link_post_response(
     payload = _read_json_body(rfile, headers, upload_limit=upload_limit)
     survey_id = normalize_survey_id(payload.get("survey_id"))
     source_item = str(payload.get("source_item") or "").strip()
+    speaker = _request_speaker(payload)
+    concept_ids = _parse_concept_id_list(concept_id)
     if not survey_id:
         raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "survey_id is required")
     if not source_item:
         raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "source_item is required")
+    if speaker is None and len(concept_ids) != 1:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "speaker is required for comma-separated concept ids")
 
-    row = _load_concept_row(project_root, concept_id)
-    if row is None:
-        raise ProjectConfigHandlerError(HTTPStatus.NOT_FOUND, "concept not found")
+    rows = _load_concept_rows(project_root, concept_ids)
+    first_row = rows[0]
+
+    if speaker is None:
+        state = update_survey_overlap_state(
+            project_root,
+            {"concept_survey_links": {str(first_row["id"]): {survey_id: source_item}}},
+        )
+        return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(first_row, state))
 
     state = update_survey_overlap_state(
         project_root,
-        {"concept_survey_links": {str(row["id"]): {survey_id: source_item}}},
+        {
+            "speaker_concept_survey_links": {
+                speaker: {str(row["id"]): {survey_id: source_item} for row in rows}
+            }
+        },
     )
-    return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(row, state))
+    return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(first_row, state, speaker=speaker))
 
 
 def build_concept_survey_link_delete_response(
@@ -537,12 +580,47 @@ def build_concept_survey_link_delete_response(
     survey_id = normalize_survey_id(payload.get("survey_id"))
     source_item_raw = payload.get("source_item")
     source_item = str(source_item_raw or "").strip() if source_item_raw is not None else ""
+    speaker = _request_speaker(payload)
+    concept_ids = _parse_concept_id_list(concept_id)
     if not survey_id:
         raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "survey_id is required")
+    if speaker is None and len(concept_ids) != 1:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "speaker is required for comma-separated concept ids")
 
-    row = _load_concept_row(project_root, concept_id)
-    if row is None:
-        raise ProjectConfigHandlerError(HTTPStatus.NOT_FOUND, "concept not found")
+    rows = _load_concept_rows(project_root, concept_ids)
+    first_row = rows[0]
+    if speaker is not None:
+        current = load_survey_overlap_state(project_root)
+        new_speaker_root = {
+            other_speaker: {other_cid: dict(other_links) for other_cid, other_links in concept_links.items()}
+            for other_speaker, concept_links in current["speaker_concept_survey_links"].items()
+        }
+        speaker_links = {
+            other_cid: dict(other_links)
+            for other_cid, other_links in new_speaker_root.get(speaker, {}).items()
+        }
+        for row in rows:
+            cid = str(row["id"]).strip()
+            concept_links = dict(speaker_links.get(cid, {}))
+            concept_links.pop(survey_id, None)
+            if concept_links:
+                speaker_links[cid] = concept_links
+            else:
+                speaker_links.pop(cid, None)
+        if speaker_links:
+            new_speaker_root[speaker] = speaker_links
+        else:
+            new_speaker_root.pop(speaker, None)
+        state = update_survey_overlap_state(
+            project_root,
+            {
+                "reset_speaker_concept_survey_links": True,
+                "speaker_concept_survey_links": new_speaker_root,
+            },
+        )
+        return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(first_row, state, speaker=speaker))
+
+    row = first_row
     cid = str(row["id"]).strip()
 
     legacy_survey = normalize_survey_id(row_value(row, "source_survey"))

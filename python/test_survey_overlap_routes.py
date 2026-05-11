@@ -45,6 +45,7 @@ def test_api_get_survey_overlap_returns_backward_compatible_default_state(tmp_pa
                 "surveys": {},
                 "concept_survey_links": {},
                 "speaker_choices": {},
+                "speaker_concept_survey_links": {},
             },
         )
     ]
@@ -72,6 +73,7 @@ def test_api_post_survey_overlap_persists_labels_toggle_and_speaker_choices(tmp_
                 "surveys": {"klq": {"display_label": "Kurdish Linguistic Questionnaire", "display_color": "violet"}},
                 "concept_survey_links": {"salt": {"klq": "3.14", "jbil": "139"}},
                 "speaker_choices": {"Saha01": {"salt": "jbil"}},
+                "speaker_concept_survey_links": {},
             },
         )
     ]
@@ -113,7 +115,14 @@ def test_api_survey_overlap_returns_bare_state_without_envelope_keys(tmp_path: p
     either side, update both tests.
     """
     monkeypatch.chdir(tmp_path)
-    expected_keys = {"version", "color_coding_enabled", "surveys", "concept_survey_links", "speaker_choices"}
+    expected_keys = {
+        "version",
+        "color_coding_enabled",
+        "surveys",
+        "concept_survey_links",
+        "speaker_choices",
+        "speaker_concept_survey_links",
+    }
 
     get_handler = _HandlerHarness()
     get_handler._api_get_survey_overlap()

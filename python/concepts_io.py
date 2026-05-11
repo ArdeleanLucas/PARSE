@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from concept_source_item import read_concepts_csv_rows, write_concepts_csv_rows
+from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 
 _VARIANT_SUFFIX_RE = re.compile(r"\(([A-Z]|\d+)\)\s*$")
 
@@ -159,6 +160,26 @@ def duplicate_concept_variant(
 
     try:
         write_concepts_csv_rows(concepts_path, updated_rows, atomic=True)
+        current = load_survey_overlap_state(project_root)
+        speaker_root = current["speaker_concept_survey_links"]
+        new_speaker_root = {
+            speaker: {cid: dict(links) for cid, links in concept_links.items()}
+            for speaker, concept_links in speaker_root.items()
+        }
+        copied = False
+        for speaker, concept_links in speaker_root.items():
+            source_links = concept_links.get(normalized_id)
+            if source_links:
+                new_speaker_root.setdefault(speaker, {})[sibling["id"]] = dict(source_links)
+                copied = True
+        if copied:
+            update_survey_overlap_state(
+                project_root,
+                {
+                    "reset_speaker_concept_survey_links": True,
+                    "speaker_concept_survey_links": new_speaker_root,
+                },
+            )
     except Exception as exc:
         try:
             _restore_from_backup(concepts_path, backup_path)
