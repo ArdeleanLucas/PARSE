@@ -1,161 +1,71 @@
----
-name: parse-mcp-tool-stt-word-level-status
-description: "Use PARSE MCP tool `stt_word_level_status`: Read status of a Tier 1 word-level STT job. When includeSegments=true the returned segments include the nested words[] payload produced by word_timestamps=True."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# stt_word_level_status
 
-# PARSE MCP Tool Skill — `stt_word_level_status`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only poll)
+**Complexity:** Low
+**Estimated Tokens:** ~200 (short) / ~430 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `stt_word_level_status` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Polls a Tier 1 word-level STT job started by `stt_word_level_start`, optionally returning a bounded preview of segments and their nested `words[]` payload.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After every `stt_word_level_start` call, until status reaches `complete` or `error`.
+- To inspect a sample of segments + word timestamps without reading the full cache file.
+- To resume tracking after a session restart — combine with `jobs_list_active` to recover the `jobId`.
+- For audit evidence — the response shape distinguishes word-level output (`words[]` present) from plain sentence-level STT.
 
-## Tool contract snapshot
+## When NOT to Use
+- For plain sentence-level STT — use `stt_status` (no `words[]`).
+- For other class statuses (forced-align, IPA, normalize, BND, retranscribe) — use their paired `*_status` tools.
+- For the full segment dump on a long recording — `maxSegments` caps at 300. Read the cache file via `read_text_preview` for more.
 
-- **Tool name:** `stt_word_level_status`
-- **Skill name:** `parse-mcp-tool-stt-word-level-status`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `jobId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read status of a Tier 1 word-level STT job. When includeSegments=true the returned segments include the nested words[] payload produced by word_timestamps=True.
+## Parameters
 
-### Parameters
+| Parameter       | Type    | Required | Description                                                                  | Default       | Example                                  |
+|-----------------|---------|----------|------------------------------------------------------------------------------|---------------|------------------------------------------|
+| jobId           | string  | Yes      | Identifier from `stt_word_level_start`. `minLength=1`, `maxLength=128`.      | —             | `"550e8400-e29b-41d4-a716-446655440000"` |
+| includeSegments | boolean | No       | If `true`, include a segment preview in the response.                        | `false`       | `true`                                   |
+| includeWords    | boolean | No       | If `true` (and `includeSegments: true`), each segment carries the `words[]` array. | `false`       | `true`                                   |
+| maxSegments     | integer | No       | Cap on returned segments when `includeSegments: true`. `minimum=1`, `maximum=300`. | (server default) | `50`                                   |
 
-- `jobId` (type=string; minLength=1; maxLength=128)
-- `includeSegments` (type=boolean)
-- `includeWords` (type=boolean)
-- `maxSegments` (type=integer; minimum=1; maximum=300)
+## Expected Output
+Returns `{ jobId, type, status, progress, message, error, result, segments?, ... }`. Terminal states: `complete` (cache written with word timestamps) or `error`. When `includeSegments: true`, `segments` contains the bounded preview; when `includeWords: true`, each segment includes `words: [{ word, start, end, prob }, ...]`.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The caller must provide a valid jobId from a previous start call. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_status?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `stt_word_level_status` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Poll the `jobId` returned by `stt_word_level_start`; keep `maxSegments` bounded when returning nested `words[]` arrays:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_word_level_status?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{"jobId":"6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4","includeSegments":true,"includeWords":true,"maxSegments":1}'
-```
-
-Equivalent MCP arguments:
-
+## Example Successful Call
+Plain status:
 ```json
 {
-  "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
+  "jobId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Segment + word preview:
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
   "includeSegments": true,
   "includeWords": true,
-  "maxSegments": 1
+  "maxSegments": 20
 }
 ```
 
-Representative completed response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "stt_word_level_status",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
-    "status": "complete",
-    "progress": 100.0,
-    "segmentsProcessed": 1,
-    "totalSegments": 1,
-    "error": null,
-    "speaker": "Speaker01",
-    "sourceWav": "<PROJECT_ROOT>/audio/working/Speaker01/source.wav",
-    "segments": [
-      {
-        "start": 0.0,
-        "end": 1.42,
-        "text": "sample opening phrase",
-        "confidence": 0.82,
-        "words": [
-          {"word": "sample", "start": 0.0, "end": 0.48, "prob": 0.91},
-          {"word": "opening", "start": 0.48, "end": 1.02, "prob": 0.88},
-          {"word": "phrase", "start": 1.02, "end": 1.42, "prob": 0.84}
-        ]
-      }
-    ],
-    "segmentsTruncated": false,
-    "segmentCount": 1,
-    "tier": "tier1_word_level",
-    "mode": "read-only",
-    "previewOnly": true
-  }
-}
-```
+| Failure                       | Symptom                                                  | Recovery                                                                            |
+|-------------------------------|----------------------------------------------------------|-------------------------------------------------------------------------------------|
+| Unknown jobId                 | `status: "not_found"` or tool error                      | Find the live `jobId` via `jobs_list_active`.                                       |
+| Job stuck `running`           | Progress idle past expected duration                     | Read `job_logs`.                                                                    |
+| Job ended `error`             | Terminal `error` with message                             | `job_logs` carries the failure detail.                                              |
+| `includeWords` but no words[] | `includeWords: true` but segments have no nested array   | The cache may be from `stt_start` (sentence-level) rather than this tool. Verify via `result.source` or re-run word-level.|
 
-Set `includeWords: false` to keep segment timing/text while omitting nested word spans; the response then includes `wordsOmitted: true`.
+## Agent Reasoning Notes
+This is the matching status tool for `stt_word_level_start`. Use `includeSegments: true` + `includeWords: true` for spot-checks of Tier 1 word boundaries — but for full-recording inspection read the cache file via `read_text_preview` instead. After completion, the cache feeds Tier 2 forced-align or `compute_boundaries_start`.
 
-## Quality checklist
-
-- [ ] Live catalog confirms `stt_word_level_status` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `stt_word_level_start` — produces the `jobId` polled here.
+- `stt_status` — sentence-level alternative.
+- `forced_align_start`, `compute_boundaries_start` — Tier 2 follow-ups that consume the cache.
+- `job_logs`, `job_status` — generic alternatives.

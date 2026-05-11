@@ -1,101 +1,66 @@
----
-name: parse-mcp-tool-audio-normalize-start
-description: "Use PARSE MCP tool `audio_normalize_start`: Start an audio normalization job for a speaker (two-pass ffmpeg loudnorm: mono, 44.1 kHz, -16 LUFS). Returns a jobId; poll with audio_normalize_status. sourceWav is optional — defaults to the speaker's primary source audio."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# audio_normalize_start
 
-# PARSE MCP Tool Skill — `audio_normalize_start`
+**Category:** Annotation
+**Mutability:** stateful_job (starts an ffmpeg loudnorm background job)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Low
+**Estimated Tokens:** ~210 (short) / ~460 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `audio_normalize_start` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Starts a two-pass ffmpeg loudnorm job for a speaker — converts to mono, 44.1 kHz, -16 LUFS — producing a normalized working WAV at `audio/working/<speaker>/<speaker>.wav`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- As the first compute step after `onboard_speaker_import` for any new speaker. STT and forced-align both expect the normalized working WAV, not the raw source.
+- After re-importing a source WAV (`onboard_speaker_import` with a refreshed file) — re-normalize before downstream tiers will see the new audio.
+- When `pipeline_state_read` reports `normalize.done: false` and the source audio is present.
 
-## Tool contract snapshot
+## When NOT to Use
+- Repeatedly on the same already-normalized speaker. ffmpeg loudnorm is idempotent in result but the job will still rewrite the working WAV and may invalidate downstream caches if not coordinated.
+- For source-file edits, format conversion, or sample-rate changes beyond loudnorm. The tool is a two-pass loudness normalizer, not a general audio editor.
+- When the source isn't where the tool expects. If `sourceWav` is omitted, the tool resolves the speaker's primary source from `source_index.json`; a missing/wrong primary causes confusing failures. Verify with `read_audio_info` first if unsure.
 
-- **Tool name:** `audio_normalize_start`
-- **Skill name:** `parse-mcp-tool-audio-normalize-start`
-- **Family:** `chat`
-- **Mutability:** `stateful_job`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Start an audio normalization job for a speaker (two-pass ffmpeg loudnorm: mono, 44.1 kHz, -16 LUFS). Returns a jobId; poll with audio_normalize_status. sourceWav is optional — defaults to the speaker's primary source audio.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                  | Default                  | Example                            |
+|-----------|---------|----------|----------------------------------------------------------------------------------------------|--------------------------|------------------------------------|
+| speaker   | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                  | —                        | `"Khan01"`                         |
+| sourceWav | string  | No       | Project-relative or absolute path to source WAV. Must be inside `PARSE_EXTERNAL_READ_ROOTS` if absolute. | speaker's primary source | `"audio/original/Khan01/raw.wav"` |
+| dryRun    | boolean | No       | If `true`, preview the normalize job without launching ffmpeg.                               | `false`                  | `true`                             |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `sourceWav` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path to source WAV. Omit to use primary source.
-- `dryRun` (type=boolean) — If true, preview the normalize job without launching ffmpeg.
+## Expected Output
+On `dryRun: true`: returns the resolved source path, planned output path, and ffmpeg command preview without launching anything.
 
-### MCP annotations
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, ... }`. **Poll with `audio_normalize_status` until terminal.** On completion the job writes `audio/working/<speaker>/<speaker>.wav` and updates the working-audio entry in project metadata.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- A readable source audio path must be provided or resolvable for the requested speaker. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- Calling this tool starts or previews a background job that can be polled later. (`job_state`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{
+  "speaker": "Khan01",
+  "dryRun": true
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/audio_normalize_start?mode=active"
+Live start:
+```json
+{
+  "speaker": "Khan01"
+}
 ```
 
-## Workflow
+## Common Failure Modes & How to Recover
 
-1. **Discover** – Confirm `audio_normalize_start` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+| Failure                                  | Symptom                                                       | Recovery                                                                                                  |
+|------------------------------------------|---------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Source WAV missing                       | Job errors quickly with "no source audio"                     | Verify with `read_audio_info` against the expected path. Re-import via `onboard_speaker_import` if needed.|
+| Source outside allowed roots             | Path-validation error                                         | Move the source under the project audio dir, or add the parent to `PARSE_EXTERNAL_READ_ROOTS`.            |
+| ffmpeg failure (corrupt source)          | Job reaches `status: "error"`                                 | Read `job_logs` on the `jobId` for the ffmpeg stderr. Re-encode the source externally and re-import.      |
+| Downstream caches stale after re-norm    | STT or forced-align job ran against the old working WAV       | Re-normalize first, then re-run STT (`stt_word_level_start` with `overwrite`-equivalent intent).          |
 
-## Quality checklist
+## Agent Reasoning Notes
+Normalize is the foundation of every downstream pipeline step. If `pipeline_state_read` says `normalize.can_run: true` and `done: false`, this is the next action. After it completes, all downstream tiers should treat their inputs as invalidated and be re-run if they were computed against an older working WAV. Pair with `read_audio_info` for pre-flight ("is the source actually there?") and `audio_normalize_status` for polling.
 
-- [ ] Live catalog confirms `audio_normalize_start` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `audio_normalize_status` — poll the returned `jobId`.
+- `read_audio_info` — verify source path/metadata before starting.
+- `onboard_speaker_import` — typical predecessor for fresh-speaker flows.
+- `pipeline_state_read` — confirms `normalize.can_run` and whether downstream tiers exist.

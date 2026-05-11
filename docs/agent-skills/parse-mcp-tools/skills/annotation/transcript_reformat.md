@@ -1,155 +1,80 @@
----
-name: parse-mcp-tool-transcript-reformat
-description: "Use PARSE MCP tool `transcript_reformat`: Reformat a *_coarse.json alignment file into PARSE CoarseTranscript schema (speaker, source_wav, duration_sec, segments[]). Without outputPath returns the reformatted JSON object; with outputPath writes inside the project."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# transcript_reformat
 
-# PARSE MCP Tool Skill — `transcript_reformat`
+**Category:** Annotation
+**Mutability:** mutating when `outputPath` is set (writes a project artifact)
+**Supports Dry Run:** Yes (`dryRun: true` returns the parsed JSON without writing)
+**Complexity:** Low
+**Estimated Tokens:** ~230 (short) / ~500 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `transcript_reformat` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reformats a `*_coarse.json` alignment file into the PARSE CoarseTranscript schema (`{ speaker, source_wav, duration_sec, segments[] }`), returning the result inline or writing it inside the project if `outputPath` is supplied.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Adapting legacy `*_coarse.json` files (produced by an older PARSE version or external tooling) to the current CoarseTranscript schema before importing.
+- Bridging between an external alignment producer and PARSE's expected `coarse_transcripts/<speaker>.json` shape.
+- For one-off conversions where you want to inspect the reformatted JSON (`dryRun: true` or omit `outputPath`) before writing.
 
-## Tool contract snapshot
+## When NOT to Use
+- For files that are already in the PARSE schema — there's nothing to do.
+- To run STT. This tool reshapes existing alignment data, it does not generate it. Use `stt_start` / `stt_word_level_start` for that.
+- For arbitrary JSON reformatting — the tool understands the legacy `*_coarse.json` shape specifically.
 
-- **Tool name:** `transcript_reformat`
-- **Skill name:** `parse-mcp-tool-transcript-reformat`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `inputPath`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Reformat a *_coarse.json alignment file into PARSE CoarseTranscript schema (speaker, source_wav, duration_sec, segments[]). Without outputPath returns the reformatted JSON object; with outputPath writes inside the project.
+## Parameters
 
-### Parameters
+| Parameter   | Type    | Required | Description                                                                                  | Default              | Example                              |
+|-------------|---------|----------|----------------------------------------------------------------------------------------------|----------------------|--------------------------------------|
+| inputPath   | string  | Yes      | Path to the `*_coarse.json` file to reformat. `minLength=1`, `maxLength=512`.                | —                    | `"legacy/Khan01_coarse.json"`        |
+| outputPath  | string  | No       | Project-relative or absolute path inside project root to write the result. Omit to return inline. `minLength=1`, `maxLength=512`. | (return inline) | `"coarse_transcripts/Khan01.json"` |
+| speaker     | string  | No       | Override speaker ID (inferred from filename if omitted). `minLength=1`, `maxLength=200`.     | (inferred)           | `"Khan01"`                           |
+| sourceWav   | string  | No       | Override source WAV path written into output metadata. `minLength=1`, `maxLength=512`.       | (inferred)           | `"audio/working/Khan01/Khan01.wav"` |
+| durationSec | number  | No       | Override total duration (inferred from segments if omitted). `minimum=0.0`.                  | (inferred)           | `300.0`                              |
+| dryRun      | boolean | No       | If `true`, return parsed JSON without writing (regardless of `outputPath`).                  | `false`              | `true`                               |
 
-- `inputPath` (type=string; minLength=1; maxLength=512) — Path to the *_coarse.json file to reformat (absolute or project-relative).
-- `outputPath` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path inside project root to write the result.
-- `speaker` (type=string; minLength=1; maxLength=200) — Override speaker ID (inferred from filename if omitted).
-- `sourceWav` (type=string; minLength=1; maxLength=512) — Override source WAV path written into the output metadata.
-- `durationSec` (type=number; minimum=0.0) — Override total duration in seconds (inferred from segments if omitted).
-- `dryRun` (type=boolean) — Return parsed JSON without writing.
+## Expected Output
+On dry-run or when `outputPath` is omitted: returns the reformatted JSON object inline.
 
-### MCP annotations
+On `outputPath` + `dryRun: false`: writes the file inside the project root and returns `{ ok: true, outputPath, speaker, durationSec, segmentCount }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/transcript_reformat?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `transcript_reformat` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Use `dryRun: true` or omit `outputPath` to preview the normalized `CoarseTranscript` object without writing a file:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/transcript_reformat?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{
-    "inputPath": "alignment/Speaker01_session_coarse.json",
-    "speaker": "Speaker01",
-    "sourceWav": "audio/working/Speaker01/source.wav",
-    "durationSec": 8.4,
-    "dryRun": true
-  }'
-```
-
-Equivalent MCP arguments:
-
+## Example Successful Call
+Inline reformat (no write):
 ```json
 {
-  "inputPath": "alignment/Speaker01_session_coarse.json",
-  "speaker": "Speaker01",
-  "sourceWav": "audio/working/Speaker01/source.wav",
-  "durationSec": 8.4,
+  "inputPath": "legacy/Khan01_coarse.json"
+}
+```
+
+Write to project, overriding speaker:
+```json
+{
+  "inputPath": "legacy/Khan01_coarse.json",
+  "outputPath": "coarse_transcripts/Khan01.json",
+  "speaker": "Khan01",
+  "sourceWav": "audio/working/Khan01/Khan01.wav"
+}
+```
+
+Dry-run with explicit overrides:
+```json
+{
+  "inputPath": "legacy/Khan01_coarse.json",
+  "outputPath": "coarse_transcripts/Khan01.json",
+  "speaker": "Khan01",
   "dryRun": true
 }
 ```
 
-Expected dry-run response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "transcript_reformat",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "result": {
-      "speaker": "Speaker01",
-      "source_wav": "audio/working/Speaker01/source.wav",
-      "duration_sec": 8.4,
-      "segments": [
-        {"start": 0.0, "end": 1.42, "text": "sample opening phrase"},
-        {"start": 1.42, "end": 2.85, "text": "second phrase"}
-      ]
-    },
-    "mode": "read-only"
-  }
-}
-```
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Input not in expected `*_coarse.json` shape | Tool error / partial reformat                                   | Inspect the file manually; PARSE expects a specific top-level shape with segments / words.            |
+| Wrong `speaker` inferred from filename | Reformatted JSON has wrong speaker ID                                | Pass `speaker` explicitly. The override is the canonical mechanism.                                   |
+| `outputPath` outside project           | Validation error                                                     | Use a project-relative path or an absolute path under the project root.                               |
+| Existing output file silently overwritten | Prior `coarse_transcripts/<speaker>.json` replaced              | No auto-backup. Snapshot first if rollback may be needed.                                             |
 
-To write the reformatted transcript, add an `outputPath` inside the project and set `dryRun: false`; the write response includes `success: true`, `outputPath`, `previewOnly: false`, and `mode: "write-allowed"`.
+## Agent Reasoning Notes
+This is a format-bridge tool. Reach for it when an external producer (or a previous PARSE version) gave you a `*_coarse.json` and you need the active schema. After the reformat, downstream tools (`forced_align_start`, `compute_boundaries_start`, etc.) consume the standard `coarse_transcripts/<speaker>.json` shape — no further conversion needed. For the standard PARSE pipeline running on canonical sources, you'd typically never need this; it's specifically for migration and external-bridge cases.
 
-## Quality checklist
-
-- [ ] Live catalog confirms `transcript_reformat` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `stt_start`, `stt_word_level_start` — produce the cache from audio (rather than reformat existing JSON).
+- `read_text_preview` — inspect the input file before reformatting.

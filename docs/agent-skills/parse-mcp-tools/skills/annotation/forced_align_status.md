@@ -1,128 +1,53 @@
----
-name: parse-mcp-tool-forced-align-status
-description: "Use PARSE MCP tool `forced_align_status`: Read status/progress of an existing Tier 2 forced-alignment job."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# forced_align_status
 
-# PARSE MCP Tool Skill — `forced_align_status`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only poll)
+**Complexity:** Low
+**Estimated Tokens:** ~160 (short) / ~360 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `forced_align_status` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Polls the status and progress of a Tier 2 forced-alignment job started by `forced_align_start`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After every `forced_align_start` call, until status reaches `complete` or `error`.
+- To resume tracking an in-flight Tier 2 job after a session restart (find the `jobId` via `jobs_list_active`).
+- To capture the terminal snapshot as audit evidence — the result payload carries the per-word alignment summary.
 
-## Tool contract snapshot
+## When NOT to Use
+- For other class statuses — STT has `stt_status` / `stt_word_level_status`, IPA has `ipa_transcribe_acoustic_status`, normalize has `audio_normalize_status`. Use `job_status` if you don't know.
+- For artifact verification ("did the file actually update?") — read the annotation file back via `annotation_read` for the Tier 2 boundary intervals.
 
-- **Tool name:** `forced_align_status`
-- **Skill name:** `parse-mcp-tool-forced-align-status`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `jobId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read status/progress of an existing Tier 2 forced-alignment job.
+## Parameters
 
-### Parameters
+| Parameter | Type   | Required | Description                                       | Default | Example                                  |
+|-----------|--------|----------|---------------------------------------------------|---------|------------------------------------------|
+| jobId     | string | Yes      | Identifier from `forced_align_start`. `minLength=1`, `maxLength=128`. | — | `"550e8400-e29b-41d4-a716-446655440000"` |
 
-- `jobId` (type=string; minLength=1; maxLength=128)
+## Expected Output
+Returns `{ jobId, type, status, progress, message, error, result, ... }`. Terminal states: `complete` (alignment written) or `error`.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The caller must provide a valid jobId from a previous start call. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/forced_align_status?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `forced_align_status` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Example request/response
-
-Sample HTTP MCP status call using the UUID `jobId` returned by `forced_align_start`:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/forced_align_status?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"jobId":"550e8400-e29b-41d4-a716-446655440000"}'
-```
-
-Representative running response:
-
+## Example Successful Call
 ```json
 {
-  "tool": "forced_align_status",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "jobId": "550e8400-e29b-41d4-a716-446655440000",
-    "tier": "tier2_forced_align",
-    "status": "running",
-    "progress": 42.0,
-    "message": "Aligning Tier 1 word windows",
-    "error": null,
-    "result": null
-  }
+  "jobId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-If the `jobId` belongs to another job class, expect `status: "invalid_job_type"` with `expected` and `actual` fields.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure              | Symptom                              | Recovery                                                                            |
+|----------------------|--------------------------------------|-------------------------------------------------------------------------------------|
+| Unknown jobId        | `status: "not_found"` or tool error  | Find the live `jobId` via `jobs_list_active`.                                       |
+| Job stuck `running`  | Progress idle past expected duration | Read `job_logs` — forced-align logs which word window it's on.                      |
+| Job ended `error`    | Terminal `error` with message        | `job_logs` carries CTC/CUDA failure detail.                                         |
 
-- [ ] Live catalog confirms `forced_align_status` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+This is the matching status tool for `forced_align_start`. Use it instead of `job_status` when you want forced-align-specific result fields. After completion, verify the speaker's alignment via `annotation_read` (check `tiers.ortho_words` or Tier 2 intervals) and `pipeline_state_read.ortho.full_coverage`.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `forced_align_start` — produces the `jobId` polled here.
+- `annotation_read`, `pipeline_state_read` — verify the alignment artifact after completion.
+- `job_logs`, `job_status` — generic alternatives.

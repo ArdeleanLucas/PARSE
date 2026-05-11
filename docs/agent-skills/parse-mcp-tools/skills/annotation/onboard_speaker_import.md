@@ -1,146 +1,88 @@
----
-name: parse-mcp-tool-onboard-speaker-import
-description: "Use PARSE MCP tool `onboard_speaker_import`: Import a speaker's audio source from on-disk paths (and optional transcription CSV). Copies files into audio/original/<speaker>/, scaffolds an annotation record on the first import, and appends the source to source_index.json. sourceWav/sourceCsv may be absolute paths under PARSE_EXTERNAL_READ_ROOTS (set to '*' for no sandbox) or paths under the project audio/ directory. Multi-source speakers: call this tool once per audio source. The first import defaults to is_primary=true; subsequent imports default to is_primary=false. When a speaker already has registered sources, the response flags `virtualTimelineRequired=true` — PARSE does not yet auto-align multiple WAVs across a shared virtual timeline, so annotation spanning them must be coordinated manually or deferred. Gated by dryRun: call dryRun=true first to preview planned copies/registrations, then dryRun=false after the user confirms."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# onboard_speaker_import
 
-# PARSE MCP Tool Skill — `onboard_speaker_import`
+**Category:** Annotation
+**Mutability:** mutating (copies WAV, scaffolds annotation, appends to `source_index.json`)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Medium–High
+**Estimated Tokens:** ~310 (short) / ~660 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `onboard_speaker_import` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Imports a speaker's audio source from disk (and optional transcription CSV) into `audio/original/<speaker>/`, scaffolds the annotation record on first import, and appends the source to `source_index.json` — the canonical fresh-onboarding entry point.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- For brand-new speakers being added to a project. First call creates the speaker; subsequent calls add additional audio sources.
+- Multi-source speakers: call this tool once per audio source (multiple WAVs for the same speaker). First call defaults to `isPrimary: true`; subsequent calls default to `isPrimary: false`.
+- Importing from `PARSE_EXTERNAL_READ_ROOTS` (set to `*` for no sandbox) or paths inside the project `audio/` directory.
 
-## Tool contract snapshot
+## When NOT to Use
+- When you have pre-aligned annotation artifacts (working WAV + annotation JSON) — use `import_processed_speaker` instead. That one preserves alignment without re-running the pipeline.
+- For multi-WAV speakers expecting auto-aligned annotations across all sources — PARSE does *not* yet auto-align multiple WAVs across a shared virtual timeline. The response will flag `virtualTimelineRequired: true`; annotation spanning multiple WAVs must be coordinated manually or deferred.
+- Without a dry-run preview. `dryRun` is required by schema — call with `true` first to inspect planned copies and registrations.
 
-- **Tool name:** `onboard_speaker_import`
-- **Skill name:** `parse-mcp-tool-onboard-speaker-import`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `sourceWav`, `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Import a speaker's audio source from on-disk paths (and optional transcription CSV). Copies files into audio/original/<speaker>/, scaffolds an annotation record on the first import, and appends the source to source_index.json. sourceWav/sourceCsv may be absolute paths under PARSE_EXTERNAL_READ_ROOTS (set to '*' for no sandbox) or paths under the project audio/ directory. Multi-source speakers: call this tool once per audio source. The first import defaults to is_primary=true; subsequent imports default to is_primary=false. When a speaker already has registered sources, the response flags `virtualTimelineRequired=true` — PARSE does not yet auto-align multiple WAVs across a shared virtual timeline, so annotation spanning them must be coordinated manually or deferred. Gated by dryRun: call dryRun=true first to preview planned copies/registrations, then dryRun=false after the user confirms.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                                       | Default                  | Example                                |
+|-----------|---------|----------|-------------------------------------------------------------------------------------------------------------------|--------------------------|----------------------------------------|
+| speaker   | string  | Yes      | Speaker ID to create or extend. `minLength=1`, `maxLength=200`.                                                   | —                        | `"Khan01"`                             |
+| sourceWav | string  | Yes      | Absolute or project-relative path to the source audio. `minLength=1`, `maxLength=1024`.                            | —                        | `"/external/recordings/Khan01.wav"`    |
+| sourceCsv | string  | No       | Optional transcript CSV to store alongside the imported source. `maxLength=1024`.                                  | —                        | `"/external/recordings/Khan01.csv"`    |
+| isPrimary | boolean | No       | Flag this WAV as the speaker's primary source.                                                                    | `true` if no existing sources; `false` otherwise | `true` |
+| dryRun    | boolean | Yes      | `true` previews — no file copies or `source_index.json` writes. `false` performs the import.                       | —                        | `true`                                 |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID to create or extend in the current project.
-- `sourceWav` (type=string; minLength=1; maxLength=1024) — Absolute or project-relative path to the source audio file to copy into the workspace.
-- `sourceCsv` (type=string; maxLength=1024) — Optional transcript CSV to store alongside the imported source WAV.
-- `isPrimary` (type=boolean) — Flag this WAV as the speaker's primary source. Defaults to true when the speaker has no existing sources.
-- `dryRun` (type=boolean) — If true, preview only — no file copies or source_index.json writes.
+## Expected Output
+On `dryRun: true`: returns the planned destination paths, the `source_index.json` entry that would be appended, the `isPrimary` resolution, and `virtualTimelineRequired` if the speaker already has registered sources.
 
-### MCP annotations
+On `dryRun: false`: copies the WAV (and optional CSV) under `audio/original/<speaker>/`, scaffolds `annotations/<speaker>.parse.json` on first import, appends the source to `source_index.json`, and returns `{ ok: true, speaker, destWav, isPrimary, virtualTimelineRequired }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The sourceWav path must resolve to a readable audio file within the allowed import roots. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, the source audio is copied into the workspace and source_index.json / project metadata are updated. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/onboard_speaker_import?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `onboard_speaker_import` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Multi-source dry-run example
-
-For a second WAV on an existing speaker, call dry-run first and make the primary/non-primary choice explicit:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/onboard_speaker_import?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"speaker":"Khan01","sourceWav":"/imports/Khan01/session-b.wav","sourceCsv":"/imports/Khan01/session-b.csv","isPrimary":false,"dryRun":true}'
-```
-
-Expected preview shape for a multi-source speaker:
-
+## Example Successful Call
+First import (dry run):
 ```json
 {
-  "tool": "onboard_speaker_import",
-  "ok": true,
-  "result": {
-    "ok": true,
-    "dryRun": true,
-    "readOnly": true,
-    "previewOnly": true,
-    "plan": {
-      "speaker": "Khan01",
-      "sourceWav": "/imports/Khan01/session-b.wav",
-      "sourceCsv": "/imports/Khan01/session-b.csv",
-      "wavDest": "audio/original/Khan01/session-b.wav",
-      "csvDest": "audio/original/Khan01/session-b.csv",
-      "isPrimary": false,
-      "newSpeaker": false,
-      "alreadyRegistered": false,
-      "wavSizeBytes": 24832000,
-      "csvSizeBytes": 4096,
-      "projectedSourceCount": 2,
-      "virtualTimelineRequired": true,
-      "virtualTimelineNote": "Speaker 'Khan01' will have 2 source WAVs after this import. PARSE does not yet auto-align multiple WAVs on a shared virtual timeline."
-    },
-    "message": "Preview only. Run again with dryRun=false to copy the audio into audio/original/Khan01/ and register it in source_index.json.",
-    "mode": "read-only"
-  }
+  "speaker": "Khan01",
+  "sourceWav": "/external/recordings/Khan01.wav",
+  "sourceCsv": "/external/recordings/Khan01.csv",
+  "dryRun": true
 }
 ```
 
-Run the live call only after confirming the preview; multi-source imports require downstream virtual-timeline coordination before assuming annotations transfer across WAVs.
+Live first import:
+```json
+{
+  "speaker": "Khan01",
+  "sourceWav": "/external/recordings/Khan01.wav",
+  "sourceCsv": "/external/recordings/Khan01.csv",
+  "dryRun": false
+}
+```
 
-## Quality checklist
+Second source (multi-source speaker):
+```json
+{
+  "speaker": "Khan01",
+  "sourceWav": "/external/recordings/Khan01_session2.wav",
+  "isPrimary": false,
+  "dryRun": false
+}
+```
 
-- [ ] Live catalog confirms `onboard_speaker_import` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Common Failure Modes & How to Recover
 
-## Anti-patterns
+| Failure                                            | Symptom                                                                  | Recovery                                                                                                  |
+|----------------------------------------------------|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Source path outside allowed roots                  | Path-validation error                                                    | Add the directory to `PARSE_EXTERNAL_READ_ROOTS` (`*` to disable the sandbox), or move the source under the project audio dir. |
+| Multi-source speaker — virtual timeline not built | `virtualTimelineRequired: true` in response                              | Annotation spanning all sources must be coordinated manually; PARSE doesn't auto-align across WAVs.        |
+| Wrong `isPrimary` flag                             | After import, the wrong WAV is treated as primary downstream             | Re-import with explicit `isPrimary: true/false`. Manual fixup may require editing `source_index.json`.     |
+| First-import scaffold missing concepts             | `annotations/<speaker>.parse.json` exists but lacks expected concept rows| The scaffold pulls concept IDs from the active project — verify with `project_context_read` that the concept list is populated. |
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Agent Reasoning Notes
+This is the typical fresh-onboarding entry point. After it completes, the natural next steps depend on flow:
+- For full pipeline annotation: `audio_normalize_start` → `stt_word_level_start` → `forced_align_start` → `ipa_transcribe_acoustic_start`. Or use the workflow macro `run_full_annotation_pipeline`.
+- For peaks-only (waveform viewer without compute): `peaks_generate` after the source is registered.
+
+Multi-source speakers are a known PARSE limitation: each WAV registers independently and the virtual timeline must be managed by the user. Don't attempt to derive cross-WAV intervals automatically.
+
+## Related Skills
+- `import_processed_speaker` — alternative when annotation alignment already exists.
+- `audio_normalize_start`, `stt_word_level_start`, `forced_align_start`, `ipa_transcribe_acoustic_start` — typical post-onboarding chain.
+- `run_full_annotation_pipeline` — high-level workflow macro that wraps the chain.
+- `peaks_generate` — produce waveform peaks for the viewer.

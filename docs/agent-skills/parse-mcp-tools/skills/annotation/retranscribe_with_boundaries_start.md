@@ -1,145 +1,68 @@
----
-name: parse-mcp-tool-retranscribe-with-boundaries-start
-description: "Use PARSE MCP tool `retranscribe_with_boundaries_start`: Start a boundary-constrained STT job for a speaker. Reads the speaker's BND lane (tiers.ortho_words) as authoritative segment boundaries, slices the source audio in memory at each window, and runs faster-whisper on each slice independently. Writes the merged segments to coarse_transcripts/<speaker>.json with source=boundary_constrained. Returns a jobId for polling with retranscribe_with_boundaries_status."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# retranscribe_with_boundaries_start
 
-# PARSE MCP Tool Skill — `retranscribe_with_boundaries_start`
+**Category:** Annotation
+**Mutability:** stateful_job (writes `coarse_transcripts/<speaker>.json` with `source=boundary_constrained`)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Medium
+**Estimated Tokens:** ~240 (short) / ~520 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `retranscribe_with_boundaries_start` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Starts a boundary-constrained STT job: reads the speaker's `tiers.ortho_words` as authoritative segment boundaries, slices the source audio in memory at each window, runs faster-whisper on each slice independently, and merges the results back into `coarse_transcripts/<speaker>.json`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- When ortho_words boundaries are trusted and you want STT output constrained to those exact windows (no segment-merging surprises from faster-whisper's default boundary inference).
+- After `compute_boundaries_start` or `forced_align_start` has produced a clean `tiers.ortho_words` lane and you want to re-derive segment text against those windows.
+- For corpora where word-level alignment is more reliable than Whisper's default segmenter and you want STT text aligned to the curated boundaries.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without populated `tiers.ortho_words`. The catalog precondition is explicit: ortho_words intervals are required — the slicer has nothing to do without them. Run `compute_boundaries_start` first (or full forced-align).
+- For the standard first STT pass — use `stt_start` or `stt_word_level_start` instead. Those work without prior boundaries.
+- To write `tiers.ortho_words`. That's what `compute_boundaries_start` does; this tool *reads* it.
+- For phoneme-level output — this produces orthographic segments, not IPA. Use `ipa_transcribe_acoustic_start` for IPA.
 
-- **Tool name:** `retranscribe_with_boundaries_start`
-- **Skill name:** `parse-mcp-tool-retranscribe-with-boundaries-start`
-- **Family:** `chat`
-- **Mutability:** `stateful_job`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Start a boundary-constrained STT job for a speaker. Reads the speaker's BND lane (tiers.ortho_words) as authoritative segment boundaries, slices the source audio in memory at each window, and runs faster-whisper on each slice independently. Writes the merged segments to coarse_transcripts/<speaker>.json with source=boundary_constrained. Returns a jobId for polling with retranscribe_with_boundaries_status.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                | Default       | Example     |
+|-----------|---------|----------|--------------------------------------------------------------------------------------------|---------------|-------------|
+| speaker   | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                | —             | `"Khan01"`  |
+| language  | string  | No       | ISO 639-1 language code for faster-whisper. Empty/omitted triggers auto-detect. `minLength=0`, `maxLength=8`. | (auto-detect) | `"sdh"`     |
+| dryRun    | boolean | No       | If `true`, preview the retranscribe job plan without launching it.                          | `false`       | `true`      |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `language` (type=string; minLength=0; maxLength=8) — Optional ISO 639-1 language code for faster-whisper. Empty/omitted triggers auto-detect.
-- `dryRun` (type=boolean)
+## Expected Output
+On `dryRun: true`: returns the planned slice count (one per `tiers.ortho_words` interval), the speaker's working WAV path, and the resolved language.
 
-### MCP annotations
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, ... }`. **Poll with `retranscribe_with_boundaries_status` until terminal.** On completion the job writes `coarse_transcripts/<speaker>.json` with `source: "boundary_constrained"` so downstream tools can distinguish it from the regular STT cache.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The requested speaker must already have non-empty tiers.ortho_words intervals — boundary-constrained STT slices the audio at those windows and has nothing to do without them. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- Calling this tool starts or previews a background job that can be polled later. (`job_state`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/retranscribe_with_boundaries_start?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `retranscribe_with_boundaries_start` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Start with a dry run to confirm the speaker and optional faster-whisper language code, then repeat with `dryRun: false` or omit `dryRun` to launch the job:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/retranscribe_with_boundaries_start?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{
-    "speaker": "Speaker01",
-    "language": "ku",
-    "dryRun": false
-  }'
-```
-
-Equivalent MCP arguments:
-
+## Example Successful Call
+Dry run:
 ```json
 {
-  "speaker": "Speaker01",
+  "speaker": "Khan01",
   "language": "ku",
-  "dryRun": false
+  "dryRun": true
 }
 ```
 
-Typical launch response shape:
-
+Live start (auto-detect language):
 ```json
 {
-  "tool": "retranscribe_with_boundaries_start",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "jobId": "8f3f2e14-3d1c-46f9-9c78-92a0fb0e9a31",
-    "status": "running",
-    "tier": "boundary_constrained_stt",
-    "speaker": "Speaker01",
-    "language": "ku",
-    "message": "Boundary-constrained STT job started. Poll with retranscribe_with_boundaries_status.",
-    "mode": "read-only"
-  }
+  "speaker": "Khan01"
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `retranscribe_with_boundaries_start` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                  | Symptom                                                              | Recovery                                                                                                  |
+|------------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Empty `tiers.ortho_words`                | Job errors immediately                                               | Run `compute_boundaries_start` (or `forced_align_start`) first to populate the BND lane.                  |
+| Wrong language detected                  | Garbled per-window STT output                                        | Re-run with explicit `language: "<iso>"`. The cache is overwritten so prior result is discarded.          |
+| One bad window contaminates the cache    | One ortho_words interval was wrong → its slice gets garbage STT      | Fix the boundary first (manual edit or rerun `compute_boundaries_start`), then re-run this tool.          |
+| `coarse_transcripts` overwritten unexpectedly | Subsequent tools see `source: "boundary_constrained"` not regular STT | This is intentional. If you need a regular sentence-level STT cache, re-run `stt_start` to overwrite.    |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the right tool when you trust the boundaries more than Whisper's segmenter and want STT text aligned to those exact windows. It produces the same `coarse_transcripts/<speaker>.json` shape as `stt_start`, but with `source: "boundary_constrained"` so downstream tools (e.g. cognate compute, IPA windows) know which segmenter produced it. The window-by-window slice is also more robust against long stretches of silence or speaker overlap than full-file Whisper, since each slice is independent.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `retranscribe_with_boundaries_status` — poll the returned `jobId`.
+- `compute_boundaries_start`, `forced_align_start` — produce `tiers.ortho_words` consumed by this tool.
+- `stt_start`, `stt_word_level_start` — alternatives that produce a full-file STT cache (no prior boundaries needed).

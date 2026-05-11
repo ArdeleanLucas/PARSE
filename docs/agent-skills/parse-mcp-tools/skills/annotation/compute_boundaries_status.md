@@ -1,99 +1,53 @@
----
-name: parse-mcp-tool-compute-boundaries-status
-description: "Use PARSE MCP tool `compute_boundaries_status`: Read status/progress of a standalone BND job started by compute_boundaries_start."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# compute_boundaries_status
 
-# PARSE MCP Tool Skill — `compute_boundaries_status`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only poll)
+**Complexity:** Low
+**Estimated Tokens:** ~160 (short) / ~360 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `compute_boundaries_status` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Polls the status and progress of a Boundaries (BND) job started by `compute_boundaries_start`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After every `compute_boundaries_start` call, until status reaches `complete` or `error`.
+- To pick up an in-flight BND job after a session restart — combine with `jobs_list_active` to find the `jobId`.
+- To capture the terminal snapshot as audit evidence that the BND lane was written.
 
-## Tool contract snapshot
+## When NOT to Use
+- For other class statuses — each compute class has its own paired `*_status`. Use `job_status` if you don't know the class.
+- For artifact-level audit ("did the file actually change?") — read `annotations/<speaker>.parse.json` back through `annotation_read` for ground truth.
 
-- **Tool name:** `compute_boundaries_status`
-- **Skill name:** `parse-mcp-tool-compute-boundaries-status`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `jobId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read status/progress of a standalone BND job started by compute_boundaries_start.
+## Parameters
 
-### Parameters
+| Parameter | Type   | Required | Description                                       | Default | Example                                  |
+|-----------|--------|----------|---------------------------------------------------|---------|------------------------------------------|
+| jobId     | string | Yes      | Identifier from `compute_boundaries_start`. `minLength=1`, `maxLength=128`. | — | `"550e8400-e29b-41d4-a716-446655440000"` |
 
-- `jobId` (type=string; minLength=1; maxLength=128)
+## Expected Output
+Returns `{ jobId, type, status, progress, message, error, result, ... }`. Terminal states: `complete` (BND lane written) or `error`.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The caller must provide a valid jobId from a previous start call. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-The returned payload is structured inspection data for the BND job: it is safe to archive in validation notes, compare across polls, and cite as evidence that the job reached a terminal state.
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000"
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
+## Common Failure Modes & How to Recover
 
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/compute_boundaries_status?mode=active"
-```
+| Failure              | Symptom                              | Recovery                                                                            |
+|----------------------|--------------------------------------|-------------------------------------------------------------------------------------|
+| Unknown jobId        | `status: "not_found"` or tool error  | Find a live `jobId` via `jobs_list_active`.                                         |
+| Job stuck `running`  | Progress idle past expected duration | Read `job_logs` for the alignment-step logs.                                        |
+| Job ended `error`    | Terminal `error` with message        | `job_logs` carries the failure detail.                                              |
 
-## Workflow
+## Agent Reasoning Notes
+This is the matching status tool for `compute_boundaries_start`. The result payload is structured BND-job inspection data — safe to archive in validation notes, cite as evidence that the job reached terminal state, and compare across polls.
 
-1. **Discover** – Confirm `compute_boundaries_status` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `compute_boundaries_status` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `compute_boundaries_start` — produces the `jobId` polled here.
+- `annotation_read` — read the BND lane after completion to confirm coverage.
+- `job_logs`, `job_status` — generic alternatives for failure diagnosis or unknown classes.

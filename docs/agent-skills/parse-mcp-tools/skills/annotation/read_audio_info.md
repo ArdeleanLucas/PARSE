@@ -1,128 +1,56 @@
----
-name: parse-mcp-tool-read-audio-info
-description: "Use PARSE MCP tool `read_audio_info`: Read metadata for a WAV file in the project audio directory: duration, sample rate, channels, sample width, frame count, and file size. Read-only; does not return audio samples."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# read_audio_info
 
-# PARSE MCP Tool Skill — `read_audio_info`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (metadata read)
+**Complexity:** Low
+**Estimated Tokens:** ~150 (short) / ~340 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `read_audio_info` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads metadata for a WAV file under the project audio directory: duration, sample rate, channels, sample width, frame count, and file size — without returning audio samples.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Pre-flight check before `audio_normalize_start`, `stt_start`, or any tool that consumes a WAV — confirm the file exists, is readable, and has plausible duration/sample rate.
+- Diagnosing pipeline-state mismatches — "the WAV is 6 minutes but only 30s of intervals?" → `read_audio_info` confirms the WAV duration.
+- Verifying a normalize job actually produced a 44.1 kHz / mono output by re-reading the working WAV.
+- Choosing `samplesPerPixel` for `peaks_generate` — duration plus sample rate determine total samples.
 
-## Tool contract snapshot
+## When NOT to Use
+- To read audio samples. This is metadata only; no PCM data is returned.
+- For peaks data — that's `peaks_generate`.
+- For external files outside `PARSE_EXTERNAL_READ_ROOTS`. The path must be project-audio-relative or an allowed absolute path.
 
-- **Tool name:** `read_audio_info`
-- **Skill name:** `parse-mcp-tool-read-audio-info`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `sourceWav`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read metadata for a WAV file in the project audio directory: duration, sample rate, channels, sample width, frame count, and file size. Read-only; does not return audio samples.
+## Parameters
 
-### Parameters
+| Parameter | Type   | Required | Description                                                                                                | Default | Example                                  |
+|-----------|--------|----------|------------------------------------------------------------------------------------------------------------|---------|------------------------------------------|
+| sourceWav | string | Yes      | Project-audio-relative WAV path (e.g. `audio/working/Khan01/Khan01.wav`) or an allowed absolute path. `minLength=1`, `maxLength=512`. | — | `"audio/working/Khan01/Khan01.wav"` |
 
-- `sourceWav` (type=string; minLength=1; maxLength=512) — Project-audio-relative WAV path such as `audio/working/Khan01/Khan01.wav`, or an allowed absolute path when external read roots are configured.
+## Expected Output
+Returns `{ sourceWav, durationSec, sampleRate, channels, sampleWidth, frameCount, fileSizeBytes }`. Does not return audio samples.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/read_audio_info?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `read_audio_info` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-`sourceWav` may be a project-relative path under the audio directory, such as `audio/working/<Speaker>/<file>.wav`:
-
+## Example Successful Call
 ```json
 {
   "sourceWav": "audio/working/Khan01/Khan01.wav"
 }
 ```
 
-Expected response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "read_audio_info",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "ok": true,
-    "path": "audio/working/Khan01/Khan01.wav",
-    "channels": 1,
-    "sampleWidthBytes": 2,
-    "sampleRateHz": 16000,
-    "numFrames": 4800000,
-    "durationSec": 300.0,
-    "fileSizeBytes": 9600044
-  }
-}
-```
+| Failure                       | Symptom                                | Recovery                                                                                            |
+|-------------------------------|----------------------------------------|-----------------------------------------------------------------------------------------------------|
+| File not found                | Tool error                             | Verify the path. If a speaker has multiple sources, check `source_index.json` or `speakers_list`.   |
+| Outside allowed roots         | Path-validation error                   | Use a project-relative path, or add the parent directory to `PARSE_EXTERNAL_READ_ROOTS`.            |
+| Unexpected sample rate / channels | Returned values don't match expectations | The source may not be normalized — run `audio_normalize_start` to get mono / 44.1 kHz / -16 LUFS.   |
+| Corrupt WAV                   | Tool error reading header              | The file may be truncated. Re-import via `onboard_speaker_import` from a known-good source.         |
 
-## Quality checklist
+## Agent Reasoning Notes
+This is the cheap "does the audio file look right?" check. Run it before any compute-heavy tool to fail fast if the source is missing/corrupt. Pair with `pipeline_state_read` — the latter reports per-tier `done` / `full_coverage`, this reports the underlying file properties. The two together answer "is the source there?" and "did the pipeline process it?" separately.
 
-- [ ] Live catalog confirms `read_audio_info` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `audio_normalize_start` — typical follow-up if the source isn't normalized.
+- `peaks_generate` — needs the same audio path.
+- `pipeline_state_read` — coverage view across pipeline tiers.
