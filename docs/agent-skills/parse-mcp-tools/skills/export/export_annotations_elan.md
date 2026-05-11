@@ -1,112 +1,70 @@
----
-name: parse-mcp-tool-export-annotations-elan
-description: "Use PARSE MCP tool `export_annotations_elan`: Export speaker annotations to ELAN .eaf XML format for use in ELAN or other linguistic annotation tools. Without outputPath returns an XML preview (first 2000 chars); with outputPath writes inside the project."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# export_annotations_elan
 
-# PARSE MCP Tool Skill — `export_annotations_elan`
+**Category:** Export
+**Mutability:** mutating when `outputPath` is set and `dryRun: false` (writes `.eaf` XML inside the project)
+**Supports Dry Run:** Yes (`dryRun: true` or omit `outputPath`)
+**Complexity:** Low
+**Estimated Tokens:** ~180 (short) / ~400 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `export_annotations_elan` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Exports one speaker's annotations to ELAN `.eaf` XML format for use in ELAN, EXMARaLDA, or other linguistic annotation tools.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Handing off a speaker's annotation to a collaborator who works in ELAN.
+- Producing per-speaker ELAN bundles for archival alongside the source audio.
+- Cross-tool review (transcribers / phoneticians who prefer ELAN's tier visualization).
+- Per-speaker only — there is no merged multi-speaker variant.
 
-## Tool contract snapshot
+## When NOT to Use
+- For multi-speaker merge. ELAN files are per-speaker by construction; for a merged dataset, use `export_annotations_csv` with `speaker: "all"` or the LingPy bundle.
+- For phonetic-only analysis in Praat — use `export_annotations_textgrid` for the matching format.
+- For LingPy / cognate analysis — use `export_lingpy_tsv` (different shape: wordlist, not interval XML).
+- For full XML before previewing. The preview (no `outputPath` or `dryRun: true`) returns the first 2000 characters — enough to verify the header and tier setup before writing.
 
-- **Tool name:** `export_annotations_elan`
-- **Skill name:** `parse-mcp-tool-export-annotations-elan`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Export speaker annotations to ELAN .eaf XML format for use in ELAN or other linguistic annotation tools. Without outputPath returns an XML preview (first 2000 chars); with outputPath writes inside the project.
+## Parameters
 
-### Parameters
+| Parameter  | Type    | Required | Description                                                                                              | Default | Example                              |
+|------------|---------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------------------|
+| speaker    | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                              | —       | `"Khan01"`                           |
+| outputPath | string  | No       | Project-relative or absolute path inside project root (e.g. `exports/elan/Khan01.eaf`). Omit for preview. | (preview only) | `"exports/elan/Khan01.eaf"`     |
+| dryRun     | boolean | No       | If `true`, preview only — never writes.                                                                  | `false` | `true`                               |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID whose annotations should be converted to ELAN format.
-- `outputPath` (type=string; minLength=1; maxLength=512) — Project-relative or absolute path inside project root (e.g. exports/speaker.eaf).
-- `dryRun` (type=boolean) — Preview only — never writes.
+## Expected Output
+Preview mode: returns `{ readOnly, preview, truncated, totalChars }`. `preview` is the first ~2000 characters of the `.eaf` XML (enough to verify the `xmin`/`xmax`/tier structure).
 
-Example write payload using a project-relative output path:
+Write mode: writes the full `.eaf` XML inside the project and returns `{ ok: true, outputPath, totalChars }`.
 
+## Example Successful Call
+Preview:
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
-  "outputPath": "exports/elan/<SPEAKER_ID>.eaf",
+  "speaker": "Khan01",
+  "dryRun": true
+}
+```
+
+Live write:
+```json
+{
+  "speaker": "Khan01",
+  "outputPath": "exports/elan/Khan01.eaf",
   "dryRun": false
 }
 ```
 
-For preview-only validation, omit `outputPath` or set `dryRun: true`; live writes must stay inside the PARSE project root.
+## Common Failure Modes & How to Recover
 
-### MCP annotations
+| Failure                                  | Symptom                                                                  | Recovery                                                                                              |
+|------------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Missing annotation file                  | Tool error                                                               | Verify with `pipeline_state_read` that the speaker has tiers. Import via `onboard_speaker_import` if not.|
+| `outputPath` outside project root        | Validation error                                                         | Use a project-relative path.                                                                          |
+| ELAN opens the file but no media link    | Tier data visible but no waveform                                        | ELAN needs the corresponding WAV. Ship `audio/working/<speaker>/<speaker>.wav` alongside the `.eaf` file.|
+| Existing `.eaf` silently overwritten     | Prior export at the same path replaced                                   | No auto-backup. Timestamp outputs or snapshot first.                                                  |
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+## Agent Reasoning Notes
+ELAN is the natural format for collaborator handoff in fieldwork-driven projects — it shows tiers + audio waveform in a familiar timeline UI. For a complete handoff, bundle the `.eaf` plus the working WAV. The 2000-char preview is enough to verify ELAN-validity (header, tier list, first interval); for full validation, open the actual `.eaf` in ELAN after writing.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The requested speaker must already have an annotation file to export. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false and outputPath is provided, the requested export file is written inside the project. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/export_annotations_elan?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `export_annotations_elan` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `export_annotations_elan` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `export_annotations_textgrid` — same per-speaker per-format approach but for Praat.
+- `export_annotations_csv` — flat dump if the collaborator can't open ELAN.
+- `pipeline_state_read` (Advanced bucket) — confirm tier coverage before exporting.
