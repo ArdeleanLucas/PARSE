@@ -3926,10 +3926,14 @@ describe("Actions menu — transcription run flow", () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
-    fireEvent.click(screen.getByTestId("annotate-capture-anchor"));
+    const rightPanel = screen.getByTestId("right-panel");
+    const anchorButton = within(rightPanel).getByTestId("annotate-capture-anchor");
+    expect(anchorButton.textContent).toContain("00:09.50");
+
+    fireEvent.click(anchorButton);
 
     expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
-    expect((await screen.findByTestId("annotate-capture-toast")).textContent).toContain(
+    expect((await within(rightPanel).findByTestId("annotate-capture-toast")).textContent).toContain(
       "Anchored water @ 00:09.50 → +1.50s offset.",
     );
   });

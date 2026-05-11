@@ -20,6 +20,13 @@ type AnnotateTabContentProps = Pick<
   | 'onSaveAnnotations'
 >;
 
+function LivePlayheadBadge() {
+  const playheadSec = usePlaybackStore((s) => s.currentTime);
+  return (
+    <span className="font-mono text-[10px] tabular-nums text-indigo-500">{formatPlaybackTime(playheadSec)}</span>
+  );
+}
+
 export function AnnotateTabContent({
   activeActionSpeaker,
   offsetPhase,
@@ -33,7 +40,6 @@ export function AnnotateTabContent({
   onSaveAnnotations,
 }: AnnotateTabContentProps) {
   const offsetButtonsDisabled = !activeActionSpeaker || offsetPhase === 'detecting' || offsetPhase === 'applying';
-  const playheadSec = usePlaybackStore((s) => s.currentTime);
 
   return (
     <>
@@ -54,7 +60,7 @@ export function AnnotateTabContent({
               >
                 <Anchor className="h-3 w-3" />
                 <span className="flex-1">Anchor offset here</span>
-                <span className="font-mono text-[10px] tabular-nums text-indigo-500">{formatPlaybackTime(playheadSec)}</span>
+                <LivePlayheadBadge />
               </button>
               {captureToast && (
                 <div
