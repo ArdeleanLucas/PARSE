@@ -39,8 +39,8 @@ function compareBundle(): CompareBundle {
     ],
     candidates: {
       Fail02: {
-        "53": { csv_row_id: "53", speaker: "Fail02", form: "mez", realization_index: 0 },
-        "619": { csv_row_id: "619", speaker: "Fail02", form: "gewre", realization_index: 1 },
+        "53": { csv_row_id: "53", speaker: "Fail02", ortho: "mez", realization_index: 0 },
+        "619": { csv_row_id: "619", speaker: "Fail02", ortho: "gewre", realization_index: 1 },
       },
     },
   };
