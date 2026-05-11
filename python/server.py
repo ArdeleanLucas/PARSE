@@ -20,6 +20,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
+# Route modules import `server` by name; when launched as a script, register the in-flight module under that name so route helpers do not dual-load a second copy.
 sys.modules.setdefault("server", sys.modules[__name__])
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
@@ -118,6 +119,7 @@ from app.http.static_paths import (
 from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.streaming import JobStreamingSidecar
+# Route modules import `server` by name; when launched as a script, register the in-flight module under that name so route helpers do not dual-load a second copy.
 sys.modules.setdefault("server", sys.modules[__name__])
 try:
     from compare import cognate_compute as cognate_compute_module

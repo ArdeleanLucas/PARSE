@@ -43,7 +43,7 @@ export function ConceptRow({
           )}
         </td>
         {speakers.map((speaker) => {
-          const entry = lookupEntry(records, speaker, concept.id);
+          const entry = lookupEntry(records, speaker, rawConceptId);
           const cognate = getCognateGroup(enrichmentData, concept.id, speaker);
           const hasForm = entry.ipa || entry.ortho;
           const key = expandKey(speaker, concept.id);
@@ -107,7 +107,7 @@ export function ConceptRow({
         <tr data-testid={`detail-row-${concept.id}`}>
           <td colSpan={totalCols} style={{ padding: "0.25rem 0.5rem 0.75rem 0.5rem", borderBottom: "1px solid #f3f4f6", background: "#f9fafb" }}>
             {expandedSpeakers.map((speaker) => {
-              const entry = lookupEntry(records, speaker, concept.id);
+              const entry = lookupEntry(records, speaker, rawConceptId);
               const cognate = getCognateGroup(enrichmentData, concept.id, speaker);
               return (
                 <LexemeDetail
