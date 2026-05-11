@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import server as _server
 from concept_relink import ConceptRelinkError, apply_relink_by_gloss, build_relink_by_gloss_plan
 from concepts_io import ConceptDuplicateError, duplicate_concept_variant
+from storage import tags_store
+
+_LOGGER = logging.getLogger(__name__)
 
 def _api_get_export_lingpy(self) -> None:
     """Stream LingPy-compatible wordlist TSV as a file download."""
@@ -104,6 +108,40 @@ def _copy_concept_tags_to_sibling(annotations_dir: Path, primary_id: str, siblin
         except OSError:
             pass
 
+def _mirror_global_tag_concepts_to_sibling(primary_id: str, sibling_id: str) -> None:
+    """Best-effort mirror of global tag concept membership onto a duplicate sibling."""
+    try:
+        current = tags_store.fetch_all()
+    except OSError as exc:
+        _LOGGER.warning("Failed to mirror duplicate concept global tags: fetch failed: %s", exc)
+        return
+
+    changed = False
+    next_tags = []
+    for tag in current.get("tags", []):
+        concepts = list(tag.get("concepts", []))
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for concept_id in concepts:
+            if concept_id not in seen:
+                deduped.append(concept_id)
+                seen.add(concept_id)
+        if primary_id in seen and sibling_id not in seen:
+            deduped.append(sibling_id)
+            changed = True
+        if deduped != concepts:
+            changed = True
+        next_tags.append({**tag, "concepts": deduped})
+
+    if not changed:
+        return
+
+    try:
+        tags_store.replace_all(next_tags)
+    except (OSError, tags_store.TagValidationError) as exc:
+        _LOGGER.warning("Failed to mirror duplicate concept global tags: write failed: %s", exc)
+
+
 def _api_post_concept_duplicate(self, concept_id: str) -> None:
     """Duplicate one concepts.csv row into a new variant sibling."""
     try:
@@ -112,6 +150,10 @@ def _api_post_concept_duplicate(self, concept_id: str) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     _copy_concept_tags_to_sibling(
         _server._annotations_dir_path(),
+        payload['primary']['id'],
+        payload['sibling']['id'],
+    )
+    _mirror_global_tag_concepts_to_sibling(
         payload['primary']['id'],
         payload['sibling']['id'],
     )

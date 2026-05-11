@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
+from storage import tags_store
 
 
 FIELDNAMES = ["id", "concept_en", "source_item", "source_survey", "custom_order"]
@@ -275,6 +276,104 @@ def test_duplicate_restores_backup_when_atomic_write_fails(tmp_path: pathlib.Pat
     backups = sorted(tmp_path.glob("concepts.csv.bak-*-pre-duplicate-322"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == prewrite
+
+def test_duplicate_mirrors_global_tag_concept_membership(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
+    tags_store.replace_all(
+        [
+            {"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["53"], "lexemeTargets": []},
+            {"id": "t-other", "label": "Other", "color": "#111111", "concepts": ["999"], "lexemeTargets": []},
+        ]
+    )
+    _write_concepts(
+        tmp_path / "concepts.csv",
+        [{"id": "53", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "53"}],
+    )
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "53")
+
+    assert status == HTTPStatus.OK
+    sibling_id = payload["sibling"]["id"]
+    after = tags_store.fetch_all()["tags"]
+    thesis = next(tag for tag in after if tag["id"] == "t-thesis")
+    other = next(tag for tag in after if tag["id"] == "t-other")
+    assert thesis["concepts"] == ["53", sibling_id]
+    assert other["concepts"] == ["999"]
+
+
+def test_duplicate_global_tag_mirror_is_idempotent(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
+    tags_store.replace_all(
+        [{"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["53"], "lexemeTargets": []}]
+    )
+    _write_concepts(
+        tmp_path / "concepts.csv",
+        [{"id": "53", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "53"}],
+    )
+
+    first_status, first_payload = _post_duplicate(tmp_path, monkeypatch, "53")
+    second_status, second_payload = _post_duplicate(tmp_path, monkeypatch, "53")
+
+    assert first_status == HTTPStatus.OK
+    assert second_status == HTTPStatus.OK
+    first_sibling_id = first_payload["sibling"]["id"]
+    second_sibling_id = second_payload["sibling"]["id"]
+    thesis = tags_store.fetch_all()["tags"][0]
+    assert thesis["concepts"].count("53") == 1
+    assert thesis["concepts"].count(first_sibling_id) == 1
+    assert thesis["concepts"].count(second_sibling_id) == 1
+
+
+def test_duplicate_succeeds_when_tag_store_unwritable(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
+    tags_store.replace_all(
+        [{"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["322"], "lexemeTargets": []}]
+    )
+    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    annotation_path = annotations_dir / "Saha01.json"
+    annotation_path.write_text(
+        json.dumps({"version": 1, "speaker": "Saha01", "concept_tags": {"322": ["thesis"]}}),
+        encoding="utf-8",
+    )
+
+    def reject_tags(_tags):  # type: ignore[no-untyped-def]
+        raise tags_store.TagValidationError("simulated tag-store write failure")
+
+    monkeypatch.setattr(tags_store, "replace_all", reject_tags)
+    caplog.set_level("WARNING")
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    sibling_id = payload["sibling"]["id"]
+    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
+    assert updated["concept_tags"][sibling_id] == ["thesis"]
+    assert "simulated tag-store write failure" in caplog.text
+
+
+def test_duplicate_no_global_tag_mirror_when_primary_not_attached(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
+    tags_store.replace_all(
+        [{"id": "t-other", "label": "Other", "color": "#111111", "concepts": ["999"], "lexemeTargets": []}]
+    )
+    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+    calls = 0
+    original_replace_all = tags_store.replace_all
+
+    def counting_replace_all(tag_payload):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return original_replace_all(tag_payload)
+
+    monkeypatch.setattr(tags_store, "replace_all", counting_replace_all)
+
+    status, _payload = _post_duplicate(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    assert calls == 0
+    assert tags_store.fetch_all()["tags"][0]["concepts"] == ["999"]
 
 
 def test_duplicate_copies_concept_tags_to_sibling_in_annotation_files(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

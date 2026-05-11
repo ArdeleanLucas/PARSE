@@ -38,6 +38,8 @@
 
 ## Post-cutoff follow-up state
 
+- **2026-05-11 / MC-371-A:** Concept duplicate now mirrors inherited tag membership through both per-speaker annotation `concept_tags` and global `tags_store` tag `concepts` lists, with ParseUI refreshing the tag store after duplicate reload.
+
 | PR | State at final freshness check | Documentation handling |
 |---:|---|---|
 | [#358](https://github.com/ArdeleanLucas/PARSE/pull/358) | Merged at `2026-05-10T21:47:10Z`, after the fixed rolling-window cutoff | Rebased onto `bd9ef88` so the shipped model docs are present in this PR's base. No extra model-doc changes were added here; this refresh only records the post-cutoff state. |
