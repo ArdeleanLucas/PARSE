@@ -151,6 +151,51 @@ describe('ConceptSidebar cross-survey linking', () => {
     await waitFor(() => expect(onSurveyLinksChanged).toHaveBeenCalled());
   });
 
+  it('disables Save on a grouped parent when no active speaker is selected', () => {
+    renderSidebar({ activeSpeaker: null });
+
+    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
+
+    const saveButton = screen.getByRole('button', { name: /^Save$/i }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+    expect(saveButton.title).toBe('Select a speaker before changing the survey ID for a grouped concept.');
+  });
+
+  it('enables Save on a grouped parent once an active speaker is selected', () => {
+    const { rerender } = renderSidebar({ activeSpeaker: null });
+
+    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
+    rerender(
+      <ConceptSidebar
+        {...baseProps}
+        filteredConcepts={[groupedBigConcept]}
+        activeConceptId={53}
+        activeSpeaker="Saha01"
+        conceptSurveyLinks={{ '53': { klq: '4.1' }, '619': { klq: '4.1' } }}
+        speakerConceptSurveyLinks={{}}
+        onSurveyChoiceChange={vi.fn()}
+      />,
+    );
+
+    const saveButton = screen.getByRole('button', { name: /^Save$/i }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    expect(saveButton.title).toBe('');
+  });
+
+  it('keeps Save enabled for a child variant when no active speaker is selected', () => {
+    renderSidebar({ activeSpeaker: null });
+
+    fireEvent.click(screen.getByTestId('concept-variant-toggle-53'));
+    fireEvent.contextMenu(screen.getByTestId('concept-variant-row-53'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
+
+    const saveButton = screen.getByRole('button', { name: /^Save$/i }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    expect(saveButton.title).toBe('');
+  });
+
   it('saves a grouped parent bucket with comma-separated csv row ids instead of the synthetic key', async () => {
     const onSurveyLinksChanged = vi.fn();
     renderSidebar({ onSurveyLinksChanged });
