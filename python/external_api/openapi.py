@@ -383,6 +383,14 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": False,
             },
+            "CompareCandidate": {"type": ["object", "null"], "properties": {"ipa": {"type": "string"}, "ortho": {"type": "string"}, "start_sec": {"type": "number"}, "end_sec": {"type": "number"}, "source_wav": {"type": "string"}}, "additionalProperties": False},
+            "CanonicalLexemeSelection": {"type": "object", "required": ["csv_row_id", "source"], "properties": {"csv_row_id": {"type": "string"}, "survey_id": {"type": "string"}, "source_item": {"type": "string"}, "bucket_key": {"type": "string"}, "variant_label": {"type": "string"}, "realization_index": {"type": "integer", "minimum": 0}, "selected_at": {"type": "string"}, "source": {"type": "string", "enum": ["manual", "migration:canonical_realizations", "default:single-candidate"]}}, "additionalProperties": False},
+            "CompareVariant": {"type": "object", "required": ["csv_row_id", "variant_label", "concept_en"], "properties": {"csv_row_id": {"type": "string"}, "variant_label": {"type": "string"}, "concept_en": {"type": "string"}}, "additionalProperties": False},
+            "CompareBucket": {"type": "object", "required": ["bucket_key", "survey_id", "source_item", "variants"], "properties": {"bucket_key": {"type": "string"}, "survey_id": {"type": "string"}, "source_item": {"type": "string"}, "variants": {"type": "array", "items": _schema_ref("CompareVariant")}}, "additionalProperties": False},
+            "CompareBundle": {"type": "object", "required": ["bundle_id", "label", "row_ids", "buckets", "candidates", "canonical", "warnings"], "properties": {"bundle_id": {"type": "string"}, "label": {"type": "string"}, "row_ids": {"type": "array", "items": {"type": "string"}}, "buckets": {"type": "array", "items": _schema_ref("CompareBucket")}, "candidates": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": _schema_ref("CompareCandidate")}}, "canonical": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": _schema_ref("CanonicalLexemeSelection")}}, "warnings": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": False},
+            "CompareBundlesResponse": {"type": "object", "required": ["bundles"], "properties": {"bundles": {"type": "array", "items": _schema_ref("CompareBundle")}}, "additionalProperties": False},
+            "CanonicalLexemePutRequest": {"type": "object", "required": ["csv_row_id"], "properties": {"csv_row_id": {"type": "string"}, "realization_index": {"type": "integer", "minimum": 0}}, "additionalProperties": False},
+            "CanonicalLexemeMutationResponse": {"type": "object", "required": ["bundle"], "properties": {"bundle": _schema_ref("CompareBundle")}, "additionalProperties": False},
             "GenericJobResponse": {
                 "type": "object",
                 "properties": {
@@ -562,6 +570,16 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/export/nexus": {
             "get": {"tags": ["Export"], "summary": "Download NEXUS export", "operationId": "downloadNexusExport", "responses": {"200": {"description": "NEXUS export", "content": _binary_content("application/octet-stream")}}},
+        },
+        "/api/exports/canonical-lexemes-report": {
+            "get": {"tags": ["Export"], "summary": "Download readable canonical lexeme TSV report", "operationId": "downloadCanonicalLexemesReport", "responses": {"200": {"description": "Canonical lexeme TSV report", "content": _binary_content("text/tab-separated-values")}}},
+        },
+        "/api/compare/bundles": {
+            "get": {"tags": ["Compare"], "summary": "Read compare bundle/bucket/variant payload", "operationId": "getCompareBundles", "parameters": [_parameter("speaker", "query", {"type": "string"}, description="Optional speaker id to restrict candidates."), _parameter("bundle_id", "query", {"type": "string"}, description="Optional bundle id to fetch one bundle.")], "responses": {"200": _response("Compare bundles", _schema_ref("CompareBundlesResponse"))}},
+        },
+        "/api/compare/canonical-lexemes/{bundleId}/{speaker}": {
+            "put": {"tags": ["Compare"], "summary": "Set a speaker canonical lexeme for one bundle", "operationId": "putCanonicalLexeme", "parameters": [_parameter("bundleId", "path", {"type": "string"}), _parameter("speaker", "path", {"type": "string"})], "requestBody": {"required": True, "content": _json_content(_schema_ref("CanonicalLexemePutRequest"))}, "responses": {"200": _response("Updated compare bundle", _schema_ref("CanonicalLexemeMutationResponse")), "400": _response("Invalid bundle/csv row/realization request", _schema_ref("ErrorResponse")), "404": _response("Bundle not found", _schema_ref("ErrorResponse")), "409": _response("Selection is stale under active speaker survey overrides", _schema_ref("ErrorResponse"))}},
+            "delete": {"tags": ["Compare"], "summary": "Clear a speaker canonical lexeme for one bundle", "operationId": "deleteCanonicalLexeme", "parameters": [_parameter("bundleId", "path", {"type": "string"}), _parameter("speaker", "path", {"type": "string"})], "responses": {"200": _response("Updated compare bundle", _schema_ref("CanonicalLexemeMutationResponse")), "404": _response("Bundle not found", _schema_ref("ErrorResponse"))}},
         },
         "/api/contact-lexemes/coverage": {
             "get": {"tags": ["Compare"], "summary": "Read CLEF provider coverage", "operationId": "getContactLexemeCoverage", "responses": {"200": _response("CLEF coverage payload", _schema_ref("GenericObject"))}},

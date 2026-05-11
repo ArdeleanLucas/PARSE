@@ -20,9 +20,6 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
-# When launched as `python python/server.py`, downstream route modules still
-# import `server`. Register this module under that name early so script-mode
-# startup reuses the in-flight module instead of recursively re-importing it.
 sys.modules.setdefault("server", sys.modules[__name__])
 from ai.chat_orchestrator import ChatOrchestrator, ChatOrchestratorError, READ_ONLY_NOTICE
 from ai.chat_tools import ParseChatTools
@@ -121,9 +118,6 @@ from app.http.static_paths import (
 from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.streaming import JobStreamingSidecar
-# Route modules import `server` by name. When this file runs as a script its
-# module name is `__main__`; register that in-flight module under `server` too
-# so route helpers do not dual-load a second copy of server.py.
 sys.modules.setdefault("server", sys.modules[__name__])
 try:
     from compare import cognate_compute as cognate_compute_module
@@ -1417,6 +1411,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_export_nexus()
             return
 
+        if request_path == "/api/exports/canonical-lexemes-report": self._api_get_canonical_lexemes_report(); return
+        if request_path == "/api/compare/bundles": self._api_get_compare_bundles(); return
+
         if request_path == "/api/contact-lexemes/coverage":
             self._api_get_contact_lexeme_coverage()
             return
@@ -1613,6 +1610,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_put_concept_tags()
             return
         parts = self._path_parts(request_path)
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "compare" and parts[2] == "canonical-lexemes": self._api_put_compare_canonical_lexeme(parts[3], parts[4]); return
         if len(parts) == 5 and parts[0] == "api" and parts[1] == "annotations" and parts[3] == "ipa-review":
             self._api_put_ipa_review(parts[2], parts[4])
             return
@@ -1620,6 +1618,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _dispatch_api_delete(self, request_path: str) -> None:
         parts = self._path_parts(request_path)
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "compare" and parts[2] == "canonical-lexemes": self._api_delete_compare_canonical_lexeme(parts[3], parts[4]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links":
             self._api_delete_concept_survey_link(parts[2])
             return

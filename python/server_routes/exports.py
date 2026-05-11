@@ -28,7 +28,7 @@ def _api_get_export_nexus(self) -> None:
     Manual overrides in ``manual_overrides.cognate_sets`` take precedence
     over the auto-computed ``cognate_sets`` block.
     """
-    response = _server._app_build_get_export_nexus_response(enrichments_path=_server._enrichments_path(), project_json_path=_server._project_json_path(), read_json_file=_server._read_json_file, default_enrichments_payload=_server._default_enrichments_payload, concept_sort_key=_server._concept_sort_key)
+    response = _server._app_build_get_export_nexus_response(enrichments_path=_server._enrichments_path(), project_json_path=_server._project_json_path(), read_json_file=_server._read_json_file, default_enrichments_payload=_server._default_enrichments_payload, concept_sort_key=_server._concept_sort_key, project_root=_server._project_root())
     self.send_response(response.status)
     self.send_header('Content-Type', response.content_type)
     self.send_header('Content-Disposition', response.content_disposition)

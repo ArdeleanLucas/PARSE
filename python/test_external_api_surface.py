@@ -70,6 +70,9 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/worker/status",
         "/api/export/lingpy",
         "/api/export/nexus",
+        "/api/exports/canonical-lexemes-report",
+        "/api/compare/bundles",
+        "/api/compare/canonical-lexemes/{bundleId}/{speaker}",
         "/api/contact-lexemes/coverage",
         "/api/tags",
         "/api/spectrogram",
@@ -485,3 +488,26 @@ def test_http_mcp_bridge_rejects_invalid_mode_with_400(tmp_path: pathlib.Path, m
             assert "mode must be one of" in payload["error"]
         else:
             raise AssertionError("Expected HTTP 400 for invalid mode")
+
+
+def test_build_openapi_document_covers_compare_bundle_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    components = spec["components"]["schemas"]
+    for name in [
+        "CompareBundle",
+        "CompareBucket",
+        "CompareVariant",
+        "CompareCandidate",
+        "CanonicalLexemeSelection",
+        "CompareBundlesResponse",
+        "CanonicalLexemePutRequest",
+    ]:
+        assert name in components
+
+    assert spec["paths"]["/api/compare/bundles"]["get"]["operationId"] == "getCompareBundles"
+    canonical_path = spec["paths"]["/api/compare/canonical-lexemes/{bundleId}/{speaker}"]
+    assert set(canonical_path) == {"put", "delete"}
+    assert canonical_path["put"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/CanonicalLexemePutRequest"
+    }
+    assert spec["paths"]["/api/exports/canonical-lexemes-report"]["get"]["operationId"] == "downloadCanonicalLexemesReport"

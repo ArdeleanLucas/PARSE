@@ -203,3 +203,55 @@ def test_build_get_export_nexus_response_preserves_override_precedence_and_matri
     assert "Fail01    1" in text
     assert "Fail02    1" in text
     assert "Kalh01    ?" in text
+
+
+
+def _seed_nexus_compare_workspace(tmp_path: pathlib.Path) -> None:
+    import csv
+
+    with (tmp_path / "concepts.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+        writer.writeheader()
+        writer.writerow({"id": "53", "concept_en": "big (A)", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "53"})
+        writer.writerow({"id": "619", "concept_en": "big (B)", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "619"})
+    annotations = tmp_path / "annotations"
+    annotations.mkdir()
+    (annotations / "Saha01.parse.json").write_text(
+        json.dumps({"tiers": {"concept": {"intervals": [{"text": "big", "concept_id": "53", "start": 1, "end": 2, "ipa": "ipa-53", "ortho": "ortho-53"}]}}}),
+        encoding="utf-8",
+    )
+    (annotations / "Khan02.parse.json").write_text(
+        json.dumps({"tiers": {"concept": {"intervals": [{"text": "big", "concept_id": "53", "start": 1, "end": 2, "ipa": "ipa-53"}, {"text": "big", "concept_id": "619", "start": 3, "end": 4, "ipa": "ipa-619"}]}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "project.json").write_text(json.dumps({"speakers": {"Saha01": {}, "Khan02": {}}}), encoding="utf-8")
+    (tmp_path / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "canonical_lexemes": {"bundle:big": {"Saha01": {"csv_row_id": "53", "source": "manual"}}},
+                    "cognate_sets": {"big": {"A": ["Saha01", "Khan02"]}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_nexus_export_uses_canonical_lexeme_and_warns_for_blank(tmp_path: pathlib.Path) -> None:
+    _seed_nexus_compare_workspace(tmp_path)
+
+    response = build_get_export_nexus_response(
+        enrichments_path=tmp_path / "parse-enrichments.json",
+        project_json_path=tmp_path / "project.json",
+        read_json_file=server._read_json_file,
+        default_enrichments_payload=server._default_enrichments_payload,
+        concept_sort_key=server._concept_sort_key,
+        project_root=tmp_path,
+    )
+
+    text = response.body.decode("utf-8")
+    assert "Saha01    1" in text
+    assert "Khan02    ?" in text
+    assert "[export.warnings]" in text
+    assert "2+ candidates, no canonical chosen" in text

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import server as _server
+from canonical_lexemes import CanonicalLexemeError, delete_canonical_selection, store_canonical_selection
+from compare_bundles import build_canonical_lexemes_report_tsv, build_compare_bundles
 
 def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     if _server.cognate_compute_module is None:
@@ -120,5 +122,120 @@ def _api_post_tags_merge(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge']
+def _api_get_compare_bundles(self) -> None:
+    params = _server._app_request_query_params(getattr(self, 'path', '/api/compare/bundles'))
+    speakers = None
+    if params.get('speaker'):
+        speakers = [str(params['speaker'][0]).strip()]
+    bundle_id = str(params.get('bundle_id', [''])[0] or '').strip() or None
+    payload = build_compare_bundles(_server._project_root(), speakers=speakers, bundle_id=bundle_id)
+    self._send_json(_server.HTTPStatus.OK, payload)
+
+
+def _validate_canonical_request(project_root, bundle_id: str, speaker: str, body: _server.Mapping[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    csv_row_id = str(body.get('csv_row_id') or '').strip()
+    if not csv_row_id:
+        raise CanonicalLexemeError(_server.HTTPStatus.BAD_REQUEST, 'csv_row_id is required')
+    payload = build_compare_bundles(project_root, speakers=[speaker], bundle_id=bundle_id)
+    base_payload = build_compare_bundles(project_root, speakers=[], bundle_id=bundle_id)
+    if not payload['bundles']:
+        raise CanonicalLexemeError(_server.HTTPStatus.NOT_FOUND, 'bundle_id not found')
+    bundle = payload['bundles'][0]
+    base_bundle = base_payload['bundles'][0] if base_payload.get('bundles') else bundle
+    if csv_row_id not in bundle.get('row_ids', []):
+        raise CanonicalLexemeError(_server.HTTPStatus.BAD_REQUEST, 'csv_row_id is not a member of bundle')
+    visible = any(
+        variant.get('csv_row_id') == csv_row_id
+        for bucket in bundle.get('buckets', [])
+        for variant in bucket.get('variants', [])
+        if bucket.get('survey_id') or bucket.get('source_item')
+    )
+    if not visible:
+        raise CanonicalLexemeError(
+            _server.HTTPStatus.CONFLICT,
+            'selected csv_row_id is no longer visible under active per-speaker survey overrides',
+            'Reload compare bundles; the active survey/source_item for this speaker changed.',
+        )
+    base_bucket_keys = {bucket.get('bucket_key') for bucket in base_bundle.get('buckets', [])}
+    active_bucket_keys = {
+        bucket.get('bucket_key')
+        for bucket in bundle.get('buckets', [])
+        for variant in bucket.get('variants', [])
+        if variant.get('csv_row_id') == csv_row_id
+    }
+    if active_bucket_keys and active_bucket_keys.isdisjoint(base_bucket_keys):
+        raise CanonicalLexemeError(
+            _server.HTTPStatus.CONFLICT,
+            'selected csv_row_id is no longer visible under active per-speaker survey overrides',
+            'Reload compare bundles; the active survey/source_item for this speaker changed.',
+        )
+    # A speaker override that points outside the current bundle's known buckets hides the row for canonical purposes.
+    if bundle.get('warnings') and any('no annotation' in warning for warning in bundle.get('warnings', [])) and bundle['candidates'].get(speaker, {}).get(csv_row_id) is None:
+        pass
+    if 'realization_index' in body and body.get('realization_index') is not None:
+        try:
+            idx = int(body.get('realization_index'))
+        except (TypeError, ValueError) as exc:
+            raise CanonicalLexemeError(_server.HTTPStatus.BAD_REQUEST, 'realization_index must be an integer') from exc
+        if idx < 0:
+            raise CanonicalLexemeError(_server.HTTPStatus.BAD_REQUEST, 'realization_index must be non-negative')
+        if bundle.get('candidates', {}).get(speaker, {}).get(csv_row_id) is None and idx > 0:
+            raise CanonicalLexemeError(_server.HTTPStatus.BAD_REQUEST, 'realization_index is out of range')
+    selection = None
+    for bucket in bundle.get('buckets', []):
+        for variant in bucket.get('variants', []):
+            if variant.get('csv_row_id') == csv_row_id:
+                selection = {
+                    'csv_row_id': csv_row_id,
+                    'survey_id': bucket.get('survey_id', ''),
+                    'source_item': bucket.get('source_item', ''),
+                    'bucket_key': bucket.get('bucket_key', ''),
+                    'variant_label': variant.get('variant_label', ''),
+                    'realization_index': int(body.get('realization_index') or 0),
+                    'source': 'manual',
+                }
+                break
+        if selection:
+            break
+    if selection is None:
+        raise CanonicalLexemeError(
+            _server.HTTPStatus.CONFLICT,
+            'selected csv_row_id is no longer visible under active per-speaker survey overrides',
+            'Reload compare bundles; the active survey/source_item for this speaker changed.',
+        )
+    return selection
+
+
+def _api_put_compare_canonical_lexeme(self, bundle_id: str, speaker: str) -> None:
+    body = self._expect_object(self._read_json_body(required=True), 'Request body')
+    try:
+        selection = _validate_canonical_request(_server._project_root(), bundle_id, speaker, body)
+        store_canonical_selection(_server._project_root(), bundle_id=bundle_id, speaker=speaker, selection=selection)
+        payload = build_compare_bundles(_server._project_root(), speakers=[speaker], bundle_id=bundle_id)
+    except CanonicalLexemeError as exc:
+        raise _server.ApiError(exc.status, str(exc)) from exc
+    self._send_json(_server.HTTPStatus.OK, {'bundle': payload['bundles'][0] if payload['bundles'] else None})
+
+
+def _api_delete_compare_canonical_lexeme(self, bundle_id: str, speaker: str) -> None:
+    try:
+        delete_canonical_selection(_server._project_root(), bundle_id=bundle_id, speaker=speaker)
+        payload = build_compare_bundles(_server._project_root(), speakers=[speaker], bundle_id=bundle_id)
+    except CanonicalLexemeError as exc:
+        raise _server.ApiError(exc.status, str(exc)) from exc
+    self._send_json(_server.HTTPStatus.OK, {'bundle': payload['bundles'][0] if payload['bundles'] else None})
+
+
+def _api_get_canonical_lexemes_report(self) -> None:
+    payload = build_compare_bundles(_server._project_root())
+    body = build_canonical_lexemes_report_tsv(payload).encode('utf-8')
+    self.send_response(_server.HTTPStatus.OK)
+    self.send_header('Content-Type', 'text/tab-separated-values; charset=utf-8')
+    self.send_header('Content-Disposition', 'attachment; filename="canonical-lexemes.tsv"')
+    self.send_header('Content-Length', str(len(body)))
+    self.end_headers()
+    self.wfile.write(body)
+
+
+__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
 
