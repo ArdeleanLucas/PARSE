@@ -64,11 +64,15 @@ export function lookupEntry(
     endSec: null,
   };
   const rec = records[speaker] as {
-    tiers?: Record<string, { intervals?: { start: number; end: number; text: string }[] }>;
+    tiers?: Record<string, { intervals?: { start: number; end: number; text: string; concept_id?: string }[] }>;
     source_wav?: string;
   } | undefined;
   if (!rec?.tiers?.concept?.intervals) return empty;
-  const conceptInterval = rec.tiers.concept.intervals.find((iv) => normalizeConcept(iv.text) === conceptId);
+  const conceptIntervals = rec.tiers.concept.intervals;
+  const hasConceptIds = conceptIntervals.some((interval) => typeof interval.concept_id === "string" && interval.concept_id.trim());
+  const conceptInterval = conceptIntervals.find((interval) => (
+    hasConceptIds ? interval.concept_id === conceptId : normalizeConcept(interval.text) === conceptId
+  ));
   if (!conceptInterval) return empty;
   const { start, end } = conceptInterval;
   const findMatch = (tier: string): string => {

@@ -169,9 +169,6 @@ def _validate_canonical_request(project_root, bundle_id: str, speaker: str, body
             'selected csv_row_id is no longer visible under active per-speaker survey overrides',
             'Reload compare bundles; the active survey/source_item for this speaker changed.',
         )
-    # A speaker override that points outside the current bundle's known buckets hides the row for canonical purposes.
-    if bundle.get('warnings') and any('no annotation' in warning for warning in bundle.get('warnings', [])) and bundle['candidates'].get(speaker, {}).get(csv_row_id) is None:
-        pass
     if 'realization_index' in body and body.get('realization_index') is not None:
         try:
             idx = int(body.get('realization_index'))

@@ -36,4 +36,28 @@ describe("compare workstation cluster barrels", () => {
     expect(sharedModule).toHaveProperty("normalizeConcept");
     expect(typesModule).toHaveProperty("GROUP_LETTERS");
   });
+
+  it("looks up legacy compare rows by concept_id rather than display text", async () => {
+    const { lookupEntry } = await import("./shared");
+    const records = {
+      Fail02: {
+        tiers: {
+          concept: {
+            intervals: [
+              { start: 0, end: 1, text: "dog", concept_id: "298" },
+              { start: 1, end: 2, text: "298", concept_id: "322" },
+            ],
+          },
+          ipa: { intervals: [{ start: 1, end: 2, text: "wrong-row" }] },
+          ortho: { intervals: [{ start: 0, end: 1, text: "right-row" }] },
+        },
+      },
+    };
+
+    expect(lookupEntry(records, "Fail02", "298")).toMatchObject({
+      startSec: 0,
+      endSec: 1,
+      ortho: "right-row",
+    });
+  });
 });
