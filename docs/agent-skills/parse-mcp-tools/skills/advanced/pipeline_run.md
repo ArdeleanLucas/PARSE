@@ -1,173 +1,88 @@
----
-name: parse-mcp-tool-pipeline-run
-description: "Use PARSE MCP tool `pipeline_run`: Kick off a transcription pipeline for ONE speaker — the same ``full_pipeline`` compute the UI uses. Supports any subset of ``normalize / stt / ortho / ipa`` in canonical order. Setting ``steps: ['ortho']`` with ``overwrites: {ortho: true}`` runs the configured ORTH model full-file against this speaker's working WAV and overwrites the ortho tier. Returns a jobId; poll via ``compute_status`` (compute_type=\"full_pipeline\") until ``status=complete``. Steps run step-resilient: a failing STT will not abort ORTH/IPA for the same speaker."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# pipeline_run
 
-# PARSE MCP Tool Skill — `pipeline_run`
+**Category:** Advanced
+**Mutability:** mutating (starts a background compute job)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Medium
+**Estimated Tokens:** ~300 (short) / ~640 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `pipeline_run` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Starts a `full_pipeline` compute job for one speaker — the same backend the PARSE UI uses — with explicit control over which subset of `normalize / stt / ortho / ipa` runs and which existing tiers may be overwritten.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Re-running a single tier on one speaker (e.g. `steps: ["ortho"]` + `overwrites: {ortho: true}` to refresh the ortho tier after changing the configured model).
+- Running a specific subset of steps when you don't want the whole STT → ortho → IPA chain (e.g. just STT before manually editing concept windows).
+- Targeting concept windows or manually-edited windows only via `run_mode: "concept-windows"` / `"edited-only"` + optional `concept_ids` filter.
+- Forcing a language override (`language: "ku"`) when auto-detect picks the wrong language for STT.
 
-## Tool contract snapshot
+## When NOT to Use
+- For the standard end-to-end "annotate this whole speaker" flow — use `run_full_annotation_pipeline` instead. It wraps `pipeline_run` with sensible defaults and is the recommended high-level entry point.
+- For batch processing across multiple speakers — `pipeline_run` is single-speaker. Iterate manually or write a higher-level macro.
+- Without first running `pipeline_state_read` for the target speaker. The preflight tells you which steps `can_run` and whether existing tiers have `full_coverage`; without it you'll fight the step-skip logic blind.
 
-- **Tool name:** `pipeline_run`
-- **Skill name:** `parse-mcp-tool-pipeline-run`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `steps`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Kick off a transcription pipeline for ONE speaker — the same ``full_pipeline`` compute the UI uses. Supports any subset of ``normalize / stt / ortho / ipa`` in canonical order. Setting ``steps: ['ortho']`` with ``overwrites: {ortho: true}`` runs the configured ORTH model full-file against this speaker's working WAV and overwrites the ortho tier. Returns a jobId; poll via ``compute_status`` (compute_type="full_pipeline") until ``status=complete``. Steps run step-resilient: a failing STT will not abort ORTH/IPA for the same speaker.
+## Parameters
 
-### Parameters
+| Parameter   | Type     | Required | Description                                                                                                                                                | Default       | Example                                |
+|-------------|----------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|----------------------------------------|
+| speaker     | string   | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                                                                                | —             | `"Khan01"`                             |
+| steps       | string[] | Yes      | Ordered subset of `["normalize", "stt", "ortho", "ipa"]`. Executed in canonical order; the array order is ignored.                                         | —             | `["stt", "ortho", "ipa"]`              |
+| overwrites  | object   | No       | Per-step overwrite flags. `false` (default) → skip step if tier is already populated. `true` → replace existing tier data.                                 | `{}`          | `{"ortho": true}`                      |
+| language    | string   | No       | Language override for STT + ORTH. Empty/omitted → auto-detect for STT, project default for ORTH. `minLength=1`, `maxLength=32`.                            | (auto/default) | `"sdh"`                                |
+| run_mode    | string   | No       | `full` = full-file; `concept-windows` = all concept rows; `edited-only` = manually adjusted concept rows.                                                  | `"full"`      | `"concept-windows"`                    |
+| concept_ids | string[] | No       | Exact concept IDs to restrict to. Only meaningful when `run_mode` is `concept-windows` or `edited-only`.                                                   | (all)         | `["1", "2", "3"]`                      |
+| dryRun      | boolean  | No       | If `true`, validate inputs and preview the planned compute payload without starting a job.                                                                 | `false`       | `true`                                 |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID whose pipeline should run.
-- `steps` (type=array) — Ordered pipeline subset to execute for this speaker.
-- `overwrites` (type=object) — Per-step overwrite flags. Steps flagged false will skip when their tier / cache is already populated; flagged true will replace the existing data.
-- `language` (type=string; minLength=1; maxLength=32) — Optional language override forwarded to STT + ORTH (the configured project model). Empty / omitted = auto-detect for STT, the project default for ORTH.
-- `run_mode` (type=string; default="full"; enum=`full`, `concept-windows`, `edited-only`) — Pipeline scope: full-file behavior, all concept windows, or manually adjusted concept windows only.
-- `concept_ids` (type=array) — Optional exact concept-id filter used when run_mode is concept-windows or edited-only.
-- `dryRun` (type=boolean) — If true, preview the planned compute payload without starting a background job.
+## Expected Output
+On `dryRun: true`: returns `{ status: "dry_run", plan: { speaker, steps, overwrites, language, run_mode, concept_ids }, message }`. No job is created.
 
-### MCP annotations
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, steps, overwrites, computeType: "full_pipeline", run_mode, concept_ids, message }`. **Always poll the returned `jobId` with `compute_status` (set `computeType: "full_pipeline"` for early failure on class mismatch) until status is `complete` or `error` before claiming success.**
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+Steps run step-resilient: a failing STT will not abort ORTH/IPA for the same speaker — the job completes with per-step `status` inside `result.results`.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The target speaker must exist in the current project and have the files needed for the requested steps. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, a full_pipeline background job is created and can be polled via compute_status. (`job_state`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/pipeline_run?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `pipeline_run` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-A complete HTTP MCP dry-run call for a concept-window pipeline run looks like this:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/pipeline_run?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"speaker":"Khan01","steps":["normalize","stt","ortho","ipa"],"overwrites":{"normalize":false,"stt":false,"ortho":true,"ipa":true},"language":"sd","run_mode":"concept-windows","concept_ids":["1","2","3"],"dryRun":true}'
-```
-
-Dry-run response shape:
-
+## Example Successful Call
+Dry run (always do this first):
 ```json
 {
-  "tool": "pipeline_run",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "status": "dry_run",
-    "tool": "pipeline_run",
-    "plan": {
-      "speaker": "Khan01",
-      "steps": ["normalize", "stt", "ortho", "ipa"],
-      "overwrites": {
-        "normalize": false,
-        "stt": false,
-        "ortho": true,
-        "ipa": true
-      },
-      "language": "sd",
-      "run_mode": "concept-windows",
-      "concept_ids": ["1", "2", "3"]
-    },
-    "message": "Dry run. Would start a full_pipeline compute job for this speaker."
-  }
+  "speaker": "Khan01",
+  "steps": ["normalize", "stt", "ortho", "ipa"],
+  "overwrites": {"ortho": true, "ipa": true},
+  "language": "sdh",
+  "run_mode": "concept-windows",
+  "concept_ids": ["1", "2", "3"],
+  "dryRun": true
 }
 ```
 
-After review, repeat the same payload with `dryRun: false`. A successful live start returns a job ID to poll with `compute_status` and `compute_type="full_pipeline"`:
-
+Live start (same payload, `dryRun: false`) returns:
 ```json
 {
-  "tool": "pipeline_run",
-  "ok": true,
-  "result": {
-    "previewOnly": false,
-    "readOnly": false,
-    "mode": "write-allowed",
-    "jobId": "9b662f0e-9dcf-4faa-9de2-a11f9b9d4de5",
-    "status": "running",
-    "speaker": "Khan01",
-    "steps": ["normalize", "stt", "ortho", "ipa"],
-    "overwrites": {
-      "normalize": false,
-      "stt": false,
-      "ortho": true,
-      "ipa": true
-    },
-    "computeType": "full_pipeline",
-    "run_mode": "concept-windows",
-    "concept_ids": ["1", "2", "3"],
-    "message": "Pipeline job started. Poll with compute_status."
-  }
+  "jobId": "9b662f0e-9dcf-4faa-9de2-a11f9b9d4de5",
+  "status": "running",
+  "speaker": "Khan01",
+  "steps": ["normalize", "stt", "ortho", "ipa"],
+  "overwrites": {"ortho": true, "ipa": true},
+  "computeType": "full_pipeline",
+  "run_mode": "concept-windows",
+  "concept_ids": ["1", "2", "3"],
+  "message": "Pipeline job started. Poll with compute_status."
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `pipeline_run` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                          | Symptom                                                  | Recovery                                                                                                       |
+|----------------------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| Step silently skipped            | `result.results.<step>.status: "skipped"`                | The tier was already populated and `overwrites[<step>]` was not `true`. Set the flag and re-run that step only. |
+| Speaker missing required file    | Job errors with "no source audio" or "ortho tier empty"  | Run `pipeline_state_read` first — `can_run: false` rows include a `reason` string explaining the gap.          |
+| Wrong language detected (STT)    | STT output garbled / low confidence                      | Re-run with explicit `language: "<iso>"`. Use `overwrites: {stt: true}` to replace the prior result.           |
+| `concept_ids` referenced unknown IDs | Job completes but `result.summary.skipped` matches IDs | Verify IDs against `project_context_read` (`concepts` section) or `list_concepts_by_tag`. Drop unknown IDs and re-run. |
+| Lock conflict                    | Job rejected because speaker resource is held by another active job | Wait for the conflicting job to terminate, or check `jobs_list_active` to find it.                  |
 
-## Anti-patterns
+## Agent Reasoning Notes
+`pipeline_run` is the right tool when you need *fine control* — exact step subset, explicit overwrites, language override, concept-window scoping. For the common "just annotate this speaker end-to-end" case, prefer `run_full_annotation_pipeline` and let it pick sensible defaults. Always preface a live call with (1) `pipeline_state_read` to see what `can_run` and what already has `full_coverage`, and (2) a `dryRun: true` of the exact payload to confirm the plan. After live start, poll `compute_status` with `computeType: "full_pipeline"` until terminal, then inspect `result.summary` and `result.results.<step>.status` — a top-level `complete` can still hide step-level errors.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `run_full_annotation_pipeline` — higher-level workflow macro; prefer for common cases.
+- `pipeline_state_read`, `pipeline_state_batch` — preflight before starting.
+- `compute_status` — poll the returned `jobId`.
+- `job_logs` — diagnose a failed or stalled pipeline step.

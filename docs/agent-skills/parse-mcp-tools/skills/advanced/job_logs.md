@@ -1,88 +1,39 @@
----
-name: parse-mcp-tool-job-logs
-description: "Use PARSE MCP tool `job_logs`: Read structured log lines for any PARSE background job. Returns timestamped entries for progress and terminal events."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# job_logs
 
-# PARSE MCP Tool Skill — `job_logs`
+**Category:** Advanced
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only log retrieval)
+**Complexity:** Low
+**Estimated Tokens:** ~210 (short) / ~470 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `job_logs` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads timestamped structured log entries for any PARSE background job by `jobId`, with offset/limit paging for long histories.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Diagnosing a job that ended in `status: "error"` — the snapshot only carries one error string, but `job_logs` shows the path that led to it.
+- Following a long job mid-run when you want more detail than the periodic `progress` updates from `compute_status` or `job_status`.
+- Paging through very long log histories (forced-align on a multi-hour speaker can produce hundreds of entries).
+- Auditing what a job actually did after the fact (which steps ran, when each progress checkpoint fired, what messages the worker emitted).
 
-## Tool contract snapshot
+## When NOT to Use
+- For the current job status — use `job_status` (any class) or `compute_status` (compute-class only). They return the snapshot directly with the latest `progress` and `message`.
+- To audit project artifacts a job wrote. Logs describe *what the worker did*; for the actual file contents, read `annotations/<speaker>.parse.json` or the relevant artifact back through the appropriate read tool.
+- For locating a `jobId` you don't know — `jobs_list` and `jobs_list_active` are the discovery tools.
 
-- **Tool name:** `job_logs`
-- **Skill name:** `parse-mcp-tool-job-logs`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `jobId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read structured log lines for any PARSE background job. Returns timestamped entries for progress and terminal events.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                | Default | Example                                  |
+|-----------|---------|----------|----------------------------------------------------------------------------|---------|------------------------------------------|
+| jobId     | string  | Yes      | Job identifier from any `*_start` tool. `minLength=1`, `maxLength=128`.    | —       | `"550e8400-e29b-41d4-a716-446655440000"` |
+| offset    | integer | No       | Starting index for paging. `minimum=0`, `maximum=10000`.                   | `0`     | `100`                                    |
+| limit     | integer | No       | Maximum number of entries to return. `minimum=1`, `maximum=200`.           | (server default) | `50`                              |
 
-- `jobId` (type=string; minLength=1; maxLength=128)
-- `offset` (type=integer; minimum=0; maximum=10000)
-- `limit` (type=integer; minimum=1; maximum=200)
+## Expected Output
+Returns `{ jobId, logs, count, offset, limit, logCount }`. Each entry in `logs` carries `ts` (ISO 8601), `level` (`info`/`warn`/`error`/`debug`), `event` (`job.created`, `job.progress`, `job.complete`, `job.error`, …), `message`, `source`, and optionally `progress`. Use `count` (total entries currently retained) to know when you've paged to the end.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- None advertised by the catalog.
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/job_logs?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `job_logs` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Job ID example
-
-`jobId` is the UUID returned by any PARSE job-start tool or HTTP endpoint, such as `forced_align_start`, `ipa_transcribe_acoustic_start`, `stt_start`, `audio_normalize_start`, or `run_full_annotation_pipeline`.
-
+## Example Successful Call
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -92,7 +43,6 @@ curl "$PARSE_BASE_URL/api/mcp/tools/job_logs?mode=active"
 ```
 
 Representative response:
-
 ```json
 {
   "readOnly": true,
@@ -101,44 +51,24 @@ Representative response:
   "offset": 0,
   "limit": 50,
   "logs": [
-    {
-      "ts": "2026-05-10T20:15:00Z",
-      "level": "info",
-      "event": "job.created",
-      "message": "Job created",
-      "source": "server",
-      "progress": 0.0
-    },
-    {
-      "ts": "2026-05-10T20:15:08Z",
-      "level": "info",
-      "event": "job.progress",
-      "message": "Aligning Tier 1 word windows",
-      "source": "server",
-      "progress": 42.0
-    }
+    {"ts": "2026-05-10T20:15:00Z", "level": "info", "event": "job.created",  "message": "Job created",                "progress": 0.0},
+    {"ts": "2026-05-10T20:15:08Z", "level": "info", "event": "job.progress", "message": "Aligning Tier 1 word windows", "progress": 42.0}
   ],
   "logCount": 2
 }
 ```
 
-Use `offset` plus `limit` to page through long logs; `count` is the total log entries currently retained for the job.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                  | Symptom                                       | Recovery                                                                                                       |
+|--------------------------|-----------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| Unknown jobId            | Tool error / empty `logs`                     | The job may have expired from the in-memory registry. Use `jobs_list` to find currently-tracked jobs.          |
+| Logs paged out / retention truncation | `count` matches the page but `logs` for older offsets are gone | The registry retains a bounded log history per job. Capture the tail you need at job completion, don't rely on retrieval days later. |
+| Page step too large      | Validation error (`limit > 200`)              | Cap `limit` at 200; iterate with `offset += limit` until `offset + len(logs) >= count`.                        |
 
-- [ ] Live catalog confirms `job_logs` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+Reach for `job_logs` only after `compute_status` / `job_status` shows something interesting — an `error`, a stalled `progress`, or a `complete` status with unexpected counts. The status snapshot is cheaper than reading every log entry, so use logs as a second-level diagnostic, not a primary one. When paging long logs, treat `count` as the source of truth for "is there more" rather than relying on whether the returned `logs` array is shorter than `limit`.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `job_status`, `compute_status` — primary status polls; consult logs only when these surface something unexpected.
+- `jobs_list`, `jobs_list_active` — find a `jobId` when you don't have one.

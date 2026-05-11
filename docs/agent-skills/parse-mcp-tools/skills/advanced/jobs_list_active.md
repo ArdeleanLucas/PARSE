@@ -1,142 +1,80 @@
----
-name: parse-mcp-tool-jobs-list-active
-description: "Use PARSE MCP tool `jobs_list_active`: List all currently-running jobs in the PARSE job registry (STT, normalize, compute, onboard, etc.). Returns type, status, progress, speaker, and message for each active job. Useful for recovering jobIds after a session restart."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# jobs_list_active
 
-# PARSE MCP Tool Skill — `jobs_list_active`
+**Category:** Advanced
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only listing)
+**Complexity:** Low
+**Estimated Tokens:** ~190 (short) / ~440 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `jobs_list_active` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Lists all currently-running PARSE jobs (STT, normalize, compute, onboard, forced-align, IPA, etc.) with no arguments — the canonical "what's PARSE doing right now?" check.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Recovering live `jobId`s after a session restart, agent crash, or lost chat context.
+- Liveness probe before starting new work — e.g. detecting that an STT or compute job is already underway on a target speaker.
+- Project-wide activity audit in chat-driven flows ("am I waiting on anything before I close this session?").
+- Detecting stuck jobs — combine with `job_logs` on each returned `jobId` to find one whose `progress` hasn't moved.
 
-## Tool contract snapshot
+## When NOT to Use
+- For *historical* job listings (completed, error, recent successes) — use `jobs_list` with `statuses` filters.
+- For the detail of a single known job — use `job_status` or `compute_status`.
+- To check if a *specific* job is still running. `job_status` answers that directly; `jobs_list_active` is a list-pull and may not include terminal jobs once they leave the dwell window.
 
-- **Tool name:** `jobs_list_active`
-- **Skill name:** `parse-mcp-tool-jobs-list-active`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** List all currently-running jobs in the PARSE job registry (STT, normalize, compute, onboard, etc.). Returns type, status, progress, speaker, and message for each active job. Useful for recovering jobIds after a session restart.
+## Parameters
+No parameters. Pass `{}`.
 
-### Parameters
+## Expected Output
+Returns `{ jobs: [...], count, mode, previewOnly }`. Each `jobs` entry includes `jobId`, `type`, `status`, `progress`, `result` (typically `null` while running), `startedTs`, `message`, optional class-specific counters (`segmentsProcessed` / `totalSegments` for STT), `locks`, `done`, `success`, `speaker`, `language`.
 
-- No parameters.
+**Important:** Terminal jobs (`complete` / `error`) may briefly appear here during the active-job dwell window so the UI and agents can render completion chips after a reload. Don't treat presence in this list as a strict guarantee of `status: "running"` — read each row's `status` field directly.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/jobs_list_active?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `jobs_list_active` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Active jobs response example
-
-The tool takes no arguments:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/jobs_list_active?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{}'
-```
-
-Representative response shape:
-
+Representative response:
 ```json
 {
-  "tool": "jobs_list_active",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "jobs": [
-      {
-        "jobId": "b38f8a2d-b29f-4f17-a4ac-8b7e8c4b1a6d",
-        "type": "stt",
-        "status": "running",
-        "progress": 50.0,
-        "result": null,
-        "startedTs": 1778436000.0,
-        "message": "Halfway there",
-        "segmentsProcessed": 12,
-        "totalSegments": 24,
-        "locks": {"active": true, "resources": ["speaker:Khan01"]},
-        "done": false,
-        "success": false,
-        "speaker": "Khan01",
-        "language": "sdh"
-      }
-    ],
-    "count": 1,
-    "mode": "read-only",
-    "previewOnly": true
-  }
+  "readOnly": true,
+  "jobs": [
+    {
+      "jobId": "b38f8a2d-b29f-4f17-a4ac-8b7e8c4b1a6d",
+      "type": "stt",
+      "status": "running",
+      "progress": 50.0,
+      "result": null,
+      "startedTs": 1778436000.0,
+      "message": "Halfway there",
+      "segmentsProcessed": 12,
+      "totalSegments": 24,
+      "locks": {"active": true, "resources": ["speaker:Khan01"]},
+      "done": false,
+      "success": false,
+      "speaker": "Khan01",
+      "language": "sdh"
+    }
+  ],
+  "count": 1,
+  "mode": "read-only",
+  "previewOnly": true
 }
 ```
 
-Terminal jobs may briefly appear here during the active-job dwell window so UI/agents can recover completion/error chips after reloads.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                                 | Symptom                                            | Recovery                                                                                       |
+|-----------------------------------------|----------------------------------------------------|------------------------------------------------------------------------------------------------|
+| Includes terminal jobs in dwell window  | Job has `status: "complete"` but still listed      | Filter on `status == "running"` client-side, or pivot to `jobs_list` with explicit `statuses`. |
+| Empty result when work is genuinely happening | `count: 0` but the project is mid-pipeline    | The job may have finished between calls or the registry was rotated. Use `jobs_list` (with completed statuses) to confirm. |
+| Lock conflict before starting new work  | Active job already holds `speaker:<id>` resource   | Either wait for the existing job to terminate, or scope the new work to a different speaker.   |
 
-- [ ] Live catalog confirms `jobs_list_active` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+This is the cheapest way to recover orchestration state after a restart — one call, no arguments, returns everything currently live. Pair with `job_status` to drill into each entry. The dwell window means you can't use this as a strict "is anything running?" test on its own (terminal jobs appear briefly); always check each row's `status`. For longer-horizon audit (completed jobs, error chains, who ran what when), reach for `jobs_list`.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `jobs_list` — broader registry queries with status/type/speaker filters.
+- `job_status`, `compute_status` — per-job detail once you have a `jobId` from this list.
+- `job_logs` — diagnose a stuck active job.

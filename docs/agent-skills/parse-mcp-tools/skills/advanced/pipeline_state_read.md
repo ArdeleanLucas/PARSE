@@ -1,158 +1,78 @@
----
-name: parse-mcp-tool-pipeline-state-read
-description: "Use PARSE MCP tool `pipeline_state_read`: Preflight one speaker. Read-only. Returns per-step ``{done, intervals|segments, can_run, reason, coverage_start_sec, coverage_end_sec, coverage_fraction, full_coverage}`` plus top-level ``duration_sec``. IMPORTANT: ``done`` only means 'the tier has ≥1 non-empty interval'. That is NOT the same as 'the entire WAV was processed' — a tier whose 128 intervals only cover the first 30 seconds of a 6-minute recording is still ``done: true`` but ``full_coverage: false``. Gate re-run decisions on ``full_coverage``, not ``done``."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# pipeline_state_read
 
-# PARSE MCP Tool Skill — `pipeline_state_read`
+**Category:** Advanced
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only preflight)
+**Complexity:** Low
+**Estimated Tokens:** ~260 (short) / ~560 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `pipeline_state_read` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Preflights pipeline state for a single speaker, returning per-step `{done, can_run, reason, coverage_*, full_coverage}` plus `duration_sec` — so the agent knows what is safe to run, what is partially done, and what is fully covered before kicking off a pipeline job.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Immediately before any `pipeline_run` or `run_full_annotation_pipeline` call to confirm which steps `can_run` and which would skip.
+- After a pipeline job completes, to verify the speaker reached `full_coverage: true` for all expected tiers — a `complete` status doesn't guarantee full coverage.
+- When diagnosing why an agent's previous attempt didn't produce annotations — the `reason` string explains what's missing (e.g. "No ortho intervals yet").
 
-## Tool contract snapshot
+## When NOT to Use
+- For batch checks across many speakers — `pipeline_state_batch` runs the same logic across the whole project (or a `speakers` subset) and adds top-level `blockedSpeakers` / `partialCoverageSpeakers` counts.
+- For artifact-level audit — `full_coverage` is computed from the annotation file's interval coverage; for direct file inspection, read `annotations/<speaker>.parse.json`.
+- To actually *start* anything — this is read-only. Follow up with `pipeline_run` once preflight is clean.
 
-- **Tool name:** `pipeline_state_read`
-- **Skill name:** `parse-mcp-tool-pipeline-state-read`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Preflight one speaker. Read-only. Returns per-step ``{done, intervals|segments, can_run, reason, coverage_start_sec, coverage_end_sec, coverage_fraction, full_coverage}`` plus top-level ``duration_sec``. IMPORTANT: ``done`` only means 'the tier has ≥1 non-empty interval'. That is NOT the same as 'the entire WAV was processed' — a tier whose 128 intervals only cover the first 30 seconds of a 6-minute recording is still ``done: true`` but ``full_coverage: false``. Gate re-run decisions on ``full_coverage``, not ``done``.
+## Parameters
 
-### Parameters
+| Parameter | Type   | Required | Description                                                       | Default | Example     |
+|-----------|--------|----------|-------------------------------------------------------------------|---------|-------------|
+| speaker   | string | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                       | —       | `"Khan01"`  |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
+## Expected Output
+Returns `{ speaker, duration_sec, normalize, stt, ortho, ipa, mode, previewOnly }`. Each step object carries:
 
-### MCP annotations
+- `done` — boolean: ≥1 non-empty interval present. **Not the same as "fully processed".**
+- `can_run` — boolean: are preconditions met to start this step now?
+- `reason` — string when `can_run: false` (e.g. `"No source audio at audio/working/<speaker>/<speaker>.wav"`).
+- `intervals` / `segments` — count.
+- `coverage_start_sec`, `coverage_end_sec` — span covered by existing tier data.
+- `coverage_fraction` — float 0–1.
+- `full_coverage` — boolean: does the tier cover the *entire* working WAV?
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+**Critical distinction:** A tier with 128 intervals covering only the first 30 seconds of a 6-minute recording is still `done: true` but `full_coverage: false`. Gate re-run decisions on `full_coverage`, never on `done` alone.
 
-### Preconditions advertised by catalog
+Does not mutate project state.
 
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/pipeline_state_read?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `pipeline_state_read` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Successful response example
-
-Call one speaker by ID:
-
+## Example Successful Call
 ```json
 {
   "speaker": "Khan01"
 }
 ```
 
-A successful preflight response includes `done`, `full_coverage`, and coverage fields per step. Gate reruns on `full_coverage`, not only `done`:
-
+Representative response:
 ```json
 {
-  "tool": "pipeline_state_read",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "speaker": "Khan01",
-    "duration_sec": 300.0,
-    "normalize": {
-      "done": true,
-      "can_run": true,
-      "reason": null,
-      "path": "audio/working/Khan01/Khan01.wav"
-    },
-    "stt": {
-      "done": true,
-      "can_run": true,
-      "reason": null,
-      "segments": 82,
-      "coverage_start_sec": 0.0,
-      "coverage_end_sec": 299.2,
-      "coverage_fraction": 0.997,
-      "full_coverage": true
-    },
-    "ortho": {
-      "done": true,
-      "can_run": true,
-      "reason": null,
-      "intervals": 82,
-      "coverage_start_sec": 0.0,
-      "coverage_end_sec": 30.0,
-      "coverage_fraction": 0.1,
-      "full_coverage": false
-    },
-    "ipa": {
-      "done": false,
-      "can_run": true,
-      "reason": null,
-      "intervals": 0,
-      "coverage_start_sec": null,
-      "coverage_end_sec": null,
-      "coverage_fraction": 0.0,
-      "full_coverage": false
-    }
-  }
+  "readOnly": true,
+  "speaker": "Khan01",
+  "duration_sec": 300.0,
+  "normalize": {"done": true, "can_run": true, "path": "audio/working/Khan01/Khan01.wav"},
+  "stt":   {"done": true,  "can_run": true,  "segments": 82, "coverage_start_sec": 0.0, "coverage_end_sec": 299.2, "coverage_fraction": 0.997, "full_coverage": true},
+  "ortho": {"done": true,  "can_run": true,  "intervals": 82, "coverage_start_sec": 0.0, "coverage_end_sec": 30.0,  "coverage_fraction": 0.10,  "full_coverage": false},
+  "ipa":   {"done": false, "can_run": true,  "intervals": 0,  "coverage_start_sec": null, "coverage_end_sec": null, "coverage_fraction": 0.0,  "full_coverage": false}
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `pipeline_state_read` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                              | Symptom                                                  | Recovery                                                                                                          |
+|------------------------------------------------------|----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Misreading `done: true` as "step finished"           | Re-run skipped because tier looks populated, but only first N seconds are covered | Read `full_coverage`. Re-run with `pipeline_run` + `overwrites: {<step>: true}` to replace partial output.        |
+| `can_run: false` with `reason` set                   | Step won't start                                         | Read the `reason` string verbatim and act on it — most commonly run an earlier step first (normalize → STT → ortho → IPA). |
+| Unknown speaker ID                                   | Tool error                                               | Verify against `speakers_list` or `project_context_read` before retrying.                                         |
+| `normalize.done: false` but you have a source WAV    | Pipeline can't find the working WAV at the expected path | The source may not have been imported through the normalize path. Run `audio_normalize_start` (Annotation bucket), or re-import via `onboard_speaker_import`. |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the right tool when you have one speaker in mind and want to know exactly what's safe to run next. The full_coverage vs done distinction is the single most important thing to internalize about PARSE's pipeline state: legacy "done" semantics from the UI mean "user saw output", not "everything was processed". Use this preflight before *every* `pipeline_run` call — without it you'll fight skip-on-populated semantics blind, and may declare success on a partially-processed tier. For project-wide planning use `pipeline_state_batch` instead.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `pipeline_state_batch` — same shape across multiple speakers.
+- `pipeline_run`, `run_full_annotation_pipeline` — the tools to call once preflight is clean.
+- `speakers_list`, `project_context_read` — to validate speaker IDs.
