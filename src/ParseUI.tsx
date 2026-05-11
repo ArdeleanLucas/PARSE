@@ -2045,8 +2045,6 @@ export function ParseUI() {
               peaksUrl={selectedSpeakers[0] ? resolveAssetUrl(`/peaks/${selectedSpeakers[0]}.json`) : undefined}
               surveyLabel={activeSurveyLabel}
               surveySourceItem={activeSurveySourceItem}
-              onCaptureOffsetAnchor={captureAnchorFromBar}
-              captureToast={captureToast}
             />
             <AIChat
               height={aiHeight}
@@ -2433,6 +2431,8 @@ export function ParseUI() {
           offsetPhase={offsetState.phase}
           onDetectOffset={() => { void detectOffsetForSpeaker(); }}
           onOpenManualOffset={openManualOffset}
+          onCaptureOffsetAnchor={captureAnchorFromBar}
+          captureToast={captureToast}
           currentConceptId={activeRawKey ?? concept.key}
           annotateSpeakerTools={annotatePhoneticTools}
           annotateAuxTools={<TranscriptionLanesControls />}
