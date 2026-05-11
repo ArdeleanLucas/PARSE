@@ -8,7 +8,9 @@ import { resolveSurveyLinksForSpeaker, type SpeakerSurveyLinkBucket } from '../.
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
-type ConceptSortMode = 'az' | '1n' | 'survey';
+export type ConceptSortParent = 'concept' | 'source';
+export type ConceptSortConceptSub = 'az' | '1n';
+export type ConceptSortSourceSub = 'time' | 'row';
 export type ConceptStatusFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
 
 export interface SidebarConcept {
@@ -52,9 +54,13 @@ interface SidebarTag {
 interface ConceptSidebarProps {
   query: string;
   onQueryChange: (query: string) => void;
-  sortMode: ConceptSortMode;
-  onSortModeChange: (mode: ConceptSortMode) => void;
-  hasSourceItems: boolean;
+  sortParent: ConceptSortParent;
+  conceptSub: ConceptSortConceptSub;
+  sourceSub: ConceptSortSourceSub;
+  onSortParentChange: (parent: ConceptSortParent) => void;
+  onConceptSubChange: (sub: ConceptSortConceptSub) => void;
+  onSourceSubChange: (sub: ConceptSortSourceSub) => void;
+  sourceDisabled: boolean;
   filteredConcepts: SidebarConcept[];
   statusFilter: ConceptStatusFilter;
   onStatusFilterChange: (filter: ConceptStatusFilter) => void;
@@ -158,9 +164,13 @@ function surveyLinkChoiceIds(concept: SidebarConcept, settings: SurveySettingsMa
 export function ConceptSidebar({
   query,
   onQueryChange,
-  sortMode,
-  onSortModeChange,
-  hasSourceItems,
+  sortParent,
+  conceptSub,
+  sourceSub,
+  onSortParentChange,
+  onConceptSubChange,
+  onSourceSubChange,
+  sourceDisabled,
   filteredConcepts,
   statusFilter,
   onStatusFilterChange,
@@ -333,35 +343,78 @@ export function ConceptSidebar({
             className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-            <button
-              data-testid="concept-sort-az"
-              onClick={() => onSortModeChange('az')}
-              title="Sort alphabetically by label"
-              className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode === 'az' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
-            >
-              A→Z
-            </button>
-            <button
-              data-testid="concept-sort-1n"
-              onClick={() => onSortModeChange('1n')}
-              title="Sort by concept id"
-              className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode === '1n' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
-            >
-              1→N
-            </button>
-            <button
-              data-testid="concept-sort-survey"
-              onClick={() => onSortModeChange('survey')}
-              disabled={!hasSourceItems}
-              title={hasSourceItems ? 'Sort by original source item (section.item)' : 'No source_item values present in concepts.csv'}
-              className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortMode === 'survey' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'} ${!hasSourceItems ? 'cursor-not-allowed opacity-40' : ''}`}
-            >
-              Source
-            </button>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex rounded-md bg-slate-100 p-0.5">
+              <button
+                data-testid="concept-sort-parent-concept"
+                type="button"
+                onClick={() => onSortParentChange('concept')}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortParent === 'concept' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+              >
+                Concept
+              </button>
+              <button
+                data-testid="concept-sort-parent-source"
+                type="button"
+                onClick={() => { if (!sourceDisabled) onSortParentChange('source'); }}
+                aria-disabled={sourceDisabled ? 'true' : undefined}
+                title={sourceDisabled ? 'Select one speaker to enable Source ordering' : 'Order concepts by this speaker source sequence'}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortParent === 'source' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-700'} ${sourceDisabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-sky-100'}`}
+              >
+                Source
+              </button>
+            </div>
+            <span className="text-[10px] text-slate-400">{scopedConcepts.length} concepts</span>
           </div>
-          <span className="ml-auto text-[10px] text-slate-400">{scopedConcepts.length} concepts</span>
+          {sortParent === 'concept' ? (
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">Order by</span>
+              <div className="inline-flex rounded-md bg-slate-100 p-0.5">
+                <button
+                  data-testid="concept-sort-az"
+                  type="button"
+                  onClick={() => onConceptSubChange('az')}
+                  title="Sort alphabetically by label"
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${conceptSub === 'az' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+                >
+                  A→Z
+                </button>
+                <button
+                  data-testid="concept-sort-1n"
+                  type="button"
+                  onClick={() => onConceptSubChange('1n')}
+                  title="Sort by concept id"
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${conceptSub === '1n' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+                >
+                  1–N
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-100 px-2 py-1">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-sky-700">Order by</span>
+              <div className="inline-flex rounded-md bg-sky-50 p-0.5">
+                <button
+                  data-testid="concept-sort-source-time"
+                  type="button"
+                  onClick={() => onSourceSubChange('time')}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sourceSub === 'time' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-700 hover:bg-sky-200'}`}
+                >
+                  Time
+                </button>
+                <button
+                  data-testid="concept-sort-source-row"
+                  type="button"
+                  onClick={() => onSourceSubChange('row')}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sourceSub === 'row' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-700 hover:bg-sky-200'}`}
+                >
+                  Row
+                </button>
+              </div>
+              {activeSpeaker && <span className="ml-auto text-[10px] text-sky-700/80">{activeSpeaker}</span>}
+            </div>
+          )}
         </div>
         {activeSpeaker && onScopedToSpeakerChange && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
