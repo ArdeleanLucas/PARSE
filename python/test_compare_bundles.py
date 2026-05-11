@@ -138,6 +138,42 @@ def test_speaker_concept_survey_links_take_precedence_over_legacy_bucket(tmp_pat
     assert any(variant["csv_row_id"] == "53" for variant in bucket_by_key["jbil\u0000169"]["variants"])
 
 
+def test_bundle_emits_scoped_survey_overlap_snapshot(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, _big_rows())
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps(
+            {
+                "concept_survey_links": {"53": {"KLQ": "4.1"}, "999": {"KLQ": "9.9"}},
+                "speaker_choices": {"Saha01": {"53": "KLQ", "999": "KLQ"}, "Khan02": {"150": "JBIL"}},
+                "speaker_concept_survey_links": {
+                    "Saha01": {"53": {"JBIL": "169"}, "999": {"KLQ": "9.9"}},
+                    "Khan02": {"150": {"JBIL": "169"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = build_compare_bundles(tmp_path, speakers=["Saha01", "Khan02"])["bundles"][0]
+
+    assert bundle["concept_survey_links"] == {"53": {"klq": "4.1"}}
+    assert bundle["speaker_choices"] == {"Saha01": {"53": "klq"}, "Khan02": {"150": "jbil"}}
+    assert bundle["speaker_concept_survey_links"] == {
+        "Saha01": {"53": {"jbil": "169"}},
+        "Khan02": {"150": {"jbil": "169"}},
+    }
+
+
+def test_bundle_emits_empty_survey_overlap_snapshot_when_unset(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, [{"id": "10", "concept_en": "nose", "source_item": "1.5", "source_survey": "KLQ"}])
+
+    bundle = build_compare_bundles(tmp_path, speakers=[])["bundles"][0]
+
+    assert bundle["concept_survey_links"] == {}
+    assert bundle["speaker_choices"] == {}
+    assert bundle["speaker_concept_survey_links"] == {}
+
+
 def test_migration_from_canonical_realizations_maps_unambiguous_order_and_skips_ambiguous(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows() + [{"id": "9", "concept_en": "hand", "source_item": "2", "source_survey": "KLQ"}])
     (tmp_path / "parse-enrichments.json").write_text(

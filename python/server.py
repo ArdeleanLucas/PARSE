@@ -1967,7 +1967,6 @@ def main() -> None:
         sys.exit(1)
 
     os.chdir(serve_dir); _require_route_export("_cleanup_stale_locks_on_startup")()
-
     _install_route_bindings(); _require_route_export("_load_job_snapshots")()
 
     http_port = _resolve_http_port()
