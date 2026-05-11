@@ -618,6 +618,8 @@ export function ConceptSidebar({
             const selectableSurveyIds = surveyLinkEditor.mode === 'add'
               ? surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings, buckets).filter((surveyId) => !usedSurveyIds.has(surveyId) || surveyId === surveyLinkEditor.surveyId)
               : surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings, buckets);
+            const blockingNoSpeaker = surveyLinkEditor.rowIds.length > 1 && !activeSpeaker;
+            const saveDisabledReason = 'Select a speaker before changing the survey ID for a grouped concept.';
             return (
             <div className="mt-1 w-64 space-y-1.5 border-t border-slate-100 pt-2" role="group" aria-label="Change survey ID editor">
               <div className="text-[10px] font-semibold text-slate-500">Current buckets</div>
@@ -675,7 +677,15 @@ export function ConceptSidebar({
               </label>
               {surveyLinkEditor.error ? <div className="text-[10px] text-rose-600">{surveyLinkEditor.error}</div> : null}
               <div className="flex gap-1">
-                <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { void saveSurveyLinkEditor(); }} className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-60">Save</button>
+                <button
+                  type="button"
+                  disabled={surveyLinkEditor.saving || blockingNoSpeaker}
+                  title={blockingNoSpeaker ? saveDisabledReason : undefined}
+                  onClick={() => { void saveSurveyLinkEditor(); }}
+                  className="flex-1 rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-60"
+                >
+                  Save
+                </button>
                 <button type="button" disabled={surveyLinkEditor.saving} onClick={() => { setSurveyLinkEditor(null); }} className="rounded border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600">Cancel</button>
               </div>
               {surveyLinkEditor.mode === 'edit' ? (
