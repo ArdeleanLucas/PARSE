@@ -12,6 +12,7 @@ const { mockSaveLexemeNoteApi, mockRerunLexemeIpa, mockRerunLexemeOrtho, mockSav
 }));
 
 let mockRecord: AnnotationRecord | null = null;
+let mockOtherRecord: AnnotationRecord | null = null;
 let mockEnrichmentData: Record<string, unknown> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
 let mockCurrentTime = 0;
@@ -70,6 +71,7 @@ const mockSetInterval = vi.fn((speaker: string, tier: string, interval: Annotati
   applyIntervalToMockRecord(tier, interval);
 });
 const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
+const mockCreateConceptInterval = vi.fn().mockResolvedValue(undefined);
 const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockUndo = vi.fn();
@@ -84,6 +86,16 @@ const mockPlayRange = vi.fn();
 const mockPause = vi.fn();
 const mockSkip = vi.fn();
 const mockClearQuickRetimeSelection = vi.fn();
+type DragToCreateOptions = {
+  onRegionCreated: (region: { start: number; end: number }) => void;
+  onRegionUpdated: (region: { start: number; end: number }) => void;
+};
+let mockDragToCreateOptions: DragToCreateOptions | null = null;
+const mockDisableDragToCreate = vi.fn();
+const mockEnableDragToCreate = vi.fn((options: DragToCreateOptions) => {
+  mockDragToCreateOptions = options;
+  return mockDisableDragToCreate;
+});
 let mockWaveSurferOptions: { quickRetimeSelection?: {
   enabled: boolean;
   label: string;
@@ -98,9 +110,10 @@ vi.mock('../../api/client', () => ({
 
 vi.mock('../../stores/annotationStore', () => ({
   useAnnotationStore: (selector: (state: unknown) => unknown) => selector({
-    records: { Fail01: mockRecord },
+    records: { Fail01: mockRecord, Alt01: mockOtherRecord },
     setInterval: mockSetInterval,
     saveLexemeAnnotation: mockSaveLexemeAnnotation,
+    createConceptInterval: mockCreateConceptInterval,
     moveIntervalAcrossTiers: mockMoveIntervalAcrossTiers,
     saveSpeaker: mockSaveSpeaker,
     undo: mockUndo,
@@ -154,6 +167,8 @@ vi.mock('../../hooks/useWaveSurfer', () => ({
       skip: mockSkip,
       addRegion: mockAddRegion,
       clearQuickRetimeSelection: mockClearQuickRetimeSelection,
+      enableDragToCreate: mockEnableDragToCreate,
+      disableDragToCreate: mockDisableDragToCreate,
       setZoom: mockSetZoom,
       setRate: mockSetRate,
       wsRef: { current: null },
@@ -190,6 +205,7 @@ function makeRecord(concepts: Array<{ conceptText: string; conceptId?: string; i
 describe('AnnotateView', () => {
   beforeEach(() => {
     mockRecord = null;
+    mockOtherRecord = null;
     mockEnrichmentData = {};
     mockSelectedRegion = { start: 1.25, end: 2.5 };
     mockCurrentTime = 0;
@@ -203,6 +219,8 @@ describe('AnnotateView', () => {
     mockSetInterval.mockClear();
     mockSaveLexemeAnnotation.mockReset();
     mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
+    mockCreateConceptInterval.mockReset();
+    mockCreateConceptInterval.mockResolvedValue(undefined);
     mockSetConceptTag.mockClear();
     mockSetConfirmedAnchor.mockClear();
     mockMoveIntervalAcrossTiers.mockClear();
@@ -219,6 +237,9 @@ describe('AnnotateView', () => {
     mockPause.mockClear();
     mockSkip.mockClear();
     mockClearQuickRetimeSelection.mockClear();
+    mockEnableDragToCreate.mockClear();
+    mockDisableDragToCreate.mockClear();
+    mockDragToCreateOptions = null;
     mockSaveLexemeNoteApi.mockReset();
     mockSaveLexemeNoteApi.mockResolvedValue({ success: true });
     mockRerunLexemeIpa.mockReset();
@@ -402,6 +423,123 @@ describe('AnnotateView', () => {
     expect(screen.queryByText('Missing')).toBeNull();
   });
 
+  it('renders the Create lexeme panel when conceptInterval is null', () => {
+    mockRecord = makeRecord([{ conceptText: 'fire', conceptId: 'fire', start: 3, end: 4 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByText('No lexeme interval yet for this variant.')).toBeTruthy();
+    expect(screen.getByText('Drag on the waveform above to mark the audio span for this lexeme.')).toBeTruthy();
+    expect(screen.getByTestId('create-lexeme-interval')).toBeTruthy();
+    expect(screen.queryByTestId('lexeme-start')).toBeNull();
+    expect(screen.queryByTestId('save-lexeme-annotation')).toBeNull();
+    expect(screen.queryByTestId('annotate-capture-anchor')).toBeNull();
+  });
+
+  it('renders the standard timestamp controls when conceptInterval exists', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByTestId('lexeme-start')).toBeTruthy();
+    expect(screen.getByTestId('lexeme-end')).toBeTruthy();
+    expect(screen.getByTestId('confirm-time')).toBeTruthy();
+    expect(screen.getByTestId('save-lexeme-annotation')).toBeTruthy();
+    expect(screen.queryByTestId('create-lexeme-interval')).toBeNull();
+  });
+
+  it('keeps the Create lexeme button disabled until a region is drawn', () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    const createButton = screen.getByTestId('create-lexeme-interval') as HTMLButtonElement;
+    expect(createButton.disabled).toBe(true);
+    expect(screen.getByTestId('create-lexeme-start').textContent).toContain('—');
+    expect(screen.getByTestId('create-lexeme-end').textContent).toContain('—');
+
+    act(() => {
+      mockDragToCreateOptions?.onRegionCreated({ start: 1.25, end: 2.5 });
+    });
+
+    expect(screen.getByTestId('create-lexeme-start').textContent).toContain('1.250');
+    expect(screen.getByTestId('create-lexeme-end').textContent).toContain('2.500');
+    expect(createButton.disabled).toBe(false);
+  });
+
+  it('clicking Create lexeme invokes createConceptInterval with the drawn start and end', async () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    act(() => {
+      mockDragToCreateOptions?.onRegionCreated({ start: 1.25, end: 2.5 });
+    });
+    fireEvent.click(screen.getByTestId('create-lexeme-interval'));
+
+    await waitFor(() => expect(mockCreateConceptInterval).toHaveBeenCalledWith('Fail01', 'water', 1.25, 2.5));
+  });
+
+  it('surfaces createConceptInterval errors inline and keeps the selected region retryable', async () => {
+    mockRecord = makeRecord([]);
+    mockCreateConceptInterval.mockRejectedValueOnce(new Error('autosave failed'));
+
+    renderWaterAnnotateView();
+
+    act(() => {
+      mockDragToCreateOptions?.onRegionCreated({ start: 1.25, end: 2.5 });
+    });
+    fireEvent.click(screen.getByTestId('create-lexeme-interval'));
+
+    await waitFor(() => expect(screen.getByText('autosave failed')).toBeTruthy());
+    expect(screen.getByTestId('create-lexeme-start').textContent).toContain('1.250');
+    expect((screen.getByTestId('create-lexeme-interval') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('switching speaker or concept clears the in-flight region', async () => {
+    mockRecord = makeRecord([]);
+    mockOtherRecord = makeRecord([]);
+
+    const { rerender } = renderWaterAnnotateView();
+
+    act(() => {
+      mockDragToCreateOptions?.onRegionCreated({ start: 1.25, end: 2.5 });
+    });
+    expect(screen.getByTestId('create-lexeme-start').textContent).toContain('1.250');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 2, key: 'fire', name: 'fire' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('create-lexeme-start').textContent).toContain('—'));
+
+    act(() => {
+      mockDragToCreateOptions?.onRegionCreated({ start: 2.25, end: 3.5 });
+    });
+    expect(screen.getByTestId('create-lexeme-start').textContent).toContain('2.250');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 2, key: 'fire', name: 'fire' }}
+        speaker="Alt01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Alt01.wav"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('create-lexeme-start').textContent).toContain('—'));
+    expect((screen.getByTestId('create-lexeme-interval') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('flips Mark Done to confirmed, emits a transient toast, and ignores repeat clicks', async () => {
     vi.useFakeTimers();
     mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
@@ -498,7 +636,10 @@ describe('AnnotateView', () => {
   });
 
   it('clears the Marked done toast when navigating to a different concept', () => {
-    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+    mockRecord = makeRecord([
+      { conceptText: 'water', start: 1, end: 2 },
+      { conceptText: 'fire', start: 3, end: 4 },
+    ]);
 
     const { rerender } = renderWaterAnnotateView();
 
@@ -942,7 +1083,7 @@ describe('AnnotateView', () => {
   });
 
   it('marks the current concept done', () => {
-    mockRecord = makeRecord([]);
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
 
     render(
       <AnnotateView
@@ -1030,25 +1171,24 @@ describe('AnnotateView', () => {
     expect(screen.queryByTestId('spectrogram-playhead')).toBeNull();
   });
 
-  it('marks done without a time anchor when no concept boundary exists', () => {
-    vi.useFakeTimers();
+  it('renders create-lexeme panel instead of Mark Done when no concept boundary exists', () => {
     mockRecord = makeRecord([]);
 
     renderWaterAnnotateView();
 
-    fireEvent.click(screen.getByRole('button', { name: /Mark Done/i }));
-
-    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+    expect(screen.queryByRole('button', { name: /Mark Done/i })).toBeNull();
+    expect(screen.getByTestId('create-lexeme-interval')).toBeTruthy();
+    expect(mockSetConceptTag).not.toHaveBeenCalled();
     expect(mockSetConfirmedAnchor).not.toHaveBeenCalled();
-    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done. Time anchor skipped: no boundary.');
   });
 
-  it('disables Confirm time when no concept boundary exists', () => {
+  it('hides Confirm time when no concept boundary exists', () => {
     mockRecord = makeRecord([]);
 
     renderWaterAnnotateView();
 
-    expect((screen.getByTestId('confirm-time') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId('confirm-time')).toBeNull();
+    expect(screen.getByText('No lexeme interval yet for this variant.')).toBeTruthy();
   });
 
   it('toggles Confirm time anchor without tagging or matched text', () => {

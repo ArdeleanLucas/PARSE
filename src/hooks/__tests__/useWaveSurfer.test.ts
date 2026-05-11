@@ -84,6 +84,9 @@ describe("useWaveSurfer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWsInstance.getDuration.mockReturnValue(10);
+    mockRegionsPlugin.addRegion.mockReturnValue(mockRegionInstance);
+    mockRegionsPlugin.enableDragSelection.mockReturnValue(mockDisableQuickRetimeSelection);
+    mockRegionsPlugin.on.mockImplementation(() => vi.fn());
   });
 
   it("destroys on unmount", () => {
@@ -321,6 +324,129 @@ describe("useWaveSurfer", () => {
     expect(mockWsInstance.seekTo).toHaveBeenCalledWith(0.2);
   });
 
+
+
+  function findRegionHandler(eventName: string): ((region: { id?: string; start: number; end: number; remove?: () => void; play?: () => void }) => void) | undefined {
+    const calls = mockRegionsPlugin.on.mock.calls.filter(([name]) => name === eventName);
+    const call = calls[calls.length - 1];
+    return call?.[1] as ((region: { id?: string; start: number; end: number; remove?: () => void; play?: () => void }) => void) | undefined;
+  }
+
+  it("enableDragToCreate fires onRegionCreated on user drag", () => {
+    const onRegionCreated = vi.fn();
+    const onRegionUpdated = vi.fn();
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    act(() => {
+      result.current.enableDragToCreate({ onRegionCreated, onRegionUpdated });
+    });
+
+    expect(mockRegionsPlugin.enableDragSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.stringContaining("create-lexeme-selection"), drag: true, resize: true }),
+      1,
+    );
+
+    const onCreated = findRegionHandler("region-created");
+    const onUpdated = findRegionHandler("region-updated");
+    expect(onCreated).toBeDefined();
+    expect(onUpdated).toBeDefined();
+
+    act(() => onCreated!({ id: "r-pre-rendered", start: 0.5, end: 0.75, remove: vi.fn(), play: vi.fn() }));
+    expect(onRegionCreated).not.toHaveBeenCalled();
+
+    act(() => onCreated!({ id: "create-lexeme-selection-test", start: 1.25, end: 2.5, remove: vi.fn(), play: vi.fn() }));
+    expect(onRegionCreated).toHaveBeenCalledWith({ start: 1.25, end: 2.5 });
+
+    act(() => onUpdated!({ id: "create-lexeme-selection-test", start: 1.5, end: 2.75, remove: vi.fn(), play: vi.fn() }));
+    expect(onRegionUpdated).toHaveBeenCalledWith({ start: 1.5, end: 2.75 });
+  });
+
+  it("disableDragToCreate removes the in-flight region", () => {
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+
+    act(() => {
+      result.current.enableDragToCreate({ onRegionCreated: vi.fn(), onRegionUpdated: vi.fn() });
+    });
+
+    const transientRegion = {
+      id: "create-lexeme-selection-test",
+      start: 1.25,
+      end: 2.5,
+      remove: vi.fn(),
+      play: vi.fn(),
+    };
+    const onCreated = findRegionHandler("region-created");
+    act(() => onCreated!(transientRegion));
+
+    act(() => {
+      result.current.disableDragToCreate();
+    });
+
+    expect(mockDisableQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(transientRegion.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("calling enableDragToCreate twice does not stack handlers", () => {
+    const firstDisable = vi.fn();
+    const secondDisable = vi.fn();
+    const firstUnsubscribeCreated = vi.fn();
+    const firstUnsubscribeUpdated = vi.fn();
+    const secondUnsubscribeCreated = vi.fn();
+    const secondUnsubscribeUpdated = vi.fn();
+    const unsubscribers = [
+      firstUnsubscribeCreated,
+      firstUnsubscribeUpdated,
+      secondUnsubscribeCreated,
+      secondUnsubscribeUpdated,
+    ];
+    const { result } = renderHook(() =>
+      useWaveSurfer({
+        containerRef: makeContainerRef(),
+        audioUrl: "/audio/test.wav",
+      }),
+    );
+    mockRegionsPlugin.enableDragSelection.mockReset();
+    mockRegionsPlugin.on.mockReset();
+    mockRegionsPlugin.enableDragSelection
+      .mockImplementationOnce(() => firstDisable)
+      .mockImplementationOnce(() => secondDisable);
+    mockRegionsPlugin.on.mockImplementation(() => unsubscribers.shift() ?? vi.fn());
+
+    const firstCreated = vi.fn();
+    const secondCreated = vi.fn();
+    act(() => {
+      result.current.enableDragToCreate({ onRegionCreated: firstCreated, onRegionUpdated: vi.fn() });
+    });
+    act(() => {
+      result.current.enableDragToCreate({ onRegionCreated: secondCreated, onRegionUpdated: vi.fn() });
+    });
+
+    expect(firstDisable).toHaveBeenCalledTimes(1);
+    expect(firstUnsubscribeCreated).toHaveBeenCalledTimes(1);
+    expect(firstUnsubscribeUpdated).toHaveBeenCalledTimes(1);
+
+    const onCreated = findRegionHandler("region-created");
+    act(() => onCreated!({ id: "create-lexeme-selection-test", start: 1.25, end: 2.5, remove: vi.fn(), play: vi.fn() }));
+    expect(firstCreated).not.toHaveBeenCalled();
+    expect(secondCreated).toHaveBeenCalledWith({ start: 1.25, end: 2.5 });
+
+    act(() => {
+      result.current.disableDragToCreate();
+    });
+    expect(secondDisable).toHaveBeenCalledTimes(1);
+    expect(secondUnsubscribeCreated).toHaveBeenCalledTimes(1);
+    expect(secondUnsubscribeUpdated).toHaveBeenCalledTimes(1);
+  });
 
   it("Escape clears the transient quick-retime region without removing the active lexeme region", () => {
     const { result, rerender } = renderHook(
