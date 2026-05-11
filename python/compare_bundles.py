@@ -211,6 +211,30 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 bucket = bucket_map.setdefault(key2, {"bucket_key": key2, "survey_id": survey_id, "source_item": source_item, "variants": []})
                 bucket["variants"].append({"csv_row_id": row_id, "variant_label": _variant_label(row.get("concept_en", "")), "concept_en": row.get("concept_en", "")})
         bundle = {"bundle_id": bid, "label": group["label"], "row_ids": row_ids, "buckets": list(bucket_map.values()), "candidates": {}, "canonical": {}, "warnings": warnings}
+        concept_links = overlap.get("concept_survey_links") if isinstance(overlap, Mapping) else None
+        bundle["concept_survey_links"] = {
+            row_id: dict(concept_links.get(row_id, {}))
+            for row_id in row_ids
+            if isinstance(concept_links, Mapping) and concept_links.get(row_id)
+        }
+        speaker_choices = overlap.get("speaker_choices") if isinstance(overlap, Mapping) else None
+        bundle["speaker_choices"] = {}
+        if isinstance(speaker_choices, Mapping):
+            for speaker, choices in speaker_choices.items():
+                if not isinstance(choices, Mapping):
+                    continue
+                scoped = {row_id: choices[row_id] for row_id in row_ids if row_id in choices}
+                if scoped:
+                    bundle["speaker_choices"][str(speaker)] = scoped
+        speaker_links = overlap.get("speaker_concept_survey_links") if isinstance(overlap, Mapping) else None
+        bundle["speaker_concept_survey_links"] = {}
+        if isinstance(speaker_links, Mapping):
+            for speaker, by_row in speaker_links.items():
+                if not isinstance(by_row, Mapping):
+                    continue
+                scoped = {row_id: dict(by_row.get(row_id, {})) for row_id in row_ids if by_row.get(row_id)}
+                if scoped:
+                    bundle["speaker_concept_survey_links"][str(speaker)] = scoped
         for speaker in selected_speakers:
             intervals, source_wav = _intervals_for_speaker(project_root, speaker)
             by_concept: dict[str, list[dict[str, Any]]] = {}

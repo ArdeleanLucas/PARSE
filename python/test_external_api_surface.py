@@ -510,4 +510,21 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
     assert canonical_path["put"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/CanonicalLexemePutRequest"
     }
+    compare_bundle = components["CompareBundle"]
+    assert compare_bundle["required"] == ["bundle_id", "label", "row_ids", "buckets", "candidates", "canonical", "warnings"]
+    assert compare_bundle["properties"]["concept_survey_links"] == {
+        "type": "object",
+        "additionalProperties": {"$ref": "#/components/schemas/ConceptSurveyLinks"},
+    }
+    assert compare_bundle["properties"]["speaker_choices"] == {
+        "type": "object",
+        "additionalProperties": {"$ref": "#/components/schemas/ConceptSurveyLinks"},
+    }
+    assert compare_bundle["properties"]["speaker_concept_survey_links"] == {
+        "type": "object",
+        "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/components/schemas/ConceptSurveyLinks"},
+        },
+    }
     assert spec["paths"]["/api/exports/canonical-lexemes-report"]["get"]["operationId"] == "downloadCanonicalLexemesReport"
