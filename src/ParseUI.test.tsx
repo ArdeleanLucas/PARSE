@@ -987,7 +987,9 @@ describe("ParseUI", () => {
     await waitFor(() => expect(screen.getByText("1 / 2 reviewed for Fail01")).toBeTruthy());
     expect(screen.getByText("2 of 3 master concepts elicited")).toBeTruthy();
     const sidebar = screen.getByTestId("concept-sidebar");
-    expect(within(sidebar).getByText("Scoped to Fail01")).toBeTruthy();
+    const breadcrumb = within(sidebar).getByTestId("concept-scope-breadcrumb");
+    expect(breadcrumb.textContent).toContain("2 in Fail01");
+    expect(within(sidebar).getByRole("button", { name: /show all/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /water/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /earth/i })).toBeTruthy();
     expect(within(sidebar).queryByRole("button", { name: /fire/i })).toBeNull();
@@ -1049,7 +1051,10 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     await waitFor(() => expect(screen.getByText("0 / 1 reviewed for Fail01")).toBeTruthy());
-    expect(screen.getByText("Showing all 3 master")).toBeTruthy();
+    const sidebar = screen.getByTestId("concept-sidebar");
+    const breadcrumb = within(sidebar).getByTestId("concept-scope-breadcrumb");
+    expect(breadcrumb.textContent).toContain("3 concepts");
+    expect(within(sidebar).getByRole("button", { name: /scope to speaker/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /fire/i }).textContent ?? "").toContain("no data");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Fail02" })[0]);
@@ -2697,7 +2702,8 @@ describe("ParseUI", () => {
     await switchToAnnotateMode();
 
     const sidebar = screen.getByTestId("concept-sidebar");
-    expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
+    const breadcrumb = within(sidebar).getByTestId("concept-scope-breadcrumb");
+    expect(breadcrumb.textContent).toContain("3 in Fail01");
     expect(within(sidebar).getByRole("button", { name: /head \(A\).*#1/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /head \(B\).*#2/i })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /head.*#3/i })).toBeTruthy();

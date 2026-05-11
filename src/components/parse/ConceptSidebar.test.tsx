@@ -715,12 +715,48 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByText('Scoped to Fail02')).toBeTruthy();
+    const breadcrumb = screen.getByTestId('concept-scope-breadcrumb');
+    expect(breadcrumb.textContent).toContain('3 in Fail02');
+    expect(screen.getByRole('button', { name: /show all/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /fire/i })).toBeNull();
     expect(screen.getByRole('button', { name: /brother of husband/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /variant row/i })).toBeTruthy();
-    expect(screen.getByText('3 concepts')).toBeTruthy();
+  });
+
+  it('folds the unscoped active speaker toggle into the count breadcrumb', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[
+          { id: 1, key: '1', name: 'water', tag: 'untagged' as const },
+          { id: 2, key: '2', name: 'fire', tag: 'confirmed' as const },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail02"
+        scopedToSpeaker={false}
+        onScopedToSpeakerChange={vi.fn()}
+        elicitedConceptKeys={new Set(['1'])}
+      />,
+    );
+
+    const breadcrumb = screen.getByTestId('concept-scope-breadcrumb');
+    expect(breadcrumb.textContent).toContain('2 concepts');
+    expect(screen.getByRole('button', { name: /scope to speaker/i })).toBeTruthy();
   });
 
   it('does not surface hidden source-item variants in a scoped tag-filtered sidebar row', () => {
@@ -801,12 +837,13 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByText('Showing all 2 master')).toBeTruthy();
+    const breadcrumb = screen.getByTestId('concept-scope-breadcrumb');
+    expect(breadcrumb.textContent).toContain('2 concepts');
     expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
     const fire = screen.getByRole('button', { name: /fire/i });
     expect(fire.className).toContain('text-slate-400');
     expect(fire.textContent ?? '').toContain('no data');
-    fireEvent.click(screen.getByRole('button', { name: /Scope to speaker/i }));
+    fireEvent.click(screen.getByRole('button', { name: /scope to speaker/i }));
     expect(onScopedToSpeakerChange).toHaveBeenCalledWith(true);
   });
 
