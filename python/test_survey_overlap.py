@@ -26,6 +26,7 @@ def test_missing_sidecar_loads_empty_backward_compatible_state(tmp_path: pathlib
     assert state["surveys"] == {}
     assert state["concept_survey_links"] == {}
     assert state["speaker_choices"] == {}
+    assert state["speaker_concept_survey_links"] == {}
 
 
 def test_load_normalizes_surveys_links_and_speaker_choices(tmp_path: pathlib.Path) -> None:
@@ -178,6 +179,7 @@ def test_update_reset_flags_compose_in_one_call(tmp_path: pathlib.Path) -> None:
         "surveys": {},
         "concept_survey_links": {},
         "speaker_choices": {},
+        "speaker_concept_survey_links": {},
     }
 
 
