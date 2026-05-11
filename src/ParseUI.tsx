@@ -1545,7 +1545,7 @@ export function ParseUI() {
               <span className="text-[15px] font-semibold tracking-tight text-slate-900">PARSE</span>
             </div>
             <div className="hidden items-center gap-3 md:flex">
-              <div>
+              <div data-testid={activeSpeakerProgress ? `annotate-progress-${activeSpeakerProgress}` : "annotate-progress-all"}>
                 {activeSpeakerProgress && elicitedForSpeaker > 0 ? (
                   <>
                     <div className="text-[11px] font-medium text-slate-500 tabular-nums">{reviewedForSpeaker} / {elicitedForSpeaker} reviewed for {activeSpeakerProgress}</div>
@@ -1989,7 +1989,7 @@ export function ParseUI() {
               } catch (err) {
                 console.error('[ParseUI] duplicateConcept failed:', err);
                 const message = err instanceof Error ? err.message : String(err);
-                const variant = /\b409\b/.test(message) ? 'warning' : 'error';
+                const variant: 'warning' | 'error' = err instanceof ApiError && err.status === 409 ? 'warning' : 'error';
                 flashActionFeedback(message, variant);
               }
             })();

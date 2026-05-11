@@ -1825,9 +1825,7 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(screen.queryAllByText((_text, element) => (
-      element?.textContent?.includes("reviewed for Fail01") ?? false
-    )).length).toBeGreaterThan(0));
+    await screen.findByTestId("annotate-progress-Fail01");
     // Strict per-variant scope (MC-371-F): the parent renders as a single-row group
     // because only row 527 is visible to Fail01.
     fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /head.*JBIL 31/i }));
