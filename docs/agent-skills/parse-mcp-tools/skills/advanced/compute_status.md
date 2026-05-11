@@ -1,100 +1,59 @@
----
-name: parse-mcp-tool-compute-status
-description: "Use PARSE MCP tool `compute_status`: Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) by jobId. Read-only. Returns the job snapshot with status, progress, message, and — for completed jobs — the full ``result`` payload. For pipeline jobs the result includes per-step status and summary counts so the agent can reason about success/skip/error cells."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# compute_status
 
-# PARSE MCP Tool Skill — `compute_status`
+**Category:** Advanced
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only poll)
+**Complexity:** Low
+**Estimated Tokens:** ~220 (short) / ~520 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `compute_status` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Polls a PARSE compute job (full_pipeline, ortho, ipa, contact-lexemes, etc.) by `jobId` and returns its current snapshot, with per-step results and counts when the job is complete.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After any compute-class start call (`pipeline_run`, `run_full_annotation_pipeline`, and the lower-level ortho/ipa/contact-lexeme starters) — poll here until a terminal status before claiming success.
+- To watch progress on a long-running pipeline without re-reading project files.
+- To inspect per-step success/skip/error counts for `full_pipeline` jobs.
+- As a `computeType`-guarded poll when you want the call to fail fast if the `jobId` belongs to a different job class.
 
-## Tool contract snapshot
+## When NOT to Use
+- For non-compute job classes — STT, IPA-acoustic, audio-normalize, forced-align, compute-boundaries, retranscribe — each has its own dedicated `*_status` tool. Use `job_status` when you don't know the class.
+- To audit the *files* a job wrote. The `result` payload is a summary; for ground truth, read `annotations/<speaker>.parse.json` (or the relevant artifact) back independently.
+- For failure diagnosis. The snapshot exposes `error` but not per-step log lines — reach for `job_logs` when a job ended in error.
 
-- **Tool name:** `compute_status`
-- **Skill name:** `parse-mcp-tool-compute-status`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `jobId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Poll any compute job (full_pipeline, ortho, ipa, contact-lexemes, …) by jobId. Read-only. Returns the job snapshot with status, progress, message, and — for completed jobs — the full ``result`` payload. For pipeline jobs the result includes per-step status and summary counts so the agent can reason about success/skip/error cells.
+## Parameters
 
-### Parameters
+| Parameter   | Type   | Required | Description                                                                                                                       | Default          | Example          |
+|-------------|--------|----------|-----------------------------------------------------------------------------------------------------------------------------------|------------------|------------------|
+| jobId       | string | Yes      | Job identifier returned by the start tool. `minLength=1`, `maxLength=128`.                                                        | —                | `"compute-7f3a"` |
+| computeType | string | No       | Expected compute type (e.g. `"full_pipeline"`). When set, the tool validates the job's type matches before returning the snapshot. | (no validation)  | `"full_pipeline"` |
 
-- `jobId` (type=string; minLength=1; maxLength=128)
-- `computeType` (type=string; minLength=1; maxLength=64) — Optional expected compute type (e.g. "full_pipeline"). If provided, the tool validates the job's type matches before returning the snapshot.
+## Expected Output
+Returns a JSON snapshot:
 
-### MCP annotations
+- `jobId`, `type` — identifiers from the original start call.
+- `status` — one of `queued`, `running`, `complete`, `error`, `invalid_job_type`.
+- `progress` — 0–100.
+- `message`, `error` — current human-readable state; `error` is `null` until the job fails.
+- `result` — present once `status == "complete"`. For pipeline jobs:
+  - `result.steps_run` — ordered list of step names.
+  - `result.results.<step>` — `{ status, filled, ... }` per step.
+  - `result.summary` — aggregate counts: `{ ok, skipped, error }`.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+Does not mutate project state.
 
-### Preconditions advertised by catalog
-
-- The caller must provide a valid jobId from a previous start call. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/compute_status?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `compute_status` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Example request/response
-
-Request a typed status check so accidentally polling the wrong job class fails visibly:
-
+## Example Successful Call
 ```json
 {
-  "jobId": "compute-<ID>",
+  "jobId": "compute-7f3a",
   "computeType": "full_pipeline"
 }
 ```
 
 Representative completed response:
-
 ```json
 {
   "readOnly": true,
-  "jobId": "compute-<ID>",
+  "jobId": "compute-7f3a",
   "type": "compute:full_pipeline",
   "status": "complete",
   "progress": 100.0,
@@ -105,30 +64,27 @@ Representative completed response:
     "steps_run": ["ortho", "ipa"],
     "results": {
       "ortho": {"status": "ok", "filled": 128},
-      "ipa": {"status": "ok", "filled": 129}
+      "ipa":   {"status": "ok", "filled": 129}
     },
     "summary": {"ok": 2, "skipped": 0, "error": 0}
   }
 }
 ```
 
-If the response is `status: "invalid_job_type"`, keep the job evidence but re-check the original start call before making any pipeline success claim.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                                    | Symptom                                                | Recovery                                                                                                          |
+|--------------------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Wrong job class                            | `status: "invalid_job_type"`                           | The `jobId` is from a non-compute job. Drop the `computeType` arg, switch to the matching `*_status`, or use `job_status`. |
+| Unknown jobId                              | Tool error: jobId not found                            | Confirm the start call actually returned a `jobId` (don't fabricate). Use `jobs_list` / `jobs_list_active` to find currently known jobs. |
+| Job stuck `running`                        | `progress` hasn't advanced past the expected duration  | Read `job_logs` for the same `jobId`. For pipeline jobs, inspect `result.results.<step>` (visible mid-run) to pinpoint the stalled step. |
+| Step-level error inside a `complete` job   | `status: "complete"` but `result.summary.error > 0`    | A pipeline can finish without raising. Read `result.results.<step>.status` and re-run only the failed step instead of the whole pipeline. |
 
-- [ ] Live catalog confirms `compute_status` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+This is the canonical "is it done yet?" tool for *compute-class* jobs. Every call to `pipeline_run`, `run_full_annotation_pipeline`, or a lower-level ortho/ipa/contact-lexeme starter should be followed by polling here until `status` reaches a terminal value (`complete` or `error`). For pipeline jobs, the load-bearing information lives in `result.summary` and `result.results.<step>` — a `complete` top-level status can still hide step-level errors, so always look at the summary counts before declaring success. Pair with `job_logs` for failure diagnosis and with the generic `job_status` when polling a job whose class you don't know in advance.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `pipeline_run`, `run_full_annotation_pipeline` — typical producers of `jobId`s polled here.
+- `job_status` — class-agnostic alternative; use when the job class is unknown.
+- `job_logs` — line-level log retrieval for failure diagnosis.
+- `jobs_list`, `jobs_list_active` — find a `jobId` when the producing call's return was lost.

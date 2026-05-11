@@ -1,93 +1,47 @@
----
-name: parse-mcp-tool-run-full-annotation-pipeline
-description: "Use PARSE MCP tool `run_full_annotation_pipeline`: Run the high-level annotation workflow for one speaker. In run_mode='full' it preserves the legacy speaker-wide STT → forced-align → IPA sequence; in concept-scoped modes it starts one full_pipeline compute job restricted to all concept windows or manually edited concept windows."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - workflow
----
+# run_full_annotation_pipeline
 
-# PARSE MCP Tool Skill — `run_full_annotation_pipeline`
+**Category:** Advanced
+**Mutability:** mutating (starts a background workflow with STT, forced-align, and IPA steps)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** High
+**Estimated Tokens:** ~340 (short) / ~720 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `run_full_annotation_pipeline` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Runs the high-level annotation workflow for one speaker — full-speaker STT → forced-align → IPA in `run_mode: "full"`, or a `full_pipeline` compute job scoped to all concept windows / manually-edited windows in the other modes.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- The standard "annotate this speaker end-to-end" case — this is the recommended high-level entry point, not `pipeline_run`.
+- New-speaker onboarding flows: after `onboard_speaker_import`, this runs the rest of the annotation chain.
+- When you want PARSE to pick sensible defaults across the STT → ortho → IPA chain rather than driving each step by hand.
+- For concept-window scoping with a single call (`run_mode: "concept-windows"` or `"edited-only"`) — handles the scoping internally instead of requiring per-step `concept_ids` plumbing.
 
-## Tool contract snapshot
+## When NOT to Use
+- For fine-grained step subsets or explicit overwrite control (e.g. just re-running ORTH with overwrites) — use `pipeline_run` directly; it accepts `steps` and `overwrites` arguments.
+- When you need batch processing across multiple speakers — this is single-speaker. Loop yourself, or write a higher-level macro.
+- Without `pipeline_state_read` first. The workflow will start whatever it can, but you risk burning compute on a speaker missing prerequisites.
+- For status polling only — this *starts* work. To poll an existing job, use `compute_status` / `job_status`.
 
-- **Tool name:** `run_full_annotation_pipeline`
-- **Skill name:** `parse-mcp-tool-run-full-annotation-pipeline`
-- **Family:** `workflow`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker_id`, `concept_list`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Run the high-level annotation workflow for one speaker. In run_mode='full' it preserves the legacy speaker-wide STT → forced-align → IPA sequence; in concept-scoped modes it starts one full_pipeline compute job restricted to all concept windows or manually edited concept windows.
+## Parameters
 
-### Parameters
+| Parameter      | Type     | Required | Description                                                                                                                          | Default       | Example                            |
+|----------------|----------|----------|--------------------------------------------------------------------------------------------------------------------------------------|---------------|------------------------------------|
+| speaker_id     | string   | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                                                          | —             | `"Speaker01"`                      |
+| concept_list   | string[] | Yes      | Concept IDs used for workflow reporting and final annotation summary filtering. Must be non-empty.                                   | —             | `["12", "13", "14"]`               |
+| run_mode       | string   | No       | `full` preserves the legacy speaker-wide STT → forced-align → IPA sequence. `concept-windows` and `edited-only` start a `full_pipeline` job scoped to concept windows. | `"full"`      | `"concept-windows"`                |
+| concept_ids    | string[] | No       | Exact concept IDs to scope to. Only meaningful for `concept-windows` / `edited-only`. Omitted in those modes = all concept rows / all edited rows. | (all)         | `["12", "13"]`                     |
+| dryRun         | boolean  | No       | Validate inputs and preview the planned workflow without starting jobs.                                                              | `false`       | `true`                             |
 
-- `speaker_id` (type=string; minLength=1; maxLength=200)
-- `concept_list` (type=array) — Concept IDs used for workflow reporting and final annotation summary filtering.
-- `run_mode` (type=string; default="full"; enum=`full`, `concept-windows`, `edited-only`) — full preserves the legacy speaker-wide path; concept-windows and edited-only run the backend compute pipeline on concept windows.
-- `concept_ids` (type=array) — Optional exact concept IDs for scoped run modes. When omitted, concept-windows selects all concept rows and edited-only selects manually adjusted rows.
-- `dryRun` (type=boolean) — Validate inputs and preview the planned workflow without starting jobs.
+## Expected Output
+On `dryRun: true`: returns `{ status: "dry_run", speaker_id, concept_list, run_mode, concept_ids, source_wav, stages: [...], progress }`. The `stages` array names each planned step with its tool, status (`"planned"`), and `run_mode`. No jobs are created.
 
-### MCP annotations
+On `dryRun: false`:
+- `run_mode: "full"` — starts STT, forced-align, and acoustic IPA sequentially, polling each to terminal state. Returns the workflow summary.
+- `run_mode: "concept-windows"` / `"edited-only"` — starts one `full_pipeline` compute job via `pipeline_run`. Returns the `jobId` to poll with `compute_status` (`computeType: "full_pipeline"`).
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+**Always poll any returned `jobId` to terminal state before claiming success.**
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The requested speaker must resolve to a readable source audio file. (`file_presence`, `required`)
-- The caller must provide a non-empty concept_list for workflow reporting. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, STT, forced alignment, and acoustic IPA are each started and polled to a terminal status. (`job_state`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/run_full_annotation_pipeline?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `run_full_annotation_pipeline` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Construct `speaker_id` from the PARSE speaker identifier, `concept_list` as the non-empty concept IDs you want reported in the summary, and `run_mode` as one of `full`, `concept-windows`, or `edited-only`:
-
+## Example Successful Call
+Dry run (concept-windows mode):
 ```json
 {
   "speaker_id": "Speaker01",
@@ -98,8 +52,27 @@ Construct `speaker_id` from the PARSE speaker identifier, `concept_list` as the 
 }
 ```
 
-For a legacy speaker-wide dry run, keep the same `speaker_id` and `concept_list` but set `run_mode` to `full` and omit `concept_ids`:
+Representative dry-run response:
+```json
+{
+  "readOnly": true,
+  "previewOnly": true,
+  "dryRun": true,
+  "speaker_id": "Speaker01",
+  "concept_list": ["12", "13", "14"],
+  "run_mode": "concept-windows",
+  "concept_ids": ["12", "13"],
+  "source_wav": "audio/working/Speaker01/source.wav",
+  "stages": [
+    {"stage": "stt",   "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"},
+    {"stage": "ortho", "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"},
+    {"stage": "ipa",   "tool": "pipeline_run", "status": "planned", "run_mode": "concept-windows"}
+  ],
+  "progress": {"completedStages": 0, "totalStages": 3, "currentStage": "stt"}
+}
+```
 
+Legacy full-speaker dry run:
 ```json
 {
   "speaker_id": "Speaker01",
@@ -109,66 +82,22 @@ For a legacy speaker-wide dry run, keep the same `speaker_id` and `concept_list`
 }
 ```
 
-Typical scoped dry-run response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "run_full_annotation_pipeline",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "dryRun": true,
-    "speaker_id": "Speaker01",
-    "concept_list": ["12", "13", "14"],
-    "run_mode": "concept-windows",
-    "concept_ids": ["12", "13"],
-    "source_wav": "audio/working/Speaker01/source.wav",
-    "stages": [
-      {
-        "stage": "stt",
-        "tool": "pipeline_run",
-        "status": "planned",
-        "run_mode": "concept-windows"
-      },
-      {
-        "stage": "ortho",
-        "tool": "pipeline_run",
-        "status": "planned",
-        "run_mode": "concept-windows"
-      },
-      {
-        "stage": "ipa",
-        "tool": "pipeline_run",
-        "status": "planned",
-        "run_mode": "concept-windows"
-      }
-    ],
-    "progress": {
-      "completedStages": 0,
-      "totalStages": 3,
-      "currentStage": "stt"
-    },
-    "mode": "read-only"
-  }
-}
-```
+| Failure                                | Symptom                                                                | Recovery                                                                                                              |
+|----------------------------------------|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| Empty `concept_list`                   | Validation error                                                       | The workflow uses `concept_list` for reporting and summary filtering. Always pass a non-empty array, even if all concepts. |
+| Missing source audio                   | Job errors with file-not-found                                         | Run `pipeline_state_read` first. The speaker may not have been imported via `onboard_speaker_import` or normalized.   |
+| Step failure mid-workflow (full mode)  | One sub-job ends in `error`, later stages may not run                  | Read `job_logs` on the failed sub-job's `jobId`. Re-start only the failed stage via `pipeline_run` with `steps: [<that_step>]`. |
+| Live apply without confirmation        | Workflow starts before user is ready                                   | Always run with `dryRun: true` first, present the `stages` plan, and require explicit confirmation before `dryRun: false`. |
+| `concept_ids` references unknown IDs   | Workflow completes but with skipped windows                            | Verify IDs against `project_context_read` / `list_concepts_by_tag` before passing.                                    |
 
-## Quality checklist
+## Agent Reasoning Notes
+Treat this as the workflow macro: prefer it over `pipeline_run` for the common case. The `run_mode` choice is load-bearing — `full` is for fresh speakers where you want the whole audio processed; `concept-windows` is for review/re-annotation passes restricted to concept rows; `edited-only` is for cleanup passes after the user has manually adjusted some rows. Always (1) call `pipeline_state_read` to confirm preconditions, (2) call this with `dryRun: true` to see the planned stages, (3) confirm with the user, (4) re-run with `dryRun: false`, then (5) poll any returned `jobId` with `compute_status` until terminal. Inspect step-level results before declaring success — a `complete` status can still hide skipped or errored stages.
 
-- [ ] Live catalog confirms `run_full_annotation_pipeline` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `pipeline_run` — lower-level entry point with explicit step subset / overwrite control.
+- `pipeline_state_read`, `pipeline_state_batch` — preflight before starting.
+- `compute_status`, `job_status` — poll the returned `jobId`.
+- `onboard_speaker_import` — the typical predecessor for fresh-speaker flows.
+- `job_logs` — diagnose a failed stage.

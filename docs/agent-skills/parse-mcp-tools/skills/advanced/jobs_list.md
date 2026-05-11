@@ -1,97 +1,40 @@
----
-name: parse-mcp-tool-jobs-list
-description: "Use PARSE MCP tool `jobs_list`: List jobs from the PARSE job registry, including active and recent completed jobs. Supports filtering by status, type, and speaker, plus a bounded result limit."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# jobs_list
 
-# PARSE MCP Tool Skill — `jobs_list`
+**Category:** Advanced
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only listing)
+**Complexity:** Low
+**Estimated Tokens:** ~220 (short) / ~480 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `jobs_list` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Lists jobs from the PARSE job registry — active and recently completed — with optional filtering by status, type, and speaker, plus a bounded result limit.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Recovering a `jobId` you lost (session restart, agent crashed mid-poll, chat lost the start-call response).
+- Auditing recent activity on a speaker (`speaker: "Khan01"` to scope).
+- Finding all jobs of a given class — e.g. all `compute:full_pipeline` jobs to compare success counts across speakers.
+- Distinguishing recently-finished from currently-running work when triaging a project (`statuses: ["complete", "error"]` for the last batch).
 
-## Tool contract snapshot
+## When NOT to Use
+- For "what's running *right now*?" — `jobs_list_active` is purpose-built for that and takes no arguments. `jobs_list` returns completed/error jobs in its dwell window too, which is often noise for liveness checks.
+- For the detailed snapshot of a single known job — use `job_status` or `compute_status` directly with the `jobId`.
+- As a substitute for log retention. The registry is bounded; jobs age out. Don't rely on `jobs_list` to answer "what happened last week".
 
-- **Tool name:** `jobs_list`
-- **Skill name:** `parse-mcp-tool-jobs-list`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** List jobs from the PARSE job registry, including active and recent completed jobs. Supports filtering by status, type, and speaker, plus a bounded result limit.
+## Parameters
 
-### Parameters
+| Parameter | Type     | Required | Description                                                                                  | Default       | Example                              |
+|-----------|----------|----------|----------------------------------------------------------------------------------------------|---------------|--------------------------------------|
+| statuses  | string[] | No       | Filter by status. Accepts `queued`, `running`, `complete`, `error`.                          | (all)         | `["running", "queued"]`              |
+| types     | string[] | No       | Filter by job class — e.g. `"compute:full_pipeline"`, `"stt"`, `"onboard:speaker_import"`.   | (all)         | `["compute:full_pipeline"]`          |
+| speaker   | string   | No       | Restrict to jobs whose meta names this speaker. `minLength=1`, `maxLength=200`.              | (all)         | `"Khan01"`                           |
+| limit     | integer  | No       | Cap on result count. `minimum=1`, `maximum=500`.                                             | (server default) | `50`                              |
 
-- `statuses` (type=array)
-- `types` (type=array)
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `limit` (type=integer; minimum=1; maximum=500)
+## Expected Output
+Returns `{ jobs: [...], count, mode, previewOnly }`. Each entry in `jobs` carries `jobId`, `type`, `status`, `progress`, `message`, `meta`, `done`, `success`, `logCount`. The set is the union of currently-active jobs and recently-completed jobs still in the registry's dwell window.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- None advertised by the catalog.
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/jobs_list?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `jobs_list` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Filtered HTTP MCP call example
-
-Use `statuses` and `types` arrays when calling the MCP tool over HTTP; bound the result size with `limit`:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/jobs_list?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"statuses":["running","queued"],"types":["compute:full_pipeline"],"speaker":"Khan01","limit":5}'
-```
-
-Equivalent tool arguments:
-
+## Example Successful Call
 ```json
 {
   "statuses": ["running", "queued"],
@@ -101,49 +44,41 @@ Equivalent tool arguments:
 }
 ```
 
-Representative response shape:
-
+Representative response:
 ```json
 {
-  "tool": "jobs_list",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "jobs": [
-      {
-        "jobId": "9df2d820-4f7d-4f02-a6b0-2eb4e33f5c8a",
-        "type": "compute:full_pipeline",
-        "status": "running",
-        "progress": 42.5,
-        "message": "Running ORTH for Khan01",
-        "meta": {"speaker": "Khan01", "language": "sdh"},
-        "done": false,
-        "success": false,
-        "logCount": 7
-      }
-    ],
-    "count": 1,
-    "mode": "read-only",
-    "previewOnly": true
-  }
+  "readOnly": true,
+  "jobs": [
+    {
+      "jobId": "9df2d820-4f7d-4f02-a6b0-2eb4e33f5c8a",
+      "type": "compute:full_pipeline",
+      "status": "running",
+      "progress": 42.5,
+      "message": "Running ORTH for Khan01",
+      "meta": {"speaker": "Khan01", "language": "sdh"},
+      "done": false,
+      "success": false,
+      "logCount": 7
+    }
+  ],
+  "count": 1,
+  "mode": "read-only",
+  "previewOnly": true
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `jobs_list` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                            | Symptom                                                | Recovery                                                                                            |
+|------------------------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Job aged out of registry           | Expected `jobId` not in results despite recent run     | The dwell window has passed. There is no recovery for the snapshot itself — rely on persisted artifacts for evidence of past work. |
+| Wrong `types` string               | Empty result despite knowing jobs of that class exist  | Type strings are exact (e.g. `compute:full_pipeline`, not `full_pipeline`). Drop the `types` filter and inspect a row's `type` to learn the canonical value. |
+| Limit too low                      | Pagination truncation                                  | Increase `limit` up to 500, or filter more tightly with `statuses`/`types`/`speaker`.               |
 
-## Anti-patterns
+## Agent Reasoning Notes
+Use `jobs_list` for discovery and audit, `jobs_list_active` for liveness, and `job_status`/`compute_status` for the single-job detail. When in doubt about a job class, do an unfiltered `jobs_list` and read `type` off a representative row before adding `types` filters — this avoids the silent empty-result trap from typos. Filter aggressively when a project has hundreds of jobs in the registry; the default `limit` won't necessarily show you what you want.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `jobs_list_active` — narrower: only currently-running jobs, no arguments needed.
+- `job_status`, `compute_status` — per-job detail once you have a `jobId`.
+- `job_logs` — line-level log retrieval.
