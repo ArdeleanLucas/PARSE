@@ -1380,6 +1380,7 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
     await switchToAnnotateMode();
+    mockSyncTagsFromServer.mockClear();
     const rightPanel = () => screen.getByTestId("right-panel");
     const thesisRow = () => within(rightPanel()).getByRole("button", { name: /Thesis\s+1/i });
     expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
@@ -1389,6 +1390,8 @@ describe("ParseUI", () => {
 
     await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
     await waitFor(() => expect(mockRecords.Fail01.concept_tags?.["618"]).toEqual(["thesis"]));
+    await waitFor(() => expect(mockSyncTagsFromServer).toHaveBeenCalledOnce());
+    expect(mockSyncTagsFromServer.mock.invocationCallOrder[0]).toBeGreaterThan(mockReloadConfig.mock.invocationCallOrder[0]);
     expect(mockRecords.Fail01.concept_tags?.["365"]).toEqual(["thesis"]);
     expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
   });

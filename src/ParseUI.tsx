@@ -1808,6 +1808,7 @@ export function ParseUI() {
                 const duplicated = await duplicateConcept(underlyingKey);
                 seedLoadedDuplicateSiblingTags(duplicated.primary.id, duplicated.sibling.id);
                 await reloadConfig();
+                await syncTagStoreFromServer();
                 // Re-resolve the post-reload grouped concept by the
                 // original raw concept_id — `groupConceptEntries` will
                 // have rolled (A) and (B) into one sidebar entry sharing
