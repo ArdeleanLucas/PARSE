@@ -393,7 +393,7 @@ export function ConceptSidebar({
             {activeSpeaker && onScopedToSpeakerChange ? (
               <div className="flex flex-col items-end text-[10px] text-slate-400">
                 <span data-testid="concept-scope-breadcrumb" className="inline-flex items-center gap-1 whitespace-nowrap">
-                  {scopedToSpeaker ? (
+                  {scopedToSpeaker && hasElicitedScope ? (
                     <>
                       <span>{scopedConcepts.length} in</span>
                       {' '}

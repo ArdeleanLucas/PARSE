@@ -879,6 +879,39 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /fire/i })).toBeTruthy();
   });
 
+  it('renders concept count breadcrumb when scoped speaker has no annotation file', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail02"
+        scopedToSpeaker
+        onScopedToSpeakerChange={vi.fn()}
+        elicitedConceptKeys={new Set()}
+      />,
+    );
+
+    const breadcrumb = screen.getByTestId('concept-scope-breadcrumb');
+    expect(breadcrumb.textContent).toContain('2 concepts');
+    expect(breadcrumb.textContent).not.toContain('in Fail02');
+    expect(screen.getByText('No annotation file for Fail02 — showing master list')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /show all/i })).toBeTruthy();
+  });
 
   describe('right-click → Duplicate (split into next variant)', () => {
     const concepts = [
