@@ -1100,6 +1100,19 @@ describe('AnnotateView', () => {
     expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
   });
 
+  it('marks done without a time anchor when no concept boundary exists', () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    expect(screen.getByText('No lexeme interval yet for this variant.')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('annotate-mark-done'));
+
+    expect(mockSetConceptTag).toHaveBeenCalledWith('Fail01', 'water', 'confirmed');
+    expect(mockSetConfirmedAnchor).not.toHaveBeenCalled();
+    expect(screen.getByTestId('annotate-mark-done-toast').textContent).toBe('Marked done. Time anchor skipped: no boundary.');
+  });
+
   it('left-click on the Spectrogram button shows the spectrogram row beneath the waveform', () => {
     mockRecord = makeRecord([]);
     renderWaterAnnotateView();
@@ -1171,12 +1184,12 @@ describe('AnnotateView', () => {
     expect(screen.queryByTestId('spectrogram-playhead')).toBeNull();
   });
 
-  it('renders create-lexeme panel instead of Mark Done when no concept boundary exists', () => {
+  it('renders create-lexeme panel with Mark Done when no concept boundary exists', () => {
     mockRecord = makeRecord([]);
 
     renderWaterAnnotateView();
 
-    expect(screen.queryByRole('button', { name: /Mark Done/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Mark Done/i })).toBeTruthy();
     expect(screen.getByTestId('create-lexeme-interval')).toBeTruthy();
     expect(mockSetConceptTag).not.toHaveBeenCalled();
     expect(mockSetConfirmedAnchor).not.toHaveBeenCalled();

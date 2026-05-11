@@ -68,7 +68,6 @@ import { usePlaybackStore } from './stores/playbackStore';
 import { useTagStore } from './stores/tagStore';
 import { useUIStore } from './stores/uiStore';
 import { Modal } from './components/shared/Modal';
-import { Toast } from './components/shared/Toast';
 import {
   TranscriptionRunModal,
 } from './components/shared/TranscriptionRunModal';
@@ -879,15 +878,39 @@ export function ParseUI() {
   const [tagConceptSearch, setTagConceptSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
   const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
-  const [duplicateToast, setDuplicateToast] = useState<{ message: string; variant: 'error' | 'warning' | 'success' } | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ message: string; variant: 'error' | 'warning' } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
   const [recentlyDuplicatedSiblingKey, setRecentlyDuplicatedSiblingKey] = useState<string | null>(null);
   const recentlyDuplicatedSiblingTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const actionFeedbackTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   useEffect(() => () => {
     if (recentlyDuplicatedSiblingTimeoutRef.current) {
       window.clearTimeout(recentlyDuplicatedSiblingTimeoutRef.current);
     }
+    if (actionFeedbackTimeoutRef.current) {
+      window.clearTimeout(actionFeedbackTimeoutRef.current);
+    }
+  }, []);
+
+  const dismissActionFeedback = useCallback(() => {
+    if (actionFeedbackTimeoutRef.current) {
+      window.clearTimeout(actionFeedbackTimeoutRef.current);
+      actionFeedbackTimeoutRef.current = null;
+    }
+    setActionFeedback(null);
+  }, []);
+
+  const flashActionFeedback = useCallback((message: string, variant: 'error' | 'warning') => {
+    setActionFeedback({ message, variant });
+    if (actionFeedbackTimeoutRef.current) {
+      window.clearTimeout(actionFeedbackTimeoutRef.current);
+    }
+    actionFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setActionFeedback(null);
+      actionFeedbackTimeoutRef.current = null;
+    }, 5000);
   }, []);
 
   useEffect(() => {
@@ -1861,6 +1884,8 @@ export function ParseUI() {
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
           recentlyDuplicatedSiblingKey={recentlyDuplicatedSiblingKey}
+          actionFeedback={actionFeedback}
+          onDismissActionFeedback={dismissActionFeedback}
           isConceptVariantVisibleInSidebar={sidebarVariantVisibilityPredicate}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
@@ -1871,6 +1896,7 @@ export function ParseUI() {
             if (target) unmergeConcept(target.key);
           }}
           onDeleteConcept={(sidebarConcept) => {
+            setDeleteModalError(null);
             setDeleteConfirmation({
               conceptKey: sidebarConcept.key ?? String(sidebarConcept.id),
               conceptLabel: sidebarConcept.name,
@@ -1927,7 +1953,7 @@ export function ParseUI() {
                 console.error('[ParseUI] duplicateConcept failed:', err);
                 const message = err instanceof Error ? err.message : String(err);
                 const variant = /\b409\b/.test(message) ? 'warning' : 'error';
-                setDuplicateToast({ message, variant });
+                flashActionFeedback(message, variant);
               }
             })();
           }}
@@ -2467,11 +2493,17 @@ export function ParseUI() {
 
       <Modal
         open={deleteConfirmation !== null}
-        onClose={() => setDeleteConfirmation(null)}
+        onClose={() => { setDeleteModalError(null); setDeleteConfirmation(null); }}
         title={deleteConfirmation ? `Delete ${deleteConfirmation.conceptLabel}?` : 'Delete variant?'}
       >
         {deleteConfirmation && (
           <div className="space-y-4 text-sm text-slate-700">
+            {deleteModalError && (
+              <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-900">
+                <p className="font-semibold">Delete failed.</p>
+                <p className="mt-1">{deleteModalError}</p>
+              </div>
+            )}
             {deleteConfirmation.blockingSpeakers ? (
               <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
                 <p className="font-semibold">
@@ -2488,7 +2520,7 @@ export function ParseUI() {
               <button
                 type="button"
                 className="rounded border border-slate-200 px-3 py-1.5 text-slate-600 hover:bg-slate-50"
-                onClick={() => setDeleteConfirmation(null)}
+                onClick={() => { setDeleteModalError(null); setDeleteConfirmation(null); }}
               >
                 Cancel
               </button>
@@ -2500,11 +2532,11 @@ export function ParseUI() {
                     const pending = deleteConfirmation;
                     void (async () => {
                       try {
+                        setDeleteModalError(null);
                         await deleteConcept(pending.conceptKey);
                         await reloadConfig();
                         await syncTagStoreFromServer();
                         setDeleteConfirmation(null);
-                        setDuplicateToast({ message: `Deleted ${pending.conceptLabel}`, variant: 'warning' });
                       } catch (err) {
                         console.error('[ParseUI] deleteConcept failed:', err);
                         const body = err instanceof ApiError && err.body && typeof err.body === 'object' ? err.body as { blocking_speakers?: unknown } : null;
@@ -2516,7 +2548,7 @@ export function ParseUI() {
                           return;
                         }
                         const message = err instanceof Error ? err.message : String(err);
-                        setDuplicateToast({ message, variant: 'error' });
+                        setDeleteModalError(message);
                       }
                     })();
                   }}
@@ -2531,14 +2563,6 @@ export function ParseUI() {
       <Modal open={modals.commentsImport.isOpen} onClose={modals.commentsImport.close} title="Import Audition Comments">
         <CommentsImport onImportComplete={modals.commentsImport.close} />
       </Modal>
-      {duplicateToast && (
-        <Toast
-          message={duplicateToast.message}
-          variant={duplicateToast.variant}
-          duration={5000}
-          onDismiss={() => setDuplicateToast(null)}
-        />
-      )}
     </div>
   );
 }

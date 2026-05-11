@@ -1754,6 +1754,46 @@ describe("ParseUI", () => {
     expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").not.toContain("NEW");
   });
 
+  it("duplicate 409 error surfaces in the sidebar inline notice and clears after 5s", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.duplicateConcept).mockRejectedValueOnce(new ApiError(409, "POST", "/api/concepts/618/duplicate", { error: "duplicate exists" }, "API POST /api/concepts/618/duplicate failed 409: duplicate exists"));
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const feedback = within(sidebar).getByTestId("sidebar-action-feedback");
+    expect(feedback.textContent ?? "").toContain("duplicate exists");
+    expect(feedback.className).toContain("bg-amber-50");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(within(sidebar).queryByTestId("sidebar-action-feedback")).toBeNull();
+  });
+
   it("duplicates the active raw variant when right-clicking a grouped parent", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
@@ -1814,7 +1854,7 @@ describe("ParseUI", () => {
     expect(screen.getByText(/permanently removes new \(B\)/i)).toBeTruthy();
   });
 
-  it("successful delete reloads config and fires a warning toast", async () => {
+  it("successful delete reloads config and closes without a viewport toast", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
       project_name: "PARSE",
@@ -1843,7 +1883,41 @@ describe("ParseUI", () => {
     await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("618"));
     await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
     expect(mockSyncTagsFromServer).toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent ?? "").toContain("Deleted new (B)");
+    await waitFor(() => expect(screen.queryByText("Delete new (B)?")).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("delete network error surfaces inline in the delete modal and keeps it open", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockRejectedValueOnce(new Error("Could not reach the PARSE API"));
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("618"));
+    expect(screen.getByText("Delete new (B)?")).toBeTruthy();
+    const modalError = screen.getByText("Delete failed.").parentElement as HTMLElement;
+    expect(modalError.textContent ?? "").toContain("Could not reach the PARSE API");
+    expect(modalError.className).toContain("bg-rose-50");
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("409 delete keeps the modal open and surfaces blocking speakers", async () => {

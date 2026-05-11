@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import type { DragToCreateOptions, QuickRetimeSelectionOptions, UseWaveSurferOptions, WaveSurferRefs, WaveSurferRegionsControls, WsRegion } from "./types";
-import { WAVE_SURFER_REGION_COLOR } from "./types";
+import { WAVE_SURFER_DRAFT_REGION_COLOR, WAVE_SURFER_REGION_COLOR } from "./types";
 
 const QUICK_RETIME_REGION_ID = "quick-retime-selection";
 const QUICK_RETIME_REGION_COLOR = "rgba(59,130,246,0.18)";
@@ -59,7 +59,7 @@ export function useWaveSurferRegions(
     const disableSelection = regions.enableDragSelection(
       {
         id: `${CREATE_LEXEME_REGION_ID}-${Date.now()}`,
-        color: WAVE_SURFER_REGION_COLOR,
+        color: WAVE_SURFER_DRAFT_REGION_COLOR,
         drag: true,
         resize: true,
       },

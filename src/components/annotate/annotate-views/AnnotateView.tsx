@@ -1075,8 +1075,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
 
           {conceptInterval ? (
-            <>
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                 <div className="mb-2 flex items-center justify-between">
                   <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Lexeme timestamp (seconds)</label>
                   <span className="font-mono text-[10px] text-slate-400">{fmt(conceptInterval.start)}–{fmt(conceptInterval.end)}</span>
@@ -1140,10 +1139,19 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   )}
                 </div>
               </div>
+          ) : (
+            <CreateLexemePanel
+              speaker={speaker}
+              conceptKey={concept.key}
+              enableDragToCreate={enableDragToCreate}
+              disableDragToCreate={disableDragToCreate}
+            />
+          )}
 
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  data-testid="save-lexeme-annotation"
+          <div className="flex items-center gap-3 pt-2">
+            {conceptInterval && (
+              <button
+                data-testid="save-lexeme-annotation"
                   disabled={timestampSaving}
                   onClick={async () => {
                     const nextStart = parseFloat(editStart);
@@ -1183,10 +1191,11 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     }
                   }}
                   className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  <Save className="h-4 w-4" /> Save Annotation
-                </button>
-                <div className="relative">
+              >
+                <Save className="h-4 w-4" /> Save Annotation
+              </button>
+            )}
+            <div className="relative">
                   <button
                     type="button"
                     data-testid="annotate-mark-done"
@@ -1209,9 +1218,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                       {doneToast}
                     </div>
                   )}
-                </div>
-                {onCaptureOffsetAnchor && (
-                  <div className="relative">
+            </div>
+            {onCaptureOffsetAnchor && (
+              <div className="relative">
                     <button
                       onClick={onCaptureOffsetAnchor}
                       data-testid="annotate-capture-anchor"
@@ -1229,18 +1238,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                         {captureToast}
                       </div>
                     )}
-                  </div>
-                )}
               </div>
-            </>
-          ) : (
-            <CreateLexemePanel
-              speaker={speaker}
-              conceptKey={concept.key}
-              enableDragToCreate={enableDragToCreate}
-              disableDragToCreate={disableDragToCreate}
-            />
-          )}
+            )}
+          </div>
         </div>
       </section>
 

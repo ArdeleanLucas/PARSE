@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
 import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
@@ -93,6 +93,8 @@ interface ConceptSidebarProps {
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
   recentlyDuplicatedSiblingKey?: string | null;
+  actionFeedback?: { message: string; variant: 'error' | 'warning' } | null;
+  onDismissActionFeedback?: () => void;
 }
 
 const tagDot: Record<ConceptTag, string> = {
@@ -198,6 +200,8 @@ export function ConceptSidebar({
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
   recentlyDuplicatedSiblingKey = null,
+  actionFeedback = null,
+  onDismissActionFeedback,
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
@@ -345,6 +349,27 @@ export function ConceptSidebar({
             className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
         </div>
+        {actionFeedback && (
+          <div
+            role="status"
+            data-testid="sidebar-action-feedback"
+            className={`mt-3 flex items-center gap-2 rounded-md border px-2 py-1.5 text-[11px] ${
+              actionFeedback.variant === 'warning'
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-rose-200 bg-rose-50 text-rose-900'
+            }`}
+          >
+            <span className="flex-1">{actionFeedback.message}</span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="shrink-0 rounded p-0.5 hover:bg-white/70"
+              onClick={onDismissActionFeedback}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
         <div className="mt-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="inline-flex rounded-md bg-slate-100 p-0.5">

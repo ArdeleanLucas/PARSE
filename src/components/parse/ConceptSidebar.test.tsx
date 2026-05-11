@@ -18,6 +18,97 @@ afterEach(() => {
 });
 
 describe('ConceptSidebar', () => {
+
+  it('renders the action feedback banner when actionFeedback prop is set', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        actionFeedback={{ message: 'Duplicate failed', variant: 'error' }}
+        onDismissActionFeedback={vi.fn()}
+      />,
+    );
+
+    const banner = screen.getByTestId('sidebar-action-feedback');
+    expect(banner.textContent ?? '').toContain('Duplicate failed');
+    expect(banner.className).toContain('bg-rose-50');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('does not render the action feedback banner when actionFeedback is null', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        actionFeedback={null}
+      />,
+    );
+
+    expect(screen.queryByTestId('sidebar-action-feedback')).toBeNull();
+  });
+
+  it('clicking the action feedback dismiss button calls onDismissActionFeedback', () => {
+    const onDismissActionFeedback = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        actionFeedback={{ message: 'Already exists', variant: 'warning' }}
+        onDismissActionFeedback={onDismissActionFeedback}
+      />,
+    );
+
+    const banner = screen.getByTestId('sidebar-action-feedback');
+    expect(banner.className).toContain('bg-amber-50');
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(onDismissActionFeedback).toHaveBeenCalledOnce();
+  });
+
   it('renders Concept and Source parent pills with only the active sub-row visible', () => {
     const onSortParentChange = vi.fn();
     const { rerender } = render(
