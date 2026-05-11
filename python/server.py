@@ -1621,6 +1621,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _dispatch_api_delete(self, request_path: str) -> None:
         parts = self._path_parts(request_path)
         if len(parts) == 5 and parts[0] == "api" and parts[1] == "compare" and parts[2] == "canonical-lexemes": self._api_delete_compare_canonical_lexeme(parts[3], parts[4]); return
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "concepts": self._api_delete_concept(parts[2]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links":
             self._api_delete_concept_survey_link(parts[2])
             return

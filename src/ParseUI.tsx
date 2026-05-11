@@ -60,7 +60,8 @@ import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
 import { useActiveJobsFeed } from './hooks/useActiveJobsFeed';
 import { listActiveJobs } from './api/client';
-import { duplicateConcept } from './api/client';
+import { deleteConcept, duplicateConcept } from './api/client';
+import { ApiError } from './api/contracts/shared';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
 import { usePlaybackStore } from './stores/playbackStore';
@@ -97,6 +98,12 @@ import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from 
 import type { AnnotationRecord, ClefConfigStatus, CompareBundle, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
+
+interface DeleteConfirmationState {
+  conceptKey: string;
+  conceptLabel: string;
+  blockingSpeakers: string[] | null;
+}
 
 interface LingTag {
   id: string; name: string; color: string; dotClass: string; count: number;
@@ -837,6 +844,7 @@ export function ParseUI() {
   const [darkMode, setDarkMode] = useState(false);
   const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
   const [duplicateToast, setDuplicateToast] = useState<{ message: string; variant: 'error' | 'warning' | 'success' } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
   const [recentlyDuplicatedSiblingKey, setRecentlyDuplicatedSiblingKey] = useState<string | null>(null);
   const recentlyDuplicatedSiblingTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
@@ -1796,6 +1804,13 @@ export function ParseUI() {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             if (target) unmergeConcept(target.key);
           }}
+          onDeleteConcept={(sidebarConcept) => {
+            setDeleteConfirmation({
+              conceptKey: sidebarConcept.key ?? String(sidebarConcept.id),
+              conceptLabel: sidebarConcept.name,
+              blockingSpeakers: null,
+            });
+          }}
           onDuplicateConcept={(sidebarConcept) => {
             // Pin the underlying concept_id (the concepts.csv row id) now —
             // `concepts` re-derives on every config reload, so the captured
@@ -1841,10 +1856,6 @@ export function ParseUI() {
                     setRecentlyDuplicatedSiblingKey((current) => current === siblingKey ? null : current);
                     recentlyDuplicatedSiblingTimeoutRef.current = null;
                   }, 5000);
-                  setDuplicateToast({
-                    message: `Duplicated ${duplicated.primary.label} → ${duplicated.sibling.label}`,
-                    variant: 'success',
-                  });
                 }
               } catch (err) {
                 console.error('[ParseUI] duplicateConcept failed:', err);
@@ -2387,6 +2398,70 @@ export function ParseUI() {
         jobId={jobLogsOpen}
         onClose={closeJobLogs}
       />
+
+      <Modal
+        open={deleteConfirmation !== null}
+        onClose={() => setDeleteConfirmation(null)}
+        title={deleteConfirmation ? `Delete ${deleteConfirmation.conceptLabel}?` : 'Delete variant?'}
+      >
+        {deleteConfirmation && (
+          <div className="space-y-4 text-sm text-slate-700">
+            {deleteConfirmation.blockingSpeakers ? (
+              <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                <p className="font-semibold">
+                  {deleteConfirmation.blockingSpeakers.length} speaker(s) have annotated this lexeme: {deleteConfirmation.blockingSpeakers.join(', ')}.
+                </p>
+                <p className="mt-1">Resolve those before deleting.</p>
+              </div>
+            ) : (
+              <p>
+                This permanently removes {deleteConfirmation.conceptLabel} from concepts.csv and clears its sidecar state. Annotated lexemes cannot be deleted.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-slate-200 px-3 py-1.5 text-slate-600 hover:bg-slate-50"
+                onClick={() => setDeleteConfirmation(null)}
+              >
+                Cancel
+              </button>
+              {!deleteConfirmation.blockingSpeakers && (
+                <button
+                  type="button"
+                  className="rounded bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-700"
+                  onClick={() => {
+                    const pending = deleteConfirmation;
+                    void (async () => {
+                      try {
+                        await deleteConcept(pending.conceptKey);
+                        await reloadConfig();
+                        await syncTagStoreFromServer();
+                        setDeleteConfirmation(null);
+                        setDuplicateToast({ message: `Deleted ${pending.conceptLabel}`, variant: 'warning' });
+                      } catch (err) {
+                        console.error('[ParseUI] deleteConcept failed:', err);
+                        const body = err instanceof ApiError && err.body && typeof err.body === 'object' ? err.body as { blocking_speakers?: unknown } : null;
+                        const blockingSpeakers = Array.isArray(body?.blocking_speakers)
+                          ? body.blocking_speakers.filter((speaker): speaker is string => typeof speaker === 'string')
+                          : null;
+                        if (err instanceof ApiError && err.status === 409 && blockingSpeakers?.length) {
+                          setDeleteConfirmation({ ...pending, blockingSpeakers });
+                          return;
+                        }
+                        const message = err instanceof Error ? err.message : String(err);
+                        setDuplicateToast({ message, variant: 'error' });
+                      }
+                    })();
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
       <Modal open={modals.commentsImport.isOpen} onClose={modals.commentsImport.close} title="Import Audition Comments">
         <CommentsImport onImportComplete={modals.commentsImport.close} />
       </Modal>

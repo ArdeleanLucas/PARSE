@@ -74,6 +74,7 @@ interface ConceptSidebarProps {
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
+  onDeleteConcept?: (concept: SidebarConcept) => void;
   onSurveyLinksChanged?: () => void | Promise<void>;
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
@@ -180,6 +181,7 @@ export function ConceptSidebar({
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
+  onDeleteConcept,
   onSurveyLinksChanged,
   isConceptVariantVisibleInSidebar,
   scopedToSpeaker = false,
@@ -558,6 +560,7 @@ export function ConceptSidebar({
                     onClick={() => onConceptSelect(concept.id, variant.conceptKey)}
                     onContextMenu={(event) => {
                       event.preventDefault();
+                      event.stopPropagation();
                       setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
                     }}
                     className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass} ${isRecentlyDuplicated ? 'border-l-2 border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : ''}`}
@@ -632,6 +635,20 @@ export function ConceptSidebar({
           >
             Change survey ID…
           </button>
+          {!contextMenu.concept.variants?.length && (
+            <button
+              type="button"
+              role="menuitem"
+              title="Delete this variant"
+              className="block w-full rounded px-2 py-1 text-left text-rose-700 hover:bg-rose-50"
+              onClick={() => {
+                onDeleteConcept?.(contextMenu.concept);
+                setContextMenu(null);
+              }}
+            >
+              Delete variant…
+            </button>
+          )}
           {surveyLinkEditor && surveyLinkEditor.concept.id === contextMenu.concept.id && (() => {
             const buckets = bucketsForConcept(surveyLinkEditor.concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
             const selectedBucketKey = surveyLinkEditor.bucket ? `${surveyLinkEditor.bucket.surveyId} ${surveyLinkEditor.bucket.sourceItem}` : '';

@@ -6,9 +6,11 @@ import logging
 from pathlib import Path
 
 import server as _server
+from canonical_lexemes import drop_canonical_references_for
 from concept_relink import ConceptRelinkError, apply_relink_by_gloss, build_relink_by_gloss_plan
-from concepts_io import ConceptDuplicateError, duplicate_concept_variant
+from concepts_io import ConceptDeleteError, ConceptDuplicateError, delete_concept_variant, duplicate_concept_variant
 from storage import tags_store
+from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,6 +144,82 @@ def _mirror_global_tag_concepts_to_sibling(primary_id: str, sibling_id: str) -> 
         _LOGGER.warning("Failed to mirror duplicate concept global tags: write failed: %s", exc)
 
 
+def _drop_concept_tags_from_annotations(annotations_dir: Path, concept_id: str) -> None:
+    """Best-effort removal of one concept_tags entry from every annotation file."""
+    if not annotations_dir.is_dir():
+        return
+    for annotation_path in sorted(annotations_dir.glob('*.json')):
+        try:
+            data = json.loads(annotation_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError):
+            continue
+        concept_tags = data.get('concept_tags')
+        if not isinstance(concept_tags, dict) or concept_id not in concept_tags:
+            continue
+        concept_tags.pop(concept_id, None)
+        data['concept_tags'] = concept_tags
+        tmp = annotation_path.with_suffix('.json.tmp')
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+            tmp.replace(annotation_path)
+        except OSError as exc:
+            _LOGGER.warning("Failed to drop concept tag sidecar %s from %s: %s", concept_id, annotation_path, exc)
+
+
+def _drop_global_tag_concept_membership(concept_id: str) -> None:
+    """Best-effort removal of one concept id from global tag memberships."""
+    try:
+        current = tags_store.fetch_all()
+    except OSError as exc:
+        _LOGGER.warning("Failed to drop deleted concept from global tags: fetch failed: %s", exc)
+        return
+    changed = False
+    next_tags = []
+    for tag in current.get("tags", []):
+        concepts = list(tag.get("concepts", []))
+        filtered = [cid for cid in concepts if cid != concept_id]
+        if filtered != concepts:
+            changed = True
+        next_tags.append({**tag, "concepts": filtered})
+    if not changed:
+        return
+    try:
+        tags_store.replace_all(next_tags)
+    except (OSError, tags_store.TagValidationError) as exc:
+        _LOGGER.warning("Failed to drop deleted concept from global tags: write failed: %s", exc)
+
+
+def _drop_survey_link_overrides(project_root: Path, concept_id: str) -> None:
+    """Best-effort removal of speaker-scoped survey-link overrides for one concept."""
+    try:
+        state = load_survey_overlap_state(project_root)
+        speaker_links = state.get("speaker_concept_survey_links", {})
+        next_speaker_links = {
+            speaker: {cid: dict(links) for cid, links in concept_links.items() if cid != concept_id}
+            for speaker, concept_links in speaker_links.items()
+        }
+        next_speaker_links = {speaker: links for speaker, links in next_speaker_links.items() if links}
+        if next_speaker_links == speaker_links:
+            return
+        update_survey_overlap_state(
+            project_root,
+            {
+                "reset_speaker_concept_survey_links": True,
+                "speaker_concept_survey_links": next_speaker_links,
+            },
+        )
+    except Exception as exc:
+        _LOGGER.warning("Failed to drop deleted concept survey-link overrides: %s", exc)
+
+
+def _drop_canonical_references(project_root: Path, concept_id: str) -> None:
+    """Best-effort removal of canonical selections for one deleted concept row."""
+    try:
+        drop_canonical_references_for(project_root, row_id=concept_id)
+    except Exception as exc:
+        _LOGGER.warning("Failed to drop deleted concept canonical references: %s", exc)
+
+
 def _api_post_concept_duplicate(self, concept_id: str) -> None:
     """Duplicate one concepts.csv row into a new variant sibling."""
     try:
@@ -157,6 +235,24 @@ def _api_post_concept_duplicate(self, concept_id: str) -> None:
         payload['primary']['id'],
         payload['sibling']['id'],
     )
+    self._send_json(_server.HTTPStatus.OK, payload)
+
+
+def _api_delete_concept(self, concept_id: str) -> None:
+    """Delete one unannotated concepts.csv row and clean best-effort sidecars."""
+    try:
+        payload = delete_concept_variant(_server._project_root(), concept_id)
+    except ConceptDeleteError as exc:
+        body: dict[str, object] = {"error": exc.message}
+        if exc.blocking_speakers:
+            body["blocking_speakers"] = exc.blocking_speakers
+        self._send_json(exc.status, body)
+        return
+    deleted_id = str(payload["deleted_id"])
+    _drop_concept_tags_from_annotations(_server._annotations_dir_path(), deleted_id)
+    _drop_global_tag_concept_membership(deleted_id)
+    _drop_survey_link_overrides(_server._project_root(), deleted_id)
+    _drop_canonical_references(_server._project_root(), deleted_id)
     self._send_json(_server.HTTPStatus.OK, payload)
 
 
@@ -190,4 +286,4 @@ def _api_delete_concept_survey_link(self, concept_id: str) -> None:
     self._send_json(response.status, response.payload)
 
 
-__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_concepts_relink_by_gloss', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_post_concept_survey_link', '_api_delete_concept_survey_link']
+__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_concepts_relink_by_gloss', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_delete_concept', '_api_post_concept_survey_link', '_api_delete_concept_survey_link']
