@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
+from concepts_io import _variant_suffix
 from storage import tags_store
 
 
@@ -63,6 +64,14 @@ def _read_concepts(path: pathlib.Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _source_item_suffixes(path: pathlib.Path, source_item: str) -> set[str]:
+    return {
+        _variant_suffix(row["concept_en"])
+        for row in _read_concepts(path)
+        if row["source_item"] == source_item
+    }
+
+
 def _post_duplicate(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, concept_id: str) -> tuple[int, dict]:
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     server._install_route_bindings()
@@ -111,6 +120,64 @@ def test_duplicate_single_row_renames_original_appends_sibling_and_writes_backup
     backups = sorted(tmp_path.glob("concepts.csv.bak-*-pre-duplicate-322"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == prewrite
+
+
+def test_duplicate_first_time_on_singleton_still_yields_A_and_B(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [{"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": "527"}],
+    )
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "527")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["concept_en"] == "head (A)"
+    assert payload["sibling"]["concept_en"] == "head (B)"
+    assert _source_item_suffixes(concepts_path, "31") == {"A", "B"}
+
+
+def test_duplicate_rewrites_bare_primary_when_letters_already_taken(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare primary in an already-lettered bucket gets the first free letter before its sibling."""
+
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [
+            {"id": "247", "concept_en": "head (A)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
+            {"id": "248", "concept_en": "head (B)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
+            {"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
+        ],
+    )
+
+    status, payload = _post_duplicate(tmp_path, monkeypatch, "527")
+
+    assert status == HTTPStatus.OK
+    assert payload["primary"]["id"] == "527"
+    assert payload["primary"]["concept_en"] == "head (C)"
+    assert payload["sibling"]["concept_en"] == "head (D)"
+    assert _source_item_suffixes(concepts_path, "31") == {"A", "B", "C", "D"}
+
+
+def test_duplicate_post_condition_bucket_has_no_bare_when_any_letter_used(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts(
+        concepts_path,
+        [
+            {"id": "10", "concept_en": "water", "source_item": "10", "source_survey": "JBIL", "custom_order": ""},
+            {"id": "247", "concept_en": "head (A)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
+            {"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
+        ],
+    )
+
+    status, _payload = _post_duplicate(tmp_path, monkeypatch, "527")
+
+    assert status == HTTPStatus.OK
+    bucket_suffixes = _source_item_suffixes(concepts_path, "31")
+    assert "" not in bucket_suffixes
+    assert bucket_suffixes == {"A", "B", "C"}
+    singleton_suffixes = _source_item_suffixes(concepts_path, "10")
+    assert singleton_suffixes == {""}
 
 
 def test_duplicate_creates_C_when_AB_already_exist(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -187,7 +254,7 @@ def test_duplicate_falls_back_to_numeric_after_Z(tmp_path: pathlib.Path, monkeyp
     assert payload["sibling"]["concept_en"] == "leaf (27)"
 
 
-def test_duplicate_leaves_bare_primary_when_A_sibling_already_exists(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_duplicate_rewrites_bare_primary_when_A_sibling_already_exists(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     concepts_path = tmp_path / "concepts.csv"
     _write_concepts(
         concepts_path,
@@ -200,13 +267,14 @@ def test_duplicate_leaves_bare_primary_when_A_sibling_already_exists(tmp_path: p
     status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
 
     assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf"
-    assert payload["sibling"]["concept_en"] == "leaf (B)"
+    assert payload["primary"]["concept_en"] == "leaf (B)"
+    assert payload["sibling"]["concept_en"] == "leaf (C)"
     assert _read_concepts(concepts_path) == [
-        {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
+        {"id": "322", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
         {"id": "618", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-        {"id": "619", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+        {"id": "619", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
     ]
+    assert "" not in _source_item_suffixes(concepts_path, "102")
 
 
 def test_duplicate_does_not_double_suffix_when_primary_already_lettered(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

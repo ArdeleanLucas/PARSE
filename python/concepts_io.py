@@ -91,16 +91,8 @@ def _source_item_variant_suffixes(rows: Sequence[Mapping[str, Any]], *, source_i
     return used
 
 
-def _next_free_variant_label(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    source_item: str,
-    rewrite_bare_primary: bool,
-) -> str:
-    used = _source_item_variant_suffixes(rows, source_item=source_item)
-    if rewrite_bare_primary:
-        # A bare primary will be rewritten to `(A)` before the sibling is appended.
-        used.add("A")
+def _first_free_letter(used: set[str]) -> str:
+    """Return the first A-Z variant label not in ``used``; fall back to numeric labels."""
 
     for codepoint in range(ord("A"), ord("Z") + 1):
         label = chr(codepoint)
@@ -112,6 +104,20 @@ def _next_free_variant_label(
     while label_num in numeric_labels:
         label_num += 1
     return str(label_num)
+
+
+def _next_free_variant_label(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_item: str,
+    rewrite_bare_primary: bool,
+) -> str:
+    used = _source_item_variant_suffixes(rows, source_item=source_item)
+    if rewrite_bare_primary:
+        # A bare primary will be rewritten to `(A)` before the sibling is appended.
+        used.add("A")
+
+    return _first_free_letter(used)
 
 
 def _speaker_name_from_annotation(path: Path, payload: Mapping[str, Any]) -> str:
@@ -181,12 +187,20 @@ def duplicate_concept_variant(
     stem = _variant_stem(label)
     target_suffix = _variant_suffix(label)
     sibling_suffixes = _source_item_variant_suffixes(rows, source_item=source_item, exclude_index=target_index)
-    rewrite_bare_primary = not target_suffix and "A" not in sibling_suffixes
-    variant_label = _next_free_variant_label(
-        rows,
-        source_item=source_item,
-        rewrite_bare_primary=rewrite_bare_primary,
-    )
+    # MC-371-G: a duplicated bucket must never mix bare and lettered labels.
+    rewrite_bare_primary = not target_suffix
+    if rewrite_bare_primary:
+        primary_label_letter = _first_free_letter(sibling_suffixes)
+        reserved = set(sibling_suffixes)
+        reserved.add(primary_label_letter)
+        variant_label = _first_free_letter(reserved)
+    else:
+        primary_label_letter = ""
+        variant_label = _next_free_variant_label(
+            rows,
+            source_item=source_item,
+            rewrite_bare_primary=False,
+        )
     backup_path = _backup_path(concepts_path, normalized_id, now)
     try:
         original_bytes = concepts_path.read_bytes()
@@ -196,7 +210,7 @@ def duplicate_concept_variant(
 
     primary = dict(target)
     primary["id"] = normalized_id
-    primary["concept_en"] = "{0} (A)".format(stem) if rewrite_bare_primary else label
+    primary["concept_en"] = "{0} ({1})".format(stem, primary_label_letter) if rewrite_bare_primary else label
     sibling = {
         "id": str(_max_numeric_id(rows) + 1),
         "concept_en": "{0} ({1})".format(stem, variant_label),
