@@ -1,122 +1,60 @@
----
-name: parse-mcp-tool-speakers-list
-description: "Use PARSE MCP tool `speakers_list`: List every speaker with an annotation file under ``annotations/``. Read-only. Use as the starting point for a batch pipeline run — pair with ``pipeline_state_batch`` to see which speakers are ready to process. Filters out non-annotation entries (e.g. a ``backups/`` directory) so the list is directly usable as input to ``pipeline_run``."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# speakers_list
 
-# PARSE MCP Tool Skill — `speakers_list`
+**Category:** Project
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only)
+**Complexity:** Low
+**Estimated Tokens:** ~150 (short) / ~340 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `speakers_list` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Lists every speaker with an annotation file under `annotations/` — filters out non-annotation entries (e.g. `backups/`) so the list is directly usable as input to `pipeline_run` and other speaker-iterating tools.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Starting any batch pipeline run — get the list of speakers, then pass it to `pipeline_state_batch` (Advanced bucket) for readiness check, then iterate `pipeline_run` per speaker.
+- Validating a speaker ID before mutating tools (`apply_timestamp_offset`, `csv_only_reimport`, etc.).
+- Capacity / progress reporting: "how many speakers are in this project?".
+- As a cheap discovery probe at the start of any session.
 
-## Tool contract snapshot
+## When NOT to Use
+- For project-wide metadata beyond just speaker names — `project_context_read` returns a richer set of context blocks (project metadata, annotation inventory, enrichments summary).
+- For per-speaker pipeline coverage — that's `pipeline_state_read` / `pipeline_state_batch` (Advanced bucket).
+- For speakers registered in `source_index.json` but not yet annotated. This tool lists annotation files; for source-index inspection use `source_index_validate` with `mode: "full"` and an empty manifest, or read the file via `read_text_preview`.
 
-- **Tool name:** `speakers_list`
-- **Skill name:** `parse-mcp-tool-speakers-list`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** List every speaker with an annotation file under ``annotations/``. Read-only. Use as the starting point for a batch pipeline run — pair with ``pipeline_state_batch`` to see which speakers are ready to process. Filters out non-annotation entries (e.g. a ``backups/`` directory) so the list is directly usable as input to ``pipeline_run``.
+## Parameters
+No parameters. Pass `{}`.
 
-### Parameters
+## Expected Output
+Returns `{ readOnly, speakers: [...], count }`. `speakers` is a flat list of speaker IDs derived from filenames under `annotations/`, filtered to exclude non-annotation entries.
 
-- No parameters.
+Does not mutate project state.
 
-### MCP annotations
-
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/speakers_list?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `speakers_list` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-`speakers_list` takes no arguments; call it with an empty JSON object over the HTTP MCP bridge:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/speakers_list?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{}'
-```
-
-Expected JSON response shape:
-
+Representative response:
 ```json
 {
-  "tool": "speakers_list",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "speakers": ["Speaker01", "Speaker02"],
-    "count": 2,
-    "mode": "read-only",
-    "previewOnly": true
-  }
+  "readOnly": true,
+  "speakers": ["Khan01", "Khan02", "Khan03"],
+  "count": 3
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `speakers_list` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Speaker registered but not listed      | `source_index.json` has an entry but `speakers_list` doesn't include it | The speaker doesn't have an annotation file yet. Run `onboard_speaker_import` (Annotation bucket) — that creates the annotation scaffold. |
+| Listed speaker has no source           | Annotation file exists but `source_index.json` has no entry          | Stale annotation file. Either re-import via `onboard_speaker_import` or remove the orphan annotation. |
+| Unexpected entries                     | Backup directory names or other non-speaker entries appear           | This shouldn't happen — the tool filters them out. If it does, treat it as a project state issue and clean up `annotations/`. |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the cheapest "who's in this project?" probe. The deliberate filtering of non-annotation entries (e.g. `backups/`) is what makes the output directly usable as input to `pipeline_run` — no manual list-cleanup required. Pair with `pipeline_state_batch` for the standard batch-pipeline flow: enumerate → preflight → iterate.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `project_context_read` — broader project state, including this list plus more context.
+- `pipeline_state_batch`, `pipeline_state_read` (Advanced bucket) — per-tier coverage / readiness per speaker.
+- `pipeline_run`, `run_full_annotation_pipeline` (Advanced bucket) — the typical consumers of this list.
+- `source_index_validate` — inspect / repair `source_index.json` separately.

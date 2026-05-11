@@ -1,157 +1,76 @@
----
-name: parse-mcp-tool-csv-only-reimport
-description: "Use PARSE MCP tool `csv_only_reimport`: Re-import an already-onboarded speaker from a refreshed Audition cue CSV (and optional comments CSV) without accepting or copying a WAV. The speaker's existing primary WAV is resolved from source_index.json; dryRun=true previews the resolved WAV and backup path, while dryRun=false first captures a mandatory backup under annotations/backups/<timestamp>-<speaker>-csv-reimport/ and then reuses the server onboarding worker."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# csv_only_reimport
 
-# PARSE MCP Tool Skill — `csv_only_reimport`
+**Category:** Project
+**Mutability:** mutating (rewrites annotation + concepts + project metadata; captures mandatory backup first)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Medium–High
+**Estimated Tokens:** ~280 (short) / ~600 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `csv_only_reimport` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Re-imports an already-onboarded speaker from a refreshed Audition cue CSV (and optional comments CSV) — *without* re-accepting or copying a WAV — capturing a timestamped backup under `annotations/backups/` before rewriting the speaker's annotation files.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Refreshing a speaker from a corrected Audition cue CSV after manual editing in Audition.
+- Reapplying an updated comments CSV without changing the audio source.
+- Iterating on CSV-only changes to a single speaker — fast vs. re-running the full onboard flow.
+- When the existing primary WAV in `source_index.json` is still correct but the cue data has changed.
 
-## Tool contract snapshot
+## When NOT to Use
+- For fresh speaker imports — use `onboard_speaker_import` (Annotation bucket).
+- For re-importing both WAV and CSV — use `onboard_speaker_import` (it handles both).
+- For pre-aligned annotation JSON imports — use `import_processed_speaker` (Annotation bucket).
+- For speakers whose primary WAV is wrong / stale — fix `source_index.json` (via `source_index_validate`) or re-import audio first, then re-import the CSV.
 
-- **Tool name:** `csv_only_reimport`
-- **Skill name:** `parse-mcp-tool-csv-only-reimport`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `sourceCsv`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Re-import an already-onboarded speaker from a refreshed Audition cue CSV (and optional comments CSV) without accepting or copying a WAV. The speaker's existing primary WAV is resolved from source_index.json; dryRun=true previews the resolved WAV and backup path, while dryRun=false first captures a mandatory backup under annotations/backups/<timestamp>-<speaker>-csv-reimport/ and then reuses the server onboarding worker.
+## Parameters
 
-### Parameters
+| Parameter    | Type    | Required | Description                                                                                  | Default | Example                                  |
+|--------------|---------|----------|----------------------------------------------------------------------------------------------|---------|------------------------------------------|
+| speaker      | string  | Yes      | Existing speaker ID to re-import. `minLength=1`, `maxLength=200`.                            | —       | `"Khan01"`                               |
+| sourceCsv    | string  | Yes      | Path to the refreshed Audition cue CSV. `minLength=1`, `maxLength=1024`.                     | —       | `"imports/refreshed/Khan01.csv"`         |
+| commentsCsv  | string  | No       | Optional path to the companion Audition comments CSV. `maxLength=1024`.                      | —       | `"imports/refreshed/Khan01_comments.csv"` |
+| dryRun       | boolean | No       | If `true`, validate and preview the backup path without writing or re-importing.             | `false` | `true`                                   |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Existing speaker ID to re-import.
-- `sourceCsv` (type=string; minLength=1; maxLength=1024) — Path to the refreshed Audition cue CSV.
-- `commentsCsv` (type=string; maxLength=1024) — Optional path to the companion Audition comments CSV.
-- `dryRun` (type=boolean) — If true, validate and preview the backup path without writing or re-importing.
+## Expected Output
+On `dryRun: true`: returns the resolved WAV path, the timestamped backup directory that would be created, and the source CSV paths — without taking the backup or rewriting anything.
 
-### Example response formats
+On `dryRun: false`: captures the backup at `annotations/backups/<ts>-<speaker>-csv-reimport/` (with `manifest.json`), reruns the server onboarding worker against the existing WAV, and returns `{ ok: true, speaker, backupDir, lexemesImported, commentsImported, conceptsAdded, conceptTotal, annotationPath, wavPath, csvPath, commentsCsvPath }`.
 
-Dry-run request:
-
+## Example Successful Call
+Dry run:
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
-  "sourceCsv": "imports/refreshed/<SPEAKER_ID>.csv",
-  "commentsCsv": "imports/refreshed/<SPEAKER_ID>_comments.csv",
+  "speaker": "Khan01",
+  "sourceCsv": "imports/refreshed/Khan01.csv",
+  "commentsCsv": "imports/refreshed/Khan01_comments.csv",
   "dryRun": true
 }
 ```
 
-Representative dry-run result payload:
-
+Live apply (after confirmation):
 ```json
 {
-  "ok": true,
-  "dryRun": true,
-  "speaker": "<SPEAKER_ID>",
-  "backupDir": "annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport",
-  "lexemesImported": null,
-  "commentsImported": null,
-  "conceptsAdded": null,
-  "conceptTotal": null,
-  "annotationPath": null,
-  "wavPath": "audio/working/<SPEAKER_ID>/<SPEAKER_ID>.wav",
-  "csvPath": "imports/refreshed/<SPEAKER_ID>.csv",
-  "commentsCsvPath": "imports/refreshed/<SPEAKER_ID>_comments.csv",
-  "message": "Preview only. Run again with dryRun=false to take the backup and re-import."
+  "speaker": "Khan01",
+  "sourceCsv": "imports/refreshed/Khan01.csv",
+  "commentsCsv": "imports/refreshed/Khan01_comments.csv",
+  "dryRun": false
 }
 ```
 
-Representative live execution result payload after rerunning the same request with `dryRun: false`:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "ok": true,
-  "dryRun": false,
-  "speaker": "<SPEAKER_ID>",
-  "backupDir": "annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport",
-  "lexemesImported": 128,
-  "commentsImported": 12,
-  "conceptsAdded": 3,
-  "conceptTotal": 420,
-  "annotationPath": "annotations/<SPEAKER_ID>.parse.json",
-  "wavPath": "audio/working/<SPEAKER_ID>/<SPEAKER_ID>.wav",
-  "csvPath": "imports/refreshed/<SPEAKER_ID>.csv",
-  "commentsCsvPath": "imports/refreshed/<SPEAKER_ID>_comments.csv",
-  "message": "Re-imported '<SPEAKER_ID>': 128 lexemes, 12 notes. Backup at annotations/backups/20260510T192400Z-<SPEAKER_ID>-csv-reimport."
-}
-```
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Speaker not onboarded                  | Tool error — no entry in `source_index.json`                         | Run `onboard_speaker_import` (Annotation bucket) first; this tool re-imports existing speakers only.   |
+| CSV paths unreadable                   | Path-validation error                                                | Verify with `read_csv_preview`; place CSVs under allowed roots.                                       |
+| Wrong CSV chosen — bad re-import       | Live apply rewrote annotation with wrong data                        | Use `revert_csv_reimport` to restore from the captured backup.                                        |
+| Backup directory not captured          | Live apply didn't return `backupDir`                                 | Should not happen — the backup is mandatory before write. If it does, treat the re-import as unsafe and roll back via git. |
+| Concepts changed unexpectedly          | `conceptsAdded` higher than expected                                 | The refreshed CSV introduced new concept rows. Verify via `read_csv_preview` before re-importing.     |
 
-The timestamped `backupDir` is generated at runtime; always archive it in the validation note before inspecting the rewritten annotation.
+## Agent Reasoning Notes
+The mandatory backup-before-write design is load-bearing — every live re-import captures a manifest-backed backup, and `revert_csv_reimport` is the matching rollback path. **Always archive the returned `backupDir` in any validation note** so the rollback is recoverable even after the chat context is lost. The tool deliberately doesn't touch the WAV — that's the whole point — so a workflow that needs new audio + new CSV must do two separate imports (or use `onboard_speaker_import` for both).
 
-### MCP annotations
-
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The speaker must already have a registered WAV in source_index.json. (`project_state`, `required`)
-- sourceCsv/commentsCsv must resolve to readable CSV files. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, a manifest-backed backup is captured before annotation/enrichment/concept files are rewritten. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/csv_only_reimport?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `csv_only_reimport` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `csv_only_reimport` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `revert_csv_reimport` — restore from the captured backup if the re-import was wrong.
+- `onboard_speaker_import` (Annotation bucket) — fresh-import alternative; handles WAV + CSV together.
+- `read_csv_preview` — inspect the refreshed CSV before re-importing.
+- `source_index_validate` — verify / repair the speaker's `source_index.json` entry.

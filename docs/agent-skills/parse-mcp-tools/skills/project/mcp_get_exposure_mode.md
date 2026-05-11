@@ -1,130 +1,68 @@
----
-name: parse-mcp-tool-mcp-get-exposure-mode
-description: "Use PARSE MCP tool `mcp_get_exposure_mode`: Read the active MCP exposure mode, config source, and tool counts."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - adapter
----
+# mcp_get_exposure_mode
 
-# PARSE MCP Tool Skill — `mcp_get_exposure_mode`
+**Category:** Project
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only)
+**Complexity:** Low
+**Estimated Tokens:** ~150 (short) / ~320 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `mcp_get_exposure_mode` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads the active MCP exposure mode, config source, and tool counts — the diagnostic probe for "which tool surface am I talking to?".
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Verifying the MCP adapter is exposing the expected tool surface (full default vs. legacy opt-out vs. custom).
+- Diagnosing missing tools — if a tool should be available but isn't, this confirms the active mode.
+- Integration tests and capability checks against the catalog.
+- After changing exposure config (e.g. setting `expose_all_tools=false`) to confirm the change took effect.
 
-## Tool contract snapshot
+## When NOT to Use
+- To inspect individual tool schemas — use the HTTP MCP bridge endpoint `GET /api/mcp/tools/<toolName>?mode=active` for that.
+- To list every exposed tool by name — use `GET /api/mcp/tools?mode=active` (HTTP) or the catalog regeneration check documented in the parent README.
+- For project state. This tool reports adapter / catalog configuration, not project data.
 
-- **Tool name:** `mcp_get_exposure_mode`
-- **Skill name:** `parse-mcp-tool-mcp-get-exposure-mode`
-- **Family:** `adapter`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read the active MCP exposure mode, config source, and tool counts.
+## Parameters
+No parameters. Pass `{}`.
 
-### Parameters
+## Expected Output
+Returns `{ readOnly, exposureMode, configSource, toolCounts: { chat, workflow, adapter, total } }`.
 
-- No parameters.
+- `exposureMode` — `"all"` (full default surface) or `"legacy"` (`expose_all_tools=false` opt-out).
+- `configSource` — where the active mode was loaded from (env var, project config file, default).
+- `toolCounts` — counts by family.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `openWorldHint`: `False`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- The active MCP exposure mode, config source, and tool counts are returned. (`reporting`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/mcp_get_exposure_mode?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `mcp_get_exposure_mode` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Exposure payload example
-
-Call with an empty JSON object:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/mcp_get_exposure_mode?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{}'
-```
-
-Current PARSE returns tool counts as top-level count fields:
-
+Representative response:
 ```json
 {
-  "tool": "mcp_get_exposure_mode",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "exposeAllTools": false,
-    "configSource": ".parse/mcp-exposure.json",
-    "parseChatToolCount": 64,
-    "workflowToolCount": 4,
-    "mcpToolCount": 44,
-    "defaultParseMcpToolCount": 40,
-    "defaultWorkflowMcpToolCount": 4
+  "readOnly": true,
+  "exposureMode": "all",
+  "configSource": "default",
+  "toolCounts": {
+    "chat": 60,
+    "workflow": 3,
+    "adapter": 1,
+    "total": 64
   }
 }
 ```
 
-If `configSource` is `null`, PARSE is using its built-in default exposure set rather than a project config file.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Unexpected `exposureMode`              | Mode doesn't match what was set in config                            | Inspect `configSource` to see which input won. Env vars typically override file config.               |
+| Wrong tool count                       | A tool you expect to use isn't counted                               | Pivot to `GET /api/mcp/tools?mode=active` over HTTP for the full list, or run the catalog regeneration check from the parent README. |
+| Mode shows `"legacy"` unexpectedly      | Custom-curated narrow surface in play                                | Verify `expose_all_tools` is not set to `false` in the relevant config.                               |
 
-- [ ] Live catalog confirms `mcp_get_exposure_mode` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+This is a diagnostic / configuration-introspection probe. Most session loops don't need to call it — most agents should just call the tools they need and handle "tool not exposed" as a configuration error surfaced by the dispatcher. Reach for `mcp_get_exposure_mode` when you're debugging "why isn't X available?" or running integration tests against an adapter instance.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `project_context_read` — project-level state (different from adapter configuration).
+- HTTP MCP bridge endpoints `/api/mcp/tools`, `/api/mcp/tools/<toolName>` — per-tool schema inspection.

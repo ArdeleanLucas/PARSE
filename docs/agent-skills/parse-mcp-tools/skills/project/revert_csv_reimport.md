@@ -1,145 +1,72 @@
----
-name: parse-mcp-tool-revert-csv-reimport
-description: "Use PARSE MCP tool `revert_csv_reimport`: Restore the files captured by a csv_only_reimport backup for one speaker. If backupDir is omitted, the latest annotations/backups/*-<speaker>-csv-reimport directory is selected. Revert restores only the filenames listed in manifest.json."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# revert_csv_reimport
 
-# PARSE MCP Tool Skill — `revert_csv_reimport`
+**Category:** Project
+**Mutability:** mutating (restores files from a backup directory captured by `csv_only_reimport`)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~210 (short) / ~460 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `revert_csv_reimport` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Restores the files captured by a `csv_only_reimport` backup for one speaker — using the manifest in the backup directory — to roll back a bad CSV re-import.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Immediately after a `csv_only_reimport` that turned out to be wrong (bad source CSV, wrong concept matching, accidental run).
+- For any speaker that has a `csv_only_reimport` backup under `annotations/backups/`.
+- When `backupDir` is omitted — the latest `annotations/backups/*-<speaker>-csv-reimport/` is selected automatically.
+- For targeted rollback — pass an explicit `backupDir` when you want a specific historical backup rather than the latest.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without a prior `csv_only_reimport` backup. The tool requires a manifest-backed backup; restoring arbitrary annotation files isn't this tool's job.
+- For `onboard_speaker_import` rollback — that flow doesn't capture the same backup shape. Roll back via git or by re-importing from scratch.
+- For full project rollback. The tool restores per-speaker artifacts only, governed by the backup's `manifest.json`.
+- Without `dryRun: true` first. Even a rollback is a write — preview the file list before committing.
 
-- **Tool name:** `revert_csv_reimport`
-- **Skill name:** `parse-mcp-tool-revert-csv-reimport`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Restore the files captured by a csv_only_reimport backup for one speaker. If backupDir is omitted, the latest annotations/backups/*-<speaker>-csv-reimport directory is selected. Revert restores only the filenames listed in manifest.json.
+## Parameters
 
-### Parameters
+| Parameter  | Type    | Required | Description                                                                                              | Default                | Example                                          |
+|------------|---------|----------|----------------------------------------------------------------------------------------------------------|------------------------|--------------------------------------------------|
+| speaker    | string  | Yes      | Speaker ID whose csv-reimport backup should be restored. `minLength=1`, `maxLength=200`.                  | —                      | `"Khan01"`                                       |
+| backupDir  | string  | No       | Backup directory name or relative path under `annotations/backups/`. `maxLength=1024`.                    | (latest for speaker)   | `"20260510T192400Z-Khan01-csv-reimport"`         |
+| dryRun     | boolean | No       | If `true`, preview which files would be restored without copying them.                                    | `false`                | `true`                                           |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID whose csv-reimport backup should be restored.
-- `backupDir` (type=string; maxLength=1024) — Optional backup directory name or relative path under annotations/backups/.
-- `dryRun` (type=boolean) — If true, preview which files would be restored without copying them.
+## Expected Output
+On `dryRun: true`: returns `{ readOnly, speaker, backupDir, filesToRestore: [...] }` — the manifest contents preview.
 
-### MCP annotations
+On `dryRun: false`: copies the files listed in `manifest.json` back to their project locations and returns `{ ok: true, speaker, backupDir, filesRestored }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
+**Only the filenames listed in `manifest.json` are restored** — newer files created since the backup that weren't in the original set are not touched.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- A manifest-backed csv-reimport backup must exist for the requested speaker. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, files listed in the backup manifest are copied back to their project locations. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/revert_csv_reimport?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `revert_csv_reimport` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Use `dryRun: true` first to confirm which manifest-listed files would be restored from the selected backup directory:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/revert_csv_reimport?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{
-    "speaker": "Speaker01",
-    "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
-    "dryRun": true
-  }'
-```
-
-Equivalent MCP arguments:
-
+## Example Successful Call
+Dry run (latest backup):
 ```json
 {
-  "speaker": "Speaker01",
-  "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
+  "speaker": "Khan01",
   "dryRun": true
 }
 ```
 
-Dry-run response shape:
-
+Live restore from a specific historical backup:
 ```json
 {
-  "tool": "revert_csv_reimport",
-  "ok": true,
-  "result": {
-    "ok": true,
-    "dryRun": true,
-    "speaker": "Speaker01",
-    "backupDir": "annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z",
-    "restoredFiles": ["Speaker01.parse.json", "parse-enrichments.json", "concepts.csv"],
-    "skippedFiles": [],
-    "message": "Would restore 3 file(s) for 'Speaker01' from annotations/backups/csv-reimport/Speaker01/2026-05-10T18-30-00Z.",
-    "previewOnly": true,
-    "readOnly": true,
-    "mode": "read-only"
-  }
+  "speaker": "Khan01",
+  "backupDir": "20260508T103000Z-Khan01-csv-reimport",
+  "dryRun": false
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `revert_csv_reimport` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| No backup found for speaker            | Tool error                                                           | Confirm `annotations/backups/` has a `*-<speaker>-csv-reimport/` directory. If not, use git for rollback.|
+| Restored files older than current      | `revert` undoes work done after the backup                           | Expected behavior — the backup is a point-in-time snapshot. Re-apply newer edits manually if needed.   |
+| Wrong `backupDir` chosen               | Restored too-old or too-new state                                    | Inspect `annotations/backups/` to choose the right timestamp. Backups are named `<ISO-timestamp>-<speaker>-csv-reimport`. |
+| Manifest missing files                 | Some expected files not restored                                     | Only filenames listed in `manifest.json` are restored. Inspect the manifest via `read_text_preview`.   |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the matching rollback path for `csv_only_reimport`. The pairing is by design: every live `csv_only_reimport` captures a manifest-backed backup with a known timestamp, and this tool consumes that exact backup format. Don't try to use it for arbitrary annotation restoration — the manifest-driven scope is what makes the rollback safe and predictable. For git-tracked rollbacks of `annotations/<speaker>.parse.json`, fall back to git instead; this tool is for the specific `csv_only_reimport` backup format only.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `csv_only_reimport` — the forward operation this tool reverts.
+- `read_text_preview` — inspect `manifest.json` in a backup directory.
+- `onboard_speaker_import` (Annotation bucket) — different import path with no matching revert tool (use git for rollback).

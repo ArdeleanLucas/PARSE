@@ -1,152 +1,79 @@
----
-name: parse-mcp-tool-import-tag-csv
-description: "Use PARSE MCP tool `import_tag_csv`: Import a CSV file as a custom tag list. Matches CSV rows to project concept IDs by label (case-insensitive), numeric ID, or fuzzy match (edit distance <= 1). When dryRun=true returns a preview of matched/unmatched rows and asks for tag name. When dryRun=false and tagName is provided, creates the tag and writes parse-tags.json. Always use dryRun=true first, then dryRun=false after explicit user confirmation."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# import_tag_csv
 
-# PARSE MCP Tool Skill — `import_tag_csv`
+**Category:** Project
+**Mutability:** mutating (creates a tag entry in `parse-tags.json`)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Medium
+**Estimated Tokens:** ~240 (short) / ~520 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `import_tag_csv` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Imports a CSV file as a custom tag list — matches CSV rows to project concept IDs (case-insensitive label, numeric ID, or fuzzy match with edit distance ≤ 1) — and either previews the result (`dryRun: true`) or writes the tag to `parse-tags.json` (`dryRun: false` + `tagName`).
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Importing an external concept list as a new tag (e.g. "Swadesh-200", "high-priority", "borrowed-from-Arabic").
+- Bridging external categorizations into PARSE's tag vocabulary without manual entry of dozens / hundreds of concept IDs.
+- For fuzzy-match recovery — when the CSV uses slightly different labels than the project's canonical `concept_en`.
+- For programmatic tag creation from any CSV with one concept per row.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without `dryRun: true` first. The `dryRun` parameter is **required** by schema. The dry-run returns matched + unmatched rows so the user can confirm coverage before committing.
+- For per-concept tag *editing* — once a tag exists in `parse-tags.json`, modify it via `prepare_tag_import` (different shape: accepts an explicit `conceptIds` array) or direct file edit.
+- For tag *vocabulary* inspection — read `parse-tags.json` via `read_text_preview` or `enrichments_read` (depending on where tags live in the project).
+- For arbitrary CSV ingestion. The tool specifically maps rows → concept IDs; it doesn't handle multi-column attribute import.
 
-- **Tool name:** `import_tag_csv`
-- **Skill name:** `parse-mcp-tool-import-tag-csv`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Import a CSV file as a custom tag list. Matches CSV rows to project concept IDs by label (case-insensitive), numeric ID, or fuzzy match (edit distance <= 1). When dryRun=true returns a preview of matched/unmatched rows and asks for tag name. When dryRun=false and tagName is provided, creates the tag and writes parse-tags.json. Always use dryRun=true first, then dryRun=false after explicit user confirmation.
+## Parameters
 
-### Parameters
+| Parameter           | Type    | Required | Description                                                                                              | Default | Example                              |
+|---------------------|---------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------------------|
+| dryRun              | boolean | Yes      | `true` previews matched / unmatched rows; `false` creates the tag (requires `tagName`).                  | —       | `true`                               |
+| csvPath             | string  | No       | Path to the source CSV. `maxLength=512`.                                                                  | —       | `"imports/swadesh200.csv"`           |
+| tagName             | string  | No       | Required when `dryRun: false`. `minLength=1`, `maxLength=100`.                                            | —       | `"swadesh_200"`                      |
+| color               | string  | No       | Tag color hex (e.g. `"#FF6F61"`).                                                                         | —       | `"#FF6F61"`                          |
+| labelColumn         | string  | No       | CSV column name to read concept labels from. `maxLength=64`.                                              | (inferred) | `"concept_en"`                    |
+| matchAllVariants    | boolean | No       | When `true`, also match variant spellings of the same concept.                                            | `true`  | `true`                               |
+| propagateToSpeakers | boolean | No       | When `true`, propagate the tag to every speaker's row for matched concepts.                              | `true`  | `true`                               |
 
-- `csvPath` (type=string; maxLength=512)
-- `tagName` (type=string; minLength=1; maxLength=100)
-- `color` (type=string)
-- `labelColumn` (type=string; maxLength=64)
-- `dryRun` (type=boolean)
-- `matchAllVariants` (type=boolean; default=true)
-- `propagateToSpeakers` (type=boolean; default=true)
+## Expected Output
+On `dryRun: true`: returns `{ readOnly, matched: [{ csvRow, conceptId, matchType }], unmatched: [{ csvRow }], totalRows, matchedCount, unmatchedCount }`. **The dry-run is also the only place where the tool asks for `tagName`** if not yet provided.
 
-### MCP annotations
+On `dryRun: false` (with `tagName` set): writes the new tag to `parse-tags.json` and returns `{ ok: true, tagName, conceptIds, conceptsCount }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/import_tag_csv?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `import_tag_csv` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Dry-run example
-
-Sample dry-run input JSON for a custom tag CSV:
-
+## Example Successful Call
+Dry run:
 ```json
 {
-  "csvPath": "imports/tags/thesis-priority.csv",
+  "csvPath": "imports/swadesh200.csv",
   "labelColumn": "concept_en",
-  "tagName": "Thesis priority",
-  "color": "#4461d4",
-  "dryRun": true,
-  "matchAllVariants": true,
-  "propagateToSpeakers": true
+  "dryRun": true
 }
 ```
 
-Expected output format:
-
+Live apply (after dry-run + confirmation):
 ```json
 {
-  "ok": true,
-  "matchedCount": 2,
-  "unmatchedCount": 1,
-  "matched": [
-    {
-      "csvLabel": "rain",
-      "conceptId": "12",
-      "conceptIds": ["12"],
-      "conceptLabel": "rain"
-    },
-    {
-      "csvLabel": "ice",
-      "conceptId": "34-a",
-      "conceptIds": ["34-a", "34-b"],
-      "conceptLabel": "ice (A)"
-    }
-  ],
-  "unmatched": [
-    {"csvLabel": "hail"}
-  ],
-  "matchedConceptCount": 3,
-  "dryRun": true,
-  "preview": true,
-  "message": "Will create tag 'Thesis priority' with 3 concepts. Call again with dryRun=false to confirm."
+  "csvPath": "imports/swadesh200.csv",
+  "tagName": "swadesh_200",
+  "color": "#3D7EFF",
+  "dryRun": false
 }
 ```
 
-If `tagName` is omitted, the dry-run result sets `needsTagName: true` and asks what the tag should be called; provide the name only after reviewing matched/unmatched rows.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                                  | Symptom                                                              | Recovery                                                                                              |
+|------------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Many unmatched rows                      | `unmatchedCount` high in dry-run                                     | Check `labelColumn` is correct; verify the CSV's labels against `project_context_read`'s `concepts` block. |
+| Fuzzy match picked the wrong concept     | `matched` includes implausible pairings                              | Tighten matching — but the tool's match scope is fixed (label / ID / edit-distance ≤ 1). For precision, hand-curate `conceptIds` and use `prepare_tag_import` instead. |
+| Live apply without `tagName`             | Tool error                                                           | `tagName` is required when `dryRun: false`. Run dry-run first to get the user to confirm a name.       |
+| Existing tag overwritten                 | Live apply replaced a same-named tag's concept list                  | No auto-backup. Read `parse-tags.json` first; use unique tag names or version them (e.g. `swadesh_200_v2`). |
+| CSV outside allowed roots                | Validation error                                                     | Move the CSV into the project import dir or add the parent to allowed read roots.                      |
 
-- [ ] Live catalog confirms `import_tag_csv` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+The two-phase dry-run-then-confirm flow is mandatory by schema design. The dry-run output is the contract: it tells the user (and agent) exactly which concepts will be tagged, which won't, and asks for a tag name. Live apply without prior dry-run is technically permitted (if `tagName` is provided) but skips the user-confirmation step — don't take that shortcut. For curated tag creation where you already know the exact concept IDs, `prepare_tag_import` is simpler.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `prepare_tag_import` — alternative when you already have the exact `conceptIds` list.
+- `list_concepts_by_tag` (Comparison bucket) — verify the tag matched the expected concepts after creation.
+- `rerun_lexemes_by_tag` (Comparison bucket) — downstream consumer of tags.
+- `read_csv_preview` — inspect the CSV before importing.
+- `project_context_read` — verify concept labels / IDs before tag creation.

@@ -1,100 +1,69 @@
----
-name: parse-mcp-tool-clef-clear-data
-description: "Use PARSE MCP tool `clef_clear_data`: Clear CLEF-populated reference forms from config/sil_contact_languages.json. Supports dryRun preview, optional language/concept scoping, and optional provider-cache cleanup. Use dryRun=true first before destructive clears."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# clef_clear_data
 
-# PARSE MCP Tool Skill — `clef_clear_data`
+**Category:** Project
+**Mutability:** mutating (rewrites `config/sil_contact_languages.json`; optionally clears provider caches)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~220 (short) / ~470 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `clef_clear_data` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Clears CLEF-populated reference forms from `config/sil_contact_languages.json` — supports `dryRun` preview, optional `languages`/`concepts` scoping, and optional provider-cache cleanup via `clearCache`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Resetting CLEF-fetched contact-language data when results have gone stale or wrong (bad provider output, schema change, etc.).
+- Selective cleanup — scope by `languages` or `concepts` arrays to clear only specific entries.
+- Cache invalidation: pair with `clearCache: true` when stale provider cache entries are also a problem.
+- Before a fresh `contact_lexeme_lookup` run when you want clean state rather than merging onto existing data.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without `dryRun: true` first. This tool is destructive — always preview the planned clear scope before committing.
+- For non-CLEF entries. The tool clears CLEF-populated forms specifically; manually-entered or hand-edited contact-language data outside the CLEF flow may be affected too, so audit the file with `read_text_preview` first.
+- For full-file replacement. Use direct file editing via your normal workflow if you need to rebuild `sil_contact_languages.json` from scratch.
 
-- **Tool name:** `clef_clear_data`
-- **Skill name:** `parse-mcp-tool-clef-clear-data`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** Clear CLEF-populated reference forms from config/sil_contact_languages.json. Supports dryRun preview, optional language/concept scoping, and optional provider-cache cleanup. Use dryRun=true first before destructive clears.
+## Parameters
 
-### Parameters
+| Parameter   | Type     | Required | Description                                                                                  | Default | Example                |
+|-------------|----------|----------|----------------------------------------------------------------------------------------------|---------|------------------------|
+| dryRun      | boolean  | No       | If `true`, preview the count of forms / languages / concepts / cache entries to clear without writing. | `false` | `true`                 |
+| languages   | string[] | No       | Language codes to clear. Omit or pass `null` to clear all configured languages.              | (all)   | `["ar", "fa"]`         |
+| concepts    | string[] | No       | Concept labels to clear. Omit or pass `null` to clear all concepts.                          | (all)   | `["water", "fire"]`    |
+| clearCache  | boolean  | No       | If `true`, also remove CLEF provider caches under `config/cache`.                            | `false` | `true`                 |
 
-- `dryRun` (type=boolean) — If true, preview the number of forms, languages, concepts, and cache entries that would be cleared without writing anything. Defaults to false.
-- `languages` (type=array/null) — Optional list of language codes to clear. Omit or pass null to clear all configured languages.
-- `concepts` (type=array/null) — Optional list of concept labels to clear. Omit or pass null to clear all concepts.
-- `clearCache` (type=boolean) — If true, also remove known CLEF provider caches under config/cache.
+## Expected Output
+On `dryRun: true`: returns `{ readOnly, formsToClear, languagesAffected, conceptsAffected, cacheEntriesToClear }` — the planned scope without modifying anything.
 
-### MCP annotations
+On `dryRun: false`: rewrites `config/sil_contact_languages.json` and (if `clearCache: true`) removes cache files. Returns `{ ok: true, formsCleared, languagesAffected, conceptsAffected, cacheEntriesCleared }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+Preview clearing all CLEF data:
+```json
+{
+  "dryRun": true
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/clef_clear_data?mode=active"
+Scoped clear of two languages with cache cleanup:
+```json
+{
+  "languages": ["ar", "fa"],
+  "clearCache": true,
+  "dryRun": false
+}
 ```
 
-## Workflow
+## Common Failure Modes & How to Recover
 
-1. **Discover** – Confirm `clef_clear_data` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Cleared more than intended             | Live apply removed unexpected entries                                | No auto-rollback. Snapshot `config/sil_contact_languages.json` before destructive clears (or rely on git). |
+| Cache not actually cleared             | `clearCache: true` but caches persist                                | Provider cache locations may differ from what the tool expects. Inspect `config/cache/` directly via `read_text_preview`. |
+| Selective scope missed entries         | `languages` / `concepts` filter excluded what you wanted             | Re-run with broader scope, or omit the filter to clear all.                                           |
+| Mixed CLEF / manual entries            | Manually-edited contact-language data also affected                  | This tool clears CLEF-populated forms; hand-edited entries may not be distinguishable. Audit with `read_text_preview` before clearing. |
 
-## Quality checklist
+## Agent Reasoning Notes
+This is the cleanup half of the CLEF / `contact_lexeme_lookup` flow. The mandatory dry-run discipline matches `contact_lexeme_lookup`'s — both deal with the same `sil_contact_languages.json` file and both can affect data agents/users care about. Rely on git for true rollback; the tool doesn't auto-backup. Pair with `read_text_preview` to inspect the file before and after, and with `contact_lexeme_lookup` (Comparison bucket) to repopulate after clearing.
 
-- [ ] Live catalog confirms `clef_clear_data` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `contact_lexeme_lookup` (Comparison bucket) — the canonical write path for this file.
+- `read_text_preview` — inspect `sil_contact_languages.json` before / after clearing.
+- `enrichments_read` — separately inspect cognate data that may reference the cleared forms.
