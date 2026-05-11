@@ -1,147 +1,76 @@
----
-name: parse-mcp-tool-import-processed-speaker
-description: "Use PARSE MCP tool `import_processed_speaker`: Import a speaker from existing processed artifacts when lexemes are already timestamped to a WAV. Copies a working WAV plus annotation JSON (and optional peaks JSON / legacy transcript CSV) into the PARSE workspace, writes concepts.csv, updates project.json and source_index.json, and preserves the annotation's timestamp alignment to the working WAV. Call dryRun=true first, then dryRun=false after confirmation."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# import_processed_speaker
 
-# PARSE MCP Tool Skill — `import_processed_speaker`
+**Category:** Annotation
+**Mutability:** mutating (writes WAV, annotation JSON, concepts.csv, project.json, source_index.json)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Medium–High
+**Estimated Tokens:** ~280 (short) / ~590 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `import_processed_speaker` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Imports a speaker from existing processed artifacts (working WAV + timestamp-aligned annotation JSON) into the PARSE workspace, preserving the annotation's alignment to the WAV — the right path when lexemes are already timestamped and you don't want PARSE to re-derive them.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Migrating a speaker from a prior PARSE workspace or pipeline that already produced a working WAV plus an aligned annotation JSON.
+- Importing thesis-corpus speakers whose intervals were generated externally (e.g. via Praat, Audition, or a prior PARSE) and whose timestamps are trusted.
+- When you have both the WAV the timestamps are aligned to AND the annotation JSON, and want to skip the normalize → STT → forced-align chain entirely.
 
-## Tool contract snapshot
+## When NOT to Use
+- For fresh-from-tape imports where you only have a source WAV and a CSV of cues — use `onboard_speaker_import` instead. That kicks off the standard onboarding flow with downstream `audio_normalize_start` / `stt_word_level_start` work.
+- When the working WAV and annotation JSON are misaligned. The tool *preserves* alignment, it does not validate it. If the annotation's interval timestamps don't match the WAV, the imported speaker will be broken.
+- Without a dry-run preview. `dryRun` is required by schema — call with `true` first to see the file-copy plan, then `false` after confirming.
 
-- **Tool name:** `import_processed_speaker`
-- **Skill name:** `parse-mcp-tool-import-processed-speaker`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `workingWav`, `annotationJson`, `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Import a speaker from existing processed artifacts when lexemes are already timestamped to a WAV. Copies a working WAV plus annotation JSON (and optional peaks JSON / legacy transcript CSV) into the PARSE workspace, writes concepts.csv, updates project.json and source_index.json, and preserves the annotation's timestamp alignment to the working WAV. Call dryRun=true first, then dryRun=false after confirmation.
+## Parameters
 
-### Parameters
+| Parameter      | Type    | Required | Description                                                                                              | Default | Example                                      |
+|----------------|---------|----------|----------------------------------------------------------------------------------------------------------|---------|----------------------------------------------|
+| speaker        | string  | Yes      | Speaker ID to import into the PARSE workspace. `minLength=1`, `maxLength=200`.                            | —       | `"Khan01"`                                   |
+| workingWav     | string  | Yes      | Path to the processed/working WAV whose timestamps align with the annotation JSON. `minLength=1`, `maxLength=1024`. | — | `"/path/to/processed/Khan01.wav"` |
+| annotationJson | string  | Yes      | Path to the timestamp-bearing annotation JSON to copy into `annotations/`. `minLength=1`, `maxLength=1024`. | — | `"/path/to/Khan01.parse.json"` |
+| peaksJson      | string  | No       | Optional precomputed peaks JSON aligned to the working WAV. `maxLength=1024`.                            | —       | `"/path/to/Khan01.peaks.json"`               |
+| transcriptCsv  | string  | No       | Optional legacy transcript CSV to preserve in the imported workspace. `maxLength=1024`.                  | —       | `"/path/to/Khan01.csv"`                      |
+| dryRun         | boolean | Yes      | `true` previews the file-copy and metadata-write plan; `false` performs the import.                       | —       | `true`                                       |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID to import into the PARSE workspace.
-- `workingWav` (type=string; minLength=1; maxLength=1024) — Path to the processed/working WAV whose timestamps already align with the annotation JSON.
-- `annotationJson` (type=string; minLength=1; maxLength=1024) — Path to the timestamp-bearing annotation JSON to copy into annotations/.
-- `peaksJson` (type=string; maxLength=1024) — Optional precomputed peaks JSON aligned to the working WAV.
-- `transcriptCsv` (type=string; maxLength=1024) — Optional legacy transcript CSV to preserve in the imported workspace.
-- `dryRun` (type=boolean) — If true, preview the file-copy and metadata-write plan without mutating the workspace.
+## Expected Output
+On `dryRun: true`: returns the resolved paths, planned file copies (WAV, annotation, optional peaks/CSV), planned `concepts.csv` and `project.json` updates, and `source_index.json` entry preview.
 
-### MCP annotations
+On `dryRun: false`: copies files into the workspace, writes `concepts.csv`, updates `project.json` and `source_index.json`, and preserves the annotation's timestamp alignment. Returns `{ ok: true, speaker, workspacePaths: {...} }`.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The working WAV and annotation JSON must both exist and be readable. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, the processed speaker artifacts are copied into the workspace and project/source-index metadata are updated. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/import_processed_speaker?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `import_processed_speaker` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Dry-run example
-
-Sample dry-run invocation. Relative paths resolve under `PARSE_PROJECT_ROOT`; absolute paths must sit under an allowed external read root.
-
+## Example Successful Call
+Dry run (mandatory first step):
 ```json
 {
-  "speaker": "Fail02",
-  "workingWav": "processed/Fail02/speaker.wav",
-  "annotationJson": "processed/Fail02/Fail02.parse.json",
-  "peaksJson": "processed/Fail02/peaks.json",
-  "transcriptCsv": "processed/Fail02/transcript.csv",
+  "speaker": "Khan01",
+  "workingWav": "/external/processed/Khan01/Khan01.wav",
+  "annotationJson": "/external/processed/Khan01/Khan01.parse.json",
+  "peaksJson": "/external/processed/Khan01/Khan01.peaks.json",
   "dryRun": true
 }
 ```
 
-Expected dry-run output format:
-
+Live import:
 ```json
 {
-  "ok": true,
-  "dryRun": true,
-  "plan": {
-    "speaker": "Fail02",
-    "workingWav": "<PROJECT_ROOT>/processed/Fail02/speaker.wav",
-    "annotationJson": "<PROJECT_ROOT>/processed/Fail02/Fail02.parse.json",
-    "peaksJson": "<PROJECT_ROOT>/processed/Fail02/peaks.json",
-    "transcriptCsv": "<PROJECT_ROOT>/processed/Fail02/transcript.csv",
-    "audioDest": "audio/working/Fail02/speaker.wav",
-    "annotationDest": "annotations/Fail02.json",
-    "peaksDest": "peaks/Fail02.json",
-    "transcriptDest": "imports/legacy/Fail02/transcript.csv",
-    "conceptCount": 128,
-    "languageCode": "ku",
-    "projectId": "parse-project",
-    "wavSizeBytes": 1048576,
-    "annotationSizeBytes": 65536,
-    "peaksSizeBytes": 32768
-  },
-  "message": "Preview only. Run again with dryRun=false to copy processed artifacts and register the speaker."
+  "speaker": "Khan01",
+  "workingWav": "/external/processed/Khan01/Khan01.wav",
+  "annotationJson": "/external/processed/Khan01/Khan01.parse.json",
+  "peaksJson": "/external/processed/Khan01/Khan01.peaks.json",
+  "dryRun": false
 }
 ```
 
-Do not proceed to `dryRun: false` until the destination paths and `conceptCount` match the intended import.
+## Common Failure Modes & How to Recover
 
-## Quality checklist
+| Failure                              | Symptom                                                            | Recovery                                                                                                  |
+|--------------------------------------|--------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Source paths outside allowed roots   | Path-validation error                                              | Add the directory to `PARSE_EXTERNAL_READ_ROOTS`, or copy the files under the project audio dir first.    |
+| WAV / annotation misaligned          | Imported speaker shows intervals off-audio in the UI               | The tool doesn't validate alignment. Verify externally first; if broken, re-import with corrected source. |
+| Speaker already exists               | Tool errors or overwrites the existing entry                       | This is mutating without backups — snapshot `annotations/<speaker>.parse.json` first if you might roll back.|
+| Missing optional peaks JSON          | Workspace lacks waveform peaks                                     | Run `peaks_generate` after import — that produces `peaks/<speaker>.json` from the working WAV.            |
 
-- [ ] Live catalog confirms `import_processed_speaker` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+## Agent Reasoning Notes
+Pick this tool over `onboard_speaker_import` when the lexeme alignment is already correct and you don't want PARSE to re-run STT / forced-align. It's a copy-and-register operation, not a compute pipeline. After import, run `peaks_generate` if `peaksJson` was not supplied so the waveform viewer works. The dry-run is mandatory by schema — never skip it; the workspace mutations include `concepts.csv`, `project.json`, and `source_index.json` updates that are non-trivial to roll back manually.
 
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `onboard_speaker_import` — alternative for fresh-source imports without pre-aligned annotations.
+- `peaks_generate` — generate `peaks/<speaker>.json` post-import if not supplied.
+- `annotation_read`, `pipeline_state_read` — verify the import after completion.

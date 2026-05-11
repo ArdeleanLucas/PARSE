@@ -1,143 +1,95 @@
----
-name: parse-mcp-tool-detect-timestamp-offset-from-pair
-description: "Use PARSE MCP tool `detect_timestamp_offset_from_pair`: Compute a timestamp offset from one or more trusted (csvTime, audioTime) pairs — no STT, no statistics-on-text, no false matches. Use this when the user (or you) already knows where one or more lexemes actually are in the audio.\n\nTwo argument shapes are accepted:\n - Single pair: pass speaker + audioTimeSec + (csvTimeSec OR conceptId)\n - Multiple pairs: pass speaker + pairs=[{...}, {...}]. With two or more pairs the offset is the median of per-pair offsets, and the response carries the MAD spread plus warnings if any pair disagrees with the consensus by more than ~2 s.\n\nThe response shape is the same as detect_timestamp_offset, so the offsetSec can be passed straight into apply_timestamp_offset."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# detect_timestamp_offset_from_pair
 
-# PARSE MCP Tool Skill — `detect_timestamp_offset_from_pair`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only computation)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~240 (short) / ~520 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `detect_timestamp_offset_from_pair` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Computes a constant timestamp offset from one or more trusted (CSV/annotation time, audio time) pairs — deterministic, no STT, no statistical anchor search — returning the same response shape as `detect_timestamp_offset` so the result can be piped straight into `apply_timestamp_offset`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- When you (or the user) already know exactly where one or more lexemes are in the audio. Skip the anchor search entirely.
+- When `detect_timestamp_offset` returns low confidence or has too few matches to be trusted.
+- For high-confidence shifts where one good manual anchor is worth a dozen auto-detected ones.
+- With multiple pairs across the timeline to detect drift — pass 3+ pairs; the response surfaces MAD-style spread and per-pair warnings when pairs disagree by more than ~2 s.
 
-## Tool contract snapshot
+## When NOT to Use
+- When you don't have a single trusted (audio time, csv/concept time) pair — there's nothing to compute from. Use `detect_timestamp_offset` for the anchor-search auto-detect path.
+- For non-constant drift across the whole recording. Multiple pairs reveal drift (large MAD spread), but the tool still returns a median offset. Drift is a real problem that no single global offset can fix.
+- For STT-based segment matching. The catalog description is explicit: "no STT, no statistics-on-text, no false matches". Mixing STT segments into the pairs is the wrong tool — use `detect_timestamp_offset` for that.
 
-- **Tool name:** `detect_timestamp_offset_from_pair`
-- **Skill name:** `parse-mcp-tool-detect-timestamp-offset-from-pair`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Compute a timestamp offset from one or more trusted (csvTime, audioTime) pairs — no STT, no statistics-on-text, no false matches. Use this when the user (or you) already knows where one or more lexemes actually are in the audio.
+## Parameters
 
 Two argument shapes are accepted:
- - Single pair: pass speaker + audioTimeSec + (csvTimeSec OR conceptId)
- - Multiple pairs: pass speaker + pairs=[{...}, {...}]. With two or more pairs the offset is the median of per-pair offsets, and the response carries the MAD spread plus warnings if any pair disagrees with the consensus by more than ~2 s.
 
-The response shape is the same as detect_timestamp_offset, so the offsetSec can be passed straight into apply_timestamp_offset.
+**Single pair**
 
-### Parameters
+| Parameter    | Type    | Required | Description                                                                          | Example      |
+|--------------|---------|----------|--------------------------------------------------------------------------------------|--------------|
+| speaker      | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                          | `"Khan01"`   |
+| audioTimeSec | number  | Yes      | The time in the audio where the lexeme actually occurs. `minimum=0.0`.               | `14.375`     |
+| csvTimeSec   | number  | One of csvTimeSec/conceptId required | CSV-side timestamp for the same lexeme.                          | `12.0`       |
+| conceptId    | string  | One of csvTimeSec/conceptId required | Concept ID — the tool resolves the annotation-side timestamp.   | `"42"`       |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `audioTimeSec` (type=number; minimum=0.0)
-- `csvTimeSec` (type=number; minimum=0.0)
-- `conceptId` (type=string; minLength=1; maxLength=128)
-- `pairs` (type=array)
+**Multiple pairs**
 
-### Example input payloads
+| Parameter | Type    | Required | Description                                                                                                      | Example                                          |
+|-----------|---------|----------|------------------------------------------------------------------------------------------------------------------|--------------------------------------------------|
+| speaker   | string  | Yes      | Speaker ID.                                                                                                      | `"Khan01"`                                       |
+| pairs     | object[] | Yes     | Array of pair objects. Each entry needs `audioTimeSec` + (`csvTimeSec` or `conceptId`). 2+ pairs → median offset, MAD spread, drift warnings. | `[{"csvTimeSec": 12.0, "audioTimeSec": 14.375}, ...]` |
 
-Single trusted pair using an explicit CSV/annotation timestamp:
+## Expected Output
+Same shape as `detect_timestamp_offset`: `{ offsetSec, confidence, spreadSec, direction, warnings, matches[], annotationPath, ... }`. With 2+ pairs, `spreadSec` carries the MAD across per-pair offsets and `warnings` flags any pair that disagrees with the median by more than ~2 s.
 
+Does not mutate project state.
+
+## Example Successful Call
+Single trusted pair with CSV time:
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
+  "speaker": "Khan01",
   "csvTimeSec": 12.0,
   "audioTimeSec": 14.375
 }
 ```
 
-Single trusted pair using a concept ID to resolve the annotation-side timestamp:
-
+Single pair via concept ID (tool resolves the CSV side):
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
-  "conceptId": "<CONCEPT_ID>",
+  "speaker": "Khan01",
+  "conceptId": "42",
   "audioTimeSec": 14.375
 }
 ```
 
-Multiple trusted pairs; the tool returns the median offset and MAD-style spread:
-
+Multiple pairs (drift check):
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
+  "speaker": "Khan01",
   "pairs": [
     {"csvTimeSec": 12.0, "audioTimeSec": 14.375},
     {"csvTimeSec": 48.5, "audioTimeSec": 50.875},
-    {"conceptId": "<CONCEPT_ID>", "audioTimeSec": 91.25}
+    {"conceptId": "108", "audioTimeSec": 91.25}
   ]
 }
 ```
 
-Every pair must include `audioTimeSec` plus either `csvTimeSec` or `conceptId`; do not mix in STT segments for this manual-anchor path.
+## Common Failure Modes & How to Recover
 
-### MCP annotations
+| Failure                                              | Symptom                                                                    | Recovery                                                                                                              |
+|------------------------------------------------------|----------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| Pair mixes shape variants                            | Validation error — neither single-pair nor `pairs` array satisfied         | Pick one form. For multiple anchors, use `pairs`. For one anchor, use `audioTimeSec` + (`csvTimeSec` OR `conceptId`). |
+| Unknown `conceptId`                                  | Tool error or empty result                                                 | Verify concept ID via `project_context_read` (`concepts` section) or `list_concepts_by_tag`.                          |
+| Drift detected (multiple pairs disagree)             | High `spreadSec`, non-empty `warnings`                                     | Don't apply a global offset. Investigate per-region — there may be multiple offsets across the recording.             |
+| Wrong sign                                           | `offsetSec` would push intervals before t=0 when applied                   | Re-read your pair. The convention is `audioTimeSec - csvTimeSec` = offset; if applying pulls intervals negative, the pair is inverted. |
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+## Agent Reasoning Notes
+Reach for this when auto-detect is unreliable or when the user has reviewed the audio and knows exactly where a lexeme starts. Two pairs from opposite ends of the recording is a cheap drift check — if they agree within MAD, a global offset is safe; if they disagree, drift is real and a single shift won't fix the file. The output is drop-in compatible with `apply_timestamp_offset` — same `offsetSec` field, same convention.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/detect_timestamp_offset_from_pair?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `detect_timestamp_offset_from_pair` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `detect_timestamp_offset_from_pair` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `apply_timestamp_offset` — apply the computed offset (always `dryRun: true` first).
+- `detect_timestamp_offset` — auto-detect alternative when no manual pairs are available.
+- `annotation_read` — inspect the file before/after.
+- `project_context_read` — verify `conceptId` values.

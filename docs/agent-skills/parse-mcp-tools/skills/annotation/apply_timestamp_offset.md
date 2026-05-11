@@ -1,124 +1,70 @@
----
-name: parse-mcp-tool-apply-timestamp-offset
-description: "Use PARSE MCP tool `apply_timestamp_offset`: Shift every annotation interval (start and end) by offsetSec for the given speaker. Mutates annotations/<speaker>.parse.json. Use dryRun=true first to preview the shift, then dryRun=false to write."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# apply_timestamp_offset
 
-# PARSE MCP Tool Skill — `apply_timestamp_offset`
+**Category:** Annotation
+**Mutability:** mutating (writes `annotations/<speaker>.parse.json`)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~210 (short) / ~470 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `apply_timestamp_offset` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Shifts every annotation interval (start and end) for one speaker by a constant `offsetSec`, rewriting `annotations/<speaker>.parse.json` — the standard fix when CSV-derived timestamps are uniformly offset from the audio.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After `detect_timestamp_offset` or `detect_timestamp_offset_from_pair` returns a high-confidence offset and you've sanity-checked the matched anchors.
+- When you have one or more trusted (audio time, csv/annotation time) pairs and want to apply the resulting `offsetSec` to the whole speaker.
+- For a "the recording was edited and shifted by X seconds" cleanup — the offset is constant across the file.
 
-## Tool contract snapshot
+## When NOT to Use
+- When the offset is *not* constant (the CSV drifts non-linearly relative to audio) — this tool applies one shift to every interval. Drift requires per-interval re-alignment, not a global offset.
+- Without a dry-run preview first. `dryRun` is required in the schema for a reason: the file is rewritten in place and a wrong sign value can scramble all intervals across the recording.
+- For boundary-level refinement — use `forced_align_start` or `compute_boundaries_start` for tight per-word boundaries, not a global shift.
 
-- **Tool name:** `apply_timestamp_offset`
-- **Skill name:** `parse-mcp-tool-apply-timestamp-offset`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `offsetSec`, `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Shift every annotation interval (start and end) by offsetSec for the given speaker. Mutates annotations/<speaker>.parse.json. Use dryRun=true first to preview the shift, then dryRun=false to write.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                  | Default | Example     |
+|-----------|---------|----------|----------------------------------------------------------------------------------------------|---------|-------------|
+| speaker   | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                  | —       | `"Khan01"`  |
+| offsetSec | number  | Yes      | Seconds to add to every interval start/end. Negative values pull timestamps earlier.         | —       | `2.375`     |
+| dryRun    | boolean | Yes      | `true` previews; `false` writes. Always run with `true` first.                               | —       | `true`      |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID whose annotation intervals will be shifted.
-- `offsetSec` (type=number) — Seconds to add to every interval start/end; negative values pull timestamps earlier.
-- `dryRun` (type=boolean) — If true, preview the timestamp shift without writing annotations/<speaker>.parse.json.
+## Expected Output
+On `dryRun: true`: returns the preview — number of intervals that would shift, the new min/max start/end times, and any out-of-range warnings. No file write.
 
-### MCP annotations
+On `dryRun: false`: rewrites `annotations/<speaker>.parse.json` in place with every interval's `start_sec` and `end_sec` incremented by `offsetSec`. Returns `{ ok: true, speaker, offsetSec, intervalsShifted, annotationPath }`. The previous file content is not automatically backed up — callers that need rollback must snapshot first.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The target speaker must already have an annotation file under annotations/. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, the speaker's annotation intervals are rewritten with the requested offset. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/apply_timestamp_offset?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `apply_timestamp_offset` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Dry-run output example
-
-Always run with `dryRun: true` first. A representative successful preview looks like:
-
+## Example Successful Call
+Dry run (mandatory first step):
 ```json
 {
-  "readOnly": true,
-  "dryRun": true,
-  "speaker": "<SPEAKER_ID>",
-  "offsetSec": 0.25,
-  "wouldShiftIntervals": 4,
-  "wouldShiftConcepts": 2,
-  "preview": [
-    {
-      "tier": "ortho",
-      "from": [1.0, 1.5],
-      "to": [1.25, 1.75]
-    }
-  ]
+  "speaker": "Khan01",
+  "offsetSec": 2.375,
+  "dryRun": true
 }
 ```
 
-Only the subsequent `dryRun: false` call is allowed to write; after applying, re-read `annotations/<Speaker>.parse.json` and verify the shifted interval counts match the preview.
+Live apply (only after confirming the dry-run looks right):
+```json
+{
+  "speaker": "Khan01",
+  "offsetSec": 2.375,
+  "dryRun": false
+}
+```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `apply_timestamp_offset` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                                | Recovery                                                                                              |
+|----------------------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Wrong sign on offset                   | All intervals shift the wrong direction; some go negative              | Re-read the original file (no auto-backup). If unrecoverable, re-import from source CSV via `onboard_speaker_import` and re-derive. |
+| Offset pushes intervals past EOF       | Some intervals have `end_sec > duration_sec`                           | Cap the offset or trim the affected intervals. Re-run `detect_timestamp_offset` to confirm the value. |
+| Drift mistaken for offset              | After apply, some regions of the audio align but others don't          | The offset is not constant. Don't keep stacking offsets — restore from source and run per-region alignment via `forced_align_start`. |
+| Missing annotation file                | Tool error                                                             | Speaker must have an existing annotation file. Import via `onboard_speaker_import` first.             |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This tool is the apply step in a three-step flow: (1) detect the offset (`detect_timestamp_offset` for auto or `detect_timestamp_offset_from_pair` for manual), (2) inspect the result for high confidence + low spread + no warnings, (3) apply here with `dryRun: true` first, then `false`. Never skip the dry-run; the file is rewritten in place without an auto-backup. Treat the `offsetSec` value as load-bearing data — confirm sign and magnitude before applying, especially when the detected `direction` is `"earlier"` (negative offset).
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `detect_timestamp_offset` — auto-detect from STT anchors.
+- `detect_timestamp_offset_from_pair` — manual offset from trusted pairs.
+- `annotation_read` — audit the file before and after.
+- `forced_align_start`, `compute_boundaries_start` — alternative for per-word boundary correction (not global shift).

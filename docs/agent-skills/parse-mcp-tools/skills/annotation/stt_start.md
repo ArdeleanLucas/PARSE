@@ -1,147 +1,71 @@
----
-name: parse-mcp-tool-stt-start
-description: "Use PARSE MCP tool `stt_start`: Start a bounded STT background job for a project audio file. Returns a jobId for polling with stt_status."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# stt_start
 
-# PARSE MCP Tool Skill — `stt_start`
+**Category:** Annotation
+**Mutability:** stateful_job (starts a sentence-level STT background job)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~230 (short) / ~500 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `stt_start` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Starts a bounded sentence-level STT job (faster-whisper) for a project audio file and returns a `jobId` for polling with `stt_status`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- For sentence-level transcription — segments with start/end times but **no word timestamps**.
+- As a first STT pass when word-level precision isn't needed (e.g. for compare-mode anchors, quick coverage check).
+- When the audio is already normalized; if not, run `audio_normalize_start` first.
 
-## Tool contract snapshot
+## When NOT to Use
+- When you need word-level timestamps for `forced_align_start` or `compute_boundaries_start` — use `stt_word_level_start` instead. Those downstream tools require word seeds, which sentence-level STT doesn't produce.
+- For boundary-constrained STT (re-transcribe per ortho_words window) — that's `retranscribe_with_boundaries_start`.
+- Without normalized audio. Whisper handles unnormalized audio in principle but PARSE's pipeline assumes the normalized working WAV is the canonical input.
 
-- **Tool name:** `stt_start`
-- **Skill name:** `parse-mcp-tool-stt-start`
-- **Family:** `chat`
-- **Mutability:** `stateful_job`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `sourceWav`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Start a bounded STT background job for a project audio file. Returns a jobId for polling with stt_status.
+## Parameters
 
-### Parameters
+| Parameter | Type    | Required | Description                                                                                | Default       | Example                              |
+|-----------|---------|----------|--------------------------------------------------------------------------------------------|---------------|--------------------------------------|
+| speaker   | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                | —             | `"Khan01"`                           |
+| sourceWav | string  | Yes      | Path to the audio (normalized working WAV usually). `minLength=1`, `maxLength=512`.        | —             | `"audio/working/Khan01/Khan01.wav"` |
+| language  | string  | No       | Language hint for faster-whisper. Empty/omitted = auto-detect. `minLength=1`, `maxLength=32`. | (auto-detect) | `"sdh"`                           |
+| dryRun    | boolean | No       | If `true`, validate inputs and preview the STT job without launching it.                    | `false`       | `true`                               |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `sourceWav` (type=string; minLength=1; maxLength=512)
-- `language` (type=string; minLength=1; maxLength=32)
-- `dryRun` (type=boolean) — If true, validate inputs and preview the STT job without launching it.
+## Expected Output
+On `dryRun: true`: returns the resolved source path, model, and language without launching the job.
 
-### MCP annotations
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, language }`. **Poll with `stt_status` until terminal.** On completion the job writes the sentence-level cache to `coarse_transcripts/<speaker>.json`.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- A readable source audio path must be provided or resolvable for the requested speaker. (`file_presence`, `required`)
-
-### Postconditions advertised by catalog
-
-- Calling this tool starts or previews a background job that can be polled later. (`job_state`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/stt_start?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `stt_start` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked example
-
-Start with `dryRun: true` when validating a path; omit it or set `false` to launch the background STT job:
-
-```bash
-curl -sS -X POST "$PARSE_BASE_URL/api/mcp/tools/stt_start?mode=active" \
-  -H "Content-Type: application/json" \
-  --data '{
-    "speaker": "Speaker01",
-    "sourceWav": "audio/working/Speaker01/source.wav",
-    "language": "ku",
-    "dryRun": false
-  }'
-```
-
-Equivalent MCP arguments:
-
+## Example Successful Call
+Dry run:
 ```json
 {
-  "speaker": "Speaker01",
-  "sourceWav": "audio/working/Speaker01/source.wav",
+  "speaker": "Khan01",
+  "sourceWav": "audio/working/Khan01/Khan01.wav",
   "language": "ku",
-  "dryRun": false
+  "dryRun": true
 }
 ```
 
-Expected launch response shape; poll the returned UUID with `stt_status`:
-
+Live start:
 ```json
 {
-  "tool": "stt_start",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "jobId": "6fb9a9ef-61f8-41fb-8c4d-173848c2a0d4",
-    "status": "running",
-    "speaker": "Speaker01",
-    "sourceWav": "audio/working/Speaker01/source.wav",
-    "message": "STT job started. Poll with stt_status.",
-    "mode": "read-only"
-  }
+  "speaker": "Khan01",
+  "sourceWav": "audio/working/Khan01/Khan01.wav"
 }
 ```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `stt_start` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                                  |
+|----------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Wrong language detected                | Garbled segments                                                     | Re-run with explicit `language: "<iso>"`. Overwriting the cache happens by default — re-running rewrites it.|
+| Source WAV missing                     | Job errors quickly                                                   | Verify with `read_audio_info`. Run `audio_normalize_start` if a working WAV isn't present.                |
+| Missing word timestamps for downstream | `forced_align_start` errors on lookup                                | Sentence-level STT doesn't produce words. Run `stt_word_level_start` instead before forced-align.         |
+| OOM / GPU issues                       | Job ends in `error` with CUDA/torch message                          | Read `job_logs`. faster-whisper has a CPU fallback but is slow.                                           |
 
-## Anti-patterns
+## Agent Reasoning Notes
+Pick `stt_start` only when you don't need word-level timestamps. For the standard Tier 1 → 2 → 3 pipeline, you almost certainly want `stt_word_level_start` (Tier 1 word-level) instead — it's the same model with `word_timestamps=True`, and downstream forced-align needs the words. Keep this as the cheap-and-fast option for cases that don't care about word boundaries (quick coverage checks, compare-mode anchors).
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `stt_status` — poll the returned `jobId`.
+- `stt_word_level_start` — preferred for word-level output needed by Tier 2.
+- `retranscribe_with_boundaries_start` — boundary-constrained alternative.
+- `audio_normalize_start`, `read_audio_info` — preflight for the source WAV.

@@ -1,51 +1,46 @@
----
-name: parse-mcp-tool-detect-timestamp-offset
-description: "Use PARSE MCP tool `detect_timestamp_offset`: Detect a constant timestamp offset between a speaker's annotation intervals and STT segments for the same audio. Uses monotonic anchor-segment alignment (chosen matches must visit anchors and segments in increasing time order) so false matches to similar-sounding words elsewhere in the recording can't elect the wrong direction. Anchors are sampled across the timeline by quantile by default — pass anchorDistribution='earliest' to use the legacy first-N selection. Read-only; returns offsetSec, confidence, spreadSec, direction, warnings, and the matched anchor↔segment pairs so callers can sanity-check before applying."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# detect_timestamp_offset
 
-# PARSE MCP Tool Skill — `detect_timestamp_offset`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only detection)
+**Complexity:** Medium
+**Estimated Tokens:** ~280 (short) / ~600 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `detect_timestamp_offset` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Detects a constant timestamp offset between a speaker's annotation intervals and STT segments for the same audio using monotonic anchor-segment alignment, returning `offsetSec` with confidence and spread so callers can sanity-check before applying.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- When you suspect the speaker's CSV-derived timestamps are uniformly off from the audio (e.g. the recording was edited and shifted, the CSV uses a different time zero).
+- Before `apply_timestamp_offset`: this is the auto-detect path that produces the `offsetSec` value.
+- When you have an STT job already completed for the speaker and want PARSE to figure out the offset from anchor-word matches instead of feeding manual pairs.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without a completed STT job — the tool depends on `sttJobId` to source STT segments. Run `stt_start` or `stt_word_level_start` first.
+- When you already have trusted (audio time, csv time) pairs from manual review — use `detect_timestamp_offset_from_pair` instead; it's deterministic and skips the anchor search.
+- For non-constant drift. The tool models a single constant offset; if the spread is high (`spreadSec` > ~1s) or `warnings` is non-empty, the audio doesn't have a single-offset relationship to the CSV.
+- To apply the offset. This is read-only; pass the returned `offsetSec` into `apply_timestamp_offset` after sanity-checking.
 
-- **Tool name:** `detect_timestamp_offset`
-- **Skill name:** `parse-mcp-tool-detect-timestamp-offset`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Detect a constant timestamp offset between a speaker's annotation intervals and STT segments for the same audio. Uses monotonic anchor-segment alignment (chosen matches must visit anchors and segments in increasing time order) so false matches to similar-sounding words elsewhere in the recording can't elect the wrong direction. Anchors are sampled across the timeline by quantile by default — pass anchorDistribution='earliest' to use the legacy first-N selection. Read-only; returns offsetSec, confidence, spreadSec, direction, warnings, and the matched anchor↔segment pairs so callers can sanity-check before applying.
+## Parameters
 
-### Parameters
+| Parameter          | Type    | Required | Description                                                                                            | Default     | Example          |
+|--------------------|---------|----------|--------------------------------------------------------------------------------------------------------|-------------|------------------|
+| speaker            | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                            | —           | `"Khan01"`       |
+| sttJobId           | string  | No       | Identifier of a completed STT job for the same speaker. `minLength=1`, `maxLength=128`.                | (resolve latest) | `"stt-7f3a"` |
+| nAnchors           | integer | No       | Number of annotation anchors to sample. `minimum=2`, `maximum=50`.                                     | (server default) | `12`        |
+| bucketSec          | number  | No       | Match window in seconds. `minimum=0.1`, `maximum=30.0`.                                                | (server default) | `1.0`       |
+| minMatchScore      | number  | No       | Minimum similarity score for a match to count. `minimum=0.0`, `maximum=1.0`.                            | (server default) | `0.56`      |
+| anchorDistribution | string  | No       | `quantile` (default — anchors sampled across timeline) or `earliest` (legacy first-N selection).        | `"quantile"` | `"quantile"`     |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `sttJobId` (type=string; minLength=1; maxLength=128)
-- `nAnchors` (type=integer; minimum=2; maximum=50)
-- `bucketSec` (type=number; minimum=0.1; maximum=30.0)
-- `minMatchScore` (type=number; minimum=0.0; maximum=1.0)
-- `anchorDistribution` (type=string; enum=`quantile`, `earliest`)
+## Expected Output
+Returns `{ offsetSec, confidence, nAnchors, totalAnchors, totalSegments, method: "monotonic_alignment", spreadSec, direction, directionLabel, anchorDistribution, reliable, warnings, matches[], annotationPath }`. Treat non-empty `warnings`, low `confidence` (< ~0.7), or high `spreadSec` (> ~1s) as a stop sign — do not pass `offsetSec` to `apply_timestamp_offset` in those cases.
 
-### Example request/response
+Does not mutate project state.
 
-Input for a completed STT job:
-
+## Example Successful Call
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
-  "sttJobId": "stt-<ID>",
+  "speaker": "Khan01",
+  "sttJobId": "stt-7f3a",
   "nAnchors": 12,
   "bucketSec": 1.0,
   "minMatchScore": 0.56,
@@ -53,12 +48,11 @@ Input for a completed STT job:
 }
 ```
 
-Representative result payload:
-
+Representative high-confidence response:
 ```json
 {
   "readOnly": true,
-  "speaker": "<SPEAKER_ID>",
+  "speaker": "Khan01",
   "offsetSec": 2.375,
   "confidence": 0.87,
   "nAnchors": 9,
@@ -68,85 +62,29 @@ Representative result payload:
   "spreadSec": 0.42,
   "direction": "later",
   "directionLabel": "2.375 s later (toward the end)",
-  "anchorDistribution": "quantile",
   "reliable": true,
   "warnings": [],
   "matches": [
-    {
-      "anchor_index": 0,
-      "anchor_text": "water",
-      "anchor_start": 12.0,
-      "segment_index": 17,
-      "segment_text": "water",
-      "segment_start": 14.375,
-      "score": 0.94,
-      "offset_sec": 2.375
-    }
-  ],
-  "annotationPath": "annotations/<SPEAKER_ID>.parse.json"
+    {"anchor_index": 0, "anchor_text": "water", "anchor_start": 12.0, "segment_index": 17, "segment_text": "water", "segment_start": 14.375, "score": 0.94, "offset_sec": 2.375}
+  ]
 }
 ```
 
-Treat non-empty `warnings`, low `confidence`, or high `spreadSec` as a stop sign before passing `offsetSec` to `apply_timestamp_offset`.
+## Common Failure Modes & How to Recover
 
-### MCP annotations
+| Failure                                | Symptom                                                                      | Recovery                                                                                                  |
+|----------------------------------------|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Low confidence / few matches           | `confidence < 0.5`, few entries in `matches`                                 | Speaker may not have enough overlap. Try lowering `minMatchScore` cautiously, or switch to `detect_timestamp_offset_from_pair` with manual pairs. |
+| High spread                            | `spreadSec > 1s`, `warnings` non-empty                                       | The offset is not constant (drift). Don't apply a global offset — investigate per-region with `detect_timestamp_offset_from_pair` and multiple pairs. |
+| Wrong direction                        | `direction` doesn't match expectations                                       | Re-read the `matches[]` array to see which anchor-segment pairs the algorithm chose — false matches show up as outliers. |
+| STT job not for this speaker           | Tool errors or matches are garbage                                            | Verify `sttJobId` was for the same speaker. Re-run STT if needed.                                         |
+| `anchorDistribution: "earliest"` biased | All anchors concentrated in opening — misses drift later in the recording   | Keep `quantile` (default) unless you specifically need legacy behavior.                                   |
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+## Agent Reasoning Notes
+This is step 1 of the timestamp-correction flow: `detect_timestamp_offset` → inspect for confidence/spread/warnings → `apply_timestamp_offset` (`dryRun: true` first). The monotonic-alignment guarantee means matches must visit anchors and segments in increasing time order — that defeats the false-match-elsewhere-in-recording problem that simpler nearest-neighbor approaches fall into. Don't trust the `offsetSec` blindly: read the matched anchor-segment pairs in the response, confirm they look right, and only then pass it forward. If unsure or if confidence is low, fall back to `detect_timestamp_offset_from_pair` with a couple of trusted manual anchors.
 
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/detect_timestamp_offset?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `detect_timestamp_offset` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `detect_timestamp_offset` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `apply_timestamp_offset` — apply the detected offset (always `dryRun: true` first).
+- `detect_timestamp_offset_from_pair` — manual-pair alternative when auto-detect is unreliable.
+- `stt_start`, `stt_word_level_start` — produce the STT job this tool needs.
+- `annotation_read` — inspect the speaker's interval structure before detecting.

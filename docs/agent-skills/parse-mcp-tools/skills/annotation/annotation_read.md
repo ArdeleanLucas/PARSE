@@ -1,115 +1,62 @@
----
-name: parse-mcp-tool-annotation-read
-description: "Use PARSE MCP tool `annotation_read`: Read one speaker annotation JSON safely from annotations/<speaker>.parse.json with optional concept filtering. Read-only."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# annotation_read
 
-# PARSE MCP Tool Skill — `annotation_read`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only inspection)
+**Complexity:** Low
+**Estimated Tokens:** ~190 (short) / ~430 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `annotation_read` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Reads one speaker's annotation JSON (`annotations/<speaker>.parse.json`) with optional concept/tier filtering and a hard cap on returned intervals — the safe inspection path that won't dump multi-megabyte files into the agent's context.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Auditing what's actually in a speaker's annotation file after a pipeline job claims success — read_only ground truth, not a job summary.
+- Inspecting a specific concept row's intervals across tiers (`conceptIds: ["12"]` + `includeTiers: ["ortho", "ipa"]`).
+- Before any mutating tool that targets the annotation file (`apply_timestamp_offset`, `compute_boundaries_start`, `ipa_transcribe_acoustic_start`) — confirm the file looks like you expect.
+- Diagnosing why a downstream step thinks a tier is empty or partial — `intervals` count and the actual interval content settle the question.
 
-## Tool contract snapshot
+## When NOT to Use
+- For a full-project annotation dump — call once per speaker, or use `speakers_list` + iterate. There is no batch read tool.
+- To read the raw file directly. The tool applies project-aware loading (resolves the canonical `.parse.json` path, handles missing-file errors cleanly); shelling out via `read_text_preview` works but bypasses these safeguards.
+- For pipeline-state preflight ("is STT done? how much coverage?") — use `pipeline_state_read` instead; it computes coverage fractions and `can_run` flags rather than dumping raw intervals.
 
-- **Tool name:** `annotation_read`
-- **Skill name:** `parse-mcp-tool-annotation-read`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `speaker`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Read one speaker annotation JSON safely from annotations/<speaker>.parse.json with optional concept filtering. Read-only.
+## Parameters
 
-### Parameters
+| Parameter     | Type     | Required | Description                                                                       | Default       | Example                  |
+|---------------|----------|----------|-----------------------------------------------------------------------------------|---------------|--------------------------|
+| speaker       | string   | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                       | —             | `"Khan01"`               |
+| conceptIds    | string[] | No       | Restrict the read to intervals belonging to these concept IDs.                    | (all)         | `["12", "13", "14"]`     |
+| includeTiers  | string[] | No       | Restrict the read to specific tiers. Common tiers: `ortho`, `ipa`, `ortho_words`. | (all)         | `["ortho", "ipa"]`       |
+| maxIntervals  | integer  | No       | Hard cap on returned intervals. `minimum=1`, `maximum=5000`.                      | (server default) | `200`                 |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `conceptIds` (type=array)
-- `includeTiers` (type=array)
-- `maxIntervals` (type=integer; minimum=1; maximum=5000)
+## Expected Output
+Returns the annotation JSON content limited by the filters: `{ readOnly, speaker, tiers: { <tier>: [{ id, start_sec, end_sec, text, concept_id, ... }] }, conceptCount, intervalCount, truncated }`. When `maxIntervals` is hit, `truncated: true` signals that the response is a partial view.
 
-### MCP annotations
+Does not mutate project state.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+```json
+{
+  "speaker": "Khan01",
+  "conceptIds": ["12", "13"],
+  "includeTiers": ["ortho", "ipa"],
+  "maxIntervals": 100
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
+## Common Failure Modes & How to Recover
 
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active"
-```
+| Failure                          | Symptom                                                | Recovery                                                                                              |
+|----------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Unknown speaker                  | Tool error — annotation file not found                 | Verify against `speakers_list` or `project_context_read`. Speaker may not be onboarded yet.           |
+| Empty tier despite expecting data | `tiers.<x>` empty array                                | The tier hasn't been populated. Call `pipeline_state_read` to see which step is missing.              |
+| Truncated response               | `truncated: true` in result                            | Either tighten `conceptIds`/`includeTiers` filters or raise `maxIntervals` (capped at 5000).          |
+| Unknown concept IDs              | Filtered result empty but tier has data                | Verify IDs in `project_context_read` (`concepts` section).                                            |
 
-Schema-first inspection example:
+## Agent Reasoning Notes
+This is the right tool for "show me what's actually in the file" questions. Pair with `pipeline_state_read` for the higher-level coverage view, and with `apply_timestamp_offset` / `compute_boundaries_start` / `ipa_transcribe_acoustic_start` as a pre/post audit when those mutate the same file. Avoid using it as a project-wide audit primitive — the tool is per-speaker by design.
 
-```bash
-# 1. Fetch the live contract for the active MCP exposure mode.
-curl -s "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active" \
-  | python3 -m json.tool
-
-# 2. Only after checking the live inputSchema, make a bounded read call.
-curl -s "$PARSE_BASE_URL/api/mcp/tools/annotation_read?mode=active" \
-  -H 'Content-Type: application/json' \
-  -d '{"speaker":"<SPEAKER_ID>","includeTiers":["ortho"],"maxIntervals":200}' \
-  | python3 -m json.tool
-```
-
-Do not copy an old argument shape from this document if the first curl shows a newer schema; treat the live catalog response as authoritative.
-
-## Workflow
-
-1. **Discover** – Confirm `annotation_read` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `annotation_read` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `pipeline_state_read` — coverage/state view; better for "is this done?" questions.
+- `speakers_list` — enumerate valid speaker IDs.
+- `apply_timestamp_offset`, `compute_boundaries_start`, `ipa_transcribe_acoustic_start` — mutating tools that target the same file; audit before/after.

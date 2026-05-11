@@ -1,196 +1,82 @@
----
-name: parse-mcp-tool-phonetic-rules-apply
-description: "Use PARSE MCP tool `phonetic_rules_apply`: Apply the project phonetic rules to IPA forms. Three modes:\n  normalize — strip delimiters, lowercase, normalise whitespace\n  apply     — return all rule-generated variants of a form\n  equivalence — compare two forms; returns isEquivalent + similarity score\nUses project phonetic_rules.json unless custom rules are supplied."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# phonetic_rules_apply
 
-# PARSE MCP Tool Skill — `phonetic_rules_apply`
+**Category:** Annotation
+**Mutability:** read_only
+**Supports Dry Run:** N/A (read-only computation)
+**Complexity:** Low
+**Estimated Tokens:** ~230 (short) / ~510 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `phonetic_rules_apply` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Applies the project's phonetic rules to IPA forms in one of three modes — `normalize` (strip delimiters / lowercase / whitespace), `apply` (return all rule-generated variants), or `equivalence` (compare two forms, returning `isEquivalent` + similarity score).
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- **`normalize` mode** — before comparing or storing IPA forms; ensures consistent delimiter / case / whitespace handling.
+- **`apply` mode** — to expand a base IPA form into its rule-permitted variants (free variation, allophones, etc.) for cognate matching or display.
+- **`equivalence` mode** — to decide whether two surface IPA forms are the same lexeme up to allowable variation, for cognate / borrowing decisions.
 
-## Tool contract snapshot
+## When NOT to Use
+- For orthographic forms — this tool operates on IPA. Use a different transformation if the input is graphemes.
+- For tier-wide batch transformations on an annotation file. The tool is per-form (or per-form-pair); apply it programmatically over the cells you care about.
+- To author or modify the project's rule file. The tool reads `phonetic_rules.json` (or accepts inline `rules`); it does not write back.
 
-- **Tool name:** `phonetic_rules_apply`
-- **Skill name:** `parse-mcp-tool-phonetic-rules-apply`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `form`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Apply the project phonetic rules to IPA forms. Three modes:
-  normalize — strip delimiters, lowercase, normalise whitespace
-  apply     — return all rule-generated variants of a form
-  equivalence — compare two forms; returns isEquivalent + similarity score
-Uses project phonetic_rules.json unless custom rules are supplied.
+## Parameters
 
-### Parameters
+| Parameter | Type     | Required | Description                                                                                  | Default       | Example                |
+|-----------|----------|----------|----------------------------------------------------------------------------------------------|---------------|------------------------|
+| form      | string   | Yes      | Primary IPA form to operate on. `minLength=1`, `maxLength=256`.                              | —             | `"[xosˈtin]"`          |
+| mode      | string   | No       | Operation: `normalize`, `apply`, or `equivalence`.                                           | `"normalize"` | `"equivalence"`        |
+| form2     | string   | No*      | Second form (required for `equivalence` mode). `minLength=1`, `maxLength=256`.               | —             | `"xostin"`             |
+| rules     | object[] | No       | Optional inline rule list (same schema as `phonetic_rules.json` entries). Omit to use the project file. | — | `[{"from": "x", "to": "h"}]` |
 
-- `form` (type=string; minLength=1; maxLength=256) — Primary IPA form to operate on.
-- `mode` (type=string; enum=`normalize`, `apply`, `equivalence`) — Operation mode (default: normalize).
-- `form2` (type=string; minLength=1; maxLength=256) — Second form for equivalence mode.
-- `rules` (type=array) — Optional inline rule list (same schema as phonetic_rules.json entries). Omit to use the project file.
+*Required when `mode: "equivalence"`.
 
-### MCP annotations
+## Expected Output
+Shape depends on `mode`:
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+- **`normalize`**: `{ normalized: "<form>" }` — the input with delimiters stripped, lowercased, whitespace normalized.
+- **`apply`**: `{ variants: ["...", "..."] }` — all rule-generated variants of the input.
+- **`equivalence`**: `{ isEquivalent: bool, score: 0.0..1.0, normalizedForm, normalizedForm2 }` — the comparison verdict and similarity score.
 
-### Preconditions advertised by catalog
+Does not mutate project state.
 
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/phonetic_rules_apply?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `phonetic_rules_apply` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Worked examples
-
-These examples use inline rules so the results are deterministic across projects. Omit `rules` to use the project's `phonetic_rules.json`. In wrapped HTTP/MCP responses, `result.mode` stays `read-only`; the requested operation is visible from the distinct result keys (`normalized`, `variants`, or `isEquivalent`/`similarityScore`).
-
-Normalize strips IPA delimiters, lowercases, and normalizes whitespace:
-
+## Example Successful Call
+Normalize:
 ```json
 {
-  "form": " /Yek/ ",
+  "form": "[xosˈtin]",
   "mode": "normalize"
 }
 ```
 
+Apply rules (variants):
 ```json
 {
-  "tool": "phonetic_rules_apply",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "form": "/Yek/",
-    "normalized": "yek"
-  }
+  "form": "xostin",
+  "mode": "apply"
 }
 ```
 
-Apply returns the canonical rule-applied form in `variants`:
-
+Equivalence:
 ```json
 {
-  "form": "pa",
-  "mode": "apply",
-  "rules": [
-    {
-      "from": "p",
-      "to": "b",
-      "context": "onset",
-      "bidirectional": false
-    }
-  ]
+  "form": "[xosˈtin]",
+  "form2": "xostin",
+  "mode": "equivalence"
 }
 ```
 
-```json
-{
-  "tool": "phonetic_rules_apply",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "form": "pa",
-    "normalized": "pa",
-    "variants": "ba"
-  }
-}
-```
+## Common Failure Modes & How to Recover
 
-Equivalence compares two forms and returns a boolean plus rounded similarity score:
+| Failure                                 | Symptom                                                              | Recovery                                                                                              |
+|-----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Missing `form2` in equivalence mode     | Validation error                                                     | Provide both forms when `mode: "equivalence"`.                                                        |
+| Inline `rules` schema mismatch          | Validation error or unexpected behavior                              | Match `phonetic_rules.json` schema; or omit `rules` to use the project file.                          |
+| Surprising equivalence verdict          | `isEquivalent: false` when you expected true (or vice versa)         | Inspect `normalizedForm` / `normalizedForm2` in the response — the rules may not capture the variation. Edit `phonetic_rules.json`.|
+| Variant explosion in `apply` mode       | Hundreds of variants for a long form                                 | The rule set may have too many rewrites. Consider scoping the inline `rules` to just what's needed.   |
 
-```json
-{
-  "form": "pa",
-  "form2": "ba",
-  "mode": "equivalence",
-  "rules": [
-    {
-      "from": "p",
-      "to": "b",
-      "context": "onset",
-      "bidirectional": false
-    }
-  ]
-}
-```
+## Agent Reasoning Notes
+Normalize first, equivalence-test second. In compare-mode cognate review (Comparison bucket), this tool is the canonical check for "are these two forms the same?". The similarity score is useful for borderline cases — pair with a threshold (e.g. > 0.85) for automated grouping, but always show the matched normalized forms to a human reviewer before persisting a decision. Project-wide rules live in `phonetic_rules.json`; modify that file via direct edit (not via this tool) if rules need to change.
 
-```json
-{
-  "tool": "phonetic_rules_apply",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "mode": "read-only",
-    "form": "pa",
-    "form2": "ba",
-    "isEquivalent": true,
-    "similarityScore": 1.0
-  }
-}
-```
-
-## Quality checklist
-
-- [ ] Live catalog confirms `phonetic_rules_apply` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `cognate_compute_preview`, `cross_speaker_match_preview` — comparison-bucket tools that consume normalized IPA.
+- `annotation_read` — get the raw IPA cells to feed this tool.
