@@ -836,7 +836,15 @@ export function ParseUI() {
   const [tagConceptSearch, setTagConceptSearch] = useState('');
   const [darkMode, setDarkMode] = useState(false);
   const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
-  const [duplicateToast, setDuplicateToast] = useState<{ message: string; variant: 'error' | 'warning' } | null>(null);
+  const [duplicateToast, setDuplicateToast] = useState<{ message: string; variant: 'error' | 'warning' | 'success' } | null>(null);
+  const [recentlyDuplicatedSiblingKey, setRecentlyDuplicatedSiblingKey] = useState<string | null>(null);
+  const recentlyDuplicatedSiblingTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (recentlyDuplicatedSiblingTimeoutRef.current) {
+      window.clearTimeout(recentlyDuplicatedSiblingTimeoutRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -1778,6 +1786,7 @@ export function ParseUI() {
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
+          recentlyDuplicatedSiblingKey={recentlyDuplicatedSiblingKey}
           isConceptVariantVisibleInSidebar={sidebarVariantVisibilityPredicate}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
@@ -1791,13 +1800,17 @@ export function ParseUI() {
             // Pin the underlying concept_id (the concepts.csv row id) now —
             // `concepts` re-derives on every config reload, so the captured
             // object goes stale. Variant child rows pass their raw concept key
-            // through `sidebarConcept.key`, while grouped parent rows fall
-            // back to the first underlying variant.
+            // through `sidebarConcept.key`. Grouped parent rows prefer the
+            // active raw variant so the duplicate action does not yank the
+            // editor away from the variant the user was working on.
             const target = concepts.find((c) => c.id === sidebarConcept.id) ?? null;
             const variantKey = sidebarConcept.key && target?.variants?.some((variant) => variant.conceptKey === sidebarConcept.key)
               ? sidebarConcept.key
               : null;
-            const underlyingKey = variantKey ?? target?.variants?.[0]?.conceptKey ?? target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
+            const activeVariantKey = activeRawKey && target?.variants?.some((variant) => variant.conceptKey === activeRawKey)
+              ? activeRawKey
+              : null;
+            const underlyingKey = variantKey ?? activeVariantKey ?? target?.variants?.[0]?.conceptKey ?? target?.key ?? sidebarConcept.key ?? String(sidebarConcept.id);
             // Capture the grouping inputs at click-time so the post-reload
             // regrouping mirrors the live `concepts` memo at line 880 — in
             // particular `conceptMerges` matters when a duplicated concept
@@ -1819,6 +1832,19 @@ export function ParseUI() {
                 if (next) {
                   setConceptId(next.id);
                   setSelectedConceptKey(underlyingKey);
+                  const siblingKey = duplicated.sibling.id;
+                  setRecentlyDuplicatedSiblingKey(siblingKey);
+                  if (recentlyDuplicatedSiblingTimeoutRef.current) {
+                    window.clearTimeout(recentlyDuplicatedSiblingTimeoutRef.current);
+                  }
+                  recentlyDuplicatedSiblingTimeoutRef.current = window.setTimeout(() => {
+                    setRecentlyDuplicatedSiblingKey((current) => current === siblingKey ? null : current);
+                    recentlyDuplicatedSiblingTimeoutRef.current = null;
+                  }, 5000);
+                  setDuplicateToast({
+                    message: `Duplicated ${duplicated.primary.label} → ${duplicated.sibling.label}`,
+                    variant: 'success',
+                  });
                 }
               } catch (err) {
                 console.error('[ParseUI] duplicateConcept failed:', err);

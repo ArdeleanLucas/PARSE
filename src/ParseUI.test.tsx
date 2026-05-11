@@ -724,6 +724,11 @@ beforeEach(() => {
   vi.mocked(apiClient.startContactLexemeFetch).mockClear();
   vi.mocked(apiClient.listActiveJobs).mockClear();
   vi.mocked(apiClient.cancelComputeJob).mockClear();
+  vi.mocked(apiClient.duplicateConcept).mockReset();
+  vi.mocked(apiClient.duplicateConcept).mockResolvedValue({
+    primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
+    sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
+  });
 
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
@@ -1097,8 +1102,8 @@ describe("ParseUI", () => {
     const sidebar = screen.getByTestId("concept-sidebar");
     expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
     expect(within(sidebar).getByText("brother of husband")).toBeTruthy();
-    expect(within(sidebar).queryByText("brother of husband A")).toBeNull();
-    expect(within(sidebar).queryByText("brother of husband B")).toBeNull();
+    expect(within(sidebar).getByTestId("concept-variant-row-concept-a").textContent ?? "").toContain("brother of husband A");
+    expect(within(sidebar).getByTestId("concept-variant-row-concept-b").textContent ?? "").toContain("brother of husband B");
     expect(within(sidebar).getByText("sister of husband")).toBeTruthy();
     expect(within(sidebar).getByText("water")).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /brother of husband.*KLQ 2\.15/i })).toBeTruthy();
@@ -1382,7 +1387,7 @@ describe("ParseUI", () => {
     await switchToAnnotateMode();
     mockSyncTagsFromServer.mockClear();
     const rightPanel = () => screen.getByTestId("right-panel");
-    const thesisRow = () => within(rightPanel()).getByRole("button", { name: /Thesis\s+1/i });
+    const thesisRow = () => within(rightPanel()).getByRole("button", { name: /Thesis\s+\d+/i });
     expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /JBIL 154/i }));
@@ -1428,7 +1433,7 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    fireEvent.click(within(sidebar).getByTestId("concept-variant-toggle-1"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
     fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
@@ -1437,6 +1442,97 @@ describe("ParseUI", () => {
     expect(within(sidebar).getByTestId("concept-variant-row-365").textContent ?? "").toContain("new (A)");
     expect(within(sidebar).getByTestId("concept-variant-row-618").textContent ?? "").toContain("new (B)");
     expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").toContain("new (C)");
+  });
+
+  it("keeps duplicate focus on the original variant, shows success feedback, and clears the NEW marker", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      sibling: { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
+    });
+    mockReloadConfig.mockImplementationOnce(async () => {
+      mockConfig = {
+        ...(mockConfig as ProjectConfig),
+        concepts: [
+          { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+          { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+          { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
+        ],
+      };
+    });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618");
+    const originalRow = within(sidebar).getByTestId("concept-variant-row-618");
+    const siblingRow = within(sidebar).getByTestId("concept-variant-row-619");
+    expect(originalRow.className).toContain("bg-indigo-50");
+    expect(siblingRow.className).not.toContain("bg-indigo-50");
+    expect(siblingRow.textContent ?? "").toContain("NEW");
+    expect(screen.getByRole("alert").textContent ?? "").toContain("Duplicated new (B) → new (C)");
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").not.toContain("NEW");
+  });
+
+  it("duplicates the active raw variant when right-clicking a grouped parent", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [
+        { id: "247", label: "head (A)", source_item: "31", source_survey: "JBIL" },
+        { id: "248", label: "head (B)", source_item: "31", source_survey: "JBIL" },
+        { id: "527", label: "head", source_item: "31", source_survey: "JBIL" },
+        { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Qasr01: makeRecord("Qasr01", [{ conceptText: "head", conceptId: "622", start: 1, end: 2 }]) };
+    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
+      primary: { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
+      sibling: { id: "623", label: "head (D)", source_item: "31", source_survey: "JBIL" },
+    });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-622")).toBeTruthy());
+    fireEvent.click(within(sidebar).getByTestId("concept-variant-row-622"));
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /head.*JBIL 31/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
+
+    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("622"));
+    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("247");
   });
 
   it("treats an explicit empty annotate tag scope as untagged", () => {

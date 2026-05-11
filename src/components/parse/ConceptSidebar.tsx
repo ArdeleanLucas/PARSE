@@ -85,6 +85,7 @@ interface ConceptSidebarProps {
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
+  recentlyDuplicatedSiblingKey?: string | null;
 }
 
 const tagDot: Record<ConceptTag, string> = {
@@ -184,6 +185,7 @@ export function ConceptSidebar({
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
+  recentlyDuplicatedSiblingKey = null,
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
@@ -199,6 +201,20 @@ export function ConceptSidebar({
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
+  useEffect(() => {
+    if (activeConceptId == null || !activeConceptKey) return;
+    const parent = filteredConcepts.find((concept) => concept.id === activeConceptId);
+    const variants = parent?.variants ?? [];
+    if (variants.length <= 1) return;
+    if (!variants.some((variant) => variant.conceptKey === activeConceptKey)) return;
+    setExpandedConceptIds((current) => {
+      if (current.has(activeConceptId)) return current;
+      const next = new Set(current);
+      next.add(activeConceptId);
+      return next;
+    });
+  }, [activeConceptId, activeConceptKey, filteredConcepts]);
+
   const openSurveyLinkEditor = (concept: SidebarConcept) => {
     const buckets = bucketsForConcept(concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
     const resolved = resolveConceptSurvey(
@@ -524,6 +540,8 @@ export function ConceptSidebar({
               </div>
               {expanded && hasVariants && visibleVariants.map((variant) => {
                 const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
+                const isRecentlyDuplicated = !!recentlyDuplicatedSiblingKey
+                  && variant.conceptKey === recentlyDuplicatedSiblingKey;
                 const childConcept: SidebarConcept = {
                   ...concept,
                   key: variant.conceptKey,
@@ -542,10 +560,13 @@ export function ConceptSidebar({
                       event.preventDefault();
                       setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
                     }}
-                    className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
+                    className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass} ${isRecentlyDuplicated ? 'border-l-2 border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : ''}`}
                   >
                     <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
                     <span className={`flex-1 text-[12px] ${childActive ? 'font-semibold' : 'font-medium'}`}>{variant.conceptEn}</span>
+                    {isRecentlyDuplicated && (
+                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">NEW</span>
+                    )}
                     <span className="font-mono text-[10px] text-slate-300">{variant.conceptKey}</span>
                   </button>
                 );
