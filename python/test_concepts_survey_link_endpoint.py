@@ -33,17 +33,19 @@ class _FakeWfile:
 
 
 class _Handler(server.RangeRequestHandler):
-    def __init__(self, body: bytes, content_type: str = "application/json") -> None:
+    def __init__(self, body: bytes, content_type: str = "application/json", path: str = "/") -> None:
+        self.path = path
         self.rfile = io.BytesIO(body)
         self.wfile = _FakeWfile()
         self.headers = {"Content-Type": content_type, "Content-Length": str(len(body))}
         self.status: int | None = None
+        self.sent_headers: dict[str, str] = {}
 
     def send_response(self, code):
         self.status = code
 
-    def send_header(self, *_args, **_kwargs):
-        pass
+    def send_header(self, key, value):
+        self.sent_headers[str(key)] = str(value)
 
     def end_headers(self):
         pass
@@ -83,6 +85,14 @@ def _post(handler_method: str, body: dict, concept_id: str = "1") -> _Handler:
     return handler
 
 
+def _dispatch(method: str, path: str, body: dict) -> _Handler:
+    raw = json.dumps(body).encode("utf-8")
+    handler = _Handler(raw, path=path)
+    server._install_route_bindings()
+    assert handler._handle_api(method) is True
+    return handler
+
+
 def test_post_survey_link_persists_sidecar_and_returns_concept_entry(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     (tmp_path / "project.json").write_text("{}", encoding="utf-8")
@@ -102,6 +112,38 @@ def test_post_survey_link_persists_sidecar_and_returns_concept_entry(tmp_path, m
     assert payload["surveys"]["klq"] == "1.5"
     overlap = _read_overlap(tmp_path)
     assert overlap["concept_survey_links"]["1"]["jbil"] == "34"
+
+
+def test_survey_link_dispatcher_preserves_comma_separated_speaker_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    path = "/api/concepts/53,619/survey-links"
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "53", "concept_en": "ashes", "source_item": "53", "source_survey": "KLQ"},
+            {"id": "619", "concept_en": "ashes (B)", "source_item": "169", "source_survey": "JBIL"},
+        ],
+    )
+
+    missing_speaker = _dispatch("POST", path, {"survey_id": "jbil", "source_item": "169"})
+    assert missing_speaker.status == HTTPStatus.BAD_REQUEST
+
+    post_handler = _dispatch(
+        "POST",
+        path,
+        {"survey_id": "jbil", "source_item": "169", "speaker": "Saha01"},
+    )
+
+    assert post_handler.status == HTTPStatus.OK
+    overlap = _read_overlap(tmp_path)
+    assert overlap["speaker_concept_survey_links"] == {
+        "Saha01": {"53": {"jbil": "169"}, "619": {"jbil": "169"}}
+    }
+
+    delete_handler = _dispatch("DELETE", path, {"survey_id": "jbil", "speaker": "Saha01"})
+
+    assert delete_handler.status == HTTPStatus.OK
+    assert _read_overlap(tmp_path).get("speaker_concept_survey_links", {}) == {}
 
 
 def test_post_survey_link_normalizes_survey_id_and_trims_source_item(tmp_path, monkeypatch):

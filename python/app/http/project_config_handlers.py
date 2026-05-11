@@ -589,6 +589,10 @@ def build_concept_survey_link_delete_response(
 
     rows = _load_concept_rows(project_root, concept_ids)
     first_row = rows[0]
+    # Per-speaker deletes intentionally bypass the legacy CSV-link 409 and
+    # stored-source_item mismatch guard below: overrides live in
+    # speaker_concept_survey_links, not concepts.csv/global sidecar links.
+    # Keep this branch above those global-only guards (MC-367 / PR #362).
     if speaker is not None:
         current = load_survey_overlap_state(project_root)
         new_speaker_root = {
