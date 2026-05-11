@@ -92,6 +92,20 @@ describe('RightPanel', () => {
     expect(within(panel).getByRole('button', { name: /save annotations/i })).toBeTruthy();
   });
 
+  it('keeps the phonetic section limited to real annotated tools', () => {
+    renderRightPanel({
+      currentMode: 'annotate',
+      annotateSpeakerTools: <button type="button">Speaker-scoped tool</button>,
+      annotateAuxTools: <button type="button">Auxiliary tool</button>,
+    });
+
+    const section = screen.getByRole('button', { name: /Phonetic tools/i }).closest('section');
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByRole('button', { name: 'Speaker-scoped tool' })).toBeTruthy();
+    expect(within(section as HTMLElement).getByRole('button', { name: 'Auxiliary tool' })).toBeTruthy();
+    expect(within(section as HTMLElement).getAllByRole('button')).toHaveLength(3);
+  });
+
   it('renders Survey Values between Speakers and Timestamp tools and persists per-speaker flips', () => {
     const onSurveyOverlapUpdate = vi.fn();
     renderRightPanel({
