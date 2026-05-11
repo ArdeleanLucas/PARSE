@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { getLingPyExport, getNEXUSExport } from "../api/client";
+import { getCanonicalLexemesReport, getLingPyExport, getNEXUSExport } from "../api/client";
 import { useEnrichmentStore } from "../stores/enrichmentStore";
 
 const WORDLIST_HEADERS = ["ID", "CONCEPT", "DOCULECT", "IPA", "COGID", "TOKENS", "BORROWING"] as const;
@@ -110,6 +110,11 @@ export function useExport() {
     triggerDownload(blob, "parse-wordlist.nex");
   }, []);
 
+  const exportCanonicalLexemesReport = useCallback(async (): Promise<void> => {
+    const blob = await getCanonicalLexemesReport();
+    triggerDownload(blob, "canonical-lexemes.tsv");
+  }, []);
+
   const exportCSV = useCallback((): void => {
     const root = normalizeDataRoot(data);
     const rows: string[] = [WORDLIST_HEADERS.join("	")];
@@ -157,5 +162,5 @@ export function useExport() {
     triggerDownload(blob, "parse-wordlist-local.tsv");
   }, [data]);
 
-  return { exportLingPyTSV, exportNEXUS, exportCSV };
+  return { exportLingPyTSV, exportNEXUS, exportCanonicalLexemesReport, exportCSV };
 }

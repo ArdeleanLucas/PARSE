@@ -279,6 +279,7 @@ export interface CanonicalLexemeSelection {
 export interface CompareCandidate {
   csv_row_id: string;
   speaker?: string;
+  form?: string | null;
   ipa?: string | null;
   ortho?: string | null;
   start_sec?: number | null;

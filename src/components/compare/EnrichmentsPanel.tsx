@@ -67,7 +67,7 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
   const selectedSpeakers = useUIStore((store) => store.selectedSpeakers) ?? [];
   const configSpeakers = useConfigStore((store) => store.config?.speakers ?? []);
 
-  const { exportLingPyTSV } = useExport();
+  const { exportCanonicalLexemesReport, exportLingPyTSV } = useExport();
   const { start: startCompute, state: computeState } = useComputeJob("cognates");
 
   const [exportLoading, setExportLoading] = useState(false);
@@ -152,15 +152,23 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
     });
   }
 
-  async function handleExportLingPy() {
+  async function runExport(download: () => Promise<void>) {
     setExportLoading(true);
     try {
-      await exportLingPyTSV();
+      await download();
     } catch {
       // handled by API-level errors and user retry
     } finally {
       setExportLoading(false);
     }
+  }
+
+  function handleExportLingPy() {
+    void runExport(exportLingPyTSV);
+  }
+
+  function handleExportCanonicalReport() {
+    void runExport(exportCanonicalLexemesReport);
   }
 
   async function handleRunCompute() {
@@ -252,6 +260,15 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
         </Button>
         <Button size="sm" variant="secondary" loading={computeState.status === "running"} onClick={handleRunCompute}>
           Run Compute
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={exportLoading}
+          aria-label="Download canonical-lexemes report (TSV)"
+          onClick={handleExportCanonicalReport}
+        >
+          Download canonical-lexemes report (TSV)
         </Button>
         <Button size="sm" variant="secondary" loading={exportLoading} onClick={handleExportLingPy}>
           Export LingPy TSV
