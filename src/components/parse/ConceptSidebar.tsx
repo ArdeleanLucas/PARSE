@@ -331,10 +331,8 @@ export function ConceptSidebar({
   const scopedConcepts = scopedToSpeaker && hasElicitedScope
     ? filteredConcepts.filter((concept) => conceptMatchesElicitedKeys(concept, elicitedConceptKeys))
     : filteredConcepts;
-  const scopeLabel = scopedToSpeaker && activeSpeaker
-    ? `Scoped to ${activeSpeaker}`
-    : `Showing all ${filteredConcepts.length} master`;
   const scopeButtonLabel = scopedToSpeaker ? 'Show all' : 'Scope to speaker';
+  const scopeButtonText = scopedToSpeaker ? 'all' : 'scope';
   const showMissingAnnotationNote = scopedToSpeaker && activeSpeaker && !hasElicitedScope;
 
   return (
@@ -392,7 +390,35 @@ export function ConceptSidebar({
                 Source
               </button>
             </div>
-            <span className="text-[10px] text-slate-400">{scopedConcepts.length} concepts</span>
+            {activeSpeaker && onScopedToSpeakerChange ? (
+              <div className="flex flex-col items-end text-[10px] text-slate-400">
+                <span data-testid="concept-scope-breadcrumb" className="inline-flex items-center gap-1 whitespace-nowrap">
+                  {scopedToSpeaker ? (
+                    <>
+                      <span>{scopedConcepts.length} in</span>
+                      {' '}
+                      <span className="font-semibold text-sky-700">{activeSpeaker}</span>
+                    </>
+                  ) : (
+                    <span>{scopedConcepts.length} concepts</span>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    aria-label={scopeButtonLabel}
+                    onClick={() => onScopedToSpeakerChange(!scopedToSpeaker)}
+                    className="rounded-full bg-white px-1.5 py-0.5 font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50"
+                  >
+                    {scopeButtonText}
+                  </button>
+                </span>
+                {showMissingAnnotationNote && (
+                  <span className="mt-1 text-slate-400">No annotation file for {activeSpeaker} — showing master list</span>
+                )}
+              </div>
+            ) : (
+              <span className="text-[10px] text-slate-400">{scopedConcepts.length} concepts</span>
+            )}
           </div>
           {sortParent === 'concept' ? (
             <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
@@ -443,23 +469,6 @@ export function ConceptSidebar({
             </div>
           )}
         </div>
-        {activeSpeaker && onScopedToSpeakerChange && (
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold text-slate-600">{scopeLabel}</span>
-              <button
-                type="button"
-                onClick={() => onScopedToSpeakerChange(!scopedToSpeaker)}
-                className="rounded-full bg-white px-2 py-0.5 font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50"
-              >
-                {scopeButtonLabel}
-              </button>
-            </div>
-            {showMissingAnnotationNote && (
-              <div className="mt-1 text-slate-400">No annotation file for {activeSpeaker} — showing master list</div>
-            )}
-          </div>
-        )}
         <div className="mt-2 flex flex-wrap gap-1">
           <button
             onClick={() => {
