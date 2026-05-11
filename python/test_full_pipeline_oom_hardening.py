@@ -290,21 +290,26 @@ def test_sigkill_subprocess_without_result_is_classified_as_oom_suspect() -> Non
     assert "OOM" in snapshot["error"]
 
 
-def test_parse_run_warns_loudly_when_compute_mode_is_unset() -> None:
-    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "parse-run.sh"
+def _parse_run_warning_env(compute_mode: str = "") -> dict[str, str]:
     env = os.environ.copy()
     env.update(
         {
             "PARSE_RUN_WARNING_ONLY": "1",
-            "PARSE_COMPUTE_MODE": "",
+            "PARSE_ENV_FILE": os.devnull,
+            "PARSE_COMPUTE_MODE": compute_mode,
             "PARSE_USE_PERSISTENT_WORKER": "",
         }
     )
+    return env
+
+
+def test_parse_run_warns_loudly_when_compute_mode_is_unset() -> None:
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "parse-run.sh"
 
     result = subprocess.run(
         ["bash", str(script)],
         cwd=script.parents[1],
-        env=env,
+        env=_parse_run_warning_env(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -318,21 +323,35 @@ def test_parse_run_warns_loudly_when_compute_mode_is_unset() -> None:
     assert "WARNING: PARSE_COMPUTE_MODE is unset" not in result.stdout
 
 
+def test_parse_run_warning_only_can_ignore_local_parse_env(tmp_path: pathlib.Path) -> None:
+    source_script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "parse-run.sh"
+    script = tmp_path / "scripts" / "parse-run.sh"
+    script.parent.mkdir()
+    script.write_text(source_script.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / ".parse-env").write_text("PARSE_COMPUTE_MODE=subprocess\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=tmp_path,
+        env=_parse_run_warning_env(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Loaded local overrides from .parse-env" not in result.stdout
+    assert "WARNING: PARSE_COMPUTE_MODE is unset" in result.stderr
+
+
 def test_parse_run_warning_is_suppressed_when_compute_mode_is_explicit() -> None:
     script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "parse-run.sh"
-    env = os.environ.copy()
-    env.update(
-        {
-            "PARSE_RUN_WARNING_ONLY": "1",
-            "PARSE_COMPUTE_MODE": "subprocess",
-            "PARSE_USE_PERSISTENT_WORKER": "",
-        }
-    )
 
     result = subprocess.run(
         ["bash", str(script)],
         cwd=script.parents[1],
-        env=env,
+        env=_parse_run_warning_env("subprocess"),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

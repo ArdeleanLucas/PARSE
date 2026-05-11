@@ -68,14 +68,15 @@ set -u
 #   PARSE_PY=/mnt/c/Users/Lucas/miniconda3/python.exe
 #
 # The file is sourced before the defaults block so any variable it exports
-# takes precedence over the :=  defaults below.
+# takes precedence over the :=  defaults below. Set PARSE_ENV_FILE to another
+# path (for example /dev/null in tests) to bypass repo-local machine state.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARSE_ENV_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.parse-env"
+: "${PARSE_ENV_FILE:=$(cd "${SCRIPT_DIR}/.." && pwd)/.parse-env}"
 if [ -f "${PARSE_ENV_FILE}" ]; then
   # shellcheck source=/dev/null
   . "${PARSE_ENV_FILE}"
-  printf '[parse-run] Loaded local overrides from .parse-env\n'
+  printf '[parse-run] Loaded local overrides from %s\n' "${PARSE_ENV_FILE}"
 fi
 
 # ---------- Defaults ------------------------------------------------------
