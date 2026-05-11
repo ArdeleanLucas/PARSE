@@ -1,65 +1,52 @@
----
-name: parse-mcp-tool-cross-speaker-match-preview
-description: "Use PARSE MCP tool `cross_speaker_match_preview`: Compute read-only cross-speaker match candidates from STT output and existing annotations. Accepts sttJobId or inline sttSegments."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# cross_speaker_match_preview
 
-# PARSE MCP Tool Skill — `cross_speaker_match_preview`
+**Category:** Comparison
+**Mutability:** read_only
+**Supports Dry Run:** N/A (preview-only by design)
+**Complexity:** Medium
+**Estimated Tokens:** ~260 (short) / ~560 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `cross_speaker_match_preview` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Computes read-only cross-speaker match candidates from STT output (`sttJobId` or inline `sttSegments`) against existing annotations — surfaces which segments in one speaker's STT likely correspond to which concept rows across other speakers.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- After STT on a new speaker — find which existing concept rows this speaker's segments map to, before manually adjudicating in compare mode.
+- For pre-flight to compare mode — run this to see candidate matches before bulk-tagging or moving rows around.
+- To validate a `detect_timestamp_offset`-corrected speaker against the rest of the corpus.
+- Inside `prepare_compare_mode` — the workflow tool calls this internally to build the cross-speaker section of the bundle.
 
-## Tool contract snapshot
+## When NOT to Use
+- To persist any matches. This is preview-only. Decisions get made elsewhere (compare-mode UI, `enrichments_write`).
+- Without STT data. The tool requires either a completed `sttJobId` or inline `sttSegments`. No STT → no input.
+- For unbounded full-record dumps. Inline `sttSegments` should be a bounded list (typically from a windowed STT run); don't paste an entire annotation file in here.
+- For cognate similarity / borrowing comparison — that's `cognate_compute_preview`. This tool answers "which existing concept row is this segment?", not "are these forms cognate?".
 
-- **Tool name:** `cross_speaker_match_preview`
-- **Skill name:** `parse-mcp-tool-cross-speaker-match-preview`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** None
-- **`additionalProperties`:** `False`
-- **Catalog description:** Compute read-only cross-speaker match candidates from STT output and existing annotations. Accepts sttJobId or inline sttSegments.
+## Parameters
 
-### Parameters
+| Parameter     | Type     | Required | Description                                                                                              | Default | Example                  |
+|---------------|----------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------|
+| speaker       | string   | No*      | Speaker the STT data comes from. `minLength=1`, `maxLength=200`.                                         | —       | `"Khan04"`               |
+| sttJobId      | string   | No*      | Identifier of a completed STT job (`stt_start` / `stt_word_level_start`). `minLength=1`, `maxLength=128`. | —       | `"stt-7f3a"`             |
+| sttSegments   | object[] | No*      | Inline STT segments — each carries `start`/`end`/`text` (and optionally `ortho`/`ipa`).                  | —       | `[{"start": 12.34, "end": 12.78, "text": "water"}]` |
+| topK          | integer  | No       | Number of top matches per segment. `minimum=1`, `maximum=20`.                                            | (server default) | `5`              |
+| minConfidence | number   | No       | Minimum similarity score to include. `minimum=0.0`, `maximum=1.0`.                                       | (server default) | `0.35`           |
+| maxConcepts   | integer  | No       | Cap on concepts considered. `minimum=1`, `maximum=500`.                                                  | (server default) | `25`             |
 
-- `speaker` (type=string; minLength=1; maxLength=200)
-- `sttJobId` (type=string; minLength=1; maxLength=128)
-- `sttSegments` (type=array)
-- `topK` (type=integer; minimum=1; maximum=20)
-- `minConfidence` (type=number; minimum=0.0; maximum=1.0)
-- `maxConcepts` (type=integer; minimum=1; maximum=500)
+*Provide either `sttJobId` *or* `sttSegments` (and `speaker` for context).
 
-### Example input payload
+## Expected Output
+Returns `{ readOnly, matches: [{ segment, candidates: [{ speaker, conceptId, score, ortho, ipa }] }], speakersConsidered, conceptsConsidered, topK, minConfidence, ... }`. Each segment of input gets up to `topK` candidate (speaker, conceptId) matches from the existing annotation pool.
 
-Valid inline-STT request shape:
+Does not mutate project state.
 
+## Example Successful Call
+Inline STT:
 ```json
 {
-  "speaker": "<SPEAKER_ID>",
+  "speaker": "Khan04",
   "sttSegments": [
-    {
-      "start": 12.34,
-      "end": 12.78,
-      "text": "water",
-      "ortho": "water",
-      "ipa": "wɑtər"
-    },
-    {
-      "startSec": 18.1,
-      "endSec": 18.72,
-      "text": "fire",
-      "ortho": "fire",
-      "ipa": "faɪr"
-    }
+    {"start": 12.34, "end": 12.78, "text": "water", "ortho": "water", "ipa": "wɑtər"},
+    {"startSec": 18.1, "endSec": 18.72, "text": "fire",  "ortho": "fire",  "ipa": "faɪr"}
   ],
   "topK": 5,
   "minConfidence": 0.35,
@@ -67,67 +54,32 @@ Valid inline-STT request shape:
 }
 ```
 
-Use `sttJobId` instead of `sttSegments` when a completed STT job is available; do not provide unbounded full-record annotation JSON here.
-
-### MCP annotations
-
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+Via STT job:
+```json
+{
+  "speaker": "Khan04",
+  "sttJobId": "stt-7f3a",
+  "topK": 5,
+  "minConfidence": 0.35,
+  "maxConcepts": 25
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
+## Common Failure Modes & How to Recover
 
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/cross_speaker_match_preview?mode=active"
-```
+| Failure                                | Symptom                                                              | Recovery                                                                                                  |
+|----------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Empty `matches`                        | No candidates returned for any segment                               | Lower `minConfidence`. Verify the speaker has overlap with existing concepts.                              |
+| Generic / wrong matches                | Top candidate is irrelevant                                          | Increase `minConfidence`. Restrict scope by reducing `maxConcepts` or pre-filtering `sttSegments`.        |
+| Too many candidates                    | `topK` results overwhelm the agent                                   | Lower `topK`. Default is usually `5`.                                                                      |
+| Inline `sttSegments` shape mismatch    | Validation error                                                     | Segments accept `start`/`end` or `startSec`/`endSec`. Include `text` plus optional `ortho`/`ipa`.          |
+| Speaker not provided                   | Matches lack source context                                          | Set `speaker` so each match has a clear "this is from speaker X" attribution.                              |
 
-## Workflow
+## Agent Reasoning Notes
+This is the typical "where does this new speaker's data fit?" pre-flight before compare-mode review. Use a real `sttJobId` when one is available — it pulls the full segment set; only use inline `sttSegments` for spot-checks or when re-running against curated windows. Pair with `cognate_compute_preview` for the complementary "are these forms cognate?" question and `prepare_compare_mode` for the full bundle including both.
 
-1. **Discover** – Confirm `cross_speaker_match_preview` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-- For job-backed workflows, record the returned `jobId` and poll until a terminal status before claiming completion.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Quality checklist
-
-- [ ] Live catalog confirms `cross_speaker_match_preview` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `prepare_compare_mode` — workflow that wraps this with cognate preview and annotation load.
+- `cognate_compute_preview` — cognate/similarity comparison (different question, complementary signal).
+- `stt_start`, `stt_word_level_start` — produce the `sttJobId` consumed here.
+- `enrichments_write` (Project bucket) — persist decisions derived from this preview.

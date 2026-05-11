@@ -1,149 +1,73 @@
----
-name: parse-mcp-tool-list-concepts-by-tag
-description: "Use PARSE MCP tool `list_concepts_by_tag`: Resolve a tag query and return matched concepts per speaker without running any STT/IPA work. Useful as the dry-run preview before calling rerun_lexemes_by_tag. ANY = the union: a concept is included if it carries at least one of the selected tags. Use for broad discovery and batching. ALL = the intersection: a concept is included only if it carries every selected tag. Use for precise filtering."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# list_concepts_by_tag
 
-# PARSE MCP Tool Skill — `list_concepts_by_tag`
+**Category:** Comparison
+**Mutability:** read_only
+**Supports Dry Run:** N/A (preview by design)
+**Complexity:** Low
+**Estimated Tokens:** ~220 (short) / ~470 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `list_concepts_by_tag` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Resolves a tag query (`ANY` / `ALL` semantics over `tagLabels`) and returns matched concepts per speaker — without running any STT or IPA work. The canonical dry-run preview before `rerun_lexemes_by_tag`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Before `rerun_lexemes_by_tag` — always. This is the no-cost preview that confirms the tag query resolves to the expected concept set before kicking off a GPU rerun.
+- For tag-driven discovery: "which concepts have the `loanword` tag across these speakers?".
+- To validate tag-vocabulary changes: after editing the tag store, run this to see what the query now matches.
 
-## Tool contract snapshot
+## When NOT to Use
+- To actually rerun ORTH/IPA — that's `rerun_lexemes_by_tag` (the matching write/compute path).
+- For all concepts (no tag filter) — use `project_context_read` (Project bucket) to enumerate concepts and speakers.
+- For tag-vocabulary inspection only ("what tags exist on this project?") — read `parse-tags.json` directly via `read_text_preview` (Project bucket) or `enrichments_read` if tags live there.
 
-- **Tool name:** `list_concepts_by_tag`
-- **Skill name:** `parse-mcp-tool-list-concepts-by-tag`
-- **Family:** `chat`
-- **Mutability:** `read_only`
-- **Supports dry-run:** `No`
-- **Required inputs:** `speakers`, `tagLabels`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Resolve a tag query and return matched concepts per speaker without running any STT/IPA work. Useful as the dry-run preview before calling rerun_lexemes_by_tag. ANY = the union: a concept is included if it carries at least one of the selected tags. Use for broad discovery and batching. ALL = the intersection: a concept is included only if it carries every selected tag. Use for precise filtering.
+## Parameters
 
-### Parameters
+| Parameter | Type     | Required | Description                                                                                              | Default | Example                              |
+|-----------|----------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------------------|
+| speakers  | oneOf    | Yes      | Either an array of speaker IDs or `"all"`.                                                              | —       | `["Khan01", "Khan02"]` or `"all"`    |
+| tagLabels | string[] | Yes      | One or more tag labels to match.                                                                         | —       | `["loanword", "uncertain"]`          |
+| match     | string   | No       | `any` = union (concept needs at least one of the tags); `all` = intersection (concept needs every tag). | `"any"` | `"all"`                              |
 
-- `speakers` (type=oneOf)
-- `tagLabels` (type=array)
-- `match` (type=string; default="any"; enum=`any`, `all`)
+**ANY vs ALL semantics:**
+- `any` — A concept is included if it carries **at least one** of the selected tags. Use for broad discovery / batching.
+- `all` — A concept is included only if it carries **every** selected tag. Use for precise filtering.
 
-### MCP annotations
+## Expected Output
+Returns `{ readOnly, match, speakers: [{ speaker, conceptIds: ["..."], count }], totalConceptsMatched, ... }`. Each speaker entry lists matched concept IDs.
 
-- `destructiveHint`: `False`
-- `idempotentHint`: `True`
-- `readOnlyHint`: `True`
+Does not mutate project state.
 
-### Preconditions advertised by catalog
-
-- None advertised by the catalog.
-
-### Postconditions advertised by catalog
-
-- The tool returns structured inspection data without mutating project state. (`project_state`, `recommended`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/list_concepts_by_tag?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `list_concepts_by_tag` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as read-only, but still bound result sizes when the schema offers `limit`, `maxIntervals`, or preview-size parameters.
-- It is suitable for reconnaissance, schema validation, reports, and preflight checks.
-- If results refer to annotation files, prefer active `annotations/<Speaker>.parse.json` artifacts for any independent audit.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Valid `speakers` input examples
-
-The `speakers` field is a `oneOf`: either an explicit array of speaker IDs or the literal string `"all"`.
-
-Explicit speaker subset:
-
+## Example Successful Call
+ANY across two speakers:
 ```json
 {
   "speakers": ["Khan01", "Khan02"],
-  "tagLabels": ["weather"],
+  "tagLabels": ["loanword", "uncertain"],
   "match": "any"
 }
 ```
 
-All currently registered speakers:
-
+ALL across the whole project:
 ```json
 {
   "speakers": "all",
-  "tagLabels": ["weather", "confirmed"],
+  "tagLabels": ["loanword", "high_confidence"],
   "match": "all"
 }
 ```
 
-Representative response shape:
+## Common Failure Modes & How to Recover
 
-```json
-{
-  "tool": "list_concepts_by_tag",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "ok": true,
-    "totalConcepts": 1,
-    "perSpeaker": {
-      "Khan01": {
-        "conceptCount": 1,
-        "concepts": [
-          {"conceptId": "17", "name": "rain", "start": 12.34, "end": 13.1, "tags": ["weather"]}
-        ]
-      },
-      "Khan02": {"conceptCount": 0, "concepts": []}
-    },
-    "unknownTags": [],
-    "ambiguousTags": {},
-    "mode": "read-only",
-    "previewOnly": true
-  }
-}
-```
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Unknown tag label                      | Tool returns ambiguous-tag error                                     | Verify tag labels against `parse-tags.json` (via `read_text_preview` or `enrichments_read`). Typos and case mismatch are common. |
+| Ambiguous tag label                    | Tool returns ambiguous-tag error (multiple tags share the label)     | Use canonical tag IDs instead of labels, or rename one of the ambiguous tags in `parse-tags.json`.    |
+| Empty result with `match: "all"`       | `totalConceptsMatched: 0`                                            | The intersection is empty. Switch to `match: "any"` for broader matches, or drop a tag from `tagLabels`. |
+| Tag covers nothing across speakers     | All speakers report `count: 0`                                       | The tag may exist in vocabulary but be unused. Verify with `enrichments_read` / tag-store inspection. |
 
-## Quality checklist
+## Agent Reasoning Notes
+Use `list_concepts_by_tag` as the always-on pre-flight before `rerun_lexemes_by_tag` — they share the exact same `(speakers, tagLabels, match)` resolution semantics. Run this first, present the matched concept set to the user, and only after confirmation run the compute path. This preview-first discipline is especially important because the matching rerun consumes GPU time and acquires per-speaker locks.
 
-- [ ] Live catalog confirms `list_concepts_by_tag` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `rerun_lexemes_by_tag` — same query semantics, runs ORTH/IPA over the matched concepts.
+- `enrichments_read`, `read_text_preview` — inspect the tag vocabulary in `parse-tags.json`.
+- `project_context_read` — enumerate speakers and concepts unfiltered.

@@ -1,141 +1,74 @@
----
-name: parse-mcp-tool-lexeme-notes-write
-description: "Use PARSE MCP tool `lexeme_notes_write`: Write or delete a single lexeme note in parse-enrichments.json (speaker + conceptId key). Supports userNote and importNote fields."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# lexeme_notes_write
 
-# PARSE MCP Tool Skill — `lexeme_notes_write`
+**Category:** Comparison
+**Mutability:** mutating (writes the targeted entry in `parse-enrichments.json`)
+**Supports Dry Run:** Yes (`dryRun: true`)
+**Complexity:** Low–Medium
+**Estimated Tokens:** ~220 (short) / ~480 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `lexeme_notes_write` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Writes (or deletes) a single lexeme-note entry in `parse-enrichments.json` keyed by `(speaker, conceptId)`, with separate `userNote` and `importNote` fields.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Recording a human-authored review comment for a specific (speaker, conceptId) pair — set `userNote`.
+- Annotating machine/import provenance (which import run produced this lexeme, what flags it inherited) — set `importNote`.
+- Removing a stale note entry — set `delete: true`.
+- Cleaning up notes after concept-row merges or speaker re-imports.
 
-## Tool contract snapshot
+## When NOT to Use
+- For batch note operations across many (speaker, conceptId) pairs. The tool is single-entry; call it repeatedly or edit `parse-enrichments.json` directly via `enrichments_write` (Project bucket).
+- For other enrichment fields (cognate sets, borrowing flags, similarities) — use `enrichments_write`.
+- Without first reading the existing entry via `lexeme_notes_read`. Writing blindly overwrites `userNote` and `importNote` — preserve any context you want to keep by reading first.
+- Skipping `dryRun: true`. Even though the change is small, the file is rewritten — always preview the resulting block first.
 
-- **Tool name:** `lexeme_notes_write`
-- **Skill name:** `parse-mcp-tool-lexeme-notes-write`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `speaker`, `conceptId`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Write or delete a single lexeme note in parse-enrichments.json (speaker + conceptId key). Supports userNote and importNote fields.
+## Parameters
 
-### Parameters
+| Parameter  | Type    | Required | Description                                                                                  | Default | Example          |
+|------------|---------|----------|----------------------------------------------------------------------------------------------|---------|------------------|
+| speaker    | string  | Yes      | Speaker ID. `minLength=1`, `maxLength=200`.                                                  | —       | `"Khan01"`       |
+| conceptId  | string  | Yes      | Concept ID. `minLength=1`, `maxLength=128`.                                                  | —       | `"42"`           |
+| userNote   | string  | No       | Human-authored note. `maxLength=4096`.                                                       | (unchanged) | `"borrowed from Arabic"` |
+| importNote | string  | No       | Machine/import provenance note. `maxLength=4096`.                                            | (unchanged) | `"imported via CLEF run 2026-05-08"` |
+| delete     | boolean | No       | If `true`, removes the note entry for this (speaker, conceptId). Other fields are ignored.   | `false` | `false`          |
+| dryRun     | boolean | No       | If `true`, preview the resulting `lexeme_notes` block without writing `parse-enrichments.json`. | `false` | `true`           |
 
-- `speaker` (type=string; minLength=1; maxLength=200) — Speaker ID whose lexeme note will be updated.
-- `conceptId` (type=string; minLength=1; maxLength=128) — Concept ID whose note entry will be created, updated, or deleted.
-- `userNote` (type=string; maxLength=4096) — Human-authored note text to store under user_note.
-- `importNote` (type=string; maxLength=4096) — Machine/import provenance note to store under import_note.
-- `delete` (type=boolean) — If true, removes the note entry for this speaker+concept.
-- `dryRun` (type=boolean) — If true, preview the resulting lexeme_notes block without writing parse-enrichments.json.
+## Expected Output
+On `dryRun: true`: returns the resulting (speaker, conceptId) entry as it would appear after the write — letting the caller confirm before committing.
 
-### MCP annotations
+On `dryRun: false`: rewrites `parse-enrichments.json` with the targeted entry created/updated/deleted, returns `{ ok: true, speaker, conceptId, action }` (`action` ∈ `"created"`, `"updated"`, `"deleted"`).
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-- The caller must provide both speaker and conceptId to identify a single lexeme-note entry. (`input_shape`, `required`)
-
-### Postconditions advertised by catalog
-
-- When dryRun=false, the targeted lexeme_notes entry is created, updated, or deleted in parse-enrichments.json. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
-```
-
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_write?mode=active"
-```
-
-## Workflow
-
-1. **Discover** – Confirm `lexeme_notes_write` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
-
-## Dry-run write example
-
-Preview a `userNote` update before writing `parse-enrichments.json`:
-
-```bash
-curl -s -X POST "$PARSE_BASE_URL/api/mcp/tools/lexeme_notes_write?mode=active" \
-  -H 'Content-Type: application/json' \
-  --data '{"speaker":"Khan01","conceptId":"17","userNote":"Verify vowel length before cognate grouping.","dryRun":true}'
-```
-
-Expected preview shape:
-
+## Example Successful Call
+Set a user note (dry-run):
 ```json
 {
-  "tool": "lexeme_notes_write",
-  "ok": true,
-  "result": {
-    "readOnly": true,
-    "previewOnly": true,
-    "dryRun": true,
-    "speaker": "Khan01",
-    "conceptId": "17",
-    "delete": false,
-    "lexeme_notes": {
-      "Khan01": {
-        "17": {
-          "user_note": "Verify vowel length before cognate grouping.",
-          "updated_at": "2026-05-10T18:42:00Z"
-        }
-      }
-    },
-    "mode": "read-only"
-  }
+  "speaker": "Khan01",
+  "conceptId": "42",
+  "userNote": "Borrowed from Arabic; confirmed via Wiktionary",
+  "dryRun": true
 }
 ```
 
-After the preview is approved, repeat the same call with `"dryRun": false` to persist the note; use `"delete": true` to preview/remove the entry.
+Delete an entry:
+```json
+{
+  "speaker": "Khan01",
+  "conceptId": "42",
+  "delete": true,
+  "dryRun": false
+}
+```
 
-## Quality checklist
+## Common Failure Modes & How to Recover
 
-- [ ] Live catalog confirms `lexeme_notes_write` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
+| Failure                                | Symptom                                                              | Recovery                                                                                              |
+|----------------------------------------|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Overwrote a meaningful previous note   | Live apply replaced existing `userNote` content                      | No auto-backup. Read with `lexeme_notes_read` first and preserve content explicitly when re-writing.  |
+| `delete: true` with userNote / importNote set | Other field values ignored; entry deleted                     | Intentional. To update, drop `delete`. To clear one field but keep the entry, pass an empty string for that field. |
+| Speaker / concept not in project       | Tool error                                                           | Verify via `project_context_read`.                                                                    |
 
-## Anti-patterns
+## Agent Reasoning Notes
+This is the focused write path for one specific class of enrichment data. Always pair (1) `lexeme_notes_read` to inspect the prior state, (2) `lexeme_notes_write` with `dryRun: true` to preview, (3) user confirmation, (4) `dryRun: false` to commit. For mass operations across many entries, use `enrichments_write` instead — it can replace the whole `lexeme_notes` block in one call.
 
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `lexeme_notes_read` — read the current note before overwriting.
+- `enrichments_read`, `enrichments_write` (Project bucket) — broader read/write of `parse-enrichments.json`.

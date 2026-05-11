@@ -1,102 +1,80 @@
----
-name: parse-mcp-tool-contact-lexeme-lookup
-description: "Use PARSE MCP tool `contact_lexeme_lookup`: Fetch reference forms (IPA transcriptions) for contact/comparison languages from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grok LLM, literature). Gated by dryRun: pass dryRun=true FIRST to preview what would be fetched without touching sil_contact_languages.json, then dryRun=false after the user confirms — only the second call writes. maxConcepts caps the sample size per call for bounded previews."
-version: 1.0.0
-source: PARSE MCP catalog
-source_generated_at: 2026-05-10T17:37:02Z
-license: MIT
-tags:
-  - parse
-  - mcp
-  - tool
-  - chat
----
+# contact_lexeme_lookup
 
-# PARSE MCP Tool Skill — `contact_lexeme_lookup`
+**Category:** Comparison
+**Mutability:** mutating (writes `config/sil_contact_languages.json`)
+**Supports Dry Run:** Yes (`dryRun` is required)
+**Complexity:** Medium–High
+**Estimated Tokens:** ~290 (short) / ~620 (full)
 
-Use this portable skill when calling, validating, reviewing, or documenting the PARSE MCP tool `contact_lexeme_lookup` for any research project, speaker set, language, or corpus hosted in PARSE.
+## One-Sentence Summary
+Fetches reference IPA forms for contact/comparison languages from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grok LLM, literature) and merges them into `config/sil_contact_languages.json` — gated by mandatory `dryRun`.
 
-> Source of truth: generated from `python/external_api/catalog.py::build_mcp_http_catalog(..., mode="all")` on `2026-05-10T17:37:02Z`. Re-discover the live schema before execution because tool contracts can evolve.
+## When to Use
+- Bootstrapping contact-language reference forms for a new project (e.g. Arabic, Persian, Central Kurdish forms to compare against Southern Kurdish data).
+- Filling gaps in existing contact-language coverage — `overwrite: false` (default) is non-destructive.
+- Refreshing entries when a provider chain order changes or a new provider becomes preferred.
+- Bounded previews for cost / quality control via `maxConcepts`.
 
-## Tool contract snapshot
+## When NOT to Use
+- Without a `dryRun: true` first. The `dryRun` parameter is *required* by schema — the catalog gates this tool explicitly so callers don't accidentally hit external providers and overwrite the contact-languages file.
+- For pure preview without provider calls. `dryRun: true` does still go out to providers (it just doesn't write). For "what's already in the file?", read it directly via `read_text_preview` (Project bucket).
+- To replace existing forms accidentally — `overwrite: false` is the default. Only flip to `true` when the user has explicitly confirmed they want to re-fetch.
+- For local-only comparison without external lookups — this tool's purpose is the third-party provider chain. If you only want cognate similarity from existing data, use `cognate_compute_preview`.
 
-- **Tool name:** `contact_lexeme_lookup`
-- **Skill name:** `parse-mcp-tool-contact-lexeme-lookup`
-- **Family:** `chat`
-- **Mutability:** `mutating`
-- **Supports dry-run:** `Yes — `dryRun``
-- **Required inputs:** `dryRun`
-- **`additionalProperties`:** `False`
-- **Catalog description:** Fetch reference forms (IPA transcriptions) for contact/comparison languages from third-party sources (local CLDF, ASJP, Wikidata, Wiktionary, Grok LLM, literature). Gated by dryRun: pass dryRun=true FIRST to preview what would be fetched without touching sil_contact_languages.json, then dryRun=false after the user confirms — only the second call writes. maxConcepts caps the sample size per call for bounded previews.
+## Parameters
 
-### Parameters
+| Parameter   | Type     | Required | Description                                                                                                       | Default                       | Example               |
+|-------------|----------|----------|-------------------------------------------------------------------------------------------------------------------|-------------------------------|-----------------------|
+| dryRun      | boolean  | Yes      | `true` previews (provider chain runs but no write); `false` writes results into `sil_contact_languages.json`.     | —                             | `true`                |
+| languages   | string[] | No       | ISO 639 codes.                                                                                                    | —                             | `["ar", "fa", "ckb"]` |
+| conceptIds  | string[] | No       | Project concept IDs or English labels.                                                                            | (all project concepts)        | `["water", "fire"]`   |
+| providers   | string[] | No       | Provider priority order. Names from the project's provider registry.                                              | (full chain default)          | `["cldf", "wiktionary", "grok"]` |
+| maxConcepts | integer  | No       | Cap on concepts processed. `minimum=1`, `maximum=200`.                                                            | —                             | `25`                  |
+| overwrite   | boolean  | No       | If `true` and `dryRun: false`, re-fetch even when forms already exist. Ignored when `dryRun: true`.               | `false`                       | `false`               |
 
-- `languages` (type=array) — ISO 639 language codes, e.g. ["ar", "fa", "ckb"]
-- `conceptIds` (type=array) — Project concept IDs or English concept labels to look up. Defaults to all project concepts.
-- `providers` (type=array) — Provider priority order. Defaults to full chain.
-- `dryRun` (type=boolean) — If true, preview only — fetches via the provider registry but does NOT write to sil_contact_languages.json. If false, merges results and writes. Required.
-- `maxConcepts` (type=integer; minimum=1; maximum=200) — Cap on concepts processed this call. Useful for bounded previews.
-- `overwrite` (type=boolean) — If true and dryRun is false, re-fetch even if forms already exist. Ignored when dryRun is true.
+## Expected Output
+On `dryRun: true`: returns the candidate forms per (language, conceptId), the provider that produced each, and a count of how many would be merged vs. skipped (because they already exist) — without touching the file.
 
-### MCP annotations
+On `dryRun: false`: writes the merged results into `config/sil_contact_languages.json` and returns `{ ok: true, languagesUpdated, conceptsUpdated, providersUsed, ... }`. The previous file content is not automatically backed up.
 
-- `destructiveHint`: `True`
-- `idempotentHint`: `False`
-- `readOnlyHint`: `False`
-
-### Preconditions advertised by catalog
-
-- The PARSE project root must be available and readable. (`project_state`, `required`)
-
-### Postconditions advertised by catalog
-
-- When the tool is not in preview mode, it writes or updates a project artifact. (`filesystem_write`, `required`)
-
-## Portable setup
-
-Use placeholders instead of machine-specific paths:
-
-```bash
-cd <PARSE_REPO>
-export PARSE_PROJECT_ROOT=<PROJECT_ROOT>
-# Optional when input files live outside the PARSE project root:
-export PARSE_EXTERNAL_READ_ROOTS=<ABSOLUTE_READ_ROOT_1>[:<ABSOLUTE_READ_ROOT_2>]
-PYTHONPATH=python python3 -m adapters.mcp_adapter --project-root "$PARSE_PROJECT_ROOT"
+## Example Successful Call
+Dry run (mandatory first step):
+```json
+{
+  "languages": ["ar", "fa"],
+  "conceptIds": ["water", "fire", "stone"],
+  "providers": ["cldf", "wiktionary", "grok"],
+  "maxConcepts": 25,
+  "dryRun": true
+}
 ```
 
-For the HTTP MCP bridge, discover the live schema before calling:
-
-```bash
-curl "$PARSE_BASE_URL/api/mcp/tools/contact_lexeme_lookup?mode=active"
+Live apply after confirmation:
+```json
+{
+  "languages": ["ar", "fa"],
+  "conceptIds": ["water", "fire", "stone"],
+  "providers": ["cldf", "wiktionary", "grok"],
+  "maxConcepts": 25,
+  "dryRun": false
+}
 ```
 
-## Workflow
+## Common Failure Modes & How to Recover
 
-1. **Discover** – Confirm `contact_lexeme_lookup` is exposed by the active MCP catalog and inspect its current `inputSchema`.
-2. **Prepare arguments** – Supply required inputs exactly as named above; keep optional bounds conservative unless the task requires a broad sweep.
-3. **Respect corpus neutrality** – Treat speaker IDs, concept IDs, tags, CSV labels, paths, and audio names as project-specific data. Do not hard-code language names or local workstation paths.
-4. **Apply safety policy**:
-- Treat this tool as mutating or job-starting. Use an isolated test project first when possible.
-- Run the advertised dry-run/preview mode first, then apply only after the result is inspected and the user has confirmed the intended mutation.
-- Before live apply, snapshot the project artifacts the tool may write, then verify with an independent read-back after execution.
-- If the tool starts a background job, poll the corresponding status tool or `job_status` until terminal state before reporting success.
-5. **Verify** – Check returned JSON for `ok`, `error`, nested result payloads, skipped rows, warnings, and job IDs. Verify mutations by reading the relevant project artifacts back through a separate read-only path.
+| Failure                                  | Symptom                                                                | Recovery                                                                                              |
+|------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Missing provider credentials             | Provider returns errors / empty results in the chain                   | Check provider setup; remove the failing provider from `providers` or fall back to the default chain. |
+| Bad form transcribed by a provider       | Forms look implausible for the language                                | Adjust `providers` priority (e.g. prefer `cldf` / `wiktionary` over `grok` for known languages).      |
+| Existing forms not refreshed             | Live apply completes but some entries unchanged                        | Default `overwrite: false`. Re-run with `overwrite: true` only if the user explicitly wants re-fetch.  |
+| Exceeded `maxConcepts` quietly           | Only a subset of `conceptIds` processed                                | The cap silently bounds the call. Increase `maxConcepts` (up to 200) or run in batches.               |
+| Unknown concept labels                   | Empty results for those concepts                                       | Verify via `project_context_read` (`concepts`); use canonical IDs rather than English labels for stability. |
 
-## Quality checklist
+## Agent Reasoning Notes
+This is the only path PARSE has for *fetching* contact-language data; without it, comparison against Arabic, Persian, etc. relies on whatever's already in the file. Treat the mandatory `dryRun` as load-bearing — always preview first, present the candidate forms to the user, and only `dryRun: false` after confirmation. The provider chain has different quality profiles: CLDF and Wikidata for citable references, Wiktionary for breadth, Grok for fallback when nothing else has the concept. Pair with `cognate_compute_preview` (consumes the file this writes) and `enrichments_write` (persists cognate decisions that use this data).
 
-- [ ] Live catalog confirms `contact_lexeme_lookup` is currently exposed.
-- [ ] The current live schema was inspected before constructing arguments.
-- [ ] Required arguments were provided and optional result limits were bounded.
-- [ ] Dry-run/preview was used first when advertised by the catalog.
-- [ ] Any returned `jobId` was polled to terminal state.
-- [ ] Any file mutation was independently audited after apply.
-- [ ] Evidence recorded the exact argument shape, result summary, and verification path.
-
-## Anti-patterns
-
-- Calling internal helper functions and presenting that as MCP validation.
-- Running `python/adapters/mcp_adapter.py` by file path; use `PYTHONPATH=python python3 -m adapters.mcp_adapter`.
-- Copying local workstation paths into reusable docs, scripts, or handoffs.
-- Treating `ok: true`, preview counts, or dry-run output as proof of durable file mutation.
-- Auditing legacy `annotations/<Speaker>.json` when active `.parse.json` annotations exist.
-- Reporting before a started job reaches terminal state.
+## Related Skills
+- `cognate_compute_preview` — consumes `sil_contact_languages.json` for cross-language similarity.
+- `read_text_preview` (Project bucket) — inspect existing contact-languages file content.
+- `clef_clear_data` (Project bucket) — destructive cleanup of CLEF-populated entries (use with care).
+- `enrichments_write` (Project bucket) — persist downstream cognate / borrowing decisions.
