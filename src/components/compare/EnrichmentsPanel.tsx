@@ -67,7 +67,7 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
   const selectedSpeakers = useUIStore((store) => store.selectedSpeakers) ?? [];
   const configSpeakers = useConfigStore((store) => store.config?.speakers ?? []);
 
-  const { exportCanonicalLexemesReport, exportLingPyTSV } = useExport();
+  const { exportCanonicalLexemesReport, exportLingPyTSV, exportNEXUS } = useExport();
   const { start: startCompute, state: computeState } = useComputeJob("cognates");
 
   const [exportLoading, setExportLoading] = useState(false);
@@ -167,6 +167,10 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
     void runExport(exportLingPyTSV);
   }
 
+  function handleExportNEXUS() {
+    void runExport(exportNEXUS);
+  }
+
   function handleExportCanonicalReport() {
     void runExport(exportCanonicalLexemesReport);
   }
@@ -260,6 +264,9 @@ export function EnrichmentsPanel({ activeConcept }: EnrichmentsPanelProps) {
         </Button>
         <Button size="sm" variant="secondary" loading={computeState.status === "running"} onClick={handleRunCompute}>
           Run Compute
+        </Button>
+        <Button size="sm" variant="secondary" loading={exportLoading} onClick={handleExportNEXUS}>
+          Export NEXUS
         </Button>
         <Button
           size="sm"
