@@ -1155,6 +1155,8 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
     expect(screen.getByTestId("concept-sort-parent-concept").className).toContain("bg-white");
     expect(screen.getByTestId("concept-sort-az").className).toContain("bg-white");
+    expect(screen.getByTestId("concept-sort-az")).toBeTruthy();
+    expect(screen.queryByTestId("concept-sort-source-time")).toBeNull();
 
     unmount();
     cleanup();
@@ -1177,6 +1179,120 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
     expect(screen.getByTestId("concept-sort-parent-concept").className).toContain("bg-white");
     expect(screen.getByTestId("concept-sort-az").className).toContain("bg-white");
+    expect(screen.getByTestId("concept-sort-az")).toBeTruthy();
+    expect(screen.queryByTestId("concept-sort-source-time")).toBeNull();
+  });
+
+  it("sorts by Concept 1–N when Source is persisted but no speaker is selected", async () => {
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: "time" }));
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: [],
+      concepts: [
+        { id: "1", label: "one" },
+        { id: "2", label: "two" },
+        { id: "3", label: "three" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [
+        { conceptText: "three", conceptId: "3", start: 0.5, end: 1.0, importIndex: 0 },
+        { conceptText: "two", conceptId: "2", start: 2.0, end: 2.5, importIndex: 1 },
+        { conceptText: "one", conceptId: "1", start: 5.0, end: 5.5, importIndex: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBe("true"));
+    expect(screen.getByTestId("concept-sort-1n")).toBeTruthy();
+    expect(screen.queryByTestId("concept-sort-source-time")).toBeNull();
+    expect(sidebarConceptNames()).toEqual(["one", "two", "three"]);
+  });
+
+  it("preserves persisted Source preference through a multi-select detour", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [{ id: "1", label: "one" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Qasr01: makeRecord("Qasr01", [{ conceptText: "one", conceptId: "1", start: 1, end: 2, importIndex: 1 }]) };
+
+    const { unmount } = render(<ParseUI />);
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBeNull());
+    fireEvent.click(screen.getByTestId("concept-sort-parent-source"));
+    fireEvent.click(screen.getByTestId("concept-sort-source-row"));
+
+    await waitFor(() => expect(window.localStorage.getItem("parse.concept-sort.v1")).toBe(JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: "row" })));
+    unmount();
+    cleanup();
+
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01", "Khan01"],
+      concepts: [{ id: "1", label: "one" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [{ conceptText: "one", conceptId: "1", start: 1, end: 2, importIndex: 1 }]),
+      Khan01: makeRecord("Khan01", [{ conceptText: "one", conceptId: "1", start: 3, end: 4, importIndex: 1 }]),
+    };
+
+    const multi = render(<ParseUI />);
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBe("true"));
+    expect(screen.getByTestId("concept-sort-1n")).toBeTruthy();
+    expect(screen.queryByTestId("concept-sort-source-row")).toBeNull();
+    expect(window.localStorage.getItem("parse.concept-sort.v1")).toBe(JSON.stringify({ parent: "source", concept_sub: "1n", source_sub: "row" }));
+    multi.unmount();
+    cleanup();
+
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01"],
+      concepts: [{ id: "1", label: "one" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Qasr01: makeRecord("Qasr01", [{ conceptText: "one", conceptId: "1", start: 1, end: 2, importIndex: 1 }]) };
+
+    render(<ParseUI />);
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").className).toContain("bg-sky-600"));
+    expect(screen.getByTestId("concept-sort-source-row").className).toContain("bg-sky-600");
+  });
+
+  it("does not demote raw Source state when mounted with multiple selected speakers", async () => {
+    window.localStorage.setItem("parse.concept-sort.v1", JSON.stringify({ parent: "source", concept_sub: "az", source_sub: "time" }));
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Qasr01", "Khan01"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [{ conceptText: "water", conceptId: "1", start: 1, end: 2 }]),
+      Khan01: makeRecord("Khan01", [{ conceptText: "fire", conceptId: "2", start: 3, end: 4 }]),
+    };
+
+    render(<ParseUI />);
+
+    await waitFor(() => expect(screen.getByTestId("concept-sort-parent-source").getAttribute("aria-disabled")).toBe("true"));
+    expect(screen.getByTestId("concept-sort-az")).toBeTruthy();
+    expect(screen.queryByTestId("concept-sort-source-time")).toBeNull();
+    expect(window.localStorage.getItem("parse.concept-sort.v1")).toBe(JSON.stringify({ parent: "source", concept_sub: "az", source_sub: "time" }));
   });
 
   it("persists the split concept sort state under parse.concept-sort.v1", async () => {
