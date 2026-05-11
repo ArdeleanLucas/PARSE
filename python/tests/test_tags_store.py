@@ -52,6 +52,75 @@ def test_replace_all_round_trips_old_shape_and_writes_version_2(isolated_tags_pa
     assert json.loads(isolated_tags_path.read_text(encoding="utf-8")) == result
 
 
+def test_replace_all_preserves_concepts_when_incoming_tag_omits_the_field() -> None:
+    tags_store.replace_all([_tag("tag_thesis", "Thesis", concepts=["1", "2"])])
+
+    result = tags_store.replace_all([
+        {"id": "tag_thesis", "label": "Thesis", "color": "#3554B8"},
+    ])
+
+    assert result["tags"][0]["concepts"] == ["1", "2"]
+    assert tags_store.fetch_all()["tags"][0]["concepts"] == ["1", "2"]
+
+
+def test_replace_all_preserves_lexeme_targets_when_incoming_tag_omits_the_field() -> None:
+    tags_store.replace_all([_tag("tag_thesis", "Thesis", lexeme_targets=["Saha01::sister", "Khan01::sister"])])
+
+    result = tags_store.replace_all([
+        {"id": "tag_thesis", "label": "Thesis", "color": "#3554B8"},
+    ])
+
+    assert result["tags"][0]["lexemeTargets"] == ["Saha01::sister", "Khan01::sister"]
+    assert tags_store.fetch_all()["tags"][0]["lexemeTargets"] == ["Saha01::sister", "Khan01::sister"]
+
+
+def test_replace_all_overrides_concepts_when_incoming_tag_supplies_non_empty_value() -> None:
+    tags_store.replace_all([_tag("tag_thesis", "Thesis", concepts=["1", "2"])])
+
+    result = tags_store.replace_all([
+        _tag("tag_thesis", "Thesis", concepts=["3", "4"]),
+    ])
+
+    assert result["tags"][0]["concepts"] == ["3", "4"]
+    assert tags_store.fetch_all()["tags"][0]["concepts"] == ["3", "4"]
+
+
+def test_replace_all_treats_empty_concepts_as_preserve_not_clear() -> None:
+    tags_store.replace_all([_tag("tag_thesis", "Thesis", concepts=["1", "2"])])
+
+    result = tags_store.replace_all([
+        _tag("tag_thesis", "Thesis", concepts=[]),
+    ])
+
+    assert result["tags"][0]["concepts"] == ["1", "2"]
+    assert tags_store.fetch_all()["tags"][0]["concepts"] == ["1", "2"]
+
+
+def test_replace_all_uses_default_empty_list_for_new_tag_ids() -> None:
+    result = tags_store.replace_all([
+        {"id": "tag_new", "label": "new", "color": "#aabbcc"},
+    ])
+
+    assert result["tags"] == [_tag("tag_new", "new", "#aabbcc")]
+    assert tags_store.fetch_all()["tags"] == [_tag("tag_new", "new", "#aabbcc")]
+
+
+def test_replace_all_preserves_concepts_across_reorder() -> None:
+    tags_store.replace_all([
+        _tag("tag_first", "first", concepts=["1"]),
+        _tag("tag_second", "second", "#aabbcc", concepts=["2", "3"]),
+    ])
+
+    result = tags_store.replace_all([
+        {"id": "tag_second", "label": "second", "color": "#aabbcc"},
+        {"id": "tag_first", "label": "first", "color": "#3554B8"},
+    ])
+
+    assert [tag["id"] for tag in result["tags"]] == ["tag_second", "tag_first"]
+    assert result["tags"][0]["concepts"] == ["2", "3"]
+    assert result["tags"][1]["concepts"] == ["1"]
+
+
 def test_replace_all_dedupes_concepts_preserving_first_occurrence_order() -> None:
     tag = _tag(concepts=["water", "fire", "water", "earth", "fire"])
 
