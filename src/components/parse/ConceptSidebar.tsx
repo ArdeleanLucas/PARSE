@@ -5,7 +5,7 @@ import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client'
 import { useConfigStore } from '../../stores/configStore';
 import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
-import { resolveSurveyLinksForSpeaker, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
+import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -118,10 +118,7 @@ function surveyLinksForSidebarConcept(concept: SidebarConcept): ConceptSurveyLin
 }
 
 function bundleRowIds(concept: SidebarConcept): string[] {
-  if (concept.variants && concept.variants.length > 0) {
-    return concept.variants.map((variant) => variant.conceptKey).filter(Boolean);
-  }
-  return [String(concept.key ?? concept.id)].filter(Boolean);
+  return surveyRowIdsForConcept(concept).filter(Boolean);
 }
 
 function variantLabelForRowId(concept: SidebarConcept, rowId: string): string {

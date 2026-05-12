@@ -11,7 +11,7 @@ import {
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
-import { resolveSurveyLinksForSpeaker } from '../../../lib/surveyLinksForSpeaker';
+import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from '../../../lib/surveyLinksForSpeaker';
 import { relinkConceptsByGloss } from '../../../api/client';
 import type {
   ConceptSurveyLinksByConcept,
@@ -80,14 +80,16 @@ export function SurveyValuesSection({
   }, [activeConcept, conceptSurveyLinks, surveySettings, workspaceConcepts]);
   const speakerBuckets = useMemo(() => {
     if (!activeConcept) return [];
-    const key = activeConcept.key;
-    const fallbackLinks = conceptSurveyLinks?.[key] ?? activeConcept.surveys ?? {};
-    return resolveSurveyLinksForSpeaker([key], activeSpeaker, { [key]: fallbackLinks }, speakerConceptSurveyLinks);
+    const rowIds = surveyRowIdsForConcept(activeConcept);
+    const fallbackByRowId = Object.fromEntries(rowIds.map((rowId) => [rowId, conceptSurveyLinks?.[rowId] ?? activeConcept.surveys ?? {}]));
+    return resolveSurveyLinksForSpeaker(rowIds, activeSpeaker, fallbackByRowId, speakerConceptSurveyLinks);
   }, [activeConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks]);
   const hasSpeakerOverride = useMemo(() => {
     if (!activeConcept || !activeSpeaker) return false;
-    const links = speakerConceptSurveyLinks?.[activeSpeaker]?.[activeConcept.key];
-    return Object.entries(links ?? {}).some(([surveyId, sourceItem]) => normalizeSurveyId(surveyId) && String(sourceItem ?? '').trim());
+    return surveyRowIdsForConcept(activeConcept).some((rowId) => {
+      const links = speakerConceptSurveyLinks?.[activeSpeaker]?.[rowId];
+      return Object.entries(links ?? {}).some(([surveyId, sourceItem]) => normalizeSurveyId(surveyId) && String(sourceItem ?? '').trim());
+    });
   }, [activeConcept, activeSpeaker, speakerConceptSurveyLinks]);
   const bucketSourceItemBySurveyId = useMemo(
     () => Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
