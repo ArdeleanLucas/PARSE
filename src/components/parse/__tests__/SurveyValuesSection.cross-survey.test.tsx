@@ -123,6 +123,36 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(screen.queryByRole('button', { name: /Current survey JBIL 32/i })).toBeNull();
   });
 
+  it('preserves the source survey fallback for global multi-survey concepts without a speaker override', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{
+          id: 1,
+          key: '1',
+          name: 'hair (A)',
+          tag: 'untagged' as never,
+          sourceSurvey: 'klq',
+          sourceItem: '1.1',
+          surveys: { klq: '1.1', jbil: '32' },
+        }}
+        activeSpeaker="Saha01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        speakerConceptSurveyLinks={{}}
+        surveyColorCodingEnabled={false}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+    const summary = screen.getByTestId('survey-current-summary');
+    expect(summary.textContent).toContain('KLQ');
+    expect(summary.textContent).toContain('1.1');
+    expect(summary.textContent).not.toContain('JBIL');
+    expect(summary.textContent).not.toContain('32');
+    expect(screen.getByRole('button', { name: /Current survey KLQ 1\.1/i })).toBeTruthy();
+  });
+
   it('opens an informational dialog for fuzzy-only dry runs without apply', async () => {
     vi.mocked(relinkConceptsByGloss).mockResolvedValueOnce({
       ok: true,

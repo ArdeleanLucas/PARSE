@@ -84,6 +84,11 @@ export function SurveyValuesSection({
     const fallbackLinks = conceptSurveyLinks?.[key] ?? activeConcept.surveys ?? {};
     return resolveSurveyLinksForSpeaker([key], activeSpeaker, { [key]: fallbackLinks }, speakerConceptSurveyLinks);
   }, [activeConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks]);
+  const hasSpeakerOverride = useMemo(() => {
+    if (!activeConcept || !activeSpeaker) return false;
+    const links = speakerConceptSurveyLinks?.[activeSpeaker]?.[activeConcept.key];
+    return Object.entries(links ?? {}).some(([surveyId, sourceItem]) => normalizeSurveyId(surveyId) && String(sourceItem ?? '').trim());
+  }, [activeConcept, activeSpeaker, speakerConceptSurveyLinks]);
   const bucketSourceItemBySurveyId = useMemo(
     () => Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
     [speakerBuckets],
@@ -98,10 +103,12 @@ export function SurveyValuesSection({
       return resolveConceptSurvey(activeConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
     }
     const choice = activeSpeaker ? normalizeSurveyId(speakerSurveyChoices?.[activeSpeaker]?.[activeConcept.key] ?? '') : '';
-    const match = choice ? speakerBuckets.find((bucket) => bucket.surveyId === choice) : undefined;
-    const bucket = match ?? speakerBuckets[0];
+    const choiceMatch = choice ? speakerBuckets.find((bucket) => bucket.surveyId === choice) : undefined;
+    const sourceSurvey = hasSpeakerOverride ? '' : normalizeSurveyId(activeConcept.sourceSurvey);
+    const sourceMatch = sourceSurvey ? speakerBuckets.find((bucket) => bucket.surveyId === sourceSurvey) : undefined;
+    const bucket = choiceMatch ?? sourceMatch ?? speakerBuckets[0];
     return { surveyId: bucket.surveyId, sourceItem: bucket.sourceItem };
-  }, [activeConcept, activeSpeaker, speakerBuckets, speakerSurveyChoices, surveySettings]);
+  }, [activeConcept, activeSpeaker, hasSpeakerOverride, speakerBuckets, speakerSurveyChoices, surveySettings]);
   const hasWorkspaceSurveys = workspaceChoices.length > 0;
   const conceptKey = activeConcept?.key ?? '';
   const speaker = activeSpeaker ?? '';
