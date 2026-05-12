@@ -142,6 +142,6 @@ Top-level ORTH result fields:
 | `oom_suspect` | Memory pressure suspected. Existing full-pipeline preflight semantics are preserved and extended to chunk-level results. | Retry only the failed chunk with a smaller chunk size, for example by lowering `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`, or fall back to scoped reprocessing with `run_mode='concept'` and `concept_ids`. |
 | `chunk_failed` | Chunk failed for a non-memory reason that did not match a more specific code. | Retry the specific chunk once; if it repeats, surface the chunk span to the user and continue with the partial result. |
 | `provider_error` | Provider/model raised an unexpected exception. | Do not blind-loop. Check provider configuration/logs, switch provider if available, or run a scoped retry. |
-| `timeout` | Chunk or subprocess exceeded its time budget. | Retry the affected chunk with a smaller chunk size or a longer timeout if the machine is healthy. |
+| `timeout` | Subprocess or chunk exceeded its time budget. Added to the documented enum in MC-384-B for the shared subprocess wrapper. | Retry the affected chunk with a smaller chunk size or a longer timeout if the machine is healthy. |
 
 Backward compatibility: callers that do not read `chunks[]` can continue to consume the top-level result fields. New agents should prefer `chunks[]` for retry and partial-result decisions.

@@ -24,17 +24,29 @@ Mode meanings:
 
 - `thread`: legacy in-process background thread. Lowest process overhead, weakest crash containment.
 - `subprocess`: per-job process launched by `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`. Better crash containment for the whole job.
-- `persistent`: long-lived worker in `python/workers/compute_worker.py` that dispatches jobs through `_dispatch()` at `python/workers/compute_worker.py:409` and can keep models warm.
+- `persistent`: long-lived worker in `python/workers/compute_worker.py` that dispatches jobs through `_dispatch()` at `python/workers/compute_worker.py:417` and can keep models warm.
 
 ## Nested subprocess wrappers
 
-MC-384 extends the existing nested-subprocess pattern. Current main has the IPA full-pipeline nested wrapper at `python/server_routes/annotate.py:2950` (`_compute_full_pipeline_ipa_in_subprocess`). After MC-384-B/C merge, this section must cite the new exact wrappers:
+MC-384 extends the existing nested-subprocess pattern. PR #412 introduced the shared IPA subprocess envelope and standalone IPA full-mode routing:
 
-- `_run_in_isolated_subprocess`: `TODO_LINE`.
-- `_compute_speaker_ipa_in_subprocess`: `TODO_LINE`.
-- `_compute_speaker_ortho_in_subprocess`: `TODO_LINE`.
+- `python/server_routes/annotate.py:2704` — `_isolated_subprocess_error_result()` builds the structured subprocess error result and assigns `oom_suspect`/`timeout` where applicable.
+- `python/server_routes/annotate.py:2782` — `_speaker_ipa_subprocess_entry()` serializes standalone speaker-IPA child outcomes.
+- `python/server_routes/annotate.py:3001` — `_run_in_isolated_subprocess()` owns spawn, timeout, result-file parsing, and envelope error conversion.
+- `python/server_routes/annotate.py:3107` — `_compute_full_pipeline_ipa_in_subprocess()` now delegates to the shared helper.
+- `python/server_routes/annotate.py:3120` — `_compute_speaker_ipa_in_subprocess()` wraps standalone `compute_type='ipa'` full-mode calls.
+- `_compute_speaker_ortho_in_subprocess`: `TODO_LINE` (MC-384-C).
 
 These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The outer compute mode chooses how the job is launched; the nested wrappers isolate a memory-heavy step inside that job.
+
+## Chunking primitives
+
+PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitive module (84 LoC):
+
+- `python/workers/audio_chunking.py:12` — `ChunkSpan`, the audio-global `{start, end}` span shape.
+- `python/workers/audio_chunking.py:18` — `ChunkResult`, the per-chunk result shape used by job/MCP outputs.
+- `python/workers/audio_chunking.py:26` — `split_audio_duration(total_seconds, chunk_seconds)`.
+- `python/workers/audio_chunking.py:56` — `merge_chunk_segments(per_chunk_segments, spans)`, which offsets chunk-local segments back into audio-global time.
 
 ## Tier-1 vs Tier-2 ORTH
 
@@ -48,10 +60,22 @@ MC-384-D uses adjacent chunks with no overlap for Milestone A. The line citation
 ## Environment variables
 
 - `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; expected default is `10`. Final declaration line: `TODO_LINE`.
-- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` and `python/server_routes/annotate.py:2973`, default `14400`.
+- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3037` for nested isolated subprocesses, default `14400`.
 - `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
 - `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.
 - `PARSE_FULL_PIPELINE_MIN_MEM_GB`: full-pipeline host-memory preflight threshold; read by `python/server_routes/annotate.py:2584` and documented in `scripts/parse-run.sh:30`.
+
+## Subprocess timeout configuration
+
+`PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` defaults to `14400` seconds (4 hours). PR #412 changed nested isolated subprocess timeout handling in `python/server_routes/annotate.py:3037`-`3043`: any positive finite value is respected exactly. The previous 60-second minimum floor was removed for the nested wrapper, so test and debug runs can use values such as `1` second. Values that are zero, negative, non-finite, missing, or unparsable fall back to `14400`.
+
+The older per-job `PARSE_COMPUTE_MODE=subprocess` launcher still reads the same variable at `python/server_routes/jobs.py:320`; its floor behavior is separate from the nested helper and should be audited before changing that outer launcher contract.
+
+## Subprocess result envelope
+
+`_run_in_isolated_subprocess()` (`python/server_routes/annotate.py:3001`) uses an internal JSON envelope where child entries write `{ok: true, result: ...}` for successful computations and `{ok: false, error: ..., traceback: ...}` for child failures. `_compute_full_pipeline_ipa_in_subprocess()` (`python/server_routes/annotate.py:3107`) then treats `sub_result.get('status') == 'error'` as the hard subprocess-error sentinel generated by `_isolated_subprocess_error_result()` (`python/server_routes/annotate.py:2704`).
+
+Contract for subprocess entries: a successful computation must not return a dict whose `status` field is the literal string `error`. If application-level partial failure needs to be surfaced, use a different key such as `failure_reason` or `partial`, or raise and let the subprocess envelope convert the failure. Returning `status='error'` from successful application code collides with the envelope sentinel.
 
 ## When chunking fires
 
@@ -78,9 +102,10 @@ Chunked compute results add a `chunks` array with per-chunk status. See `docs/mc
 
 When adding a new `compute_type`, keep these routing tables in agreement:
 
-- `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`.
-- `python/workers/compute_worker.py:409` `_dispatch()`.
-- The thread-mode dispatcher in `python/server_routes/jobs.py` around `TODO_LINE` after the final MC-384 rebase.
+- `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`; standalone IPA full-mode dispatch is at `python/server_routes/jobs.py:391`.
+- `python/server_routes/jobs.py:1025` `_run_compute_job()` thread-mode IPA full-mode dispatch.
+- `python/workers/compute_worker.py:417` `_dispatch()`; standalone IPA full-mode dispatch is at `python/workers/compute_worker.py:424`.
+- Future ORTH subprocess/chunk dispatch citations remain pending until MC-384-C/D.
 
 A compute type that works in one mode but not another is a contract bug. Add or update tests before shipping a new alias.
 
