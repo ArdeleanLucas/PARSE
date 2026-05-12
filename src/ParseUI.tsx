@@ -1964,11 +1964,12 @@ export function ParseUI() {
                 // a `source_item`, so the numeric id may have shifted.
                 const after = useConfigStore.getState().config?.concepts ?? [];
                 const grouped = groupConceptEntries(after, () => 'untagged', mergesForReload);
-                const next = findConceptByUnderlyingKey(grouped, underlyingKey);
+                const siblingKey = duplicated.sibling.id;
+                const next = findConceptByUnderlyingKey(grouped, siblingKey) ?? findConceptByUnderlyingKey(grouped, underlyingKey);
                 if (next) {
+                  previousActiveRawKeyRef.current = siblingKey;
                   setConceptId(next.id);
-                  setSelectedConceptKey(underlyingKey);
-                  const siblingKey = duplicated.sibling.id;
+                  setSelectedConceptKey(siblingKey);
                   setRecentlyDuplicatedSiblingKey(siblingKey);
                   if (activeSpeakerForSidebar) {
                     setFreshDuplicateKeysBySpeaker((prev) => {

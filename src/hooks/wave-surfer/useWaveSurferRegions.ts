@@ -75,9 +75,25 @@ export function useWaveSurferRegions(
       activeRegionRef.current = region;
     };
 
+    let detachContextMenu: (() => void) | null = null;
+    const attachContextMenu = (region: WsRegion) => {
+      detachContextMenu?.();
+      if (!options.onContextMenu || !region.element) {
+        detachContextMenu = null;
+        return;
+      }
+      const handler = (event: MouseEvent) => {
+        event.preventDefault();
+        options.onContextMenu?.({ start: region.start, end: region.end }, event);
+      };
+      region.element.addEventListener("contextmenu", handler);
+      detachContextMenu = () => region.element?.removeEventListener("contextmenu", handler);
+    };
+
     const onCreated = regions.on("region-created", (region) => {
       if (!isCreateLexemeRegion(region)) return;
       rememberRegion(region);
+      attachContextMenu(region);
       options.onRegionCreated({ start: region.start, end: region.end });
     });
     const onUpdated = regions.on("region-updated", (region) => {
@@ -85,7 +101,11 @@ export function useWaveSurferRegions(
       rememberRegion(region);
       options.onRegionUpdated({ start: region.start, end: region.end });
     });
-    dragCreateUnsubscribeRef.current = [onCreated, onUpdated].filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+    const detachContextMenuSubscription = () => {
+      detachContextMenu?.();
+      detachContextMenu = null;
+    };
+    dragCreateUnsubscribeRef.current = [onCreated, onUpdated, detachContextMenuSubscription].filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
 
     return disableDragToCreate;
   }, [activeRegionRef, disableDragToCreate, regionsRef]);

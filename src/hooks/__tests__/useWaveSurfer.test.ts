@@ -327,15 +327,16 @@ describe("useWaveSurfer", () => {
 
 
 
-  function findRegionHandler(eventName: string): ((region: { id?: string; start: number; end: number; remove?: () => void; play?: () => void }) => void) | undefined {
+  function findRegionHandler(eventName: string): ((region: { id?: string; start: number; end: number; element?: HTMLElement; remove?: () => void; play?: () => void }) => void) | undefined {
     const calls = mockRegionsPlugin.on.mock.calls.filter(([name]) => name === eventName);
     const call = calls[calls.length - 1];
     return call?.[1] as ((region: { id?: string; start: number; end: number; remove?: () => void; play?: () => void }) => void) | undefined;
   }
 
-  it("enableDragToCreate fires onRegionCreated on user drag", () => {
+  it("enableDragToCreate fires onRegionCreated and contextmenu on user drag", () => {
     const onRegionCreated = vi.fn();
     const onRegionUpdated = vi.fn();
+    const onContextMenu = vi.fn();
     const { result } = renderHook(() =>
       useWaveSurfer({
         containerRef: makeContainerRef(),
@@ -344,7 +345,7 @@ describe("useWaveSurfer", () => {
     );
 
     act(() => {
-      result.current.enableDragToCreate({ onRegionCreated, onRegionUpdated });
+      result.current.enableDragToCreate({ onRegionCreated, onRegionUpdated, onContextMenu });
     });
 
     expect(mockRegionsPlugin.enableDragSelection).toHaveBeenCalledWith(
@@ -360,8 +361,14 @@ describe("useWaveSurfer", () => {
     act(() => onCreated!({ id: "r-pre-rendered", start: 0.5, end: 0.75, remove: vi.fn(), play: vi.fn() }));
     expect(onRegionCreated).not.toHaveBeenCalled();
 
-    act(() => onCreated!({ id: "create-lexeme-selection-test", start: 1.25, end: 2.5, remove: vi.fn(), play: vi.fn() }));
+    const transientElement = document.createElement("div");
+    act(() => onCreated!({ id: "create-lexeme-selection-test", start: 1.25, end: 2.5, element: transientElement, remove: vi.fn(), play: vi.fn() }));
     expect(onRegionCreated).toHaveBeenCalledWith({ start: 1.25, end: 2.5 });
+
+    const contextEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 20 });
+    transientElement.dispatchEvent(contextEvent);
+    expect(contextEvent.defaultPrevented).toBe(true);
+    expect(onContextMenu).toHaveBeenCalledWith({ start: 1.25, end: 2.5 }, contextEvent);
 
     act(() => onUpdated!({ id: "create-lexeme-selection-test", start: 1.5, end: 2.75, remove: vi.fn(), play: vi.fn() }));
     expect(onRegionUpdated).toHaveBeenCalledWith({ start: 1.5, end: 2.75 });
