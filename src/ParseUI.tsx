@@ -980,10 +980,12 @@ export function ParseUI() {
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
     const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
-    return groupConceptEntries(rawConcepts, (conceptKeys) => {
+    const resolveParentTag = (conceptKeys: readonly string[]) => {
       const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey, activeTagScope));
       return getConceptStatus(tags);
-    }, mergesForCurrentMode);
+    };
+    const resolveVariantTag = (conceptKey: string) => getConceptStatus(getTagsForConcept(conceptKey, activeTagScope));
+    return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag);
   }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode]);
 
   const sourceSortDisabled = selectedSpeakers.length !== 1;

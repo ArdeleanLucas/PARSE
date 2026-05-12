@@ -7,6 +7,8 @@ export interface ConceptVariant {
   conceptEn: string;
   variantLabel: string;
   surveys?: ConceptSurveyLinks;
+  /** Per-variant status used by the concept sidebar when grouped siblings diverge. */
+  tag?: ConceptTag;
 }
 
 export interface Concept {
