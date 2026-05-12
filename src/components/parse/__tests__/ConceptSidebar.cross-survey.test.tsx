@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-li
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { ConceptSidebar } from '../ConceptSidebar';
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../../api/client';
+import { useConfigStore } from '../../../stores/configStore';
 
 vi.mock('../../../api/client', () => ({
   setConceptSurveyLink: vi.fn(),
@@ -79,10 +80,12 @@ function renderSidebar(overrides = {}) {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  useConfigStore.setState({ config: null, loading: false, error: null });
 });
 
 beforeEach(() => {
-  vi.mocked(setConceptSurveyLink).mockResolvedValue({ ok: true, concept: { id: '527', label: 'head', surveys: { klq: '1.2', jbil: '31' }, speaker_surveys: { klq: '1.2' } }, survey_overlap: { version: 1, color_coding_enabled: false, surveys: {}, concept_survey_links: {}, speaker_choices: {}, speaker_concept_survey_links: {} } });
+  useConfigStore.setState({ config: { project_name: 'Test', language_code: 'ckb', speakers: ['Saha01', 'speakerKey'], concepts: [{ id: 'conceptKey', label: 'head' }, { id: '53', label: 'big' }, { id: '619', label: 'big B' }], audio_dir: 'audio', annotations_dir: 'annotations' }, loading: false, error: null });
+  vi.mocked(setConceptSurveyLink).mockResolvedValue({ ok: true, concept: { id: '527', label: 'head', surveys: { klq: '1.2', jbil: '31' }, speaker_surveys: { klq: '1.2' } }, survey_overlap: { version: 1, color_coding_enabled: false, surveys: {}, concept_survey_links: { conceptKey: { klq: '1.2' }, '53': { klq: '4.2' }, '619': { klq: '4.2' } }, speaker_choices: {}, speaker_concept_survey_links: { speakerKey: { conceptKey: { klq: '1.2' } }, Saha01: { '53': { klq: '4.2' }, '619': { klq: '4.2' } } } } });
   vi.mocked(deleteConceptSurveyLink).mockResolvedValue({ ok: true, concept: { id: '527', label: 'head', surveys: { jbil: '31' } }, survey_overlap: { version: 1, color_coding_enabled: false, surveys: {}, concept_survey_links: {}, speaker_choices: {}, speaker_concept_survey_links: {} } });
 });
 
@@ -135,14 +138,12 @@ describe('ConceptSidebar cross-survey linking', () => {
   });
 
   it('submits manual survey-link edits through the typed API helper with speaker scope', async () => {
-    const onSurveyLinksChanged = vi.fn();
     render(
       <ConceptSidebar
         {...baseProps}
         filteredConcepts={[crossSurveyConcept]}
         speakerSurveyChoices={{ speakerKey: { conceptKey: 'klq' } }}
         onSurveyChoiceChange={vi.fn()}
-        onSurveyLinksChanged={onSurveyLinksChanged}
       />,
     );
 
@@ -152,7 +153,7 @@ describe('ConceptSidebar cross-survey linking', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => expect(setConceptSurveyLink).toHaveBeenCalledWith('conceptKey', { survey_id: 'klq', source_item: '1.2', speaker: 'speakerKey' }));
-    await waitFor(() => expect(onSurveyLinksChanged).toHaveBeenCalled());
+    await waitFor(() => expect(useConfigStore.getState().config?.speaker_concept_survey_links?.speakerKey?.conceptKey?.klq).toBe('1.2'));
   });
 
   it('disables Save on a grouped parent when no active speaker is selected', () => {
@@ -201,8 +202,7 @@ describe('ConceptSidebar cross-survey linking', () => {
   });
 
   it('saves a grouped parent bucket with comma-separated csv row ids instead of the synthetic key', async () => {
-    const onSurveyLinksChanged = vi.fn();
-    renderSidebar({ onSurveyLinksChanged });
+    renderSidebar();
 
     fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
@@ -211,7 +211,7 @@ describe('ConceptSidebar cross-survey linking', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => expect(setConceptSurveyLink).toHaveBeenCalledWith('53,619', { survey_id: 'klq', source_item: '4.2', speaker: 'Saha01' }));
-    await waitFor(() => expect(onSurveyLinksChanged).toHaveBeenCalled());
+    await waitFor(() => expect(useConfigStore.getState().config?.speaker_concept_survey_links?.Saha01?.['53']?.klq).toBe('4.2'));
   });
 
   it('saves a child variant bucket with only that row id', async () => {

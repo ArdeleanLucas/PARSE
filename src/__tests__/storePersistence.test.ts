@@ -8,6 +8,7 @@ const mockPutTags = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../api/client", () => ({
   getConfig: vi.fn(),
+  getSurveyOverlap: vi.fn().mockResolvedValue({ version: 1, color_coding_enabled: false, surveys: {}, concept_survey_links: {}, speaker_choices: {} }),
   getAnnotation: (...args: unknown[]) => mockGetAnnotation(...args),
   saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   getEnrichments: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("../api/client", () => ({
 
 vi.mock("@/api/client", () => ({
   getConfig: vi.fn(),
+  getSurveyOverlap: vi.fn().mockResolvedValue({ version: 1, color_coding_enabled: false, surveys: {}, concept_survey_links: {}, speaker_choices: {} }),
   getAnnotation: (...args: unknown[]) => mockGetAnnotation(...args),
   saveAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   getEnrichments: vi.fn(),

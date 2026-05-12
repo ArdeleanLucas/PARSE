@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
+import { useConfigStore } from '../../stores/configStore';
 import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
@@ -81,7 +82,6 @@ interface ConceptSidebarProps {
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
   onDeleteConcept?: (concept: SidebarConcept) => void;
-  onSurveyLinksChanged?: () => void | Promise<void>;
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
    * src/lib/sidebarVisibility.ts so speaker-scope and tag filters are applied to each
@@ -194,7 +194,6 @@ export function ConceptSidebar({
   onUnmergeConcept,
   onDuplicateConcept,
   onDeleteConcept,
-  onSurveyLinksChanged,
   isConceptVariantVisibleInSidebar,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
@@ -293,8 +292,8 @@ export function ConceptSidebar({
     }
     setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
     try {
-      await setConceptSurveyLink(conceptIdOrList, payload);
-      await onSurveyLinksChanged?.();
+      const response = await setConceptSurveyLink(conceptIdOrList, payload);
+      if (response.survey_overlap) useConfigStore.getState().applySurveyOverlap(response.survey_overlap);
       setSurveyLinkEditor(null);
       setContextMenu(null);
     } catch (err) {
@@ -308,8 +307,8 @@ export function ConceptSidebar({
     const conceptIdOrList = surveyLinkEditor.rowIds.join(',');
     setSurveyLinkEditor((current) => current ? { ...current, saving: true, error: null } : current);
     try {
-      await deleteConceptSurveyLink(conceptIdOrList, { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim(), ...(activeSpeaker ? { speaker: activeSpeaker } : {}) });
-      await onSurveyLinksChanged?.();
+      const response = await deleteConceptSurveyLink(conceptIdOrList, { survey_id: surveyLinkEditor.surveyId, source_item: surveyLinkEditor.sourceItem.trim(), ...(activeSpeaker ? { speaker: activeSpeaker } : {}) });
+      if (response.survey_overlap) useConfigStore.getState().applySurveyOverlap(response.survey_overlap);
       setSurveyLinkEditor(null);
       setContextMenu(null);
     } catch (err) {
