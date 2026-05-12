@@ -5,16 +5,19 @@ import type { Concept } from '../../../lib/speakerForm';
 import {
   aggregateWorkspaceSurveys,
   defaultSurveySettings,
+  normalizeSurveyId,
   resolveConceptSurvey,
   SURVEY_CHIP_CLASSES,
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
+import { resolveSurveyLinksForSpeaker } from '../../../lib/surveyLinksForSpeaker';
 import { relinkConceptsByGloss } from '../../../api/client';
 import type {
   ConceptSurveyLinksByConcept,
   RelinkByGlossRequest,
   RelinkByGlossResponse,
+  SpeakerConceptSurveyLinks,
   SpeakerSurveyChoices,
   SurveyOverlapPatch,
   SurveySettingsMap,
@@ -27,6 +30,7 @@ interface SurveyValuesSectionProps {
   activeSpeaker?: string | null;
   workspaceConcepts?: Concept[];
   conceptSurveyLinks?: ConceptSurveyLinksByConcept;
+  speakerConceptSurveyLinks?: SpeakerConceptSurveyLinks;
   surveyColorCodingEnabled: boolean;
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
@@ -59,6 +63,7 @@ export function SurveyValuesSection({
   activeSpeaker,
   workspaceConcepts = [],
   conceptSurveyLinks,
+  speakerConceptSurveyLinks,
   surveyColorCodingEnabled,
   surveySettings,
   speakerSurveyChoices,
@@ -69,12 +74,34 @@ export function SurveyValuesSection({
   const [draftLabel, setDraftLabel] = useState('');
   const [relinkStatus, setRelinkStatus] = useState<string | null>(null);
   const [relinkReview, setRelinkReview] = useState<RelinkByGlossResponse | null>(null);
-  const conceptChoices = useMemo(() => activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [], [activeConcept]);
   const workspaceChoices = useMemo(() => {
     const concepts = workspaceConcepts.length > 0 ? workspaceConcepts : (activeConcept ? [activeConcept] : []);
     return aggregateWorkspaceSurveys(concepts, surveySettings, conceptSurveyLinks);
   }, [activeConcept, conceptSurveyLinks, surveySettings, workspaceConcepts]);
-  const resolved = activeConcept ? resolveConceptSurvey(activeConcept, activeSpeaker, speakerSurveyChoices, surveySettings) : { surveyId: '', sourceItem: '' };
+  const speakerBuckets = useMemo(() => {
+    if (!activeConcept) return [];
+    const key = activeConcept.key;
+    const fallbackLinks = conceptSurveyLinks?.[key] ?? activeConcept.surveys ?? {};
+    return resolveSurveyLinksForSpeaker([key], activeSpeaker, { [key]: fallbackLinks }, speakerConceptSurveyLinks);
+  }, [activeConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks]);
+  const bucketSourceItemBySurveyId = useMemo(
+    () => Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
+    [speakerBuckets],
+  );
+  const conceptChoices = useMemo(() => {
+    if (speakerBuckets.length > 0) return speakerBuckets.map((bucket) => bucket.surveyId);
+    return activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [];
+  }, [activeConcept, speakerBuckets]);
+  const resolved = useMemo<{ surveyId: string; sourceItem: string }>(() => {
+    if (!activeConcept) return { surveyId: '', sourceItem: '' };
+    if (speakerBuckets.length === 0) {
+      return resolveConceptSurvey(activeConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
+    }
+    const choice = activeSpeaker ? normalizeSurveyId(speakerSurveyChoices?.[activeSpeaker]?.[activeConcept.key] ?? '') : '';
+    const match = choice ? speakerBuckets.find((bucket) => bucket.surveyId === choice) : undefined;
+    const bucket = match ?? speakerBuckets[0];
+    return { surveyId: bucket.surveyId, sourceItem: bucket.sourceItem };
+  }, [activeConcept, activeSpeaker, speakerBuckets, speakerSurveyChoices, surveySettings]);
   const hasWorkspaceSurveys = workspaceChoices.length > 0;
   const conceptKey = activeConcept?.key ?? '';
   const speaker = activeSpeaker ?? '';
@@ -207,7 +234,7 @@ export function SurveyValuesSection({
             {activeConcept && conceptChoices.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {conceptChoices.map((surveyId) => {
-                const sourceItem = activeConcept.surveys?.[surveyId] ?? '';
+                const sourceItem = bucketSourceItemBySurveyId[surveyId] ?? activeConcept.surveys?.[surveyId] ?? '';
                 const label = surveyLabelFor(surveyId, surveySettings);
                 const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
                 const active = resolved.surveyId === surveyId;

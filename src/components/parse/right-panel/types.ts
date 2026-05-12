@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ConceptSurveyLinksByConcept, SurveyOverlapPatch, SpeakerSurveyChoices, SurveySettingsMap } from '../../../api/types';
+import type { ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SurveyOverlapPatch, SpeakerSurveyChoices, SurveySettingsMap } from '../../../api/types';
 import type { Concept } from '../../../lib/speakerForm';
 import type { CompareComputeJobStatus, CompareComputeMode, OffsetPhase } from '../compareComputeContract';
 
@@ -46,6 +46,7 @@ export interface RightPanelProps {
   activeConcept?: Concept | null;
   workspaceConcepts?: Concept[];
   conceptSurveyLinks?: ConceptSurveyLinksByConcept;
+  speakerConceptSurveyLinks?: SpeakerConceptSurveyLinks;
   surveyColorCodingEnabled: boolean;
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;

@@ -2442,6 +2442,8 @@ export function ParseUI() {
           }}
           activeConcept={concept}
           workspaceConcepts={concepts}
+          conceptSurveyLinks={conceptSurveyLinks}
+          speakerConceptSurveyLinks={speakerConceptSurveyLinks}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}
