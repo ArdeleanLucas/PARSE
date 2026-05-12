@@ -1,6 +1,6 @@
 # PARSE MCP tool skill index
 
-Generated at `2026-05-10T17:37:02Z` from the live PARSE MCP catalog (`mode="all"`).
+Hand-curated against the PARSE MCP catalog snapshot of `2026-05-10T17:37:02Z` (`mode="all"`). Skill docs are written by hand and reviewed in PRs; there is no auto-generation step.
 
 - Full/default surface: **64** tools (60 chat/task + 3 workflow + 1 adapter)
 - Legacy explicit opt-out (`expose_all_tools=false`): **44** tools (40 chat/task + 3 workflow + 1 adapter)
