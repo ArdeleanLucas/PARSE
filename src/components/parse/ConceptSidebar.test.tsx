@@ -200,6 +200,128 @@ describe('ConceptSidebar', () => {
     expect(screen.getByTestId('concept-sort-az').className).toContain('bg-white');
   });
 
+  it('renders source-item variant dots from each variant tag instead of the parent rollup', async () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 42,
+          key: 'hair',
+          name: 'hair',
+          tag: 'problematic' as const,
+          variants: [
+            { conceptKey: 'hair-a', conceptEn: 'hair (A)', variantLabel: 'A', tag: 'untagged' as const },
+            { conceptKey: 'hair-c', conceptEn: 'hair (C)', variantLabel: 'C', tag: 'problematic' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={42}
+        activeConceptKey="hair-a"
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    const parentDot = screen.getByTestId('concept-row-42').querySelector('button[aria-label="hair #42"] span');
+    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
+    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
+    const variantADot = variantARow.querySelector('span');
+    const variantCDot = variantCRow.querySelector('span');
+    expect(parentDot?.className).toContain('bg-rose-500');
+    expect(variantADot?.className).toContain('bg-slate-300');
+    expect(variantCDot?.className).toContain('bg-rose-500');
+  });
+
+  it('renders review-needed source-item variants independently of untagged sibling rollups', async () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 44,
+          key: 'hair',
+          name: 'hair',
+          tag: 'review' as const,
+          variants: [
+            { conceptKey: 'hair-a', conceptEn: 'hair (A)', variantLabel: 'A', tag: 'review' as const },
+            { conceptKey: 'hair-c', conceptEn: 'hair (C)', variantLabel: 'C', tag: 'untagged' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={44}
+        activeConceptKey="hair-a"
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
+    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
+    expect(variantARow.querySelector('span')?.className).toContain('bg-amber-400');
+    expect(variantCRow.querySelector('span')?.className).toContain('bg-slate-300');
+  });
+  it('renders review-needed source-item variants independently of confirmed sibling rollups', async () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 43,
+          key: 'hair',
+          name: 'hair',
+          tag: 'confirmed' as const,
+          variants: [
+            { conceptKey: 'hair-a', conceptEn: 'hair (A)', variantLabel: 'A', tag: 'confirmed' as const },
+            { conceptKey: 'hair-c', conceptEn: 'hair (C)', variantLabel: 'C', tag: 'review' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={43}
+        activeConceptKey="hair-a"
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
+    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
+    const variantADot = variantARow.querySelector('span');
+    const variantCDot = variantCRow.querySelector('span');
+    expect(variantADot?.className).toContain('bg-emerald-500');
+    expect(variantCDot?.className).toContain('bg-amber-400');
+  });
+
   it('renders the provided concept list with the active concept highlighted', () => {
     render(
       <ConceptSidebar

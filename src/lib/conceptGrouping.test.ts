@@ -39,6 +39,32 @@ describe('groupConceptEntries', () => {
     expect(grouped[2]).toMatchObject({ id: 3, key: 'concept-d', name: 'water' });
   });
 
+  it('stamps per-variant tags from each underlying concept key while preserving the parent rollup', () => {
+    const grouped = groupConceptEntries([
+      { id: 'hair-a', label: 'hair (A)', source_item: '1.1' },
+      { id: 'hair-c', label: 'hair (C)', source_item: '1.1' },
+    ], () => 'problematic' as const, undefined, (conceptKey) => conceptKey === 'hair-a' ? 'untagged' as const : 'problematic' as const);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].tag).toBe('problematic');
+    expect(grouped[0].variants?.map((variant) => [variant.conceptKey, variant.tag])).toEqual([
+      ['hair-a', 'untagged'],
+      ['hair-c', 'problematic'],
+    ]);
+  });
+
+  it('stamps per-variant tags on compare mergedVariants for singleton merges', () => {
+    const grouped = groupConceptEntries([
+      { id: 'primary', label: 'hair' },
+      { id: 'absorbed', label: 'hair (A)' },
+    ], () => 'confirmed' as const, { primary: ['absorbed'] }, (conceptKey) => conceptKey === 'absorbed' ? 'review' as const : 'confirmed' as const);
+
+    expect(grouped[0].tag).toBe('confirmed');
+    expect(grouped[0].mergedVariants?.map((variant) => [variant.conceptKey, variant.tag])).toEqual([
+      ['primary', 'confirmed'],
+      ['absorbed', 'review'],
+    ]);
+  });
   it('threads plural survey links through grouped and singleton concepts', () => {
     const entries: ConceptEntry[] = [
       { id: 'concept-a', label: 'rain A', source_item: 'KLQ_1.10', source_survey: 'KLQ', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } },

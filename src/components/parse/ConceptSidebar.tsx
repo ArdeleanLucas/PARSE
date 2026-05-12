@@ -28,8 +28,8 @@ export interface SidebarConcept {
    * (e.g. `deep (A)`, `deep (B)`, `deep (C)`). Mirrors the `ConceptVariant`
    * shape from `speakerForm.ts` so each underlying row can be surfaced as a
    * selectable child while N-ary duplicate actions remain enabled. */
-  variants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
-  mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string }>;
+  variants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string; tag?: ConceptTag }>;
+  mergedVariants?: Array<{ conceptKey: string; conceptEn: string; variantLabel: string; tag?: ConceptTag }>;
 }
 
 type SidebarVariant = NonNullable<SidebarConcept['variants']>[number];
@@ -651,7 +651,7 @@ export function ConceptSidebar({
                     }}
                     className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass} ${isRecentlyDuplicated ? 'border-l-2 border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : ''}`}
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${tagDot[variant.tag ?? concept.tag]}`} />
                     <span className={`flex-1 text-[12px] ${childActive ? 'font-semibold' : 'font-medium'}`}>{variant.conceptEn}</span>
                     {isRecentlyDuplicated && (
                       <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">NEW</span>

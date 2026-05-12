@@ -3,6 +3,14 @@ import type { Concept, ConceptVariant } from './speakerForm';
 import type { ConceptTag } from './parseUIUtils';
 
 type ResolveConceptTag = (conceptKeys: readonly string[]) => ConceptTag;
+type ResolveVariantTag = (conceptKey: string) => ConceptTag;
+
+function withVariantTag(
+  variant: Omit<ConceptVariant, 'tag'>,
+  resolveVariantTag: ResolveVariantTag | undefined,
+): ConceptVariant {
+  return resolveVariantTag ? { ...variant, tag: resolveVariantTag(variant.conceptKey) } : variant;
+}
 
 function normalizeSourceItem(sourceItem: string | undefined): string | null {
   const trimmed = sourceItem?.trim() ?? '';
@@ -96,6 +104,7 @@ export function groupConceptEntries(
   rawConcepts: readonly ConceptEntry[],
   resolveTag: ResolveConceptTag,
   conceptMerges?: Record<string, readonly string[]>,
+  resolveVariantTag?: ResolveVariantTag,
 ): Concept[] {
   const sourceBuckets = new Map<string, number[]>();
   const sourceBucketKeysByItem = new Map<string, Set<string>>();
@@ -140,11 +149,11 @@ export function groupConceptEntries(
     emittedId += 1;
 
     const siblingEntries = siblings.map((siblingIndex) => rawConcepts[siblingIndex]);
-    const variants: ConceptVariant[] = siblingEntries.map((sibling, siblingIndex) => ({
+    const variants: ConceptVariant[] = siblingEntries.map((sibling, siblingIndex) => withVariantTag({
       conceptKey: sibling.id,
       conceptEn: sibling.label,
       variantLabel: variantLabelFor(sibling.label, siblingIndex),
-    }));
+    }, resolveVariantTag));
     const conceptKeys = siblingEntries.map((sibling) => sibling.id);
 
     grouped.push({
@@ -167,7 +176,7 @@ export function groupConceptEntries(
   const underlyingKeys = (concept: Concept): string[] => concept.variants?.map((variant) => variant.conceptKey) ?? [concept.key];
   const underlyingVariants = (concept: Concept, startIndex: number): ConceptVariant[] => {
     if (concept.variants?.length) return concept.variants;
-    return [{ conceptKey: concept.key, conceptEn: concept.name, variantLabel: variantLabelFor(concept.name, startIndex) }];
+    return [withVariantTag({ conceptKey: concept.key, conceptEn: concept.name, variantLabel: variantLabelFor(concept.name, startIndex) }, resolveVariantTag)];
   };
 
   const absorbedConcepts = new Set<Concept>();
