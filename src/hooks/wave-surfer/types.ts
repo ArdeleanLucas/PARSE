@@ -26,6 +26,8 @@ export interface DragToCreateSelection {
 export interface DragToCreateOptions {
   onRegionCreated: (selection: DragToCreateSelection) => void;
   onRegionUpdated: (selection: DragToCreateSelection) => void;
+  /** Right-click on the draft drag-to-create region. Mirrors QuickRetimeSelectionOptions.onContextMenu. */
+  onContextMenu?: (selection: DragToCreateSelection, event: MouseEvent) => void;
 }
 
 export interface UseWaveSurferOptions {

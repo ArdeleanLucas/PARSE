@@ -89,6 +89,7 @@ const mockClearQuickRetimeSelection = vi.fn();
 type DragToCreateOptions = {
   onRegionCreated: (region: { start: number; end: number }) => void;
   onRegionUpdated: (region: { start: number; end: number }) => void;
+  onContextMenu?: (region: { start: number; end: number }, event: MouseEvent) => void;
 };
 let mockDragToCreateOptions: DragToCreateOptions | null = null;
 const mockDisableDragToCreate = vi.fn();
@@ -478,6 +479,38 @@ describe('AnnotateView', () => {
     fireEvent.click(screen.getByTestId('create-lexeme-interval'));
 
     await waitFor(() => expect(mockCreateConceptInterval).toHaveBeenCalledWith('Fail01', 'water', 1.25, 2.5));
+  });
+
+  it('opens a create-lexeme menu from the drag-to-create contextmenu callback', () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 32, clientY: 48 });
+    act(() => {
+      mockDragToCreateOptions?.onContextMenu?.({ start: 1.25, end: 2.5 }, contextEvent);
+    });
+
+    expect(contextEvent.defaultPrevented).toBe(true);
+    expect(screen.getByRole('menu', { name: 'Waveform create lexeme menu' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Create lexeme for water' })).toBeTruthy();
+  });
+
+  it('commits a create-lexeme contextmenu selection and dismisses the menu', async () => {
+    mockRecord = makeRecord([]);
+
+    renderWaterAnnotateView();
+
+    act(() => {
+      mockDragToCreateOptions?.onContextMenu?.(
+        { start: 1.25, end: 2.5 },
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 32, clientY: 48 }),
+      );
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create lexeme for water' }));
+
+    await waitFor(() => expect(mockCreateConceptInterval).toHaveBeenCalledWith('Fail01', 'water', 1.25, 2.5));
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Waveform create lexeme menu' })).toBeNull());
   });
 
   it('surfaces createConceptInterval errors inline and keeps the selected region retryable', async () => {

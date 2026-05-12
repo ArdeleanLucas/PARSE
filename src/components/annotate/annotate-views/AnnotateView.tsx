@@ -82,6 +82,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
   const saveLexemeAnnotation = useAnnotationStore((s) => s.saveLexemeAnnotation);
+  const createConceptInterval = useAnnotationStore((s) => s.createConceptInterval);
   const saveSpeaker = useAnnotationStore((s) => s.saveSpeaker);
   const undoAnnotation = useAnnotationStore((s) => s.undo);
   const redoAnnotation = useAnnotationStore((s) => s.redo);
@@ -220,6 +221,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
+  const [createLexemeMenu, setCreateLexemeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
   const [rerunDialog, setRerunDialog] = useState<RerunDialogState>(null);
   const [rerunBusy, setRerunBusy] = useState<RerunField | null>(null);
   const [rerunPad, setRerunPad] = useState<LexemeRerunPad>(DEFAULT_RERUN_PAD);
@@ -238,6 +240,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
+    setCreateLexemeMenu(null);
     setRerunDialog(null);
     setRerunBusy(null);
     setRerunPad(DEFAULT_RERUN_PAD);
@@ -297,6 +300,11 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         }
       : null
   ), [concept.name, conceptInterval]);
+
+  const handleCreateLexemeContextMenu = useCallback((selection: { start: number; end: number }, event: MouseEvent) => {
+    event.preventDefault();
+    setCreateLexemeMenu({ x: event.clientX, y: event.clientY, start: selection.start, end: selection.end });
+  }, []);
 
   const {
     playPause,
@@ -475,6 +483,20 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setQuickRetimeMenu(null);
   }, [clearQuickRetimeSelection]);
 
+  const commitCreateLexeme = useCallback(async () => {
+    if (!createLexemeMenu) return;
+    try {
+      await createConceptInterval(speaker, concept.key, createLexemeMenu.start, createLexemeMenu.end);
+      setCreateLexemeMenu(null);
+    } catch (err) {
+      setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err || "Create lexeme failed.") });
+    }
+  }, [concept.key, createConceptInterval, createLexemeMenu, speaker]);
+
+  const cancelCreateLexeme = useCallback(() => {
+    setCreateLexemeMenu(null);
+  }, []);
+
   const handleSaveNote = useCallback(async () => {
     setSavingNote(true);
     setNoteError(null);
@@ -499,15 +521,16 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [concept.key, lexemeNotesBlock, saveEnrichments, speaker, userNote]);
 
   useEffect(() => {
-    if (!quickRetimeMenu) return;
+    if (!quickRetimeMenu && !createLexemeMenu) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      cancelQuickRetime();
+      if (quickRetimeMenu) cancelQuickRetime();
+      if (createLexemeMenu) cancelCreateLexeme();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancelQuickRetime, quickRetimeMenu]);
+  }, [cancelCreateLexeme, cancelQuickRetime, createLexemeMenu, quickRetimeMenu]);
 
   const handlePlayToggle = useCallback(() => {
     if (currentConceptPastEoa) {
@@ -958,6 +981,32 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 )}
               </div>
             )}
+            {createLexemeMenu && (
+              <div
+                role="menu"
+                aria-label="Waveform create lexeme menu"
+                className="fixed z-50 min-w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                style={{ left: createLexemeMenu.x, top: createLexemeMenu.y }}
+                onContextMenu={(event) => event.preventDefault()}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                  onClick={() => void commitCreateLexeme()}
+                >
+                  Create lexeme for {concept.name}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full border-t border-slate-100 px-3 py-2 text-left text-slate-600 hover:bg-slate-50"
+                  onClick={cancelCreateLexeme}
+                >
+                  Cancel selection
+                </button>
+              </div>
+            )}
             {quickRetimeMenu && (
               <div
                 role="menu"
@@ -1142,6 +1191,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
               conceptKey={concept.key}
               enableDragToCreate={enableDragToCreate}
               disableDragToCreate={disableDragToCreate}
+              onContextMenu={handleCreateLexemeContextMenu}
             />
           )}
 

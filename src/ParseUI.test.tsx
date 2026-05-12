@@ -1701,7 +1701,7 @@ describe("ParseUI", () => {
     expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").toContain("new (C)");
   });
 
-  it("keeps duplicate focus on the original variant, shows success feedback, and clears the NEW marker", async () => {
+  it("focuses the new duplicate sibling, shows success feedback, and clears the NEW marker", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
       project_name: "PARSE",
@@ -1748,8 +1748,8 @@ describe("ParseUI", () => {
     expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618");
     const originalRow = within(sidebar).getByTestId("concept-variant-row-618");
     const siblingRow = within(sidebar).getByTestId("concept-variant-row-619");
-    expect(originalRow.className).toContain("bg-indigo-50");
-    expect(siblingRow.className).not.toContain("bg-indigo-50");
+    expect(originalRow.className).not.toContain("bg-indigo-50");
+    expect(siblingRow.className).toContain("bg-indigo-50");
     expect(siblingRow.textContent ?? "").toContain("NEW");
     expect(screen.queryByRole("alert")).toBeNull();
 

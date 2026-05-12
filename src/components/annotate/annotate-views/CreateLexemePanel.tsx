@@ -8,6 +8,7 @@ type CreateLexemePanelProps = {
   conceptKey: string;
   enableDragToCreate: WaveSurferRegionsControls["enableDragToCreate"];
   disableDragToCreate: WaveSurferRegionsControls["disableDragToCreate"];
+  onContextMenu?: (selection: DragToCreateSelection, event: MouseEvent) => void;
   onCreated?: () => void;
 };
 
@@ -24,6 +25,7 @@ export function CreateLexemePanel({
   conceptKey,
   enableDragToCreate,
   disableDragToCreate,
+  onContextMenu,
   onCreated,
 }: CreateLexemePanelProps) {
   const [inFlightRegion, setInFlightRegion] = useState<DragToCreateSelection | null>(null);
@@ -43,6 +45,7 @@ export function CreateLexemePanel({
         setError(null);
         setInFlightRegion(selection);
       },
+      onContextMenu,
     });
     return () => {
       if (cleanup === disableDragToCreate) {
@@ -52,7 +55,7 @@ export function CreateLexemePanel({
         disableDragToCreate();
       }
     };
-  }, [conceptKey, disableDragToCreate, enableDragToCreate, speaker]);
+  }, [conceptKey, disableDragToCreate, enableDragToCreate, onContextMenu, speaker]);
 
   const canCreate = regionIsValid(inFlightRegion) && !saving;
   const intervalLabel = useMemo(() => {
