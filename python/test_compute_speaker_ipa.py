@@ -246,7 +246,8 @@ def test_overwrite_true_replaces_existing_ipa(tmp_path, monkeypatch):
 
 
 def test_run_compute_job_dispatches_ipa_only(tmp_path, monkeypatch):
-    """_run_compute_job should route compute_type='ipa_only' to _compute_speaker_ipa."""
+    """_run_compute_job routes full-mode ipa_only aliases to the subprocess wrapper."""
+    server._install_route_bindings()
     _install_stubs(monkeypatch, tmp_path, _StubAligner())
     _seed_annotation(
         tmp_path, "Fail02",
@@ -254,29 +255,38 @@ def test_run_compute_job_dispatches_ipa_only(tmp_path, monkeypatch):
     )
 
     captured: dict = {}
+    calls: list[tuple[str, str]] = []
 
     def fake_complete(job_id, result, **kwargs):
         captured["result"] = result
 
-    def fake_error(job_id, err):
+    def fake_error(job_id, err, **kwargs):
         captured["error"] = err
+
+    def fake_ipa_subprocess(job_id, payload):
+        calls.append((job_id, payload["speaker"]))
+        return {"speaker": payload["speaker"], "filled": 1, "total": 1}
 
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
     monkeypatch.setattr(server, "_set_job_complete", fake_complete)
     monkeypatch.setattr(server, "_set_job_error", fake_error)
+    monkeypatch.setattr(server, "_compute_speaker_ipa_in_subprocess", fake_ipa_subprocess)
 
     server._run_compute_job("j1", "ipa_only", {"speaker": "Fail02"})
     assert "error" not in captured
     assert captured["result"]["filled"] == 1
+    assert calls == [("j1", "Fail02")]
 
     # Also try the hyphenated alias.
     captured.clear()
+    calls.clear()
     _seed_annotation(
         tmp_path, "Fail03",
         [{"start": 2.0, "end": 2.5, "text": "ash"}], [],
     )
     server._run_compute_job("j2", "ipa-only", {"speaker": "Fail03"})
     assert captured["result"]["filled"] == 1
+    assert calls == [("j2", "Fail03")]
 
 
 def test_missing_annotation_raises(tmp_path, monkeypatch):
