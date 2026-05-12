@@ -57,7 +57,9 @@ describe("useWaveSurferRegions region paths", () => {
     const harness = makeHarness();
     const onRegionCreated = vi.fn();
     const onRegionUpdated = vi.fn();
-    const onContextMenu = vi.fn();
+    const onContextMenu = vi.fn((_selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+    });
     const { result } = renderHook(() => useWaveSurferRegions(harness.refs));
 
     act(() => {
@@ -87,7 +89,9 @@ describe("useWaveSurferRegions region paths", () => {
 
   it("wires quick-retime contextmenu through the retime region path", () => {
     const harness = makeHarness();
-    const onContextMenu = vi.fn();
+    const onContextMenu = vi.fn((_selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+    });
     renderHook(() =>
       useWaveSurferRegions(harness.refs, {
         enabled: true,
@@ -112,6 +116,54 @@ describe("useWaveSurferRegions region paths", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(onContextMenu).toHaveBeenCalledWith({ start: 3.25, end: 4.5 }, event);
+  });
+
+  it("leaves quick-retime contextmenu unprevented when the selection is late-disabled", () => {
+    const harness = makeHarness();
+    const onContextMenu = vi.fn((_selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+    });
+    const selection = {
+      enabled: true,
+      label: "Update water timestamp",
+      onContextMenu,
+    };
+    renderHook(() => useWaveSurferRegions(harness.refs, selection));
+
+    const region = makeRegion({ id: "quick-retime-selection-test", start: 3.25, end: 4.5 });
+    act(() => harness.fire("region-created", region));
+
+    selection.enabled = false;
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    region.element!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onContextMenu).not.toHaveBeenCalled();
+  });
+
+  it("lets the quick-retime caller preventDefault after its gate passes", () => {
+    const harness = makeHarness();
+    const inner = vi.fn();
+    const onContextMenu = vi.fn((selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+      inner(selection);
+    });
+    renderHook(() =>
+      useWaveSurferRegions(harness.refs, {
+        enabled: true,
+        label: "Update water timestamp",
+        onContextMenu,
+      }),
+    );
+
+    const region = makeRegion({ id: "quick-retime-selection-test", start: 3.25, end: 4.5 });
+    act(() => harness.fire("region-created", region));
+
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    region.element!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(inner).toHaveBeenCalledWith({ start: 3.25, end: 4.5 });
   });
 
   it("cleans up quick-retime listeners and removes the transient region", () => {
@@ -140,8 +192,12 @@ describe("useWaveSurferRegions region paths", () => {
 
   it("lets create and retime region paths coexist without routing events to the wrong callback", () => {
     const harness = makeHarness();
-    const onCreateContextMenu = vi.fn();
-    const onRetimeContextMenu = vi.fn();
+    const onCreateContextMenu = vi.fn((_selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+    });
+    const onRetimeContextMenu = vi.fn((_selection: { start: number; end: number }, event: MouseEvent) => {
+      event.preventDefault();
+    });
     const onRegionCreated = vi.fn();
     const { result } = renderHook(() =>
       useWaveSurferRegions(harness.refs, {

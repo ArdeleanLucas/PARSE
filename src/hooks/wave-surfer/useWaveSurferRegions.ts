@@ -47,7 +47,6 @@ function attachRegionPath(args: AttachRegionPathArgs): () => void {
     detachCurrentContextMenu = null;
     if (!args.onContextMenu || !region.element) return;
     const handler = (event: MouseEvent) => {
-      event.preventDefault();
       args.onContextMenu?.(region, event);
     };
     region.element.addEventListener("contextmenu", handler);
@@ -85,7 +84,6 @@ export function useWaveSurferRegions(
   const quickRetimeSelectionRef = useRef<QuickRetimeSelectionOptions | null>(null);
   const quickRetimeRegionRef = useRef<WsRegion | null>(null);
   const dragCreateRegionRef = useRef<WsRegion | null>(null);
-  const dragCreateDisableSelectionRef = useRef<(() => void) | null>(null);
   const dragCreateUnsubscribeRef = useRef<Array<() => void>>([]);
 
   useEffect(() => {
@@ -100,8 +98,6 @@ export function useWaveSurferRegions(
   const disableDragToCreate = useCallback(() => {
     for (const unsubscribe of dragCreateUnsubscribeRef.current) unsubscribe();
     dragCreateUnsubscribeRef.current = [];
-    dragCreateDisableSelectionRef.current?.();
-    dragCreateDisableSelectionRef.current = null;
     const region = dragCreateRegionRef.current;
     region?.remove();
     dragCreateRegionRef.current = null;
@@ -137,10 +133,12 @@ export function useWaveSurferRegions(
         options.onRegionUpdated({ start: region.start, end: region.end });
       },
       onContextMenu: options.onContextMenu
-        ? (region, event) => options.onContextMenu?.({ start: region.start, end: region.end }, event)
+        ? (region, event) => {
+            event.preventDefault();
+            options.onContextMenu?.({ start: region.start, end: region.end }, event);
+          }
         : undefined,
     });
-    dragCreateDisableSelectionRef.current = null;
     dragCreateUnsubscribeRef.current = [teardown];
 
     return disableDragToCreate;
@@ -202,6 +200,7 @@ export function useWaveSurferRegions(
       onContextMenu: (region, event) => {
         const latest = quickRetimeSelectionRef.current;
         if (!latest?.enabled) return;
+        event.preventDefault();
         latest.onContextMenu({ start: region.start, end: region.end }, event);
       },
     });
