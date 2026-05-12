@@ -20,6 +20,63 @@ type DragSelectionRegionsPlugin = {
   on?: (event: "region-created" | "region-updated", handler: (region: WsRegion) => void) => (() => void) | void;
 };
 
+interface AttachRegionPathArgs {
+  regions: DragSelectionRegionsPlugin;
+  id: string;
+  color: string;
+  drag: boolean;
+  resize: boolean;
+  predicate: (region: WsRegion) => boolean;
+  decorate?: (region: WsRegion) => void;
+  onCreated?: (region: WsRegion) => void;
+  onUpdated?: (region: WsRegion) => void;
+  onContextMenu?: (region: WsRegion, event: MouseEvent) => void;
+}
+
+function attachRegionPath(args: AttachRegionPathArgs): () => void {
+  const detachers: Array<() => void> = [];
+  const disableSelection = args.regions.enableDragSelection?.(
+    { id: args.id, color: args.color, drag: args.drag, resize: args.resize },
+    1,
+  );
+  if (typeof disableSelection === "function") detachers.push(disableSelection);
+
+  let detachCurrentContextMenu: (() => void) | null = null;
+  const attachContextMenu = (region: WsRegion) => {
+    detachCurrentContextMenu?.();
+    detachCurrentContextMenu = null;
+    if (!args.onContextMenu || !region.element) return;
+    const handler = (event: MouseEvent) => {
+      event.preventDefault();
+      args.onContextMenu?.(region, event);
+    };
+    region.element.addEventListener("contextmenu", handler);
+    detachCurrentContextMenu = () => region.element?.removeEventListener("contextmenu", handler);
+  };
+
+  const offCreated = args.regions.on?.("region-created", (region) => {
+    if (!args.predicate(region)) return;
+    args.decorate?.(region);
+    attachContextMenu(region);
+    args.onCreated?.(region);
+  });
+  if (typeof offCreated === "function") detachers.push(offCreated);
+
+  if (args.onUpdated) {
+    const offUpdated = args.regions.on?.("region-updated", (region) => {
+      if (!args.predicate(region)) return;
+      args.onUpdated?.(region);
+    });
+    if (typeof offUpdated === "function") detachers.push(offUpdated);
+  }
+
+  return () => {
+    detachCurrentContextMenu?.();
+    detachCurrentContextMenu = null;
+    for (const detach of detachers.reverse()) detach();
+  };
+}
+
 export function useWaveSurferRegions(
   refs: WaveSurferRefs,
   quickRetimeSelection?: UseWaveSurferOptions["quickRetimeSelection"],
@@ -56,17 +113,6 @@ export function useWaveSurferRegions(
     const regions = regionsRef.current as unknown as DragSelectionRegionsPlugin | null;
     if (!regions?.enableDragSelection || !regions.on) return () => undefined;
 
-    const disableSelection = regions.enableDragSelection(
-      {
-        id: `${CREATE_LEXEME_REGION_ID}-${Date.now()}`,
-        color: WAVE_SURFER_DRAFT_REGION_COLOR,
-        drag: true,
-        resize: true,
-      },
-      1,
-    );
-    dragCreateDisableSelectionRef.current = typeof disableSelection === "function" ? disableSelection : null;
-
     const rememberRegion = (region: WsRegion) => {
       if (dragCreateRegionRef.current && dragCreateRegionRef.current !== region) {
         dragCreateRegionRef.current.remove();
@@ -75,37 +121,27 @@ export function useWaveSurferRegions(
       activeRegionRef.current = region;
     };
 
-    let detachContextMenu: (() => void) | null = null;
-    const attachContextMenu = (region: WsRegion) => {
-      detachContextMenu?.();
-      if (!options.onContextMenu || !region.element) {
-        detachContextMenu = null;
-        return;
-      }
-      const handler = (event: MouseEvent) => {
-        event.preventDefault();
-        options.onContextMenu?.({ start: region.start, end: region.end }, event);
-      };
-      region.element.addEventListener("contextmenu", handler);
-      detachContextMenu = () => region.element?.removeEventListener("contextmenu", handler);
-    };
-
-    const onCreated = regions.on("region-created", (region) => {
-      if (!isCreateLexemeRegion(region)) return;
-      rememberRegion(region);
-      attachContextMenu(region);
-      options.onRegionCreated({ start: region.start, end: region.end });
+    const teardown = attachRegionPath({
+      regions,
+      id: `${CREATE_LEXEME_REGION_ID}-${Date.now()}`,
+      color: WAVE_SURFER_DRAFT_REGION_COLOR,
+      drag: true,
+      resize: true,
+      predicate: isCreateLexemeRegion,
+      onCreated: (region) => {
+        rememberRegion(region);
+        options.onRegionCreated({ start: region.start, end: region.end });
+      },
+      onUpdated: (region) => {
+        rememberRegion(region);
+        options.onRegionUpdated({ start: region.start, end: region.end });
+      },
+      onContextMenu: options.onContextMenu
+        ? (region, event) => options.onContextMenu?.({ start: region.start, end: region.end }, event)
+        : undefined,
     });
-    const onUpdated = regions.on("region-updated", (region) => {
-      if (!isCreateLexemeRegion(region)) return;
-      rememberRegion(region);
-      options.onRegionUpdated({ start: region.start, end: region.end });
-    });
-    const detachContextMenuSubscription = () => {
-      detachContextMenu?.();
-      detachContextMenu = null;
-    };
-    dragCreateUnsubscribeRef.current = [onCreated, onUpdated, detachContextMenuSubscription].filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+    dragCreateDisableSelectionRef.current = null;
+    dragCreateUnsubscribeRef.current = [teardown];
 
     return disableDragToCreate;
   }, [activeRegionRef, disableDragToCreate, regionsRef]);
@@ -148,35 +184,30 @@ export function useWaveSurferRegions(
     const selection = quickRetimeSelectionRef.current;
     if (!regions?.enableDragSelection || !regions.on || !selection?.enabled) return;
 
-    const disableDragSelection = regions.enableDragSelection(
-      {
-        id: `${QUICK_RETIME_REGION_ID}-${Date.now()}`,
-        color: QUICK_RETIME_REGION_COLOR,
-        drag: false,
-        resize: true,
+    const teardown = attachRegionPath({
+      regions,
+      id: `${QUICK_RETIME_REGION_ID}-${Date.now()}`,
+      color: QUICK_RETIME_REGION_COLOR,
+      drag: false,
+      resize: true,
+      predicate: isQuickRetimeRegion,
+      decorate: (region) => {
+        if (quickRetimeRegionRef.current && quickRetimeRegionRef.current !== region) {
+          quickRetimeRegionRef.current.remove();
+        }
+        quickRetimeRegionRef.current = region;
+        region.element?.setAttribute("aria-label", selection.label);
+        region.element?.setAttribute("title", selection.label);
       },
-      1,
-    );
-
-    const unsubscribe = regions.on("region-created", (region) => {
-      if (!isQuickRetimeRegion(region)) return;
-      if (quickRetimeRegionRef.current && quickRetimeRegionRef.current !== region) {
-        quickRetimeRegionRef.current.remove();
-      }
-      quickRetimeRegionRef.current = region;
-      region.element?.setAttribute("aria-label", selection.label);
-      region.element?.setAttribute("title", selection.label);
-      region.element?.addEventListener("contextmenu", (event) => {
+      onContextMenu: (region, event) => {
         const latest = quickRetimeSelectionRef.current;
         if (!latest?.enabled) return;
-        event.preventDefault();
         latest.onContextMenu({ start: region.start, end: region.end }, event);
-      });
+      },
     });
 
     return () => {
-      if (typeof unsubscribe === "function") unsubscribe();
-      if (typeof disableDragSelection === "function") disableDragSelection();
+      teardown();
       clearQuickRetimeSelection();
     };
   }, [clearQuickRetimeSelection, regionsInstance, quickRetimeSelection]);
