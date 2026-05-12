@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ProjectConfig, SurveyOverlapPatch, SurveyOverlapState } from "../api/types";
-import { getConfig, updateConfig, updateSurveyOverlap as persistSurveyOverlap } from "../api/client";
+import { getConfig, getSurveyOverlap, updateConfig, updateSurveyOverlap as persistSurveyOverlap } from "../api/client";
 
 interface ConfigStore {
   config: ProjectConfig | null;
@@ -10,6 +10,7 @@ interface ConfigStore {
   reload: () => Promise<void>;
   update: (patch: Partial<ProjectConfig>) => Promise<void>;
   updateSurveyOverlap: (patch: SurveyOverlapPatch) => Promise<void>;
+  applySurveyOverlap: (state: SurveyOverlapState) => void;
 }
 
 function mergeSurveyOverlapProjection(config: ProjectConfig, state: SurveyOverlapState): ProjectConfig {
@@ -28,6 +29,19 @@ function mergeSurveyOverlapProjection(config: ProjectConfig, state: SurveyOverla
   };
 }
 
+async function fetchSurveyOverlapOrNull(): Promise<SurveyOverlapState | null> {
+  try {
+    return await getSurveyOverlap();
+  } catch (err) {
+    console.warn('[configStore] survey-overlap fetch failed; continuing without override sidecar', err);
+    return null;
+  }
+}
+
+function mergeConfigWithSurveyOverlap(config: ProjectConfig, state: SurveyOverlapState | null): ProjectConfig {
+  return state ? mergeSurveyOverlapProjection(config, state) : config;
+}
+
 export const useConfigStore = create<ConfigStore>()((set, get) => ({
   config: null,
   loading: false,
@@ -39,8 +53,8 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     if (loading) return; // don't double-fetch
     set({ loading: true, error: null });
     try {
-      const data = await getConfig();
-      set({ config: data, loading: false });
+      const [data, overlap] = await Promise.all([getConfig(), fetchSurveyOverlapOrNull()]);
+      set({ config: mergeConfigWithSurveyOverlap(data, overlap), loading: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ loading: false, error: message });
@@ -54,8 +68,8 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     if (get().loading) return;
     set({ loading: true, error: null });
     try {
-      const data = await getConfig();
-      set({ config: data, loading: false });
+      const [data, overlap] = await Promise.all([getConfig(), fetchSurveyOverlapOrNull()]);
+      set({ config: mergeConfigWithSurveyOverlap(data, overlap), loading: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ loading: false, error: message });
@@ -78,6 +92,15 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     }
   },
 
+  applySurveyOverlap: (state: SurveyOverlapState) => {
+    const current = get().config;
+    if (!current) {
+      set({ error: "Cannot update survey overlap before config has loaded" });
+      return;
+    }
+    set({ config: mergeSurveyOverlapProjection(current, state), error: null });
+  },
+
   updateSurveyOverlap: async (patch: SurveyOverlapPatch) => {
     const current = get().config;
     if (!current) {
@@ -87,7 +110,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     set({ error: null });
     try {
       const state = await persistSurveyOverlap(patch);
-      set({ config: mergeSurveyOverlapProjection(current, state) });
+      get().applySurveyOverlap(state);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ error: message });

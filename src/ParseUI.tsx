@@ -1889,7 +1889,6 @@ export function ParseUI() {
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}
-          onSurveyLinksChanged={() => reloadConfig()}
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}

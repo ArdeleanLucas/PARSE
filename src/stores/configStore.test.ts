@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectConfig } from "../api/types";
+import type { ProjectConfig, SurveyOverlapState } from "../api/types";
 
-const { mockedGetConfig, mockedUpdateConfig, mockedUpdateSurveyOverlap } = vi.hoisted(() => ({
+const { mockedGetConfig, mockedGetSurveyOverlap, mockedUpdateConfig, mockedUpdateSurveyOverlap } = vi.hoisted(() => ({
   mockedGetConfig: vi.fn(),
+  mockedGetSurveyOverlap: vi.fn(),
   mockedUpdateConfig: vi.fn(),
   mockedUpdateSurveyOverlap: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
   getConfig: mockedGetConfig,
+  getSurveyOverlap: mockedGetSurveyOverlap,
   updateConfig: mockedUpdateConfig,
   updateSurveyOverlap: mockedUpdateSurveyOverlap,
 }));
@@ -18,11 +20,74 @@ import { useConfigStore } from "./configStore";
 const baseConfig: ProjectConfig = {
   project_name: "TestProject",
   language_code: "ckb",
-  speakers: ["Fail01"],
-  concepts: [],
+  speakers: ["Fail01", "Saha01"],
+  concepts: [{ id: "1", label: "hair", surveys: { klq: "1.1" } }],
   audio_dir: "audio",
   annotations_dir: "annotations",
 };
+
+
+const overlapState: SurveyOverlapState = {
+  version: 1,
+  color_coding_enabled: true,
+  surveys: {
+    klq: { display_label: "KLQ", display_color: "slate" },
+    jbil: { display_label: "JBIL", display_color: "amber" },
+  },
+  concept_survey_links: {
+    "1": { klq: "1.1", jbil: "32" },
+  },
+  speaker_choices: {},
+  speaker_concept_survey_links: {
+    Saha01: {
+      "1": { jbil: "32" },
+    },
+  },
+};
+
+describe("configStore.load survey-overlap hydration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useConfigStore.setState({ config: null, loading: false, error: null });
+    mockedGetConfig.mockResolvedValue(structuredClone(baseConfig));
+    mockedGetSurveyOverlap.mockResolvedValue(structuredClone(overlapState));
+  });
+
+  it("hydrates speaker-scoped and global survey links from /api/survey-overlap during load", async () => {
+    await useConfigStore.getState().load();
+
+    const config = useConfigStore.getState().config;
+    expect(mockedGetConfig).toHaveBeenCalledTimes(1);
+    expect(mockedGetSurveyOverlap).toHaveBeenCalledTimes(1);
+    expect(config?.speaker_concept_survey_links?.Saha01?.["1"]?.jbil).toBe("32");
+    expect(config?.concept_survey_links).toEqual(overlapState.concept_survey_links);
+    expect(config?.concepts[0]?.surveys).toEqual({ klq: "1.1", jbil: "32" });
+  });
+
+  it("continues loading /api/config when /api/survey-overlap rejects", async () => {
+    mockedGetSurveyOverlap.mockRejectedValueOnce(new Error("sidecar unavailable"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      await useConfigStore.getState().load();
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(useConfigStore.getState().config?.project_name).toBe("TestProject");
+    expect(useConfigStore.getState().config?.speaker_concept_survey_links).toBeUndefined();
+    expect(useConfigStore.getState().error).toBeNull();
+  });
+
+  it("applies a survey-link POST response without fetching /api/config again", () => {
+    useConfigStore.setState({ config: structuredClone(baseConfig), loading: false, error: null });
+
+    useConfigStore.getState().applySurveyOverlap(structuredClone(overlapState));
+
+    expect(mockedGetConfig).not.toHaveBeenCalled();
+    expect(useConfigStore.getState().config?.speaker_concept_survey_links?.Saha01?.["1"]?.jbil).toBe("32");
+  });
+});
 
 describe("configStore.update", () => {
   beforeEach(() => {
