@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { BatchReportTableRow } from "../BatchReportTableRow";
+import { BatchReportTableRow, bucketChunks } from "../BatchReportTableRow";
 import type { BatchSpeakerOutcome, PipelineStepId } from "../BatchReportModal";
 import type { ChunkResult, KnownErrorCode } from "../../../api/client";
 
@@ -203,5 +203,150 @@ describe("BatchReportTableRow", () => {
     });
 
     expect(screen.getByRole("region", { name: /Traceback for Gamma03 speaker/ }).textContent).toMatch(/poll loop disconnected/);
+  });
+
+  describe("partial-result coloring (MC-384-G)", () => {
+    const mkOutcome = (chunks: ChunkResult[]): BatchSpeakerOutcome => ({
+      speaker: "Khan01",
+      status: "complete",
+      error: null,
+      result: {
+        speaker: "Khan01",
+        steps_run: ["ortho"],
+        results: {
+          ortho: {
+            status: "ok",
+            filled: 137,
+            total: 184,
+            chunks,
+          },
+        },
+        summary: { ok: 1, skipped: 0, error: 0 },
+      },
+    });
+
+    it("renders the OK (emerald) cell when all chunks succeeded — no regression", () => {
+      const outcome = mkOutcome([
+        { idx: 0, span: { idx: 0, start: 0, end: 600 }, status: "ok" },
+        { idx: 1, span: { idx: 1, start: 600, end: 1200 }, status: "ok" },
+      ]);
+      render(<RowHarness outcome={outcome} stepsRun={["ortho"]} />);
+      const row = screen.getByTestId("batch-report-row-Khan01");
+      expect(row.textContent).toMatch(/OK/);
+      expect(row.textContent).not.toMatch(/Partial/);
+      expect(screen.queryByTestId("chunk-details-toggle-Khan01-ortho")).toBeNull();
+    });
+
+    it("renders the partial (yellow) cell when chunks mix ok and error", () => {
+      const outcome = mkOutcome([
+        { idx: 0, span: { idx: 0, start: 0, end: 600 }, status: "ok" },
+        {
+          idx: 7,
+          span: { idx: 7, start: 4200, end: 4800 },
+          status: "error",
+          error_code: "oom_suspect",
+          error: "simulated OOM",
+        },
+        { idx: 8, span: { idx: 8, start: 4800, end: 5400 }, status: "ok" },
+      ]);
+      render(<RowHarness outcome={outcome} stepsRun={["ortho"]} />);
+
+      const row = screen.getByTestId("batch-report-row-Khan01");
+      expect(row.textContent).toMatch(/Partial/);
+      // Cell carries the yellow background class.
+      const yellowCell = row.querySelector(".bg-yellow-50\\/60");
+      expect(yellowCell).toBeTruthy();
+      expect(screen.getByTestId("chunk-summary-Khan01-ortho").textContent).toMatch(/1\/3 chunks failed/);
+    });
+
+    it("renders the Error (rose) cell when all chunks failed — no regression", () => {
+      const outcome: BatchSpeakerOutcome = {
+        speaker: "Khan01",
+        status: "complete",
+        error: null,
+        result: {
+          speaker: "Khan01",
+          steps_run: ["ortho"],
+          results: {
+            ortho: {
+              status: "error",
+              error: "all chunks OOM'd",
+              chunks: [
+                {
+                  idx: 0,
+                  span: { idx: 0, start: 0, end: 600 },
+                  status: "error",
+                  error_code: "oom_suspect",
+                  error: "OOM",
+                },
+                {
+                  idx: 1,
+                  span: { idx: 1, start: 600, end: 1200 },
+                  status: "error",
+                  error_code: "oom_suspect",
+                  error: "OOM",
+                },
+              ] satisfies ChunkResult[],
+            },
+          },
+          summary: { ok: 0, skipped: 0, error: 1 },
+        },
+      };
+
+      render(<RowHarness outcome={outcome} stepsRun={["ortho"]} />);
+      const row = screen.getByTestId("batch-report-row-Khan01");
+      expect(row.textContent).toMatch(/Error/);
+      expect(row.textContent).not.toMatch(/Partial/);
+      expect(screen.queryByTestId("chunk-details-toggle-Khan01-ortho")).toBeNull();
+    });
+
+    it("reveals per-chunk details (idx, span MM:SS-MM:SS, status, error_code, error) on toggle", () => {
+      const outcome = mkOutcome([
+        { idx: 0, span: { idx: 0, start: 0, end: 600 }, status: "ok" },
+        {
+          idx: 7,
+          span: { idx: 7, start: 4200, end: 4800 },
+          status: "error",
+          error_code: "oom_suspect",
+          error: "simulated OOM",
+        },
+      ]);
+      render(<RowHarness outcome={outcome} stepsRun={["ortho"]} />);
+
+      // Pre-toggle: details block hidden.
+      expect(screen.queryByTestId("chunk-details-block")).toBeNull();
+
+      act(() => {
+        fireEvent.click(screen.getByTestId("chunk-details-toggle-Khan01-ortho"));
+      });
+
+      const block = screen.getByTestId("chunk-details-block");
+      expect(block.textContent).toMatch(/oom_suspect/);
+      expect(block.textContent).toMatch(/simulated OOM/);
+      // Span 4200s-4800s formatted as MM:SS-MM:SS → 70:00-80:00.
+      expect(block.textContent).toMatch(/70:00-80:00/);
+      // Both chunk rows present.
+      expect(screen.getByTestId("chunk-detail-row-0")).toBeTruthy();
+      expect(screen.getByTestId("chunk-detail-row-7")).toBeTruthy();
+    });
+
+    it("bucketChunks classifies pure-ok / pure-error / mixed / empty inputs", () => {
+      expect(bucketChunks(undefined)).toBe("none");
+      expect(bucketChunks([])).toBe("none");
+      expect(bucketChunks([{ idx: 0, span: { idx: 0, start: 0, end: 1 }, status: "ok" }])).toBe("all_ok");
+      expect(
+        bucketChunks([{ idx: 0, span: { idx: 0, start: 0, end: 1 }, status: "error" }]),
+      ).toBe("all_error");
+      expect(
+        bucketChunks([
+          { idx: 0, span: { idx: 0, start: 0, end: 1 }, status: "ok" },
+          { idx: 1, span: { idx: 1, start: 1, end: 2 }, status: "error" },
+        ]),
+      ).toBe("partial");
+      // Skipped/cancelled-only chunks → bucket "none".
+      expect(
+        bucketChunks([{ idx: 0, span: { idx: 0, start: 0, end: 1 }, status: "skipped" }]),
+      ).toBe("none");
+    });
   });
 });

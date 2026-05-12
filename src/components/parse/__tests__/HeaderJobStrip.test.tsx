@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActiveJobSnapshot } from "../../../api/contracts/job-observability";
-import { HeaderJobStrip, friendlyLabel } from "../HeaderJobStrip";
+import { HeaderJobStrip, chunkInfoFromMessage, friendlyLabel } from "../HeaderJobStrip";
 
 const baseJob = (overrides: Partial<ActiveJobSnapshot> = {}): ActiveJobSnapshot => ({
   jobId: "job-1",
@@ -152,5 +152,55 @@ describe("HeaderJobStrip", () => {
       "topbar-job-strip-row-newer",
       "topbar-job-strip-row-older",
     ]);
+  });
+
+  describe("chunk-progress overlay (MC-384-G)", () => {
+    it("renders the overlay when the message matches the ORTH-chunk pattern", () => {
+      const job = baseJob({
+        jobId: "chunked-job",
+        type: "compute:ortho",
+        progress: 0.354,
+        message: "ORTH chunk 7/18 (4200s-4800s)",
+      });
+      render(<HeaderJobStrip jobs={[job]} />);
+
+      const overlay = screen.getByTestId("chunk-progress-overlay");
+      expect(overlay.textContent).toMatch(/Chunk 7 of 18/);
+      // Existing percent text still rendered.
+      const row = screen.getByTestId("topbar-job-strip-row-chunked-job");
+      expect(within(row).getByText("35%")).toBeTruthy();
+    });
+
+    it("renders no overlay for messages that don't match the pattern", () => {
+      const job = baseJob({
+        jobId: "plain-job",
+        type: "compute:ortho",
+        progress: 0.5,
+        message: "Aligning ortho_words (Tier-2)",
+      });
+      render(<HeaderJobStrip jobs={[job]} />);
+
+      expect(screen.queryByTestId("chunk-progress-overlay")).toBeNull();
+    });
+
+    it("does not render the overlay for terminal jobs even when the message would match", () => {
+      const job = baseJob({
+        jobId: "terminal-job",
+        type: "compute:ortho",
+        status: "error",
+        error: "boom",
+        message: "ORTH chunk 7/18 (4200s-4800s)",
+      });
+      render(<HeaderJobStrip jobs={[job]} />);
+
+      expect(screen.queryByTestId("chunk-progress-overlay")).toBeNull();
+    });
+
+    it("exports a parser that returns null for non-matching strings", () => {
+      expect(chunkInfoFromMessage(undefined)).toBeNull();
+      expect(chunkInfoFromMessage("")).toBeNull();
+      expect(chunkInfoFromMessage("Aligning ortho_words")).toBeNull();
+      expect(chunkInfoFromMessage("ORTH chunk 3/9 (1800s-2400s)")).toEqual({ current: 3, total: 9 });
+    });
   });
 });
