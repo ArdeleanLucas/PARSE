@@ -750,6 +750,107 @@ def _audio_duration_sec(path: _server.pathlib.Path) -> _server.Optional[float]:
     except Exception:
         return None
 
+
+def _ortho_audio_duration_seconds(path: _server.pathlib.Path) -> float:
+    """Return ORTH chunking duration using soundfile metadata when available."""
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(path))
+        duration = getattr(info, 'duration', None)
+        if duration is not None:
+            return max(0.0, float(duration))
+    except Exception:
+        pass
+    fallback = _audio_duration_sec(path)
+    return max(0.0, float(fallback or 0.0))
+
+
+def _write_audio_slice_to_temp_wav(audio_path: _server.pathlib.Path, start_sec: float, end_sec: float) -> str:
+    """Write ``[start_sec, end_sec)`` from ``audio_path`` to a temp WAV.
+
+    The caller owns deletion of the returned path. The helper intentionally
+    uses soundfile start/stop reads so chunked Tier-1 ORTH never materializes
+    the whole source recording just to feed one provider call.
+    """
+    import soundfile as sf
+    import tempfile
+
+    info = sf.info(str(audio_path))
+    sample_rate = int(getattr(info, 'samplerate', 0) or 0)
+    if sample_rate <= 0:
+        raise RuntimeError('Could not determine sample rate for {0}'.format(audio_path))
+    start_frame = max(0, int(round(float(start_sec) * sample_rate)))
+    stop_frame = max(start_frame, int(round(float(end_sec) * sample_rate)))
+    data, read_sample_rate = sf.read(str(audio_path), start=start_frame, stop=stop_frame, always_2d=False)
+    handle = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+    temp_path = handle.name
+    handle.close()
+    try:
+        sf.write(temp_path, data, int(read_sample_rate or sample_rate))
+    except Exception:
+        try:
+            _server.os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+    return temp_path
+
+
+def _classify_chunk_error(exc: BaseException) -> str:
+    message = str(exc).lower()
+    if isinstance(exc, MemoryError) or any(marker in message for marker in ('cuda out of memory', 'killed', 'oom', '137')):
+        return 'oom_suspect'
+    if 'timeout' in message or 'timed out' in message:
+        return 'timeout'
+    return 'provider_error'
+
+
+def _ortho_default_chunk_seconds() -> float:
+    raw_value = str(_server.os.environ.get('PARSE_ORTH_DEFAULT_CHUNK_MINUTES', '10') or '10').strip()
+    try:
+        minutes = float(raw_value)
+    except (TypeError, ValueError):
+        logger.warning('Invalid PARSE_ORTH_DEFAULT_CHUNK_MINUTES=%r; falling back to 10 minutes', raw_value)
+        minutes = 10.0
+    return max(0.0, minutes * 60.0)
+
+
+def _chunk_progress_pct(chunk_idx: int, total_chunks: int) -> float:
+    if total_chunks <= 0:
+        return 2.0
+    return min(94.0, 2.0 + (float(chunk_idx) / float(total_chunks)) * 92.0)
+
+
+def _transcribe_ortho_with_fallback(
+    provider: AIProvider,
+    base_transcribe_kwargs: _server.Dict[str, _server.Any],
+    should_cancel: Callable[[], bool],
+) -> _server.List[_server.Dict[str, _server.Any]]:
+    attempts = [
+        {**base_transcribe_kwargs, 'should_cancel': should_cancel, 'initial_prompt': None},
+        {**base_transcribe_kwargs, 'should_cancel': should_cancel},
+        {**base_transcribe_kwargs, 'initial_prompt': None},
+        base_transcribe_kwargs,
+    ]
+    segments = None
+    last_type_error: _server.Optional[TypeError] = None
+    for transcribe_kwargs in attempts:
+        try:
+            segments = provider.transcribe(**transcribe_kwargs)
+            break
+        except TypeError as exc:
+            message = str(exc)
+            if 'should_cancel' not in message and 'initial_prompt' not in message and 'unexpected' not in message:
+                raise
+            last_type_error = exc
+    if segments is None:
+        if last_type_error is not None:
+            raise last_type_error
+        return []
+    return list(segments)
+
+
 def _tier_coverage(intervals: _server.Any, duration_sec: _server.Optional[float]) -> _server.Dict[str, _server.Any]:
     """Summarise how much of a file a tier's intervals cover.
 
@@ -2430,7 +2531,7 @@ def _compute_speaker_ortho(
             pad_sec=pad_sec,
         )
     if has_existing_text and (not overwrite):
-        return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals)}
+        return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals), 'chunks': []}
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
     _set_compute_progress(job_id, 2.0, message='Loading ortho model (razhan)')
     if provider is None:
@@ -2443,34 +2544,68 @@ def _compute_speaker_ortho(
 
     should_cancel = make_should_cancel(job_id)
     cancelled_requested = False
+    chunk_results: _server.List[_server.Dict[str, _server.Any]] = []
     try:
         base_transcribe_kwargs = {
             'audio_path': audio_path,
             'language': language_str,
             'progress_callback': _progress_callback,
         }
-        attempts = [
-            {**base_transcribe_kwargs, 'should_cancel': should_cancel, 'initial_prompt': None},
-            {**base_transcribe_kwargs, 'should_cancel': should_cancel},
-            {**base_transcribe_kwargs, 'initial_prompt': None},
-            base_transcribe_kwargs,
-        ]
-        segments = None
-        last_type_error: _server.Optional[TypeError] = None
-        for transcribe_kwargs in attempts:
+        duration_sec = _ortho_audio_duration_seconds(audio_path)
+        chunk_seconds = _ortho_default_chunk_seconds()
+        if chunk_seconds <= 0.0 or duration_sec <= chunk_seconds:
+            segments = _transcribe_ortho_with_fallback(provider, base_transcribe_kwargs, should_cancel)
+            cancelled_requested = should_cancel()
+        else:
+            from workers.audio_chunking import merge_chunk_segments, split_audio_duration
+
+            spans = split_audio_duration(duration_sec, chunk_seconds)
+            per_chunk_segments: _server.List[_server.List[_server.Dict[str, _server.Any]]] = []
+            temp_paths: _server.List[str] = []
             try:
-                segments = provider.transcribe(**transcribe_kwargs)
-                break
-            except TypeError as exc:
-                message = str(exc)
-                if 'should_cancel' not in message and 'initial_prompt' not in message and 'unexpected' not in message:
-                    raise
-                last_type_error = exc
-        if segments is None:
-            if last_type_error is not None:
-                raise last_type_error
-            segments = []
-        cancelled_requested = should_cancel()
+                total_chunks = len(spans)
+                for span in spans:
+                    should_cancel = make_should_cancel(job_id)
+                    if should_cancel():
+                        cancelled_requested = True
+                        for remaining_span in spans[int(span['idx']):]:
+                            per_chunk_segments.append([])
+                            chunk_results.append({'idx': remaining_span['idx'], 'span': remaining_span, 'status': 'cancelled'})
+                        break
+                    slice_path = _write_audio_slice_to_temp_wav(audio_path, float(span['start']), float(span['end']))
+                    temp_paths.append(slice_path)
+                    try:
+                        _set_compute_progress(
+                            job_id,
+                            _chunk_progress_pct(int(span['idx']), total_chunks),
+                            message='ORTH chunk {0}/{1} ({2}s-{3}s)'.format(
+                                int(span['idx']) + 1,
+                                total_chunks,
+                                int(float(span['start'])),
+                                int(float(span['end'])),
+                            ),
+                        )
+                        chunk_kwargs = {**base_transcribe_kwargs, 'audio_path': _server.pathlib.Path(slice_path)}
+                        chunk_segments = _transcribe_ortho_with_fallback(provider, chunk_kwargs, make_should_cancel(job_id))
+                        per_chunk_segments.append(chunk_segments)
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'ok'})
+                    except MemoryError as exc:
+                        per_chunk_segments.append([])
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'error', 'error_code': 'oom_suspect', 'error': str(exc)})
+                    except RuntimeError as exc:
+                        per_chunk_segments.append([])
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'error', 'error_code': _classify_chunk_error(exc), 'error': str(exc)})
+                    except Exception as exc:
+                        per_chunk_segments.append([])
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'error', 'error_code': _classify_chunk_error(exc), 'error': str(exc)})
+                segments = merge_chunk_segments(per_chunk_segments, spans)
+                cancelled_requested = cancelled_requested or make_should_cancel(job_id)()
+            finally:
+                for temp_path in temp_paths:
+                    try:
+                        _server.os.remove(temp_path)
+                    except OSError:
+                        pass
     finally:
         clear_cancel(job_id)
     new_intervals: _server.List[_server.Dict[str, _server.Any]] = []
@@ -2513,8 +2648,9 @@ def _compute_speaker_ortho(
             'replaced_existing': has_existing_text,
             'audio_path': str(audio_path),
             'total': len(new_intervals),
-            'status': 'partial_cancelled' if new_intervals else 'cancelled',
+            'status': 'cancelled' if chunk_results else ('partial_cancelled' if new_intervals else 'cancelled'),
             'cancelled_at_interval': len(new_intervals),
+            'chunks': chunk_results,
         }
         _set_compute_progress(job_id, 99.0, message='ORTH cancelled after {0} intervals'.format(len(new_intervals)))
         return result_payload
@@ -2541,7 +2677,7 @@ def _compute_speaker_ortho(
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
     _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
-    return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals)}
+    return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals), 'chunks': chunk_results}
 
 
 _MIN_FREE_GB_FOR_IPA = 4.0  # Conservative, tunable guard before wav2vec2 loads.
