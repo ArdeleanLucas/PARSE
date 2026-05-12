@@ -16,7 +16,7 @@ import { useChatSession } from './hooks/useChatSession';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
-import { resolveSurveyLinksForSpeaker } from './lib/surveyLinksForSpeaker';
+import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from './lib/surveyLinksForSpeaker';
 import {
   resolveConceptSurvey,
   surveyLabelFor,
@@ -1261,11 +1261,11 @@ export function ParseUI() {
     if (currentMode !== 'annotate') {
       return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);
     }
-    const rowId = concept.key;
+    const rowIds = surveyRowIdsForConcept(concept);
     const buckets = resolveSurveyLinksForSpeaker(
-      rowId ? [rowId] : [],
+      rowIds,
       selectedSpeakers[0] ?? null,
-      { ...(rowId ? { [rowId]: conceptSurveyLinks[rowId] ?? concept.surveys ?? {} } : {}) },
+      Object.fromEntries(rowIds.map((rowId) => [rowId, conceptSurveyLinks[rowId] ?? concept.surveys ?? {}])),
       speakerConceptSurveyLinks,
     );
     const bucket = buckets[0];

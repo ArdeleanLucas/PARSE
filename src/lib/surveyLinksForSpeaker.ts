@@ -7,6 +7,31 @@ export interface SpeakerSurveyLinkBucket {
   rowIds: string[];
 }
 
+interface SurveyConceptKeyCarrier {
+  key?: string | null;
+  mergedKeys?: readonly (string | null | undefined)[] | null;
+  variants?: readonly { conceptKey?: string | null }[] | null;
+  mergedVariants?: readonly { conceptKey?: string | null }[] | null;
+}
+
+function normalizedRowId(value: string | null | undefined): string {
+  return String(value ?? "").trim();
+}
+
+export function surveyRowIdsForConcept(concept: SurveyConceptKeyCarrier): string[] {
+  const ids = new Set<string>();
+  const add = (value: string | null | undefined) => {
+    const id = normalizedRowId(value);
+    if (id) ids.add(id);
+  };
+
+  for (const variant of concept.variants ?? []) add(variant.conceptKey);
+  for (const key of concept.mergedKeys ?? []) add(key);
+  for (const variant of concept.mergedVariants ?? []) add(variant.conceptKey);
+  if (ids.size === 0) add(concept.key);
+  return [...ids];
+}
+
 function normalizeLinks(links: ConceptSurveyLinks | undefined): ConceptSurveyLinks {
   const normalized: ConceptSurveyLinks = {};
   for (const [surveyId, sourceItem] of Object.entries(links ?? {})) {

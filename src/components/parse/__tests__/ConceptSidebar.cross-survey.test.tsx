@@ -90,6 +90,46 @@ beforeEach(() => {
 });
 
 describe('ConceptSidebar cross-survey linking', () => {
+
+  it('renders speaker override survey IDs for merged/source-item rows using merged raw concept ids', () => {
+    render(
+      <ConceptSidebar
+        {...baseProps}
+        filteredConcepts={[{
+          id: 1,
+          key: '1.1',
+          name: 'hair',
+          tag: 'confirmed' as const,
+          sourceItem: '1.1',
+          sourceSurvey: 'klq',
+          surveys: { klq: '1.1' },
+          mergedKeys: ['1', '599', '623'],
+        }]}
+        activeConceptId={1}
+        activeSpeaker="Saha01"
+        conceptSurveyLinks={{
+          '1': { klq: '1.1' },
+          '599': { klq: '1.1' },
+          '623': { klq: '1.1' },
+        }}
+        speakerConceptSurveyLinks={{
+          Saha01: {
+            '1': { jbil: '32' },
+            '599': { jbil: '32' },
+            '623': { jbil: '32' },
+          },
+        }}
+        speakerSurveyChoices={{}}
+        onSurveyChoiceChange={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByTestId('concept-row-1');
+    expect(row.textContent).toContain('JBIL 32');
+    expect(row.textContent).not.toContain('KLQ 1.1');
+    expect(within(row).getByRole('button', { name: /^hair \+2 JBIL 32/i })).toBeTruthy();
+  });
+
   it('clicks any multi-survey badge through the per-speaker choice cycle', () => {
     const onSurveyChoiceChange = vi.fn();
     const { rerender } = render(

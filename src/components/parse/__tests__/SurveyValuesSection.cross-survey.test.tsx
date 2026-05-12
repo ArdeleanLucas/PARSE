@@ -34,6 +34,48 @@ function renderSection(onRelinkApplied = vi.fn()) {
 }
 
 describe('SurveyValuesSection cross-survey reconciliation', () => {
+
+  it('renders speaker override survey IDs for merged/source-item active concepts using merged raw concept ids', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{
+          id: 1,
+          key: '1.1',
+          name: 'hair',
+          tag: 'confirmed' as never,
+          sourceSurvey: 'klq',
+          sourceItem: '1.1',
+          surveys: { klq: '1.1' },
+          mergedKeys: ['1', '599', '623'],
+        }}
+        activeSpeaker="Saha01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{
+          '1': { klq: '1.1' },
+          '599': { klq: '1.1' },
+          '623': { klq: '1.1' },
+        }}
+        speakerConceptSurveyLinks={{
+          Saha01: {
+            '1': { jbil: '32' },
+            '599': { jbil: '32' },
+            '623': { jbil: '32' },
+          },
+        }}
+        surveyColorCodingEnabled={false}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByTestId('survey-current-summary');
+    expect(summary.textContent).toContain('JBIL');
+    expect(summary.textContent).toContain('32');
+    expect(summary.textContent).not.toContain('KLQ 1.1');
+    expect(screen.getByRole('button', { name: /Current survey JBIL 32/i })).toBeTruthy();
+  });
+
   it('dry-runs, opens review dialog, applies selected groups, and refreshes with rewrite summary', async () => {
     const onRelinkApplied = vi.fn();
     vi.mocked(relinkConceptsByGloss)
