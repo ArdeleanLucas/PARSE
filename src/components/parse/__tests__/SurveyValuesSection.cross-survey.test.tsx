@@ -97,9 +97,30 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     const summary = screen.getByTestId('survey-current-summary');
     expect(summary.textContent).toContain('JBIL');
     expect(summary.textContent).toContain('32');
-    expect(summary.textContent).not.toContain('KLQ');
-    expect(summary.textContent).not.toContain('1.1');
+    expect(summary.textContent).not.toContain('KLQ 1.1');
     expect(screen.getByRole('button', { name: /Current survey JBIL 32/i })).toBeTruthy();
+  });
+
+  it('keeps a different active speaker on the global concept survey when another speaker has an override', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 1, key: '1', name: 'hair (A)', tag: 'untagged' as never, sourceSurvey: 'klq', sourceItem: '1.1', surveys: { klq: '1.1' } }}
+        activeSpeaker="Other01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        speakerConceptSurveyLinks={{ Saha01: { '1': { jbil: '32' } } }}
+        surveyColorCodingEnabled={false}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+    const summary = screen.getByTestId('survey-current-summary');
+    expect(summary.textContent).toContain('KLQ');
+    expect(summary.textContent).toContain('1.1');
+    expect(summary.textContent).not.toContain('JBIL');
+    expect(summary.textContent).not.toContain('32');
+    expect(screen.queryByRole('button', { name: /Current survey JBIL 32/i })).toBeNull();
   });
 
   it('opens an informational dialog for fuzzy-only dry runs without apply', async () => {
