@@ -394,7 +394,7 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
             else:
                 result = _server._compute_speaker_ipa('child-{0}'.format(job_id), payload)
         elif normalized_type in {'ortho', 'ortho_only', 'ortho-only'}:
-            result = _server._compute_speaker_ortho('child-{0}'.format(job_id), payload)
+            result = _server._compute_speaker_ortho_dispatch('child-{0}'.format(job_id), payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
             result = _server._compute_speaker_forced_align('child-{0}'.format(job_id), payload)
         elif normalized_type in {'boundaries', 'bnd', 'ortho_words', 'ortho-words'}:
@@ -1028,7 +1028,7 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             else:
                 result = _server._compute_speaker_ipa(job_id, payload)
         elif normalized_type in {'ortho', 'ortho_only', 'ortho-only'}:
-            result = _server._compute_speaker_ortho(job_id, payload)
+            result = _server._compute_speaker_ortho_dispatch(job_id, payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
             result = _server._compute_speaker_forced_align(job_id, payload)
         elif normalized_type in {'boundaries', 'bnd', 'ortho_words', 'ortho-words'}:

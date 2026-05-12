@@ -26,6 +26,8 @@ def _release_registered_ipa_aligner() -> None:
 if not callable(_server.__dict__.get('_release_ipa_aligner')):
     setattr(_server, '_release_ipa_aligner', _release_registered_ipa_aligner)
 
+_ORIGINAL_GET_ORTHO_PROVIDER = getattr(_server, 'get_ortho_provider', None)
+
 
 def _annotation_empty_tier(display_order: int) -> _server.Dict[str, _server.Any]:
     return {'type': 'interval', 'display_order': int(display_order), 'intervals': []}
@@ -2779,6 +2781,38 @@ def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, 
         pass
 
 
+def _speaker_ortho_step_result(sub_result: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    if sub_result.get('status'):
+        return dict(sub_result)
+    if sub_result.get('skipped'):
+        return {'status': 'skipped', **sub_result}
+    return {'status': 'ok', **sub_result}
+
+
+def _speaker_ortho_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
+    import json as _json
+    import traceback as _tb
+
+    _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
+    outcome: _server.Dict[str, _server.Any] = {'ok': False}
+    try:
+        _server._compute_checkpoint('SPEAKER_ORTHO_CHILD.entry', job_id=job_id)
+        result = _server._compute_speaker_ortho(job_id, payload, provider=None)
+        _server._compute_checkpoint('SPEAKER_ORTHO_CHILD.ok', job_id=job_id)
+        outcome = {'ok': True, 'result': _speaker_ortho_step_result(dict(result))}
+    except BaseException as exc:  # noqa: BLE001 - child must serialize any failure instead of killing parent.
+        outcome = {'ok': False, 'error': str(exc), 'traceback': _tb.format_exc()}
+        try:
+            _server._compute_checkpoint('SPEAKER_ORTHO_CHILD.error', job_id=job_id, error=str(exc))
+        except Exception:
+            pass
+    try:
+        with open(result_path, 'w', encoding='utf-8') as handle:
+            _json.dump(outcome, handle)
+    except Exception:
+        pass
+
+
 def _speaker_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
     import json as _json
     import traceback as _tb
@@ -3048,8 +3082,17 @@ def _run_in_isolated_subprocess(
             child.join(timeout=10.0)
         except Exception:
             pass
+        timeout_label = (
+            'IPA subprocess'
+            if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS'
+            else 'Speaker IPA subprocess'
+            if log_prefix == 'SPEAKER_IPA_SUBPROCESS'
+            else 'Speaker ORTH subprocess'
+            if log_prefix == 'SPEAKER_ORTHO_SUBPROCESS'
+            else '{0} subprocess'.format(log_prefix)
+        )
         timeout_message = '{0} exceeded {1} ({2}s) and was terminated'.format(
-            'IPA subprocess' if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS' else 'Speaker IPA subprocess',
+            timeout_label,
             timeout_env_var,
             int(timeout_sec),
         )
@@ -3072,12 +3115,12 @@ def _run_in_isolated_subprocess(
             pass
         return _isolated_subprocess_error_result(log_prefix, exit_code, result_path)
     if not _server.os.path.exists(result_path):
-        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, 'IPA subprocess result file was not written')
+        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file was not written'.format(log_prefix))
     try:
         with open(result_path, 'r', encoding='utf-8') as handle:
             payload_out = _json.load(handle)
     except Exception as exc:
-        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, 'IPA subprocess result file unreadable: {0}'.format(exc))
+        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file unreadable: {1}'.format(log_prefix, exc))
     finally:
         try:
             _server.os.remove(result_path)
@@ -3088,7 +3131,7 @@ def _run_in_isolated_subprocess(
         if isinstance(sub_result, dict):
             return dict(sub_result)
         return {'result': sub_result}
-    error_text = str(payload_out.get('error') or 'IPA subprocess reported failure')
+    error_text = str(payload_out.get('error') or '{0} reported failure'.format(log_prefix))
     traceback_text = str(payload_out.get('traceback') or '') or None
     error_code = None
     memory_hint = '{0}\n{1}'.format(error_text, traceback_text or '').lower()
@@ -3115,6 +3158,45 @@ def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[
     if sub_result.get('status') == 'error':
         return sub_result
     return _full_pipeline_ipa_step_result(dict(sub_result))
+
+
+def _compute_speaker_ortho_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    route_impl = globals().get('_compute_speaker_ortho')
+    server_impl = getattr(_server, '_compute_speaker_ortho', route_impl)
+    provider_factory = getattr(_server, 'get_ortho_provider', None)
+    # Preserve legacy unit-test monkeypatches of ORTH internals without spawning
+    # a child that cannot inherit patched callables. Runtime code keeps the route
+    # implementation and provider factory installed, so full-mode ORTH is isolated.
+    if server_impl is not route_impl or provider_factory is not _ORIGINAL_GET_ORTHO_PROVIDER:
+        provider = provider_factory() if callable(provider_factory) else None
+        try:
+            if provider is None:
+                result = server_impl(job_id, payload)
+            else:
+                result = server_impl(job_id, payload, provider=provider)
+            return _speaker_ortho_step_result(dict(result))
+        finally:
+            if provider is not None:
+                try:
+                    unload = getattr(provider, 'unload_model', None)
+                    if callable(unload):
+                        unload()
+                except Exception:
+                    pass
+    return _run_in_isolated_subprocess(
+        job_id,
+        payload,
+        subprocess_entry=_speaker_ortho_subprocess_entry,
+        log_prefix='SPEAKER_ORTHO_SUBPROCESS',
+        result_file_prefix='parse-speaker-ortho-',
+    )
+
+
+def _compute_speaker_ortho_dispatch(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+    if run_mode == 'full':
+        return _server._compute_speaker_ortho_in_subprocess(job_id, payload)
+    return _server._compute_speaker_ortho(job_id, payload)
 
 
 def _compute_speaker_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
@@ -3178,8 +3260,6 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     results: _server.Dict[str, _server.Any] = {}
     steps_run: _server.List[str] = []
     total = len(selected)
-    ortho_provider: _server.Optional[AIProvider] = None
-
     def _capture_error(exc: BaseException) -> _server.Dict[str, _server.Any]:
         error_payload: _server.Dict[str, _server.Any] = {'status': 'error', 'error': str(exc), 'traceback': _traceback_module.format_exc()}
         details = getattr(exc, 'details', None)
@@ -3189,20 +3269,6 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
         if error_code:
             error_payload['error_code'] = str(error_code)
         return error_payload
-
-    def _unload_ortho_provider() -> None:
-        nonlocal ortho_provider
-        provider = ortho_provider
-        if provider is None:
-            return
-        try:
-            unload = getattr(provider, 'unload_model', None)
-            if callable(unload):
-                unload()
-        except Exception:
-            pass
-        finally:
-            ortho_provider = None
 
     def _release_full_pipeline_ipa_aligner() -> None:
         try:
@@ -3265,18 +3331,12 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                             results['stt'] = {'status': 'ok', **sub_result}
                     steps_run.append(step)
                 elif step == 'ortho':
-                    if ortho_provider is None:
-                        ortho_provider = _server.get_ortho_provider()
                     ortho_sub_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'overwrite': overwrites.get('ortho', False), 'language': language_str, 'run_mode': run_mode}
                     if concept_ids is not None:
                         ortho_sub_payload['concept_ids'] = list(concept_ids)
                     if payload.get('refine_lexemes') is not None:
                         ortho_sub_payload['refine_lexemes'] = bool(payload.get('refine_lexemes'))
-                    sub_result = _server._compute_speaker_ortho(job_id, ortho_sub_payload, provider=ortho_provider)
-                    if sub_result.get('skipped'):
-                        results['ortho'] = {'status': 'skipped', **sub_result}
-                    else:
-                        results['ortho'] = {'status': 'ok', **sub_result}
+                    results['ortho'] = _server._compute_speaker_ortho_in_subprocess(job_id, ortho_sub_payload)
                     steps_run.append(step)
                 elif step == 'ipa':
                     _ensure_free_gpu_memory_for_ipa()
@@ -3295,13 +3355,11 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                 if step in {'normalize', 'stt'}:
                     _server._collect_after_unload()
                 elif step == 'ortho':
-                    _unload_ortho_provider()
                     _server._collect_after_unload()
                 elif step == 'ipa':
                     _release_full_pipeline_ipa_aligner()
                     _server._collect_after_unload()
     finally:
-        _unload_ortho_provider()
         if 'ipa' in selected:
             _release_full_pipeline_ipa_aligner()
         _server._collect_after_unload()
@@ -3684,5 +3742,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_isolated_subprocess_error_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_speaker_ipa_subprocess_entry', '_run_in_isolated_subprocess', '_compute_full_pipeline_ipa_in_subprocess', '_compute_speaker_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_isolated_subprocess_error_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_speaker_ortho_step_result', '_speaker_ortho_subprocess_entry', '_speaker_ipa_subprocess_entry', '_run_in_isolated_subprocess', '_compute_full_pipeline_ipa_in_subprocess', '_compute_speaker_ortho_in_subprocess', '_compute_speaker_ortho_dispatch', '_compute_speaker_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
