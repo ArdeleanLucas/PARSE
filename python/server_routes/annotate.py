@@ -2701,30 +2701,58 @@ def _full_pipeline_ipa_step_result(sub_result: _server.Dict[str, _server.Any]) -
     return {'status': 'ok', **sub_result}
 
 
-def _full_pipeline_ipa_subprocess_error_result(
+def _isolated_subprocess_error_result(
+    log_prefix: str,
     exit_code: _server.Optional[int],
     result_path: _server.Optional[str],
     error: _server.Optional[str] = None,
     traceback_str: _server.Optional[str] = None,
+    error_code: _server.Optional[str] = None,
 ) -> _server.Dict[str, _server.Any]:
     killed = exit_code in (-9, 137)
-    if killed:
-        message = 'IPA subprocess was killed (likely OOM); other steps\' results are intact'
+    full_pipeline_ipa = log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS'
+    label = 'IPA subprocess' if full_pipeline_ipa else 'Speaker IPA subprocess' if log_prefix == 'SPEAKER_IPA_SUBPROCESS' else '{0} subprocess'.format(log_prefix)
+    suffix = "; other steps' results are intact" if full_pipeline_ipa else ''
+    if error_code == 'timeout':
+        message = error or '{0} timed out{1}'.format(label, suffix)
+    elif killed:
+        message = '{0} was killed (likely OOM){1}'.format(label, suffix)
+        error_code = 'oom_suspect'
     elif error:
         message = error
+        memory_hint = '{0}\n{1}'.format(error, traceback_str or '').lower()
+        if 'memoryerror' in memory_hint or 'out of memory' in memory_hint:
+            error_code = error_code or 'oom_suspect'
     elif exit_code is None:
-        message = 'IPA subprocess did not report an exit code; other steps\' results are intact'
+        message = '{0} did not report an exit code{1}'.format(label, suffix)
     else:
-        message = 'IPA subprocess exited with code {0}; other steps\' results are intact'.format(exit_code)
+        message = '{0} exited with code {1}{2}'.format(label, exit_code, suffix)
     result: _server.Dict[str, _server.Any] = {
         'status': 'error',
         'error': message,
         'traceback': traceback_str,
         'exit_code': exit_code,
     }
+    if error_code:
+        result['error_code'] = error_code
     if result_path:
         result['result_path'] = result_path
     return result
+
+
+def _full_pipeline_ipa_subprocess_error_result(
+    exit_code: _server.Optional[int],
+    result_path: _server.Optional[str],
+    error: _server.Optional[str] = None,
+    traceback_str: _server.Optional[str] = None,
+) -> _server.Dict[str, _server.Any]:
+    return _isolated_subprocess_error_result(
+        'FULL_PIPELINE_IPA_SUBPROCESS',
+        exit_code,
+        result_path,
+        error,
+        traceback_str,
+    )
 
 
 def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
@@ -2750,6 +2778,29 @@ def _full_pipeline_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, 
     except Exception:
         pass
 
+
+def _speaker_ipa_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
+    import json as _json
+    import traceback as _tb
+
+    _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
+    outcome: _server.Dict[str, _server.Any] = {'ok': False}
+    try:
+        _server._compute_checkpoint('SPEAKER_IPA_CHILD.entry', job_id=job_id)
+        result = _server._compute_speaker_ipa(job_id, payload)
+        _server._compute_checkpoint('SPEAKER_IPA_CHILD.ok', job_id=job_id)
+        outcome = {'ok': True, 'result': result}
+    except BaseException as exc:  # noqa: BLE001 - child must serialize any failure instead of killing parent.
+        outcome = {'ok': False, 'error': str(exc), 'traceback': _tb.format_exc()}
+        try:
+            _server._compute_checkpoint('SPEAKER_IPA_CHILD.error', job_id=job_id, error=str(exc))
+        except Exception:
+            pass
+    try:
+        with open(result_path, 'w', encoding='utf-8') as handle:
+            _json.dump(outcome, handle)
+    except Exception:
+        pass
 
 
 def _compute_lexeme_rerun(
@@ -2947,12 +2998,22 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
         _server._collect_after_unload()
 
 
-def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+def _run_in_isolated_subprocess(
+    job_id: str,
+    payload: dict,
+    *,
+    subprocess_entry: Callable,
+    log_prefix: str,
+    timeout_env_var: str = 'PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC',
+    default_timeout_sec: float = 14400.0,
+    result_file_prefix: str = 'parse-isolated-subprocess-',
+) -> dict:
+    """Run a compute slice in a spawn child and read back its JSON result."""
     import json as _json
     import multiprocessing
     import tempfile
 
-    fd, result_path = tempfile.mkstemp(prefix='parse-full-pipeline-ipa-', suffix='.json')
+    fd, result_path = tempfile.mkstemp(prefix=result_file_prefix, suffix='.json')
     _server.os.close(fd)
     try:
         _server.os.remove(result_path)
@@ -2960,62 +3021,109 @@ def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[
         pass
     checkpoint_path = _server._compute_checkpoint_path()
     ctx = multiprocessing.get_context('spawn')
-    child_job_id = 'child-{0}-ipa'.format(job_id)
+    child_suffix = log_prefix.lower().replace('_subprocess', '').replace('_', '-') or 'isolated'
+    child_job_id = 'child-{0}-{1}'.format(job_id, child_suffix)
+    process_name = result_file_prefix[:-1] if result_file_prefix.endswith('-') else result_file_prefix
+    process_name = process_name or 'parse-isolated-subprocess'
     child = ctx.Process(
-        target=_full_pipeline_ipa_subprocess_entry,
-        name='parse-full-pipeline-ipa',
+        target=subprocess_entry,
+        name=process_name,
         args=(child_job_id, payload, result_path, checkpoint_path),
         daemon=True,
     )
     child.start()
-    _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.started', job_id=job_id, child_pid=child.pid, result_path=result_path)
+    _server._compute_checkpoint(f'{log_prefix}.started', job_id=job_id, child_pid=child.pid, result_path=result_path)
     try:
-        timeout_raw = _server.os.environ.get('PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC', '14400')
-        timeout_sec = max(60.0, float(timeout_raw))
-    except ValueError:
-        timeout_sec = 14400.0
+        timeout_raw = _server.os.environ.get(timeout_env_var, str(default_timeout_sec))
+        timeout_sec = float(timeout_raw)
+        if timeout_sec <= 0 or not _server.math.isfinite(timeout_sec):
+            timeout_sec = float(default_timeout_sec)
+    except (TypeError, ValueError):
+        timeout_sec = float(default_timeout_sec)
     child.join(timeout=timeout_sec)
     if child.is_alive():
-        _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.timeout', job_id=job_id, child_pid=child.pid, timeout=timeout_sec)
+        _server._compute_checkpoint(f'{log_prefix}.timeout', job_id=job_id, child_pid=child.pid, timeout=timeout_sec)
         try:
             child.terminate()
             child.join(timeout=10.0)
         except Exception:
             pass
-        return _full_pipeline_ipa_subprocess_error_result(
+        timeout_message = '{0} exceeded {1} ({2}s) and was terminated'.format(
+            'IPA subprocess' if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS' else 'Speaker IPA subprocess',
+            timeout_env_var,
+            int(timeout_sec),
+        )
+        if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS':
+            timeout_message += "; other steps' results are intact"
+        return _isolated_subprocess_error_result(
+            log_prefix,
             child.exitcode,
             result_path,
-            'IPA subprocess exceeded PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC ({0}s) and was terminated; other steps\' results are intact'.format(int(timeout_sec)),
+            timeout_message,
+            error_code='timeout',
         )
     exit_code = child.exitcode
-    _server._compute_checkpoint('FULL_PIPELINE_IPA_SUBPROCESS.exited', job_id=job_id, exit_code=exit_code)
+    _server._compute_checkpoint(f'{log_prefix}.exited', job_id=job_id, exit_code=exit_code)
     if exit_code not in (0, None):
         try:
             if _server.os.path.exists(result_path):
                 _server.os.remove(result_path)
         except OSError:
             pass
-        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path)
+        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path)
     if not _server.os.path.exists(result_path):
-        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path, 'IPA subprocess result file was not written; other steps\' results are intact')
+        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, 'IPA subprocess result file was not written')
     try:
         with open(result_path, 'r', encoding='utf-8') as handle:
             payload_out = _json.load(handle)
     except Exception as exc:
-        return _full_pipeline_ipa_subprocess_error_result(exit_code, result_path, 'IPA subprocess result file unreadable: {0}'.format(exc))
+        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, 'IPA subprocess result file unreadable: {0}'.format(exc))
     finally:
         try:
             _server.os.remove(result_path)
         except OSError:
             pass
     if bool(payload_out.get('ok')):
-        sub_result = payload_out.get('result') if isinstance(payload_out.get('result'), dict) else {}
-        return _full_pipeline_ipa_step_result(dict(sub_result))
-    return _full_pipeline_ipa_subprocess_error_result(
+        sub_result = payload_out.get('result')
+        if isinstance(sub_result, dict):
+            return dict(sub_result)
+        return {'result': sub_result}
+    error_text = str(payload_out.get('error') or 'IPA subprocess reported failure')
+    traceback_text = str(payload_out.get('traceback') or '') or None
+    error_code = None
+    memory_hint = '{0}\n{1}'.format(error_text, traceback_text or '').lower()
+    if 'memoryerror' in memory_hint or 'out of memory' in memory_hint:
+        error_code = 'oom_suspect'
+    return _isolated_subprocess_error_result(
+        log_prefix,
         exit_code,
         result_path,
-        str(payload_out.get('error') or 'IPA subprocess reported failure'),
-        str(payload_out.get('traceback') or '') or None,
+        error_text,
+        traceback_text,
+        error_code=error_code,
+    )
+
+
+def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    sub_result = _run_in_isolated_subprocess(
+        job_id,
+        payload,
+        subprocess_entry=_full_pipeline_ipa_subprocess_entry,
+        log_prefix='FULL_PIPELINE_IPA_SUBPROCESS',
+        result_file_prefix='parse-full-pipeline-ipa-',
+    )
+    if sub_result.get('status') == 'error':
+        return sub_result
+    return _full_pipeline_ipa_step_result(dict(sub_result))
+
+
+def _compute_speaker_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
+    return _run_in_isolated_subprocess(
+        job_id,
+        payload,
+        subprocess_entry=_speaker_ipa_subprocess_entry,
+        log_prefix='SPEAKER_IPA_SUBPROCESS',
+        result_file_prefix='parse-speaker-ipa-',
     )
 
 
@@ -3576,5 +3684,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_compute_full_pipeline_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_isolated_subprocess_error_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_speaker_ipa_subprocess_entry', '_run_in_isolated_subprocess', '_compute_full_pipeline_ipa_in_subprocess', '_compute_speaker_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 

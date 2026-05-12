@@ -388,7 +388,11 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
         elif normalized_type == 'contact-lexemes':
             result = _server._compute_contact_lexemes('child-{0}'.format(job_id), payload)
         elif normalized_type in {'ipa_only', 'ipa-only', 'ipa'}:
-            result = _server._compute_speaker_ipa('child-{0}'.format(job_id), payload)
+            ipa_run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+            if ipa_run_mode == 'full':
+                result = _server._compute_speaker_ipa_in_subprocess('child-{0}'.format(job_id), payload)
+            else:
+                result = _server._compute_speaker_ipa('child-{0}'.format(job_id), payload)
         elif normalized_type in {'ortho', 'ortho_only', 'ortho-only'}:
             result = _server._compute_speaker_ortho('child-{0}'.format(job_id), payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
@@ -1018,7 +1022,11 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
         elif normalized_type == 'contact-lexemes':
             result = _server._compute_contact_lexemes(job_id, payload)
         elif normalized_type in {'ipa_only', 'ipa-only', 'ipa'}:
-            result = _server._compute_speaker_ipa(job_id, payload)
+            ipa_run_mode = _server._normalize_compute_run_mode(payload.get('run_mode') if payload.get('run_mode') is not None else payload.get('runMode'))
+            if ipa_run_mode == 'full':
+                result = _server._compute_speaker_ipa_in_subprocess(job_id, payload)
+            else:
+                result = _server._compute_speaker_ipa(job_id, payload)
         elif normalized_type in {'ortho', 'ortho_only', 'ortho-only'}:
             result = _server._compute_speaker_ortho(job_id, payload)
         elif normalized_type in {'forced_align', 'forced-align', 'align'}:
