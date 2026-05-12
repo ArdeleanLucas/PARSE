@@ -60,9 +60,20 @@ describe('parseUIUtils', () => {
     expect(deriveAudioUrl(null, { dev: false })).toBe('');
   });
 
-  it('routes heavy media assets directly to the backend target during dev', () => {
+  it('routes heavy media assets directly to the backend target during localhost dev', () => {
     expect(resolveAssetUrl('/peaks/Fail01.json', { dev: true, apiTarget: 'http://127.0.0.1:8866' })).toBe('http://127.0.0.1:8866/peaks/Fail01.json');
     expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: true, apiTarget: 'http://127.0.0.1:8866/' })).toBe('http://127.0.0.1:8866/audio/working/Fail02/foo.wav');
+  });
+
+  it('keeps media assets browser-relative when the dev UI is opened over Tailscale', () => {
+    const tailscaleOptions = {
+      dev: true,
+      apiTarget: 'http://127.0.0.1:8866',
+      locationHostname: '100.112.179.123',
+    } as const;
+
+    expect(resolveAssetUrl('/peaks/Fail01.json', tailscaleOptions)).toBe('/peaks/Fail01.json');
+    expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), tailscaleOptions)).toBe('/audio/working/Fail02/foo.wav');
   });
 
   it('matches concept intervals by raw concept key, not grouped display id', () => {

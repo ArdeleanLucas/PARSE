@@ -23,18 +23,45 @@ export function overlaps(a: AnnotationInterval, b: AnnotationInterval): boolean 
 export interface AssetUrlOptions {
   dev?: boolean;
   apiTarget?: string;
+  /** Browser hostname for tests; defaults to window.location.hostname at runtime. */
+  locationHostname?: string;
 }
 
 const DEFAULT_PARSE_API_TARGET = typeof __PARSE_API_TARGET__ === 'string'
   ? __PARSE_API_TARGET__.replace(/\/$/, '')
   : '';
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.trim().replace(/^\[|\]$/g, '').toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '0.0.0.0'
+    || normalized === '127.0.0.1'
+    || normalized.startsWith('127.');
+}
+
+function currentBrowserHostname(): string {
+  if (typeof window === 'undefined') return '';
+  return window.location.hostname;
+}
+
+function shouldUseApiTargetForDevAssets(apiTarget: string, locationHostname?: string): boolean {
+  const browserHostname = (locationHostname ?? currentBrowserHostname()).trim();
+  if (!browserHostname || isLoopbackHostname(browserHostname)) return true;
+
+  try {
+    return !isLoopbackHostname(new URL(apiTarget).hostname);
+  } catch {
+    return true;
+  }
+}
+
 export function resolveAssetUrl(path: string, options: AssetUrlOptions = {}): string {
   if (!path) return '';
   const normalizedPath = path.startsWith('/') ? path : `/${path.replace(/^\/+/, '')}`;
   const dev = options.dev ?? import.meta.env.DEV;
   const apiTarget = (options.apiTarget ?? DEFAULT_PARSE_API_TARGET).replace(/\/$/, '');
-  if (!dev || !apiTarget || /^https?:\/\//i.test(normalizedPath)) {
+  if (!dev || !apiTarget || /^https?:\/\//i.test(normalizedPath) || !shouldUseApiTargetForDevAssets(apiTarget, options.locationHostname)) {
     return normalizedPath;
   }
   return `${apiTarget}${normalizedPath}`;
