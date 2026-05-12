@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest";
 import { BatchReportTableRow } from "../BatchReportTableRow";
 import type { BatchSpeakerOutcome, PipelineStepId } from "../BatchReportModal";
+import type { ChunkResult, KnownErrorCode } from "../../../api/client";
 
 function RowHarness({
   outcome,
@@ -43,6 +44,75 @@ function RowHarness({
 describe("BatchReportTableRow", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  const timeoutCode: KnownErrorCode = "timeout";
+
+  const chunkedOrthoCases: Array<{
+    name: string;
+    speaker: string;
+    ortho: NonNullable<BatchSpeakerOutcome["result"]>["results"]["ortho"];
+    expectedText: RegExp;
+  }> = [
+    {
+      name: "pre-MC-384 result with no chunks[]",
+      speaker: "Legacy01",
+      ortho: { status: "ok", filled: 5, total: 5 },
+      expectedText: /5 ivs/,
+    },
+    {
+      name: "short-audio MC-384 result with empty chunks[]",
+      speaker: "Short02",
+      ortho: { status: "ok", filled: 5, total: 5, chunks: [] as ChunkResult[] },
+      expectedText: /5 ivs/,
+    },
+    {
+      name: "long-audio MC-384 result with mixed chunk statuses",
+      speaker: "Khan01",
+      ortho: {
+        status: "ok",
+        filled: 137,
+        total: 184,
+        chunks: [
+          { idx: 0, span: { idx: 0, start: 0, end: 600 }, status: "ok" },
+          {
+            idx: 7,
+            span: { idx: 7, start: 4200, end: 4800 },
+            status: "error",
+            error_code: "oom_suspect",
+            error: "simulated OOM",
+          },
+        ] satisfies ChunkResult[],
+      },
+      expectedText: /137 ivs/,
+    },
+    {
+      name: "future top-level error_code",
+      speaker: "Future04",
+      ortho: {
+        status: "error",
+        error_code: "some_future_code",
+        error: `provider returned ${timeoutCode}`,
+      },
+      expectedText: /Error/,
+    },
+  ];
+
+  it.each(chunkedOrthoCases)("tolerates $name", ({ speaker, ortho, expectedText }) => {
+    const outcome: BatchSpeakerOutcome = {
+      speaker,
+      status: "complete",
+      error: null,
+      result: {
+        speaker,
+        steps_run: ["ortho"],
+        results: { ortho },
+        summary: { ok: ortho?.status === "ok" ? 1 : 0, skipped: 0, error: ortho?.status === "error" ? 1 : 0 },
+      },
+    };
+
+    expect(() => render(<RowHarness outcome={outcome} stepsRun={["ortho"]} />)).not.toThrow();
+    expect(screen.getByTestId(`batch-report-row-${speaker}`).textContent).toMatch(expectedText);
   });
 
   it("renders one speaker row with per-step cells and status", () => {

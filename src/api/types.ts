@@ -1,6 +1,7 @@
 // Shared TypeScript types for PARSE API payloads.
 // These mirror the Python backend data structures exactly.
 // No component may import from the Python backend directly — always use client.ts.
+import type { KnownErrorCode } from "./contracts/project-config-and-pipeline-state";
 
 export interface AnnotationInterval {
   start: number; // seconds — IMMUTABLE once written
@@ -401,6 +402,7 @@ export interface ComputeStatus {
   progress: number;
   message?: string;
   error?: string;
+  error_code?: KnownErrorCode | string;
   /** Full Python traceback captured by the worker when the job errored.
    *  Present on terminal-error snapshots only; the UI renders it in the
    *  crash-log modal alongside the short ``error`` message. */

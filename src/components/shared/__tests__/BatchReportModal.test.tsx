@@ -6,7 +6,7 @@ import {
   type BatchSpeakerOutcome,
   type PipelineStepId,
 } from "../BatchReportModal";
-import type { PipelineRunResult } from "../../../api/client";
+import type { ChunkResult, KnownErrorCode, PipelineRunResult } from "../../../api/client";
 
 function makeResult(
   speaker: string,
@@ -34,6 +34,78 @@ describe("BatchReportModal", () => {
   });
 
   const DEFAULT_STEPS: PipelineStepId[] = ["normalize", "stt", "ortho", "ipa"];
+  const timeoutCode: KnownErrorCode = "timeout";
+
+  const chunkedOrthoCases: Array<{
+    name: string;
+    speaker: string;
+    ortho: PipelineRunResult["results"]["ortho"];
+    expectedText: RegExp;
+  }> = [
+    {
+      name: "pre-MC-384 result with no chunks[]",
+      speaker: "Legacy01",
+      ortho: { status: "ok", filled: 5, total: 5 },
+      expectedText: /5 ivs/,
+    },
+    {
+      name: "short-audio MC-384 result with empty chunks[]",
+      speaker: "Short02",
+      ortho: { status: "ok", filled: 5, total: 5, chunks: [] as ChunkResult[] },
+      expectedText: /5 ivs/,
+    },
+    {
+      name: "long-audio MC-384 result with mixed chunk statuses",
+      speaker: "Khan01",
+      ortho: {
+        status: "ok",
+        filled: 137,
+        total: 184,
+        chunks: [
+          { idx: 0, span: { idx: 0, start: 0, end: 600 }, status: "ok" },
+          {
+            idx: 7,
+            span: { idx: 7, start: 4200, end: 4800 },
+            status: "error",
+            error_code: "oom_suspect",
+            error: "simulated OOM",
+          },
+        ] satisfies ChunkResult[],
+      },
+      expectedText: /137 ivs/,
+    },
+    {
+      name: "future top-level error_code",
+      speaker: "Future04",
+      ortho: {
+        status: "error",
+        error_code: "some_future_code",
+        error: `provider returned ${timeoutCode}`,
+      },
+      expectedText: /Error/,
+    },
+  ];
+
+  it.each(chunkedOrthoCases)("tolerates $name", ({ speaker, ortho, expectedText }) => {
+    const outcomes: BatchSpeakerOutcome[] = [
+      {
+        speaker,
+        status: "complete",
+        error: null,
+        result: makeResult(speaker, { ortho }),
+      },
+    ];
+
+    expect(() => render(
+      <BatchReportModal
+        open
+        onClose={() => {}}
+        outcomes={outcomes}
+        stepsRun={["ortho"]}
+      />,
+    )).not.toThrow();
+    expect(screen.getByTestId(`batch-report-row-${speaker}`).textContent).toMatch(expectedText);
+  });
 
   it("Test A: renders one row per outcome and one col per step", () => {
     const outcomes: BatchSpeakerOutcome[] = [

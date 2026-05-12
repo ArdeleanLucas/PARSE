@@ -100,6 +100,7 @@ export async function pollCompute(computeType: string, jobId: string): Promise<C
           ? payload.error
           : undefined,
     error: typeof payload.error === "string" ? payload.error : undefined,
+    ...(typeof payload.error_code === "string" ? { error_code: payload.error_code } : {}),
     ...(typeof payload.traceback === "string" ? { traceback: payload.traceback } : {}),
     result: payload.result,
   };
