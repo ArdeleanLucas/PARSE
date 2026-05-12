@@ -59,13 +59,38 @@ export async function getPipelineState(speaker: string): Promise<PipelineState> 
   return apiFetch<PipelineState>(`/api/pipeline/state/${encodeURIComponent(speaker)}`);
 }
 
-export type PipelineStepStatus = "ok" | "skipped" | "error";
+// MC-384 Milestone A result-envelope shape. Canonical spec:
+// /mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md
+// Decisions #10-12. These types mirror python/workers/audio_chunking.py.
+export type KnownErrorCode = "oom_suspect" | "chunk_failed" | "provider_error" | "timeout";
+
+export interface ChunkSpan {
+  idx: number;
+  start: number;
+  end: number;
+}
+
+export interface ChunkResult {
+  idx: number;
+  span: ChunkSpan;
+  status: "ok" | "error" | "skipped" | "cancelled";
+  error_code?: KnownErrorCode | string;
+  error?: string;
+}
+
+// Deferred to Milestone B (MC-385+):
+//   - Chunk-level progress UI (chunk N/M overlay during long jobs)
+//   - Per-chunk retry affordance (click failed chunk -> re-run scoped to its span)
+//   - Batch report partial-result coloring (yellow for "some chunks failed", not just red/green)
+export type PipelineStepStatus = "ok" | "skipped" | "error" | "cancelled" | "partial_cancelled";
 
 export interface PipelineStepResultBase {
   status?: PipelineStepStatus;
+  error_code?: KnownErrorCode | string;
   reason?: string;
   error?: string;
   traceback?: string;
+  chunks?: ChunkResult[];
   skip_breakdown?: {
     empty_ortho?: number;
     existing_ipa_no_overwrite?: number;
