@@ -107,3 +107,41 @@ The stdio MCP adapter does not add a separate network auth layer. Access is cont
 4. Prefer `dryRun=true` for mutating tools when available
 5. Execute via `POST /api/mcp/tools/{toolName}`
 6. Use normal HTTP endpoints or MCP-specific polling/status helpers as needed
+
+## Compute job result shapes
+
+### ORTH/IPA compute result with chunking (MC-384, Milestone A)
+
+Long-file ORTH and future chunked compute types return their normal top-level result plus a `chunks` array. The array is present for chunk-aware results and is empty for short-audio single-shot paths.
+
+Top-level ORTH result fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `speaker` | string | yes | Speaker ID. |
+| `filled` | integer | yes | Coarse Tier-1 intervals populated. |
+| `total` | integer | yes | Coarse intervals attempted. |
+| `ortho_words` | integer | yes | Tier-2 word-level intervals. |
+| `status` | enum: `ok`/`skipped`/`error`/`cancelled`/`partial_cancelled` | yes | Top-level outcome. |
+| `chunks` | `ChunkResult[]` | yes for chunk-aware results | One entry per Tier-1 chunk. Empty array for short-audio single-shot paths. |
+
+`ChunkResult` fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idx` | integer | yes | Zero-based chunk index. |
+| `span` | object `{start: float, end: float}` | yes | Audio-global seconds. Adjacent chunks satisfy `chunks[i].span.end == chunks[i+1].span.start`. |
+| `status` | enum: `ok`/`error`/`skipped`/`cancelled` | yes | Per-chunk outcome. |
+| `error_code` | enum: `oom_suspect`/`chunk_failed`/`provider_error`/`timeout` | required when `status='error'` | Machine-readable recovery code. |
+| `error` | string | required when `status='error'` | Human-readable error message. |
+
+### Error codes (MC-384 additions)
+
+| Code | Meaning | Agent retry guidance |
+| --- | --- | --- |
+| `oom_suspect` | Memory pressure suspected. Existing full-pipeline preflight semantics are preserved and extended to chunk-level results. | Retry only the failed chunk with a smaller chunk size, for example by lowering `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`, or fall back to scoped reprocessing with `run_mode='concept'` and `concept_ids`. |
+| `chunk_failed` | Chunk failed for a non-memory reason that did not match a more specific code. | Retry the specific chunk once; if it repeats, surface the chunk span to the user and continue with the partial result. |
+| `provider_error` | Provider/model raised an unexpected exception. | Do not blind-loop. Check provider configuration/logs, switch provider if available, or run a scoped retry. |
+| `timeout` | Subprocess or chunk exceeded its time budget. Added to the documented enum in MC-384-B for the shared subprocess wrapper. | Retry the affected chunk with a smaller chunk size or a longer timeout if the machine is healthy. |
+
+Backward compatibility: callers that do not read `chunks[]` can continue to consume the top-level result fields. New agents should prefer `chunks[]` for retry and partial-result decisions.
