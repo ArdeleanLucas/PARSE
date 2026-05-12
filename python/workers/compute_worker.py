@@ -428,6 +428,11 @@ def _dispatch(
             return server_mod._compute_speaker_ipa_in_subprocess(job_id, payload)
         return server_mod._compute_speaker_ipa(job_id, payload)
     if normalized in {"ortho", "ortho_only", "ortho-only"}:
+        ortho_run_mode = server_mod._normalize_compute_run_mode(
+            payload.get("run_mode") if payload.get("run_mode") is not None else payload.get("runMode")
+        )
+        if ortho_run_mode == "full":
+            return server_mod._compute_speaker_ortho_in_subprocess(job_id, payload)
         return server_mod._compute_speaker_ortho(job_id, payload)
     if normalized in {"forced_align", "forced-align", "align"}:
         return server_mod._compute_speaker_forced_align(job_id, payload)
