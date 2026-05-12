@@ -43,6 +43,18 @@ export function friendlyLabel(jobType: string): string {
   return titleCase(segment) || jobType;
 }
 
+const CHUNK_PROGRESS_RE = /ORTH chunk (\d+)\/(\d+) \(\d+s-\d+s\)/;
+
+export function chunkInfoFromMessage(message: string | undefined): { current: number; total: number } | null {
+  if (!message) return null;
+  const match = CHUNK_PROGRESS_RE.exec(message);
+  if (!match) return null;
+  const current = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return null;
+  return { current, total };
+}
+
 function isCompleteStatus(status: string): boolean {
   const normalized = status.toLowerCase();
   return normalized === "complete" || normalized === "completed" || normalized === "done";
@@ -116,6 +128,7 @@ export function HeaderJobStrip({
         const complete = isCompleteStatus(job.status);
         const errored = isErrorStatus(job.status);
         const cancelled = isCancelledStatus(job.status);
+        const chunkInfo = !errored && !complete && !cancelled ? chunkInfoFromMessage(job.message) : null;
 
         return (
           <div
@@ -163,10 +176,19 @@ export function HeaderJobStrip({
                   )}
                 </div>
                 <span className="tabular-nums text-indigo-700">{pct}%</span>
+                {chunkInfo && (
+                  <span
+                    data-testid="chunk-progress-overlay"
+                    className="rounded-sm bg-indigo-100 px-1.5 py-0.5 font-medium tabular-nums text-indigo-800"
+                    title={job.message}
+                  >
+                    Chunk {chunkInfo.current} of {chunkInfo.total}
+                  </span>
+                )}
                 {typeof job.etaMs === "number" && job.etaMs > 0 && (
                   <span className="tabular-nums text-indigo-600" title="Estimated time remaining">· ~{formatEta(job.etaMs)} left</span>
                 )}
-                {job.message && (
+                {job.message && !chunkInfo && (
                   <span className="hidden max-w-[180px] truncate text-indigo-600 lg:inline" title={job.message}>{job.message}</span>
                 )}
                 <button

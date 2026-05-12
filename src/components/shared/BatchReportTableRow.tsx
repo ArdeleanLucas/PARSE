@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -9,7 +10,7 @@ import {
   SkipForward,
   XCircle,
 } from "lucide-react";
-import type { PipelineStepResultBase } from "../../api/client";
+import type { ChunkResult, PipelineStepResultBase } from "../../api/client";
 import {
   classifyCell,
   okDetail,
@@ -78,6 +79,84 @@ function DetailsBlock({
   );
 }
 
+function formatChunkSpan(start: number, end: number): string {
+  const fmt = (seconds: number): string => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+    const totalSec = Math.round(seconds);
+    const mm = Math.floor(totalSec / 60);
+    const ss = totalSec % 60;
+    return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  };
+  return `${fmt(start)}-${fmt(end)}`;
+}
+
+export function bucketChunks(chunks: ChunkResult[] | undefined | null): "partial" | "all_error" | "all_ok" | "none" {
+  if (!Array.isArray(chunks) || chunks.length === 0) return "none";
+  let anyOk = false;
+  let anyErr = false;
+  for (const c of chunks) {
+    if (!c || typeof c !== "object") continue;
+    if (c.status === "ok") anyOk = true;
+    else if (c.status === "error") anyErr = true;
+  }
+  if (anyOk && anyErr) return "partial";
+  if (anyErr && !anyOk) return "all_error";
+  if (anyOk && !anyErr) return "all_ok";
+  return "none";
+}
+
+function ChunkDetailsBlock({
+  speaker,
+  step,
+  chunks,
+}: {
+  speaker: string;
+  step: string;
+  chunks: ChunkResult[];
+}) {
+  return (
+    <div
+      role="region"
+      aria-label={`Chunk details for ${speaker} ${step}`}
+      data-testid="chunk-details-block"
+      className="mt-1 rounded border border-yellow-200 bg-white p-2 text-[11px] text-yellow-900"
+    >
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-yellow-800">Per-chunk outcomes</div>
+      <table className="w-full text-left font-mono text-[10.5px]">
+        <thead>
+          <tr className="text-yellow-800/80">
+            <th className="pr-2 font-medium">#</th>
+            <th className="pr-2 font-medium">span</th>
+            <th className="pr-2 font-medium">status</th>
+            <th className="pr-2 font-medium">code</th>
+            <th className="font-medium">error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {chunks.map((c) => {
+            const isError = c.status === "error";
+            return (
+              <tr
+                key={c.idx}
+                data-testid={`chunk-detail-row-${c.idx}`}
+                className={isError ? "text-rose-900" : "text-emerald-900"}
+              >
+                <td className="pr-2 tabular-nums">{c.idx}</td>
+                <td className="pr-2 tabular-nums">
+                  {formatChunkSpan(c.span?.start ?? 0, c.span?.end ?? 0)}
+                </td>
+                <td className="pr-2">{c.status}</td>
+                <td className="pr-2">{c.error_code ?? ""}</td>
+                <td className="whitespace-pre-wrap break-words">{c.error ?? ""}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function StepCell({
   outcome,
   step,
@@ -126,6 +205,40 @@ function StepCell({
   }
 
   const kind = classifyCell(cell);
+  const chunksBucket = bucketChunks(cell.chunks as ChunkResult[] | undefined);
+  const isPartial = chunksBucket === "partial";
+
+  if (isPartial) {
+    const chunks = (cell.chunks ?? []) as ChunkResult[];
+    const failedCount = chunks.filter((c) => c?.status === "error").length;
+    const total = chunks.length;
+    return (
+      <td className="border-b border-slate-100 bg-yellow-50/60 px-2 py-1.5 align-top">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-yellow-800">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-xs font-semibold">Partial</span>
+            <span className="text-[11px] text-yellow-900/80 tabular-nums" data-testid={`chunk-summary-${outcome.speaker}-${step}`}>
+              {failedCount}/{total} chunks failed · {okDetail(step, cell)}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            data-testid={`chunk-details-toggle-${outcome.speaker}-${step}`}
+            className="inline-flex w-fit items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-yellow-800 hover:bg-yellow-100"
+            aria-expanded={isOpen}
+          >
+            {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Chunk details
+          </button>
+          {isOpen && (
+            <ChunkDetailsBlock speaker={outcome.speaker} step={step} chunks={chunks} />
+          )}
+        </div>
+      </td>
+    );
+  }
 
   if (kind === "ok") {
     return (
