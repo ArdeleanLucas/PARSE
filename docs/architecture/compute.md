@@ -66,6 +66,7 @@ MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked
 Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer than the configured chunk size are split into adjacent chunks before `provider.transcribe()` is called. Each chunk gets a fresh decoder state so a repetition loop in one slice cannot poison the rest of the recording.
 
 - **Entry point:** `_run_stt_job()` in `python/server_routes/media.py`.
+- **Subprocess wrap:** `_run_stt_job_in_subprocess()` in `python/server_routes/media.py` — full-file STT runs inside the shared isolated subprocess helper from MC-384-B (#412), preventing a hostile chunk from taking down the parent server. The wrap landed in MC-384-N (#428).
 - **Dispatcher boundary:** `_compute_stt()` routes `run_mode != 'full'` to `_compute_speaker_stt()`; only full-file STT enters `_run_stt_job()`.
 - **Chunk size:** `PARSE_STT_DEFAULT_CHUNK_MINUTES` (default `10`). Invalid values fall back to `10`; `0` disables duration chunking.
 - **Short audio (`duration <= chunk_seconds`):** single-shot `provider.transcribe()` path with `chunks: []` in the returned job result.
