@@ -167,7 +167,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = ("annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun", "tag_filtered_rerun")
+_ROUTE_MODULE_NAMES = ("progress_ipc", "annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun", "tag_filtered_rerun")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -972,6 +972,7 @@ def _compute_checkpoint(label: str, **kv: Any) -> None:
         # Checkpointing MUST NOT ever raise back into the compute path.
         # If the log file is unreachable the compute continues.
         pass
+
 
 def _resolve_http_port() -> int:
     for env_key in ("PARSE_PORT", "PARSE_API_PORT"):

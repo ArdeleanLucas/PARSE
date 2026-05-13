@@ -1153,7 +1153,7 @@ def _transcription_language_from_payload_or_annotation(
 
 def _set_compute_progress(job_id: str, progress: float, **kwargs: _server.Any) -> None:
     try:
-        _server._set_job_progress(job_id, progress, **kwargs)
+        _server._publish_progress(job_id, progress, **kwargs)
     except RecursionError:
         # Direct unit tests can reach annotate exports before the jobs-route
         # progress implementation replaces server.py's lazy wrapper. Progress is
@@ -3316,86 +3316,103 @@ def _run_in_isolated_subprocess(
         args=(child_job_id, payload, result_path, checkpoint_path),
         daemon=True,
     )
-    child.start()
-    _server._compute_checkpoint(f'{log_prefix}.started', job_id=job_id, child_pid=child.pid, result_path=result_path)
+    initial_offset = 0
     try:
-        timeout_raw = _server.os.environ.get(timeout_env_var, str(default_timeout_sec))
-        timeout_sec = float(timeout_raw)
-        if timeout_sec <= 0 or not _server.math.isfinite(timeout_sec):
-            timeout_sec = float(default_timeout_sec)
-    except (TypeError, ValueError):
-        timeout_sec = float(default_timeout_sec)
-    child.join(timeout=timeout_sec)
-    if child.is_alive():
-        _server._compute_checkpoint(f'{log_prefix}.timeout', job_id=job_id, child_pid=child.pid, timeout=timeout_sec)
+        initial_offset = _server.os.path.getsize(checkpoint_path)
+    except OSError:
+        pass
+    stop_event = _server.threading.Event()
+    watcher = _server.threading.Thread(
+        target=_server._watch_progress_file,
+        args=(job_id, checkpoint_path, stop_event, initial_offset),
+        daemon=True,
+        name='progress-watcher-{0}'.format(job_id[:16]),
+    )
+    watcher.start()
+    try:
+        child.start()
+        _server._compute_checkpoint(f'{log_prefix}.started', job_id=job_id, child_pid=child.pid, result_path=result_path)
         try:
-            child.terminate()
-            child.join(timeout=10.0)
-        except Exception:
-            pass
-        timeout_label = (
-            'IPA subprocess'
-            if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS'
-            else 'Speaker IPA subprocess'
-            if log_prefix == 'SPEAKER_IPA_SUBPROCESS'
-            else 'Speaker ORTH subprocess'
-            if log_prefix == 'SPEAKER_ORTHO_SUBPROCESS'
-            else '{0} subprocess'.format(log_prefix)
-        )
-        timeout_message = '{0} exceeded {1} ({2}s) and was terminated'.format(
-            timeout_label,
-            timeout_env_var,
-            int(timeout_sec),
-        )
-        if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS':
-            timeout_message += "; other steps' results are intact"
+            timeout_raw = _server.os.environ.get(timeout_env_var, str(default_timeout_sec))
+            timeout_sec = float(timeout_raw)
+            if timeout_sec <= 0 or not _server.math.isfinite(timeout_sec):
+                timeout_sec = float(default_timeout_sec)
+        except (TypeError, ValueError):
+            timeout_sec = float(default_timeout_sec)
+        child.join(timeout=timeout_sec)
+        if child.is_alive():
+            _server._compute_checkpoint(f'{log_prefix}.timeout', job_id=job_id, child_pid=child.pid, timeout=timeout_sec)
+            try:
+                child.terminate()
+                child.join(timeout=10.0)
+            except Exception:
+                pass
+            timeout_label = (
+                'IPA subprocess'
+                if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS'
+                else 'Speaker IPA subprocess'
+                if log_prefix == 'SPEAKER_IPA_SUBPROCESS'
+                else 'Speaker ORTH subprocess'
+                if log_prefix == 'SPEAKER_ORTHO_SUBPROCESS'
+                else '{0} subprocess'.format(log_prefix)
+            )
+            timeout_message = '{0} exceeded {1} ({2}s) and was terminated'.format(
+                timeout_label,
+                timeout_env_var,
+                int(timeout_sec),
+            )
+            if log_prefix == 'FULL_PIPELINE_IPA_SUBPROCESS':
+                timeout_message += "; other steps' results are intact"
+            return _isolated_subprocess_error_result(
+                log_prefix,
+                child.exitcode,
+                result_path,
+                timeout_message,
+                error_code='timeout',
+            )
+        exit_code = child.exitcode
+        _server._compute_checkpoint(f'{log_prefix}.exited', job_id=job_id, exit_code=exit_code)
+        if exit_code not in (0, None):
+            try:
+                if _server.os.path.exists(result_path):
+                    _server.os.remove(result_path)
+            except OSError:
+                pass
+            return _isolated_subprocess_error_result(log_prefix, exit_code, result_path)
+        if not _server.os.path.exists(result_path):
+            return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file was not written'.format(log_prefix))
+        try:
+            with open(result_path, 'r', encoding='utf-8') as handle:
+                payload_out = _json.load(handle)
+        except Exception as exc:
+            return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file unreadable: {1}'.format(log_prefix, exc))
+        finally:
+            try:
+                _server.os.remove(result_path)
+            except OSError:
+                pass
+        if bool(payload_out.get('ok')):
+            sub_result = payload_out.get('result')
+            if isinstance(sub_result, dict):
+                return dict(sub_result)
+            return {'result': sub_result}
+        error_text = str(payload_out.get('error') or '{0} reported failure'.format(log_prefix))
+        traceback_text = str(payload_out.get('traceback') or '') or None
+        error_code = None
+        memory_hint = '{0}\n{1}'.format(error_text, traceback_text or '').lower()
+        if 'memoryerror' in memory_hint or 'out of memory' in memory_hint:
+            error_code = 'oom_suspect'
         return _isolated_subprocess_error_result(
             log_prefix,
-            child.exitcode,
+            exit_code,
             result_path,
-            timeout_message,
-            error_code='timeout',
+            error_text,
+            traceback_text,
+            error_code=error_code,
         )
-    exit_code = child.exitcode
-    _server._compute_checkpoint(f'{log_prefix}.exited', job_id=job_id, exit_code=exit_code)
-    if exit_code not in (0, None):
-        try:
-            if _server.os.path.exists(result_path):
-                _server.os.remove(result_path)
-        except OSError:
-            pass
-        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path)
-    if not _server.os.path.exists(result_path):
-        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file was not written'.format(log_prefix))
-    try:
-        with open(result_path, 'r', encoding='utf-8') as handle:
-            payload_out = _json.load(handle)
-    except Exception as exc:
-        return _isolated_subprocess_error_result(log_prefix, exit_code, result_path, '{0} result file unreadable: {1}'.format(log_prefix, exc))
     finally:
-        try:
-            _server.os.remove(result_path)
-        except OSError:
-            pass
-    if bool(payload_out.get('ok')):
-        sub_result = payload_out.get('result')
-        if isinstance(sub_result, dict):
-            return dict(sub_result)
-        return {'result': sub_result}
-    error_text = str(payload_out.get('error') or '{0} reported failure'.format(log_prefix))
-    traceback_text = str(payload_out.get('traceback') or '') or None
-    error_code = None
-    memory_hint = '{0}\n{1}'.format(error_text, traceback_text or '').lower()
-    if 'memoryerror' in memory_hint or 'out of memory' in memory_hint:
-        error_code = 'oom_suspect'
-    return _isolated_subprocess_error_result(
-        log_prefix,
-        exit_code,
-        result_path,
-        error_text,
-        traceback_text,
-        error_code=error_code,
-    )
+        stop_event.set()
+        watcher.join(timeout=2.0)
 
 
 def _compute_full_pipeline_ipa_in_subprocess(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
