@@ -3545,7 +3545,12 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                             stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
                         except Exception as exc:
                             raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
-                        results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}
+                        results['stt'] = {
+                            'status': 'ok',
+                            'segments': len(stt_result.get('segments') or []),
+                            'chunks': list(stt_result.get('chunks') or []),
+                            'done': True,
+                        }
                     else:
                         stt_payload: _server.Dict[str, _server.Any] = {'speaker': speaker, 'run_mode': run_mode, 'language': language_str}
                         if concept_ids is not None:
