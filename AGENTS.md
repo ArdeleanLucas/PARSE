@@ -140,6 +140,8 @@ $ gh pr view N --repo ArdeleanLucas/PARSE --json baseRefName
 
 **When in doubt, base = main. Always.**
 
+**Labels mandatory on every `gh pr create`:** include the MC parent label (for example `--label MC-384`) plus at least one type label (`docs`, `bugfix`, `feat`, `test`, `chore`, etc.) directly on `gh pr create`; verify before announcing with `gh pr view <N> --repo ArdeleanLucas/PARSE --json labels`. Regression: PR #421 shipped with `labels: []`, breaking MC-parent filtering.
+
 ## Agent identities and parallel worktrees (added 2026-04-27)
 
 The three implementation lanes are:
@@ -742,6 +744,12 @@ grep -n 'apiFetch.*compute\|startCompute' src/api/contracts/<your_caller>.ts
 
 If any of these checks fails, the PR is not done.
 
+
+## Backend rules — chunking and subprocess isolation pointers (added 2026-05-13)
+
+Long full-mode ORTH/STT chunking is governed by `PARSE_ORTH_DEFAULT_CHUNK_MINUTES=10` and `PARSE_STT_DEFAULT_CHUNK_MINUTES=10`; IPA does not chunk by audio duration, but `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC=60` guards destructive IPA overwrite reruns. Full-file STT, ORTH, and IPA run memory-heavy stages in isolated subprocesses via `_run_in_isolated_subprocess`; see `docs/architecture/compute.md` for the canonical contract.
+
+Drift guard: `python/test_docs_compute_env_vars.py` ties `docs/architecture/compute.md` to the chunking env vars and top-level subprocess wrap names. Adding a chunking env var or top-level subprocess wrap requires updating both the doc and that test's expected set.
 
 ## Backend rules — compute children must tee stderr, not redirect (added 2026-05-10)
 

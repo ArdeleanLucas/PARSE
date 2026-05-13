@@ -66,3 +66,11 @@ Saved Fail01, Fail02, and Khan01 ORTH annotations are poisoned and require clean
 - Decide whether `ortho.initial_prompt` should remain in `config/ai_config.json` now that production callers no longer pass it implicitly.
 - Audit `python/ai/providers/local_whisper.py` for matching default behavior across `transcribe_clip()`, `transcribe_segments_in_memory()` if present, and `transcribe()`.
 - Consider a future rerun-dialog enhancement to persist the last-used pad and add an expected-length hint such as lexeme, phrase, or clause.
+
+## Update 2026-05-13: regression cycle + Tier-2 fallback contract
+
+The no-parrot regression resurfaced on 2026-05-13 when `python/test_orth_no_parrot_regression.py::test_concept_window_outputs_never_include_configured_initial_prompt` failed across pad values `0.0`, `0.2`, and `0.5`. The prompt-suppression call path still set `initial_prompt=None`, but Tier-2 forced alignment crashed because a numpy ndarray reached an aligner consumer that called the torch-only `.numel()` method.
+
+The failure compounded with a silent fallback path: after Tier-2 raised, the concept-window ORTH code could leak the raw Tier-1 decode instead of preserving the midpoint no-parrot pick selected before alignment. MC-384-T (PR #431) added the defense-in-depth contract that Tier-2 alignment failure preserves the no-parrot pick, and MC-384-U (PR #432) fixed the root cause by restoring the torch-tensor contract at the Tier-2 boundary with an `isinstance` assertion and sentinel test.
+
+Current contract: ORTH no-parrot suppression must survive Tier-2 failure. A forced-alignment exception may degrade `tiers.ortho_words`, but it must not reintroduce configured-prompt text into `tiers.ortho`.
