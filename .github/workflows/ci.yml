@@ -173,9 +173,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # The repo currently has no requirements.txt / pyproject lockfile.
-          # Keep CI cheap and deterministic: install only lint + test tooling,
-          # and rely on PARSE's lazy imports to avoid heavy ML/GPU packages.
-          python -m pip install pytest ruff
+          # Keep CI deterministic: install lint/test tooling plus lightweight
+          # imports required for the full backend sweep, but avoid heavy ML/GPU stacks.
+          python -m pip install pytest ruff numpy soundfile pydantic requests mcp PyYAML faster-whisper
 
       - name: Lint backend runtime modules (fatal rules only)
         run: |
