@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
+import { THEME_LABELS, useThemeCycle } from './hooks/useThemeCycle';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
@@ -217,6 +218,7 @@ export function ParseUI() {
   const setActiveConceptUI = useUIStore(s => s.setActiveConcept);
   // — Chat session (one instance for the whole UI) —
   const chatSession = useChatSession();
+  const { theme, cycleTheme, nextTheme } = useThemeCycle();
   // — Annotation sync (auto-loads record when activeSpeaker changes) —
   useAnnotationSync();
   // — Bootstrap —
@@ -877,7 +879,6 @@ export function ParseUI() {
   const [showUntagged, setShowUntagged] = useState(true);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [tagConceptSearch, setTagConceptSearch] = useState('');
-  const [darkMode, setDarkMode] = useState(false);
   const [mergePickerPrimary, setMergePickerPrimary] = useState<Concept | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ message: string; variant: 'error' | 'warning' } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
@@ -914,10 +915,6 @@ export function ParseUI() {
       actionFeedbackTimeoutRef.current = null;
     }, 5000);
   }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-  }, [darkMode]);
 
   useEffect(() => {
     try {
@@ -1818,11 +1815,13 @@ export function ParseUI() {
 
 
             <button
-              onClick={() => setDarkMode(v => !v)}
-              title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              onClick={cycleTheme}
+              title={`Theme: ${THEME_LABELS[theme]} — click for ${THEME_LABELS[nextTheme]}`}
+              aria-label={`Theme: ${THEME_LABELS[theme]}`}
+              data-theme={theme}
               className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"
             >
-              {darkMode ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}
+              {theme === 'light' ? <Moon className="h-4 w-4"/> : <Sun className="h-4 w-4"/>}
             </button>
           </div>
         </div>

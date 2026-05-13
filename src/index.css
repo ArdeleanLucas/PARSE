@@ -2,114 +2,254 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Dark mode — "Noir": pure black + bright blue accent.
-   Toggled via `html.dark` in ParseUI.tsx. Overrides Tailwind utility classes
-   already in use so existing markup doesn't need dark: variants. */
+/* ============================================================
+   Dark themes — three approved palettes, cycled via the theme
+   button. Toggled by adding `html.theme-amber`, `html.theme-violet`,
+   or `html.theme-blue`. The legacy `.dark` class is also applied for
+   any non-light theme for backwards compatibility.
+   Each theme defines a palette as CSS custom properties; the shared
+   override layer below maps Tailwind utility classes to those vars.
+   ============================================================ */
 
-html.dark { color-scheme: dark; background: #000; }
+html.theme-amber,
+html.theme-violet,
+html.theme-blue {
+  color-scheme: dark;
+}
 
-/* Surfaces: pure black page, slightly lifted cards */
-html.dark .bg-white,
-html.dark .bg-white\/80,
-html.dark .bg-white\/90,
-html.dark .bg-white\/95 { background-color: #0a0a0a !important; }
-html.dark .bg-slate-50,
-html.dark .bg-slate-50\/40,
-html.dark .bg-slate-50\/60,
-html.dark .bg-slate-50\/70,
-html.dark .bg-slate-50\/80 { background-color: #000 !important; }
-html.dark .bg-slate-100,
-html.dark .bg-slate-100\/80 { background-color: #141414 !important; }
-html.dark .bg-slate-200,
-html.dark .bg-slate-200\/60 { background-color: #1f1f1f !important; }
+/* --------- Palette: Warm Amber (Option 1) --------- */
+html.theme-amber {
+  --bg-page:       #0E141B;
+  --bg-card:       #141B24;
+  --bg-elevated:   #1B222C;
+  --bg-hover:      #232B38;
+  --bg-deep:       #0A0E13;
 
-/* Gradients flatten to black */
-html.dark .from-slate-50 { --tw-gradient-from: #000 !important; }
-html.dark .to-white { --tw-gradient-to: #0a0a0a !important; }
+  --border:        #252D38;
+  --border-strong: #303A47;
+  --border-subtle: #1A2230;
 
-/* Borders / rings: subtle hairlines */
-html.dark .border-slate-100,
-html.dark .border-slate-200,
-html.dark .border-slate-200\/70,
-html.dark .border-slate-200\/80 { border-color: #1f1f1f !important; }
-html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1f1f1f !important; }
-html.dark .ring-slate-100,
-html.dark .ring-slate-200 { --tw-ring-color: #1f1f1f !important; }
+  --text-1:        #E4E7EC;
+  --text-2:        #D5D8DD;
+  --text-3:        #BFC4CC;
+  --text-4:        #9099A8;
+  --text-5:        #6B7585;
+  --text-6:        #4A5260;
+  --text-7:        #3A4150;
 
-/* Text: white → muted gray scale */
-html.dark .text-slate-900 { color: #fafafa !important; }
-html.dark .text-slate-800 { color: #f4f4f5 !important; }
-html.dark .text-slate-700 { color: #e4e4e7 !important; }
-html.dark .text-slate-600 { color: #a1a1aa !important; }
-html.dark .text-slate-500 { color: #71717a !important; }
-html.dark .text-slate-400 { color: #52525b !important; }
-html.dark .text-slate-300 { color: #3f3f46 !important; }
+  --accent:        #E8A872;
+  --accent-hover:  #F2B584;
+  --accent-deep:   #C58A56;
+  --accent-text:   #1F1408;
+  --accent-dim:    rgba(232, 168, 114, 0.13);
+  --accent-faint:  rgba(232, 168, 114, 0.06);
+  --accent-strong: rgba(232, 168, 114, 0.28);
+
+  --status-warning: #E8B956;
+  --status-danger:  #E47373;
+  --status-success: #7AC18D;
+  --status-info:    #7AABDA;
+  --status-special: #B79BE0;
+  --status-fuchsia: #E5A0D2;
+
+  --warning-bg:  rgba(232, 185, 86, 0.10);
+  --warning-bg2: rgba(232, 185, 86, 0.16);
+  --warning-border: rgba(232, 185, 86, 0.40);
+  --danger-bg:   rgba(228, 115, 115, 0.20);
+  --danger-border: rgba(228, 115, 115, 0.45);
+  --success-bg:  rgba(122, 193, 141, 0.18);
+  --success-border: rgba(122, 193, 141, 0.45);
+  --special-bg:  rgba(183, 155, 224, 0.22);
+  --fuchsia-bg:  rgba(229, 160, 210, 0.22);
+
+  --wave-bar:    #C58A56;
+  --shadow-1:    0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-2:    0 10px 25px -5px rgb(0 0 0 / 0.6);
+}
+
+/* --------- Palette: Cool Violet (Option 2) --------- */
+html.theme-violet {
+  --bg-page:       #0D0F13;
+  --bg-card:       #13161B;
+  --bg-elevated:   #191D24;
+  --bg-hover:      #22272F;
+  --bg-deep:       #08090C;
+
+  --border:        #21262E;
+  --border-strong: #303642;
+  --border-subtle: #181C22;
+
+  --text-1:        #E6E8EB;
+  --text-2:        #D5D8DD;
+  --text-3:        #BABEC7;
+  --text-4:        #8E939E;
+  --text-5:        #5F6470;
+  --text-6:        #3E434D;
+  --text-7:        #31353F;
+
+  --accent:        #A78BFA;
+  --accent-hover:  #B79AFC;
+  --accent-deep:   #8B6FE0;
+  --accent-text:   #1A1226;
+  --accent-dim:    rgba(167, 139, 250, 0.13);
+  --accent-faint:  rgba(167, 139, 250, 0.05);
+  --accent-strong: rgba(167, 139, 250, 0.28);
+
+  --status-warning: #D9B566;
+  --status-danger:  #DC7777;
+  --status-success: #5EBE7E;
+  --status-info:    #6BA3D8;
+  --status-special: #E0A5E0;
+  --status-fuchsia: #F0A0D6;
+
+  --warning-bg:  rgba(217, 181, 102, 0.10);
+  --warning-bg2: rgba(217, 181, 102, 0.16);
+  --warning-border: rgba(217, 181, 102, 0.40);
+  --danger-bg:   rgba(220, 119, 119, 0.20);
+  --danger-border: rgba(220, 119, 119, 0.45);
+  --success-bg:  rgba(94, 190, 126, 0.18);
+  --success-border: rgba(94, 190, 126, 0.45);
+  --special-bg:  rgba(224, 165, 224, 0.22);
+  --fuchsia-bg:  rgba(240, 160, 214, 0.22);
+
+  --wave-bar:    #8B6FE0;
+  --shadow-1:    0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-2:    0 10px 25px -5px rgb(0 0 0 / 0.6);
+}
+
+/* --------- Palette: Bright Blue (Option 3) --------- */
+html.theme-blue {
+  --bg-page:       #0A0E1A;
+  --bg-card:       #0F1422;
+  --bg-elevated:   #161C2E;
+  --bg-hover:      #1F2638;
+  --bg-deep:       #060912;
+
+  --border:        #1E2538;
+  --border-strong: #2D3548;
+  --border-subtle: #161C2C;
+
+  --text-1:        #E8EBF1;
+  --text-2:        #D7DBE5;
+  --text-3:        #B8BFD0;
+  --text-4:        #97A0B5;
+  --text-5:        #5E6680;
+  --text-6:        #3E4458;
+  --text-7:        #2D3245;
+
+  --accent:        #3B82F6;
+  --accent-hover:  #60A5FA;
+  --accent-deep:   #2563EB;
+  --accent-text:   #FFFFFF;
+  --accent-dim:    rgba(59, 130, 246, 0.12);
+  --accent-faint:  rgba(59, 130, 246, 0.05);
+  --accent-strong: rgba(59, 130, 246, 0.32);
+
+  --status-warning: #FBBF24;
+  --status-danger:  #F87171;
+  --status-success: #4ADE80;
+  --status-info:    #38BDF8;
+  --status-special: #C084FC;
+  --status-fuchsia: #E879F9;
+
+  --warning-bg:  rgba(251, 191, 36, 0.10);
+  --warning-bg2: rgba(251, 191, 36, 0.16);
+  --warning-border: rgba(180, 83, 9, 0.40);
+  --danger-bg:   rgba(136, 19, 55, 0.35);
+  --danger-border: rgba(159, 18, 57, 0.50);
+  --success-bg:  rgba(6, 78, 59, 0.35);
+  --success-border: rgba(6, 95, 70, 0.60);
+  --special-bg:  rgba(91, 33, 182, 0.50);
+  --fuchsia-bg:  rgba(134, 25, 143, 0.50);
+
+  --wave-bar:    #2563EB;
+  --shadow-1:    0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-2:    0 10px 25px -5px rgb(0 0 0 / 0.6);
+}
+
+/* ============================================================
+   Shared override layer — references the per-theme custom props
+   above. One rule per Tailwind class, applies to any active theme.
+   ============================================================ */
+
+/* Surfaces */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-white, .bg-white\/80, .bg-white\/90, .bg-white\/95) { background-color: var(--bg-card) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-slate-50, .bg-slate-50\/40, .bg-slate-50\/60, .bg-slate-50\/70, .bg-slate-50\/80) { background-color: var(--bg-page) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-slate-100, .bg-slate-100\/80) { background-color: var(--bg-elevated) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-slate-200, .bg-slate-200\/60) { background-color: var(--bg-hover) !important; }
+
+/* Gradients flatten to page background */
+html:is(.theme-amber, .theme-violet, .theme-blue) .from-slate-50 { --tw-gradient-from: var(--bg-page) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .to-white { --tw-gradient-to: var(--bg-card) !important; }
+
+/* Borders / rings */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.border-slate-100, .border-slate-200, .border-slate-200\/70, .border-slate-200\/80) { border-color: var(--border) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.ring-slate-100, .ring-slate-200) { --tw-ring-color: var(--border) !important; }
+
+/* Text scale (slate-900 → slate-300 mapped to text-1 → text-7) */
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-900 { color: var(--text-1) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-800 { color: var(--text-2) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-700 { color: var(--text-3) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-600 { color: var(--text-4) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-500 { color: var(--text-5) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-400 { color: var(--text-6) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-slate-300 { color: var(--text-7) !important; }
 
 /* Hover surfaces */
-html.dark .hover\:bg-slate-50:hover { background-color: #141414 !important; }
-html.dark .hover\:bg-slate-100:hover { background-color: #1f1f1f !important; }
-html.dark .hover\:text-slate-800:hover { color: #fafafa !important; }
-html.dark .hover\:text-slate-700:hover { color: #e4e4e7 !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-slate-50:hover { background-color: var(--bg-elevated) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-slate-100:hover { background-color: var(--bg-hover) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:text-slate-800:hover { color: var(--text-1) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:text-slate-700:hover { color: var(--text-3) !important; }
 
-/* Accent: bright blue instead of indigo/violet */
-html.dark .bg-indigo-50 { background-color: rgb(59 130 246 / 0.12) !important; }
-html.dark .bg-indigo-50\/30 { background-color: rgb(59 130 246 / 0.08) !important; }
-html.dark .bg-indigo-50\/40 { background-color: rgb(59 130 246 / 0.10) !important; }
-html.dark .bg-indigo-50\/50 { background-color: rgb(59 130 246 / 0.15) !important; }
-html.dark .bg-indigo-100 { background-color: rgb(59 130 246 / 0.2) !important; }
-html.dark .bg-indigo-600 { background-color: #3b82f6 !important; }
-html.dark .bg-indigo-700 { background-color: #2563eb !important; }
-html.dark .hover\:bg-indigo-700:hover { background-color: #2563eb !important; }
-html.dark .text-indigo-900,
-html.dark .text-indigo-800,
-html.dark .text-indigo-700,
-html.dark .text-indigo-600 { color: #60a5fa !important; }
-html.dark .ring-indigo-200 { --tw-ring-color: rgb(59 130 246 / 0.4) !important; }
-html.dark .border-indigo-100 { border-color: rgb(59 130 246 / 0.3) !important; }
-html.dark .border-indigo-300 { border-color: #3b82f6 !important; }
-html.dark .focus\:ring-indigo-100:focus { --tw-ring-color: rgb(59 130 246 / 0.25) !important; }
-html.dark .focus\:ring-indigo-50:focus { --tw-ring-color: rgb(59 130 246 / 0.15) !important; }
-html.dark .from-indigo-500,
-html.dark .from-indigo-600,
-html.dark .via-violet-600 { --tw-gradient-from: #3b82f6 !important; --tw-gradient-via: #3b82f6 !important; }
-html.dark .to-violet-600,
-html.dark .to-fuchsia-600 { --tw-gradient-to: #2563eb !important; }
+/* Accent: replaces indigo + violet + fuchsia gradient family with the theme accent */
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50 { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/30 { background-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/40 { background-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/50 { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-100 { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-600 { background-color: var(--accent) !important; color: var(--accent-text) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-700,
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-indigo-700:hover { background-color: var(--accent-deep) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-indigo-900, .text-indigo-800, .text-indigo-700, .text-indigo-600) { color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-indigo-200 { --tw-ring-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .border-indigo-100 { border-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .border-indigo-300 { border-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:ring-indigo-100:focus { --tw-ring-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:ring-indigo-50:focus { --tw-ring-color: var(--accent-faint) !important; }
 
-/* Amber / rose / emerald soft badges remain readable.
-   Low-opacity warm tint keeps the card visibly "warning" without reading
-   as rust/red under bright yellow text. */
-html.dark .bg-amber-50,
-html.dark .bg-amber-50\/40 { background-color: rgba(255, 193, 7, 0.08) !important; }
-html.dark .bg-amber-100 { background-color: rgba(255, 193, 7, 0.14) !important; }
-html.dark .text-amber-700,
-html.dark .text-amber-800 { color: rgb(251 191 36) !important; }
-html.dark .border-amber-100,
-html.dark .border-amber-200 { border-color: rgba(180, 83, 9, 0.4) !important; }
-html.dark .ring-amber-200 { --tw-ring-color: rgba(180, 83, 9, 0.5) !important; }
+/* Gradient stops flatten to the theme accent */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.from-indigo-500, .from-indigo-600, .via-violet-600) { --tw-gradient-from: var(--accent) !important; --tw-gradient-via: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.to-violet-600, .to-fuchsia-600) { --tw-gradient-to: var(--accent-deep) !important; }
 
-html.dark .bg-rose-50 { background-color: rgb(136 19 55 / 0.35) !important; }
-html.dark .text-rose-600,
-html.dark .text-rose-700 { color: rgb(253 164 175) !important; }
-html.dark .border-rose-200 { border-color: rgb(159 18 57 / 0.5) !important; }
-html.dark .ring-rose-200 { --tw-ring-color: rgb(159 18 57 / 0.6) !important; }
+/* Status: amber / rose / emerald soft badges */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-amber-50, .bg-amber-50\/40) { background-color: var(--warning-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-amber-100 { background-color: var(--warning-bg2) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-amber-700, .text-amber-800) { color: var(--status-warning) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.border-amber-100, .border-amber-200) { border-color: var(--warning-border) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-amber-200 { --tw-ring-color: var(--warning-border) !important; }
 
-html.dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.35) !important; }
-html.dark .text-emerald-700 { color: rgb(110 231 183) !important; }
-html.dark .ring-emerald-200 { --tw-ring-color: rgb(6 95 70 / 0.6) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-rose-50 { background-color: var(--danger-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-rose-600, .text-rose-700) { color: var(--status-danger) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .border-rose-200 { border-color: var(--danger-border) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-rose-200 { --tw-ring-color: var(--danger-border) !important; }
 
-/* Violet / fuchsia cognate badges */
-html.dark .bg-violet-100 { background-color: rgb(91 33 182 / 0.5) !important; }
-html.dark .text-violet-700 { color: rgb(196 181 253) !important; }
-html.dark .bg-fuchsia-100 { background-color: rgb(134 25 143 / 0.5) !important; }
-html.dark .text-fuchsia-700 { color: rgb(232 121 249) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-color: var(--success-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: var(--status-success) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: var(--success-border) !important; }
 
-/* Waveform bars: invert light indigo */
-html.dark [style*="background: rgb(199, 210, 254)"] { background: rgb(67 56 202) !important; }
+/* Violet / fuchsia cognate badges keep their semantic hue but tinted to theme */
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-violet-100 { background-color: var(--special-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-violet-700 { color: var(--status-special) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-fuchsia-100 { background-color: var(--fuchsia-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-fuchsia-700 { color: var(--status-fuchsia) !important; }
+
+/* Waveform bars: replace the inline rgb(199, 210, 254) used by SpectrogramSettings/lane renderers */
+html:is(.theme-amber, .theme-violet, .theme-blue) [style*="background: rgb(199, 210, 254)"] { background: var(--wave-bar) !important; }
 
 /* kbd tags */
-html.dark kbd.bg-slate-100 { background-color: rgb(30 41 59) !important; color: rgb(148 163 184) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) kbd.bg-slate-100 { background-color: var(--bg-elevated) !important; color: var(--text-4) !important; }
 
-/* Shadows need stronger contrast */
-html.dark .shadow-sm,
-html.dark .shadow { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4) !important; }
-html.dark .shadow-lg { box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.6) !important; }
+/* Shadows */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.shadow-sm, .shadow) { box-shadow: var(--shadow-1) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .shadow-lg { box-shadow: var(--shadow-2) !important; }
