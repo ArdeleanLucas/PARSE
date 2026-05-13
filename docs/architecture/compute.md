@@ -9,9 +9,9 @@ For the process-level view of the worker changes that landed across PRs #411-#41
 PARSE keeps one user-facing compute system but differentiates execution by intent:
 
 - Fast lexeme/concept-window path: scoped work uses `run_mode != 'full'` and/or `concept_ids`; it should avoid long-file chunking overhead and return quickly for interactive fieldwork.
-- Robust long-file path: full-speaker/full-pipeline work runs through the job system and, after MC-384 Milestone A, long ORTH Tier-1 transcribe work is isolated and chunked so a Khan01-scale recording cannot kill the parent server.
+- Robust long-file path: full-speaker/full-pipeline work runs through the job system and, after MC-384 Milestone A, long Tier-1 ORTH/STT transcribe work is chunked so a Khan01/Fail01-scale recording cannot crash ORTH or silently truncate STT.
 
-The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust ORTH request needs chunking.
+The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust Tier-1 ORTH/STT request needs chunking.
 
 ## Compute modes
 
@@ -45,10 +45,10 @@ These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The out
 
 ## Chunking primitives
 
-PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitive module (84 LoC):
+PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitive module for robust Tier-1 ORTH and STT paths (84 LoC):
 
 - `python/workers/audio_chunking.py:12` — `ChunkSpan`, the audio-global `{start, end}` span shape.
-- `python/workers/audio_chunking.py:18` — `ChunkResult`, the per-chunk result shape used by job/MCP outputs.
+- `python/workers/audio_chunking.py:18` — `ChunkResult`, the per-chunk result shape used by ORTH/STT job and MCP outputs.
 - `python/workers/audio_chunking.py:26` — `split_audio_duration(total_seconds, chunk_seconds)`.
 - `python/workers/audio_chunking.py:56` — `merge_chunk_segments(per_chunk_segments, spans)`, which offsets chunk-local segments back into audio-global time.
 
@@ -61,9 +61,28 @@ ORTH has two tiers with different memory profiles:
 
 MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2554`-`2601`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2562`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2601`.
 
+## Tier-1 STT chunking
+
+Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer than the configured chunk size are split into adjacent chunks before `provider.transcribe()` is called. Each chunk gets a fresh decoder state so a repetition loop in one slice cannot poison the rest of the recording.
+
+- **Entry point:** `_run_stt_job()` in `python/server_routes/media.py`.
+- **Dispatcher boundary:** `_compute_stt()` routes `run_mode != 'full'` to `_compute_speaker_stt()`; only full-file STT enters `_run_stt_job()`.
+- **Chunk size:** `PARSE_STT_DEFAULT_CHUNK_MINUTES` (default `10`). Invalid values fall back to `10`; `0` disables duration chunking.
+- **Short audio (`duration <= chunk_seconds`):** single-shot `provider.transcribe()` path with `chunks: []` in the returned job result.
+- **Long audio (`duration > chunk_seconds`):** `split_audio_duration()` creates adjacent spans; temporary chunk WAVs are transcribed one by one; `merge_chunk_segments()` offsets chunk-local segments and words back into audio-global time.
+- **Per-chunk errors:** `MemoryError` and CUDA/OOM-style failures classify as `oom_suspect`; timeout-shaped failures classify as `timeout`; other provider failures classify as `provider_error`. The loop records an error row for that chunk and continues to later chunks.
+- **Cancellation:** cancellation is checked between chunks. Completed chunks stay `ok`; remaining chunks are reported as `cancelled`; the top-level result carries `status: 'cancelled'`.
+- **Cache:** `coarse_transcripts/<speaker>.json` still stores only the merged flat `segments` list, not `chunks[]`, preserving the pre-MC-384-H cache shape.
+- **PR:** MC-384-H / #420.
+
+**Why STT chunks now:** before MC-384-H, STT called `provider.transcribe()` once on the entire WAV. In the 2026-05-13 Fail01 investigation, the 2 h 32 min working WAV hit faster-whisper repetition loops on common Kurdish tokens around minute 14; the decoder then advanced past the failure region and stopped after minute 19. Pre-fix STT produced 40 segments covering about 9.5% of the file, while ORTH already covered the full recording because MC-384-D had chunked its Tier-1 path. PR #420 brings STT to the same long-file parity contract: later chunks still run, partial/error/cancel rows are explicit in `chunks[]`, and the merged segment cache remains backward-compatible.
+
+**IPA does not chunk by audio duration:** IPA Tier-3 acoustic transcribe is interval-driven, not a single whole-file model call. `python/ai/ipa_transcribe.py:transcribe_intervals()` operates on per-interval slices supplied by upstream ORTH word windows, and PR #422 handled IPA shrink-warning behavior separately. This is why no MC-384-K audio-duration chunking lane exists for IPA.
+
 ## Environment variables
 
 - `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:809` and exported by `scripts/parse-run.sh:100` / `scripts/parse-run.sh:395`.
+- `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:65` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
 - `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3207` for nested isolated subprocesses, default `14400`.
 - `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
 - `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.
@@ -86,8 +105,12 @@ Contract for subprocess entries: a successful computation must not return a dict
 | User/API intent | Duration | Flags/env | Expected path |
 | --- | ---: | --- | --- |
 | Concept-window ORTH (`run_mode != 'full'`) | any | default | Fast scoped path; no chunking. |
-| Full-pipeline ORTH, short audio | at or below threshold | default | Robust wrapper may run, but `chunks` is empty or a single non-chunked result depending on MC-384-D implementation. |
-| Full-pipeline ORTH, long audio | greater than `PARSE_ORTH_DEFAULT_CHUNK_MINUTES` | default | Tier-1 ORTH chunks, each isolated; Tier-2 recomputes once after merge. |
+| Full-pipeline ORTH, short audio | at or below `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Robust wrapper may run, but `chunks` is empty or a single non-chunked result depending on MC-384-D implementation. |
+| Full-pipeline ORTH, long audio | greater than `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 ORTH chunks, each isolated; Tier-2 recomputes once after merge. |
+| Full-file STT, short audio | at or below `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Single-shot `_run_stt_job()` path; `chunks: []`. |
+| Full-file STT, long audio | greater than `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 STT chunks; per-chunk results emitted in `chunks[]`, merged cache remains flat segments. |
+| Full-file STT with chunking disabled | any | `PARSE_STT_DEFAULT_CHUNK_MINUTES=0` | Single-shot STT regardless of duration; `chunks: []`. |
+| Scoped/concept-window STT (`run_mode != 'full'`) | any | payload scope | `_compute_speaker_stt()` path; windows are already bounded, so no audio-duration chunking. |
 | MCP/agent full ORTH with `force_robust=true` | any | payload flag | Robust path; duration still decides whether the robust path chunks. |
 | MCP/agent scoped ORTH with `fast_mode=true` or `concept_ids` | any | payload flag/scope | Fast scoped path; no chunking. |
 | Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling only for Milestone A; completed chunks remain ok, remaining chunks report cancelled. |
@@ -100,7 +123,9 @@ MC-384 Milestone A closes the incident by containing long ORTH work in isolated 
 
 ## Result contract
 
-Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema. Backward-compatible callers that only read the top-level `status`, `filled`, `total`, and `ortho_words` fields continue to work.
+Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema. Backward-compatible callers that only read the top-level `status`, `filled`, `total`, `segments`, and `ortho_words` fields continue to work.
+
+STT preserves its cache contract: `_write_stt_cache()` receives the merged flat `segments` list only, while `chunks[]` remains a job-result diagnostic envelope.
 
 PR #417 added two UI consumers of this same contract: the header job strip parses `ORTH chunk N/M (STARTs-ENDs)` progress messages into a live `Chunk N of M` pill, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
 
@@ -114,6 +139,10 @@ When adding a new `compute_type`, keep these routing tables in agreement:
 
 A compute type that works in one mode but not another is a contract bug. Add or update tests before shipping a new alias.
 
+Future Tier-1 long-file stages should consult this page and reuse `python/workers/audio_chunking.py` rather than inventing stage-local chunk shapes.
+
 ## Verification lineage
 
 MC-384-E grep-verified the original MC-384-A/B/C/D/F citations before PR #416 opened. The 2026-05-13 worker-process follow-up re-grounded this page against current `origin/main` after PR #417 and moved the detailed process topology to `docs/architecture/worker-processes.md`.
+
+MC-384-M re-grounded the STT and IPA notes against current `origin/main` after PR #420 (STT chunking) and PR #422 (IPA shrink warnings).
