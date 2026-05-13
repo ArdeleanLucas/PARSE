@@ -194,7 +194,7 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.O
     audio_path = _server._resolve_project_path(source_wav)
     if not audio_path.exists():
         raise FileNotFoundError('Audio file not found: {0}'.format(audio_path))
-    _server._publish_progress(job_id, 0.5, message='Initializing STT provider ({0})'.format(language or 'auto'))
+    _server._publish_progress(job_id, 0.5, message='STT initializing provider ({0})'.format(language or 'auto'))
     try:
         provider = _server.get_stt_provider()
     except Exception as exc:
@@ -202,11 +202,11 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.O
         tb = traceback.format_exc()
         print('[stt] get_stt_provider failed for speaker={0!r}: {1}'.format(speaker, tb), file=_server.sys.stderr, flush=True)
         raise RuntimeError('STT provider init failed: {0}'.format(exc)) from exc
-    _server._publish_progress(job_id, 2.0, message='Loading model')
+    _server._publish_progress(job_id, 2.0, message='STT loading model')
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 98.0)
-        _server._publish_progress(job_id, max(2.0, clamped), message='Transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
+        _server._publish_progress(job_id, max(2.0, clamped), message='STT transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
 
     def _segment_callback(segment: _server.Dict[str, _server.Any]) -> None:
         if not isinstance(segment, dict):

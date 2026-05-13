@@ -1838,7 +1838,7 @@ def _compute_speaker_ortho_concept_windows(
         ortho_words_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
     existing_words = [iv for iv in ortho_words_tier.get('intervals') or [] if isinstance(iv, dict)]
     if job_id:
-        _set_compute_progress(job_id, 70.0, message='Aligning ortho_words (Tier-2)')
+        _set_compute_progress(job_id, 70.0, message='ORTH Tier-2: Aligning ortho_words')
 
     def _tier2_progress_cb(done: int, total: int) -> None:
         if not job_id:
@@ -1848,7 +1848,7 @@ def _compute_speaker_ortho_concept_windows(
         _set_compute_progress(
             job_id,
             pct,
-            message='Aligning ortho_words (Tier-2) {0}/{1}'.format(int(done), int(total)),
+            message='ORTH Tier-2: Aligning ortho_words {0}/{1}'.format(int(done), int(total)),
         )
 
     try:
@@ -1886,10 +1886,10 @@ def _compute_speaker_ortho_concept_windows(
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
     if job_id:
-        _set_compute_progress(job_id, 92.0, message='Writing annotation')
+        _set_compute_progress(job_id, 92.0, message='ORTH Writing annotation')
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
     if job_id:
-        _set_compute_progress(job_id, 95.0, message='Concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
+        _set_compute_progress(job_id, 95.0, message='ORTH Concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
     result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,
@@ -1937,7 +1937,7 @@ def _compute_speaker_ipa_concept_windows(
         ipa_tier = {'type': 'interval', 'display_order': 1, 'intervals': []}
     existing = [iv for iv in ipa_tier.get('intervals') or [] if isinstance(iv, dict)]
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-    _set_compute_progress(job_id, 5.0, message='Loading IPA aligner')
+    _set_compute_progress(job_id, 5.0, message='IPA loading aligner')
     aligner = _server._get_ipa_aligner()
     rows = _server._run_step_on_concept_windows(
         audio_path=audio_path,
@@ -2210,7 +2210,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         total_words = sum((len(seg.get('words') or []) for seg in stt_segments))
 
         def _word_progress(pct: float, n: int) -> None:
-            _set_compute_progress(job_id, 5.0 + pct * 0.9, message='{0}/{1} words'.format(n, total_words))
+            _set_compute_progress(job_id, 5.0 + pct * 0.9, message='IPA {0}/{1} words'.format(n, total_words))
         try:
             import json as _json2
             _ai_cfg2 = _json2.loads((_server._project_root() / 'config' / 'ai_config.json').read_text())
@@ -2312,7 +2312,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             )
             filled += 1
             progress = 5.0 + (idx + 1) / total * 90.0
-            _set_compute_progress(job_id, progress, message='{0}/{1}'.format(idx + 1, total))
+            _set_compute_progress(job_id, progress, message='IPA interval {0}/{1}'.format(idx + 1, total))
     ipa_intervals.sort(key=lambda i: (float(i.get('start', 0.0)), float(i.get('end', 0.0))))
     ipa_tier['intervals'] = ipa_intervals
     tiers['ipa'] = ipa_tier
@@ -2462,7 +2462,7 @@ def _compute_speaker_boundaries(job_id: str, payload: _server.Dict[str, _server.
         ),
     )
 
-    _set_compute_progress(job_id, 90.0, message='Writing tiers.ortho_words')
+    _set_compute_progress(job_id, 90.0, message='ORTH writing tiers.ortho_words')
     if existing_tier is None:
         existing_tier = {'type': 'interval', 'display_order': 4, 'intervals': []}
     existing_tier['intervals'] = combined
@@ -2648,13 +2648,13 @@ def _compute_speaker_ortho(
     if has_existing_text and (not overwrite):
         return {'speaker': speaker, 'filled': 0, 'skipped': True, 'reason': 'ortho tier already populated; pass overwrite=True to replace', 'existing_intervals': len(existing_intervals), 'chunks': []}
     audio_path = _server._pipeline_audio_path_for_speaker(speaker)
-    _set_compute_progress(job_id, 2.0, message='Loading ortho model (razhan)')
+    _set_compute_progress(job_id, 2.0, message='ORTH loading model (razhan)')
     if provider is None:
         provider = _server.get_ortho_provider()
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
-        _set_compute_progress(job_id, max(2.0, clamped), message='Transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
+        _set_compute_progress(job_id, max(2.0, clamped), message='ORTH transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
     from ai.job_cancel import clear_cancel, make_should_cancel
 
     should_cancel = make_should_cancel(job_id)
@@ -2693,7 +2693,7 @@ def _compute_speaker_ortho(
                         _set_compute_progress(
                             job_id,
                             _chunk_progress_pct(int(span['idx']), total_chunks),
-                            message='Chunk {0}/{1} ({2}s-{3}s)'.format(
+                            message='ORTH chunk {0}/{1} ({2}s-{3}s)'.format(
                                 int(span['idx']) + 1,
                                 total_chunks,
                                 int(float(span['start'])),
@@ -2767,16 +2767,16 @@ def _compute_speaker_ortho(
             'cancelled_at_interval': len(new_intervals),
             'chunks': chunk_results,
         }
-        _set_compute_progress(job_id, 99.0, message='Cancelled after {0} intervals'.format(len(new_intervals)))
+        _set_compute_progress(job_id, 99.0, message='ORTH cancelled after {0} intervals'.format(len(new_intervals)))
         return result_payload
-    _set_compute_progress(job_id, 95.0, message='Tier-2 forced alignment')
+    _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
     ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
     refined_additions: _server.List[_server.Dict[str, _server.Any]] = []
     if refine_lexemes:
         concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None
         concept_intervals = [iv for iv in (concept_tier.get('intervals') or [] if concept_tier else []) if isinstance(iv, dict)]
         if concept_intervals:
-            _set_compute_progress(job_id, 97.0, message='Refining lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
+            _set_compute_progress(job_id, 97.0, message='ORTH refining lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
             refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, pad_sec=pad_sec, job_id=job_id, language=language_str)
     merged_words = _server._merge_ortho_words(ortho_words, refined_additions)
     ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
@@ -2791,7 +2791,7 @@ def _compute_speaker_ortho(
         _server._write_json_file(canonical_path, annotation)
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
-    _set_compute_progress(job_id, 99.0, message='Written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
+    _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
     return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals), 'chunks': chunk_results}
 
 
