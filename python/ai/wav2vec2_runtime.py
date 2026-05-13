@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
-from .provider import load_ai_config
+from . import provider as provider_module
 
 
 @dataclass(frozen=True)
@@ -22,16 +22,18 @@ class Wav2Vec2RuntimeOptions:
 
 
 def resolve_wav2vec2_runtime_options(
-    config_loader: Callable[[], Mapping[str, Any]] = load_ai_config,
+    config_loader: Optional[Callable[[], Mapping[str, Any]]] = None,
 ) -> Wav2Vec2RuntimeOptions:
     """Resolve workspace-aware wav2vec2 device options safely.
 
-    Config read failures degrade to the pre-existing conservative behavior:
-    no explicit device and WSL CUDA disabled.
+    Config read failures degrade to the MC-384-Z default: no explicit device,
+    and WSL CUDA is allowed unless ``wav2vec2.allow_wsl_cuda`` is explicitly
+    ``false``.
     """
 
     try:
-        config = config_loader()
+        loader = config_loader or provider_module.load_ai_config
+        config = loader()
         wav2vec2 = config.get("wav2vec2", {}) if isinstance(config, Mapping) else {}
         if not isinstance(wav2vec2, Mapping):
             wav2vec2 = {}
@@ -40,7 +42,7 @@ def resolve_wav2vec2_runtime_options(
         else:
             raw_device = wav2vec2.get("device")
             device = str(raw_device).strip() if raw_device is not None and str(raw_device).strip() else None
-        allow_wsl_cuda = wav2vec2.get("allow_wsl_cuda") is True
+        allow_wsl_cuda = wav2vec2.get("allow_wsl_cuda") is not False
         return Wav2Vec2RuntimeOptions(device=device, allow_wsl_cuda=allow_wsl_cuda)
     except Exception:
-        return Wav2Vec2RuntimeOptions(device=None, allow_wsl_cuda=False)
+        return Wav2Vec2RuntimeOptions(device=None, allow_wsl_cuda=True)

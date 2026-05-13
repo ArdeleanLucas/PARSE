@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import ai.provider as provider_module
+from ai.device import _torch_cuda_available, resolve_compute_device
 
 from .local_whisper import _normalize_whisper_language
 
@@ -166,7 +167,11 @@ class HFWhisperProvider(provider_module.AIProvider):
         self._reject_ct2_model_path_if_present()
 
         self.language = str(section_config.get("language", "")).strip() or None
-        self.device = str(section_config.get("device", "cuda")).strip() or "cuda"
+        self.device = resolve_compute_device(
+            "orth",
+            config_device=section_config.get("device"),
+            section_default="auto",
+        )
         task_raw = str(section_config.get("task", "transcribe") or "transcribe").strip().lower()
         self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
         self.refine_lexemes: bool = provider_module._coerce_bool(
@@ -235,7 +240,7 @@ class HFWhisperProvider(provider_module.AIProvider):
         try:
             import torch  # type: ignore
 
-            if torch.cuda.is_available():
+            if _torch_cuda_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
         except Exception:

@@ -54,6 +54,19 @@ def _ortho_config(**overrides: Any) -> Dict[str, Any]:
     }
 
 
+
+def _install_torch_cuda_stub(monkeypatch: Any) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True,
+                device_count=lambda: 1,
+            )
+        ),
+    )
+
 def _provider(config_section: str, section_config: Dict[str, Any]) -> LocalWhisperProvider:
     return LocalWhisperProvider(
         config={config_section: section_config},
@@ -171,6 +184,7 @@ def test_cpu_fallback_logs_effective_cpu_model_init(
     capsys: Any,
 ) -> None:
     _install_whisper_stub(monkeypatch, _CudaThenCpuWhisperModel)
+    _install_torch_cuda_stub(monkeypatch)
     provider = _provider("ortho", _ortho_config(device="cuda", compute_type="float16"))
 
     provider._load_whisper_model()

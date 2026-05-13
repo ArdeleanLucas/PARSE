@@ -59,7 +59,7 @@ def test_get_ipa_aligner_falls_back_when_ai_config_load_fails(monkeypatch: pytes
 
     assert server._get_ipa_aligner() is not None
 
-    assert calls == [{"device": None, "allow_wsl_cuda": False}]
+    assert calls == [{"device": None, "allow_wsl_cuda": True}]
 
 
 def test_get_ipa_aligner_force_cpu_overrides_configured_cuda(monkeypatch: pytest.MonkeyPatch) -> None:

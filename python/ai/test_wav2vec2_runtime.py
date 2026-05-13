@@ -28,4 +28,4 @@ def test_resolve_wav2vec2_runtime_options_degrades_safe_on_config_failure() -> N
     options = resolve_wav2vec2_runtime_options(broken_config)
 
     assert options.device is None
-    assert options.allow_wsl_cuda is False
+    assert options.allow_wsl_cuda is True

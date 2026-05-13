@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import ai.provider as provider_module
+from ai.device import resolve_compute_device
 
 from .shared import _ORTH_DEFAULT_INITIAL_PROMPT
 
@@ -87,7 +88,12 @@ class LocalWhisperProvider(provider_module.AIProvider):
                     "stt.model_path silently.".format(self.model_path)
                 )
         self.language = str(language or section_config.get("language", "")).strip() or None
-        self.device = str(device or section_config.get("device", "cpu")).strip() or "cpu"
+        device_stage = "orth" if self.config_section == "ortho" else "stt"
+        self.device = resolve_compute_device(
+            device_stage,
+            config_device=device or section_config.get("device"),
+            section_default="auto",
+        )
         self.compute_type = (
             str(compute_type or section_config.get("compute_type", "int8")).strip() or "int8"
         )
@@ -175,13 +181,13 @@ class LocalWhisperProvider(provider_module.AIProvider):
             section_config.get("refine_lexemes", False), default=False
         )
 
-        if provider_module._stt_force_cpu_env() and self.device.lower().startswith("cuda"):
-            print(
-                "[WARN] PARSE_STT_FORCE_CPU set; overriding stt.device "
-                "'{0}' → 'cpu' and compute_type → 'int8' before model load.".format(self.device),
-                file=sys.stderr,
-            )
-            self.device = "cpu"
+        if self.config_section == "stt" and provider_module._stt_force_cpu_env():
+            if self.compute_type != "int8":
+                print(
+                    "[WARN] PARSE_STT_FORCE_CPU set; overriding stt.compute_type "
+                    "'{0}' → 'int8' before model load.".format(self.compute_type),
+                    file=sys.stderr,
+                )
             self.compute_type = "int8"
 
         self._whisper_model: Optional[Any] = None
