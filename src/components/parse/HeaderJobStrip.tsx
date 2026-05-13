@@ -43,16 +43,46 @@ export function friendlyLabel(jobType: string): string {
   return titleCase(segment) || jobType;
 }
 
-const CHUNK_PROGRESS_RE = /(?:^|\b)(?:STT|ORTH|IPA|BND|Boundary|Boundaries)?\s*chunk\s+(\d+)\/(\d+)\s+\(\d+s\s*[-–]\s*\d+s\)/i;
+// Only strip a leading stage token when the chip label already says that same stage.
+const STAGE_PREFIXES = ["STT", "ORTH", "IPA", "BND", "Boundary", "Boundaries"] as const;
+const STAGE_LABELS = new Set<string>(STAGE_PREFIXES);
+const STAGE_PREFIX_RE = /^(STT|ORTH|IPA|BND|Boundary|Boundaries)\s+/i;
+const CHUNK_PROGRESS_RE = /(?:^|\b)(?:(STT|ORTH|IPA|BND|Boundary|Boundaries)\s+)?chunk\s+(\d+)\/(\d+)\s+\(\d+s\s*[-–]\s*\d+s\)/i;
 
-export function chunkInfoFromMessage(message: string | undefined): { current: number; total: number } | null {
+function capitalizeFirst(raw: string): string {
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : raw;
+}
+
+function stageMatchesChipLabel(stage: string | undefined, label: string): boolean {
+  return Boolean(stage) && STAGE_LABELS.has(label) && label.toLowerCase() === String(stage).toLowerCase();
+}
+
+function chunkProgressFromMessage(message: string | undefined): { current: number; total: number; stage?: string } | null {
   if (!message) return null;
   const match = CHUNK_PROGRESS_RE.exec(message);
   if (!match) return null;
-  const current = Number(match[1]);
-  const total = Number(match[2]);
+  const current = Number(match[2]);
+  const total = Number(match[3]);
   if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return null;
-  return { current, total };
+  return { current, total, stage: match[1] };
+}
+
+export function chunkInfoFromMessage(message: string | undefined): { current: number; total: number } | null {
+  const info = chunkProgressFromMessage(message);
+  if (!info) return null;
+  return { current: info.current, total: info.total };
+}
+
+function displayMessageForLabel(label: string, message: string | undefined): string {
+  if (!message) return "";
+  const match = STAGE_PREFIX_RE.exec(message);
+  if (!match || !stageMatchesChipLabel(match[1], label)) return message;
+  return capitalizeFirst(message.slice(match[0].length));
+}
+
+function chunkOverlayText(label: string, chunkInfo: { current: number; total: number; stage?: string }): string {
+  const prefix = stageMatchesChipLabel(chunkInfo.stage, label) || !chunkInfo.stage ? "" : `${chunkInfo.stage} `;
+  return prefix ? `${prefix}chunk ${chunkInfo.current} of ${chunkInfo.total}` : `Chunk ${chunkInfo.current} of ${chunkInfo.total}`;
 }
 
 function isCompleteStatus(status: string): boolean {
@@ -128,7 +158,8 @@ export function HeaderJobStrip({
         const complete = isCompleteStatus(job.status);
         const errored = isErrorStatus(job.status);
         const cancelled = isCancelledStatus(job.status);
-        const chunkInfo = !errored && !complete && !cancelled ? chunkInfoFromMessage(job.message) : null;
+        const chunkInfo = !errored && !complete && !cancelled ? chunkProgressFromMessage(job.message) : null;
+        const displayMessage = displayMessageForLabel(label, job.message);
 
         return (
           <div
@@ -182,14 +213,14 @@ export function HeaderJobStrip({
                     className="rounded-sm bg-indigo-100 px-1.5 py-0.5 font-medium tabular-nums text-indigo-800"
                     title={job.message}
                   >
-                    {`Chunk ${chunkInfo.current} of ${chunkInfo.total}`}
+                    {chunkOverlayText(label, chunkInfo)}
                   </span>
                 )}
                 {typeof job.etaMs === "number" && job.etaMs > 0 && (
                   <span className="tabular-nums text-indigo-600" title="Estimated time remaining">· ~{formatEta(job.etaMs)} left</span>
                 )}
-                {job.message && !chunkInfo && (
-                  <span className="hidden max-w-[180px] truncate text-indigo-600 lg:inline" title={job.message}>{job.message}</span>
+                {displayMessage && !chunkInfo && (
+                  <span className="hidden max-w-[180px] truncate text-indigo-600 lg:inline" title={job.message}>{displayMessage}</span>
                 )}
                 <button
                   onClick={() => { void onCancel(job.jobId); }}
