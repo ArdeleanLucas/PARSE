@@ -16,7 +16,9 @@ added in Tier 3, not here — keeping unit tests hermetic and <1 s.
 from __future__ import annotations
 
 import json
+import numpy as np
 import pathlib
+import pytest
 import sys
 import types
 from typing import Any, List, Sequence, Tuple
@@ -241,6 +243,76 @@ def test_align_segments_handles_mixed_segments(monkeypatch, tmp_path) -> None:
     assert len(out) == 2
     assert len(out[0]) == 1 and out[0][0]["method"] == "wav2vec2"
     assert out[1] == []
+
+
+def test_tier2_align_segments_accepts_tensor_audio(monkeypatch, tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(fa, "_g2p_word", lambda word, language=None: ["j"])
+
+    fake_aligner = _StubAligner(phoneme_tokens_result=[(0, 5)])
+    fake_audio = tmp_path / "clip.wav"
+    fake_audio.write_bytes(b"")
+    audio_tensor = torch.zeros(16000 * 2, dtype=torch.float32)
+
+    out = align_segments(
+        audio_path=fake_audio,
+        segments=[{"words": [{"word": "a", "start": 0.1, "end": 0.5}]}],
+        aligner=fake_aligner,  # type: ignore[arg-type]
+        audio_tensor=audio_tensor,
+    )
+
+    assert len(out) == 1
+    assert out[0][0]["method"] == "wav2vec2"
+
+
+def test_align_segments_converts_numpy_audio_loader_to_torch_tensor(monkeypatch, tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(fa, "_load_audio_mono_16k", lambda path: np.zeros(16000 * 2, dtype=np.float32))
+    monkeypatch.setattr(fa, "_g2p_word", lambda word, language=None: ["j"])
+
+    class _RecordingAligner(_StubAligner):
+        def __init__(self) -> None:
+            super().__init__(phoneme_tokens_result=[(0, 5)])
+            self.saw_torch_tensor = False
+
+        def align_window(self, audio_16k: Any, phoneme_tokens: Sequence[str]) -> Any:
+            assert isinstance(audio_16k, torch.Tensor)
+            assert audio_16k.dtype == torch.float32
+            self.saw_torch_tensor = True
+            return super().align_window(audio_16k, phoneme_tokens)
+
+    fake_aligner = _RecordingAligner()
+    fake_audio = tmp_path / "clip.wav"
+    fake_audio.write_bytes(b"")
+
+    out = align_segments(
+        audio_path=fake_audio,
+        segments=[{"words": [{"word": "a", "start": 0.1, "end": 0.5}]}],
+        aligner=fake_aligner,  # type: ignore[arg-type]
+    )
+
+    assert fake_aligner.saw_torch_tensor is True
+    assert out[0][0]["method"] == "wav2vec2"
+
+
+def test_align_word_rejects_numpy_before_real_aligner_numel(monkeypatch) -> None:
+    pytest.importorskip("torch")
+    monkeypatch.setattr(fa, "_g2p_word", lambda word, language=None: ["j"])
+    aligner = Aligner(
+        model=None,
+        processor=None,
+        device="cpu",
+        vocab={"<pad>": 0, "j": 1},
+        blank_id=0,
+        frame_stride_seconds=0.02,
+    )
+
+    with pytest.raises(AssertionError, match="expected torch.Tensor"):
+        align_word(
+            np.zeros(16000, dtype=np.float32),
+            {"word": "a", "start": 0.1, "end": 0.5},
+            aligner=aligner,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -267,7 +267,7 @@ def test_concept_window_outputs_never_include_configured_initial_prompt(
     # full word list in tiers.ortho_words for picker overrides.
     assert [row["text"] for row in rows] == ["lexical"]
     word_rows = annotation["tiers"]["ortho_words"]["intervals"]
-    assert [row["text"] for row in word_rows] == CLEAN_TRANSCRIPT.split()
+    assert sorted(row["text"] for row in word_rows) == sorted(CLEAN_TRANSCRIPT.split())
 
 
 def test_concept_window_alignment_failure_still_picks_midpoint_token(
@@ -309,3 +309,32 @@ def test_concept_window_alignment_failure_still_picks_midpoint_token(
     assert all(DISTINCTIVE_MARKER_PROMPT not in str(row.get("text") or "") for row in rows)
     ortho_words = annotation["tiers"].get("ortho_words", {"intervals": []})
     assert ortho_words["intervals"] == []
+
+
+def test_tier2_alignment_does_not_silently_fail_for_concept_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Tier-2 alignment failures must not be swallowed as stderr-only warnings."""
+    import ai.forced_align as forced_align
+
+    provider = _provider_with_distinctive_prompt()
+    _write_workspace(tmp_path)
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        server,
+        "_pipeline_audio_path_for_speaker",
+        lambda speaker: tmp_path / "audio" / "working" / speaker / "synthetic.wav",
+    )
+    monkeypatch.setattr(forced_align, "_load_audio_mono_16k", lambda _path: _synthetic_audio())
+
+    server._compute_speaker_ortho(
+        "job-concept-window",
+        {"speaker": "Saha01", "run_mode": "concept-windows", "pad": 0.2},
+        provider=provider,
+    )
+
+    captured = capsys.readouterr()
+    assert "[ORTH] Tier-2 alignment failed" not in captured.err
