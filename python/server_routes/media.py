@@ -1,10 +1,119 @@
 """PARSE server route-domain module: media."""
 from __future__ import annotations
 
+import logging
+
 import server as _server
 from concept_source_item import concept_row_from_item, read_concepts_csv_rows, source_item_from_audition_row
 from concept_registry import concept_label_key, load_concept_registry, merge_concepts_into_root_csv, resolve_or_allocate_concept_id
 from survey_overlap import concept_survey_links_for_row, load_survey_overlap_state, normalize_survey_id, update_survey_overlap_state
+
+logger = logging.getLogger(__name__)
+
+
+def _stt_audio_duration_seconds(path: _server.pathlib.Path) -> float:
+    """Return STT chunking duration from soundfile metadata."""
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(path))
+        duration = getattr(info, 'duration', None)
+        if duration is not None:
+            return max(0.0, float(duration))
+    except Exception as exc:
+        # Preserve historical unit-test/provider behavior for non-decodable dummy
+        # fixtures; real invalid audio will still fail inside the provider.
+        logger.warning('Could not read STT audio duration for %s: %r; using single-shot path', path, exc)
+    return 0.0
+
+
+def _write_audio_slice_to_temp_wav(audio_path: _server.pathlib.Path, start_sec: float, end_sec: float) -> str:
+    """Write ``[start_sec, end_sec)`` from ``audio_path`` to a caller-owned temp WAV."""
+    import soundfile as sf
+    import tempfile
+
+    info = sf.info(str(audio_path))
+    sample_rate = int(getattr(info, 'samplerate', 0) or 0)
+    if sample_rate <= 0:
+        raise RuntimeError('Could not determine sample rate for {0}'.format(audio_path))
+    start_frame = max(0, int(round(float(start_sec) * sample_rate)))
+    stop_frame = max(start_frame, int(round(float(end_sec) * sample_rate)))
+    data, read_sample_rate = sf.read(str(audio_path), start=start_frame, stop=stop_frame, always_2d=False)
+    handle = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+    temp_path = handle.name
+    handle.close()
+    try:
+        sf.write(temp_path, data, int(read_sample_rate or sample_rate))
+    except Exception:
+        try:
+            _server.os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+    return temp_path
+
+
+def _classify_stt_chunk_error(exc: BaseException) -> str:
+    message = str(exc).lower()
+    if isinstance(exc, MemoryError) or any(marker in message for marker in ('cuda out of memory', 'killed', 'oom', '137')):
+        return 'oom_suspect'
+    if 'timeout' in message or 'timed out' in message:
+        return 'timeout'
+    return 'provider_error'
+
+
+def _stt_default_chunk_seconds() -> float:
+    raw_value = str(_server.os.environ.get('PARSE_STT_DEFAULT_CHUNK_MINUTES', '10') or '10').strip()
+    try:
+        minutes = float(raw_value)
+    except (TypeError, ValueError):
+        logger.warning('Invalid PARSE_STT_DEFAULT_CHUNK_MINUTES=%r; falling back to 10 minutes', raw_value)
+        minutes = 10.0
+    return max(0.0, minutes * 60.0)
+
+
+def _stt_chunk_progress_pct(chunk_idx: int, total_chunks: int) -> float:
+    if total_chunks <= 0:
+        return 2.0
+    return min(94.0, 2.0 + (float(chunk_idx) / float(total_chunks)) * 92.0)
+
+
+def _offset_stt_segment_timestamps(segment: _server.Dict[str, _server.Any], offset: float) -> _server.Dict[str, _server.Any]:
+    shifted = dict(segment)
+    for key in ('start', 'end'):
+        if key in shifted:
+            try:
+                shifted[key] = float(shifted[key]) + offset
+            except (TypeError, ValueError):
+                pass
+    words = shifted.get('words')
+    if isinstance(words, list):
+        shifted_words = []
+        for word in words:
+            if not isinstance(word, dict):
+                shifted_words.append(word)
+                continue
+            shifted_word = dict(word)
+            for key in ('start', 'end'):
+                if key in shifted_word:
+                    try:
+                        shifted_word[key] = float(shifted_word[key]) + offset
+                    except (TypeError, ValueError):
+                        pass
+            shifted_words.append(shifted_word)
+        shifted['words'] = shifted_words
+    return shifted
+
+
+def _transcribe_stt_with_callback_fallback(provider: _server.Any, transcribe_kwargs: _server.Dict[str, _server.Any]) -> _server.List[_server.Dict[str, _server.Any]]:
+    try:
+        return provider.transcribe(**transcribe_kwargs)
+    except TypeError as exc:
+        if 'segment_callback' not in str(exc):
+            raise
+        fallback_kwargs = dict(transcribe_kwargs)
+        fallback_kwargs.pop('segment_callback', None)
+        return provider.transcribe(**fallback_kwargs)
 
 def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _server.List[_server.Dict[str, _server.Any]]:
     suggestions_path = _server._project_root() / 'ai_suggestions.json'
@@ -40,13 +149,11 @@ def _load_cached_suggestions(speaker: str, concept_ids: _server.List[str]) -> _s
 def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.Optional[str]) -> _server.Dict[str, _server.Any]:
     """Run STT for ``speaker`` and return the result dict.
 
-    Raises on failure. Terminal job state (_set_job_complete /
-    _set_job_error) is now the dispatcher's responsibility — this
-    function only reports in-progress via _set_job_progress. That
-    lets the same function run cleanly under every compute mode
-    (thread, subprocess, persistent) via the unified compute
-    dispatcher, and also keeps direct callers like
-    ``_compute_full_pipeline`` simple (try/except + read return value).
+    Long full-file STT runs are split into adjacent Tier-1 chunks so each
+    provider call gets fresh decoder state. Terminal job state
+    (_set_job_complete / _set_job_error) remains the dispatcher's
+    responsibility; this function reports in-progress updates and returns the
+    result envelope.
     """
     audio_path = _server._resolve_project_path(source_wav)
     if not audio_path.exists():
@@ -86,21 +193,101 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.O
         if isinstance(words, list) and words:
             partial_segment['words'] = _server.copy.deepcopy(words)
         _server._publish_stt_partial_segment(job_id, partial_segment)
+
+    def _transcribe_single(path: _server.pathlib.Path, *, progress_callback, segment_callback) -> _server.List[_server.Dict[str, _server.Any]]:
+        transcribe_kwargs = {
+            'audio_path': path,
+            'language': language,
+            'progress_callback': progress_callback,
+            'segment_callback': segment_callback,
+        }
+        return _transcribe_stt_with_callback_fallback(provider, transcribe_kwargs)
+
+    duration_sec = _stt_audio_duration_seconds(audio_path)
+    chunk_seconds = _stt_default_chunk_seconds()
+    chunk_results: _server.List[_server.Dict[str, _server.Any]] = []
+    cancelled_requested = False
     try:
-        transcribe_kwargs = {'audio_path': audio_path, 'language': language, 'progress_callback': _progress_callback, 'segment_callback': _segment_callback}
+        from ai.job_cancel import clear_cancel, make_should_cancel
+
+        should_cancel = make_should_cancel(job_id)
+        if chunk_seconds <= 0.0 or duration_sec <= chunk_seconds:
+            try:
+                segments = _transcribe_single(audio_path, progress_callback=_progress_callback, segment_callback=_segment_callback)
+                cancelled_requested = should_cancel()
+            except Exception as exc:
+                import traceback
+                tb = traceback.format_exc()
+                print('[stt] transcribe failed for speaker={0!r} path={1!r}: {2}'.format(speaker, str(audio_path), tb), file=_server.sys.stderr, flush=True)
+                raise RuntimeError('STT transcription failed: {0}'.format(exc)) from exc
+        else:
+            from workers.audio_chunking import merge_chunk_segments, split_audio_duration
+
+            spans = split_audio_duration(duration_sec, chunk_seconds)
+            per_chunk_segments: _server.List[_server.List[_server.Dict[str, _server.Any]]] = []
+            temp_paths: _server.List[str] = []
+            try:
+                total_chunks = len(spans)
+                cumulative_segments = 0
+                for span in spans:
+                    should_cancel = make_should_cancel(job_id)
+                    if should_cancel():
+                        cancelled_requested = True
+                        for remaining_span in spans[int(span['idx']):]:
+                            per_chunk_segments.append([])
+                            chunk_results.append({'idx': remaining_span['idx'], 'span': remaining_span, 'status': 'cancelled'})
+                        break
+                    span_start = float(span['start'])
+                    span_end = float(span['end'])
+                    _server._set_job_progress(
+                        job_id,
+                        _stt_chunk_progress_pct(int(span['idx']), total_chunks),
+                        message='STT chunk {0}/{1} ({2}s–{3}s)'.format(
+                            int(span['idx']) + 1,
+                            total_chunks,
+                            int(span_start),
+                            int(span_end),
+                        ),
+                        segments_processed=cumulative_segments,
+                    )
+                    try:
+                        slice_path = _write_audio_slice_to_temp_wav(audio_path, span_start, span_end)
+                        temp_paths.append(slice_path)
+
+                        def _chunk_segment_callback(segment: _server.Dict[str, _server.Any], *, _offset: float = span_start) -> None:
+                            if isinstance(segment, dict):
+                                _segment_callback(_offset_stt_segment_timestamps(segment, _offset))
+
+                        chunk_segments = _transcribe_single(
+                            _server.pathlib.Path(slice_path),
+                            progress_callback=_progress_callback,
+                            segment_callback=_chunk_segment_callback,
+                        )
+                        per_chunk_segments.append(chunk_segments)
+                        cumulative_segments += len(chunk_segments)
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'ok'})
+                    except MemoryError as exc:
+                        per_chunk_segments.append([])
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'error', 'error_code': 'oom_suspect', 'error': str(exc)})
+                    except Exception as exc:
+                        per_chunk_segments.append([])
+                        chunk_results.append({'idx': span['idx'], 'span': span, 'status': 'error', 'error_code': _classify_stt_chunk_error(exc), 'error': str(exc)})
+                segments = merge_chunk_segments(per_chunk_segments, spans)
+                cancelled_requested = cancelled_requested or make_should_cancel(job_id)()
+            finally:
+                for temp_path in temp_paths:
+                    try:
+                        _server.os.remove(temp_path)
+                    except OSError:
+                        pass
+    finally:
         try:
-            segments = provider.transcribe(**transcribe_kwargs)
-        except TypeError as exc:
-            if 'segment_callback' not in str(exc):
-                raise
-            transcribe_kwargs.pop('segment_callback', None)
-            segments = provider.transcribe(**transcribe_kwargs)
-    except Exception as exc:
-        import traceback
-        tb = traceback.format_exc()
-        print('[stt] transcribe failed for speaker={0!r} path={1!r}: {2}'.format(speaker, str(audio_path), tb), file=_server.sys.stderr, flush=True)
-        raise RuntimeError('STT transcription failed: {0}'.format(exc)) from exc
-    result = {'speaker': speaker, 'sourceWav': str(audio_path), 'language': language, 'segments': segments}
+            clear_cancel(job_id)
+        except Exception:
+            pass
+    result = {'speaker': speaker, 'sourceWav': str(audio_path), 'language': language, 'segments': segments, 'chunks': chunk_results}
+    if cancelled_requested:
+        result['status'] = 'cancelled'
     _server._write_stt_cache(speaker, str(audio_path), language, segments)
     return result
 
