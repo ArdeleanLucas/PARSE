@@ -266,11 +266,41 @@ html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-co
 html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: #66D396 !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: #3D6B4F !important; }
 
+/* ============================================================
+   MC-386-C — Class coverage gaps surfaced by visual QA after MC-386-B.
+   ============================================================ */
+
+/* Teal — Complete badge in SpeakerHeader.tsx uses teal-* not emerald. */
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-teal-50 { background-color: #2A4D3A !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-teal-100 { background-color: rgba(42, 77, 58, 0.6) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-teal-200 { background-color: #2A4D3A !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-teal-700, .text-teal-800) { color: #66D396 !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-teal-200 { --tw-ring-color: #3D6B4F !important; }
+
+/* Indigo gap variants — anything used in src/ but not yet overridden. */
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-200 { background-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-400 { background-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-500 { background-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.border-indigo-500, .border-indigo-600) { border-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-indigo-50\/30:hover { background-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:text-indigo-600:hover { color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-indigo-100 { --tw-ring-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-indigo-200 { color: var(--text-5) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-indigo-400 { color: var(--accent-deep) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-indigo-500 { color: var(--accent) !important; }
+
+/* Sky-800 (sister of sky-700 already mapped) */
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-sky-800 { color: var(--accent-hover) !important; }
+
 /* Violet / fuchsia cognate badges keep their semantic hue but tinted to theme */
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-violet-100 { background-color: var(--special-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-violet-200 { background-color: var(--special-bg) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .text-violet-700 { color: var(--status-special) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-violet-800 { color: var(--status-special) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-fuchsia-100 { background-color: var(--fuchsia-bg) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-fuchsia-200 { background-color: var(--fuchsia-bg) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .text-fuchsia-700 { color: var(--status-fuchsia) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-fuchsia-800 { color: var(--status-fuchsia) !important; }
 
 /* Waveform bars: replace the inline rgb(199, 210, 254) used by SpectrogramSettings/lane renderers */
 html:is(.theme-amber, .theme-violet, .theme-blue) [style*="background: rgb(199, 210, 254)"] { background: var(--wave-bar) !important; }
