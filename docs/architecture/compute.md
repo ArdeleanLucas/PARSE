@@ -2,6 +2,8 @@
 
 This page is the maintainable reference for PARSE compute execution after MC-384 Milestone A. The canonical design input is the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`.
 
+For the process-level view of the worker changes that landed across PRs #411-#417, see [Worker process architecture](worker-processes.md).
+
 ## Overview
 
 PARSE keeps one user-facing compute system but differentiates execution by intent:
@@ -100,6 +102,8 @@ MC-384 Milestone A closes the incident by containing long ORTH work in isolated 
 
 Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema. Backward-compatible callers that only read the top-level `status`, `filled`, `total`, and `ortho_words` fields continue to work.
 
+PR #417 added two UI consumers of this same contract: the header job strip parses `ORTH chunk N/M (STARTs-ENDs)` progress messages into a live `Chunk N of M` pill, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
+
 ## Maintenance rules
 
 When adding a new `compute_type`, keep these routing tables in agreement:
@@ -110,6 +114,6 @@ When adding a new `compute_type`, keep these routing tables in agreement:
 
 A compute type that works in one mode but not another is a contract bug. Add or update tests before shipping a new alias.
 
-## Finalization checklist for MC-384-E
+## Verification lineage
 
-All MC-384-A/B/C/D/F line citations in this document were grep-verified against current `origin/main` before opening the MC-384-E PR.
+MC-384-E grep-verified the original MC-384-A/B/C/D/F citations before PR #416 opened. The 2026-05-13 worker-process follow-up re-grounded this page against current `origin/main` after PR #417 and moved the detailed process topology to `docs/architecture/worker-processes.md`.
