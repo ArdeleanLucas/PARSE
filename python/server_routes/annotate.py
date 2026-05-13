@@ -356,6 +356,7 @@ def _write_stt_cache(
     *,
     source: _server.Optional[str] = None,
 ) -> None:
+    """Writes a FLAT merged segments list. chunks[] lives only in job result envelopes; do not persist it here."""
     speaker_norm = str(speaker or '').strip()
     if not speaker_norm or not isinstance(segments, list) or (not segments):
         return
