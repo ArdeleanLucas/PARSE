@@ -1950,6 +1950,85 @@ def _compute_speaker_ipa_concept_windows(
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
     }
 
+def _ipa_overwrite_shrink_threshold_sec() -> float:
+    raw = _server.os.environ.get('PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC', '60').strip()
+    if not raw:
+        return 60.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def _ipa_interval_end(interval: _server.Any) -> _server.Optional[float]:
+    if not isinstance(interval, dict):
+        return None
+    end = _server._coerce_finite_float(interval.get('end', interval.get('endSec')))
+    if end is None:
+        return None
+    return float(end)
+
+
+def _ipa_overwrite_shrink_warning(
+    speaker: str,
+    *,
+    existing_intervals: _server.List[_server.Dict[str, _server.Any]],
+    projected_intervals: _server.List[_server.Dict[str, _server.Any]],
+) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    threshold = _ipa_overwrite_shrink_threshold_sec()
+    if threshold <= 0 or not existing_intervals:
+        return None
+    existing_ends = [end for end in (_ipa_interval_end(interval) for interval in existing_intervals) if end is not None]
+    projected_ends = [end for end in (_ipa_interval_end(interval) for interval in projected_intervals) if end is not None]
+    previous_end = max(existing_ends, default=0.0)
+    projected_end = max(projected_ends, default=0.0)
+    previous_count = len(existing_intervals)
+    projected_count = len(projected_intervals)
+    end_shrinks = projected_end < previous_end - threshold
+    count_shrinks = projected_count < previous_count * 0.5
+    if not (end_shrinks or count_shrinks):
+        return None
+    logger.info(
+        '[IPA] overwrite shrink-warn speaker=%s prev_end=%.2f projected_end=%.2f prev_count=%d projected_count=%d',
+        speaker,
+        previous_end,
+        projected_end,
+        previous_count,
+        projected_count,
+    )
+    return {
+        'previous_end': float(previous_end),
+        'projected_end': float(projected_end),
+        'previous_count': int(previous_count),
+    }
+
+
+def _ipa_projected_intervals_from_stt_or_ortho(
+    stt_segments: _server.List[_server.Dict[str, _server.Any]],
+    ortho_intervals: _server.List[_server.Dict[str, _server.Any]],
+) -> _server.List[_server.Dict[str, _server.Any]]:
+    projected: _server.List[_server.Dict[str, _server.Any]] = []
+    for segment in stt_segments or []:
+        if not isinstance(segment, dict):
+            continue
+        words = segment.get('words')
+        if isinstance(words, list) and words:
+            for word in words:
+                if isinstance(word, dict) and _ipa_interval_end(word) is not None:
+                    projected.append(word)
+        elif _ipa_interval_end(segment) is not None:
+            projected.append(segment)
+    if projected:
+        return projected
+    return [
+        interval
+        for interval in ortho_intervals
+        if isinstance(interval, dict)
+        and str(interval.get('text') or '').strip()
+        and _ipa_interval_end(interval) is not None
+    ]
+
+
 def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Fill missing IPA cells on a speaker's annotation via acoustic wav2vec2.
 
@@ -2085,6 +2164,13 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     else:
         stt_segments = _server._read_stt_cache(speaker)
         has_words = bool(stt_segments and any((seg.get('words') for seg in stt_segments)))
+    coverage_shrink_warning = None
+    if overwrite:
+        coverage_shrink_warning = _ipa_overwrite_shrink_warning(
+            speaker,
+            existing_intervals=ipa_intervals,
+            projected_intervals=_ipa_projected_intervals_from_stt_or_ortho(stt_segments, ortho_intervals),
+        )
     exception_samples: _server.List[str] = []
     skipped_empty_ortho = 0
     skipped_existing_ipa = 0
@@ -2216,7 +2302,10 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if exception_samples:
         for sample in exception_samples:
             print('[IPA][EXC] {0}'.format(sample), file=_server.sys.stderr, flush=True)
-    return {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
+    result_payload = {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
+    if coverage_shrink_warning is not None:
+        result_payload['coverage_shrink_warning'] = coverage_shrink_warning
+    return result_payload
 
 def _compute_speaker_forced_align(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Run Tier 2 forced alignment for a speaker.

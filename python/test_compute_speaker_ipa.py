@@ -78,6 +78,7 @@ def _seed_annotation(
     ipa: list,
     ortho_words: list | None = None,
     concept: list | None = None,
+    duration: float = 10.0,
 ):
     (tmp_path / "annotations").mkdir(exist_ok=True)
     tiers = {
@@ -97,7 +98,7 @@ def _seed_annotation(
         "project_id": "t",
         "speaker": speaker,
         "source_audio": "x.wav",
-        "source_audio_duration_sec": 10.0,
+        "source_audio_duration_sec": duration,
         "tiers": tiers,
         "metadata": {"language_code": "sdh", "created": "2026-01-01T00:00:00Z", "modified": "2026-01-01T00:00:00Z"},
     }
@@ -243,6 +244,81 @@ def test_overwrite_true_replaces_existing_ipa(tmp_path, monkeypatch):
     assert result["filled"] == 1
     ann = _load_canonical(tmp_path, "Fail02")
     assert ann["tiers"]["ipa"]["intervals"][0]["text"] == "IPA_1"
+
+
+def _install_forced_align_stub(monkeypatch, *, projected_end: float, projected_count: int = 1) -> None:
+    words = [
+        {"start": float(idx), "end": float(idx + 1), "word": f"w{idx}"}
+        for idx in range(max(0, projected_count - 1))
+    ]
+    if projected_count:
+        words.append({"start": max(0.0, projected_end - 1.0), "end": float(projected_end), "word": "last"})
+    monkeypatch.setattr(server, "_read_stt_cache", lambda *_a, **_kw: [{"start": 0.0, "end": projected_end, "words": words}])
+
+    from ai import ipa_transcribe
+
+    def fake_transcribe_words_with_forced_align(*_args, **_kwargs):
+        return [
+            {"start": float(word["start"]), "end": float(word["end"]), "ipa": f"IPA_{idx}"}
+            for idx, word in enumerate(words, start=1)
+        ]
+
+    monkeypatch.setattr(ipa_transcribe, "transcribe_words_with_forced_align", fake_transcribe_words_with_forced_align)
+
+
+def test_ipa_overwrite_warns_on_shrink(tmp_path, monkeypatch):
+    _install_stubs(monkeypatch, tmp_path, _StubAligner())
+    _install_forced_align_stub(monkeypatch, projected_end=1000.0)
+    _seed_annotation(
+        tmp_path,
+        "Fail02",
+        [{"start": 0.0, "end": 1000.0, "text": "short new state"}],
+        [{"start": 0.0, "end": 8000.0, "text": "good prior coverage"}],
+        duration=9000.0,
+    )
+
+    result = server._compute_speaker_ipa("j-shrink", {"speaker": "Fail02", "overwrite": True})
+
+    assert result["coverage_shrink_warning"] == {
+        "previous_end": 8000.0,
+        "projected_end": 1000.0,
+        "previous_count": 1,
+    }
+    assert result["filled"] == 1
+
+
+def test_ipa_overwrite_no_warn_when_grows(tmp_path, monkeypatch):
+    _install_stubs(monkeypatch, tmp_path, _StubAligner())
+    _install_forced_align_stub(monkeypatch, projected_end=1000.0)
+    _seed_annotation(
+        tmp_path,
+        "Fail02",
+        [{"start": 0.0, "end": 1000.0, "text": "longer new state"}],
+        [{"start": 0.0, "end": 800.0, "text": "short prior coverage"}],
+        duration=1200.0,
+    )
+
+    result = server._compute_speaker_ipa("j-grow", {"speaker": "Fail02", "overwrite": True})
+
+    assert "coverage_shrink_warning" not in result
+    assert result["filled"] == 1
+
+
+def test_ipa_overwrite_no_warn_when_shrink_below_threshold(tmp_path, monkeypatch):
+    _install_stubs(monkeypatch, tmp_path, _StubAligner())
+    _install_forced_align_stub(monkeypatch, projected_end=1000.0)
+    _seed_annotation(
+        tmp_path,
+        "Fail02",
+        [{"start": 0.0, "end": 1000.0, "text": "slightly shorter new state"}],
+        [{"start": 0.0, "end": 1055.0, "text": "slightly longer prior coverage"}],
+        duration=1200.0,
+    )
+
+    result = server._compute_speaker_ipa("j-small", {"speaker": "Fail02", "overwrite": True})
+
+    assert "coverage_shrink_warning" not in result
+    assert result["filled"] == 1
 
 
 def test_run_compute_job_dispatches_ipa_only(tmp_path, monkeypatch):
