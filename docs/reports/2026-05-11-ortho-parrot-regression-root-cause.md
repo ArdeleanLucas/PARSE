@@ -48,3 +48,7 @@ That caller override prevents `HFWhisperProvider` from using its configured ORTH
 ## Proposed follow-up
 
 No follow-up implementation lane is needed unless the regression reappears on a different branch or CI base. If it does, the small fix surface is the caller-side `initial_prompt=None` override in `_run_step_on_concept_windows(...)`, not output-string filtering.
+
+**Update 2026-05-13:** The conclusion above was correct on `ab9b679`, where the handoff reproduction passed and no production-code change was needed on that mainline. It was invalidated within 48 hours when the concept-window no-parrot regression resurfaced; the bisect target lives in PR #429 or earlier-merged related work, with the recovery documented in PR #431's bisect output.
+
+The landed 2026-05-13 fix chain is: MC-384-T / PR #431 added the Tier-2 fallback contract so alignment failure preserves the no-parrot pick, then MC-384-U / PR #432 restored the torch-tensor contract at the forced-alignment boundary so numpy arrays no longer reach the `.numel()` consumer. For current canonical behavior, see `docs/architecture/compute.md` §Tier-1 vs Tier-2 ORTH.

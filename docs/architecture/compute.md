@@ -30,18 +30,21 @@ Mode meanings:
 
 ## Nested subprocess wrappers
 
-MC-384 extends the existing nested-subprocess pattern. PR #412 introduced the shared IPA subprocess envelope and standalone IPA full-mode routing:
+MC-384 extends the existing nested-subprocess pattern. PR #412 introduced the shared IPA subprocess envelope and standalone IPA full-mode routing; PR #413 added ORTH isolation, and PR #428 added full-file STT isolation:
 
-- `python/server_routes/annotate.py:2874` — `_isolated_subprocess_error_result()` builds the structured subprocess error result and assigns `oom_suspect`/`timeout` where applicable.
-- `python/server_routes/annotate.py:2952` — `_speaker_ipa_subprocess_entry()` serializes standalone speaker-IPA child outcomes.
-- `python/server_routes/annotate.py:3171` — `_run_in_isolated_subprocess()` owns spawn, timeout, result-file parsing, and envelope error conversion.
-- `python/server_routes/annotate.py:3286` — `_compute_full_pipeline_ipa_in_subprocess()` now delegates to the shared helper.
-- `python/server_routes/annotate.py:3338` — `_compute_speaker_ipa_in_subprocess()` wraps standalone `compute_type='ipa'` full-mode calls.
-- `python/server_routes/annotate.py:2928` — `_speaker_ortho_subprocess_entry()` serializes ORTH child outcomes for isolated full-mode work.
-- `python/server_routes/annotate.py:3299` — `_compute_speaker_ortho_in_subprocess()` wraps standalone/full-pipeline full-mode ORTH calls.
-- `python/server_routes/annotate.py:3331` — `_compute_speaker_ortho_dispatch()` routes full-mode ORTH into the wrapper and scoped ORTH into the fast path.
+- `python/server_routes/jobs.py:291` — `_launch_compute_subprocess()` launches the outer per-job subprocess selected by `PARSE_COMPUTE_MODE=subprocess`.
+- `python/server_routes/jobs.py:362` — `_compute_subprocess_entry()` dispatches the outer per-job child process.
+- `python/server_routes/annotate.py:3011` — `_full_pipeline_ipa_subprocess_entry()` serializes full-pipeline IPA child outcomes.
+- `python/server_routes/annotate.py:3043` — `_speaker_ortho_subprocess_entry()` serializes ORTH child outcomes for isolated full-mode work.
+- `python/server_routes/annotate.py:3067` — `_speaker_ipa_subprocess_entry()` serializes standalone speaker-IPA child outcomes.
+- `python/server_routes/annotate.py:3286` — `_run_in_isolated_subprocess()` owns spawn, timeout, result-file parsing, and envelope error conversion for nested children.
+- `python/server_routes/annotate.py:3401` — `_compute_full_pipeline_ipa_in_subprocess()` delegates full-pipeline IPA to the shared helper.
+- `python/server_routes/annotate.py:3414` — `_compute_speaker_ortho_in_subprocess()` wraps standalone/full-pipeline full-mode ORTH calls.
+- `python/server_routes/annotate.py:3453` — `_compute_speaker_ipa_in_subprocess()` wraps standalone `compute_type='ipa'` full-mode calls.
+- `python/server_routes/media.py:339` — `_run_stt_job_subprocess_entry()` serializes full-file STT child outcomes.
+- `python/server_routes/media.py:371` — `_run_stt_job_in_subprocess()` wraps full-file STT in the shared nested helper.
 
-These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The outer compute mode chooses how the job is launched; the nested wrappers isolate a memory-heavy step inside that job.
+These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The outer compute mode chooses how the job is launched; the nested wrappers isolate memory-heavy STT/ORTH/IPA stages inside that job.
 
 ## Chunking primitives
 
@@ -56,10 +59,12 @@ PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitiv
 
 ORTH has two tiers with different memory profiles:
 
-- Tier-1 coarse ORTH uses `provider.transcribe()` and is the Khan01 OOM vector. Current main calls it through `_transcribe_ortho_with_fallback()` and the chunk loop in `python/server_routes/annotate.py:2554`-`2601` for long full-mode files.
+- Tier-1 coarse ORTH uses `provider.transcribe()` and is the Khan01 OOM vector. Current main calls it through `_transcribe_ortho_with_fallback()` and the chunk loop in `python/server_routes/annotate.py:2669`-`2716` for long full-mode files.
 - Tier-2 word alignment (`tiers.ortho_words`) runs after coarse ORTH and is already windowed enough for Milestone A. It remains unchanged and recomputes once over the merged Tier-1 result.
 
-MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2554`-`2601`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2562`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2601`.
+MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2669`-`2716`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2677`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2716`.
+
+MC-384-T (PR #431) added the Tier-2 fallback contract: if forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than persisting raw Tier-1 text. MC-384-U (PR #432) then fixed the root cause: a numpy ndarray had crossed into a Tier-2 consumer that called `.numel()`, so `python/ai/forced_align.py:565`-`606` now restores the torch-tensor boundary via `_ensure_audio_tensor()` and `_assert_torch_audio()` before `align_word()` consumes audio. The #431 fallback remains defense-in-depth even though #432 restored the tensor contract.
 
 ## Tier-1 STT chunking
 
@@ -82,23 +87,23 @@ Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer 
 
 ## Environment variables
 
-- `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:809` and exported by `scripts/parse-run.sh:100` / `scripts/parse-run.sh:395`.
-- `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:65` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
-- `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC`: MC-384-J2 guard for destructive IPA overwrite reruns; default `60`. Read by `_ipa_overwrite_shrink_threshold_sec()` at `python/server_routes/annotate.py:1954`. This is not an audio-duration chunking knob; it belongs with the compute env-var surface because full-pipeline IPA can surface `coverage_shrink_warning` when newly projected STT/ORTH coverage is much shorter than existing IPA coverage.
-- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3207` for nested isolated subprocesses, default `14400`.
+- `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:811` and exported by `scripts/parse-run.sh:102` / `scripts/parse-run.sh:399`.
+- `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:66` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
+- `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC`: MC-384-J2 guard for destructive IPA overwrite reruns; default `60`. Read by `_ipa_overwrite_shrink_threshold_sec()` at `python/server_routes/annotate.py:1980`. This is not an audio-duration chunking knob; it belongs with the compute env-var surface because full-pipeline IPA can surface `coverage_shrink_warning` when newly projected STT/ORTH coverage is much shorter than existing IPA coverage.
+- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3292` for nested isolated subprocesses, default `14400`.
 - `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
 - `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.
-- `PARSE_FULL_PIPELINE_MIN_MEM_GB`: full-pipeline host-memory preflight threshold; read by `python/server_routes/annotate.py:2722` and documented in `scripts/parse-run.sh:30`.
+- `PARSE_FULL_PIPELINE_MIN_MEM_GB`: full-pipeline host-memory preflight threshold; read by `python/server_routes/annotate.py:2837` and documented in `scripts/parse-run.sh:30`.
 
 ## Subprocess timeout configuration
 
-`PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` defaults to `14400` seconds (4 hours). PR #412 changed nested isolated subprocess timeout handling in `python/server_routes/annotate.py:3207`-`3213`: any positive finite value is respected exactly. The previous 60-second minimum floor was removed for the nested wrapper, so test and debug runs can use values such as `1` second. Values that are zero, negative, non-finite, missing, or unparsable fall back to `14400`.
+`PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` defaults to `14400` seconds (4 hours). PR #412 changed nested isolated subprocess timeout handling in `python/server_routes/annotate.py:3292` / `python/server_routes/annotate.py:3322`-`3328`: any positive finite value is respected exactly. The previous 60-second minimum floor was removed for the nested wrapper, so test and debug runs can use values such as `1` second. Values that are zero, negative, non-finite, missing, or unparsable fall back to `14400`.
 
 The older per-job `PARSE_COMPUTE_MODE=subprocess` launcher still reads the same variable at `python/server_routes/jobs.py:320`; its floor behavior is separate from the nested helper and should be audited before changing that outer launcher contract.
 
 ## Subprocess result envelope
 
-`_run_in_isolated_subprocess()` (`python/server_routes/annotate.py:3171`) uses an internal JSON envelope where child entries write `{ok: true, result: ...}` for successful computations and `{ok: false, error: ..., traceback: ...}` for child failures. `_compute_full_pipeline_ipa_in_subprocess()` (`python/server_routes/annotate.py:3286`) then treats `sub_result.get('status') == 'error'` as the hard subprocess-error sentinel generated by `_isolated_subprocess_error_result()` (`python/server_routes/annotate.py:2874`).
+`_run_in_isolated_subprocess()` (`python/server_routes/annotate.py:3286`) uses an internal JSON envelope where child entries write `{ok: true, result: ...}` for successful computations and `{ok: false, error: ..., traceback: ...}` for child failures. `_compute_full_pipeline_ipa_in_subprocess()` (`python/server_routes/annotate.py:3401`) then treats `sub_result.get('status') == 'error'` as the hard subprocess-error sentinel generated by `_isolated_subprocess_error_result()` (`python/server_routes/annotate.py:2957`).
 
 Contract for subprocess entries: a successful computation must not return a dict whose `status` field is the literal string `error`. If application-level partial failure needs to be surfaced, use a different key such as `failure_reason` or `partial`, or raise and let the subprocess envelope convert the failure. Returning `status='error'` from successful application code collides with the envelope sentinel.
 
@@ -136,8 +141,8 @@ PR #417 added two UI consumers of this same contract: the header job strip parse
 When adding a new `compute_type`, keep these routing tables in agreement:
 
 - `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`; IPA full-mode dispatch is at `python/server_routes/jobs.py:391` and ORTH dispatch uses `_compute_speaker_ortho_dispatch()` at `python/server_routes/jobs.py:397`.
-- `python/server_routes/jobs.py:1025` / `python/server_routes/jobs.py:1031` in `_run_compute_job()` for thread-mode IPA/ORTH dispatch.
-- `python/workers/compute_worker.py:409` `_dispatch()`; IPA full-mode dispatch is at `python/workers/compute_worker.py:424`, and ORTH full-mode dispatch is at `python/workers/compute_worker.py:431`-`435`.
+- `python/server_routes/jobs.py:1027` / `python/server_routes/jobs.py:1031` in `_run_compute_job()` for thread-mode IPA/ORTH dispatch.
+- `python/workers/compute_worker.py:409` `_dispatch()`; IPA full-mode dispatch is at `python/workers/compute_worker.py:428`, and ORTH full-mode dispatch is at `python/workers/compute_worker.py:430`-`435`.
 
 A compute type that works in one mode but not another is a contract bug. Add or update tests before shipping a new alias.
 
@@ -148,3 +153,9 @@ Future Tier-1 long-file stages should consult this page and reuse `python/worker
 MC-384-E grep-verified the original MC-384-A/B/C/D/F citations before PR #416 opened. The 2026-05-13 worker-process follow-up re-grounded this page against current `origin/main` after PR #417 and moved the detailed process topology to `docs/architecture/worker-processes.md`.
 
 MC-384-M re-grounded the STT and IPA notes against current `origin/main` after PR #420 (STT chunking) and PR #422 (IPA shrink warnings).
+
+MC-384-I/L/O/P (PRs #423, #425, #426, #427) hardened the test surface around chunked STT after MC-384-M: I added synthetic-audio fixtures for unit-level chunking assertions, L backfilled stale `source_audio_duration_sec` values across existing workspaces, O added the gated real-WAV long-audio regression behind the `long_audio` pytest marker, and P locked the STT cache shape (flat merged segments; `chunks[]` lives only in job result envelopes) plus the chunk-progress UI contract.
+
+MC-384-N (PR #428) closed the full-file STT subprocess-isolation gap by wrapping `_run_stt_job()` in `_run_stt_job_in_subprocess()` and adding the `_run_stt_job_subprocess_entry()` child boundary plus a structured `[STT]` completion summary log. MC-384-S (PR #430) repaired integration-test drift caused by #428 and MC-384-Q (#429) merging in adjacent windows; #429 also added the compute.md drift guard that ties this document to the chunking env-var and top-level subprocess-wrap surface.
+
+MC-384-T (PR #431) added the Tier-2 fallback contract: when forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than emitting raw Tier-1 text. MC-384-U (PR #432) fixed the root cause — a numpy ndarray reached a consumer that called `.numel()` — by restoring the torch-tensor contract at the Tier-2 boundary, adding an `isinstance` assertion, and shipping a sentinel test that catches future drift loudly rather than via a logged-and-swallowed `AttributeError`.
