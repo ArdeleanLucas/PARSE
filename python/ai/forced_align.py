@@ -419,6 +419,8 @@ class Aligner:
         import torch  # type: ignore
         import torchaudio.functional as AF  # type: ignore
 
+        _assert_torch_audio_tensor(audio_16k, context="Aligner.align_window audio_16k")
+
         target_ids = self.tokens_to_ids(phoneme_tokens)
         if not target_ids:
             return None
@@ -555,6 +557,54 @@ def _g2p_word(word: str, language: str = DEFAULT_G2P_LANGUAGE) -> List[str]:
 # ---------------------------------------------------------------------------
 # Audio helpers
 # ---------------------------------------------------------------------------
+
+
+def _coerce_audio_mono_16k_tensor(audio: Any) -> Any:
+    """Normalize numpy audio fixtures/callers back to the torch-tensor contract.
+
+    ``align_segments`` accepts a pre-loaded ``audio_tensor`` and tests often
+    monkeypatch ``_load_audio_mono_16k``. Both are boundary seams; downstream
+    Tier-2 consumers require a ``torch.Tensor`` because they call ``.numel()``,
+    ``.cpu()``, and ``.numpy()``. Convert numpy arrays here rather than making
+    consumers quietly accept two unrelated audio types.
+    """
+    if audio is None:
+        return audio
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return audio
+    if isinstance(audio, torch.Tensor):
+        return audio
+    module_name = type(audio).__module__.split(".", 1)[0]
+    if module_name != "numpy":
+        return audio
+    tensor = torch.as_tensor(audio, dtype=torch.float32)
+    if tensor.ndim == 2:
+        if tensor.shape[0] == 1:
+            tensor = tensor.squeeze(0)
+        elif tensor.shape[1] == 1:
+            tensor = tensor.squeeze(1)
+        elif int(tensor.shape[0]) <= int(tensor.shape[1]):
+            tensor = tensor.mean(dim=0)
+        else:
+            tensor = tensor.mean(dim=1)
+    elif tensor.ndim > 2:
+        tensor = tensor.reshape(-1)
+    return tensor.contiguous()
+
+
+def _assert_torch_audio_tensor(audio: Any, *, context: str) -> None:
+    """Fail loudly when a real Tier-2 consumer receives non-torch audio."""
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return
+    assert isinstance(audio, torch.Tensor), (
+        "{0} expected torch.Tensor, got {1}. Upstream caller produced non-torch audio; "
+        "convert numpy arrays at the align_segments boundary instead of letting Tier-2 "
+        "fail as a swallowed .numel() AttributeError.".format(context, type(audio).__name__)
+    )
 
 
 def _load_audio_mono_16k(audio_path: Path) -> Any:
@@ -697,6 +747,9 @@ def align_word(
     if not phoneme_tokens:
         return _proportional_fallback(word_span, phoneme_count=0)
 
+    if isinstance(aligner, Aligner):
+        _assert_torch_audio_tensor(audio_full, context="align_word audio_full")
+
     slice_audio, slice_start_sec = _slice_window(
         audio_full, whisper_start, whisper_end, pad_ms=pad_ms
     )
@@ -783,6 +836,7 @@ def align_segments(
         raise FileNotFoundError("Audio file not found: {0}".format(path))
 
     audio_full = audio_tensor if audio_tensor is not None else _load_audio_mono_16k(path)
+    audio_full = _coerce_audio_mono_16k_tensor(audio_full)
 
     # Lazy-load aligner only when there is work to do and caller didn't
     # supply one. A caller (e.g. the MCP job runner) can share a single
