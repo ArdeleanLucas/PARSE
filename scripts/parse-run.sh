@@ -28,6 +28,7 @@
 #   PARSE_COMPUTE_MODE  Explicit compute launcher mode: thread, subprocess, or persistent.
 #                       If unset, the backend keeps its legacy thread default; this script warns loudly.
 #   PARSE_FULL_PIPELINE_MIN_MEM_GB  Host RAM preflight threshold for full_pipeline jobs (backend default: 12).
+#   PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC  IPA overwrite shrink warning threshold in seconds (default: 60; 0 disables).
 #   PARSE_JOB_SNAPSHOT_DIR  Optional durable job-snapshot directory (default: workspace .parse/jobs).
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
 #   PARSE_PULL_MODE  How to integrate origin/main (default: "auto")
@@ -96,6 +97,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_USE_PERSISTENT_WORKER:=}"
 : "${PARSE_COMPUTE_MODE:=}"
 : "${PARSE_FULL_PIPELINE_MIN_MEM_GB:=}"
+: "${PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC:=}"
 # Tier-1 ORTH chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
 : "${PARSE_ORTH_DEFAULT_CHUNK_MINUTES:=10}"
 # Tier-1 STT chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
