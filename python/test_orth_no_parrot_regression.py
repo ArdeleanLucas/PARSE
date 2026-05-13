@@ -268,3 +268,44 @@ def test_concept_window_outputs_never_include_configured_initial_prompt(
     assert [row["text"] for row in rows] == ["lexical"]
     word_rows = annotation["tiers"]["ortho_words"]["intervals"]
     assert [row["text"] for row in word_rows] == CLEAN_TRANSCRIPT.split()
+
+
+def test_concept_window_alignment_failure_still_picks_midpoint_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tier-2 word alignment failures must not persist the full concept-window decode."""
+    import ai.forced_align as forced_align
+
+    provider = _provider_with_distinctive_prompt()
+    _write_workspace(tmp_path)
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "_set_job_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        server,
+        "_pipeline_audio_path_for_speaker",
+        lambda speaker: tmp_path / "audio" / "working" / speaker / "synthetic.wav",
+    )
+    monkeypatch.setattr(forced_align, "_load_audio_mono_16k", lambda _path: _synthetic_audio())
+
+    def fail_tier2_alignment(
+        _audio_path: Path,
+        _rows: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        raise RuntimeError("'numpy.ndarray' object has no attribute 'numel'")
+
+    monkeypatch.setattr(server, "_align_partial_ortho_words", fail_tier2_alignment)
+
+    server._compute_speaker_ortho(
+        "job-concept-window-tier2-failure",
+        {"speaker": "Saha01", "run_mode": "concept-windows", "pad": 0.2},
+        provider=provider,
+    )
+
+    annotation = json.loads((tmp_path / "annotations" / "Saha01.parse.json").read_text(encoding="utf-8"))
+    rows = annotation["tiers"]["ortho"]["intervals"]
+    assert [row["text"] for row in rows] == ["lexical"]
+    assert all(DISTINCTIVE_MARKER_PROMPT not in str(row.get("text") or "") for row in rows)
+    ortho_words = annotation["tiers"].get("ortho_words", {"intervals": []})
+    assert ortho_words["intervals"] == []
