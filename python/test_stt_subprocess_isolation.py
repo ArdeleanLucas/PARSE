@@ -239,7 +239,7 @@ def test_full_pipeline_stt_step_routes_through_subprocess(monkeypatch: pytest.Mo
     result = server._compute_full_pipeline("job-pipeline", {"speaker": "Khan01", "steps": ["stt"], "language": "ckb"})
 
     assert calls == [("job-pipeline", "Khan01", str(audio_path), "ckb")]
-    assert result["results"]["stt"] == {"status": "ok", "segments": 1, "done": True}
+    assert result["results"]["stt"] == {"status": "ok", "segments": 1, "chunks": [], "done": True}
 
 
 def test_compute_stt_full_mode_routes_through_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:

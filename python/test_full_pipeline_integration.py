@@ -9,6 +9,7 @@ IPA writes interval-aligned output from the ORTH tier without loading models.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shutil
 import sys
@@ -227,6 +228,82 @@ def _install_pipeline_mocks(
         return server._full_pipeline_ipa_step_result(dict(sub_result))
 
     monkeypatch.setattr(server, "_compute_full_pipeline_ipa_in_subprocess", inline_ipa)
+
+    def fake_stt_subprocess(job_id: str, speaker: str, source_wav: str, language: str | None) -> dict[str, Any]:
+        """Inline the isolated STT wrapper so the existing provider mock is exercised."""
+        audio_path = pathlib.Path(source_wav)
+        duration_sec = float(sf.info(str(audio_path)).duration)
+        chunk_minutes_env = os.environ.get("PARSE_STT_DEFAULT_CHUNK_MINUTES", "10").strip()
+        try:
+            chunk_minutes = float(chunk_minutes_env) if chunk_minutes_env else 10.0
+        except ValueError:
+            chunk_minutes = 10.0
+        chunk_seconds = chunk_minutes * 60.0
+
+        if chunk_seconds <= 0.0 or duration_sec <= chunk_seconds:
+            segments = stt_provider.transcribe(audio_path=audio_path, language=language)
+            return {
+                "speaker": speaker,
+                "sourceWav": str(audio_path),
+                "language": language,
+                "segments": list(segments),
+                "chunks": [],
+                "duration_sec": duration_sec,
+            }
+
+        from server_routes import media
+        from workers.audio_chunking import merge_chunk_segments, split_audio_duration
+
+        spans = split_audio_duration(duration_sec, chunk_seconds)
+        per_chunk_segments: list[list[dict[str, Any]]] = []
+        chunk_results: list[dict[str, Any]] = []
+        temp_paths: list[str] = []
+        try:
+            for span in spans:
+                try:
+                    slice_path = media._write_audio_slice_to_temp_wav(
+                        audio_path,
+                        float(span["start"]),
+                        float(span["end"]),
+                    )
+                    temp_paths.append(slice_path)
+                    chunk_segments = stt_provider.transcribe(audio_path=pathlib.Path(slice_path), language=language)
+                    per_chunk_segments.append(list(chunk_segments))
+                    chunk_results.append({"idx": span["idx"], "span": span, "status": "ok"})
+                except MemoryError as exc:
+                    per_chunk_segments.append([])
+                    chunk_results.append(
+                        {"idx": span["idx"], "span": span, "status": "error", "error_code": "oom_suspect", "error": str(exc)}
+                    )
+                except Exception as exc:
+                    per_chunk_segments.append([])
+                    chunk_results.append(
+                        {
+                            "idx": span["idx"],
+                            "span": span,
+                            "status": "error",
+                            "error_code": "provider_error",
+                            "error": str(exc),
+                        }
+                    )
+            segments = merge_chunk_segments(per_chunk_segments, spans)
+        finally:
+            for temp_path in temp_paths:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+        return {
+            "speaker": speaker,
+            "sourceWav": str(audio_path),
+            "language": language,
+            "segments": segments,
+            "chunks": chunk_results,
+            "duration_sec": duration_sec,
+        }
+
+    monkeypatch.setattr(server, "_run_stt_job_in_subprocess", fake_stt_subprocess)
     return stt_provider, ortho_provider, ipa_calls
 
 

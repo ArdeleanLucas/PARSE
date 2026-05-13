@@ -19,6 +19,7 @@ RETIRED_ENV_VARS: set[str] = set()
 EXPECTED_SUBPROCESS_FUNCS = {
     "_compute_speaker_ortho_in_subprocess",
     "_compute_full_pipeline_ipa_in_subprocess",
+    "_run_stt_job_in_subprocess",
 }
 
 
