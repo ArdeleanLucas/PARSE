@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LaneKind } from "../../stores/transcriptionLanesStore";
 import { TranscriptionLaneRow, type LaneStrip } from "./TranscriptionLaneRow";
 
@@ -12,6 +12,41 @@ function makeStrip(overrides: Partial<LaneStrip> = {}): LaneStrip {
     sourceIndices: [4],
     ...overrides,
   };
+}
+
+afterEach(() => {
+  cleanup();
+  document.documentElement.classList.remove('theme-amber', 'theme-violet', 'theme-blue', 'dark');
+});
+
+function renderLaneRow(overrides: Partial<Parameters<typeof TranscriptionLaneRow>[0]> = {}) {
+  const strip = makeStrip(overrides.strip as Partial<LaneStrip> | undefined);
+  return render(
+    <TranscriptionLaneRow
+      color="#059669"
+      editing={null}
+      firstIdx={0}
+      innerWidth={1200}
+      isEmpty={false}
+      pendingDrag={null}
+      pxPerSec={120}
+      selectedInterval={null}
+      showEmptyHint={false}
+      speaker="Fail01"
+      strip={strip}
+      visible={strip.intervals}
+      visibleSourceIndices={strip.sourceIndices}
+      onBeginDrag={vi.fn()}
+      onCommitEdit={vi.fn()}
+      onContextMenu={vi.fn()}
+      onDoubleClickInterval={vi.fn()}
+      onSeekInterval={vi.fn()}
+      setEditRef={vi.fn()}
+      setEditing={vi.fn()}
+      setLaneScrollRef={vi.fn()}
+      {...overrides}
+    />,
+  );
 }
 
 describe("TranscriptionLaneRow", () => {
@@ -118,4 +153,34 @@ describe("TranscriptionLaneRow", () => {
     });
     expect(onBeginDrag).toHaveBeenCalled();
   });
+
+  it("updates lane segment styling when the dark theme class changes after mount", async () => {
+    renderLaneRow();
+
+    const segment = screen.getByRole("button", { name: "STT 1.00s: segment text" });
+    expect(segment.getAttribute("style") ?? "").toContain("background-color: rgb(");
+    expect(segment.getAttribute("style") ?? "").toContain("color: rgb(51, 65, 85)");
+
+    await act(async () => {
+      document.documentElement.classList.add("theme-amber");
+      await Promise.resolve();
+    });
+
+    const updatedStyle = segment.getAttribute("style") ?? "";
+    expect(updatedStyle).toContain("background-color: var(--bg-surface)");
+    expect(updatedStyle).toContain("border-left: 3px solid rgb(5, 150, 105)");
+    expect(updatedStyle).toContain("color: rgb(5, 150, 105)");
+    expect(updatedStyle).toContain("font-weight: 500");
+  });
+
+  it("renders pending drag regions with a neutral dark background in dark themes", () => {
+    document.documentElement.classList.add("theme-amber");
+    const { container } = renderLaneRow({
+      pendingDrag: { kind: "stt", tier: "stt", startSec: 1, endSec: 1.5 },
+    });
+
+    const pending = container.querySelector(".border-dashed") as HTMLElement;
+    expect(pending.getAttribute("style") ?? "").toContain("background-color: rgba(0, 0, 0, 0.25)");
+  });
+
 });

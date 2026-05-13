@@ -369,6 +369,7 @@ export function ConceptSidebar({
             <div className="inline-flex rounded-md bg-slate-100 p-0.5">
               <button
                 data-testid="concept-sort-parent-concept"
+                data-toggle-state={sortParent === 'concept' ? 'on' : 'off'}
                 type="button"
                 onClick={() => onSortParentChange('concept')}
                 className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sortParent === 'concept' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
@@ -377,6 +378,7 @@ export function ConceptSidebar({
               </button>
               <button
                 data-testid="concept-sort-parent-source"
+                data-toggle-state={sortParent === 'source' ? 'on' : 'off'}
                 type="button"
                 onClick={() => { if (!sourceDisabled) onSortParentChange('source'); }}
                 aria-disabled={sourceDisabled ? 'true' : undefined}
@@ -422,6 +424,7 @@ export function ConceptSidebar({
               <div className="inline-flex rounded-md bg-slate-100 p-0.5">
                 <button
                   data-testid="concept-sort-az"
+                  data-toggle-state={conceptSub === 'az' ? 'on' : 'off'}
                   type="button"
                   onClick={() => onConceptSubChange('az')}
                   title="Sort alphabetically by label"
@@ -431,6 +434,7 @@ export function ConceptSidebar({
                 </button>
                 <button
                   data-testid="concept-sort-1n"
+                  data-toggle-state={conceptSub === '1n' ? 'on' : 'off'}
                   type="button"
                   onClick={() => onConceptSubChange('1n')}
                   title="Sort by concept id"
@@ -446,6 +450,7 @@ export function ConceptSidebar({
               <div className="inline-flex rounded-md bg-sky-50 p-0.5">
                 <button
                   data-testid="concept-sort-source-time"
+                  data-toggle-state={sourceSub === 'time' ? 'on' : 'off'}
                   type="button"
                   onClick={() => onSourceSubChange('time')}
                   className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sourceSub === 'time' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-700 hover:bg-sky-200'}`}
@@ -454,6 +459,7 @@ export function ConceptSidebar({
                 </button>
                 <button
                   data-testid="concept-sort-source-row"
+                  data-toggle-state={sourceSub === 'row' ? 'on' : 'off'}
                   type="button"
                   onClick={() => onSourceSubChange('row')}
                   className={`px-2 py-0.5 text-[10px] font-semibold rounded ${sourceSub === 'row' ? 'bg-sky-600 text-white shadow-sm' : 'text-sky-700 hover:bg-sky-200'}`}

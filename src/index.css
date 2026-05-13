@@ -21,6 +21,7 @@ html.theme-blue {
 html.theme-amber {
   --bg-page:       #0E141B;
   --bg-card:       #141B24;
+  --bg-surface:    #141B24;
   --bg-elevated:   #1B222C;
   --bg-hover:      #232B38;
   --bg-deep:       #0A0E13;
@@ -71,6 +72,7 @@ html.theme-amber {
 html.theme-violet {
   --bg-page:       #0D0F13;
   --bg-card:       #13161B;
+  --bg-surface:    #13161B;
   --bg-elevated:   #191D24;
   --bg-hover:      #22272F;
   --bg-deep:       #08090C;
@@ -121,6 +123,7 @@ html.theme-violet {
 html.theme-blue {
   --bg-page:       #0A0E1A;
   --bg-card:       #0F1422;
+  --bg-surface:    #0F1422;
   --bg-elevated:   #161C2E;
   --bg-hover:      #1F2638;
   --bg-deep:       #060912;
@@ -214,13 +217,38 @@ html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-indigo-700:hover { 
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-indigo-900, .text-indigo-800, .text-indigo-700, .text-indigo-600) { color: var(--accent) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .ring-indigo-200 { --tw-ring-color: var(--accent-strong) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .border-indigo-100 { border-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .border-indigo-200 { border-color: var(--accent-strong) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .border-indigo-300 { border-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-indigo-100:hover { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-indigo-50:hover { background-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:border-indigo-200:hover { border-color: var(--accent-strong) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:text-indigo-700:hover { color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:text-indigo-800:hover { color: var(--accent-hover) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:border-indigo-300:focus { border-color: var(--accent) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:ring-indigo-100:focus { --tw-ring-color: var(--accent-strong) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:ring-indigo-50:focus { --tw-ring-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .focus\:ring-indigo-400:focus { --tw-ring-color: var(--accent-strong) !important; }
 
 /* Gradient stops flatten to the theme accent */
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.from-indigo-500, .from-indigo-600, .via-violet-600) { --tw-gradient-from: var(--accent) !important; --tw-gradient-via: var(--accent) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.to-violet-600, .to-fuchsia-600) { --tw-gradient-to: var(--accent-deep) !important; }
+
+/* Sky family — used by Concept|Source + ORDER BY toggles */
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-sky-50, .bg-sky-100) { background-color: var(--accent-faint) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-sky-200,
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-sky-100:hover,
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-sky-200:hover { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-sky-600 { background-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-sky-700, .text-sky-700\/80) { color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .border-sky-200 { border-color: var(--accent-strong) !important; }
+
+/* Active toggle state — solid amber regardless of underlying Tailwind classes.
+   Specificity beats hover sky-200 above. */
+html:is(.theme-amber, .theme-violet, .theme-blue) [data-toggle-state="on"] {
+  background-color: var(--accent) !important;
+  color: var(--accent-text) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4) !important;
+}
 
 /* Status: amber / rose / emerald soft badges */
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-amber-50, .bg-amber-50\/40) { background-color: var(--warning-bg) !important; }
@@ -234,9 +262,9 @@ html:is(.theme-amber, .theme-violet, .theme-blue) :is(.text-rose-600, .text-rose
 html:is(.theme-amber, .theme-violet, .theme-blue) .border-rose-200 { border-color: var(--danger-border) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .ring-rose-200 { --tw-ring-color: var(--danger-border) !important; }
 
-html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-color: var(--success-bg) !important; }
-html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: var(--status-success) !important; }
-html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: var(--success-border) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-color: #2A4D3A !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: #66D396 !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: #3D6B4F !important; }
 
 /* Violet / fuchsia cognate badges keep their semantic hue but tinted to theme */
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-violet-100 { background-color: var(--special-bg) !important; }
@@ -253,3 +281,44 @@ html:is(.theme-amber, .theme-violet, .theme-blue) kbd.bg-slate-100 { background-
 /* Shadows */
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.shadow-sm, .shadow) { box-shadow: var(--shadow-1) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .shadow-lg { box-shadow: var(--shadow-2) !important; }
+
+/* ============================================================
+   Native scrollbars — scoped to dark themes only.
+   Idle = neutral (border-strong); hover/drag = amber accent.
+   Cascades to every native scrollbar in the app (waveform,
+   concept list, modals, right panel) for consistent look.
+   ============================================================ */
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar {
+  width: 10px;
+  height: 12px;
+}
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+  border: 2px solid var(--bg-deep);
+  transition: background 0.15s;
+}
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-thumb:hover,
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-thumb:active {
+  background: var(--accent);
+}
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-button {
+  background: var(--bg-elevated);
+  border: none;
+  height: 14px;
+  width: 14px;
+}
+html:is(.theme-amber, .theme-violet, .theme-blue) ::-webkit-scrollbar-corner {
+  background: var(--bg-deep);
+}
+
+/* Firefox — single declarative property; transition not supported but the
+   thumb still recolors on hover when interacted with. */
+html.theme-amber,
+html.theme-violet,
+html.theme-blue {
+  scrollbar-color: var(--border-strong) var(--bg-deep);
+}

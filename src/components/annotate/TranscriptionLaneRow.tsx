@@ -1,4 +1,5 @@
 import type React from "react";
+import { useIsDarkTheme } from "../../hooks/useIsDarkTheme";
 import type { LaneKind } from "../../stores/transcriptionLanesStore";
 
 export interface LaneInterval {
@@ -78,6 +79,8 @@ export function TranscriptionLaneRow({
   setEditing: (editing: { kind: LaneKind; index: number } | null) => void;
   setLaneScrollRef: (kind: LaneKind, element: HTMLDivElement | null) => void;
 }) {
+  const isDark = useIsDarkTheme();
+
   return (
     <div className="relative flex items-stretch">
       <div
@@ -124,7 +127,7 @@ export function TranscriptionLaneRow({
                     left: a * pxPerSec,
                     width: Math.max(1, (b - a) * pxPerSec),
                     borderColor: color,
-                    backgroundColor: withAlpha(color, 0.12),
+                    backgroundColor: isDark ? 'rgba(0,0,0,0.25)' : withAlpha(color, 0.12),
                   }}
                 />
               );
@@ -149,9 +152,12 @@ export function TranscriptionLaneRow({
               const baseStyle: React.CSSProperties = {
                 left,
                 width,
-                backgroundColor: withAlpha(ivColor, isSelected ? 0.28 : 0.14),
-                borderLeft: `2px solid ${ivColor}`,
-                color: "#334155",
+                backgroundColor: isDark
+                  ? (isSelected ? 'var(--bg-elevated)' : 'var(--bg-surface)')
+                  : withAlpha(ivColor, isSelected ? 0.28 : 0.14),
+                borderLeft: `${isDark ? 3 : 2}px solid ${ivColor}`,
+                color: isDark ? ivColor : "#334155",
+                fontWeight: isDark ? 500 : 400,
                 ...({ ["--tw-ring-color"]: ivColor } as React.CSSProperties),
               };
 

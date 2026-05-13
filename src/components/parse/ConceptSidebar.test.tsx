@@ -168,6 +168,36 @@ describe('ConceptSidebar', () => {
     expect(screen.getByText('Fail01')).toBeTruthy();
   });
 
+  it('marks active and inactive sort toggles with data-toggle-state', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="source"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={baseConcepts}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={baseTags}
+        activeConceptId={1}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+      />,
+    );
+
+    expect(screen.getByTestId('concept-sort-parent-concept').getAttribute('data-toggle-state')).toBe('off');
+    expect(screen.getByTestId('concept-sort-parent-source').getAttribute('data-toggle-state')).toBe('on');
+    expect(screen.getByTestId('concept-sort-source-time').getAttribute('data-toggle-state')).toBe('on');
+    expect(screen.getByTestId('concept-sort-source-row').getAttribute('data-toggle-state')).toBe('off');
+  });
+
   it('keeps Source disabled as a no-op until exactly one speaker is selected', () => {
     const onSortParentChange = vi.fn();
     render(
