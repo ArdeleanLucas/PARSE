@@ -1,4 +1,5 @@
 """Tests for _run_normalize_job inplace (src==dst) handling."""
+import json
 import pathlib
 import struct
 import subprocess
@@ -12,6 +13,46 @@ import server
 def _stub_ffmpeg_output(dest_path: pathlib.Path, *, bytes_: bytes = b"RIFF0000WAVEfmt \x01\x00\x01\x00\x40\x1f\x00\x00") -> None:
     """Write a small file where ffmpeg would have written its output."""
     dest_path.write_bytes(bytes_)
+
+
+def _write_silence_wav(dest_path: pathlib.Path, *, duration_sec: float, sample_rate: int = 16000) -> None:
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    frame_count = int(duration_sec * sample_rate)
+    with wave.open(str(dest_path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        chunk = struct.pack("<16000h", *([0] * 16000))
+        full_chunks, remainder = divmod(frame_count, 16000)
+        for _ in range(full_chunks):
+            w.writeframes(chunk)
+        if remainder:
+            w.writeframes(struct.pack(f"<{remainder}h", *([0] * remainder)))
+
+
+def _seed_annotation(project_root: pathlib.Path, speaker: str, *, duration: float) -> pathlib.Path:
+    annotation_path = project_root / "annotations" / f"{speaker}.parse.json"
+    annotation_path.parent.mkdir(parents=True, exist_ok=True)
+    annotation_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_id": "t",
+                "speaker": speaker,
+                "source_audio": f"audio/working/{speaker}/source.wav",
+                "source_audio_duration_sec": duration,
+                "tiers": {
+                    "ipa": {"type": "interval", "display_order": 1, "intervals": []},
+                    "ortho": {"type": "interval", "display_order": 2, "intervals": []},
+                    "concept": {"type": "interval", "display_order": 3, "intervals": []},
+                    "speaker": {"type": "interval", "display_order": 4, "intervals": []},
+                },
+                "metadata": {"language_code": "sdh", "created": "2026-01-01T00:00:00Z", "modified": "2026-01-01T00:00:00Z"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return annotation_path
 
 
 def _fake_run(results_by_cmd):
@@ -132,3 +173,39 @@ def test_inplace_ffmpeg_failure_cleans_up_temp_and_reports_exit_code(tmp_path, m
     assert not (tmp_path / "audio/working/Fail01" / "Faili_M_1984.normalized.tmp.wav").exists()
     # Original source should remain untouched
     assert wav_path.exists()
+
+
+def test_normalize_refreshes_source_audio_duration(tmp_path, monkeypatch):
+    server._jobs.clear()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    annotation_path = _seed_annotation(tmp_path, "Fail01", duration=12000.0)
+    _seed_workspace_wav(tmp_path, "Fail01", "source.wav")
+
+    def runner(cmd, *args, **kwargs):
+        if "null" in cmd:
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+        _write_silence_wav(pathlib.Path(cmd[-1]), duration_sec=60.0)
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(server.subprocess, "run", runner)
+
+    job_id = server._create_job("normalize", {"speaker": "Fail01"})
+    server._run_normalize_job(job_id, "Fail01", "audio/working/Fail01/source.wav")
+
+    assert server._jobs[job_id]["status"] == "complete"
+    refreshed = json.loads(annotation_path.read_text(encoding="utf-8"))
+    assert refreshed["source_audio_duration_sec"] == 60.0
+
+
+def test_refresh_source_audio_duration_noops_when_already_within_one_second(tmp_path, monkeypatch):
+    server._jobs.clear()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    annotation_path = _seed_annotation(tmp_path, "Fail01", duration=60.4)
+    wav_path = tmp_path / "audio" / "working" / "Fail01" / "source.wav"
+    _write_silence_wav(wav_path, duration_sec=60.0)
+    before = annotation_path.read_text(encoding="utf-8")
+
+    changed = server._refresh_source_audio_duration("Fail01", wav_path)
+
+    assert changed is False
+    assert annotation_path.read_text(encoding="utf-8") == before

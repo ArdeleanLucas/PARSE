@@ -599,6 +599,51 @@ def _run_onboard_speaker_job(job_id: str, speaker: str, wav_dest: _server.pathli
     except Exception as exc:
         _server._set_job_error(job_id, str(exc))
 
+def _refresh_source_audio_duration(speaker: str, normalized_path: _server.pathlib.Path) -> bool:
+    """Refresh annotation duration from the normalized working WAV.
+
+    Returns True only when the annotation was rewritten. The tolerance avoids
+    no-op churn from encoder/decoder duration rounding.
+    """
+    try:
+        import soundfile as sf
+
+        actual_duration = round(float(sf.info(str(normalized_path)).duration), 6)
+    except Exception as exc:
+        print(
+            '[normalize] could not read duration for {0}: {1}'.format(normalized_path, exc),
+            file=_server.sys.stderr,
+            flush=True,
+        )
+        return False
+    try:
+        annotation_path = _server._annotation_read_path_for_speaker(speaker)
+    except Exception as exc:
+        print(
+            '[normalize] could not resolve annotation for {0}: {1}'.format(speaker, exc),
+            file=_server.sys.stderr,
+            flush=True,
+        )
+        return False
+    if not annotation_path.is_file():
+        return False
+    annotation = _server._read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        return False
+    try:
+        existing = float(annotation.get('source_audio_duration_sec'))
+    except (TypeError, ValueError):
+        existing = None
+    if existing is not None and abs(existing - actual_duration) < 1.0:
+        return False
+    annotation['source_audio_duration_sec'] = float(actual_duration)
+    _server._write_json_file(annotation_path, annotation)
+    canonical_path = _server._annotation_record_path_for_speaker(speaker)
+    if canonical_path != annotation_path:
+        _server._write_json_file(canonical_path, annotation)
+    return True
+
+
 def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
     """Background worker — runs ffmpeg loudnorm to normalize audio to LUFS target."""
     try:
@@ -659,9 +704,10 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
             raise RuntimeError('ffmpeg produced no output file')
         if inplace:
             _server.os.replace(str(write_path), str(output_path))
+        duration_refreshed = _server._refresh_source_audio_duration(speaker, output_path)
         _server._set_job_progress(job_id, 95.0, message='Finalizing')
         output_relative = str(output_path.relative_to(_server._project_root()))
-        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'sourcePath': source_wav, 'normalizedPath': output_relative}
+        result: _server.Dict[str, _server.Any] = {'speaker': speaker, 'sourcePath': source_wav, 'normalizedPath': output_relative, 'sourceAudioDurationRefreshed': duration_refreshed}
         _server._set_job_complete(job_id, result, message='Normalization complete')
     except Exception as exc:
         _server._set_job_error(job_id, str(exc))
@@ -825,5 +871,5 @@ def _api_get_spectrogram(self) -> None:
     except BrokenPipeError:
         pass
 
-__all__ = ['_load_cached_suggestions', '_run_stt_job', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
+__all__ = ['_load_cached_suggestions', '_run_stt_job', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_refresh_source_audio_duration', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
 
