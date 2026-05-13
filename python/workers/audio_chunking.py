@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
-
-from typing_extensions import NotRequired
+from typing import Literal, NotRequired, TypedDict
 
 __all__ = ["ChunkResult", "ChunkSpan", "merge_chunk_segments", "split_audio_duration"]
 

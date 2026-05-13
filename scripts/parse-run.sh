@@ -98,6 +98,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_FULL_PIPELINE_MIN_MEM_GB:=}"
 # Tier-1 ORTH chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
 : "${PARSE_ORTH_DEFAULT_CHUNK_MINUTES:=10}"
+# Tier-1 STT chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
+: "${PARSE_STT_DEFAULT_CHUNK_MINUTES:=10}"
 : "${PARSE_JOB_SNAPSHOT_DIR:=}"
 
 API_STDOUT_LOG="/tmp/parse_api_stdout.log"
@@ -393,6 +395,7 @@ start_api() {
       PARSE_COMPUTE_MODE="${PARSE_COMPUTE_MODE}" \
       PARSE_FULL_PIPELINE_MIN_MEM_GB="${PARSE_FULL_PIPELINE_MIN_MEM_GB}" \
       PARSE_ORTH_DEFAULT_CHUNK_MINUTES="${PARSE_ORTH_DEFAULT_CHUNK_MINUTES}" \
+      PARSE_STT_DEFAULT_CHUNK_MINUTES="${PARSE_STT_DEFAULT_CHUNK_MINUTES}" \
       PARSE_JOB_SNAPSHOT_DIR="${PARSE_JOB_SNAPSHOT_DIR}" \
       "${PARSE_PY}" -u "${PARSE_ROOT}/python/server.py" \
       >"${API_STDOUT_LOG}" 2>"${API_STDERR_LOG}"
