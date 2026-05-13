@@ -1243,6 +1243,27 @@ def _pick_lexeme_word_for_concept(
     return best
 
 
+def _pick_midpoint_token_from_text(text: _server.Any) -> _server.Optional[str]:
+    tokens = [token.strip() for token in str(text or '').split() if token.strip()]
+    if not tokens:
+        return None
+    return tokens[len(tokens) // 2]
+
+
+def _concept_window_matches_row(
+    row: _server.Dict[str, _server.Any],
+    concept_iv: _server.Dict[str, _server.Any],
+) -> bool:
+    try:
+        row_start = float(row.get('start', 0.0) or 0.0)
+        row_end = float(row.get('end', row_start) or row_start)
+        c_start = float(concept_iv.get('start', 0.0) or 0.0)
+        c_end = float(concept_iv.get('end', c_start) or c_start)
+    except (TypeError, ValueError):
+        return False
+    return abs(row_start - c_start) <= _server.ANNOTATION_MATCH_EPSILON and abs(row_end - c_end) <= _server.ANNOTATION_MATCH_EPSILON
+
+
 def _concept_id_from_interval(interval: _server.Dict[str, _server.Any]) -> str:
     for key in ('conceptId', 'concept_id', 'id', 'text'):
         raw = interval.get(key)
@@ -1837,20 +1858,15 @@ def _compute_speaker_ortho_concept_windows(
         for ortho_row in ortho_tier.get('intervals') or []:
             if not isinstance(ortho_row, dict):
                 continue
-            try:
-                row_start = float(ortho_row.get('start', 0.0) or 0.0)
-                row_end = float(ortho_row.get('end', row_start) or row_start)
-            except (TypeError, ValueError):
-                continue
             for concept_iv in concept_intervals:
+                if not _concept_window_matches_row(ortho_row, concept_iv):
+                    continue
                 try:
                     c_start = float(concept_iv.get('start', 0.0) or 0.0)
                     c_end = float(concept_iv.get('end', c_start) or c_start)
                 except (TypeError, ValueError):
                     continue
-                if abs(row_start - c_start) > _server.ANNOTATION_MATCH_EPSILON or abs(row_end - c_end) > _server.ANNOTATION_MATCH_EPSILON:
-                    continue
-                picked = _server._pick_lexeme_word_for_concept(c_start, c_end, partial_words)
+                picked = _pick_lexeme_word_for_concept(c_start, c_end, partial_words)
                 if picked is not None:
                     picked_text = picked.get('text')
                     if isinstance(picked_text, str) and picked_text.strip():
@@ -1858,6 +1874,15 @@ def _compute_speaker_ortho_concept_windows(
                 break
     except Exception:
         logger.exception("concept-window ORTH: failed to rebuild ortho_words for speaker %s", speaker)
+        # No-parrot contract: never leave full short-clip decodes in concept ORTH; see test_orth_no_parrot_regression.py.
+        for ortho_row in ortho_tier.get('intervals') or []:
+            if not isinstance(ortho_row, dict):
+                continue
+            if not any(_concept_window_matches_row(ortho_row, concept_iv) for concept_iv in concept_intervals):
+                continue
+            fallback_text = _pick_midpoint_token_from_text(ortho_row.get('text'))
+            if fallback_text:
+                ortho_row['text'] = fallback_text
     annotation['tiers'] = tiers
     _server._annotation_touch_metadata(annotation, preserve_created=True)
     if job_id:
