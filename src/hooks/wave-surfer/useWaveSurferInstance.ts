@@ -8,6 +8,7 @@ import { usePlaybackStore } from "../../stores/playbackStore";
 import { loadWaveSurferAudio } from "./useWaveSurferPeaks";
 import { isInteractiveTarget, clamp } from "./useWaveSurferPlayback";
 import { isQuickRetimeRegion } from "./useWaveSurferRegions";
+import { injectWavesurferScrollbarStyles } from "./scrollbarStyles";
 import type { UseWaveSurferOptions, WaveSurferRefs } from "./types";
 
 export function useWaveSurferInstance(
@@ -57,6 +58,15 @@ export function useWaveSurferInstance(
     wsRef.current = ws;
     regionsRef.current = regions;
     activeRegionRef.current = null;
+
+    try {
+      const wrapper = ws.getWrapper?.();
+      if (wrapper instanceof HTMLElement) {
+        injectWavesurferScrollbarStyles(wrapper);
+      }
+    } catch {
+      // Non-fatal: never break audio playback over a style injection failure.
+    }
 
     ws.on("timeupdate", (time: number) => {
       const stopAt = clipEndRef.current;
