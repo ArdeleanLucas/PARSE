@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+markers = [
+    "long_audio: real-WAV regression tests that load faster-whisper and run minutes-long inference. Skipped by default; run with -m long_audio.",
+]
