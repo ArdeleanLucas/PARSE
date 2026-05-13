@@ -78,6 +78,42 @@ def _stt_chunk_progress_pct(chunk_idx: int, total_chunks: int) -> float:
     return min(94.0, 2.0 + (float(chunk_idx) / float(total_chunks)) * 92.0)
 
 
+def _stt_coverage_end_sec(segments: _server.List[_server.Dict[str, _server.Any]]) -> float:
+    """Return the final non-empty STT segment end timestamp."""
+    end_sec = 0.0
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        if not str(segment.get('text') or '').strip():
+            continue
+        try:
+            segment_end = float(segment.get('end') or 0.0)
+        except (TypeError, ValueError):
+            continue
+        end_sec = max(end_sec, segment_end)
+    return end_sec
+
+
+def _emit_stt_summary_log(job_id: str, speaker: str, result: _server.Dict[str, _server.Any]) -> None:
+    """Emit the single operator-facing STT completion summary line."""
+    segments = result.get('segments') if isinstance(result.get('segments'), list) else []
+    chunks = result.get('chunks') if isinstance(result.get('chunks'), list) else []
+    try:
+        duration_sec = float(result.get('duration_sec') or 0.0)
+    except (TypeError, ValueError):
+        duration_sec = 0.0
+    logger.info(
+        '[STT] job=%s speaker=%s chunked=%s chunk_count=%d total_duration_sec=%.2f coverage_end_sec=%.2f segments=%d',
+        job_id,
+        speaker,
+        str(bool(chunks)).lower(),
+        len(chunks),
+        duration_sec,
+        _stt_coverage_end_sec(segments),
+        len(segments),
+    )
+
+
 def _offset_stt_segment_timestamps(segment: _server.Dict[str, _server.Any], offset: float) -> _server.Dict[str, _server.Any]:
     shifted = dict(segment)
     for key in ('start', 'end'):
@@ -285,17 +321,80 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.O
             clear_cancel(job_id)
         except Exception:
             pass
-    result = {'speaker': speaker, 'sourceWav': str(audio_path), 'language': language, 'segments': segments, 'chunks': chunk_results}
+    result = {
+        'speaker': speaker,
+        'sourceWav': str(audio_path),
+        'language': language,
+        'segments': segments,
+        'chunks': chunk_results,
+        'duration_sec': duration_sec,
+    }
     if cancelled_requested:
         result['status'] = 'cancelled'
+    _emit_stt_summary_log(job_id, speaker, result)
     _server._write_stt_cache(speaker, str(audio_path), language, segments)
     return result
+
+
+def _run_stt_job_subprocess_entry(job_id: str, payload: _server.Dict[str, _server.Any], result_path: str, checkpoint_path: str) -> None:
+    """Spawn-child entry point for full-file STT isolation."""
+    import json as _json
+    import traceback as _tb
+
+    _server.os.environ['PARSE_COMPUTE_CHECKPOINT_LOG'] = checkpoint_path
+    for key, value in (payload.get('env') or {}).items():
+        _server.os.environ[str(key)] = str(value)
+    outcome: _server.Dict[str, _server.Any] = {'ok': False}
+    try:
+        _server._compute_checkpoint('STT_CHILD.entry', job_id=job_id)
+        result = _run_stt_job(
+            job_id,
+            str(payload.get('speaker') or ''),
+            str(payload.get('source_wav') or payload.get('sourceWav') or ''),
+            str(payload.get('language')).strip() if payload.get('language') is not None and str(payload.get('language')).strip() else None,
+        )
+        _server._compute_checkpoint('STT_CHILD.ok', job_id=job_id)
+        outcome = {'ok': True, 'result': result}
+    except BaseException as exc:  # noqa: BLE001 - child must serialize any failure instead of killing parent.
+        outcome = {'ok': False, 'error': str(exc), 'traceback': _tb.format_exc()}
+        try:
+            _server._compute_checkpoint('STT_CHILD.error', job_id=job_id, error=str(exc))
+        except Exception:
+            pass
+    try:
+        with open(result_path, 'w', encoding='utf-8') as handle:
+            _json.dump(outcome, handle)
+    except Exception:
+        pass
+
+
+def _run_stt_job_in_subprocess(job_id: str, speaker: str, source_wav: str, language: _server.Optional[str]) -> _server.Dict[str, _server.Any]:
+    """Run full-file STT in a spawn child so provider crashes do not kill the parent."""
+    result = _server._run_in_isolated_subprocess(
+        job_id,
+        {
+            'speaker': speaker,
+            'source_wav': source_wav,
+            'language': language,
+            'env': {
+                'PARSE_STT_DEFAULT_CHUNK_MINUTES': _server.os.environ.get('PARSE_STT_DEFAULT_CHUNK_MINUTES', '10'),
+            },
+        },
+        subprocess_entry=_run_stt_job_subprocess_entry,
+        log_prefix='STT_SUBPROCESS',
+        result_file_prefix='parse-stt-',
+    )
+    if result.get('status') == 'error' and not result.get('error_code'):
+        result = dict(result)
+        result['error_code'] = 'provider_error'
+    return result
+
 
 def _compute_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     """Compute-dispatcher adapter for STT.
 
-    Unpacks the HTTP/chat payload into ``_run_stt_job``'s positional
-    signature. The dispatcher (or persistent worker) handles the
+    Unpacks the HTTP/chat payload into ``_run_stt_job_in_subprocess``'s
+    positional signature. The dispatcher (or persistent worker) handles the
     terminal _set_job_complete / _set_job_error — this wrapper only
     translates payload shapes.
     """
@@ -312,7 +411,7 @@ def _compute_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -> _serve
         raise ValueError("stt payload missing 'speaker'")
     if not source_wav:
         raise ValueError("stt payload missing 'sourceWav'")
-    return _server._run_stt_job(job_id, speaker, source_wav, language)
+    return _server._run_stt_job_in_subprocess(job_id, speaker, source_wav, language)
 
 def _parse_concepts_csv_text(csv_text: str) -> _server.List[_server.Dict[str, str]]:
     """Parse concepts-style CSV text (id, concept_en); return [] if columns do not match."""
@@ -1058,5 +1157,5 @@ def _api_get_spectrogram(self) -> None:
     except BrokenPipeError:
         pass
 
-__all__ = ['_load_cached_suggestions', '_run_stt_job', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_refresh_source_audio_duration', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
+__all__ = ['_load_cached_suggestions', '_stt_coverage_end_sec', '_emit_stt_summary_log', '_run_stt_job', '_run_stt_job_subprocess_entry', '_run_stt_job_in_subprocess', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_refresh_source_audio_duration', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
 

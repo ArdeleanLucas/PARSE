@@ -394,7 +394,7 @@ def test_full_pipeline_runs_only_selected_steps(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_compute_speaker_ortho", fake_ortho)
     monkeypatch.setattr(server, "_compute_speaker_ipa", fake_ipa)
     monkeypatch.setattr(server, "_run_normalize_job", fake_normalize)
-    monkeypatch.setattr(server, "_run_stt_job", fake_stt)
+    monkeypatch.setattr(server, "_run_stt_job_in_subprocess", fake_stt)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
 
     result = server._compute_full_pipeline(
@@ -456,10 +456,10 @@ def test_full_pipeline_stt_step_uses_normalized_working_wav(tmp_path, monkeypatc
         observed["source_wav"] = source_wav
         observed["speaker"] = speaker
 
-    monkeypatch.setattr(server, "_run_stt_job", fake_stt)
+    monkeypatch.setattr(server, "_run_stt_job_in_subprocess", fake_stt)
     monkeypatch.setattr(server, "_latest_stt_segments_for_speaker", lambda s: None)
     monkeypatch.setattr(server, "_set_job_progress", lambda *a, **kw: None)
-    # After _run_stt_job returns (no-op in this stub), the sequencer checks
+    # After _run_stt_job_in_subprocess returns (no-op in this stub), the sequencer checks
     # the job snapshot for errors and resets it to running. Return a running
     # snapshot so the sequencer doesn't treat the no-op as a failure.
     monkeypatch.setattr(server, "_get_job_snapshot", lambda jid: {"status": "running"})
@@ -470,7 +470,7 @@ def test_full_pipeline_stt_step_uses_normalized_working_wav(tmp_path, monkeypatc
         {"speaker": "Fail02", "steps": ["stt"], "overwrites": {"stt": True}},
     )
 
-    # The audio path handed to _run_stt_job must resolve — it's the
+    # The audio path handed to _run_stt_job_in_subprocess must resolve — it's the
     # normalized working copy, not the bare filename.
     assert observed["source_wav"] == str(normalized)
 

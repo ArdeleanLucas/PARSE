@@ -46,13 +46,13 @@ def _install_stt_capture(tmp_path: pathlib.Path, monkeypatch):
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     captured: dict[str, object] = {}
 
-    def _fake_run_stt_job(job_id, speaker, source_wav, language):
+    def _fake_run_stt_job_in_subprocess(job_id, speaker, source_wav, language):
         captured.update(
             {"job_id": job_id, "speaker": speaker, "source_wav": source_wav, "language": language}
         )
-        return {"speaker": speaker, "sourceWav": source_wav, "language": language, "segments": []}
+        return {"speaker": speaker, "sourceWav": source_wav, "language": language, "segments": [], "chunks": []}
 
-    monkeypatch.setattr(server, "_run_stt_job", _fake_run_stt_job)
+    monkeypatch.setattr(server, "_run_stt_job_in_subprocess", _fake_run_stt_job_in_subprocess)
     return captured
 
 

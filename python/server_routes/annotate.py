@@ -1716,7 +1716,7 @@ def _compute_speaker_stt(job_id: str, payload: _server.Dict[str, _server.Any]) -
         source_wav = str(payload.get('sourceWav') or payload.get('source_wav') or '').strip()
         if not source_wav:
             source_wav = str(_server._pipeline_audio_path_for_speaker(speaker))
-        return _server._run_stt_job(job_id, speaker, source_wav, language)
+        return _server._run_stt_job_in_subprocess(job_id, speaker, source_wav, language)
 
     concept_ids = _server._payload_concept_ids(payload)
     pad_sec = _server._payload_pad(payload)
@@ -3541,7 +3541,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
                         except (RuntimeError, FileNotFoundError) as exc:
                             raise RuntimeError('Cannot run STT for {0!r}: {1}'.format(speaker, exc))
                         try:
-                            stt_result = _server._run_stt_job(job_id, speaker, str(audio_path), language_str)
+                            stt_result = _server._run_stt_job_in_subprocess(job_id, speaker, str(audio_path), language_str)
                         except Exception as exc:
                             raise RuntimeError('stt step failed: {0}'.format(exc)) from exc
                         results['stt'] = {'status': 'ok', 'segments': len(stt_result.get('segments') or []), 'done': True}

@@ -125,13 +125,20 @@ def test_transcribe_failure_is_wrapped_with_context(tmp_path, monkeypatch):
 
 
 def test_compute_stt_wrapper_unpacks_payload(tmp_path, monkeypatch):
-    """_compute_stt adapts the HTTP payload shape to _run_stt_job args."""
-    stub = _StubProvider(emit_progresses=[], emit_segments=[{"text": "hi"}])
-    job_id, _ = _prepare_job(tmp_path, monkeypatch, provider=stub)
+    """_compute_stt adapts the HTTP payload shape to subprocess-wrapper args."""
+    calls = []
+    job_id, _ = _prepare_job(tmp_path, monkeypatch, provider=_StubProvider(emit_segments=[]))
+
+    def fake_subprocess(job_id, speaker, source_wav, language):
+        calls.append((job_id, speaker, source_wav, language))
+        return {"speaker": speaker, "sourceWav": source_wav, "language": language, "segments": [{"text": "hi"}], "chunks": []}
+
+    monkeypatch.setattr(server, "_run_stt_job_in_subprocess", fake_subprocess)
     result = server._compute_stt(
         job_id,
         {"speaker": "s", "sourceWav": "t.wav", "language": "ckb"},
     )
+    assert calls == [(job_id, "s", "t.wav", "ckb")]
     assert result["speaker"] == "s"
     assert result["language"] == "ckb"
     assert result["segments"] == [{"text": "hi"}]
