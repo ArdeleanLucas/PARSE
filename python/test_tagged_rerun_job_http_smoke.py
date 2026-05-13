@@ -78,7 +78,7 @@ def test_tagged_rerun_http_smoke_returns_job_progress_and_result_without_blockin
         def run() -> None:
             rows: list[dict[str, Any]] = []
             for idx in range(4):
-                server._set_job_progress(job_id, 15.0 + idx * 20.0, message=f"Tagged rerun {idx + 1}/4: c{idx + 1}")
+                server._set_job_progress(job_id, 15.0 + idx * 20.0, message=f"{idx + 1}/4: c{idx + 1}")
                 time.sleep(0.03)
                 rows.append({"speaker": "Smoke01", "conceptId": f"c{idx + 1}", "field": payload["field"], "status": "ok", "text": f"mock-{idx + 1}"})
             server._set_job_complete(
@@ -88,7 +88,7 @@ def test_tagged_rerun_http_smoke_returns_job_progress_and_result_without_blockin
                     "total": 4,
                     "results": rows,
                 },
-                message="Tagged rerun complete",
+                message="Complete",
             )
 
         threading.Thread(target=run, daemon=True).start()

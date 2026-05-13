@@ -612,7 +612,7 @@ def test_compute_lexemes_rerun_by_tag_caches_providers_reports_progress_and_clea
         ("c2", "ortho", "ok"),
         ("c2", "ipa", "ok"),
     ]
-    per_concept_progress = [pct for pct, message in progress if message.startswith("Tagged rerun ") and "/2:" in message]
+    per_concept_progress = [pct for pct, message in progress if "/2:" in message]
     assert per_concept_progress == sorted(per_concept_progress)
     assert per_concept_progress == [50.0, 95.0]
 

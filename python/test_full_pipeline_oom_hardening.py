@@ -174,13 +174,13 @@ def test_host_memory_helper_returns_none_when_proc_meminfo_unavailable(monkeypat
 
 def test_running_job_snapshot_survives_restart_as_interrupted_error(tmp_path: pathlib.Path) -> None:
     job_id = server._create_job("compute:full_pipeline", {"speaker": "anon-rss"})
-    server._set_job_progress(job_id, 42.0, message="Pipeline step 2/4: ortho", segments_processed=12)
+    server._set_job_progress(job_id, 42.0, message="Step 2/4: ortho", segments_processed=12)
 
     snapshot_path = pathlib.Path(server._job_snapshot_path(job_id))
     persisted = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert persisted["status"] == "running"
     assert persisted["progress"] == 42.0
-    assert persisted["message"] == "Pipeline step 2/4: ortho"
+    assert persisted["message"] == "Step 2/4: ortho"
 
     server._jobs.clear()
     loaded = server._load_job_snapshots()

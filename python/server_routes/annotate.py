@@ -1863,7 +1863,7 @@ def _compute_speaker_ortho_concept_windows(
         _set_compute_progress(job_id, 92.0, message='Writing annotation')
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
     if job_id:
-        _set_compute_progress(job_id, 95.0, message='ORTH concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
+        _set_compute_progress(job_id, 95.0, message='Concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
     result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,
@@ -2098,7 +2098,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
         total_words = sum((len(seg.get('words') or []) for seg in stt_segments))
 
         def _word_progress(pct: float, n: int) -> None:
-            _set_compute_progress(job_id, 5.0 + pct * 0.9, message='IPA {0}/{1} words'.format(n, total_words))
+            _set_compute_progress(job_id, 5.0 + pct * 0.9, message='{0}/{1} words'.format(n, total_words))
         try:
             import json as _json2
             _ai_cfg2 = _json2.loads((_server._project_root() / 'config' / 'ai_config.json').read_text())
@@ -2200,7 +2200,7 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
             )
             filled += 1
             progress = 5.0 + (idx + 1) / total * 90.0
-            _set_compute_progress(job_id, progress, message='IPA {0}/{1}'.format(idx + 1, total))
+            _set_compute_progress(job_id, progress, message='{0}/{1}'.format(idx + 1, total))
     ipa_intervals.sort(key=lambda i: (float(i.get('start', 0.0)), float(i.get('end', 0.0))))
     ipa_tier['intervals'] = ipa_intervals
     tiers['ipa'] = ipa_tier
@@ -2539,7 +2539,7 @@ def _compute_speaker_ortho(
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
-        _set_compute_progress(job_id, max(2.0, clamped), message='ORTH transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
+        _set_compute_progress(job_id, max(2.0, clamped), message='Transcribing ({0} segments)'.format(segments_processed), segments_processed=segments_processed)
     from ai.job_cancel import clear_cancel, make_should_cancel
 
     should_cancel = make_should_cancel(job_id)
@@ -2578,7 +2578,7 @@ def _compute_speaker_ortho(
                         _set_compute_progress(
                             job_id,
                             _chunk_progress_pct(int(span['idx']), total_chunks),
-                            message='ORTH chunk {0}/{1} ({2}s-{3}s)'.format(
+                            message='Chunk {0}/{1} ({2}s-{3}s)'.format(
                                 int(span['idx']) + 1,
                                 total_chunks,
                                 int(float(span['start'])),
@@ -2652,16 +2652,16 @@ def _compute_speaker_ortho(
             'cancelled_at_interval': len(new_intervals),
             'chunks': chunk_results,
         }
-        _set_compute_progress(job_id, 99.0, message='ORTH cancelled after {0} intervals'.format(len(new_intervals)))
+        _set_compute_progress(job_id, 99.0, message='Cancelled after {0} intervals'.format(len(new_intervals)))
         return result_payload
-    _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
+    _set_compute_progress(job_id, 95.0, message='Tier-2 forced alignment')
     ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
     refined_additions: _server.List[_server.Dict[str, _server.Any]] = []
     if refine_lexemes:
         concept_tier = tiers.get('concept') if isinstance(tiers.get('concept'), dict) else None
         concept_intervals = [iv for iv in (concept_tier.get('intervals') or [] if concept_tier else []) if isinstance(iv, dict)]
         if concept_intervals:
-            _set_compute_progress(job_id, 97.0, message='ORTH refine_lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
+            _set_compute_progress(job_id, 97.0, message='Refining lexemes (short-clip, {0} concepts)'.format(len(concept_intervals)))
             refined_additions = _server._short_clip_refine_lexemes(audio_path=audio_path, concept_intervals=concept_intervals, ortho_words=ortho_words, provider=provider, pad_sec=pad_sec, job_id=job_id, language=language_str)
     merged_words = _server._merge_ortho_words(ortho_words, refined_additions)
     ortho_words_tier = tiers.get('ortho_words') if isinstance(tiers.get('ortho_words'), dict) else None
@@ -2676,7 +2676,7 @@ def _compute_speaker_ortho(
         _server._write_json_file(canonical_path, annotation)
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
-    _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
+    _set_compute_progress(job_id, 99.0, message='Written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
     return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals), 'chunks': chunk_results}
 
 
@@ -3052,7 +3052,7 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
         normalize_annotation_record=_server._normalize_annotation_record,
     )
     total_concepts = sum(len(plan.by_speaker.get(speaker, [])) for speaker in plan.speakers)
-    _set_compute_progress(job_id, 1.0, message='Tagged rerun resolving {0} concept window(s)'.format(total_concepts))
+    _set_compute_progress(job_id, 1.0, message='Resolving {0} concept window(s)'.format(total_concepts))
 
     ortho_provider: _server.Optional[AIProvider] = None
     ipa_aligner: _server.Any = None
@@ -3086,10 +3086,10 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
 
     try:
         if plan.field in {'ortho', 'both'}:
-            _set_compute_progress(job_id, 2.0, message='Tagged rerun loading ORTH provider')
+            _set_compute_progress(job_id, 2.0, message='Loading ORTH provider')
             ortho_provider = _server.get_ortho_provider()
         if plan.field in {'ipa', 'both'}:
-            _set_compute_progress(job_id, 3.0, message='Tagged rerun loading IPA aligner')
+            _set_compute_progress(job_id, 3.0, message='Loading IPA aligner')
             ipa_aligner = _server._get_ipa_aligner()
 
         def _run_cached_ortho_interval(*, audio_path: _server.pathlib.Path, start: float, end: float, language: _server.Optional[str] = None) -> str:
@@ -3132,7 +3132,7 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
             _set_compute_progress(
                 job_id,
                 pct,
-                message='Tagged rerun {0}/{1}: {2} ({3})'.format(completed, total, label, field),
+                message='{0}/{1}: {2} ({3})'.format(completed, total, label, field),
                 segments_processed=completed,
                 total_segments=total,
             )
@@ -3160,7 +3160,7 @@ def _compute_lexemes_rerun_by_tag(job_id: str, payload: _server.Dict[str, _serve
             annotation_touch_metadata=_server._annotation_touch_metadata,
             align_ortho_words=_server._align_partial_ortho_words,
         )
-        _set_compute_progress(job_id, 99.0, message='Tagged rerun complete')
+        _set_compute_progress(job_id, 99.0, message='Complete')
         return result
     finally:
         _unload_ortho_provider()
@@ -3383,7 +3383,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
         raise RuntimeError('steps must be a list, got {0}'.format(type(raw_steps).__name__))
     if not selected:
         return {'speaker': speaker, 'steps_run': [], 'results': {}, 'message': 'No steps selected'}
-    _set_compute_progress(job_id, 1.0, message='Full pipeline starting')
+    _set_compute_progress(job_id, 1.0, message='Starting')
     overwrites_raw = payload.get('overwrites') or {}
     if not isinstance(overwrites_raw, dict):
         overwrites_raw = {}
@@ -3417,7 +3417,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
     try:
         for idx, step in enumerate(selected):
             step_base_pct = 5.0 + idx / total * 90.0
-            _set_compute_progress(job_id, step_base_pct, message='Pipeline step {0}/{1}: {2}'.format(idx + 1, total, step))
+            _set_compute_progress(job_id, step_base_pct, message='Step {0}/{1}: {2}'.format(idx + 1, total, step))
             try:
                 if step in _FULL_PIPELINE_HOST_MEMORY_STEPS:
                     _server._ensure_host_memory_for_step(step)
@@ -3500,7 +3500,7 @@ def _compute_full_pipeline(job_id: str, payload: _server.Dict[str, _server.Any])
             _release_full_pipeline_ipa_aligner()
         _server._collect_after_unload()
 
-    _set_compute_progress(job_id, 99.0, message='Pipeline complete')
+    _set_compute_progress(job_id, 99.0, message='Complete')
     summary = {'ok': sum((1 for r in results.values() if r.get('status') == 'ok')), 'skipped': sum((1 for r in results.values() if r.get('status') == 'skipped')), 'error': sum((1 for r in results.values() if r.get('status') == 'error'))}
     print('[PIPELINE] speaker={0} steps={1} summary={2}'.format(speaker, steps_run, summary), file=_server.sys.stderr, flush=True)
     for step_name, step_result in results.items():
