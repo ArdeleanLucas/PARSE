@@ -237,19 +237,11 @@ jobs:
           print('script-mode /api/config smoke OK')
           PY
 
-      - name: Run lightweight backend regression tests
+      - name: Run backend regression tests (full sweep)
         env:
           PYTHONPATH: python
         run: |
-          python -m pytest -q \
-            python/test_server_workspace_config.py \
-            python/test_server_static_paths.py \
-            python/test_openai_auth_status.py \
-            python/test_chat_job_result_shape.py \
-            python/test_run_stt_job.py \
-            python/test_server_auth_key_refresh.py \
-            python/test_stt_configurable_transcribe.py::test_ortho_section_defaults_cascade_guard \
-            python/test_stt_configurable_transcribe.py::test_ortho_explicit_override_beats_defaults
+          python -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults'
 
   parity-harness:
     name: Parity Diff Harness

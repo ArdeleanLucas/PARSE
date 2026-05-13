@@ -5,11 +5,46 @@ import inspect
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server  # noqa: E402
 from server_routes import annotate, media  # noqa: E402
 
-server._install_route_bindings()
+_TRIPWIRE_JOB_ID = "__progress_stage_prefix_tripwire__"
+_TRIPWIRE_JOB = {"type": "test:tripwire", "status": "sentinel"}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _preserve_jobs_for_progress_stage_prefix_module():
+    """Restore the process-global job registry after this module finishes."""
+    snapshot = dict(server._jobs)
+    server._jobs[_TRIPWIRE_JOB_ID] = dict(_TRIPWIRE_JOB)
+    try:
+        yield
+    finally:
+        server._jobs.clear()
+        server._jobs.update(snapshot)
+
+
+@pytest.fixture(autouse=True)
+def _ensure_route_bindings_installed():
+    """Install server route bindings during test execution, not collection."""
+    if not getattr(server, "_ROUTE_BINDINGS_INSTALLED", False):
+        server._install_route_bindings()
+    yield
+
+
+@pytest.fixture
+def isolated_jobs():
+    """Snapshot server._jobs around a test that needs an empty registry."""
+    snapshot = dict(server._jobs)
+    server._jobs.clear()
+    try:
+        yield
+    finally:
+        server._jobs.clear()
+        server._jobs.update(snapshot)
 
 
 class _ProgressingSttProvider:
@@ -70,8 +105,7 @@ def test_ipa_subprocess_progress_emits_ipa_prefix():
     assert all("message='IPA " in line or 'message="IPA ' in line for line in relevant), relevant
 
 
-def test_orchestrator_step_header_unchanged(monkeypatch):
-    server._jobs.clear()
+def test_orchestrator_step_header_unchanged(monkeypatch, isolated_jobs):
     messages: list[str] = []
     monkeypatch.setattr(server, "_ensure_host_memory_for_step", lambda _step: None)
     monkeypatch.setattr(server, "_latest_stt_segments_for_speaker", lambda _speaker: [{"text": "cached"}])
@@ -98,3 +132,8 @@ def test_orchestrator_step_header_unchanged(monkeypatch):
     assert result["steps_run"] == ["stt", "ortho", "ipa"]
     assert "Step 1/3: stt" in messages
     assert not any(message.startswith("STT Step") or message.startswith("ORTH Step") or message.startswith("IPA Step") for message in messages)
+
+
+def test_zz_progress_stage_prefix_tests_do_not_leak_global_state():
+    """Runs last as a trip-wire for job-registry clears in earlier tests."""
+    assert server._jobs.get(_TRIPWIRE_JOB_ID) == _TRIPWIRE_JOB
