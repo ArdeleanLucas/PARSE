@@ -43,7 +43,7 @@ export function friendlyLabel(jobType: string): string {
   return titleCase(segment) || jobType;
 }
 
-const CHUNK_PROGRESS_RE = /Chunk (\d+)\/(\d+) \(\d+s-\d+s\)/;
+const CHUNK_PROGRESS_RE = /(?:^|\b)(?:STT|ORTH|IPA|BND|Boundary|Boundaries)?\s*chunk\s+(\d+)\/(\d+)\s+\(\d+s\s*[-–]\s*\d+s\)/i;
 
 export function chunkInfoFromMessage(message: string | undefined): { current: number; total: number } | null {
   if (!message) return null;
@@ -182,7 +182,7 @@ export function HeaderJobStrip({
                     className="rounded-sm bg-indigo-100 px-1.5 py-0.5 font-medium tabular-nums text-indigo-800"
                     title={job.message}
                   >
-                    Chunk {chunkInfo.current} of {chunkInfo.total}
+                    {`Chunk ${chunkInfo.current} of ${chunkInfo.total}`}
                   </span>
                 )}
                 {typeof job.etaMs === "number" && job.etaMs > 0 && (
