@@ -816,7 +816,7 @@ describe("ParseUI", () => {
         status: "running",
         // Post-parser snapshot fraction from the backend's 42% wire value; the API contract test pins that conversion.
         progress: 0.42,
-        message: "Tagged rerun loading ORTH provider",
+        message: "Loading ORTH provider",
       },
     ]);
 

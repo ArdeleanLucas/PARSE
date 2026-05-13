@@ -155,12 +155,12 @@ describe("HeaderJobStrip", () => {
   });
 
   describe("chunk-progress overlay (MC-384-G)", () => {
-    it("renders the overlay when the message matches the ORTH-chunk pattern", () => {
+    it("renders the overlay when the message matches the chunk pattern", () => {
       const job = baseJob({
         jobId: "chunked-job",
         type: "compute:ortho",
         progress: 0.354,
-        message: "ORTH chunk 7/18 (4200s-4800s)",
+        message: "Chunk 7/18 (4200s-4800s)",
       });
       render(<HeaderJobStrip jobs={[job]} />);
 
@@ -189,7 +189,7 @@ describe("HeaderJobStrip", () => {
         type: "compute:ortho",
         status: "error",
         error: "boom",
-        message: "ORTH chunk 7/18 (4200s-4800s)",
+        message: "Chunk 7/18 (4200s-4800s)",
       });
       render(<HeaderJobStrip jobs={[job]} />);
 
@@ -200,7 +200,7 @@ describe("HeaderJobStrip", () => {
       expect(chunkInfoFromMessage(undefined)).toBeNull();
       expect(chunkInfoFromMessage("")).toBeNull();
       expect(chunkInfoFromMessage("Aligning ortho_words")).toBeNull();
-      expect(chunkInfoFromMessage("ORTH chunk 3/9 (1800s-2400s)")).toEqual({ current: 3, total: 9 });
+      expect(chunkInfoFromMessage("Chunk 3/9 (1800s-2400s)")).toEqual({ current: 3, total: 9 });
     });
   });
 });

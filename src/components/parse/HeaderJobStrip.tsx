@@ -43,7 +43,7 @@ export function friendlyLabel(jobType: string): string {
   return titleCase(segment) || jobType;
 }
 
-const CHUNK_PROGRESS_RE = /ORTH chunk (\d+)\/(\d+) \(\d+s-\d+s\)/;
+const CHUNK_PROGRESS_RE = /Chunk (\d+)\/(\d+) \(\d+s-\d+s\)/;
 
 export function chunkInfoFromMessage(message: string | undefined): { current: number; total: number } | null {
   if (!message) return null;
