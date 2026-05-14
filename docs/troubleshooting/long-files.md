@@ -55,6 +55,10 @@ Quick interpretation:
 | Backend died | Isolation gap or parent-process failure. | Preserve logs and escalate; do not keep starting duplicate jobs. |
 | UI lost contact but backend alive | Browser/API polling issue or stale job strip. | Query job status directly and wait/cancel from the real job state. |
 
+![Error handling and partial results: failed chunks are reported alongside successful chunks so users can review or rerun the affected spans.](../user-guides/assets/error-handling-partial-results.png)
+
+*Figure: A partial result preserves useful output and points to failed spans. Treat the failed chunk as a review target, not as proof that the whole recording must be discarded.*
+
 ## Common fixes in plain language
 
 | Symptom | Plain-language meaning | Try this first |

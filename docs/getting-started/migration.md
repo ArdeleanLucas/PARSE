@@ -14,6 +14,10 @@ Long-file processing is now safer and more observable by default.
 | Job results | Mostly top-level success/error fields. | Results may include `chunks[]`, `device`, `duration_sec`, and IPA `coverage_shrink_warning`. |
 | Device selection | Stage/device behavior was split across configs and legacy fallbacks. | STT, ORTH, and IPA share a resolver: stage env → global env → config → `auto`. |
 
+![Before vs after comparison: old single-shot processing versus the new chunked and isolated long-file path.](../user-guides/assets/before-after-chunked-isolated-processing.png)
+
+*Figure: The practical upgrade is from one all-or-nothing model call to smaller protected work units. Users still review one speaker result, but failures now name the affected chunks instead of hiding the whole run behind one opaque error.*
+
 ## Do existing users need to change anything?
 
 Usually, no.

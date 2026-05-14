@@ -32,7 +32,7 @@ Open batch report and inspect partial rows
 Review in Annotate mode before Compare/export
 ```
 
-![Long-file processing flow: a five-stage diagram showing job creation, chunk planning, isolated chunk processing, merged output, and user review with partial-result recovery.](assets/parse-long-file-processing-flow.svg)
+![Long-file processing flow: a five-stage diagram showing job creation, chunk planning, isolated chunk processing, merged output, and user review with partial-result recovery.](assets/long-file-processing-flow.png)
 
 *Figure: Long-file processing in PARSE. A full-file job becomes a chunk plan; each STT/ORTH chunk runs in a protected worker; successful chunks are merged back onto the original timeline; the UI shows progress, partial results, and the spans that need review or rerun.*
 
@@ -122,6 +122,10 @@ ORTH chunk 1/18 (0s-600s)
 ```
 
 A three-hour recording is about 18 chunks at the 10-minute default. A 2 h 32 min file is about 16 chunks. A one-hour file is about 6 chunks.
+
+![Chunk progress visualization: example UI progress chips for STT chunks such as 7 of 15 with audio-global spans.](assets/chunk-progress-visualization.png)
+
+*Figure: Chunk progress is a map back to the original recording. A label such as `STT chunk 7/15 (1200s–1800s)` means PARSE is processing that global time span, not a separate speaker or a lost job.*
 
 ## What happens if some chunks fail
 

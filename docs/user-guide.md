@@ -182,6 +182,10 @@ Default behavior in brief:
 
 For the practical walkthrough, hardware guidance, chunk-progress interpretation, and recovery steps for partial runs, see [Processing long recordings](./user-guides/processing-long-recordings.md). For failure-specific recovery, see [Troubleshooting long files](./troubleshooting/long-files.md). Operator reference: [Environment variables](./environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
 
+![Simple mental model overview: PARSE treats a long file as one speaker timeline with chunked support jobs, merged outputs, and reviewable reports.](./user-guides/assets/simple-mental-model-overview.png)
+
+*Figure: PARSE keeps the user's mental model simple: one file becomes one speaker timeline, while the risky support jobs may be chunked underneath so progress, failures, and reruns are easier to understand.*
+
 #### Concept-scoped pipeline reruns
 
 The transcription run modal now supports three run modes for pipeline-style reruns:

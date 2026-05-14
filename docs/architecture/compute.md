@@ -180,6 +180,10 @@ Merged text:     -------- one transcript/tier --------
 Tier-2 ORTH:     word timing over the merged Tier-1 result
 ```
 
+![Tier-1 versus Tier-2 explanation: STT and Tier-1 ORTH chunk long audio, then Tier-2 forced alignment runs once over the merged transcript.](../user-guides/assets/tier1-tier2-processing.png)
+
+*Figure: Tier 1 is the broad transcription pass that gets chunked for long recordings; Tier 2 is the later alignment pass that places the merged words back onto the original time ruler.*
+
 STT has a similar long-file chunking idea for full-file transcription. IPA is different: it works over existing intervals/windows, so it is not chunked by whole-recording duration.
 
 ### Reading chunk progress
@@ -375,6 +379,10 @@ Device precedence, highest first:
 | 2 | `PARSE_COMPUTE_DEVICE` | Global fallback for STT/ORTH/IPA | `auto`, `cpu`, `cuda`, `cuda:N` |
 | 3 | `ai_config.json` section `device` | Caller config (`stt`, `ortho`, `wav2vec2`) | `auto`, `cpu`, `cuda`, `cuda:N` |
 | 4 | Code section default | Usually `auto` | `auto`, `cpu`, `cuda`, `cuda:N` |
+
+![Device resolution flow: PARSE chooses CPU or GPU by checking stage overrides, global overrides, config, and CUDA availability.](../user-guides/assets/device-resolution-flow.png)
+
+*Figure: Power users can predict device placement by reading the chain from top to bottom: stage-specific env wins, global env is the fallback override, config provides machine defaults, and `auto` resolves to CUDA only when the runtime can actually use it.*
 
 `PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper CPU/int8 fallback semantics.
 
