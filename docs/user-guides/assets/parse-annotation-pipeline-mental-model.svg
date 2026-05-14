@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1320" role="img" aria-labelledby="title desc">
+  <title id="title">PARSE Annotation Pipeline Mental Model</title>
+  <desc id="desc">A vertical layered PARSE annotation pipeline showing evidence building from raw audio through STT, forced alignment BND, orthography, acoustic IPA, manual refinement, and concept anchoring.</desc>
+  <defs>
+    <linearGradient id="raw" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset="1" stop-color="#a5f3fc"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffbeb"/>
+      <stop offset="1" stop-color="#fde68a"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#eff6ff"/>
+      <stop offset="1" stop-color="#bfdbfe"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#faf5ff"/>
+      <stop offset="1" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <linearGradient id="manual" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f0fdf4"/>
+      <stop offset="1" stop-color="#bbf7d0"/>
+    </linearGradient>
+    <linearGradient id="concept" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#d1fae5"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+      <path d="M1,1 L9,5 L1,9 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 15px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .stage-title { font: 800 23px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; letter-spacing: -0.02em; }
+      .stage-sub { font: 500 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; }
+      .stage-anchor { font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; fill: #475569; }
+      .chip { font: 800 10px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; letter-spacing: .08em; }
+      .small { font: 600 11px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #64748b; }
+      .icon-stroke { fill: none; stroke: #0f172a; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: .86; }
+      .arrow-label { font: 700 10px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #64748b; letter-spacing: .08em; }
+    </style>
+  </defs>
+
+  <rect width="960" height="1320" fill="#ffffff"/>
+  <circle cx="84" cy="90" r="46" fill="#f8fafc" stroke="#e2e8f0"/>
+  <path d="M55 91 C62 78, 68 78, 75 91 S89 104, 96 91 S110 78, 117 91" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+
+  <text x="140" y="76" class="title">PARSE Annotation Pipeline Mental Model</text>
+  <text x="142" y="106" class="subtitle">Evidence builds downward: machine support proposes timing/text, then the researcher reviews, retimes, and anchors concepts.</text>
+  <line x1="142" y1="124" x2="818" y2="124" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- Stage 1 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="158" width="580" height="106" rx="22" fill="#cbd5e1" opacity="0.24" transform="translate(9 10)"/>
+    <rect x="190" y="146" width="580" height="106" rx="22" fill="url(#raw)" stroke="#94a3b8" stroke-width="2"/>
+    <circle cx="238" cy="199" r="29" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <path class="icon-stroke" d="M221 200h6l4-15 8 31 7-23 5 7h15"/>
+    <text x="288" y="187" class="stage-title">Raw Audio Input</text>
+    <text x="288" y="213" class="stage-sub">Speaker recording enters the workspace timeline.</text>
+    <text x="288" y="234" class="stage-anchor">source_wav → audio/working/&lt;speaker&gt;/working.wav</text>
+
+  </g>
+
+  <line x1="480" y1="268" x2="480" y2="310" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="292" class="arrow-label">seed evidence</text>
+
+  <!-- Stage 2 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="326" width="580" height="106" rx="22" fill="#0891b2" opacity="0.18" transform="translate(9 10)"/>
+    <rect x="190" y="314" width="580" height="106" rx="22" fill="url(#cyan)" stroke="#06b6d4" stroke-width="2.5"/>
+    <circle cx="238" cy="367" r="29" fill="#ffffff" stroke="#67e8f9" stroke-width="2"/>
+    <path class="icon-stroke" d="M221 354h32a10 10 0 0 1 10 10v8a10 10 0 0 1-10 10h-15l-12 10 3-10h-8a10 10 0 0 1-10-10v-8a10 10 0 0 1 10-10Z"/>
+    <text x="227" y="372" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="800" fill="#0f172a">STT</text>
+    <text x="288" y="355" class="stage-title">STT Layer</text>
+    <text x="288" y="381" class="stage-sub">Coarse transcript segments and optional Tier 1 word windows.</text>
+    <text x="288" y="402" class="stage-anchor">coarse_transcripts + editable tiers.stt / tiers.stt_words</text>
+
+  </g>
+
+  <line x1="480" y1="436" x2="480" y2="478" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="460" class="arrow-label">tighten timing</text>
+
+  <!-- Stage 3 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="494" width="580" height="106" rx="22" fill="#d97706" opacity="0.18" transform="translate(9 10)"/>
+    <rect x="190" y="482" width="580" height="106" rx="22" fill="url(#amber)" stroke="#f59e0b" stroke-width="2.5"/>
+    <circle cx="238" cy="535" r="29" fill="#ffffff" stroke="#fcd34d" stroke-width="2"/>
+    <circle cx="238" cy="535" r="14" fill="none" stroke="#0f172a" stroke-width="2.4" opacity=".86"/>
+    <path class="icon-stroke" d="M238 511v13M238 546v13M214 535h13M249 535h13"/>
+    <circle cx="238" cy="535" r="3.5" fill="#0f172a" opacity=".82"/>
+    <text x="288" y="523" class="stage-title">Forced Alignment / BND Layer</text>
+    <text x="288" y="549" class="stage-sub">Tier 2 wav2vec2 alignment turns STT words into reviewable BND spans.</text>
+    <text x="288" y="570" class="stage-anchor">compute: boundaries/BND → tiers.ortho_words</text>
+
+  </g>
+
+  <line x1="480" y1="604" x2="480" y2="646" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="628" class="arrow-label">add readable forms</text>
+
+  <!-- Stage 4 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="662" width="580" height="106" rx="22" fill="#2563eb" opacity="0.16" transform="translate(9 10)"/>
+    <rect x="190" y="650" width="580" height="106" rx="22" fill="url(#blue)" stroke="#2563eb" stroke-width="2.5"/>
+    <circle cx="238" cy="703" r="29" fill="#ffffff" stroke="#93c5fd" stroke-width="2"/>
+    <path class="icon-stroke" d="M225 684h22l8 8v29h-30zM247 684v9h8M231 704h17M231 713h12"/>
+    <text x="288" y="691" class="stage-title">Orthography Transcription Layer</text>
+    <text x="288" y="717" class="stage-sub">ORTH generates human-readable forms and can rebuild word-level lookup.</text>
+    <text x="288" y="738" class="stage-anchor">compute: ortho → tiers.ortho (+ refreshed tiers.ortho_words)</text>
+
+  </g>
+
+  <line x1="480" y1="772" x2="480" y2="814" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="796" class="arrow-label">derive acoustic form</text>
+
+  <!-- Stage 5 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="830" width="580" height="106" rx="22" fill="#7c3aed" opacity="0.16" transform="translate(9 10)"/>
+    <rect x="190" y="818" width="580" height="106" rx="22" fill="url(#purple)" stroke="#8b5cf6" stroke-width="2.5"/>
+    <circle cx="238" cy="871" r="29" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+    <text x="225" y="883" font-family="Georgia, 'Times New Roman', serif" font-size="33" font-weight="700" fill="#0f172a">ɑ</text>
+    <path class="icon-stroke" d="M255 855c6 5 8 11 5 19"/>
+    <text x="288" y="859" class="stage-title">Acoustic IPA Layer</text>
+    <text x="288" y="885" class="stage-sub">wav2vec2/espeak CTC proposes IPA directly from audio windows.</text>
+    <text x="288" y="906" class="stage-anchor">compute: ipa_only → tiers.ipa + ipa_candidates / ipa_review</text>
+
+  </g>
+
+  <line x1="480" y1="940" x2="480" y2="982" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="964" class="arrow-label">researcher review</text>
+
+  <!-- Stage 6 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="998" width="580" height="106" rx="22" fill="#16a34a" opacity="0.15" transform="translate(9 10)"/>
+    <rect x="190" y="986" width="580" height="106" rx="22" fill="url(#manual)" stroke="#22c55e" stroke-width="2.5"/>
+    <circle cx="238" cy="1039" r="29" fill="#ffffff" stroke="#86efac" stroke-width="2"/>
+    <path class="icon-stroke" d="M222 1053l8-4 25-25-4-4-25 25-4 8zM246 1022l4-4 6 6-4 4"/>
+    <path class="icon-stroke" d="M221 1059h37"/>
+    <text x="288" y="1027" class="stage-title">Manual Override &amp; Human Refinement</text>
+    <text x="288" y="1053" class="stage-sub">Inline edits, drag-retiming, reruns, and protected manual boundaries.</text>
+    <text x="288" y="1074" class="stage-anchor">manuallyAdjusted + Save Annotation → annotations/&lt;speaker&gt;.parse.json</text>
+
+  </g>
+
+  <line x1="480" y1="1108" x2="480" y2="1150" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="504" y="1132" class="arrow-label">lock research identity</text>
+
+  <!-- Stage 7 -->
+  <g filter="url(#softShadow)">
+    <rect x="205" y="1166" width="580" height="106" rx="22" fill="#059669" opacity="0.13" transform="translate(9 10)"/>
+    <rect x="190" y="1154" width="580" height="106" rx="22" fill="url(#concept)" stroke="#10b981" stroke-width="2.5"/>
+    <circle cx="238" cy="1207" r="29" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+    <path class="icon-stroke" d="M226 1200a9 9 0 0 1 13 0l4 4M250 1214a9 9 0 0 1-13 0l-4-4M234 1208l10-10M242 1216l10-10"/>
+    <text x="288" y="1195" class="stage-title">Concept Anchoring &amp; Linking</text>
+    <text x="288" y="1221" class="stage-sub">Reviewed intervals become lexical anchors for search, Compare, and export.</text>
+    <text x="288" y="1242" class="stage-anchor">tiers.concept + concept_id → lexeme links / LingPy / NEXUS</text>
+
+  </g>
+
+  <rect x="76" y="1280" width="86" height="38" rx="19" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="94" y="1304" class="small">review-first</text>
+  <rect x="784" y="1280" width="112" height="38" rx="19" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="804" y="1304" class="small">evidence layers</text>
+</svg>
