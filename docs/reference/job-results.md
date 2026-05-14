@@ -28,6 +28,8 @@ Terminal states may include `complete`, `error`, `cancelled`, and partial stage-
 
 `chunks[]` is diagnostic job-result data. It is not written into the persisted STT cache; caches continue to store merged `segments[]`.
 
+Short files, concept-window reruns, edited-only reruns, or intentionally disabled chunking may return `chunks: []`. Missing chunk rows are suspicious only for long full-file STT or full-mode ORTH runs where chunking should have applied.
+
 ## Consumer guidance
 - Treat top-level job status and per-stage result status separately.
 - Use chunk spans to identify the interval that needs rerun or manual review.

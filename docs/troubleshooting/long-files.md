@@ -4,14 +4,14 @@
 
 ## First checks
 
-Before changing settings, collect these facts:
+Before changing settings, collect these facts. In the UI, the **job id** appears in the header job strip and batch report details; **chunk rows** appear by expanding a partial/error batch cell. In MCP/API automation, use `job_status`, `compute_status`, or the stage-specific status tool.
 
 1. Speaker name and stage: STT, ORTH, IPA, or full pipeline.
 2. Recording duration and whether it is full-file or concept-window/edited-only.
 3. Current chunk settings:
    ```bash
-   PARSE_STT_DEFAULT_CHUNK_MINUTES
-   PARSE_ORTH_DEFAULT_CHUNK_MINUTES
+   printf 'STT chunks: %s minutes\n' "${PARSE_STT_DEFAULT_CHUNK_MINUTES:-default 10}"
+   printf 'ORTH chunks: %s minutes\n' "${PARSE_ORTH_DEFAULT_CHUNK_MINUTES:-default 10}"
    ```
 4. Job id from the header strip, batch report, MCP result, or `/api/jobs/active`.
 5. `chunks[]` rows from the job result when present.
@@ -19,6 +19,27 @@ Before changing settings, collect these facts:
 7. Resolved stage `device` from the result or completion logs.
 
 A long-file bug is much easier to fix when you know whether the failure is one chunk, one stage, one provider, or the whole server.
+
+## 60-second rescue plan
+
+When a long job looks wrong, do this before changing settings or starting another run:
+
+1. **Do not launch the same long job again yet.** First find out whether the original job is still running.
+2. **Write down the speaker, stage, and job id.** The job id is the thread that connects UI status, logs, and MCP/API results.
+3. **Check whether the backend is alive.** If `/api/config` still responds, the problem may be the job or UI, not the whole server.
+4. **Open the batch report or job result.** Look for `chunks[]`, `device`, `error_code`, and failed `span` values.
+5. **Pick the smallest useful fix.** One bad word needs a local rerun; repeated OOM needs settings changes; a backend crash needs developer escalation.
+
+## Pick the right fix
+
+| What you observe | First fix to try | Avoid doing this first |
+|---|---|---|
+| One failed chunk, rest OK | Inspect that span; rerun the stage with smaller chunks if needed. | Reprocess the whole corpus. |
+| Repeated `oom_suspect` | Close heavy apps; use 5-minute chunks; consider CPU fallback. | Increasing timeout. |
+| Repeated `provider_error` | Check model path, language, and traceback. | Blindly lowering chunk size without reading logs. |
+| Output ends early but job says complete | Check coverage and failed spans; rerun only the affected stage. | Moving to Compare/export as if coverage is complete. |
+| UI lost contact | Query actual job status/logs. | Starting a duplicate job from the browser. |
+| IPA coverage shrank | Inspect STT/ORTH/concept intervals. | Accepting overwrite output just because IPA finished. |
 
 ## Triage map: where did the problem happen?
 
@@ -69,6 +90,28 @@ Quick interpretation:
 | "Chunk failed: timeout" | A worker exceeded the timeout or stopped making progress. | Check logs first; smaller chunks are usually safer than a larger timeout. |
 | "Very slow" | The system may be on CPU, loading models, or doing many small chunks. | Check `device`; benchmark one chunk; avoid multi-speaker batches on laptops. |
 | "IPA got shorter" | IPA follows intervals; upstream coverage may have shrunk. | Inspect STT/ORTH/concept intervals before accepting the IPA rerun. |
+
+## Practical recipes
+
+### I have a long file and one span failed
+
+1. Note the failed `span.start` and `span.end`.
+2. Open that region in Annotate and listen around the boundary.
+3. If the region matters linguistically, lower the relevant chunk size and rerun only that stage for the speaker.
+4. If the problem is one word/prompt, use a concept-window or per-lexeme rerun instead.
+5. Keep the previous report until the rerun proves better coverage.
+
+### The machine keeps running out of memory
+
+1. Restart PARSE after closing browsers, IDEs, model servers, and other GPU/RAM-heavy tools.
+2. Run one speaker at a time.
+3. Use 5-minute STT/ORTH chunks.
+4. If GPU failures repeat, force only the failing stage to CPU before forcing everything to CPU.
+5. Record the setting that worked in local project notes.
+
+### The result is technically green but suspicious
+
+Treat it as a review blocker when coverage is tiny, output ends far before the WAV, or IPA is much shorter than before. Technical completion means "the job ended," not "the linguistic analysis is ready."
 
 ## Symptom: STT or ORTH stopped early
 
