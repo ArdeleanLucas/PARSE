@@ -2266,8 +2266,10 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    // Sanity: both speaker rows are in the DOM.
-    expect(await screen.findByText("/aw/")).toBeTruthy();
+    // Sanity: both speaker rows are in the DOM. SpeakerFormsTable expands
+    // the first row by default, so `/aw/` appears in both the row IPA cell
+    // and the variant card inside the expansion — use findAllByText.
+    expect((await screen.findAllByText("/aw/")).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText("/awa/")).toBeTruthy();
     // CLEF config loads async; wait for the dynamic headers to mount.
     await waitFor(() => expect(screen.getByTestId("sim-col-header-ar")).toBeTruthy());
@@ -2610,9 +2612,16 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    expect(await screen.findByTestId("compare-bundle-table")).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Choose canonical lexeme for Fail01" }));
-    fireEvent.click(within(screen.getByTestId("canonical-picker-Fail01")).getByText("Save"));
+    // SpeakerFormsTable expands the first speaker by default — the canonical
+    // radio is rendered inline inside the row's expansion panel and saves
+    // immediately on click (no Save button).
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
+    const radioLabel = await screen.findByTestId("canonical-option-Fail01-1");
+    const radio = radioLabel.querySelector("input") as HTMLInputElement;
+    // Clicking the radio promotes an auto default:single-candidate selection
+    // to manual. The radio's onClick handler covers the already-checked case
+    // where React would otherwise skip onChange.
+    fireEvent.click(radio);
 
     await waitFor(() => expect(apiClient.putCanonicalLexeme).toHaveBeenCalledWith("1", "Fail01", { csv_row_id: "1", realization_index: 0 }));
     expect(mockPatchCanonicalLexeme).toHaveBeenCalledWith("1", "Fail01", expect.objectContaining({ csv_row_id: "1", source: "manual" }));
@@ -2627,8 +2636,9 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    expect(await screen.findByTestId("compare-bucket-klq\u00004.1")).toBeTruthy();
-    expect(screen.getByTestId("compare-bucket-jbil\u0000169")).toBeTruthy();
+    // SpeakerFormsTable renders by speaker (not by bucket); the table testid
+    // is enough to confirm the bundle resolved.
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
     expect(mockGetCompareBundles).toHaveBeenCalledWith({});
   });
 
@@ -2638,7 +2648,7 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
-    expect(await screen.findByTestId("compare-bucket-klq\u00004.1")).toBeTruthy();
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
     expect(mockGetCompareBundles).toHaveBeenCalledTimes(1);
 
     fireEvent.click(within(screen.getByTestId("concept-sidebar")).getByRole("button", { name: /small/i }));
@@ -2655,7 +2665,7 @@ describe("ParseUI", () => {
 
     const error = await screen.findByTestId("compare-bundle-error");
     expect(error.textContent).toContain("network down");
-    expect(await screen.findByTestId("compare-bundle-table")).toBeTruthy();
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
   });
 
   it("renders a no-match empty state instead of a fallback when BE returns nonmatching bundles", async () => {
@@ -2665,7 +2675,7 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     expect(await screen.findByTestId("compare-bundle-no-match")).toBeTruthy();
-    expect(screen.queryByTestId("compare-bundle-table")).toBeNull();
+    expect(screen.queryByTestId("speaker-forms-table")).toBeNull();
     expect(screen.queryByTestId("compare-bundle-error")).toBeNull();
   });
 

@@ -26,6 +26,20 @@ export function spectrogramUrl(params: {
   return `/api/spectrogram?${search.toString()}`;
 }
 
+/** Resolve a workspace-relative source_wav (e.g. "audio/working/Fail01.wav")
+ *  to an HTTP URL the browser can fetch. The PARSE server serves files at
+ *  workspace-root-relative paths directly, so this is just normalisation:
+ *  strip leading slashes/backslashes, re-prefix with "/". Returns "" when
+ *  the input is empty. Used by compare-mode SpeakerFormsTable for HTMLAudio
+ *  scoped playback (no playback-store coupling). */
+export function mediaUrlFromSourceWav(sourceWav: string | null | undefined): string {
+  const raw = (sourceWav ?? "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const cleaned = raw.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `/${cleaned}`;
+}
+
 export async function getNEXUSExport(): Promise<Blob> {
   const response = await fetch("/api/export/nexus", {
     method: "GET",
