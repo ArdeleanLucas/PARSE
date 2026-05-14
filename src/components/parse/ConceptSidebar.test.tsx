@@ -1169,6 +1169,40 @@ describe('ConceptSidebar', () => {
       expect(onSelect).toHaveBeenCalledWith(3, '618');
     });
 
+    it('confines active highlight to the active variant button, not the wrapper or siblings', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey="365"
+          onConceptSelect={vi.fn()}
+        />,
+      );
+
+      const wrapper = screen.getByTestId('concept-row-3');
+      expect(wrapper.className).not.toContain('bg-indigo-50');
+
+      const rowA = screen.getByTestId('concept-variant-row-365');
+      expect(rowA.className).toContain('bg-indigo-50');
+
+      const rowB = screen.getByTestId('concept-variant-row-618');
+      expect(rowB.className).not.toContain('bg-indigo-50');
+    });
+
     it('auto-expands a grouped parent when activeConceptKey matches one of its variants', () => {
       render(
         <ConceptSidebar
