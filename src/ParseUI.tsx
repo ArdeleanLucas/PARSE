@@ -43,6 +43,8 @@ import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConce
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
 import { findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
+import { useCompareReturnRestore } from './hooks/useCompareReturnRestore';
+import { useOpenInAnnotateHandler } from './hooks/useOpenInAnnotateHandler';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
   applyCanonicalDecisionImport,
@@ -480,6 +482,11 @@ export function ParseUI() {
     try { localStorage.setItem('parse.currentMode', currentMode); }
     catch { /* non-fatal */ }
   }, [currentMode]);
+  const compareReturn = useCompareReturnRestore({
+    currentMode,
+    setConceptId,
+    setSelectedConceptKey,
+  });
   const readStoredSidebarScope = (mode: AppMode): boolean => {
     const fallback = mode === 'annotate';
     try {
@@ -1376,6 +1383,11 @@ export function ParseUI() {
     return null;
   }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
+  const handleOpenInAnnotate = useOpenInAnnotateHandler({
+    conceptId,
+    conceptKey: concept.key,
+    setCurrentMode,
+  });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
   }, []);
@@ -2281,6 +2293,7 @@ export function ParseUI() {
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500">Loading Compare bundle…</div>
                 ) : activeCompareBundle ? (
                   <SpeakerFormsTable
+                    key={`${concept.key}:${compareReturn.initialExpandedSpeaker ?? 'default'}`}
                     bundle={activeCompareBundle}
                     speakers={selectedCompareSpeakers}
                     speakerForms={speakerForms}
@@ -2291,6 +2304,8 @@ export function ParseUI() {
                     onCycleCognate={(speaker, current) => cycleSpeakerCognate(concept.key, speaker, current)}
                     onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
                     onToggleSpeakerFlag={(speaker, current) => toggleSpeakerFlag(concept.key, speaker, current)}
+                    onOpenInAnnotate={handleOpenInAnnotate}
+                    initialExpandedSpeaker={compareReturn.initialExpandedSpeaker ?? undefined}
                   />
                 ) : compareBundlesError ? null : compareBundles.length === 0 ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-empty">

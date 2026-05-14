@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 import type { ActiveJobSnapshot } from "./api/contracts/job-observability";
 import { useTranscriptionLanesStore } from "./stores/transcriptionLanesStore";
+import { useCompareReturnStore } from "./stores/compareReturnStore";
+import { usePlaybackStore } from "./stores/playbackStore";
 
 const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
   mockGetAuthStatus: vi.fn(),
@@ -16,6 +18,8 @@ let mockTags: Tag[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
 let mockCurrentTime = 0;
+let mockActiveSpeaker: string | null = null;
+let mockPendingSeek: { targetSec: number; nonce: number } | null = null;
 
 const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
 const mockHydrateTags = vi.fn();
@@ -155,20 +159,34 @@ vi.mock("./stores/annotationStore", () => {
 });
 
 vi.mock("./stores/playbackStore", () => {
-  const usePlaybackStore = (selector: (s: unknown) => unknown) =>
-    selector({
-      activeSpeaker: null,
-      isPlaying: false,
-      currentTime: mockCurrentTime,
-      duration: 4,
-      selectedRegion: mockSelectedRegion,
-      setSelectedRegion: mockSetSelectedRegion,
-    });
-  (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
-    mockPlaybackSetState(...args);
-  (usePlaybackStore as unknown as { getState: () => { currentTime: number } }).getState = () => ({
+  const setActiveSpeaker = (speaker: string) => {
+    mockActiveSpeaker = speaker;
+    mockSetActiveSpeaker(speaker);
+  };
+  const requestSeek = (targetSec: number) => {
+    mockPendingSeek = { targetSec, nonce: (mockPendingSeek?.nonce ?? 0) + 1 };
+  };
+  const state = () => ({
+    activeSpeaker: mockActiveSpeaker,
+    isPlaying: false,
     currentTime: mockCurrentTime,
+    duration: 4,
+    selectedRegion: mockSelectedRegion,
+    pendingSeek: mockPendingSeek,
+    setSelectedRegion: mockSetSelectedRegion,
+    setActiveSpeaker,
+    requestSeek,
   });
+  const usePlaybackStore = (selector: (s: unknown) => unknown) => selector(state());
+  (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) => {
+    const patch = args[0] as Partial<ReturnType<typeof state>> | undefined;
+    if (patch && typeof patch === "object") {
+      if ("activeSpeaker" in patch) mockActiveSpeaker = patch.activeSpeaker ?? null;
+      if ("pendingSeek" in patch) mockPendingSeek = patch.pendingSeek ?? null;
+    }
+    mockPlaybackSetState(...args);
+  };
+  (usePlaybackStore as unknown as { getState: () => ReturnType<typeof state> }).getState = () => state();
   return { usePlaybackStore };
 });
 
@@ -663,6 +681,9 @@ beforeEach(() => {
   mockPatchCanonicalLexeme.mockClear();
   mockSelectedRegion = { start: 1.25, end: 2.5 };
   mockCurrentTime = 0;
+  mockActiveSpeaker = null;
+  mockPendingSeek = null;
+  useCompareReturnStore.getState().clear();
   mockChatMessages = [];
   mockChatSending = false;
   mockChatError = null;
@@ -2282,6 +2303,50 @@ describe("ParseUI", () => {
     // Kzn03 row has no similarity entry -- both columns fall back to "—".
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("opens a Speaker Forms variant in annotate and restores the expanded compare row on return", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01", "Kalh01"],
+      concepts: [{ id: "1", label: "big" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "big", conceptId: "1", ipa: "gawra", ortho: "big", start: 1, end: 2 },
+      ]),
+      Kalh01: makeRecord("Kalh01", [
+        { conceptText: "big", conceptId: "1", ipa: "gewr", ortho: "big", start: 3, end: 4 },
+      ]),
+    };
+    mockGetCompareBundles.mockResolvedValue(makeBeShapedBigCompareBundles());
+
+    render(<ParseUI />);
+
+    fireEvent.click(await screen.findByTestId("variant-open-annotate-Fail01-53"));
+
+    expect(await screen.findByRole("button", { name: /Annotate/i })).toBeTruthy();
+    const playback = usePlaybackStore.getState() as {
+      activeSpeaker: string | null;
+      pendingSeek: { targetSec: number; nonce: number } | null;
+    };
+    expect(playback.activeSpeaker).toBe("Fail01");
+    expect(playback.pendingSeek?.targetSec).toBe(1);
+    expect(useCompareReturnStore.getState().snapshot).toEqual({
+      conceptId: 1,
+      conceptKey: "1",
+      expandedSpeaker: "Fail01",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Annotate/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Compare/i }));
+
+    await waitFor(() => expect(useCompareReturnStore.getState().snapshot).toBeNull());
+    expect(await screen.findByTestId("speaker-expanded-Fail01")).toBeTruthy();
+    expect(screen.getByTestId("variant-card-Fail01-53")).toBeTruthy();
   });
 
   it("renders dynamic similarity columns based on CLEF primary_contact_languages (not hardcoded Arabic/Persian)", async () => {
