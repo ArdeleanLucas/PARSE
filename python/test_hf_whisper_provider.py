@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import math
 import sys
 import types
@@ -220,9 +221,23 @@ def test_unload_model_drops_loaded_objects_and_clears_cuda(monkeypatch, capsys):
 
 
 def test_module_import_does_not_require_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "transformers", None)
+    module_name = "ai.providers.hf_whisper"
+    old_module = sys.modules.pop(module_name, None)
+    real_import = __import__
 
-    provider = HFWhisperProvider(config=_config())
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in {"torch", "transformers"}:
+            raise ImportError(f"no {name} in lightweight env")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    try:
+        reimported = importlib.import_module(module_name)
+        provider = reimported.HFWhisperProvider(config=_config())
+    finally:
+        sys.modules.pop(module_name, None)
+        if old_module is not None:
+            sys.modules[module_name] = old_module
 
     assert provider.model_path == "razhan/whisper-base-sdh"
     assert provider.language == "sd"

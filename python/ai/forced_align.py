@@ -39,6 +39,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
+from ai.device import _torch_cuda_available
+
 
 def _is_wsl() -> bool:
     """Return True when running inside WSL (Windows Subsystem for Linux)."""
@@ -285,9 +287,9 @@ class Aligner:
         self.processor = None
         self.vocab = {}
         try:
-            import torch  # type: ignore
+            if _torch_cuda_available():
+                import torch  # type: ignore
 
-            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
         except Exception:
@@ -351,7 +353,7 @@ class Aligner:
             ipa = self.processor.tokenizer.decode(
                 pred_ids, skip_special_tokens=True
             )
-            if torch.cuda.is_available():
+            if _torch_cuda_available():
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
         except Exception as exc:  # pragma: no cover - defensive

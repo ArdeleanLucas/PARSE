@@ -84,6 +84,23 @@ def test_resolve_compute_device_cuda_request_with_no_cuda_warns_and_falls_back(
     assert "falling back to cpu" in caplog.text
 
 
+def test_resolve_compute_device_explicit_cuda_falls_back_to_cpu_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from ai import device as device_module
+
+    monkeypatch.setattr(device_module, "_torch_cuda_available", lambda: False)
+
+    with caplog.at_level(logging.WARNING, logger="parse.device"):
+        resolved = device_module.resolve_compute_device(
+            "orth", config_device="cuda", section_default="auto"
+        )
+
+    assert resolved == "cpu"
+    assert "falling back to cpu" in caplog.text
+
+
 def test_resolve_compute_device_stt_force_cpu_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     from ai import device as device_module
 
