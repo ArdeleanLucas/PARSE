@@ -9,6 +9,13 @@ This guide walks through one conservative end-to-end run for a single speaker. I
 4. Confirm your workspace contains a source WAV and any available CSV/TSV markers.
 
 ## Recommended first run
+
+<p align="center">
+  <img src="../pr-assets/user-guide-run-full-pipeline.png" alt="Run Full Pipeline modal showing one selected speaker, all four steps, and the keep/overwrite preview grid" width="85%" />
+</p>
+
+*Figure: the **Run Full Pipeline** modal collects every step in one surface. Pick one speaker, leave all four steps (Normalize, STT, ORTH, IPA) checked, keep the default **Keep** existing-data toggles, and inspect the preview grid before clicking **Run** to make sure nothing already-finalized gets overwritten.*
+
 1. **Import or open one speaker.** Use a short representative recording before batching a corpus.
 2. **Generate or verify boundaries.** Confirm the waveform, peaks, and lexical intervals line up with the source audio.
 3. **Run STT.** For long files, PARSE reports chunk progress and keeps merged transcript timing in the usual cache shape.
