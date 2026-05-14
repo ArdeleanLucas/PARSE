@@ -1,12 +1,75 @@
 # AI Integration
 
-> Last updated: 2026-05-01
+> Last updated: 2026-05-14
 >
 > This document consolidates the AI provider system, model roles, configuration expectations, and the full built-in PARSE chat tool surface currently described in the repository README and code.
 
 PARSE is AI-native, but not in the sense of a generic chatbot pasted onto a UI. Different tasks route to different providers and model families, and the in-app assistant operates through a bounded PARSE-specific tool layer.
 
 For per-model deep-dive (configuration knobs, tuning recommendations, language-scoped empirical evidence), see [`models/`](models/README.md).
+
+## PARSE AI as Protected Assistant
+
+PARSE treats AI as a protected scribe, not as an autonomous annotator. The human researcher remains the source of truth: every machine-generated STT, ORTH, IPA, and chat-driven workflow suggestion is reviewable, editable, rejectable, and rerunnable.
+
+```mermaid
+flowchart TB
+  classDef override fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:2px;
+  classDef assistant fill:#eff6ff,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px;
+  classDef guard fill:#f0fdf4,stroke:#16a34a,color:#14532d,stroke-width:1.5px;
+  classDef artifact fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.2px;
+
+  subgraph human_override["Human Override layer — always on top"]
+    human["Human researcher<br/>source of truth"]
+    choice["Accept · edit · reject · rerun · cancel"]
+  end
+
+  subgraph protected_scribe["Protected assistant layer"]
+    stt["STT scribe<br/>local faster-whisper or OpenAI Whisper API"]
+    ortho["ORTH scribe<br/>HF Razhan by default; CT2 legacy opt-in"]
+    ipa["IPA scribe<br/>wav2vec2 acoustic IPA only"]
+    chat["Chat assistant<br/>OpenAI / xAI / Ollama tool surface"]
+  end
+
+  subgraph protection["Protection and separation layer"]
+    providers["Provider separation<br/>stt / ortho / ipa / chat config blocks"]
+    readonly["Chat write guard<br/>chat.read_only + PARSE_CHAT_READ_ONLY"]
+    dryrun["Preview-before-write rule<br/>dryRun=true before broad mutation"]
+    evidence["Persisted evidence stays visible<br/>annotations + enrichments remain inspectable"]
+  end
+
+  subgraph project_state["PARSE project state"]
+    tiers["Timestamped tiers<br/>segments, words, lexemes, IPA"]
+    enrichments["parse-enrichments.json<br/>compare and downstream evidence"]
+    memory["parse-memory.md / source index<br/>assistant context, not ground truth"]
+  end
+
+  human --> choice
+  choice --> stt
+  choice --> ortho
+  choice --> ipa
+  choice --> chat
+  stt --> providers
+  ortho --> providers
+  ipa --> providers
+  chat --> readonly
+  chat --> dryrun
+  providers --> evidence
+  readonly --> evidence
+  dryrun --> evidence
+  evidence --> tiers
+  evidence --> enrichments
+  evidence --> memory
+  project_state -. "reviewable outputs" .-> human
+  choice -. "override at any time" .-> project_state
+
+  class human,choice override;
+  class stt,ortho,ipa,chat assistant;
+  class providers,readonly,dryrun,evidence guard;
+  class tiers,enrichments,memory artifact;
+```
+
+The diagram is intentionally layered: human judgment sits above provider routing and write guards. Provider modules under `python/ai/providers/` keep speech, orthography, IPA, and chat responsibilities separate; the chat orchestrator then adds read-only/write-enabled guardrails so tool calls can support fieldwork without silently replacing researcher control.
 
 ## Provider system at a glance
 

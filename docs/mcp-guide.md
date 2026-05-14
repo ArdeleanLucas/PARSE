@@ -11,6 +11,8 @@ This guide is the narrative overview of PARSE's machine-facing surfaces. For the
 | HTTP MCP bridge | HTTP | `GET/POST /api/mcp/*` | Tool discovery and HTTP tool execution |
 | stdio MCP adapter | stdio | `python python/adapters/mcp_adapter.py` | Claude Code, Cursor, Cline, Codex, Hermes, Windsurf |
 
+![PARSE MCP Tool Surface](./user-guides/assets/parse-mcp-tool-surface.png)
+
 ## Tool Counts Verified Against Code
 
 These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, `python/external_api/catalog.py`, and the MCP adapter tests:

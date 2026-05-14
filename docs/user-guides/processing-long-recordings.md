@@ -118,6 +118,10 @@ At the default 10-minute chunk size, a three-hour recording becomes about 18 wor
 
 When the UI shows `STT chunk 7/18`, PARSE is working through one time slice of the original recording. When the job finishes, the successful slices are merged back onto the normal speaker timeline.
 
+![Long-File Chunking & Subprocess Isolation in PARSE: a three-hour audio timeline split into 18 ten-minute chunks, processed in protected subprocess boxes, and merged back onto the original timeline with progress indicators.](assets/long-file-chunking-subprocess-isolation.svg)
+
+*Figure: Long-file chunking and subprocess isolation in PARSE. The top row keeps the original three-hour time ruler, the middle row shows protected child subprocesses for each STT/ORTH chunk, and the bottom row shows successful results merged back into one whole-speaker timeline with chunk progress markers.*
+
 ### Post-run decision table
 
 Use one report pass to decide whether to review, rerun, or repair:

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-labelledby="title desc">
+  <title id="title">PARSE Troubleshooting Decision Tree</title>
+  <desc id="desc">A clean decision-tree flowchart starting at Job Issue and branching through chunk status, partial results, device problems, OOM or timeout, CPU fallback, reduced chunk size, and rerun-specific-span outcomes.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.7" opacity="0.52"/>
+    </pattern>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="7" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.11"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .caption { font-family: Inter, Arial, sans-serif; font-size: 12px; fill: #475569; font-weight: 650; }
+      .tiny { font-family: Inter, Arial, sans-serif; font-size: 11px; fill: #64748b; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="920" fill="#ffffff"/>
+  <rect width="1280" height="920" fill="url(#grid)"/>
+  <rect x="32" y="28" width="1216" height="864" rx="30" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.4"/>
+
+  <text x="640" y="68" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="850" fill="#0f172a" text-anchor="middle">PARSE Troubleshooting Decision Tree</text>
+  <text x="640" y="98" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="550" fill="#475569" text-anchor="middle">Start with job evidence, choose the smallest recovery path, and preserve useful partial output.</text>
+
+  <rect x="535.0" y="97.0" width="210" height="62" rx="18" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#softShadow)"/><text x="640" y="134" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="800" fill="#1e3a8a" text-anchor="middle">Job Issue</text>
+  <rect x="460.0" y="193.0" width="360" height="62" rx="18" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" filter="url(#softShadow)"/><text x="640" y="217" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#0f172a" text-anchor="middle">Collect evidence</text><text x="640" y="241" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#475569" text-anchor="middle">job id · chunks[] · device · logs</text>
+  <line x1="640" y1="159" x2="640" y2="191" stroke="#2563eb" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  <path d="M 640 255 V 306 H 260 V 324" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+  <path d="M 640 255 V 324" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M 640 306 H 1020 V 324" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+
+  <polygon points="260,325.0 375.0,388 260,451.0 145.0,388" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#softShadow)"/><text x="260" y="384" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Check Chunk</text><text x="260" y="402" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Status</text>
+  <polygon points="260,465.0 370.0,524 260,583.0 150.0,524" fill="#ffffff" stroke="#3b82f6" stroke-width="2" filter="url(#softShadow)"/><text x="260" y="520" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Partial</text><text x="260" y="538" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Results?</text>
+  <line x1="260" y1="451" x2="260" y2="464" stroke="#2563eb" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <rect x="135.0" y="636.0" width="250" height="76" rx="18" fill="#ecfdf5" stroke="#16a34a" stroke-width="2" filter="url(#softShadow)"/><text x="260" y="667" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#166534" text-anchor="middle">Rerun Specific Span</text><text x="260" y="691" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#475569" text-anchor="middle">use failed span; avoid corpus rerun</text>
+  <line x1="260" y1="583" x2="260" y2="634" stroke="#16a34a" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/><rect x="262" y="597" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="286" y="613" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#16a34a" text-anchor="middle">yes</text>
+  <path d="M 370 524 V 610 H 560 V 704" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" stroke-dasharray="6 6"/><rect x="436" y="580" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="460" y="596" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#94a3b8" text-anchor="middle">no</text>
+
+  <polygon points="640,325.0 755.0,388 640,451.0 525.0,388" fill="#fefce8" stroke="#eab308" stroke-width="2" filter="url(#softShadow)"/><text x="640" y="384" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Device</text><text x="640" y="402" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Problem?</text>
+  <rect x="520.0" y="504.0" width="240" height="76" rx="18" fill="#fefce8" stroke="#ca8a04" stroke-width="2" filter="url(#softShadow)"/><text x="640" y="535" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#854d0e" text-anchor="middle">Switch to CPU</text><text x="640" y="559" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#475569" text-anchor="middle">check device + env precedence</text>
+  <line x1="640" y1="451" x2="640" y2="502" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/><rect x="642" y="465" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="666" y="481" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#ca8a04" text-anchor="middle">yes</text>
+  <line x1="640" y1="581" x2="640" y2="666" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)" stroke-dasharray="6 6"/><rect x="666" y="611" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="690" y="627" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#94a3b8" text-anchor="middle">still failing?</text>
+
+  <polygon points="1020,325.0 1137.5,388 1020,451.0 902.5,388" fill="#fff7ed" stroke="#f97316" stroke-width="2" filter="url(#softShadow)"/><text x="1020" y="384" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">OOM /</text><text x="1020" y="402" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a" text-anchor="middle">Timeout?</text>
+  <rect x="895.0" y="504.0" width="250" height="76" rx="18" fill="#fff7ed" stroke="#ea580c" stroke-width="2" filter="url(#softShadow)"/><text x="1020" y="535" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#9a3412" text-anchor="middle">Reduce Chunk Size</text><text x="1020" y="559" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#475569" text-anchor="middle">prefer 5-minute STT/ORTH chunks</text>
+  <line x1="1020" y1="451" x2="1020" y2="502" stroke="#ea580c" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/><rect x="1022" y="465" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="1046" y="481" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#ea580c" text-anchor="middle">yes</text>
+  <path d="M 910 542 V 625 H 720 V 704" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" stroke-dasharray="6 6"/><rect x="788" y="595" width="48" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0"/><text x="812" y="611" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="800" fill="#94a3b8" text-anchor="middle">no / repeats</text>
+
+  <rect x="475.0" y="666.0" width="330" height="76" rx="18" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" filter="url(#softShadow)"/><text x="640" y="697" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#0f172a" text-anchor="middle">Escalate with Logs</text><text x="640" y="721" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#475569" text-anchor="middle">backend crash · missing chunks[] · device contradiction</text>
+
+  <g transform="translate(74 800)">
+    <rect x="0" y="0" width="462" height="38" rx="19" fill="#f8fafc" stroke="#cbd5e1"/>
+    <circle cx="24" cy="19" r="7" fill="#2563eb"/>
+    <text x="42" y="24" class="caption">chunk rows and failed spans guide review/rerun</text>
+    <circle cx="302" cy="19" r="7" fill="#ea580c"/>
+    <text x="320" y="24" class="caption">OOM/timeout: smaller chunks first</text>
+  </g>
+
+  <text x="1188" y="872" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="650" fill="#64748b" text-anchor="end">Grounded in docs/troubleshooting/long-files.md</text>
+</svg>

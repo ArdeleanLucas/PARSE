@@ -2,6 +2,10 @@
 
 Start with the symptom, then choose the smallest fix that preserves useful work. Most PARSE failures fall into three buckets: startup, long-file processing, or configuration/device mismatch.
 
+![PARSE troubleshooting decision-tree flowchart: Job Issue branches through chunk status, partial results, device problems, OOM or timeout, and the smallest recovery actions.](assets/parse-troubleshooting-decision-tree.svg)
+
+*Figure: Start with the job evidence, then choose the smallest recovery path. Partial chunk results point to a failed span; device mismatch points to CPU fallback; repeated OOM/timeout points to smaller STT/ORTH chunks before broader reruns.*
+
 ## Quick symptom index
 
 | Symptom | First place to look | First action |
