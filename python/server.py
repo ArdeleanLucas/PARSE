@@ -1908,6 +1908,12 @@ class _BoundedThreadHTTPServer(http.server.HTTPServer):
         finally:
             self.shutdown_request(request)
 
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
     def server_close(self):
         super().server_close()
         pool = getattr(self, "_pool", None)
