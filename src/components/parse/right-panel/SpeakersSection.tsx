@@ -48,7 +48,7 @@ export function SpeakersSection({
         <button
           type="button"
           data-testid="speakers-select-all"
-          aria-label="Select all speakers"
+          aria-label="Select all"
           aria-disabled={bulkDisabled ? 'true' : undefined}
           disabled={bulkDisabled}
           onClick={() => {
@@ -61,7 +61,7 @@ export function SpeakersSection({
         <button
           type="button"
           data-testid="speakers-clear"
-          aria-label="Clear speaker selection"
+          aria-label="Clear"
           aria-disabled={bulkDisabled ? 'true' : undefined}
           disabled={bulkDisabled}
           onClick={() => {
