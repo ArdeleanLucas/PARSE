@@ -4,6 +4,25 @@
 
 PARSE is designed to handle long elicitation recordings, but the safest workflow is still deliberate: import one speaker, confirm the audio metadata, run bounded support jobs, read the progress, and review the result before moving to the next speaker.
 
+## If you only read one section
+
+1. **Use the defaults first.** PARSE already chunks long STT/ORTH work and protects heavy stages.
+2. **Run one representative speaker before batching.** Learn the machine's speed and memory behavior.
+3. **Watch chunk progress.** A long job should eventually show `STT chunk N/M` or `ORTH chunk N/M`.
+4. **Treat partial output as useful evidence.** Find the failed span; do not automatically discard the whole recording.
+5. **Do small reruns for small problems.** If one word or prompt is poor, use a concept-window/per-lexeme rerun instead of processing hours again.
+
+## What success looks like
+
+A successful long-file pass is not "the computer finished, therefore the linguistics is done." It means PARSE produced reviewable material:
+
+| Check | Good sign | Review blocker |
+|---|---|---|
+| Job status | Complete or clearly partial with named spans. | Spinning forever, lost job id, backend crash, or opaque provider error. |
+| Coverage | Output reaches the part of the recording you need. | `full_coverage=false`, tiny coverage fraction, or output ending far before the WAV. |
+| Chunk report | Most chunks `ok`; any failures have spans/codes. | Repeated same-code failures, missing `chunks[]` on a long full-file STT/full-mode ORTH run with chunking enabled, or no report. |
+| Annotate review | Text/intervals broadly align with the audio. | Boundaries drift, prompt text parrots, or IPA covers much less than before. |
+
 ## Quick answer: how to process a three-hour recording
 
 Use the default robust path unless you have a specific debugging reason not to. For most users, no environment changes are required: long-file STT and ORTH are already chunk-aware and run with extra crash protection.
@@ -52,6 +71,38 @@ Review in Annotate mode before Compare/export
 9. **Review in Annotate mode.** Treat automation as candidate evidence: confirm boundaries, retime suspicious intervals, and rerun short concept windows where needed.
 10. **Move to Compare mode only after coverage is plausible.** Use `coverage_fraction` / `full_coverage` in pipeline state or the visible annotation tiers, not just the fact that a tier has at least one interval.
 
+### Before you press Run
+
+Use this short preflight checklist for any long speaker:
+
+- Speaker is loaded from the intended workspace, not an old checkout or test folder.
+- Waveform duration matches the field recording notes.
+- Audio plays at the expected location near the beginning, middle, and end.
+- You know whether you want the **full speaker** robust path or a **short concept-window** repair.
+- For a new machine/dataset, you are running one speaker/stage first, not the whole corpus.
+- You have not globally disabled chunking unless you are doing a controlled benchmark.
+
+### During the run
+
+Do not judge the job by the first minute alone. Model import and warm-up can be slow. Once the first chunk starts, progress should become easier to interpret.
+
+| During-run signal | Meaning | Action |
+|---|---|---|
+| First chunk takes longer than later chunks | Normal model warm-up. | Wait; do not start a duplicate job. |
+| Chunk number advances steadily | Healthy long-file progress. | Keep monitoring until report. |
+| Same chunk sits for a very long time | Possible timeout, OOM, or provider stall. | Check logs/job status before changing settings. |
+| Browser loses contact | UI polling may have dropped while backend continues. | Inspect the job id or `/api/jobs/active`; do not rerun blindly. |
+
+### After the run
+
+Before Compare/export, do a quick human review pass:
+
+1. Open the speaker in Annotate.
+2. Jump to any failed chunk spans from the report.
+3. Check a few intervals at the start, middle, and end.
+4. Confirm that lexical intervals cover the intended prompts/responses.
+5. Record any chunk-size/device changes in project notes so later reviewers know what happened.
+
 ### What the chunks mean
 
 At the default 10-minute chunk size, a three-hour recording becomes about 18 work units:
@@ -67,28 +118,19 @@ At the default 10-minute chunk size, a three-hour recording becomes about 18 wor
 
 When the UI shows `STT chunk 7/18`, PARSE is working through one time slice of the original recording. When the job finishes, the successful slices are merged back onto the normal speaker timeline.
 
-### What to watch while it runs
+### Post-run decision table
 
-```text
-Healthy long run pattern
-
-startup/model load  ->  chunk 1/N  ->  chunk 2/N  ->  ...  ->  report
-      maybe slow          visible       visible              inspect
-```
-
-Expect the first chunk to take longer than later chunks if a model has to load or warm up. After that, progress should advance chunk by chunk. If nothing changes for a long time, check the job status and logs before starting another run.
-
-### What to do after it finishes
-
-Use the result category to decide the next action:
+Use one report pass to decide whether to review, rerun, or repair:
 
 | Result you see | Meaning | Next action |
 |---|---|---|
 | All chunks `ok` | The stage produced output for every chunk. | Review boundaries and text; do not skip linguistic review. |
-| Some chunks `error` | PARSE saved partial evidence and named failed spans. | Inspect failed spans, then rerun the stage with smaller chunks if needed. |
+| Some chunks `error` | PARSE saved partial evidence and named failed spans. | Inspect failed spans, then rerun the stage with smaller chunks only if the span matters. |
 | `cancelled` rows | The job stopped before those chunks ran. | Decide whether to restart the stage; completed chunks may still be useful evidence. |
-| Empty/low coverage | The job may have technically completed but not covered the recording. | Check coverage before Compare/export; rerun or repair upstream stages. |
+| Empty/low coverage | The job may have technically completed but not covered the recording. | Treat this as a review blocker before Compare/export. |
 | IPA shrink warning | IPA would cover much less than the previous IPA tier. | Inspect STT/ORTH/concept intervals before accepting the IPA result. |
+
+For deeper failure diagnosis, jump to [Troubleshooting long files](../troubleshooting/long-files.md) with the speaker, job id, failed chunk span, and device value.
 
 ## What PARSE does by default
 
@@ -144,6 +186,19 @@ PARSE records chunk failures instead of flattening the whole stage into a single
 | `cancelled` | The user or caller cancelled before this chunk ran. | Decide whether to resume the stage later. Completed chunks remain useful evidence. |
 
 The merged transcript/annotation tiers are still the main review surface. `chunks[]` is diagnostic job-result data; it is not persisted into the STT cache.
+
+## Rerun, repair, or accept?
+
+Use this table before spending hours on a full rerun:
+
+| Situation | Best next move |
+|---|---|
+| One noisy word or one bad lexical item | Repair the interval and use a concept-window/per-lexeme rerun. |
+| One failed STT/ORTH chunk | Inspect the span; lower chunk size and rerun that stage if the span matters. |
+| Many failed chunks with `oom_suspect` | Change machine settings first: close heavy apps, lower chunks, or force CPU. |
+| Stage technically complete but low coverage | Do not accept yet; inspect why output ended early. |
+| IPA shrink warning | Fix upstream interval coverage before rerunning/accepting IPA. |
+| Good enough for rough triage, not publication | Mark it as provisional in notes; do not use for final cognate/export decisions. |
 
 ## Re-running failed work
 
@@ -247,7 +302,7 @@ Before using long-file output for comparison or publication:
 ## Related docs
 
 - [Troubleshooting long files](../troubleshooting/long-files.md)
-- [Environment variables](../environment-variables.md)
+- [Environment variables](../reference/environment-variables.md)
 - [Compute architecture](../architecture/compute.md)
-- [MC-384 migration notes](../getting-started/migration.md)
-- [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes)
+- [MC-384 migration notes](../release-notes/mc-384-migration-notes.md)
+- [MCP schema: compute job result shapes](../mcp/schema.md#compute-job-result-shapes)

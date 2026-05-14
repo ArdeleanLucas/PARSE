@@ -1,6 +1,6 @@
 # MCP & External API Guide
 
-This guide is the narrative overview of PARSE's machine-facing surfaces. For the raw schema/auth reference, see [MCP Schema](mcp-schema.md). For the full endpoint inventory, examples, and OpenAPI details, see [API Reference](api-reference.md) and [Getting Started with External Agents](getting-started-external-agents.md).
+This guide is the narrative overview of PARSE's machine-facing surfaces. For the raw schema/auth reference, see [MCP Schema](mcp/schema.md). For the full endpoint inventory, examples, and OpenAPI details, see [API Reference](api-reference.md) and [Getting Started with External Agents](getting-started-external-agents.md).
 
 ## At a Glance
 
@@ -164,5 +164,5 @@ The package also provides ready-to-use wrappers for LangChain, LlamaIndex, and C
 
 - [Getting Started with External Agents](getting-started-external-agents.md)
 - [API Reference](api-reference.md)
-- [MCP Schema](mcp-schema.md)
+- [MCP Schema](mcp/schema.md)
 - [parse-mcp package README](../python/packages/parse_mcp/README.md)

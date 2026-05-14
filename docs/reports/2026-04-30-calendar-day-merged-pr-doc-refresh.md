@@ -98,7 +98,7 @@ Rolling 21-hour coverage result: **15/15 PRs cited explicitly**.
 | `docs/ai-integration.md` / `docs/getting-started.md` / `docs/research-context.md` | Added the Hameed et al. 2025 ASR-ME paper PDF/DOI alongside Razhan model references; corrected provider-side ORTH language-token guidance to `fa`; documented the built-in ORTH decoder prime and model-init log line. |
 | `docs/plans/MC-334-razhan-sdh-language-normalize-and-cite.md` | Added the explicit ASR-ME paper PDF/DOI to the PR #213 plan and PR #216 follow-up note so Razhan citation/prompt guidance is preserved in the implementation record. |
 | `config/ai_config.example.json` | Added the ASR-ME paper PDF/DOI to the ORTH model comment and preserved the PR #216 default `initial_prompt` so copied configs keep the citation and decoder prime with the Razhan model. |
-| `docs/mcp-schema.md` | Added CSV reimport/revert to the current default MCP write-capable surface summary. |
+| `docs/mcp/schema.md` | Added CSV reimport/revert to the current default MCP write-capable surface summary. |
 | `docs/plans/deferred-validation-backlog.md` | Refreshed automated validation baseline with PR #203/#206/#207/#216 backend suites and PR #211/#215/#217 frontend/typecheck/build counts. |
 | `docs/architecture.md` / `docs/plans/concept-scoped-pipeline.md` | Clarified that concept-scoped `affected_concepts` enables scoped repaint but does not replace the canonical speaker-annotation reload after compute completion, and that IPA preview cells are mode-aware for concept-window / edited-only runs. |
 | `docs/reports/2026-04-29-calendar-day-merged-pr-doc-refresh.md` | Marked its comments-file row-index follow-up note as historical cutoff evidence superseded by PR #201. |

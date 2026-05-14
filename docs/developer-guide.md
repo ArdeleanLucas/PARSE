@@ -211,7 +211,7 @@ Compute architecture details now live in:
 
 - [Compute architecture](./architecture/compute.md) — worker mental model, launcher modes, STT/ORTH chunking, subprocess isolation, device resolver, result contract
 - [Worker process architecture](./architecture/worker-processes.md) — process topology and regression gates
-- [Environment variables](./environment-variables.md) — operator knobs for chunks, devices, timeouts, ports, and workspace roots
+- [Environment variables](./reference/environment-variables.md) — operator knobs for chunks, devices, timeouts, ports, and workspace roots
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.
 
@@ -278,7 +278,7 @@ Maintenance rules:
 
 - Keep `chunks[]` job-result-only; do not persist it into `coarse_transcripts/<speaker>.json`.
 - Use `install_child_tee()` for any spawned child log file so live progress remains visible in parent stderr.
-- Add/update [Compute architecture](./architecture/compute.md), [Worker process architecture](./architecture/worker-processes.md), [MCP schema](./mcp-schema.md), and [Environment variables](./environment-variables.md) when changing the compute contract.
+- Add/update [Compute architecture](./architecture/compute.md), [Worker process architecture](./architecture/worker-processes.md), [MCP schema](./mcp/schema.md), and [Environment variables](./reference/environment-variables.md) when changing the compute contract.
 
 ## Documentation layout after the restructure
 
@@ -289,7 +289,7 @@ The top-level docs now serve distinct audiences more cleanly:
 - `docs/user-guide.md` — end-user workflow
 - `docs/ai-integration.md` — providers, models, chat tool surface
 - `docs/api-reference.md` — HTTP + MCP reference
-- `docs/environment-variables.md` — operator-facing runtime env vars
+- `docs/reference/environment-variables.md` — operator-facing runtime env vars
 - `docs/architecture.md` plus `docs/architecture/` — system design, data model, compute, and worker topology
 - `docs/release-notes/` — release/change summaries for major shipped series
 - `docs/developer-guide.md` — contributor-facing implementation guide

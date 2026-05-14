@@ -1,4 +1,4 @@
-# Migration notes: MC-384 compute architecture
+# MC-384 migration notes
 
 > Last updated: 2026-05-14. This page is for existing PARSE users upgrading from pre-MC-384 long-file behavior to the chunk-aware, subprocess-isolated compute architecture documented in [Compute architecture](../architecture/compute.md).
 
@@ -52,7 +52,7 @@ Existing annotation files, STT caches, and enrichments remain readable. The STT 
 | `PARSE_IPA_DEVICE` | unset | Override only IPA when `wav2vec2.allow_wsl_cuda` is not explicitly false. |
 | `PARSE_STT_FORCE_CPU` | unset | Legacy STT-only alias for CPU fallback. Prefer `PARSE_STT_DEVICE=cpu` in new scripts. |
 
-Full reference: [Environment variables](../environment-variables.md).
+Full reference: [Environment variables](../reference/environment-variables.md).
 
 ## Updating old local configs
 
@@ -103,7 +103,7 @@ For an existing workspace:
 - `device` is the shipped wire key for the resolved/effective stage device. Some old PR notes called this `resolved_device`.
 - `async=false` compatibility routes are deprecated for some compute flows; prefer job-tracked starts and status polling.
 - Treat `done=true` in pipeline-state as "there is some output," not proof of full WAV coverage. Check `coverage_fraction` and `full_coverage`.
-- For MCP/API automation, read [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes).
+- For MCP/API automation, read [MCP schema: compute job result shapes](../mcp/schema.md#compute-job-result-shapes).
 
 ## When to disable the new behavior
 
@@ -122,4 +122,4 @@ Use this for controlled debugging or benchmarking, not routine fieldwork. Subpro
 - [Processing long recordings](../user-guides/processing-long-recordings.md)
 - [Troubleshooting long files](../troubleshooting/long-files.md)
 - [Compute architecture](../architecture/compute.md)
-- [MC-384 release notes](../release-notes/mc-384-compute-architecture.md)
+- [MC-384 architecture decision record](../development/architecture-decisions/mc-384-compute-architecture.md)

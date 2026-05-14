@@ -122,8 +122,8 @@ Do this only when you explicitly want the old monolithic behavior for a controll
 
 ## Related docs
 
-- [Compute architecture](architecture/compute.md)
-- [Worker process architecture](architecture/worker-processes.md)
-- [Processing long recordings](user-guides/processing-long-recordings.md)
-- [Troubleshooting long files](troubleshooting/long-files.md)
-- [MCP schema](mcp-schema.md#compute-job-result-shapes)
+- [Compute architecture](../architecture/compute.md)
+- [Worker process architecture](../architecture/worker-processes.md)
+- [Processing long recordings](../user-guides/processing-long-recordings.md)
+- [Troubleshooting long files](../troubleshooting/long-files.md)
+- [MCP schema](../mcp/schema.md#compute-job-result-shapes)
