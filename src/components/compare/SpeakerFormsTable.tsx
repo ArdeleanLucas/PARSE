@@ -102,6 +102,12 @@ function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsT
     });
 }
 
+function variantLetter(label: string): string {
+  const trimmed = label.trim();
+  if (/^[A-Z]$/.test(trimmed)) return trimmed;
+  return trimmed.match(/\(([A-Z])\)/)?.[1] ?? '';
+}
+
 function readLexemeUserNote(
   data: Record<string, unknown> | null | undefined,
   speaker: string,
@@ -270,6 +276,9 @@ function VariantCard({
         audio: candidate!.source_wav ?? undefined,
       })
     : '';
+  const letter = variantLetter(variant.label);
+  const ipa = candidate?.ipa?.trim() || variant.ipa?.trim() || '';
+  const ortho = candidate?.ortho?.trim() || variant.ortho?.trim() || '';
 
   return (
     <div
@@ -297,29 +306,31 @@ function VariantCard({
           />
         </label>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-2">
+          <div
+            className="flex flex-wrap items-baseline gap-2"
+            data-testid={`variant-card-header-${speaker}-${variant.csv_row_id}`}
+          >
             <span className="font-mono text-[10px] text-slate-400">{variant.csv_row_id}</span>
-            <span className="text-[13px] font-semibold text-slate-800">{variant.label}</span>
-            {variant.ipa && (
-              <span className="font-mono text-[13px] text-indigo-700">/{variant.ipa}/</span>
+            {letter && (
+              <span className="text-[13px] font-semibold text-slate-800">{letter}</span>
             )}
-            {variant.ortho && (
+            <span className="font-mono text-[12px] text-indigo-700">
+              {ipa ? `/${ipa}/` : '—'}
+            </span>
+            {ortho && (
               <span className="font-serif text-[14px] text-slate-700" dir="rtl">
-                {variant.ortho}
+                {ortho}
               </span>
             )}
-            {isCanonical && (
+          </div>
+          {isCanonical && (
+            <div className="mt-1">
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100"
                 data-testid={`variant-canonical-badge-${speaker}-${variant.csv_row_id}`}
               >
                 <CheckCircle2 className="h-2.5 w-2.5" /> canonical
               </span>
-            )}
-          </div>
-          {typeof candidate?.start_sec === 'number' && typeof candidate?.end_sec === 'number' && (
-            <div className="mt-1 font-mono text-[10px] text-slate-400">
-              {candidate.start_sec.toFixed(2)}–{candidate.end_sec.toFixed(2)}s
             </div>
           )}
         </div>
@@ -534,6 +545,11 @@ function ExpandedPanel({
   }, [bundle, speaker, onBundleUpdated]);
 
   const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
+  const metadataVariant = variants.find((variant) => variant.csv_row_id === current?.csv_row_id) ?? variants[0] ?? null;
+  const metadataTimestamp =
+    typeof metadataVariant?.start_sec === 'number' && typeof metadataVariant?.end_sec === 'number'
+      ? `${metadataVariant.start_sec.toFixed(2)}s – ${metadataVariant.end_sec.toFixed(2)}s`
+      : null;
   const warnings = bundle.warnings ?? [];
 
   return (
@@ -635,6 +651,12 @@ function ExpandedPanel({
               <dt className="w-24 text-slate-400">Variants</dt>
               <dd className="font-mono text-slate-700">{variants.length}</dd>
             </div>
+            {metadataTimestamp && (
+              <div className="flex gap-2">
+                <dt className="w-24 text-slate-400">Timestamp</dt>
+                <dd className="font-mono text-slate-700">{metadataTimestamp}</dd>
+              </div>
+            )}
           </dl>
         </div>
         {warnings.length > 0 && (
