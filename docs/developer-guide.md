@@ -209,7 +209,7 @@ Relevant knobs and files:
 
 Compute architecture details now live in:
 
-- [Compute architecture](./architecture/compute.md) — launcher modes, STT/ORTH chunking, subprocess isolation, device resolver, result contract
+- [Compute architecture](./architecture/compute.md) — worker mental model, launcher modes, STT/ORTH chunking, subprocess isolation, device resolver, result contract
 - [Worker process architecture](./architecture/worker-processes.md) — process topology and regression gates
 - [Environment variables](./environment-variables.md) — operator knobs for chunks, devices, timeouts, ports, and workspace roots
 

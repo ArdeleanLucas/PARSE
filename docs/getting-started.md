@@ -12,7 +12,8 @@ If you are new to the project, use this page in order:
 2. Run the [one-command launcher](#one-command-launch-recommended)
 3. Configure [`ai_config.json`](#configure-aiconfigjson)
 4. Review the [workspace-first setup](#workspace-first-bootstrap-recommended-on-a-fresh-machine)
-5. Use the [troubleshooting](#troubleshooting) section if startup or GPU inference fails
+5. If you are upgrading an existing workspace, read [migration notes](./getting-started/migration.md)
+6. Use the [troubleshooting](#troubleshooting) section if startup or GPU inference fails
 
 ## Requirements
 
@@ -279,7 +280,7 @@ The launcher and MCP adapter both rely on a shared set of `PARSE_*` environment 
 | `PARSE_STT_FORCE_CPU` | unset | Backwards-compatible truthy alias for `PARSE_STT_DEVICE=cpu`. |
 | `PARSE_JOB_SNAPSHOT_DIR` | workspace `.parse/jobs` | Durable JSON job snapshots used to recover interrupted jobs as `server_restarted` after backend restart. |
 
-For the full operator reference, precedence rules, and examples, see [Environment variables](./environment-variables.md).
+For the full operator reference, precedence rules, and examples, see [Environment variables](./environment-variables.md). Existing users upgrading long-file workflows should also read [MC-384 migration notes](./getting-started/migration.md).
 
 ### `.parse-env` for machine-local overrides
 
@@ -405,6 +406,8 @@ For provider-specific details, see [AI Integration](./ai-integration.md).
 
 ## Troubleshooting
 
+For long-recording-specific failures after startup, use [Troubleshooting long files](./troubleshooting/long-files.md). The notes below cover startup, workspace, and launch problems.
+
 ### `config/ai_config.json` is missing
 
 Symptom:
@@ -486,6 +489,9 @@ scripts/parse-stop.sh
 ## Where to go next
 
 - New user doing annotation work: [User Guide](./user-guide.md)
+- Processing multi-hour recordings: [Processing long recordings](./user-guides/processing-long-recordings.md)
+- Troubleshooting long-file processing: [Troubleshooting long files](./troubleshooting/long-files.md)
+- Existing user upgrade notes: [MC-384 migration notes](./getting-started/migration.md)
 - Tuning ports, chunks, subprocesses, and devices: [Environment variables](./environment-variables.md)
 - Configuring models, chat providers, or tool surfaces: [AI Integration](./ai-integration.md)
 - Extending the project itself: [Developer Guide](./developer-guide.md)

@@ -173,59 +173,14 @@ That distinction matters in real fieldwork, where older runs may have seeded a t
 
 Long recordings are first-class PARSE inputs. Current behavior is designed for recordings on the Khan01/Fail01 scale rather than just short elicitation clips.
 
-#### What happens by default
+Default behavior in brief:
 
 - **Full-file STT** and **full-mode ORTH** chunk recordings longer than 10 minutes into adjacent spans.
-- Chunking is selected by intent and duration: full-speaker/full-pipeline runs take the robust path; concept-window and edited-only reruns stay bounded and unchunked.
-- Full-file STT, full-mode ORTH, and full-mode IPA run inside isolated subprocesses. A crash/OOM in a heavy model call should become a job error/log entry rather than a dead backend.
-- IPA does not chunk by whole-audio duration because it runs over existing STT/ORTH/concept intervals.
+- Full-speaker/full-pipeline runs take the robust path; concept-window and edited-only reruns stay bounded and unchunked.
+- Full-file STT, full-mode ORTH, and full-mode IPA run inside isolated subprocesses so heavy model failures return structured job data rather than killing the backend.
+- IPA does not chunk by whole-audio duration because it runs over existing intervals.
 
-#### Monitoring progress
-
-Watch the global header job strip while a long job runs. For chunked STT/ORTH, PARSE emits messages like:
-
-```text
-STT chunk 2/7 (600s–1200s)
-ORTH chunk 2/7 (600s-1200s)
-```
-
-The UI condenses those into a `Chunk N of M` progress pill. After the run, the batch report can show partial chunk outcomes; yellow/partial means some chunks succeeded and some failed or were cancelled.
-
-#### Tuning or disabling chunking
-
-Default chunk size is 10 minutes:
-
-```bash
-PARSE_STT_DEFAULT_CHUNK_MINUTES=10
-PARSE_ORTH_DEFAULT_CHUNK_MINUTES=10
-```
-
-For a fragile recording, lower the chunk size before rerunning the failed step:
-
-```bash
-PARSE_STT_DEFAULT_CHUNK_MINUTES=5 PARSE_ORTH_DEFAULT_CHUNK_MINUTES=5 ./scripts/parse-run.sh
-```
-
-Disable duration chunking only for controlled debugging or benchmarks:
-
-```bash
-PARSE_STT_DEFAULT_CHUNK_MINUTES=0 PARSE_ORTH_DEFAULT_CHUNK_MINUTES=0 ./scripts/parse-run.sh
-```
-
-Disabling chunking restores the old monolithic provider-call risk; do not use it as the default fieldwork setting.
-
-#### Troubleshooting long-file issues
-
-| Symptom | What to check | Recovery |
-|---|---|---|
-| Header stalls on one chunk | `job_logs` for that job; `chunks[].span` in the terminal result | Lower the relevant chunk-size env var and rerun only the failed stage. |
-| Batch report is partial | `result.results.<step>.chunks[]` via `compute_status` or the report details | Treat successful chunks as useful evidence; rerun the missing span/stage rather than the whole batch if possible. |
-| Job reports `oom_suspect` | Host memory, VRAM pressure, and chunk size | Close heavy processes, lower chunk size, or force CPU/device settings for that stage. |
-| IPA overwrite warns about shrinkage | `coverage_shrink_warning.previous_end` vs `projected_end` | Inspect whether new STT/ORTH coverage is truncated before accepting the overwrite as healthy. |
-| Device is not what you expected | Stage result `device`, `[STT]`/`[ORTH]`/`[IPA]` completion logs, and env/config precedence | Set `PARSE_STT_DEVICE`, `PARSE_ORTH_DEVICE`, `PARSE_IPA_DEVICE`, or `PARSE_COMPUTE_DEVICE`; for IPA, also check `wav2vec2.allow_wsl_cuda`. |
-
-Operator reference: [Environment variables](./environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
-
+For the practical walkthrough, hardware guidance, chunk-progress interpretation, and recovery steps for partial runs, see [Processing long recordings](./user-guides/processing-long-recordings.md). For failure-specific recovery, see [Troubleshooting long files](./troubleshooting/long-files.md). Operator reference: [Environment variables](./environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
 
 #### Concept-scoped pipeline reruns
 

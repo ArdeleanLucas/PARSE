@@ -94,6 +94,9 @@ For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 
 ## Documentation
 - [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, GPU notes, and troubleshooting.
+- [Migration notes](docs/getting-started/migration.md) — what changed for existing users after the MC-384 long-file compute update.
+- [Processing long recordings](docs/user-guides/processing-long-recordings.md) — practical guidance for multi-hour recordings, chunk progress, recovery, and hardware expectations.
+- [Troubleshooting long files](docs/troubleshooting/long-files.md) — recovery steps for OOMs, timeouts, stalled jobs, partial chunks, and IPA coverage warnings.
 - [Environment variables](docs/environment-variables.md) — ports, workspace roots, long-file chunking, subprocess timeouts, and device overrides.
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — connecting Claude, Codex, and other agents to PARSE.
 - [User Guide](docs/user-guide.md) — detailed Annotate and Compare workflows, CLEF usage, lexical anchoring, and workspace hydration.

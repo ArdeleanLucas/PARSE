@@ -89,5 +89,7 @@ Schema reference: [MCP schema: compute job result shapes](../mcp-schema.md#compu
 - [Compute architecture](../architecture/compute.md)
 - [Worker process architecture](../architecture/worker-processes.md)
 - [Environment variables](../environment-variables.md)
-- [User guide: Processing long recordings](../user-guide.md#processing-long-recordings)
+- [Processing long recordings](../user-guides/processing-long-recordings.md)
+- [Troubleshooting long files](../troubleshooting/long-files.md)
+- [Migration notes](../getting-started/migration.md)
 - [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes)

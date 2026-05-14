@@ -13,6 +13,68 @@ PARSE keeps one user-facing compute system but differentiates execution by inten
 
 The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust Tier-1 ORTH/STT request needs chunking.
 
+## Mental model for developers
+
+Think of PARSE compute as four layers, not one worker:
+
+```text
+Browser / MCP / scripts
+        |
+        v
+Job registry and launcher (python/server_routes/jobs.py)
+        |
+        +-- thread mode: in-process background job
+        +-- subprocess mode: one outer child per job
+        +-- persistent mode: long-lived python/workers/compute_worker.py
+        |
+        v
+Stage route modules
+        +-- STT:   python/server_routes/media.py
+        +-- ORTH:  python/server_routes/annotate.py
+        +-- IPA:   python/server_routes/annotate.py + python/ai/ipa_transcribe.py
+        |
+        v
+Heavy-stage safeguards
+        +-- duration chunking for long full-file STT and full-mode ORTH
+        +-- nested isolated subprocesses for full-file STT, full-mode ORTH, full-mode IPA
+        +-- unified device resolver in python/ai/device.py
+```
+
+A long full-pipeline recording flows like this:
+
+```text
+full pipeline request
+  -> job snapshot + progress/log stream
+  -> optional normalize
+  -> STT full-file stage
+       if duration > PARSE_STT_DEFAULT_CHUNK_MINUTES:
+         split -> transcribe chunk N -> merge segments into audio-global time
+       write flat coarse_transcripts/<speaker>.json segments cache
+  -> ORTH full-mode stage
+       if duration > PARSE_ORTH_DEFAULT_CHUNK_MINUTES:
+         split -> transcribe Tier-1 chunk N -> merge Tier-1 text/windows
+       run Tier-2 forced alignment once over the merged Tier-1 result
+       write merged annotation tiers
+  -> IPA full-mode stage
+       run over existing intervals/windows, not whole-audio chunks
+       return coverage_shrink_warning if overwrite would sharply reduce coverage
+  -> final job result with per-stage status, chunks[], device, logs
+```
+
+Key files and responsibilities:
+
+| File | Responsibility |
+|---|---|
+| `python/server_routes/jobs.py` | Job registry, compute launcher mode resolution, outer thread/subprocess dispatch, snapshots, cancellation surface. |
+| `python/workers/compute_worker.py` | Persistent-worker process loop and compute dispatch for `PARSE_COMPUTE_MODE=persistent`. |
+| `python/server_routes/media.py` | Full-file STT, STT chunk loop, STT subprocess entry/wrapper, STT cache write. |
+| `python/server_routes/annotate.py` | Full-pipeline orchestration, ORTH chunk loop, Tier-2 alignment, IPA subprocess wrappers, isolated subprocess helper. |
+| `python/workers/audio_chunking.py` | Shared `ChunkSpan`, `ChunkResult`, split, and merge primitives. |
+| `python/ai/device.py` | Stage/global/config/default device resolver for STT, ORTH, and IPA. |
+| `src/components/shared/BatchReportTableRow.tsx` | UI interpretation of `chunks[]` as all-ok, all-error, partial, or none. |
+
+When debugging, start at the job boundary. Confirm job id, status, progress messages, `chunks[]`, `device`, and logs before changing provider/model code.
+
 ## Compute modes
 
 `python/server_routes/jobs.py:48` defines `_resolve_compute_mode()`. Resolution order is:
@@ -151,7 +213,7 @@ Contract for subprocess entries: a successful computation must not return a dict
 | MCP/agent scoped ORTH with `fast_mode=true` or `concept_ids` | any | payload flag/scope | Fast scoped path; no chunking. |
 | Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling; completed chunks remain `ok`, remaining chunks report `cancelled`, and top-level status is `cancelled` or `partial_cancelled` depending on stage/path. |
 
-## Performance characteristics
+## Performance and resource characteristics
 
 The robust path buys failure isolation and bounded decoder state at some cost:
 
@@ -159,6 +221,37 @@ The robust path buys failure isolation and bounded decoder state at some cost:
 - Nested subprocess isolation adds spawn/import/model-load overhead for full-file STT, full-mode ORTH, and full-mode IPA. Scoped concept-window work intentionally bypasses this overhead.
 - `persistent` outer mode can keep selected models warm for repeated jobs, but full-mode heavy stages may still spawn nested children for crash containment. Do not assume persistent mode removes nested isolation.
 - Smaller chunks are safer for hostile recordings but can increase total wall time; larger chunks reduce overhead but increase OOM/decoder-loop risk. The field default is 10 minutes because it bounds Khan01/Fail01-scale recordings without excessive chunk count.
+
+Planning rules of thumb:
+
+| Recording length | Default chunk count | What to expect |
+|---:|---:|---|
+| 1 hour | 6 chunks | Practical on most configured workstations; a 16 GB laptop may still take hours if CPU-only. |
+| 2 hours | 12 chunks | Watch memory and progress; prefer one speaker at a time on laptops. |
+| 3 hours | 18 chunks | Treat as a long unattended job; inspect partial chunk outcomes before trusting downstream IPA/Compare work. |
+| 4.5 hours | 27 chunks | Khan01-scale; defaults are intended to prevent parent-backend death, not to make review instantaneous. |
+
+Hardware guidance:
+
+- **16 GB laptop:** keep chunking enabled; drop STT/ORTH chunks to 5 minutes after any `oom_suspect`; run one stage/speaker at a time; consider CPU fallback for unstable CUDA stacks.
+- **CUDA workstation:** keep 10-minute defaults first; use stage-specific device overrides only when completion logs or result `device` show a real placement problem.
+- **Server/high-RAM box:** defaults are suitable for batch work, but still read `chunks[]`; provider errors are often data-specific rather than pure capacity issues.
+- **CPU-only:** supported but slow. Benchmark a 10-minute slice before scheduling a multi-hour corpus.
+
+Chunking helps when the risk is memory pressure, decoder state poisoning, or the need for visible progress. It adds overhead when files are already short, models are already stable, or the goal is a controlled old-path benchmark. That is why `0` disables duration chunking but is not the fieldwork default.
+
+## Debugging chunked jobs
+
+For long-file regressions, debug in this order:
+
+1. **Job state:** `GET /api/jobs/active`, `job_status`, or `compute_status` for terminal status and progress.
+2. **Stage result:** inspect `result.chunks[]` or `result.results.<stage>.chunks[]` for `span`, `status`, `error_code`, and `error`.
+3. **Logs:** use `job_logs` and backend logs to find the first failing chunk/stage. Nested subprocess failures should include traceback or crash-log tail data.
+4. **Device:** compare result `device` against `PARSE_{STAGE}_DEVICE`, `PARSE_COMPUTE_DEVICE`, config `device`, and CUDA availability.
+5. **Persistence:** remember that STT caches only flat merged `segments[]`; `chunks[]` is job-result-only.
+6. **Retry strategy:** lower chunk size before disabling chunking. Disable chunking only when reproducing old monolithic behavior is the experiment.
+
+User-facing recovery details live in [Processing long recordings](../user-guides/processing-long-recordings.md) and [Troubleshooting long files](../troubleshooting/long-files.md).
 
 ## Khan01 incident summary
 
