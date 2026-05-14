@@ -20,22 +20,23 @@ def _seed_concepts(root: pathlib.Path, rows: list[dict[str, str]]) -> None:
             writer.writerow({key: row.get(key, "") for key in FIELDNAMES})
 
 
-def _seed_annotation(root: pathlib.Path, speaker: str, intervals: list[dict]) -> None:
+def _seed_annotation(root: pathlib.Path, speaker: str, intervals: list[dict], *, source_audio: str | None = None) -> None:
     annotations = root / "annotations"
     annotations.mkdir(exist_ok=True)
+    payload = {
+        "speaker": speaker,
+        "audio": {"source_wav": f"{speaker}.wav"},
+        "tiers": {
+            "concept": {"intervals": intervals},
+            "ipa": {"intervals": []},
+            "ortho": {"intervals": []},
+            "ortho_words": {"intervals": []},
+        },
+    }
+    if source_audio is not None:
+        payload["source_audio"] = source_audio
     (annotations / f"{speaker}.parse.json").write_text(
-        json.dumps(
-            {
-                "speaker": speaker,
-                "audio": {"source_wav": f"{speaker}.wav"},
-                "tiers": {
-                    "concept": {"intervals": intervals},
-                    "ipa": {"intervals": []},
-                    "ortho": {"intervals": []},
-                    "ortho_words": {"intervals": []},
-                },
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -74,11 +75,40 @@ def test_build_compare_bundles_groups_big_rows_into_bundle_buckets_and_variants(
         "ortho": "gel",
         "start_sec": 4013.131,
         "end_sec": 4013.999,
-        "source_wav": "Saha01.wav",
+        "source_wav": "audio/working/Saha01/Saha01.wav",
     }
     assert bundle["candidates"]["Saha01"]["619"] is None
     assert "Saha01" not in bundle["canonical"]
     assert any("2 candidates" in warning for warning in bundle["warnings"])
+
+
+def test_candidate_ipa_is_none_when_concept_annotation_has_no_real_ipa(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, [{"id": "77", "concept_en": "hair (A)", "source_item": "2.2", "source_survey": "KLQ"}])
+    _seed_annotation(
+        tmp_path,
+        "Saha01",
+        [{"text": "hair (A)", "concept_id": "77", "start": 3.0, "end": 4.0, "ortho": "muser"}],
+    )
+
+    candidate = build_compare_bundles(tmp_path, speakers=["Saha01"])["bundles"][0]["candidates"]["Saha01"]["77"]
+
+    assert candidate["ipa"] is None
+    assert candidate["ortho"] == "muser"
+
+
+def test_candidate_source_wav_uses_project_relative_source_audio(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, [{"id": "53", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ"}])
+    _seed_annotation(
+        tmp_path,
+        "Saha01",
+        [{"text": "big", "concept_id": "53", "start": 1.0, "end": 2.0, "ipa": "ɣɛɫ", "ortho": "gel"}],
+        source_audio="audio/working/Saha01/Saha01.wav",
+    )
+
+    candidate = build_compare_bundles(tmp_path, speakers=["Saha01"])["bundles"][0]["candidates"]["Saha01"]["53"]
+
+    assert candidate["source_wav"] == "audio/working/Saha01/Saha01.wav"
+    assert "/" in candidate["source_wav"]
 
 
 def test_singleton_bundle_auto_picks_single_candidate_without_persisting(tmp_path: pathlib.Path) -> None:

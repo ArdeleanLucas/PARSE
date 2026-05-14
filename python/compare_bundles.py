@@ -70,28 +70,38 @@ def _annotation_path(project_root: Path, speaker: str) -> Path:
     return annotations / f"{speaker}.json"
 
 
+def _source_wav_from_annotation(payload: Mapping[str, Any], speaker: str) -> str:
+    raw = str(payload.get("source_audio") or payload.get("source_wav") or "").strip()
+    audio = payload.get("audio")
+    if not raw and isinstance(audio, Mapping):
+        raw = str(audio.get("source_audio") or audio.get("source_wav") or audio.get("path") or "").strip()
+    source_wav = raw.replace("\\", "/").strip()
+    if not source_wav:
+        source_wav = f"{speaker}.wav"
+    if "/" not in source_wav and not Path(source_wav).is_absolute():
+        source_wav = f"audio/working/{speaker}/{source_wav}"
+    return source_wav
+
+
 def _intervals_for_speaker(project_root: Path, speaker: str) -> tuple[list[dict[str, Any]], str]:
     path = _annotation_path(project_root, speaker)
     if not path.exists():
-        return [], f"{speaker}.wav"
+        return [], f"audio/working/{speaker}/{speaker}.wav"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return [], f"{speaker}.wav"
+        return [], f"audio/working/{speaker}/{speaker}.wav"
     tiers = payload.get("tiers") if isinstance(payload, Mapping) else None
     concept_tier = tiers.get("concept") if isinstance(tiers, Mapping) else None
     intervals = concept_tier.get("intervals") if isinstance(concept_tier, Mapping) else None
-    audio = payload.get("audio") if isinstance(payload, Mapping) else None
-    source_wav = ""
-    if isinstance(audio, Mapping):
-        source_wav = str(audio.get("source_wav") or audio.get("path") or "").strip()
-    source_wav = source_wav or str(payload.get("source_wav") or "").strip() if isinstance(payload, Mapping) else ""
-    return ([iv for iv in intervals if isinstance(iv, dict)] if isinstance(intervals, list) else []), source_wav or f"{speaker}.wav"
+    source_wav = _source_wav_from_annotation(payload, speaker) if isinstance(payload, Mapping) else f"audio/working/{speaker}/{speaker}.wav"
+    return ([iv for iv in intervals if isinstance(iv, dict)] if isinstance(intervals, list) else []), source_wav
 
 
 def _candidate_from_interval(interval: Mapping[str, Any], source_wav: str) -> dict[str, Any]:
+    ipa = interval.get("ipa") or interval.get("ipa_text")
     return {
-        "ipa": str(interval.get("ipa") or interval.get("ipa_text") or interval.get("text") or ""),
+        "ipa": str(ipa) if ipa else None,
         "ortho": str(interval.get("ortho") or interval.get("orthography") or interval.get("text") or ""),
         "start_sec": float(interval.get("start") or interval.get("start_sec") or 0.0),
         "end_sec": float(interval.get("end") or interval.get("end_sec") or 0.0),
