@@ -93,7 +93,8 @@ For setup and the full automation reference, see the [MCP Guide](docs/mcp-guide.
 For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 
 ## Documentation
-- [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, environment variables, GPU notes, and troubleshooting.
+- [Getting Started](docs/getting-started.md) — installation, launch paths, requirements, GPU notes, and troubleshooting.
+- [Environment variables](docs/environment-variables.md) — ports, workspace roots, long-file chunking, subprocess timeouts, and device overrides.
 - [Getting Started with External Agents](docs/getting-started-external-agents.md) — connecting Claude, Codex, and other agents to PARSE.
 - [User Guide](docs/user-guide.md) — detailed Annotate and Compare workflows, CLEF usage, lexical anchoring, and workspace hydration.
 - [AI Integration](docs/ai-integration.md) — providers, model configuration, the chat tool surface, and workflow macros.
@@ -107,6 +108,7 @@ For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 - [Developer Guide](docs/developer-guide.md) — local development flow, extension points, and contributor rules.
 - [Research Context](docs/research-context.md) — thesis framing, citation guidance, and research-software context.
 - [Models](docs/models/README.md) — model reference notes for speech and transcription support.
+- [MC-384 compute release notes](docs/release-notes/mc-384-compute-architecture.md) — long-file chunking, subprocess isolation, and device resolver changes.
 
 ## Research & Citation
 PARSE was developed for a **Southern Kurdish dialect phylogenetics thesis** at the **University of Bamberg**, but the workstation is general-purpose and applies to any fieldwork-driven comparative linguistics workflow involving long recordings, concept-based wordlists, cognate review, borrowing adjudication, and downstream analysis in **LingPy**, **LexStat**, or **BEAST 2**. If you use PARSE in academic work, cite it as research software via [`CITATION.cff`](CITATION.cff) or GitHub's **Cite this repository** UI.

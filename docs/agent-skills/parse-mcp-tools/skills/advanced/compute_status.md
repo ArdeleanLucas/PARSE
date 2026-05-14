@@ -37,6 +37,9 @@ Returns a JSON snapshot:
 - `result` — present once `status == "complete"`. For pipeline jobs:
   - `result.steps_run` — ordered list of step names.
   - `result.results.<step>` — `{ status, filled, ... }` per step.
+  - `result.results.<step>.chunks[]` — present for chunk-aware full-file STT / full-mode ORTH paths; empty on short/single-shot paths.
+  - `result.results.<step>.device` — resolved/effective stage device (`device` is the shipped wire key for what PR notes may call `resolved_device`).
+  - `result.results.ipa.coverage_shrink_warning` — optional IPA overwrite warning.
   - `result.summary` — aggregate counts: `{ ok, skipped, error }`.
 
 Does not mutate project state.
@@ -63,8 +66,9 @@ Representative completed response:
     "speaker": "<SPEAKER_ID>",
     "steps_run": ["ortho", "ipa"],
     "results": {
-      "ortho": {"status": "ok", "filled": 128},
-      "ipa":   {"status": "ok", "filled": 129}
+      "stt": {"status": "ok", "segments": 412, "chunks": [{"idx": 0, "span": {"start": 0.0, "end": 600.0}, "status": "ok"}], "device": "cuda"},
+      "ortho": {"status": "ok", "filled": 128, "chunks": [], "device": "cuda"},
+      "ipa":   {"status": "ok", "filled": 129, "device": "cuda"}
     },
     "summary": {"ok": 2, "skipped": 0, "error": 0}
   }
@@ -79,6 +83,8 @@ Representative completed response:
 | Unknown jobId                              | Tool error: jobId not found                            | Confirm the start call actually returned a `jobId` (don't fabricate). Use `jobs_list` / `jobs_list_active` to find currently known jobs. |
 | Job stuck `running`                        | `progress` hasn't advanced past the expected duration  | Read `job_logs` for the same `jobId`. For pipeline jobs, inspect `result.results.<step>` (visible mid-run) to pinpoint the stalled step. |
 | Step-level error inside a `complete` job   | `status: "complete"` but `result.summary.error > 0`    | A pipeline can finish without raising. Read `result.results.<step>.status` and re-run only the failed step instead of the whole pipeline. |
+| Partial chunk failure                     | `chunks[]` has mixed `ok` and `error` rows                 | Use each failed chunk's `span` and `error_code`; lower the relevant chunk-size env var before rerunning if it is `oom_suspect` or `timeout`. |
+| IPA overwrite shrink warning              | `result.results.ipa.coverage_shrink_warning` present      | Surface the warning and inspect coverage before declaring the overwrite healthy. |
 
 ## Agent Reasoning Notes
 This is the canonical "is it done yet?" tool for *compute-class* jobs. Every call to `pipeline_run`, `run_full_annotation_pipeline`, or a lower-level ortho/ipa/contact-lexeme starter should be followed by polling here until `status` reaches a terminal value (`complete` or `error`). For pipeline jobs, the load-bearing information lives in `result.summary` and `result.results.<step>` — a `complete` top-level status can still hide step-level errors, so always look at the summary counts before declaring success. Pair with `job_logs` for failure diagnosis and with the generic `job_status` when polling a job whose class you don't know in advance.

@@ -1,15 +1,15 @@
 # Compute architecture
 
-This page is the maintainable reference for PARSE compute execution after MC-384 Milestone A. The canonical design input is the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`.
+This page is the maintainable reference for PARSE compute execution after the MC-384 compute-architecture series (PRs #411-#440). The canonical design input was the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`; this page now records the shipped runtime contract in the repo.
 
-For the process-level view of the worker changes that landed across PRs #411-#417, see [Worker process architecture](worker-processes.md).
+For the process-level view of the worker/subprocess changes, see [Worker process architecture](worker-processes.md). For operator knobs, see [Environment variables](../environment-variables.md).
 
 ## Overview
 
 PARSE keeps one user-facing compute system but differentiates execution by intent:
 
 - Fast lexeme/concept-window path: scoped work uses `run_mode != 'full'` and/or `concept_ids`; it should avoid long-file chunking overhead and return quickly for interactive fieldwork.
-- Robust long-file path: full-speaker/full-pipeline work runs through the job system and, after MC-384 Milestone A, long Tier-1 ORTH/STT transcribe work is chunked so a Khan01/Fail01-scale recording cannot crash ORTH or silently truncate STT.
+- Robust long-file path: full-speaker/full-pipeline work runs through the job system; after the completed MC-384 series, long Tier-1 ORTH/STT transcribe work is chunked so a Khan01/Fail01-scale recording cannot crash ORTH or silently truncate STT.
 
 The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust Tier-1 ORTH/STT request needs chunking.
 
@@ -28,23 +28,24 @@ Mode meanings:
 - `subprocess`: per-job process launched by `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`. Better crash containment for the whole job.
 - `persistent`: long-lived worker in `python/workers/compute_worker.py` that dispatches jobs through `_dispatch()` at `python/workers/compute_worker.py:409` and can keep models warm.
 
-## Nested subprocess wrappers
+## Subprocess isolation
 
-MC-384 extends the existing nested-subprocess pattern. PR #412 introduced the shared IPA subprocess envelope and standalone IPA full-mode routing; PR #413 added ORTH isolation, and PR #428 added full-file STT isolation:
+MC-384 uses two distinct isolation layers. Keep them conceptually separate:
 
-- `python/server_routes/jobs.py:291` — `_launch_compute_subprocess()` launches the outer per-job subprocess selected by `PARSE_COMPUTE_MODE=subprocess`.
-- `python/server_routes/jobs.py:362` — `_compute_subprocess_entry()` dispatches the outer per-job child process.
-- `python/server_routes/annotate.py:3011` — `_full_pipeline_ipa_subprocess_entry()` serializes full-pipeline IPA child outcomes.
-- `python/server_routes/annotate.py:3043` — `_speaker_ortho_subprocess_entry()` serializes ORTH child outcomes for isolated full-mode work.
-- `python/server_routes/annotate.py:3067` — `_speaker_ipa_subprocess_entry()` serializes standalone speaker-IPA child outcomes.
-- `python/server_routes/annotate.py:3286` — `_run_in_isolated_subprocess()` owns spawn, timeout, result-file parsing, and envelope error conversion for nested children.
-- `python/server_routes/annotate.py:3401` — `_compute_full_pipeline_ipa_in_subprocess()` delegates full-pipeline IPA to the shared helper.
-- `python/server_routes/annotate.py:3414` — `_compute_speaker_ortho_in_subprocess()` wraps standalone/full-pipeline full-mode ORTH calls.
-- `python/server_routes/annotate.py:3453` — `_compute_speaker_ipa_in_subprocess()` wraps standalone `compute_type='ipa'` full-mode calls.
-- `python/server_routes/media.py:339` — `_run_stt_job_subprocess_entry()` serializes full-file STT child outcomes.
-- `python/server_routes/media.py:371` — `_run_stt_job_in_subprocess()` wraps full-file STT in the shared nested helper.
+1. **Outer job launcher** — selected by `_resolve_compute_mode()` in `python/server_routes/jobs.py`. `thread` is the low-overhead default, `subprocess` launches one child process per compute job, and `persistent` routes jobs through the long-lived worker in `python/workers/compute_worker.py`.
+2. **Nested heavy-stage isolation** — selected by compute intent. Full-file STT, full-mode ORTH, and full-mode IPA run in spawn children via `_run_in_isolated_subprocess()` even when the outer launcher is still `thread`.
 
-These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The outer compute mode chooses how the job is launched; the nested wrappers isolate memory-heavy STT/ORTH/IPA stages inside that job.
+Current import-stable entrypoints:
+
+| Stage | Child entrypoint | Parent wrapper | Scope that uses it |
+|---|---|---|---|
+| STT | `server_routes.media._run_stt_job_subprocess_entry` | `server_routes.media._run_stt_job_in_subprocess` | Full-file STT only. Scoped/concept-window STT stays in-process. |
+| ORTH | `server_routes.annotate._speaker_ortho_subprocess_entry` | `server_routes.annotate._compute_speaker_ortho_in_subprocess` | Full-mode ORTH from standalone compute or full pipeline. Scoped/concept-window ORTH stays in-process. |
+| IPA | `server_routes.annotate._full_pipeline_ipa_subprocess_entry` and `_speaker_ipa_subprocess_entry` | `server_routes.annotate._compute_full_pipeline_ipa_in_subprocess` and `_compute_speaker_ipa_in_subprocess` | Full-mode IPA from standalone compute or full pipeline. Concept-window IPA stays in-process. |
+
+`python/server_routes/jobs.py::_launch_compute_subprocess()` and `_compute_subprocess_entry()` are the **outer** per-job subprocess path. They may wrap an entire job, which can then launch a nested child for one heavy stage. This means a `PARSE_COMPUTE_MODE=subprocess` full-pipeline STT step can involve two processes beyond the parent: the outer compute child plus the nested STT child. That is expected; the first layer protects job orchestration, the second layer protects memory-heavy model calls.
+
+Nested children serialize `{ok: true, result: ...}` or `{ok: false, error, traceback}` to a result file. Parent wrappers convert child failure into structured job errors and keep stdout/stderr visible through tee-backed logs.
 
 ## Chunking primitives
 
@@ -60,9 +61,9 @@ PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitiv
 ORTH has two tiers with different memory profiles:
 
 - Tier-1 coarse ORTH uses `provider.transcribe()` and is the Khan01 OOM vector. Current main calls it through `_transcribe_ortho_with_fallback()` and the chunk loop in `python/server_routes/annotate.py:2669`-`2716` for long full-mode files.
-- Tier-2 word alignment (`tiers.ortho_words`) runs after coarse ORTH and is already windowed enough for Milestone A. It remains unchanged and recomputes once over the merged Tier-1 result.
+- Tier-2 word alignment (`tiers.ortho_words`) runs after coarse ORTH and is already windowed enough for the current long-file contract. It remains unchanged and recomputes once over the merged Tier-1 result.
 
-MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2669`-`2716`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2677`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2716`.
+The shipped MC-384 Tier-1 chunking path uses adjacent chunks with no overlap. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2669`-`2716`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2677`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2716`.
 
 MC-384-T (PR #431) added the Tier-2 fallback contract: if forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than persisting raw Tier-1 text. MC-384-U (PR #432) then fixed the root cause: a numpy ndarray had crossed into a Tier-2 consumer that called `.numel()`, so `python/ai/forced_align.py:565`-`606` now restores the torch-tensor boundary via `_ensure_audio_tensor()` and `_assert_torch_audio()` before `align_word()` consumes audio. The #431 fallback remains defense-in-depth even though #432 restored the tensor contract.
 
@@ -85,9 +86,9 @@ Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer 
 
 **IPA does not chunk by audio duration:** IPA Tier-3 acoustic transcribe is interval-driven, not a single whole-file model call. `python/ai/ipa_transcribe.py:transcribe_intervals()` operates on per-interval slices supplied by upstream ORTH word windows, and PR #422 handled IPA shrink-warning behavior separately. This is why no MC-384-K audio-duration chunking lane exists for IPA.
 
-## Device selection
+## Device resolver
 
-MC-384-Z centralizes STT, ORTH, and IPA device placement in `python/ai/device.py`. The resolver is evaluated at call time (not import time), imports torch lazily, and returns `cuda` only when `torch.cuda.is_available()` is true and `torch.cuda.device_count() > 0`; otherwise `auto` resolves to `cpu`. Explicit `cuda` / `cuda:N` requests warn and fall back to `cpu` when CUDA is unavailable.
+MC-384-Z centralizes STT, ORTH, and IPA device placement in `python/ai/device.py`. The resolver is evaluated at call time, imports torch lazily, and resolves `auto` to `cuda` only when `torch.cuda.is_available()` and `torch.cuda.device_count() > 0`; otherwise `auto` resolves to `cpu`. Explicit `cuda` / `cuda:N` requests warn and fall back to CPU when CUDA is unavailable.
 
 Device precedence, highest first:
 
@@ -98,26 +99,30 @@ Device precedence, highest first:
 | 3 | `ai_config.json` section `device` | Caller config (`stt`, `ortho`, `wav2vec2`) | `auto`, `cpu`, `cuda`, `cuda:N` |
 | 4 | Code section default | Usually `auto` | `auto`, `cpu`, `cuda`, `cuda:N` |
 
-`PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper `compute_type=int8` for the CPU escape hatch.
+`PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper CPU/int8 fallback semantics.
 
-The legacy `wav2vec2.allow_wsl_cuda` key is deprecated as a WSL-specific safety gate. Its default changed from false to true in MC-384-Z: when unset or true, IPA uses the unified resolver; explicit `allow_wsl_cuda=false` still forces IPA to CPU. This change is motivated by the 2026-05-13 Kalh01 observation where IPA pegged one CPU core while the RTX 5090 stayed around 1% utilization. MC-384-Z only ensures the wav2vec2 model can live on the selected GPU; a future word-batching lane can make IPA saturate the GPU more effectively.
+IPA retains one compatibility gate from the old wav2vec2 WSL safety model: explicit `wav2vec2.allow_wsl_cuda=false` forces CPU before the unified resolver is consulted. When that key is omitted or true, IPA uses the same precedence chain as STT and ORTH. This is the MC-384-Z behavior change: the absent-key default now allows CUDA-capable WSL machines to use the resolver instead of silently pinning IPA to CPU. Existing copied configs that explicitly set false remain conservative until edited.
 
-Completion/result observability: `[STT]`, `[ORTH]`, and `[IPA]` completion logs include `device=...`, and each stage result envelope includes the resolved `device` where the provider/aligner ran.
+Result observability uses the current wire key `device`. PR notes and user task descriptions may call this `resolved_device`; in the shipped payload, the resolved/effective device appears as `device` on STT, ORTH, and IPA stage results and in `[STT]` / `[ORTH]` / `[IPA]` completion logs.
 
 ## Environment variables
 
-- `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:811` and exported by `scripts/parse-run.sh:102` / `scripts/parse-run.sh:399`.
-- `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:66` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
-- `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC`: MC-384-J2 guard for destructive IPA overwrite reruns; default `60`. Read by `_ipa_overwrite_shrink_threshold_sec()` at `python/server_routes/annotate.py:1980`. This is not an audio-duration chunking knob; it belongs with the compute env-var surface because full-pipeline IPA can surface `coverage_shrink_warning` when newly projected STT/ORTH coverage is much shorter than existing IPA coverage.
-- `PARSE_COMPUTE_DEVICE`: MC-384-Z global compute-device fallback for STT, ORTH, and IPA; default `auto`; accepted values `auto`, `cpu`, `cuda`, `cuda:N`.
-- `PARSE_STT_DEVICE`: MC-384-Z STT-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_ORTH_DEVICE`: MC-384-Z ORTH-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_IPA_DEVICE`: MC-384-Z IPA-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_STT_FORCE_CPU`: legacy STT CPU escape hatch, now treated as a truthy alias for `PARSE_STT_DEVICE=cpu`.
-- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3292` for nested isolated subprocesses, default `14400`.
-- `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
-- `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.
-- `PARSE_FULL_PIPELINE_MIN_MEM_GB`: full-pipeline host-memory preflight threshold; read by `python/server_routes/annotate.py:2837` and documented in `scripts/parse-run.sh:30`.
+The full operator reference is [Environment variables](../environment-variables.md). Compute-specific knobs are summarized here because they are part of the architecture contract:
+
+| Variable | Default | Contract |
+|---|---:|---|
+| `PARSE_STT_DEFAULT_CHUNK_MINUTES` | `10` | Full-file STT chunk size. `0` disables duration chunking; invalid values fall back to 10. |
+| `PARSE_ORTH_DEFAULT_CHUNK_MINUTES` | `10` | Full-mode ORTH Tier-1 chunk size. `0` disables duration chunking; invalid values fall back to 10. |
+| `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC` | `60` | Destructive IPA overwrite warning threshold. `0` disables `coverage_shrink_warning`; this is not an IPA duration-chunking knob. |
+| `PARSE_COMPUTE_DEVICE` | `auto` | Global STT/ORTH/IPA device fallback. |
+| `PARSE_STT_DEVICE` | unset | STT-specific device override. |
+| `PARSE_ORTH_DEVICE` | unset | ORTH-specific device override. |
+| `PARSE_IPA_DEVICE` | unset | IPA-specific device override when `wav2vec2.allow_wsl_cuda` is not explicitly false. |
+| `PARSE_STT_FORCE_CPU` | unset | Truthy backwards-compatible alias for `PARSE_STT_DEVICE=cpu`. |
+| `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` | `14400` | Timeout for the outer subprocess launcher and nested isolated children. The nested helper honors any positive finite value exactly. |
+| `PARSE_COMPUTE_MODE` | backend default `thread` | Outer compute launcher: `thread`, `subprocess`, or `persistent`. |
+| `PARSE_USE_PERSISTENT_WORKER` | unset | Truthy shortcut selecting `persistent`. |
+| `PARSE_FULL_PIPELINE_MIN_MEM_GB` | backend default `12` | Host-memory preflight threshold before memory-heavy full-pipeline stages. |
 
 ## Subprocess timeout configuration
 
@@ -136,7 +141,7 @@ Contract for subprocess entries: a successful computation must not return a dict
 | User/API intent | Duration | Flags/env | Expected path |
 | --- | ---: | --- | --- |
 | Concept-window ORTH (`run_mode != 'full'`) | any | default | Fast scoped path; no chunking. |
-| Full-pipeline ORTH, short audio | at or below `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Robust wrapper may run, but `chunks` is empty or a single non-chunked result depending on MC-384-D implementation. |
+| Full-pipeline ORTH, short audio | at or below `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Robust subprocess wrapper may run, but Tier-1 uses one provider call and returns `chunks: []`. |
 | Full-pipeline ORTH, long audio | greater than `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 ORTH chunks, each isolated; Tier-2 recomputes once after merge. |
 | Full-file STT, short audio | at or below `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Single-shot `_run_stt_job()` path; `chunks: []`. |
 | Full-file STT, long audio | greater than `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 STT chunks; per-chunk results emitted in `chunks[]`, merged cache remains flat segments. |
@@ -144,21 +149,39 @@ Contract for subprocess entries: a successful computation must not return a dict
 | Scoped/concept-window STT (`run_mode != 'full'`) | any | payload scope | `_compute_speaker_stt()` path; windows are already bounded, so no audio-duration chunking. |
 | MCP/agent full ORTH with `force_robust=true` | any | payload flag | Robust path; duration still decides whether the robust path chunks. |
 | MCP/agent scoped ORTH with `fast_mode=true` or `concept_ids` | any | payload flag/scope | Fast scoped path; no chunking. |
-| Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling only for Milestone A; completed chunks remain ok, remaining chunks report cancelled. |
+| Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling; completed chunks remain `ok`, remaining chunks report `cancelled`, and top-level status is `cancelled` or `partial_cancelled` depending on stage/path. |
+
+## Performance characteristics
+
+The robust path buys failure isolation and bounded decoder state at some cost:
+
+- Long STT/ORTH runs perform one provider call per chunk instead of one monolithic call. This reduces peak memory and repetition-loop blast radius, but adds temp-WAV slicing and per-call setup overhead.
+- Nested subprocess isolation adds spawn/import/model-load overhead for full-file STT, full-mode ORTH, and full-mode IPA. Scoped concept-window work intentionally bypasses this overhead.
+- `persistent` outer mode can keep selected models warm for repeated jobs, but full-mode heavy stages may still spawn nested children for crash containment. Do not assume persistent mode removes nested isolation.
+- Smaller chunks are safer for hostile recordings but can increase total wall time; larger chunks reduce overhead but increase OOM/decoder-loop risk. The field default is 10 minutes because it bounds Khan01/Fail01-scale recordings without excessive chunk count.
 
 ## Khan01 incident summary
 
 Khan01 is the motivating fieldwork failure: a 1.6 GB concatenated WAV, roughly 4.5 hours, killed the backend during full-file ORTH. Memory preflight passed at job start, but peak ORTH inference exceeded WSL memory headroom. IPA already had nested subprocess protection; ORTH did not.
 
-MC-384 Milestone A closes the incident by containing long ORTH work in isolated subprocesses and splitting Tier-1 transcribe into default 10-minute chunks. A chunk-level failure produces structured result data instead of taking down the parent server.
+The completed MC-384 architecture closes the incident by containing long ORTH work in isolated subprocesses and splitting Tier-1 transcribe into default 10-minute chunks. A chunk-level failure produces structured result data instead of taking down the parent server.
 
 ## Result contract
 
-Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema. Backward-compatible callers that only read the top-level `status`, `filled`, `total`, `segments`, and `ortho_words` fields continue to work.
+Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema and examples. Backward-compatible callers that only read top-level fields such as `status`, `filled`, `total`, `segments`, and `ortho_words` continue to work.
 
-STT preserves its cache contract: `_write_stt_cache()` receives the merged flat `segments` list only, while `chunks[]` remains a job-result diagnostic envelope.
+Important fields:
 
-PR #417 added two UI consumers of this same contract: the header job strip parses `ORTH chunk N/M (STARTs-ENDs)` progress messages into a live `Chunk N of M` pill, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
+| Field | Producers | Lifecycle |
+|---|---|---|
+| `chunks[]` | Full-file STT and full-mode ORTH job results | Present in job results for chunk-aware paths; empty for short/single-shot paths; not persisted to STT cache. |
+| `device` | STT, ORTH, IPA | Resolved/effective device. This is the shipped wire key for what PR notes may call `resolved_device`. |
+| `coverage_shrink_warning` | IPA overwrite runs | Optional warning object in IPA/full-pipeline results; not a hard failure. |
+| `duration_sec` | STT | Source audio duration used for chunking decisions. |
+
+STT preserves its cache contract: `_write_stt_cache()` receives the merged flat `segments` list only, while `chunks[]` remains a job-result diagnostic envelope. ORTH writes merged annotation tiers and returns chunk diagnostics in the job result rather than persisting a separate chunk cache.
+
+UI consumers parse the same contract: the header job strip recognizes `STT chunk N/M (...)` and `ORTH chunk N/M (...)` progress messages, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
 
 ## Maintenance rules
 
@@ -183,3 +206,5 @@ MC-384-I/L/O/P (PRs #423, #425, #426, #427) hardened the test surface around chu
 MC-384-N (PR #428) closed the full-file STT subprocess-isolation gap by wrapping `_run_stt_job()` in `_run_stt_job_in_subprocess()` and adding the `_run_stt_job_subprocess_entry()` child boundary plus a structured `[STT]` completion summary log. MC-384-S (PR #430) repaired integration-test drift caused by #428 and MC-384-Q (#429) merging in adjacent windows; #429 also added the compute.md drift guard that ties this document to the chunking env-var and top-level subprocess-wrap surface.
 
 MC-384-T (PR #431) added the Tier-2 fallback contract: when forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than emitting raw Tier-1 text. MC-384-U (PR #432) fixed the root cause — a numpy ndarray reached a consumer that called `.numel()` — by restoring the torch-tensor contract at the Tier-2 boundary, adding an `isinstance` assertion, and shipping a sentinel test that catches future drift loudly rather than via a logged-and-swallowed `AttributeError`.
+
+MC-384-Z (PR #440) added the unified device resolver (`python/ai/device.py`) and per-stage device environment overrides for STT, ORTH, and IPA. This doc refresh reconciles architecture, environment, MCP/schema, user-guide, developer, and release-note references after #440.

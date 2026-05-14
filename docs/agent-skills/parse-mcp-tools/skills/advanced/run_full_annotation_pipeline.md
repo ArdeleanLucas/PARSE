@@ -38,7 +38,7 @@ On `dryRun: false`:
 - `run_mode: "full"` — starts STT, forced-align, and acoustic IPA sequentially, polling each to terminal state. Returns the workflow summary.
 - `run_mode: "concept-windows"` / `"edited-only"` — starts one `full_pipeline` compute job via `pipeline_run`. Returns the `jobId` to poll with `compute_status` (`computeType: "full_pipeline"`).
 
-**Always poll any returned `jobId` to terminal state before claiming success.**
+**Always poll any returned `jobId` to terminal state before claiming success.** For long full-file/full-pipeline runs, inspect `chunks[]`, stage `device`, and IPA `coverage_shrink_warning` in the terminal result before sign-off.
 
 ## Example Successful Call
 Dry run (concept-windows mode):
@@ -93,7 +93,7 @@ Legacy full-speaker dry run:
 | `concept_ids` references unknown IDs   | Workflow completes but with skipped windows                            | Verify IDs against `project_context_read` / `list_concepts_by_tag` before passing.                                    |
 
 ## Agent Reasoning Notes
-Treat this as the workflow macro: prefer it over `pipeline_run` for the common case. The `run_mode` choice is load-bearing — `full` is for fresh speakers where you want the whole audio processed; `concept-windows` is for review/re-annotation passes restricted to concept rows; `edited-only` is for cleanup passes after the user has manually adjusted some rows. Always (1) call `pipeline_state_read` to confirm preconditions, (2) call this with `dryRun: true` to see the planned stages, (3) confirm with the user, (4) re-run with `dryRun: false`, then (5) poll any returned `jobId` with `compute_status` until terminal. Inspect step-level results before declaring success — a `complete` status can still hide skipped or errored stages.
+Treat this as the workflow macro: prefer it over `pipeline_run` for the common case. The `run_mode` choice is load-bearing — `full` is for fresh speakers where you want the whole audio processed; `concept-windows` is for review/re-annotation passes restricted to concept rows; `edited-only` is for cleanup passes after the user has manually adjusted some rows. Always (1) call `pipeline_state_read` to confirm preconditions, (2) call this with `dryRun: true` to see the planned stages, (3) confirm with the user, (4) re-run with `dryRun: false`, then (5) poll any returned `jobId` with `compute_status` until terminal. Inspect step-level results before declaring success — a `complete` status can still hide skipped stages, errored stages, partial chunk failures, or IPA coverage-shrink warnings.
 
 ## Related Skills
 - `pipeline_run` — lower-level entry point with explicit step subset / overwrite control.

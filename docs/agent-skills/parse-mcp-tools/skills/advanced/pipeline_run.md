@@ -37,7 +37,7 @@ On `dryRun: true`: returns `{ status: "dry_run", plan: { speaker, steps, overwri
 
 On `dryRun: false`: returns `{ jobId, status: "running", speaker, steps, overwrites, computeType: "full_pipeline", run_mode, concept_ids, message }`. **Always poll the returned `jobId` with `compute_status` (set `computeType: "full_pipeline"` for early failure on class mismatch) until status is `complete` or `error` before claiming success.**
 
-Steps run step-resilient: a failing STT will not abort ORTH/IPA for the same speaker — the job completes with per-step `status` inside `result.results`.
+Steps run step-resilient: a failing STT will not abort ORTH/IPA for the same speaker — the job completes with per-step `status` inside `result.results`. Long full-file STT and full-mode ORTH chunk automatically by backend duration/env rules; agents should inspect `result.results.<step>.chunks[]` after polling with `compute_status`.
 
 ## Example Successful Call
 Dry run (always do this first):
@@ -75,11 +75,12 @@ Live start (same payload, `dryRun: false`) returns:
 | Step silently skipped            | `result.results.<step>.status: "skipped"`                | The tier was already populated and `overwrites[<step>]` was not `true`. Set the flag and re-run that step only. |
 | Speaker missing required file    | Job errors with "no source audio" or "ortho tier empty"  | Run `pipeline_state_read` first — `can_run: false` rows include a `reason` string explaining the gap.          |
 | Wrong language detected (STT)    | STT output garbled / low confidence                      | Re-run with explicit `language: "<iso>"`. Use `overwrites: {stt: true}` to replace the prior result.           |
+| Long-file chunk partial           | `compute_status.result.results.<step>.chunks[]` has failed or cancelled rows | Use `job_logs` plus the failed `span`; lower `PARSE_STT_DEFAULT_CHUNK_MINUTES` or `PARSE_ORTH_DEFAULT_CHUNK_MINUTES` and rerun only the affected step where possible. |
 | `concept_ids` referenced unknown IDs | Job completes but `result.summary.skipped` matches IDs | Verify IDs against `project_context_read` (`concepts` section) or `list_concepts_by_tag`. Drop unknown IDs and re-run. |
 | Lock conflict                    | Job rejected because speaker resource is held by another active job | Wait for the conflicting job to terminate, or check `jobs_list_active` to find it.                  |
 
 ## Agent Reasoning Notes
-`pipeline_run` is the right tool when you need *fine control* — exact step subset, explicit overwrites, language override, concept-window scoping. For the common "just annotate this speaker end-to-end" case, prefer `run_full_annotation_pipeline` and let it pick sensible defaults. Always preface a live call with (1) `pipeline_state_read` to see what `can_run` and what already has `full_coverage`, and (2) a `dryRun: true` of the exact payload to confirm the plan. After live start, poll `compute_status` with `computeType: "full_pipeline"` until terminal, then inspect `result.summary` and `result.results.<step>.status` — a top-level `complete` can still hide step-level errors.
+`pipeline_run` is the right tool when you need *fine control* — exact step subset, explicit overwrites, language override, concept-window scoping. For the common "just annotate this speaker end-to-end" case, prefer `run_full_annotation_pipeline` and let it pick sensible defaults. Always preface a live call with (1) `pipeline_state_read` to see what `can_run` and what already has `full_coverage`, and (2) a `dryRun: true` of the exact payload to confirm the plan. After live start, poll `compute_status` with `computeType: "full_pipeline"` until terminal, then inspect `result.summary`, `result.results.<step>.status`, any `chunks[]`, each stage `device`, and IPA `coverage_shrink_warning` — a top-level `complete` can still hide step-level errors or partial chunk results.
 
 ## Related Skills
 - `run_full_annotation_pipeline` — higher-level workflow macro; prefer for common cases.

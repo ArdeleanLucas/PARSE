@@ -31,7 +31,7 @@ Starts a bounded sentence-level STT job (faster-whisper) for a project audio fil
 ## Expected Output
 On `dryRun: true`: returns the resolved source path, model, and language without launching the job.
 
-On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, language }`. **Poll with `stt_status` until terminal.** On completion the job writes the sentence-level cache to `coarse_transcripts/<speaker>.json`.
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, language }`. **Poll with `stt_status` until terminal.** On completion the job writes the sentence-level cache to `coarse_transcripts/<speaker>.json`. Long full-file runs chunk automatically; terminal job `result` can include `chunks[]`, `duration_sec`, and `device`, while the cache remains a flat merged `segments[]` list.
 
 ## Example Successful Call
 Dry run:
@@ -62,6 +62,8 @@ Live start:
 | OOM / GPU issues                       | Job ends in `error` with CUDA/torch message                          | Read `job_logs`. faster-whisper has a CPU fallback but is slow.                                           |
 
 ## Agent Reasoning Notes
+For long recordings, keep the default 10-minute STT chunks unless a specific failure requires smaller chunks; do not disable chunking for ordinary fieldwork. Inspect terminal `result.chunks[]` and `job_logs` before rerunning blindly.
+
 Pick `stt_start` only when you don't need word-level timestamps. For the standard Tier 1 → 2 → 3 pipeline, you almost certainly want `stt_word_level_start` (Tier 1 word-level) instead — it's the same model with `word_timestamps=True`, and downstream forced-align needs the words. Keep this as the cheap-and-fast option for cases that don't care about word boundaries (quick coverage checks, compare-mode anchors).
 
 ## Related Skills

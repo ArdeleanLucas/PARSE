@@ -1,6 +1,6 @@
 # API Reference
 
-> Last updated: 2026-05-07
+> Last updated: 2026-05-14
 >
 > This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
@@ -160,20 +160,22 @@ Single-interval lexeme rerun endpoints (`/api/lexeme/run_ortho`, `/api/lexeme/ru
 |---|---|---|
 | `POST /api/normalize` | Start audio normalization | ffmpeg loudnorm pipeline |
 | `POST /api/normalize/status` | Poll normalization status | Job polling |
-| `POST /api/stt` | Start STT | Accepts `speaker`, `sourceWav` / `source_wav`, optional `language` |
-| `POST /api/stt/status` | Poll STT status | Accepts `jobId` or `job_id` |
-| `POST /api/compute/{computeType}` | Start a compute job | Main dispatcher for ORTH, IPA, full pipeline, contact lexemes, etc. |
+| `POST /api/stt` | Start STT | Accepts `speaker`, `sourceWav` / `source_wav`, optional `language`; full-file runs use MC-384 chunking/subprocess isolation when duration exceeds the configured threshold |
+| `POST /api/stt/status` | Poll STT status | Accepts `jobId` or `job_id`; terminal `result` can include `chunks[]`, `duration_sec`, and `device` |
+| `POST /api/compute/{computeType}` | Start a compute job | Main dispatcher for ORTH, IPA, full pipeline, contact lexemes, etc.; full STT/ORTH/IPA stages use robust isolation/chunk contracts by intent/duration |
 | `POST /api/compute/{computeType}/status` | Poll a typed compute job | Verifies the job matches the compute type |
 | `POST /api/compute/{jobId}/cancel` | Request cooperative cancellation | Returns `{ cancelled, job_id, reason? }`; ORTH observes it between chunks/windows and may return `partial_cancelled` |
 | `POST /api/compute/status` | Poll a compute job without specifying a type | Generic polling alias |
 | `POST /api/{computeType}/status` | Compatibility alias for compute status | Used for compute-style status endpoints other than STT |
 | `POST /api/locks/cleanup` | Clean stale speaker lock files | Admin/recovery endpoint; startup cleanup also runs server-side without killing processes |
 
-Cancellation semantics: `POST /api/compute/{jobId}/cancel` returns HTTP 404 with `cancelled=false` when the job id is unknown, and HTTP 200 with `cancelled=true` for a known job. The current backend cancellation registry is cooperative: HF ORTH checks the flag between full-file chunks and concept windows, persists any completed ORTH intervals, and reports `status: partial_cancelled` plus `cancelled_at_interval` when work was already written. The React batch runner stops polling immediately on user cancel and treats late backend completions as discarded.
+Cancellation semantics: `POST /api/compute/{jobId}/cancel` returns HTTP 404 with `cancelled=false` when the job id is unknown, and HTTP 200 with `cancelled=true` for a known job. The current backend cancellation registry is cooperative: chunked STT/ORTH check the flag between chunks, scoped ORTH checks between concept windows, completed work remains usable, and terminal results can report `status: cancelled` / `partial_cancelled` plus `chunks[]` and `cancelled_at_interval` metadata. The React batch runner stops polling immediately on user cancel and treats late backend completions as discarded.
 
 Stale-lock cleanup semantics: startup and `POST /api/locks/cleanup` scan direct `*.lock` files inside `PARSE_LOCKS_DIR` (or the configured default), delete dead-PID / metadata-less legacy locks, skip live-PID locks, and leave old live-PID locks in place with a manual-review reason controlled by `PARSE_STALE_LOCK_AGE_SEC`. Cleanup never kills processes.
 
 Full-pipeline OOM/restart semantics: before memory-heavy full-pipeline work, the backend checks host `MemAvailable` against `PARSE_FULL_PIPELINE_MIN_MEM_GB`; failures return structured job errors with `error_code: "oom_suspect"`, `mem_available_gb`, `required_gb`, and `swap_total_gb`. Job snapshots persist under `PARSE_JOB_SNAPSHOT_DIR` or the workspace `.parse/jobs` directory, and non-terminal snapshots recovered after server restart are marked `error_code: "server_restarted"` with `recovered_from_disk: true`. `GET /api/jobs/active` includes running jobs plus terminal complete/error/cancelled jobs inside `PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC` (default 10s, clamped to 0-120s) so the React header can render completion/error/cancelled chips before local auto-dismiss. Backend progress remains a 0-100 number; the TypeScript `listActiveJobs()` contract normalizes it to a 0-1 fraction for UI consumers.
+
+Chunked compute result semantics: full-file STT and full-mode ORTH terminal results can include `chunks[]` with per-chunk `idx`, audio-global `span`, `status`, and optional `error_code` / `error`. Short/single-shot runs return `chunks: []`. STT persists only the merged flat `segments[]` cache, not chunk diagnostics. STT/ORTH/IPA stage results expose the resolved/effective device as `device` (called `resolved_device` in some PR notes), and IPA overwrite runs may add `coverage_shrink_warning` when new projected coverage is much shorter than existing IPA coverage. See [MCP schema](./mcp-schema.md#compute-job-result-shapes).
 
 ### Suggestions, chat, and auth
 
