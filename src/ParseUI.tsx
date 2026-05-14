@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
+import { useCompareReturnRestore } from './hooks/useCompareReturnRestore';
+import { useOpenInAnnotateHandler } from './hooks/useOpenInAnnotateHandler';
 import { THEME_LABELS, useThemeCycle } from './hooks/useThemeCycle';
 import { useOffsetState } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
@@ -480,6 +482,11 @@ export function ParseUI() {
     try { localStorage.setItem('parse.currentMode', currentMode); }
     catch { /* non-fatal */ }
   }, [currentMode]);
+  const compareReturn = useCompareReturnRestore({
+    currentMode,
+    setConceptId,
+    setSelectedConceptKey,
+  });
   const readStoredSidebarScope = (mode: AppMode): boolean => {
     const fallback = mode === 'annotate';
     try {
@@ -1376,6 +1383,11 @@ export function ParseUI() {
     return null;
   }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
+  const handleOpenInAnnotate = useOpenInAnnotateHandler({
+    conceptId,
+    conceptKey: concept.key,
+    setCurrentMode,
+  });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
   }, []);
@@ -2287,10 +2299,12 @@ export function ParseUI() {
                     primaryContactCodes={primaryContactCodes}
                     contactLanguageNames={contactLanguageNames}
                     conceptKey={concept.key}
+                    initialExpandedSpeaker={compareReturn.initialExpandedSpeaker ?? undefined}
                     onBundleUpdated={handleCompareBundleUpdated}
                     onCycleCognate={(speaker, current) => cycleSpeakerCognate(concept.key, speaker, current)}
                     onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
                     onToggleSpeakerFlag={(speaker, current) => toggleSpeakerFlag(concept.key, speaker, current)}
+                    onOpenInAnnotate={handleOpenInAnnotate}
                   />
                 ) : compareBundlesError ? null : compareBundles.length === 0 ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-empty">
