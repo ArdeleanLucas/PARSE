@@ -562,7 +562,7 @@ export function ConceptSidebar({
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
           const hasVariants = visibleVariants.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
-          const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === firstVariantKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
+          const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
           const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
           const expanded = expandedConceptIds.has(concept.id);
           const parentName = concept.name;

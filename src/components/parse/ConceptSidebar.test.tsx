@@ -1203,6 +1203,43 @@ describe('ConceptSidebar', () => {
       expect(rowB.className).not.toContain('bg-indigo-50');
     });
 
+    it('does not light up the parent button when the first variant is selected', () => {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeConceptKey="365"
+          onConceptSelect={vi.fn()}
+        />,
+      );
+
+      const wrapper = screen.getByTestId('concept-row-3');
+      const parentButton = Array.from(wrapper.querySelectorAll('button[aria-label]'))
+        .find((button) => button.getAttribute('aria-label')?.includes('new 154')) as HTMLElement | undefined;
+      expect(parentButton).not.toBeUndefined();
+      expect(parentButton!.className).not.toContain('bg-indigo-50');
+
+      const rowA = screen.getByTestId('concept-variant-row-365');
+      expect(rowA.className).toContain('bg-indigo-50');
+
+      const rowB = screen.getByTestId('concept-variant-row-618');
+      expect(rowB.className).not.toContain('bg-indigo-50');
+    });
+
     it('auto-expands a grouped parent when activeConceptKey matches one of its variants', () => {
       render(
         <ConceptSidebar
