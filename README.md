@@ -23,6 +23,8 @@ Fieldwork linguists, comparative and historical linguists, and language-document
 
 ## Table of Contents
 - [What PARSE Does](#what-parse-does)
+- [How PARSE compares to tools you already use](#how-parse-compares-to-tools-you-already-use)
+- [Research Workflow](#research-workflow)
 - [Quick Start](#quick-start)
 - [Annotate](#annotate)
 - [Compare](#compare)
@@ -39,6 +41,36 @@ Fieldwork linguists, comparative and historical linguists, and language-document
 - **Check borrowing evidence** — bring in contact-language comparison forms with source information and citations.
 - **Export clean datasets** — produce LingPy TSV and NEXUS files for downstream comparative and phylogenetic work.
 - **Automate repetitive work** — use the local API and MCP server when AI agents or scripts need to import speakers, run jobs, or prepare exports.
+
+## How PARSE compares to tools you already use
+
+PARSE does not replace ELAN, Praat, FLEx, or LingPy. It connects them and adds the connective tissue that fieldwork-to-phylogenetics workflows usually require manual stitching to achieve. The fit for someone already using those tools:
+
+| Capability | ELAN | Praat | FLEx | LingPy | **PARSE** |
+|---|---|---|---|---|---|
+| Audio annotation | Unlimited hierarchical tiers | TextGrids + deep acoustics | Text-linked annotation | — | Modern waveform + spectrogram; 4 core lexeme tiers + sentence/speaker tiers |
+| Cross-speaker comparison | Manual | Scripted | Lexicon-focused | LexStat cognate clustering | Dedicated Compare table over the same workspace; runs LingPy LexStat with a tunable threshold |
+| Borrowing evidence | Manual | Manual | Manual | Programmatic | Manual flag in Compare; CLEF (Contact Lexeme Fetcher) auto-fetches contact-language forms from Wiktionary, ASJP, and Lexibank so you have something to compare against — the borrowing decision is yours, not algorithmic |
+| Phylogenetic export | Custom scripts | Custom scripts | Limited | Native Wordlist | One-click LingPy TSV (ID / CONCEPT / DOCULECT / IPA / COGID / TOKENS / BORROWING) and NEXUS; downstream consumption is not yet covered by integration tests |
+| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Current Whisper STT via `faster-whisper`; optional forced alignment; ~60-tool MCP agent layer |
+| End-to-end workflow | Annotation only | Acoustics only | Lexicon & glossing | Computation only | Audio → annotation → comparison → export in one workspace; multiple WAVs per speaker currently need manual coordination |
+| Stack | Java desktop | C / Pascal desktop | C# desktop | Python library | React 18 + Vite browser UI; Python HTTP server (FastAPI / Pydantic); Zustand state |
+
+What this means in practice
+- **From ELAN or Praat.** You will recognise the waveform-and-tier loop. PARSE has fewer fixed tier types than ELAN but adds a dedicated Compare view and one-click export to LingPy and NEXUS. Spectrograms are there for review, but PARSE is not a phonetics lab — no formant or pitch extraction.
+- **From FLEx.** You will find lighter morphology and lexicon tooling, but stronger support for long fieldwork audio, multi-speaker comparison, and phylogenetic export.
+- **From LingPy.** You will no longer rebuild a Wordlist TSV by hand. PARSE writes one directly from fieldwork audio, with LexStat clustering already run inside the Compare view.
+
+PARSE's role is to be the connecting layer between annotation (ELAN / Praat) and phylogenetics (LingPy / BEAST), with a modern web UI and an agent-driven automation layer that the classic desktop tools do not currently provide.
+
+## Research Workflow
+1. Import or open a speaker recording.
+2. Review the audio, text, IPA, and timestamps in Annotate.
+3. Compare the same word or concept across speakers.
+4. Check borrowing evidence when contact influence matters.
+5. Export LingPy TSV or NEXUS for downstream analysis.
+
+For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 
 ## Quick Start
 ```bash
@@ -82,15 +114,6 @@ Full details in the [User Guide](docs/user-guide.md).
 PARSE can also be driven by scripts and AI agents. That means repetitive tasks — importing speakers, running support jobs, checking annotations, and preparing exports — do not have to happen only through the browser. The in-app assistant uses the same bounded PARSE tool layer.
 
 For setup and the full automation reference, see the [MCP Guide](docs/mcp-guide.md) and [Getting Started with External Agents](docs/getting-started-external-agents.md).
-
-## Research Workflow
-1. Import or open a speaker recording.
-2. Review the audio, text, IPA, and timestamps in Annotate.
-3. Compare the same word or concept across speakers.
-4. Check borrowing evidence when contact influence matters.
-5. Export LingPy TSV or NEXUS for downstream analysis.
-
-For the long-form walkthrough, see the [User Guide](docs/user-guide.md).
 
 ## Documentation
 
