@@ -40,15 +40,9 @@ interface SurveyValuesSectionProps {
 
 const SURVEY_COLOR_PALETTE = [
   'indigo',
-  'violet',
-  'blue',
-  'sky',
-  'teal',
   'emerald',
   'amber',
-  'orange',
   'rose',
-  'pink',
   'slate',
 ] as const;
 
@@ -315,7 +309,7 @@ export function SurveyValuesSection({
                           </button>
                         </div>
                         {!surveyColorCodingEnabled ? <p className="text-[9px] text-slate-400">Turn on color-coding to apply.</p> : null}
-                        <div className={`grid grid-cols-6 gap-1 ${surveyColorCodingEnabled ? '' : 'opacity-40'}`}>
+                        <div className={`grid grid-cols-5 gap-1 ${surveyColorCodingEnabled ? '' : 'opacity-40'}`}>
                           {SURVEY_COLOR_PALETTE.map((color) => (
                             <button
                               key={color}
