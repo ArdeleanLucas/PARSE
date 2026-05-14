@@ -12,7 +12,7 @@ PARSE is organized around two tightly linked research modes:
 The same workspace, tag system, and backend data model support both.
 
 <p align="center">
-  <img src="./pr-assets/dogfood-fix-153-annotate-stable.png" alt="Annotate mode in PARSE" width="48%" />
+  <img src="./pr-assets/user-guide-annotate-workstation.png" alt="Annotate mode in PARSE" width="48%" />
   <img src="./pr-assets/pr76-compare-table.png" alt="Compare mode in PARSE" width="48%" />
 </p>
 
@@ -70,6 +70,12 @@ The current Annotate surface includes:
 ### Annotate jobs and automation
 
 PARSE's annotation workflow is designed around explicit, inspectable support jobs rather than opaque one-click automation.
+
+<p align="center">
+  <img src="./pr-assets/user-guide-actions-menu.png" alt="Annotate Actions menu listing the support jobs and import/export entries" width="55%" />
+</p>
+
+*Figure: the Annotate **Actions** menu groups every support job into one surface — audio normalization, STT, ORTH, IPA, full-pipeline and cross-speaker matching, plus tag import, decision save/load, LingPy export, and project reset.*
 
 #### Audio normalization
 
@@ -196,6 +202,12 @@ For the practical walkthrough, hardware guidance, chunk-progress interpretation,
 
 #### Concept-scoped pipeline reruns
 
+<p align="center">
+  <img src="./pr-assets/user-guide-run-full-pipeline.png" alt="Run Full Pipeline modal showing the speaker × step grid with keep/overwrite controls" width="85%" />
+</p>
+
+*Figure: the **Run Full Pipeline** modal previews exactly what will run before you commit. Each speaker × step cell shows whether the step will run fresh, keep existing data, overwrite it, skip, or be blocked by the backend, so a partial rerun can be inspected before any compute starts.*
+
 The transcription run modal now supports three run modes for pipeline-style reruns:
 
 - **Full speaker** (`run_mode: "full"`) — preserves whole-speaker behavior.
@@ -208,6 +220,12 @@ Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexe
 
 The transcription run modal also exposes a fourth scope filter targeting tag membership. When one or more global tag labels are selected, IPA / ORTH / Full pipeline runs restrict the rerun set to concepts that carry those tags on the selected speakers. This is meant for review-driven sweeps such as "rerun every concept I tagged `needs-second-pass`" or "rerun only the borrowing-suspect set on speakers KLQ-03..05".
 
+<p align="center">
+  <img src="./pr-assets/user-guide-pipeline-tag-filter.png" alt="Tag filter dropdown inside the run modal with Review needed, Confirmed, Problematic, and Thesis options and an AND-mode toggle" width="55%" />
+</p>
+
+*Figure: the **Tag filter** inside the run modal scopes the rerun to concepts carrying the chosen tags. Match semantics default to `any`; switch to `all` (AND) for a stricter intersection.*
+
 Behavior worth knowing before you trigger a tagged-only run:
 
 - Match semantics default to `any`: a concept matches if it carries at least one of the selected tags. Switch to `all` to require every selected tag on the same concept; in that mode, unknown or ambiguous tag labels are rejected up-front so an AND query never silently degrades to "intersection over the resolved subset".
@@ -215,6 +233,23 @@ Behavior worth knowing before you trigger a tagged-only run:
 - Tagged-only runs are tracked jobs: the global header shows active progress, then briefly shows complete/error/cancelled terminal chips before auto-dismiss. The post-run batch report lists per-concept results and surfaces per-concept errors (concept missing on the speaker, speaker locked, runner failure) inside the report rather than aborting the whole batch. Successful tagged ORTH/IPA results are persisted into the selected speakers' annotations; ORTH results also rebuild affected `ortho_words` so word-level displays do not desync after a partial rerun.
 
 The same tag-resolution backend is reused by the read-only `POST /api/concepts/by-tag` endpoint, so the modal preview and any agent or script that wants to know "which concepts would this rerun touch" share one source of truth.
+
+### Linguistic tag drawer
+
+The **Linguistic Tags** drawer manages the project-wide tag vocabulary that powers both the per-concept review state and the tagged-only rerun mode above.
+
+<p align="center">
+  <img src="./pr-assets/user-guide-tags-drawer.png" alt="Linguistic Tags drawer with vocabulary on the left, tag creation and existing tag list in the middle, and the concept list filtered to the selected tag on the right" width="85%" />
+</p>
+
+*Figure: opening **Tags** exposes the global vocabulary (here: Review needed, Confirmed, Problematic, Thesis) plus a per-tag concept list. Selecting a tag filters the right-hand concept list to the matching membership for the active speaker; the same vocabulary is what the Tagged-concepts-only run mode consumes.*
+
+From this drawer you can:
+
+- create a new tag and pick a color
+- toggle the **Show untagged** filter to see concepts that still need a review state
+- preview which concepts carry each tag for the active speaker (counts per tag are speaker-scoped; the vocabulary itself is project-wide)
+- jump into a tagged concept to confirm or change its state in Annotate
 
 ### Manual review and timing correction
 
@@ -390,6 +425,26 @@ On a fresh workspace, the first run of **Borrowing detection (CLEF)** now opens 
 - enable or disable provider groups before auto-population
 - inspect provider coverage/warnings when a populate run returns partial or empty results
 - save the language setup only, or **Save & populate** immediately
+
+The modal is organized into three tabs:
+
+<p align="center">
+  <img src="./pr-assets/clef-languages-tab.png" alt="Configure CLEF modal - Languages tab with Arabic and Persian selected as primary contact languages" width="85%" />
+</p>
+
+*Figure: **1. Languages** — pick 1–2 primary contact languages from the bundled SIL/ISO catalog (here Arabic + Persian for a Southern Kurdish workspace). Custom SIL/ISO codes can be added at the bottom.*
+
+<p align="center">
+  <img src="./pr-assets/clef-sources-tab.png" alt="Configure CLEF modal - Sources tab listing open lexical databases, local sources, and the LLM-augmented Grok provider" width="85%" />
+</p>
+
+*Figure: **2. Sources** — toggle individual provider modules (Wiktionary, Wikidata, ASJP, CLDF, pycldf, pylexibank, LingPy wordlist, plus workspace CSV/Literature overrides, and the optional Grok LLM fallback). Provider Ready/needs-API-key state is shown inline.*
+
+<p align="center">
+  <img src="./pr-assets/clef-settings-tab-v2.png" alt="Configure CLEF modal - Settings tab with provider API key entry and danger-zone delete control" width="85%" />
+</p>
+
+*Figure: **3. Settings** — add the xAI or OpenAI key used by the Grok LLM fallback (xAI is tried first, OpenAI is the fallback), and the **Danger Zone** action that clears populated reference forms while keeping language metadata and CLEF settings intact.*
 
 The saved config lives at `config/sil_contact_languages.json`; optional extra catalog entries can be provided through `config/sil_catalog_extra.json`.
 

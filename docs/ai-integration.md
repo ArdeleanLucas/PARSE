@@ -161,6 +161,16 @@ Supported provider families for chat/runtime are currently:
 
 Backend provider modules are split explicitly under `python/ai/providers/` as **`openai`**, **`xai`**, **`ollama`**, and **`local_whisper`**. The current in-app auth UI surfaces xAI/OpenAI for chat, while `local_whisper` backs the speech-first STT/ORTH paths.
 
+### Connecting a provider from the UI
+
+When PARSE has no chat provider configured yet, the AI chat dock opens to the empty-state provider chooser instead of failing silently:
+
+<p align="center">
+  <img src="./pr-assets/user-guide-parse-ai-connect.png" alt="PARSE AI provider connection panel with xAI/Grok and OpenAI API options" width="75%" />
+</p>
+
+*Figure: the **Connect PARSE AI** panel lets you sign in with xAI/Grok or supply an OpenAI API key directly. Keys are stored locally in `config/auth_tokens.json` (the same store the CLEF Settings tab writes to) and never leave the machine.*
+
 ## Current model roles
 
 ### `razhan/whisper-base-sdh`
