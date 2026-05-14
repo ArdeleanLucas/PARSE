@@ -39,6 +39,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
+from ai.device import _torch_cuda_available
+
 
 def _is_wsl() -> bool:
     """Return True when running inside WSL (Windows Subsystem for Linux)."""
@@ -46,41 +48,20 @@ def _is_wsl() -> bool:
     return "microsoft" in release or "wsl" in release
 
 
-def resolve_device(requested: Optional[str] = None, *, allow_wsl_cuda: bool = False) -> str:
+def resolve_device(requested: Optional[str] = None, *, allow_wsl_cuda: Optional[bool] = None) -> str:
     """Resolve the wav2vec2 compute device.
 
-    WSL remains CPU-first by default because earlier sustained CTC workloads
-    on RTX 5090/Blackwell could destabilize the VM. Operators may opt in to
-    CUDA from WSL with ``wav2vec2.allow_wsl_cuda=true``; even then CUDA is
-    returned only for an explicit ``requested="cuda"`` and only when PyTorch
-    reports that CUDA is available.
+    DEPRECATED: prefer ``ai.device.resolve_compute_device``. This shim exists
+    for existing callers passing the legacy ``allow_wsl_cuda`` flag.
+
+    MC-384-Z behavior change: ``allow_wsl_cuda`` default flipped from False →
+    True. Explicit ``allow_wsl_cuda=False`` still forces CPU.
     """
-    normalized = requested.strip().lower() if isinstance(requested, str) else requested
-    if normalized == "cpu":
+    from ai.device import resolve_compute_device
+
+    if allow_wsl_cuda is False:
         return "cpu"
-    if _is_wsl():
-        if normalized == "cuda" and allow_wsl_cuda:
-            try:
-                import torch  # type: ignore
-                if torch.cuda.is_available():
-                    return "cuda"
-                print(
-                    "[wav2vec2] allow_wsl_cuda=True but torch.cuda.is_available()=False; falling back to CPU.",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            except ImportError:
-                print(
-                    "[wav2vec2] allow_wsl_cuda=True but torch import failed; falling back to CPU.",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        return "cpu"
-    try:
-        import torch  # type: ignore
-        return normalized or ("cuda" if torch.cuda.is_available() else "cpu")
-    except ImportError:
-        return "cpu"
+    return resolve_compute_device("ipa", config_device=requested, section_default="auto")
 
 
 _CPU_THREAD_LIMITS_CONFIGURED = False
@@ -196,7 +177,7 @@ class Aligner:
         cls,
         model_name: str = DEFAULT_MODEL_NAME,
         device: Optional[str] = None,
-        allow_wsl_cuda: bool = False,
+        allow_wsl_cuda: Optional[bool] = None,
     ) -> "Aligner":
         """Lazy import of torch/transformers so the module is importable
         even in environments that lack them (tests stub ``Aligner.load``).
@@ -306,9 +287,9 @@ class Aligner:
         self.processor = None
         self.vocab = {}
         try:
-            import torch  # type: ignore
+            if _torch_cuda_available():
+                import torch  # type: ignore
 
-            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
         except Exception:
@@ -372,7 +353,7 @@ class Aligner:
             ipa = self.processor.tokenizer.decode(
                 pred_ids, skip_special_tokens=True
             )
-            if torch.cuda.is_available():
+            if _torch_cuda_available():
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
         except Exception as exc:  # pragma: no cover - defensive

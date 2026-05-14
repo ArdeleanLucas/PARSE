@@ -29,6 +29,11 @@
 #                       If unset, the backend keeps its legacy thread default; this script warns loudly.
 #   PARSE_FULL_PIPELINE_MIN_MEM_GB  Host RAM preflight threshold for full_pipeline jobs (backend default: 12).
 #   PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC  IPA overwrite shrink warning threshold in seconds (default: 60; 0 disables).
+#   PARSE_COMPUTE_DEVICE  Global STT/ORTH/IPA device override: auto, cpu, cuda, or cuda:N (default: auto).
+#   PARSE_STT_DEVICE      STT-specific device override; supersedes PARSE_COMPUTE_DEVICE.
+#   PARSE_ORTH_DEVICE     ORTH-specific device override; supersedes PARSE_COMPUTE_DEVICE.
+#   PARSE_IPA_DEVICE      IPA-specific device override; supersedes PARSE_COMPUTE_DEVICE.
+#   PARSE_STT_FORCE_CPU   Backwards-compatible alias for PARSE_STT_DEVICE=cpu when set truthy.
 #   PARSE_JOB_SNAPSHOT_DIR  Optional durable job-snapshot directory (default: workspace .parse/jobs).
 #   PARSE_SKIP_PULL  Set to 1 to skip `git pull` (default: 0)
 #   PARSE_PULL_MODE  How to integrate origin/main (default: "auto")
@@ -66,6 +71,10 @@ set -u
 # touching tracked files. This file is gitignored. Example contents:
 #
 #   PARSE_EXTERNAL_READ_ROOTS=/mnt/c/Users/Lucas/Thesis
+#   PARSE_COMPUTE_DEVICE=auto
+#   PARSE_STT_DEVICE=auto
+#   PARSE_ORTH_DEVICE=auto
+#   PARSE_IPA_DEVICE=auto
 #   PARSE_PY=/mnt/c/Users/Lucas/miniconda3/python.exe
 #
 # The file is sourced before the defaults block so any variable it exports
@@ -98,6 +107,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARSE_COMPUTE_MODE:=}"
 : "${PARSE_FULL_PIPELINE_MIN_MEM_GB:=}"
 : "${PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC:=}"
+: "${PARSE_COMPUTE_DEVICE:=}"
+: "${PARSE_STT_DEVICE:=}"
+: "${PARSE_ORTH_DEVICE:=}"
+: "${PARSE_IPA_DEVICE:=}"
+: "${PARSE_STT_FORCE_CPU:=}"
 # Tier-1 ORTH chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
 : "${PARSE_ORTH_DEFAULT_CHUNK_MINUTES:=10}"
 # Tier-1 STT chunk size in minutes for files exceeding this duration. Set 0 to disable chunking.
@@ -386,6 +400,18 @@ start_api() {
   if [ -n "${PARSE_JOB_SNAPSHOT_DIR}" ]; then
     log "Job snapshot dir: ${PARSE_JOB_SNAPSHOT_DIR}"
   fi
+  if [ -n "${PARSE_COMPUTE_DEVICE}" ]; then
+    log "Compute device override: ${PARSE_COMPUTE_DEVICE}"
+  fi
+  if [ -n "${PARSE_STT_DEVICE}" ]; then
+    log "STT device override: ${PARSE_STT_DEVICE}"
+  fi
+  if [ -n "${PARSE_ORTH_DEVICE}" ]; then
+    log "ORTH device override: ${PARSE_ORTH_DEVICE}"
+  fi
+  if [ -n "${PARSE_IPA_DEVICE}" ]; then
+    log "IPA device override: ${PARSE_IPA_DEVICE}"
+  fi
   # -u = unbuffered stdout (so logs appear immediately; critical for remote debugging).
   (
     cd "${PARSE_WORKSPACE_ROOT}" || exit 1
@@ -396,6 +422,11 @@ start_api() {
       PARSE_USE_PERSISTENT_WORKER="${PARSE_USE_PERSISTENT_WORKER}" \
       PARSE_COMPUTE_MODE="${PARSE_COMPUTE_MODE}" \
       PARSE_FULL_PIPELINE_MIN_MEM_GB="${PARSE_FULL_PIPELINE_MIN_MEM_GB}" \
+      PARSE_COMPUTE_DEVICE="${PARSE_COMPUTE_DEVICE}" \
+      PARSE_STT_DEVICE="${PARSE_STT_DEVICE}" \
+      PARSE_ORTH_DEVICE="${PARSE_ORTH_DEVICE}" \
+      PARSE_IPA_DEVICE="${PARSE_IPA_DEVICE}" \
+      PARSE_STT_FORCE_CPU="${PARSE_STT_FORCE_CPU}" \
       PARSE_ORTH_DEFAULT_CHUNK_MINUTES="${PARSE_ORTH_DEFAULT_CHUNK_MINUTES}" \
       PARSE_STT_DEFAULT_CHUNK_MINUTES="${PARSE_STT_DEFAULT_CHUNK_MINUTES}" \
       PARSE_JOB_SNAPSHOT_DIR="${PARSE_JOB_SNAPSHOT_DIR}" \

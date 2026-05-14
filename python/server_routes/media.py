@@ -94,6 +94,14 @@ def _stt_coverage_end_sec(segments: _server.List[_server.Dict[str, _server.Any]]
     return end_sec
 
 
+def _stt_resolved_device(provider: _server.Any) -> str:
+    """Return the provider's effective device for logs/result envelopes."""
+
+    value = getattr(provider, '_effective_device', None) or getattr(provider, 'device', None)
+    text = str(value or '').strip()
+    return text or 'unknown'
+
+
 def _emit_stt_summary_log(job_id: str, speaker: str, result: _server.Dict[str, _server.Any]) -> None:
     """Emit the single operator-facing STT completion summary line."""
     segments = result.get('segments') if isinstance(result.get('segments'), list) else []
@@ -103,9 +111,10 @@ def _emit_stt_summary_log(job_id: str, speaker: str, result: _server.Dict[str, _
     except (TypeError, ValueError):
         duration_sec = 0.0
     logger.info(
-        '[STT] job=%s speaker=%s chunked=%s chunk_count=%d total_duration_sec=%.2f coverage_end_sec=%.2f segments=%d',
+        '[STT] job=%s speaker=%s device=%s chunked=%s chunk_count=%d total_duration_sec=%.2f coverage_end_sec=%.2f segments=%d',
         job_id,
         speaker,
+        str(result.get('device') or 'unknown'),
         str(bool(chunks)).lower(),
         len(chunks),
         duration_sec,
@@ -328,6 +337,7 @@ def _run_stt_job(job_id: str, speaker: str, source_wav: str, language: _server.O
         'segments': segments,
         'chunks': chunk_results,
         'duration_sec': duration_sec,
+        'device': _stt_resolved_device(provider),
     }
     if cancelled_requested:
         result['status'] = 'cancelled'
@@ -378,6 +388,9 @@ def _run_stt_job_in_subprocess(job_id: str, speaker: str, source_wav: str, langu
             'language': language,
             'env': {
                 'PARSE_STT_DEFAULT_CHUNK_MINUTES': _server.os.environ.get('PARSE_STT_DEFAULT_CHUNK_MINUTES', '10'),
+                'PARSE_STT_DEVICE': _server.os.environ.get('PARSE_STT_DEVICE', ''),
+                'PARSE_COMPUTE_DEVICE': _server.os.environ.get('PARSE_COMPUTE_DEVICE', ''),
+                'PARSE_STT_FORCE_CPU': _server.os.environ.get('PARSE_STT_FORCE_CPU', ''),
             },
         },
         subprocess_entry=_run_stt_job_subprocess_entry,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import math
 import sys
 import types
@@ -118,6 +119,23 @@ def _guard_kwargs(**overrides: Any) -> dict[str, Any]:
     return kwargs
 
 
+
+def _install_torch_cuda_stub(monkeypatch: pytest.MonkeyPatch, *, available: bool = True) -> list[str]:
+    cuda_calls: list[str] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: available,
+                device_count=lambda: 1 if available else 0,
+                empty_cache=lambda: cuda_calls.append("empty_cache"),
+                synchronize=lambda: cuda_calls.append("synchronize"),
+            )
+        ),
+    )
+    return cuda_calls
+
 def _config(**overrides: Any) -> dict[str, Any]:
     section = {
         "backend": "hf",
@@ -187,19 +205,7 @@ def _install_soundfile_stub(
 
 def test_unload_model_drops_loaded_objects_and_clears_cuda(monkeypatch, capsys):
     _processor, model = _install_transformers_stub(monkeypatch)
-    cuda_calls: list[str] = []
-
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        types.SimpleNamespace(
-            cuda=types.SimpleNamespace(
-                is_available=lambda: True,
-                empty_cache=lambda: cuda_calls.append("empty_cache"),
-                synchronize=lambda: cuda_calls.append("synchronize"),
-            )
-        ),
-    )
+    cuda_calls = _install_torch_cuda_stub(monkeypatch)
 
     provider = HFWhisperProvider(config=_config())
     provider._load_model()
@@ -215,13 +221,27 @@ def test_unload_model_drops_loaded_objects_and_clears_cuda(monkeypatch, capsys):
 
 
 def test_module_import_does_not_require_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "transformers", None)
+    module_name = "ai.providers.hf_whisper"
+    old_module = sys.modules.pop(module_name, None)
+    real_import = __import__
 
-    provider = HFWhisperProvider(config=_config())
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in {"torch", "transformers"}:
+            raise ImportError(f"no {name} in lightweight env")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    try:
+        reimported = importlib.import_module(module_name)
+        provider = reimported.HFWhisperProvider(config=_config())
+    finally:
+        sys.modules.pop(module_name, None)
+        if old_module is not None:
+            sys.modules[module_name] = old_module
 
     assert provider.model_path == "razhan/whisper-base-sdh"
     assert provider.language == "sd"
-    assert provider.device == "cuda"
+    assert provider.device == "cpu"
 
 
 def test_missing_transformers_raises_clear_error_on_first_model_load(
@@ -259,6 +279,7 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
     audio_path = tmp_path / "clip.wav"
     audio_path.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
     _install_soundfile_stub(monkeypatch, samples=16000, sample_rate=16000)
+    _install_torch_cuda_stub(monkeypatch)
     processor, model = _install_transformers_stub(
         monkeypatch,
         processor=_RecordingProcessor(texts=[" یەک "]),
@@ -332,6 +353,7 @@ def test_transcribe_emits_multi_segment_for_long_audio(
 
 
 def test_repetition_guards_passed_to_generate(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_torch_cuda_stub(monkeypatch)
     processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
     provider = HFWhisperProvider(
         config=_config(

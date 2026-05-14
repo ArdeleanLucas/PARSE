@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, List, NotRequired, Optional, Sequence, TypedDict
 
+from ai.device import _torch_cuda_available
+
 try:
     from .forced_align import (
         DEFAULT_MODEL_NAME,
@@ -289,8 +291,8 @@ def transcribe_words_with_forced_align(
             except Exception:
                 pass
         try:
-            import torch
-            if torch.cuda.is_available():
+            if _torch_cuda_available():
+                import torch
                 torch.cuda.empty_cache()
         except Exception:
             pass
@@ -320,8 +322,8 @@ def transcribe_words_with_forced_align(
 
     def _gpu_cleanup() -> None:
         try:
-            import torch  # type: ignore
-            if torch.cuda.is_available():
+            if _torch_cuda_available():
+                import torch  # type: ignore
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()

@@ -15,6 +15,12 @@ from concept_registry import load_concept_registry, persist_concept_registry, re
 logger = logging.getLogger(__name__)
 
 
+def _compute_provider_device(provider: _server.Any) -> str:
+    value = getattr(provider, '_effective_device', None) or getattr(provider, 'device', None)
+    text = str(value or '').strip()
+    return text or 'unknown'
+
+
 def _release_registered_ipa_aligner() -> None:
     aligner = getattr(_server, '_IPA_ALIGNER', None)
     setattr(_server, '_IPA_ALIGNER', None)
@@ -1890,9 +1896,11 @@ def _compute_speaker_ortho_concept_windows(
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
     if job_id:
         _set_compute_progress(job_id, 95.0, message='ORTH Concept-windows complete ({0}/{1})'.format(len(rows), len(concept_intervals)))
+    device = _compute_provider_device(provider)
     result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,
+        'device': device,
         'concept_windows': len(concept_intervals),
         'filled': len(rows),
         'total': len(rows),
@@ -1905,6 +1913,15 @@ def _compute_speaker_ortho_concept_windows(
     if cancelled_requested and len(rows) < len(concept_intervals):
         result_payload['status'] = 'partial_cancelled' if rows else 'cancelled'
         result_payload['cancelled_at_interval'] = len(rows)
+    logger.info(
+        '[ORTH] job=%s speaker=%s device=%s run_mode=%s filled=%d total=%d',
+        job_id,
+        speaker,
+        device,
+        run_mode,
+        len(rows),
+        len(concept_intervals),
+    )
     return result_payload
 
 
@@ -1962,9 +1979,11 @@ def _compute_speaker_ipa_concept_windows(
     _server._annotation_touch_metadata(annotation, preserve_created=True)
     _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
     skipped = max(0, len(concept_intervals) - len(rows))
-    return {
+    device = _compute_provider_device(aligner)
+    result_payload = {
         'speaker': speaker,
         'run_mode': run_mode,
+        'device': device,
         'concept_windows': len(concept_intervals),
         'filled': len(rows),
         'skipped': skipped,
@@ -1975,6 +1994,17 @@ def _compute_speaker_ipa_concept_windows(
         'exception_samples': [],
         'affected_concepts': _server._affected_concepts_payload(concept_intervals),
     }
+    logger.info(
+        '[IPA] job=%s speaker=%s device=%s run_mode=%s filled=%d skipped=%d total=%d',
+        job_id,
+        speaker,
+        device,
+        run_mode,
+        len(rows),
+        skipped,
+        len(concept_intervals),
+    )
+    return result_payload
 
 def _ipa_overwrite_shrink_threshold_sec() -> float:
     raw = _server.os.environ.get('PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC', '60').strip()
@@ -2183,7 +2213,8 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     print('[IPA] calling _get_ipa_aligner()…', file=_server.sys.stderr, flush=True)
     _server._compute_checkpoint('IPA.get_aligner_begin')
     aligner = _server._get_ipa_aligner()
-    _server._compute_checkpoint('IPA.get_aligner_done')
+    device = _compute_provider_device(aligner)
+    _server._compute_checkpoint('IPA.get_aligner_done', device=device)
     if ortho_source == 'ortho_words':
         stt_segments: _server.List[_server.Dict[str, _server.Any]] = []
         has_words = False
@@ -2324,11 +2355,21 @@ def _compute_speaker_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
     skip_breakdown = {'empty_ortho': skipped_empty_ortho, 'existing_ipa_no_overwrite': skipped_existing_ipa, 'zero_range': skipped_zero_range, 'exception': skipped_exception, 'empty_ipa_from_model': skipped_empty_ipa}
-    print('[IPA] speaker={0} filled={1} skipped={2} total={3} breakdown={4}'.format(speaker, filled, skipped, total, skip_breakdown), file=_server.sys.stderr, flush=True)
+    print('[IPA] speaker={0} device={1} filled={2} skipped={3} total={4} breakdown={5}'.format(speaker, device, filled, skipped, total, skip_breakdown), file=_server.sys.stderr, flush=True)
+    logger.info(
+        '[IPA] job=%s speaker=%s device=%s run_mode=%s filled=%d skipped=%d total=%d',
+        job_id,
+        speaker,
+        device,
+        run_mode,
+        filled,
+        skipped,
+        total,
+    )
     if exception_samples:
         for sample in exception_samples:
             print('[IPA][EXC] {0}'.format(sample), file=_server.sys.stderr, flush=True)
-    result_payload = {'speaker': speaker, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
+    result_payload = {'speaker': speaker, 'device': device, 'filled': filled, 'skipped': skipped, 'total': total, 'ortho_source': ortho_source, 'skip_breakdown': skip_breakdown, 'exception_samples': exception_samples}
     if coverage_shrink_warning is not None:
         result_payload['coverage_shrink_warning'] = coverage_shrink_warning
     return result_payload
@@ -2651,6 +2692,7 @@ def _compute_speaker_ortho(
     _set_compute_progress(job_id, 2.0, message='ORTH loading model (razhan)')
     if provider is None:
         provider = _server.get_ortho_provider()
+    device = _compute_provider_device(provider)
 
     def _progress_callback(progress: float, segments_processed: int) -> None:
         clamped = min(float(progress) if progress is not None else 0.0, 94.0)
@@ -2755,6 +2797,7 @@ def _compute_speaker_ortho(
             _server._write_json_file(legacy_path, annotation)
         result_payload = {
             'speaker': speaker,
+            'device': device,
             'filled': len(new_intervals),
             'ortho_words': 0,
             'refined_lexemes': 0,
@@ -2768,6 +2811,15 @@ def _compute_speaker_ortho(
             'chunks': chunk_results,
         }
         _set_compute_progress(job_id, 99.0, message='ORTH cancelled after {0} intervals'.format(len(new_intervals)))
+        logger.info(
+            '[ORTH] job=%s speaker=%s device=%s run_mode=%s filled=%d total=%d',
+            job_id,
+            speaker,
+            device,
+            run_mode,
+            len(new_intervals),
+            len(new_intervals),
+        )
         return result_payload
     _set_compute_progress(job_id, 95.0, message='ORTH Tier-2 forced alignment')
     ortho_words = _server._ortho_tier2_align_to_words(audio_path, segments)
@@ -2792,7 +2844,17 @@ def _compute_speaker_ortho(
     if legacy_path != annotation_path:
         _server._write_json_file(legacy_path, annotation)
     _set_compute_progress(job_id, 99.0, message='ORTH written ({0} intervals, {1} word-level, {2} refined)'.format(len(new_intervals), len(merged_words), len(refined_additions)))
-    return {'speaker': speaker, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals), 'chunks': chunk_results}
+    result_payload = {'speaker': speaker, 'device': device, 'filled': len(new_intervals), 'ortho_words': len(merged_words), 'refined_lexemes': len(refined_additions), 'refine_lexemes_enabled': refine_lexemes, 'skipped': False, 'replaced_existing': has_existing_text, 'audio_path': str(audio_path), 'total': len(new_intervals), 'chunks': chunk_results}
+    logger.info(
+        '[ORTH] job=%s speaker=%s device=%s run_mode=%s filled=%d total=%d',
+        job_id,
+        speaker,
+        device,
+        run_mode,
+        len(new_intervals),
+        len(new_intervals),
+    )
+    return result_payload
 
 
 _MIN_FREE_GB_FOR_IPA = 4.0  # Conservative, tunable guard before wav2vec2 loads.

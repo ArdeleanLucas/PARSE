@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import types
 from typing import List
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -49,6 +50,19 @@ class _FakeWhisperModel:
         _FakeWhisperModel.instances.append(self)
 
 
+
+def _install_torch_cuda_stub(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True,
+                device_count=lambda: 1,
+            )
+        ),
+    )
+
 def _install_fake_whisper(monkeypatch, *, raise_until: int) -> None:
     _FakeWhisperModel.raise_until = raise_until
     _FakeWhisperModel.instances = []
@@ -79,6 +93,7 @@ def test_register_cuda_dll_directories_is_idempotent_and_safe_off_windows() -> N
 
 def test_cuda_runtime_failure_falls_back_to_cpu(monkeypatch) -> None:
     _install_fake_whisper(monkeypatch, raise_until=1)
+    _install_torch_cuda_stub(monkeypatch)
 
     provider_module._CUDA_DLL_DIRS_REGISTERED = True  # type: ignore[attr-defined]
 
@@ -104,6 +119,7 @@ def test_cuda_runtime_failure_falls_back_to_cpu(monkeypatch) -> None:
 
 
 def test_non_cuda_failure_is_re_raised_without_cpu_fallback(monkeypatch) -> None:
+    _install_torch_cuda_stub(monkeypatch)
     class _FailingFasterWhisperModule:
         @staticmethod
         def WhisperModel(model_source, device, compute_type):  # noqa: N802

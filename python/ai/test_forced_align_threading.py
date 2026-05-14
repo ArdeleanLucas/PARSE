@@ -114,15 +114,26 @@ def _system_python_has_torch() -> bool:
 REAL_TORCH_SUBPROCESS_AVAILABLE = _system_python_has_torch()
 
 
-def test_resolve_device_forces_cpu_on_wsl_by_default_even_if_cuda_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_device_defaults_to_cuda_on_wsl_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: True,
+        device_count=lambda: 1,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
-    assert fa.resolve_device("cuda") == "cpu"
-    assert fa.resolve_device(None) == "cpu"
+
+    assert fa.resolve_device("cuda") == "cuda"
+    assert fa.resolve_device(None) == "cuda"
+    assert fa.resolve_device("cuda", allow_wsl_cuda=False) == "cpu"
 
 
 def test_resolve_device_allows_wsl_cuda_when_explicitly_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_torch = types.ModuleType("torch")
-    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: True,
+        device_count=lambda: 1,
+    )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
 
@@ -131,7 +142,10 @@ def test_resolve_device_allows_wsl_cuda_when_explicitly_enabled(monkeypatch: pyt
 
 def test_resolve_device_cpu_request_wins_even_when_wsl_cuda_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_torch = types.ModuleType("torch")
-    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: True,
+        device_count=lambda: 1,
+    )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
 
@@ -140,32 +154,35 @@ def test_resolve_device_cpu_request_wins_even_when_wsl_cuda_enabled(monkeypatch:
 
 def test_resolve_device_warns_when_wsl_cuda_opt_in_but_cuda_unavailable(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     fake_torch = types.ModuleType("torch")
-    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)  # type: ignore[attr-defined]
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: False,
+        device_count=lambda: 0,
+    )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
 
-    assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cpu"
+    with caplog.at_level("WARNING", logger="parse.device"):
+        assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cpu"
 
-    stderr = capsys.readouterr().err
-    assert "allow_wsl_cuda=True" in stderr
-    assert "torch.cuda.is_available()=False" in stderr
+    assert "requested device='cuda'" in caplog.text
+    assert "falling back to cpu" in caplog.text
 
 
 def test_resolve_device_warns_when_wsl_cuda_opt_in_but_torch_import_fails(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setitem(sys.modules, "torch", None)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
 
-    assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cpu"
+    with caplog.at_level("WARNING", logger="parse.device"):
+        assert fa.resolve_device("cuda", allow_wsl_cuda=True) == "cpu"
 
-    stderr = capsys.readouterr().err
-    assert "allow_wsl_cuda=True" in stderr
-    assert "torch import failed" in stderr
+    assert "requested device='cuda'" in caplog.text
+    assert "falling back to cpu" in caplog.text
 
 
 def test_aligner_load_plumbs_wsl_cuda_opt_in_to_model_device(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,7 +190,10 @@ def test_aligner_load_plumbs_wsl_cuda_opt_in_to_model_device(monkeypatch: pytest
     monkeypatch.setattr(fa, "_PRELOADED_ALIGNER", None)
     monkeypatch.setattr(fa, "_is_wsl", lambda: True)
     fake_torch = _build_fake_torch_module()
-    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)  # type: ignore[attr-defined]
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: True,
+        device_count=lambda: 1,
+    )
     fake_transformers, model_events = _build_fake_transformers_module()
 
     monkeypatch.setitem(sys.modules, "torch", fake_torch)

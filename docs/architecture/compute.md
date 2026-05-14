@@ -85,11 +85,35 @@ Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer 
 
 **IPA does not chunk by audio duration:** IPA Tier-3 acoustic transcribe is interval-driven, not a single whole-file model call. `python/ai/ipa_transcribe.py:transcribe_intervals()` operates on per-interval slices supplied by upstream ORTH word windows, and PR #422 handled IPA shrink-warning behavior separately. This is why no MC-384-K audio-duration chunking lane exists for IPA.
 
+## Device selection
+
+MC-384-Z centralizes STT, ORTH, and IPA device placement in `python/ai/device.py`. The resolver is evaluated at call time (not import time), imports torch lazily, and returns `cuda` only when `torch.cuda.is_available()` is true and `torch.cuda.device_count() > 0`; otherwise `auto` resolves to `cpu`. Explicit `cuda` / `cuda:N` requests warn and fall back to `cpu` when CUDA is unavailable.
+
+Device precedence, highest first:
+
+| Priority | Source | Scope | Accepted values |
+|---|---|---|---|
+| 1 | `PARSE_STT_DEVICE`, `PARSE_ORTH_DEVICE`, `PARSE_IPA_DEVICE` | Per stage | `auto`, `cpu`, `cuda`, `cuda:N` |
+| 2 | `PARSE_COMPUTE_DEVICE` | Global fallback for STT/ORTH/IPA | `auto`, `cpu`, `cuda`, `cuda:N` |
+| 3 | `ai_config.json` section `device` | Caller config (`stt`, `ortho`, `wav2vec2`) | `auto`, `cpu`, `cuda`, `cuda:N` |
+| 4 | Code section default | Usually `auto` | `auto`, `cpu`, `cuda`, `cuda:N` |
+
+`PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper `compute_type=int8` for the CPU escape hatch.
+
+The legacy `wav2vec2.allow_wsl_cuda` key is deprecated as a WSL-specific safety gate. Its default changed from false to true in MC-384-Z: when unset or true, IPA uses the unified resolver; explicit `allow_wsl_cuda=false` still forces IPA to CPU. This change is motivated by the 2026-05-13 Kalh01 observation where IPA pegged one CPU core while the RTX 5090 stayed around 1% utilization. MC-384-Z only ensures the wav2vec2 model can live on the selected GPU; a future word-batching lane can make IPA saturate the GPU more effectively.
+
+Completion/result observability: `[STT]`, `[ORTH]`, and `[IPA]` completion logs include `device=...`, and each stage result envelope includes the resolved `device` where the provider/aligner ran.
+
 ## Environment variables
 
 - `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:811` and exported by `scripts/parse-run.sh:102` / `scripts/parse-run.sh:399`.
 - `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:66` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
 - `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC`: MC-384-J2 guard for destructive IPA overwrite reruns; default `60`. Read by `_ipa_overwrite_shrink_threshold_sec()` at `python/server_routes/annotate.py:1980`. This is not an audio-duration chunking knob; it belongs with the compute env-var surface because full-pipeline IPA can surface `coverage_shrink_warning` when newly projected STT/ORTH coverage is much shorter than existing IPA coverage.
+- `PARSE_COMPUTE_DEVICE`: MC-384-Z global compute-device fallback for STT, ORTH, and IPA; default `auto`; accepted values `auto`, `cpu`, `cuda`, `cuda:N`.
+- `PARSE_STT_DEVICE`: MC-384-Z STT-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
+- `PARSE_ORTH_DEVICE`: MC-384-Z ORTH-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
+- `PARSE_IPA_DEVICE`: MC-384-Z IPA-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
+- `PARSE_STT_FORCE_CPU`: legacy STT CPU escape hatch, now treated as a truthy alias for `PARSE_STT_DEVICE=cpu`.
 - `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3292` for nested isolated subprocesses, default `14400`.
 - `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
 - `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.

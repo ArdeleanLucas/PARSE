@@ -1133,20 +1133,12 @@ def _get_ipa_aligner() -> Any:
         flush=True,
     )
     # Honour wav2vec2 settings from the canonical workspace-aware AI config
-    # reader used by STT/ORTH; otherwise auto-detect in forced_align.
-    try:
-        from ai import provider as _ai_provider
-        _ai_cfg = _ai_provider.load_ai_config()
-        _w2v = _ai_cfg.get("wav2vec2", {})
-        if _w2v.get("force_cpu"):
-            _ipa_device: Optional[str] = "cpu"
-        else:
-            _ipa_device = _w2v.get("device") or None
-        _allow_wsl_cuda = _w2v.get("allow_wsl_cuda") is True
-    except Exception:
-        _ai_cfg = _w2v = {}
-        _ipa_device = None
-        _allow_wsl_cuda = False
+    # reader used by STT/ORTH; otherwise use the MC-384-Z unified resolver.
+    from ai.wav2vec2_runtime import resolve_wav2vec2_runtime_options
+
+    _w2v_options = resolve_wav2vec2_runtime_options()
+    _ipa_device = _w2v_options.device
+    _allow_wsl_cuda = _w2v_options.allow_wsl_cuda
 
     from ai.forced_align import _is_wsl as _fa_is_wsl
     if _fa_is_wsl():
