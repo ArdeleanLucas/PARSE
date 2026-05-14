@@ -76,7 +76,7 @@ import { BatchReportModal } from './components/shared/BatchReportModal';
 import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ManageTagsView } from './components/compare/ManageTagsView';
-import { CompareBundleTable } from './components/compare/CompareBundleTable';
+import { SpeakerFormsTable } from './components/compare/SpeakerFormsTable';
 import { Pill, SectionCard } from './components/compare/UIPrimitives';
 import { AnnotateView } from './components/annotate/AnnotateView';
 import { JobLogsModal } from './components/annotate/JobLogsModal';
@@ -2280,12 +2280,13 @@ export function ParseUI() {
                 {compareBundlesLoading && !activeCompareBundle ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500">Loading Compare bundle…</div>
                 ) : activeCompareBundle ? (
-                  <CompareBundleTable
+                  <SpeakerFormsTable
                     bundle={activeCompareBundle}
                     speakers={selectedCompareSpeakers}
                     speakerForms={speakerForms}
                     primaryContactCodes={primaryContactCodes}
                     contactLanguageNames={contactLanguageNames}
+                    conceptKey={concept.key}
                     onBundleUpdated={handleCompareBundleUpdated}
                     onCycleCognate={(speaker, current) => cycleSpeakerCognate(concept.key, speaker, current)}
                     onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
