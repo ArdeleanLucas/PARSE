@@ -593,6 +593,7 @@ export function ConceptSidebar({
                 )}
                 <button
                   aria-label={parentButtonLabel}
+                  data-testid={`concept-parent-button-${concept.id}`}
                   onClick={() => {
                     if (firstVariantKey ?? concept.key) onConceptSelect(concept.id, firstVariantKey ?? concept.key);
                     else onConceptSelect(concept.id);
