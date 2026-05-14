@@ -1,6 +1,6 @@
 # Developer Guide
 
-> Last updated: 2026-05-07
+> Last updated: 2026-05-14
 >
 > This guide is for contributors working on the active PARSE codebase: the React + Vite frontend in `src/`, the Python backend in `python/`, and the current workflow-specific documentation split under `docs/`.
 
@@ -15,6 +15,7 @@ Current architectural highlights:
 - **Modes**: Annotate (`/`) and Compare (`/compare`) in one unified shell
 - **Data**: per-speaker annotation JSON (`AnnotationRecord.confirmed_anchors`, `concept_tags`, IPA review sidecars), `parse-enrichments.json`, and survey/source sidecars such as `survey-overlap.json`
 - **AI**: task-routed provider system for STT, ORTH, acoustic IPA, and chat
+- **Compute**: chunk-aware long-file STT/ORTH, nested full-mode STT/ORTH/IPA subprocess isolation, and unified stage device resolution
 - **Automation**: built-in chat tooling plus MCP server mode
 
 ## Repository structure
@@ -197,7 +198,7 @@ Relevant knobs and files:
 - `PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC` for how long `/api/jobs/active` keeps terminal complete/error/cancelled jobs visible to the header strip (default 10s, clamped to 0-120s)
 - `GET /api/worker/status` for persistent-worker health checks
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
-- `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; HF ORTH observes it between chunks/windows and can return `partial_cancelled`
+- `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; STT/ORTH observe it between chunks/windows and can return `cancelled` or `partial_cancelled`
 - `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for reviewer-triggered interval reruns; default behavior starts tracked compute jobs `lexeme_rerun_ortho` / `lexeme_rerun_ipa`, and `async=false` is deprecated synchronous compatibility
 - `GET /api/survey-overlap` and `POST /api/survey-overlap` for source/survey labels, color coding, concept links, and per-speaker survey choices
 - `POST /api/concepts/{conceptId}/duplicate` for n-ary concept-row variant creation with a prewrite backup; first call rewrites the source row to `X (A)` and appends `X (B)`, subsequent calls on the same source item append `(C)`, `(D)`, … until the alphabet is exhausted
@@ -205,6 +206,12 @@ Relevant knobs and files:
 - `POST /api/concepts/relink-by-gloss` for cross-survey concept consolidation by canonical gloss (dry-run + apply with backups; fuzzy candidates are never auto-applied)
 - `POST /api/concepts/by-tag` and `POST /api/lexemes/rerun-by-tag` for tag-filtered concept queries and job-tracked tag-filtered ORTH/IPA reruns (`lexemes_rerun_by_tag`; `async=false` only for deprecated synchronous compatibility). Shared resolution lives in `python/app/services/tag_resolver.py`; handlers in `python/app/http/tag_filtered_rerun_handlers.py`; route shim in `python/server_routes/tag_filtered_rerun.py`.
 - `POST /api/locks/cleanup` plus startup cleanup for stale speaker-lock recovery; cleanup deletes stale `*.lock` files only and never kills processes
+
+Compute architecture details now live in:
+
+- [Compute architecture](./architecture/compute.md) — worker mental model, launcher modes, STT/ORTH chunking, subprocess isolation, device resolver, result contract
+- [Worker process architecture](./architecture/worker-processes.md) — process topology and regression gates
+- [Environment variables](./environment-variables.md) — operator knobs for chunks, devices, timeouts, ports, and workspace roots
 
 If you use PM2, keep `cwd` pointed at the **live workspace** rather than the bare git checkout so runtime artifacts land where the active UI expects them.
 
@@ -255,6 +262,24 @@ For documentation-only work, you should still at minimum:
 - confirm relative links
 - check `git diff` for unintended churn
 
+
+## Debugging chunked or isolated compute jobs
+
+When a long STT/ORTH/IPA job misbehaves, debug the job layer before changing model code.
+
+1. Identify the job with `GET /api/jobs/active`, `jobs_list_active`, or the UI header strip.
+2. Poll the terminal result with `stt_status`, `stt_word_level_status`, `compute_status`, or `job_status`.
+3. Inspect `result.chunks[]` or `result.results.<step>.chunks[]` for the failed `span`, `status`, and `error_code`.
+4. Read `job_logs` for the same `jobId`; nested subprocess crashes should be serialized with tracebacks and crash-log tails.
+5. Check the stage result `device` and completion logs before assuming CUDA/CPU placement.
+6. Reproduce with smaller chunks (`PARSE_STT_DEFAULT_CHUNK_MINUTES` / `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`) before disabling chunking.
+
+Maintenance rules:
+
+- Keep `chunks[]` job-result-only; do not persist it into `coarse_transcripts/<speaker>.json`.
+- Use `install_child_tee()` for any spawned child log file so live progress remains visible in parent stderr.
+- Add/update [Compute architecture](./architecture/compute.md), [Worker process architecture](./architecture/worker-processes.md), [MCP schema](./mcp-schema.md), and [Environment variables](./environment-variables.md) when changing the compute contract.
+
 ## Documentation layout after the restructure
 
 The top-level docs now serve distinct audiences more cleanly:
@@ -264,7 +289,9 @@ The top-level docs now serve distinct audiences more cleanly:
 - `docs/user-guide.md` — end-user workflow
 - `docs/ai-integration.md` — providers, models, chat tool surface
 - `docs/api-reference.md` — HTTP + MCP reference
-- `docs/architecture.md` — system design and data model
+- `docs/environment-variables.md` — operator-facing runtime env vars
+- `docs/architecture.md` plus `docs/architecture/` — system design, data model, compute, and worker topology
+- `docs/release-notes/` — release/change summaries for major shipped series
 - `docs/developer-guide.md` — contributor-facing implementation guide
 - `docs/research-context.md` — thesis and citation framing
 

@@ -110,38 +110,156 @@ The stdio MCP adapter does not add a separate network auth layer. Access is cont
 
 ## Compute job result shapes
 
-### ORTH/IPA compute result with chunking (MC-384, Milestone A)
+Compute status tools and HTTP polling endpoints return a generic job snapshot while a job runs. When a job reaches `status == "complete"`, the snapshot carries a `result` object. MC-384 adds chunk-aware and device-aware fields to those result objects.
 
-Long-file ORTH and future chunked compute types return their normal top-level result plus a `chunks` array. The array is present for chunk-aware results and is empty for short-audio single-shot paths.
+### Generic completed job snapshot
 
-Top-level ORTH result fields:
+```json
+{
+  "jobId": "compute-7f3a",
+  "type": "compute:full_pipeline",
+  "status": "complete",
+  "progress": 100,
+  "message": "Compute complete",
+  "error": null,
+  "result": {
+    "speaker": "Khan01",
+    "steps_run": ["stt", "ortho", "ipa"],
+    "results": {}
+  }
+}
+```
 
-| Field | Type | Required | Description |
+Agents should treat the top-level job `status` and the per-step result status separately. A full-pipeline job can complete while one step reports `status: "error"`, `"skipped"`, `"cancelled"`, or `"partial_cancelled"` inside `result.results.<step>`.
+
+### Shared MC-384 fields
+
+| Field | Type | Producers | Description |
 | --- | --- | --- | --- |
-| `speaker` | string | yes | Speaker ID. |
-| `filled` | integer | yes | Coarse Tier-1 intervals populated. |
-| `total` | integer | yes | Coarse intervals attempted. |
-| `ortho_words` | integer | yes | Tier-2 word-level intervals. |
-| `status` | enum: `ok`/`skipped`/`error`/`cancelled`/`partial_cancelled` | yes | Top-level outcome. |
-| `chunks` | `ChunkResult[]` | yes for chunk-aware results | One entry per Tier-1 chunk. Empty array for short-audio single-shot paths. |
+| `chunks` | `ChunkResult[]` | Full-file STT, full-mode ORTH | Per-chunk diagnostics. Empty array for short/single-shot paths. Present only in job results; not persisted to STT cache. |
+| `device` | string | STT, ORTH, IPA | Resolved/effective compute device. This is the shipped wire key for what PR notes may call `resolved_device`. |
+| `coverage_shrink_warning` | object | IPA overwrite path | Optional warning that an IPA overwrite produced much shorter projected coverage than the existing IPA tier. |
+| `duration_sec` | number | STT | Source audio duration used to decide whether STT should chunk. |
 
-`ChunkResult` fields:
+### `ChunkResult`
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `idx` | integer | yes | Zero-based chunk index. |
-| `span` | object `{start: float, end: float}` | yes | Audio-global seconds. Adjacent chunks satisfy `chunks[i].span.end == chunks[i+1].span.start`. |
-| `status` | enum: `ok`/`error`/`skipped`/`cancelled` | yes | Per-chunk outcome. |
-| `error_code` | enum: `oom_suspect`/`chunk_failed`/`provider_error`/`timeout` | required when `status='error'` | Machine-readable recovery code. |
+| `span` | object `{idx?: integer, start: float, end: float}` | yes | Audio-global seconds. Adjacent chunks satisfy `chunks[i].span.end == chunks[i+1].span.start`. |
+| `status` | enum: `ok` / `error` / `skipped` / `cancelled` | yes | Per-chunk outcome. |
+| `error_code` | enum or string | required when `status='error'` | Machine-readable recovery code. Known values are listed below. |
 | `error` | string | required when `status='error'` | Human-readable error message. |
 
-### Error codes (MC-384 additions)
+### Known error codes
 
 | Code | Meaning | Agent retry guidance |
 | --- | --- | --- |
-| `oom_suspect` | Memory pressure suspected. Existing full-pipeline preflight semantics are preserved and extended to chunk-level results. | Retry only the failed chunk with a smaller chunk size, for example by lowering `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`, or fall back to scoped reprocessing with `run_mode='concept'` and `concept_ids`. |
-| `chunk_failed` | Chunk failed for a non-memory reason that did not match a more specific code. | Retry the specific chunk once; if it repeats, surface the chunk span to the user and continue with the partial result. |
+| `oom_suspect` | Memory pressure suspected. Existing full-pipeline preflight semantics are preserved and extended to chunk-level results. | Retry the failed stage with a smaller chunk size (`PARSE_STT_DEFAULT_CHUNK_MINUTES` or `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`), or fall back to scoped reprocessing where available. |
+| `chunk_failed` | Chunk failed for a non-memory reason that did not match a more specific code. | Retry the specific span once; if it repeats, surface the chunk span to the user and continue with the partial result. |
 | `provider_error` | Provider/model raised an unexpected exception. | Do not blind-loop. Check provider configuration/logs, switch provider if available, or run a scoped retry. |
-| `timeout` | Subprocess or chunk exceeded its time budget. Added to the documented enum in MC-384-B for the shared subprocess wrapper. | Retry the affected chunk with a smaller chunk size or a longer timeout if the machine is healthy. |
+| `timeout` | Subprocess or chunk exceeded its time budget. | Retry the affected chunk with a smaller chunk size or adjust `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` after verifying the machine is healthy. |
+| `server_restarted` | Durable job snapshot was recovered after backend restart before terminal completion. | Reconcile disk artifacts, then rerun only the missing step. |
 
-Backward compatibility: callers that do not read `chunks[]` can continue to consume the top-level result fields. New agents should prefer `chunks[]` for retry and partial-result decisions.
+### STT result
+
+Full-file STT (`stt_start`, `stt_word_level_start`, or full-pipeline STT) returns:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `speaker` | string | Speaker ID. |
+| `sourceWav` | string | Resolved source/working WAV path. |
+| `language` | string or null | Language hint used for the provider, or null for auto-detect. |
+| `segments` | array | Merged flat STT segments in audio-global time. Words may be present depending on the STT mode. |
+| `chunks` | `ChunkResult[]` | Empty for short/single-shot paths; one entry per long-file chunk otherwise. |
+| `duration_sec` | number | Duration used for chunking decisions. |
+| `device` | string | Effective STT device. |
+| `status` | optional enum | Present for cancellation or error-shaped results. |
+
+Cache rule: `coarse_transcripts/<speaker>.json` stores the merged flat `segments[]` only. `chunks[]` is a job-result diagnostic envelope and is intentionally not cached.
+
+![Cache versus job result behavior: merged STT segments are saved in the persistent cache, while chunk diagnostics remain in job results and reports.](user-guides/assets/cache-vs-job-result-behavior.png)
+
+*Figure: The cache stays backward-compatible for normal STT readers. Chunk rows are diagnostic evidence for the just-run job, so agents and power users should read job results/reports when they need per-chunk recovery details.*
+
+Short-audio STT example:
+
+```json
+{
+  "speaker": "Short01",
+  "sourceWav": "audio/working/Short01/Short01.wav",
+  "language": "sdh",
+  "segments": [{"start": 0.4, "end": 2.1, "text": "..."}],
+  "chunks": [],
+  "duration_sec": 60.0,
+  "device": "cuda"
+}
+```
+
+Long-audio STT example with one failed chunk:
+
+```json
+{
+  "speaker": "Fail01",
+  "segments": [{"start": 0.5, "end": 599.0, "text": "..."}],
+  "chunks": [
+    {"idx": 0, "span": {"idx": 0, "start": 0.0, "end": 600.0}, "status": "ok"},
+    {"idx": 1, "span": {"idx": 1, "start": 600.0, "end": 1200.0}, "status": "error", "error_code": "oom_suspect", "error": "CUDA out of memory"},
+    {"idx": 2, "span": {"idx": 2, "start": 1200.0, "end": 1800.0}, "status": "ok"}
+  ],
+  "duration_sec": 1800.0,
+  "device": "cuda"
+}
+```
+
+### ORTH result
+
+Full-mode ORTH returns:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `speaker` | string | Speaker ID. |
+| `device` | string | Effective ORTH device. |
+| `filled` | integer | Coarse Tier-1 intervals populated. |
+| `total` | integer | Coarse intervals attempted/written. |
+| `ortho_words` | integer | Tier-2 word-level intervals written. |
+| `refined_lexemes` | integer | Optional short-clip refinement additions. |
+| `status` | optional enum | `cancelled` / `partial_cancelled` when cancellation interrupts. Omitted or stage-specific success fields indicate normal success. |
+| `chunks` | `ChunkResult[]` | Empty for short/single-shot paths; one entry per long-file chunk otherwise. |
+
+ORTH persists merged annotation tiers (`tiers.ortho`, `tiers.ortho_words`) rather than a chunk cache. Tier 2 forced alignment runs once after Tier-1 chunks merge.
+
+### IPA result and coverage warning
+
+IPA does not chunk by whole-audio duration. It operates over STT/ORTH/concept intervals. Full-mode or scoped IPA results can include:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `speaker` | string | Speaker ID. |
+| `device` | string | Effective wav2vec2/IPA device. |
+| `filled`, `skipped`, `total` | integer | Interval-level counts. |
+| `ortho_source` | string | Source tier used for IPA windows (`ortho_words`, `ortho`, or `concept`). |
+| `skip_breakdown` | object | Structured skip reasons. |
+| `exception_samples` | string[] | Bounded exception examples for diagnosis. |
+| `coverage_shrink_warning` | object | Optional overwrite warning. |
+
+`coverage_shrink_warning` shape:
+
+```json
+{
+  "previous_end": 8000.0,
+  "projected_end": 1200.0,
+  "previous_count": 420
+}
+```
+
+The warning is advisory: the job can still complete. Agents should surface it prominently before declaring an overwrite run healthy.
+
+### MCP tool guidance
+
+- `stt_status` / `stt_word_level_status` can expose STT `result.chunks` and `result.device` once terminal.
+- `compute_status` is the canonical poller for `pipeline_run`, ORTH, IPA, and full-pipeline compute jobs. Inspect both `result.summary` and `result.results.<step>.chunks`.
+- `pipeline_run` and `run_full_annotation_pipeline` do not change their start payloads for MC-384; chunking and subprocess isolation are selected by backend intent/duration/env.
+- `job_logs` remains the diagnostic companion when a chunk reports `oom_suspect`, `provider_error`, or `timeout`.
+
+Backward compatibility: callers that do not read `chunks[]`, `device`, or `coverage_shrink_warning` can continue to consume the previous top-level result fields.

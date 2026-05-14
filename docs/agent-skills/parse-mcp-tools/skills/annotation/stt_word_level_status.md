@@ -30,7 +30,7 @@ Polls a Tier 1 word-level STT job started by `stt_word_level_start`, optionally 
 | maxSegments     | integer | No       | Cap on returned segments when `includeSegments: true`. `minimum=1`, `maximum=300`. | (server default) | `50`                                   |
 
 ## Expected Output
-Returns `{ jobId, type, status, progress, message, error, result, segments?, ... }`. Terminal states: `complete` (cache written with word timestamps) or `error`. When `includeSegments: true`, `segments` contains the bounded preview; when `includeWords: true`, each segment includes `words: [{ word, start, end, prob }, ...]`.
+Returns `{ jobId, type, status, progress, message, error, result, segments?, ... }`. Terminal states: `complete` (cache written with word timestamps) or `error`. When `includeSegments: true`, `segments` contains the bounded preview; when `includeWords: true`, each segment includes `words: [{ word, start, end, prob }, ...]`. Terminal `result` can include MC-384 fields: `chunks[]` for long-file chunk diagnostics, `duration_sec`, and `device`.
 
 Does not mutate project state.
 
@@ -62,6 +62,8 @@ Segment + word preview:
 | `includeWords` but no words[] | `includeWords: true` but segments have no nested array   | The cache may be from `stt_start` (sentence-level) rather than this tool. Verify via `result.source` or re-run word-level.|
 
 ## Agent Reasoning Notes
+For long recordings, keep the default 10-minute STT chunks unless a specific failure requires smaller chunks; do not disable chunking for ordinary fieldwork. Inspect terminal `result.chunks[]` and `job_logs` before rerunning blindly.
+
 This is the matching status tool for `stt_word_level_start`. Use `includeSegments: true` + `includeWords: true` for spot-checks of Tier 1 word boundaries — but for full-recording inspection read the cache file via `read_text_preview` instead. After completion, the cache feeds Tier 2 forced-align or `compute_boundaries_start`.
 
 ## Related Skills

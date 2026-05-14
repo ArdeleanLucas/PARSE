@@ -12,7 +12,8 @@ If you are new to the project, use this page in order:
 2. Run the [one-command launcher](#one-command-launch-recommended)
 3. Configure [`ai_config.json`](#configure-aiconfigjson)
 4. Review the [workspace-first setup](#workspace-first-bootstrap-recommended-on-a-fresh-machine)
-5. Use the [troubleshooting](#troubleshooting) section if startup or GPU inference fails
+5. If you are upgrading an existing workspace, read [migration notes](./getting-started/migration.md)
+6. Use the [troubleshooting](#troubleshooting) section if startup or GPU inference fails
 
 ## Requirements
 
@@ -270,7 +271,16 @@ The launcher and MCP adapter both rely on a shared set of `PARSE_*` environment 
 | `PARSE_USE_PERSISTENT_WORKER` | empty | Enable the persistent compute worker path so wav2vec2 can stay warm across jobs. |
 | `PARSE_COMPUTE_MODE` | empty | Explicit compute launcher mode such as `thread`, `subprocess`, or `persistent`; `scripts/parse-run.sh` warns when this is unset so operators notice the legacy default. |
 | `PARSE_FULL_PIPELINE_MIN_MEM_GB` | backend default | Minimum host `MemAvailable` GiB required before memory-heavy full-pipeline steps; low-memory failures are reported as `oom_suspect`. |
+| `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` | `14400` | Timeout for outer per-job subprocess mode and nested isolated full-mode STT/ORTH/IPA children. |
+| `PARSE_STT_DEFAULT_CHUNK_MINUTES` | `10` | Full-file STT chunk size in minutes; `0` disables duration chunking for controlled debugging. |
+| `PARSE_ORTH_DEFAULT_CHUNK_MINUTES` | `10` | Full-mode ORTH Tier-1 chunk size in minutes; `0` disables duration chunking for controlled debugging. |
+| `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC` | `60` | IPA overwrite coverage-shrink warning threshold in seconds; `0` disables the warning. |
+| `PARSE_COMPUTE_DEVICE` | `auto` | Global STT/ORTH/IPA device override: `auto`, `cpu`, `cuda`, or `cuda:N`. |
+| `PARSE_STT_DEVICE` / `PARSE_ORTH_DEVICE` / `PARSE_IPA_DEVICE` | unset | Stage-specific device overrides that supersede `PARSE_COMPUTE_DEVICE`. |
+| `PARSE_STT_FORCE_CPU` | unset | Backwards-compatible truthy alias for `PARSE_STT_DEVICE=cpu`. |
 | `PARSE_JOB_SNAPSHOT_DIR` | workspace `.parse/jobs` | Durable JSON job snapshots used to recover interrupted jobs as `server_restarted` after backend restart. |
+
+For the full operator reference, precedence rules, and examples, see [Environment variables](./environment-variables.md). Existing users upgrading long-file workflows should also read [MC-384 migration notes](./getting-started/migration.md).
 
 ### `.parse-env` for machine-local overrides
 
@@ -282,6 +292,9 @@ Example:
 PARSE_EXTERNAL_READ_ROOTS=/absolute/path/to/optional/read/root
 PARSE_PY=/path/to/your/python
 PARSE_CHAT_MEMORY_PATH=/path/to/parse-memory.md
+PARSE_STT_DEFAULT_CHUNK_MINUTES=10
+PARSE_ORTH_DEFAULT_CHUNK_MINUTES=10
+PARSE_COMPUTE_DEVICE=auto
 ```
 
 The launcher reads this file before applying defaults. The standalone MCP adapter mirrors the same convention.
@@ -369,9 +382,11 @@ Operationally:
 - The intended research workflow is GPU-backed local inference
 - The faster-whisper path includes explicit CUDA-runtime detection plus a CPU/int8 fallback if the local CUDA stack is unavailable
 - HF ORTH unloads its model before wav2vec2 IPA during full-pipeline runs and cooperatively observes `POST /api/compute/{jobId}/cancel` for long concept-window jobs
-- `PARSE_STT_FORCE_CPU=1` is available as an emergency override when a WSL/driver stack is unstable and you need faster-whisper STT or legacy CT2 ORTH to stay on CPU deliberately
+- Long full-file STT and full-mode ORTH chunk at 10 minutes by default and run their full-file/full-mode work inside isolated subprocesses
+- `PARSE_STT_FORCE_CPU=1` is available as an emergency STT-only override; the new preferred form is `PARSE_STT_DEVICE=cpu`
+- `PARSE_COMPUTE_DEVICE` plus `PARSE_STT_DEVICE` / `PARSE_ORTH_DEVICE` / `PARSE_IPA_DEVICE` control device placement with env → config → auto precedence
 - Tier 3 IPA is no longer text-based; it depends on the wav2vec2 acoustic path
-- On WSL, the aligner now resolves to **CPU by default** for long wav2vec2 CTC workloads; the `wav2vec2.force_cpu` and `wav2vec2.chunk_size` settings in `config/ai_config.json` are the main tuning knobs for that path
+- For wav2vec2/IPA, missing or true `wav2vec2.allow_wsl_cuda` lets the unified resolver choose CUDA when available; explicit `allow_wsl_cuda=false` remains a conservative CPU pin
 
 ### Runtime and deployment modes
 
@@ -384,12 +399,14 @@ The current backend runtime has a few operational features that are easy to miss
   - `persistent` — preloads wav2vec2 once and reuses it across compute jobs
 - `GET /api/worker/status` is the health endpoint for persistent-worker deployments
 - if you supervise the backend with PM2, the tracked file is `deploy/pm2-ecosystem.config.cjs`, and `cwd` should point at the **live workspace**, not just the git checkout
-- full-pipeline jobs now run a host-memory preflight before memory-heavy steps; failures surface `oom_suspect` rather than silently wedging, and durable job snapshots let restarted servers report interrupted jobs as `server_restarted`
+- full-pipeline jobs now run a host-memory preflight before memory-heavy steps; failures surface `oom_suspect` rather than silently wedging, durable job snapshots let restarted servers report interrupted jobs as `server_restarted`, and chunked STT/ORTH results expose per-chunk `chunks[]` diagnostics
 - the PM2 config also documents WSL safety defaults such as `PARSE_STT_FORCE_CPU=1` and `CUDA_VISIBLE_DEVICES=""` for all-CPU fallback operation on unstable GPU stacks
 
 For provider-specific details, see [AI Integration](./ai-integration.md).
 
 ## Troubleshooting
+
+For long-recording-specific failures after startup, use [Troubleshooting long files](./troubleshooting/long-files.md). The notes below cover startup, workspace, and launch problems.
 
 ### `config/ai_config.json` is missing
 
@@ -472,5 +489,9 @@ scripts/parse-stop.sh
 ## Where to go next
 
 - New user doing annotation work: [User Guide](./user-guide.md)
+- Processing multi-hour recordings: [Processing long recordings](./user-guides/processing-long-recordings.md)
+- Troubleshooting long-file processing: [Troubleshooting long files](./troubleshooting/long-files.md)
+- Existing user upgrade notes: [MC-384 migration notes](./getting-started/migration.md)
+- Tuning ports, chunks, subprocesses, and devices: [Environment variables](./environment-variables.md)
 - Configuring models, chat providers, or tool surfaces: [AI Integration](./ai-integration.md)
 - Extending the project itself: [Developer Guide](./developer-guide.md)

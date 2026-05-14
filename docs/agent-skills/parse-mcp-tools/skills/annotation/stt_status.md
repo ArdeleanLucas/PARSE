@@ -28,7 +28,7 @@ Polls the status and progress of an existing STT job (`stt_start`), optionally r
 | maxSegments     | integer | No       | Cap on returned segments when `includeSegments: true`. `minimum=1`, `maximum=300`. | (server default) | `50`                                   |
 
 ## Expected Output
-Returns `{ jobId, type, status, progress, message, error, result, segments?, ... }`. Terminal states: `complete` (cache written to `coarse_transcripts/<speaker>.json`) or `error`. With `includeSegments: true`, `segments` is the bounded preview list (each segment carries `start_sec`, `end_sec`, `text`).
+Returns `{ jobId, type, status, progress, message, error, result, segments?, ... }`. Terminal states: `complete` (cache written to `coarse_transcripts/<speaker>.json`) or `error`. With `includeSegments: true`, `segments` is the bounded preview list (each segment carries `start_sec`, `end_sec`, `text`). Terminal `result` can include MC-384 fields: `chunks[]` for long-file chunk diagnostics, `duration_sec`, and `device`.
 
 Does not mutate project state.
 
@@ -59,6 +59,8 @@ Status with segment preview:
 | Segment preview truncated | `segments` length matches `maxSegments`              | Increase `maxSegments` (up to 300), or read the cache file via `read_text_preview`. |
 
 ## Agent Reasoning Notes
+For long recordings, keep the default 10-minute STT chunks unless a specific failure requires smaller chunks; do not disable chunking for ordinary fieldwork. Inspect terminal `result.chunks[]` and `job_logs` before rerunning blindly.
+
 This is the matching status tool for `stt_start`. Use `includeSegments: true` only for spot-checks; the cache file is the canonical source. For the standard Tier 1 → 2 → 3 pipeline, prefer `stt_word_level_status` since that's where downstream forced-align starts.
 
 ## Related Skills

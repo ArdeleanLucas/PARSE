@@ -31,7 +31,7 @@ Starts a word-level (Tier 1 acoustic alignment) STT job — faster-whisper with 
 ## Expected Output
 On `dryRun: true`: returns the resolved source path, model, and language without launching the job.
 
-On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, language }`. **Poll with `stt_word_level_status` until terminal.** On completion the job writes `coarse_transcripts/<speaker>.json` with segments containing nested `words[]` payloads.
+On `dryRun: false`: returns `{ jobId, status: "running", speaker, sourceWav, language }`. **Poll with `stt_word_level_status` until terminal.** On completion the job writes `coarse_transcripts/<speaker>.json` with segments containing nested `words[]` payloads. Long full-file runs chunk automatically; terminal job `result` can include `chunks[]`, `duration_sec`, and `device`, while the cache remains a flat merged `segments[]` list.
 
 ## Example Successful Call
 Dry run:
@@ -62,6 +62,8 @@ Live start:
 | OOM / GPU issues                       | Job ends in `error` with CUDA/torch message                          | Read `job_logs`. faster-whisper falls back to CPU but slowly.                                             |
 
 ## Agent Reasoning Notes
+For long recordings, keep the default 10-minute STT chunks unless a specific failure requires smaller chunks; do not disable chunking for ordinary fieldwork. Inspect terminal `result.chunks[]` and `job_logs` before rerunning blindly.
+
 This is the canonical Tier 1 step. The name is intentionally explicit ("word_level") so agents can distinguish it from plain sentence-level STT. After completion, the standard chain is `forced_align_start` (Tier 2, tight per-word boundaries) → `ipa_transcribe_acoustic_start` (Tier 3, IPA). For users who don't want to run the full chain, `compute_boundaries_start` is a faster path that consumes these word seeds without re-running wav2vec2.
 
 ## Related Skills

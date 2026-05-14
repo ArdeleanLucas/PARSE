@@ -1,17 +1,298 @@
 # Compute architecture
 
-This page is the maintainable reference for PARSE compute execution after MC-384 Milestone A. The canonical design input is the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`.
+This page is the maintainable reference for PARSE compute execution after the MC-384 compute-architecture series (PRs #411-#440). The canonical design input was the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`; this page now records the shipped runtime contract in the repo.
 
-For the process-level view of the worker changes that landed across PRs #411-#417, see [Worker process architecture](worker-processes.md).
+For the process-level view of the worker/subprocess changes, see [Worker process architecture](worker-processes.md). For operator knobs, see [Environment variables](../environment-variables.md).
 
 ## Overview
 
-PARSE keeps one user-facing compute system but differentiates execution by intent:
+PARSE has to support two very different fieldwork moments:
 
-- Fast lexeme/concept-window path: scoped work uses `run_mode != 'full'` and/or `concept_ids`; it should avoid long-file chunking overhead and return quickly for interactive fieldwork.
-- Robust long-file path: full-speaker/full-pipeline work runs through the job system and, after MC-384 Milestone A, long Tier-1 ORTH/STT transcribe work is chunked so a Khan01/Fail01-scale recording cannot crash ORTH or silently truncate STT.
+- **Focused review:** you are fixing one word, one concept, or one short time window and need a quick answer.
+- **Long-recording processing:** you are asking PARSE to work through an entire speaker/session, sometimes for several hours of audio.
 
-The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust Tier-1 ORTH/STT request needs chunking.
+The compute architecture now treats those moments differently. Short, scoped work stays fast. Long full-speaker work uses the safer path: PARSE divides risky STT/ORTH work into smaller pieces, processes those pieces independently, then stitches the useful results back into one speaker record.
+
+The guiding rule is **intent first, duration second**. A full-pipeline request means "be robust and preserve the whole recording." A concept-window request means "be fast and stay inside this small region." Duration only decides whether a robust STT/ORTH request should be split into chunks.
+
+## How it works (for linguists)
+
+Think of a long recording as a long reel of field tape. PARSE does **not** ask the speech model to hold the entire reel in its head at once. Instead, for the risky early transcription steps, PARSE cuts the reel into labelled slices, works on one slice at a time, and then puts the slices back on the original time ruler.
+
+```text
+A 3-hour recording
+0:00                                                               3:00:00
+|-----------------------------------------------------------------------|
+
+PARSE's safer long-file view, with the default 10-minute chunk size
+| 0-10 | 10-20 | 20-30 | 30-40 | ... | 160-170 | 170-180 |
+   1       2       3       4              17        18
+
+Each chunk is processed separately, but the final transcript keeps the
+original recording times, so review still happens on the full waveform.
+```
+
+The aim is simple: **one difficult passage should not ruin the whole recording**. If minute 40-50 causes a model problem, PARSE can still try minute 50-60, minute 60-70, and so on. The final report then tells you which slices were successful and which ones need attention.
+
+### Practical mental model
+
+Use this picture when deciding what PARSE is doing:
+
+```text
+You request: "Process this full speaker"
+              |
+              v
+        PARSE creates a job
+              |
+              v
+   Long STT/ORTH? split into chunks
+              |
+              v
+   Work chunk by chunk, with progress
+              |
+              v
+   Merge successful output back onto
+   the original speaker timeline
+              |
+              v
+   Show one result + a chunk report
+```
+
+The important consequences are:
+
+- **Review remains whole-speaker.** You still inspect the speaker in Annotate mode on the original waveform.
+- **Progress is more honest.** Instead of a silent multi-hour wait, you can see `STT chunk 7/18` or `ORTH chunk 3/18`.
+- **Failures are smaller.** A failed chunk is a region to inspect, not proof that the whole recording is unusable.
+- **Reruns become more targeted.** Use the failed chunk span to guide a smaller stage rerun, concept-window rerun, or manual review.
+
+### Why chunking helps
+
+Older long-file processing was closer to this:
+
+```text
+Old single-shot approach
+
+3-hour WAV  --->  one huge model call  --->  one answer or one failure
+                    |
+                    +-- high peak memory
+                    +-- one hallucination loop can poison the run
+                    +-- little visible progress
+                    +-- backend may die before saving a useful error
+```
+
+The new long-file path is closer to this:
+
+```text
+New chunked approach
+
+3-hour WAV
+   |
+   +--> chunk 1 ---> ok ---------+
+   +--> chunk 2 ---> ok ---------+
+   +--> chunk 3 ---> error ------+--> merged result + chunk report
+   +--> chunk 4 ---> ok ---------+
+   +--> ... ---------------------+
+
+The final tier/cache contains merged usable output. The report keeps the
+per-chunk evidence so you know exactly where review or rerun is needed.
+```
+
+Chunking does not make a three-hour recording short. It makes the work **bounded, inspectable, and recoverable**.
+
+### What subprocess isolation means, without jargon
+
+Some speech and phonetics models can fail badly: they can run out of memory, crash, or get stuck in a loop. Subprocess isolation means PARSE puts the riskiest model call in a separate "work room" instead of letting it run directly in the main backend room.
+
+```text
+Main PARSE backend
+  - keeps the app alive
+  - records job status
+  - collects progress and results
+          |
+          v
+Temporary worker room for one heavy stage
+  - loads the model
+  - processes STT, ORTH, or IPA
+  - writes back success or a structured error
+          |
+          v
+Main backend reads the result and continues/report fails cleanly
+```
+
+If the temporary worker room crashes, the goal is for the main backend to remain alive and tell you what happened. This is why some failures now appear as structured job errors such as `oom_suspect`, `timeout`, or `provider_error` instead of a frozen or dead server.
+
+### High-level data flow for long-file processing
+
+```text
+[User starts full speaker / full pipeline job]
+                    |
+                    v
+              [Job created]
+                    |
+                    v
+        [Audio duration inspected]
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+  [Short enough]       [Long STT/ORTH]
+  one provider call    split into chunks
+          |                   |
+          v                   v
+   [Stage output]      [Chunk 1] [Chunk 2] [Chunk 3] ...
+          |                   |       |       |
+          +-------------------+-------+-------+
+                              v
+                        [Merge output]
+                              |
+                              v
+                   [Annotation/cache/result]
+                              |
+                              v
+                 [UI report + logs + review]
+```
+
+### Tier-1 vs Tier-2, in fieldwork terms
+
+ORTH has two different jobs. They are easy to confuse because both are part of "orthographic transcription."
+
+```text
+Tier 1: rough listening pass
+  Audio slice  --->  model proposes words/text
+  Goal: get broad text coverage across the recording.
+  Long files: chunked, because this is the risky memory-heavy pass.
+
+Tier 2: alignment/refinement pass
+  Merged Tier-1 text + original audio  --->  word timing / ortho_words
+  Goal: place words back onto the time ruler.
+  Long files: runs after the Tier-1 chunks have been merged.
+```
+
+Visual version:
+
+```text
+Audio chunks:     [A] [B] [C] [D] [E]
+Tier-1 ORTH:       |   |   |   |   |      chunked transcription
+                  v   v   v   v   v
+Merged text:     -------- one transcript/tier --------
+                              |
+                              v
+Tier-2 ORTH:     word timing over the merged Tier-1 result
+```
+
+![Tier-1 versus Tier-2 explanation: STT and Tier-1 ORTH chunk long audio, then Tier-2 forced alignment runs once over the merged transcript.](../user-guides/assets/tier1-tier2-processing.png)
+
+*Figure: Tier 1 is the broad transcription pass that gets chunked for long recordings; Tier 2 is the later alignment pass that places the merged words back onto the original time ruler.*
+
+STT has a similar long-file chunking idea for full-file transcription. IPA is different: it works over existing intervals/windows, so it is not chunked by whole-recording duration.
+
+### Reading chunk progress
+
+A three-hour recording is 18 chunks at the default 10-minute setting. During a run, progress may look like this:
+
+```text
+STT chunk 1/18  |#####.............................................|  6%
+STT chunk 6/18  |#################.................................| 33%
+STT chunk 12/18 |#################################.................| 67%
+STT chunk 18/18 |##################################################|100%
+```
+
+If a row says `ORTH chunk 4/18 (1800s-2400s)`, that means PARSE is working on the audio region from 30:00 to 40:00. Those seconds are always **audio-global seconds**: they point back to the original recording, not to a temporary chunk file.
+
+### Partial results and error handling
+
+A partial run is not automatically a bad run. It means PARSE preserved more information than a single all-or-nothing failure would have preserved.
+
+```text
+Chunk results after a long STT run
+
+1  0:00-10:00      ok
+2 10:00-20:00      ok
+3 20:00-30:00      error: provider_error
+4 30:00-40:00      ok
+5 40:00-50:00      ok
+          |
+          v
+Merged transcript includes chunks 1, 2, 4, and 5.
+The report points you to 20:00-30:00 for review/rerun.
+```
+
+When you see a partial result:
+
+1. Note the failed chunk `span`.
+2. Inspect that time region in Annotate mode.
+3. Rerun the failed stage with a smaller chunk size if the problem is memory/loop shaped.
+4. Use concept-window or per-lexeme reruns when the problem is localized to a known lexical item.
+5. Do not sign off Compare/export work until the missing region is understood.
+
+### What this architecture does not promise
+
+- It does not make poor audio linguistically correct.
+- It does not remove the need to review boundaries, lexical intervals, and cognate decisions.
+- It does not persist chunk diagnostics inside every cache file; some chunk information lives in the job result/report.
+- It does not make GPU memory unlimited. Smaller chunks reduce peak risk, but models still need RAM/VRAM.
+
+## Mental model for developers
+
+Think of PARSE compute as four layers, not one worker:
+
+```text
+Browser / MCP / scripts
+        |
+        v
+Job registry and launcher (python/server_routes/jobs.py)
+        |
+        +-- thread mode: in-process background job
+        +-- subprocess mode: one outer child per job
+        +-- persistent mode: long-lived python/workers/compute_worker.py
+        |
+        v
+Stage route modules
+        +-- STT:   python/server_routes/media.py
+        +-- ORTH:  python/server_routes/annotate.py
+        +-- IPA:   python/server_routes/annotate.py + python/ai/ipa_transcribe.py
+        |
+        v
+Heavy-stage safeguards
+        +-- duration chunking for long full-file STT and full-mode ORTH
+        +-- nested isolated subprocesses for full-file STT, full-mode ORTH, full-mode IPA
+        +-- unified device resolver in python/ai/device.py
+```
+
+A long full-pipeline recording flows like this:
+
+```text
+full pipeline request
+  -> job snapshot + progress/log stream
+  -> optional normalize
+  -> STT full-file stage
+       if duration > PARSE_STT_DEFAULT_CHUNK_MINUTES:
+         split -> transcribe chunk N -> merge segments into audio-global time
+       write flat coarse_transcripts/<speaker>.json segments cache
+  -> ORTH full-mode stage
+       if duration > PARSE_ORTH_DEFAULT_CHUNK_MINUTES:
+         split -> transcribe Tier-1 chunk N -> merge Tier-1 text/windows
+       run Tier-2 forced alignment once over the merged Tier-1 result
+       write merged annotation tiers
+  -> IPA full-mode stage
+       run over existing intervals/windows, not whole-audio chunks
+       return coverage_shrink_warning if overwrite would sharply reduce coverage
+  -> final job result with per-stage status, chunks[], device, logs
+```
+
+Key files and responsibilities:
+
+| File | Responsibility |
+|---|---|
+| `python/server_routes/jobs.py` | Job registry, compute launcher mode resolution, outer thread/subprocess dispatch, snapshots, cancellation surface. |
+| `python/workers/compute_worker.py` | Persistent-worker process loop and compute dispatch for `PARSE_COMPUTE_MODE=persistent`. |
+| `python/server_routes/media.py` | Full-file STT, STT chunk loop, STT subprocess entry/wrapper, STT cache write. |
+| `python/server_routes/annotate.py` | Full-pipeline orchestration, ORTH chunk loop, Tier-2 alignment, IPA subprocess wrappers, isolated subprocess helper. |
+| `python/workers/audio_chunking.py` | Shared `ChunkSpan`, `ChunkResult`, split, and merge primitives. |
+| `python/ai/device.py` | Stage/global/config/default device resolver for STT, ORTH, and IPA. |
+| `src/components/shared/BatchReportTableRow.tsx` | UI interpretation of `chunks[]` as all-ok, all-error, partial, or none. |
+
+When debugging, start at the job boundary. Confirm job id, status, progress messages, `chunks[]`, `device`, and logs before changing provider/model code.
 
 ## Compute modes
 
@@ -28,23 +309,24 @@ Mode meanings:
 - `subprocess`: per-job process launched by `python/server_routes/jobs.py:362` `_compute_subprocess_entry()`. Better crash containment for the whole job.
 - `persistent`: long-lived worker in `python/workers/compute_worker.py` that dispatches jobs through `_dispatch()` at `python/workers/compute_worker.py:409` and can keep models warm.
 
-## Nested subprocess wrappers
+## Subprocess isolation
 
-MC-384 extends the existing nested-subprocess pattern. PR #412 introduced the shared IPA subprocess envelope and standalone IPA full-mode routing; PR #413 added ORTH isolation, and PR #428 added full-file STT isolation:
+MC-384 uses two distinct isolation layers. Keep them conceptually separate:
 
-- `python/server_routes/jobs.py:291` — `_launch_compute_subprocess()` launches the outer per-job subprocess selected by `PARSE_COMPUTE_MODE=subprocess`.
-- `python/server_routes/jobs.py:362` — `_compute_subprocess_entry()` dispatches the outer per-job child process.
-- `python/server_routes/annotate.py:3011` — `_full_pipeline_ipa_subprocess_entry()` serializes full-pipeline IPA child outcomes.
-- `python/server_routes/annotate.py:3043` — `_speaker_ortho_subprocess_entry()` serializes ORTH child outcomes for isolated full-mode work.
-- `python/server_routes/annotate.py:3067` — `_speaker_ipa_subprocess_entry()` serializes standalone speaker-IPA child outcomes.
-- `python/server_routes/annotate.py:3286` — `_run_in_isolated_subprocess()` owns spawn, timeout, result-file parsing, and envelope error conversion for nested children.
-- `python/server_routes/annotate.py:3401` — `_compute_full_pipeline_ipa_in_subprocess()` delegates full-pipeline IPA to the shared helper.
-- `python/server_routes/annotate.py:3414` — `_compute_speaker_ortho_in_subprocess()` wraps standalone/full-pipeline full-mode ORTH calls.
-- `python/server_routes/annotate.py:3453` — `_compute_speaker_ipa_in_subprocess()` wraps standalone `compute_type='ipa'` full-mode calls.
-- `python/server_routes/media.py:339` — `_run_stt_job_subprocess_entry()` serializes full-file STT child outcomes.
-- `python/server_routes/media.py:371` — `_run_stt_job_in_subprocess()` wraps full-file STT in the shared nested helper.
+1. **Outer job launcher** — selected by `_resolve_compute_mode()` in `python/server_routes/jobs.py`. `thread` is the low-overhead default, `subprocess` launches one child process per compute job, and `persistent` routes jobs through the long-lived worker in `python/workers/compute_worker.py`.
+2. **Nested heavy-stage isolation** — selected by compute intent. Full-file STT, full-mode ORTH, and full-mode IPA run in spawn children via `_run_in_isolated_subprocess()` even when the outer launcher is still `thread`.
 
-These nested wrappers are separate from `PARSE_COMPUTE_MODE=subprocess`. The outer compute mode chooses how the job is launched; the nested wrappers isolate memory-heavy STT/ORTH/IPA stages inside that job.
+Current import-stable entrypoints:
+
+| Stage | Child entrypoint | Parent wrapper | Scope that uses it |
+|---|---|---|---|
+| STT | `server_routes.media._run_stt_job_subprocess_entry` | `server_routes.media._run_stt_job_in_subprocess` | Full-file STT only. Scoped/concept-window STT stays in-process. |
+| ORTH | `server_routes.annotate._speaker_ortho_subprocess_entry` | `server_routes.annotate._compute_speaker_ortho_in_subprocess` | Full-mode ORTH from standalone compute or full pipeline. Scoped/concept-window ORTH stays in-process. |
+| IPA | `server_routes.annotate._full_pipeline_ipa_subprocess_entry` and `_speaker_ipa_subprocess_entry` | `server_routes.annotate._compute_full_pipeline_ipa_in_subprocess` and `_compute_speaker_ipa_in_subprocess` | Full-mode IPA from standalone compute or full pipeline. Concept-window IPA stays in-process. |
+
+`python/server_routes/jobs.py::_launch_compute_subprocess()` and `_compute_subprocess_entry()` are the **outer** per-job subprocess path. They may wrap an entire job, which can then launch a nested child for one heavy stage. This means a `PARSE_COMPUTE_MODE=subprocess` full-pipeline STT step can involve two processes beyond the parent: the outer compute child plus the nested STT child. That is expected; the first layer protects job orchestration, the second layer protects memory-heavy model calls.
+
+Nested children serialize `{ok: true, result: ...}` or `{ok: false, error, traceback}` to a result file. Parent wrappers convert child failure into structured job errors and keep stdout/stderr visible through tee-backed logs.
 
 ## Chunking primitives
 
@@ -60,9 +342,9 @@ PR #411 added `python/workers/audio_chunking.py` as the shared chunking primitiv
 ORTH has two tiers with different memory profiles:
 
 - Tier-1 coarse ORTH uses `provider.transcribe()` and is the Khan01 OOM vector. Current main calls it through `_transcribe_ortho_with_fallback()` and the chunk loop in `python/server_routes/annotate.py:2669`-`2716` for long full-mode files.
-- Tier-2 word alignment (`tiers.ortho_words`) runs after coarse ORTH and is already windowed enough for Milestone A. It remains unchanged and recomputes once over the merged Tier-1 result.
+- Tier-2 word alignment (`tiers.ortho_words`) runs after coarse ORTH and is already windowed enough for the current long-file contract. It remains unchanged and recomputes once over the merged Tier-1 result.
 
-MC-384-D uses adjacent chunks with no overlap for Milestone A. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2669`-`2716`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2677`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2716`.
+The shipped MC-384 Tier-1 chunking path uses adjacent chunks with no overlap. The final chunked Tier-1 loop is `python/server_routes/annotate.py:2669`-`2716`: it measures duration, splits with `split_audio_duration()` at `python/server_routes/annotate.py:2677`, runs each temporary slice, records per-chunk status/errors, and merges with `merge_chunk_segments()` at `python/server_routes/annotate.py:2716`.
 
 MC-384-T (PR #431) added the Tier-2 fallback contract: if forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than persisting raw Tier-1 text. MC-384-U (PR #432) then fixed the root cause: a numpy ndarray had crossed into a Tier-2 consumer that called `.numel()`, so `python/ai/forced_align.py:565`-`606` now restores the torch-tensor boundary via `_ensure_audio_tensor()` and `_assert_torch_audio()` before `align_word()` consumes audio. The #431 fallback remains defense-in-depth even though #432 restored the tensor contract.
 
@@ -85,9 +367,9 @@ Long-form full-file STT now mirrors the ORTH Tier-1 duration gate: files longer 
 
 **IPA does not chunk by audio duration:** IPA Tier-3 acoustic transcribe is interval-driven, not a single whole-file model call. `python/ai/ipa_transcribe.py:transcribe_intervals()` operates on per-interval slices supplied by upstream ORTH word windows, and PR #422 handled IPA shrink-warning behavior separately. This is why no MC-384-K audio-duration chunking lane exists for IPA.
 
-## Device selection
+## Device resolver
 
-MC-384-Z centralizes STT, ORTH, and IPA device placement in `python/ai/device.py`. The resolver is evaluated at call time (not import time), imports torch lazily, and returns `cuda` only when `torch.cuda.is_available()` is true and `torch.cuda.device_count() > 0`; otherwise `auto` resolves to `cpu`. Explicit `cuda` / `cuda:N` requests warn and fall back to `cpu` when CUDA is unavailable.
+MC-384-Z centralizes STT, ORTH, and IPA device placement in `python/ai/device.py`. The resolver is evaluated at call time, imports torch lazily, and resolves `auto` to `cuda` only when `torch.cuda.is_available()` and `torch.cuda.device_count() > 0`; otherwise `auto` resolves to `cpu`. Explicit `cuda` / `cuda:N` requests warn and fall back to CPU when CUDA is unavailable.
 
 Device precedence, highest first:
 
@@ -98,26 +380,34 @@ Device precedence, highest first:
 | 3 | `ai_config.json` section `device` | Caller config (`stt`, `ortho`, `wav2vec2`) | `auto`, `cpu`, `cuda`, `cuda:N` |
 | 4 | Code section default | Usually `auto` | `auto`, `cpu`, `cuda`, `cuda:N` |
 
-`PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper `compute_type=int8` for the CPU escape hatch.
+![Device resolution flow: PARSE chooses CPU or GPU by checking stage overrides, global overrides, config, and CUDA availability.](../user-guides/assets/device-resolution-flow.png)
 
-The legacy `wav2vec2.allow_wsl_cuda` key is deprecated as a WSL-specific safety gate. Its default changed from false to true in MC-384-Z: when unset or true, IPA uses the unified resolver; explicit `allow_wsl_cuda=false` still forces IPA to CPU. This change is motivated by the 2026-05-13 Kalh01 observation where IPA pegged one CPU core while the RTX 5090 stayed around 1% utilization. MC-384-Z only ensures the wav2vec2 model can live on the selected GPU; a future word-batching lane can make IPA saturate the GPU more effectively.
+*Figure: Power users can predict device placement by reading the chain from top to bottom: stage-specific env wins, global env is the fallback override, config provides machine defaults, and `auto` resolves to CUDA only when the runtime can actually use it.*
 
-Completion/result observability: `[STT]`, `[ORTH]`, and `[IPA]` completion logs include `device=...`, and each stage result envelope includes the resolved `device` where the provider/aligner ran.
+`PARSE_STT_FORCE_CPU` is preserved as a backwards-compatible alias for `PARSE_STT_DEVICE=cpu`; it wins before the normal STT device chain and still forces faster-whisper CPU/int8 fallback semantics.
+
+IPA retains one compatibility gate from the old wav2vec2 WSL safety model: explicit `wav2vec2.allow_wsl_cuda=false` forces CPU before the unified resolver is consulted. When that key is omitted or true, IPA uses the same precedence chain as STT and ORTH. This is the MC-384-Z behavior change: the absent-key default now allows CUDA-capable WSL machines to use the resolver instead of silently pinning IPA to CPU. Existing copied configs that explicitly set false remain conservative until edited.
+
+Result observability uses the current wire key `device`. PR notes and user task descriptions may call this `resolved_device`; in the shipped payload, the resolved/effective device appears as `device` on STT, ORTH, and IPA stage results and in `[STT]` / `[ORTH]` / `[IPA]` completion logs.
 
 ## Environment variables
 
-- `PARSE_ORTH_DEFAULT_CHUNK_MINUTES`: MC-384-D default chunk size for long ORTH Tier-1; default `10`. Read by `_ortho_default_chunk_seconds()` at `python/server_routes/annotate.py:811` and exported by `scripts/parse-run.sh:102` / `scripts/parse-run.sh:399`.
-- `PARSE_STT_DEFAULT_CHUNK_MINUTES`: MC-384-H default chunk size for long STT Tier-1; default `10`. Read by `_stt_default_chunk_seconds()` at `python/server_routes/media.py:66` and exported by `scripts/parse-run.sh:104` / `scripts/parse-run.sh:400`.
-- `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC`: MC-384-J2 guard for destructive IPA overwrite reruns; default `60`. Read by `_ipa_overwrite_shrink_threshold_sec()` at `python/server_routes/annotate.py:1980`. This is not an audio-duration chunking knob; it belongs with the compute env-var surface because full-pipeline IPA can surface `coverage_shrink_warning` when newly projected STT/ORTH coverage is much shorter than existing IPA coverage.
-- `PARSE_COMPUTE_DEVICE`: MC-384-Z global compute-device fallback for STT, ORTH, and IPA; default `auto`; accepted values `auto`, `cpu`, `cuda`, `cuda:N`.
-- `PARSE_STT_DEVICE`: MC-384-Z STT-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_ORTH_DEVICE`: MC-384-Z ORTH-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_IPA_DEVICE`: MC-384-Z IPA-specific device override; supersedes `PARSE_COMPUTE_DEVICE`.
-- `PARSE_STT_FORCE_CPU`: legacy STT CPU escape hatch, now treated as a truthy alias for `PARSE_STT_DEVICE=cpu`.
-- `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC`: existing hard timeout for compute subprocesses; used by `python/server_routes/jobs.py:320` for per-job subprocess mode and by `python/server_routes/annotate.py:3292` for nested isolated subprocesses, default `14400`.
-- `PARSE_USE_PERSISTENT_WORKER`: shortcut selecting persistent worker mode; read by `python/server_routes/jobs.py:61` and documented in `scripts/parse-run.sh:27`.
-- `PARSE_COMPUTE_MODE`: explicit compute launcher mode; read by `python/server_routes/jobs.py:63` and documented in `scripts/parse-run.sh:28`.
-- `PARSE_FULL_PIPELINE_MIN_MEM_GB`: full-pipeline host-memory preflight threshold; read by `python/server_routes/annotate.py:2837` and documented in `scripts/parse-run.sh:30`.
+The full operator reference is [Environment variables](../environment-variables.md). Compute-specific knobs are summarized here because they are part of the architecture contract:
+
+| Variable | Default | Contract |
+|---|---:|---|
+| `PARSE_STT_DEFAULT_CHUNK_MINUTES` | `10` | Full-file STT chunk size. `0` disables duration chunking; invalid values fall back to 10. |
+| `PARSE_ORTH_DEFAULT_CHUNK_MINUTES` | `10` | Full-mode ORTH Tier-1 chunk size. `0` disables duration chunking; invalid values fall back to 10. |
+| `PARSE_IPA_SHRINK_WARN_THRESHOLD_SEC` | `60` | Destructive IPA overwrite warning threshold. `0` disables `coverage_shrink_warning`; this is not an IPA duration-chunking knob. |
+| `PARSE_COMPUTE_DEVICE` | `auto` | Global STT/ORTH/IPA device fallback. |
+| `PARSE_STT_DEVICE` | unset | STT-specific device override. |
+| `PARSE_ORTH_DEVICE` | unset | ORTH-specific device override. |
+| `PARSE_IPA_DEVICE` | unset | IPA-specific device override when `wav2vec2.allow_wsl_cuda` is not explicitly false. |
+| `PARSE_STT_FORCE_CPU` | unset | Truthy backwards-compatible alias for `PARSE_STT_DEVICE=cpu`. |
+| `PARSE_COMPUTE_SUBPROCESS_TIMEOUT_SEC` | `14400` | Timeout for the outer subprocess launcher and nested isolated children. The nested helper honors any positive finite value exactly. |
+| `PARSE_COMPUTE_MODE` | backend default `thread` | Outer compute launcher: `thread`, `subprocess`, or `persistent`. |
+| `PARSE_USE_PERSISTENT_WORKER` | unset | Truthy shortcut selecting `persistent`. |
+| `PARSE_FULL_PIPELINE_MIN_MEM_GB` | backend default `12` | Host-memory preflight threshold before memory-heavy full-pipeline stages. |
 
 ## Subprocess timeout configuration
 
@@ -136,7 +426,7 @@ Contract for subprocess entries: a successful computation must not return a dict
 | User/API intent | Duration | Flags/env | Expected path |
 | --- | ---: | --- | --- |
 | Concept-window ORTH (`run_mode != 'full'`) | any | default | Fast scoped path; no chunking. |
-| Full-pipeline ORTH, short audio | at or below `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Robust wrapper may run, but `chunks` is empty or a single non-chunked result depending on MC-384-D implementation. |
+| Full-pipeline ORTH, short audio | at or below `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Robust subprocess wrapper may run, but Tier-1 uses one provider call and returns `chunks: []`. |
 | Full-pipeline ORTH, long audio | greater than `PARSE_ORTH_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 ORTH chunks, each isolated; Tier-2 recomputes once after merge. |
 | Full-file STT, short audio | at or below `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Single-shot `_run_stt_job()` path; `chunks: []`. |
 | Full-file STT, long audio | greater than `PARSE_STT_DEFAULT_CHUNK_MINUTES * 60` (default 600s) | default | Tier-1 STT chunks; per-chunk results emitted in `chunks[]`, merged cache remains flat segments. |
@@ -144,21 +434,70 @@ Contract for subprocess entries: a successful computation must not return a dict
 | Scoped/concept-window STT (`run_mode != 'full'`) | any | payload scope | `_compute_speaker_stt()` path; windows are already bounded, so no audio-duration chunking. |
 | MCP/agent full ORTH with `force_robust=true` | any | payload flag | Robust path; duration still decides whether the robust path chunks. |
 | MCP/agent scoped ORTH with `fast_mode=true` or `concept_ids` | any | payload flag/scope | Fast scoped path; no chunking. |
-| Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling only for Milestone A; completed chunks remain ok, remaining chunks report cancelled. |
+| Cancel requested mid-run | long audio | job cancel flag | Between-chunk polling; completed chunks remain `ok`, remaining chunks report `cancelled`, and top-level status is `cancelled` or `partial_cancelled` depending on stage/path. |
+
+## Performance and resource characteristics
+
+The robust path buys failure isolation and bounded decoder state at some cost:
+
+- Long STT/ORTH runs perform one provider call per chunk instead of one monolithic call. This reduces peak memory and repetition-loop blast radius, but adds temp-WAV slicing and per-call setup overhead.
+- Nested subprocess isolation adds spawn/import/model-load overhead for full-file STT, full-mode ORTH, and full-mode IPA. Scoped concept-window work intentionally bypasses this overhead.
+- `persistent` outer mode can keep selected models warm for repeated jobs, but full-mode heavy stages may still spawn nested children for crash containment. Do not assume persistent mode removes nested isolation.
+- Smaller chunks are safer for hostile recordings but can increase total wall time; larger chunks reduce overhead but increase OOM/decoder-loop risk. The field default is 10 minutes because it bounds Khan01/Fail01-scale recordings without excessive chunk count.
+
+Planning rules of thumb:
+
+| Recording length | Default chunk count | What to expect |
+|---:|---:|---|
+| 1 hour | 6 chunks | Practical on most configured workstations; a 16 GB laptop may still take hours if CPU-only. |
+| 2 hours | 12 chunks | Watch memory and progress; prefer one speaker at a time on laptops. |
+| 3 hours | 18 chunks | Treat as a long unattended job; inspect partial chunk outcomes before trusting downstream IPA/Compare work. |
+| 4.5 hours | 27 chunks | Khan01-scale; defaults are intended to prevent parent-backend death, not to make review instantaneous. |
+
+Hardware guidance:
+
+- **16 GB laptop:** keep chunking enabled; drop STT/ORTH chunks to 5 minutes after any `oom_suspect`; run one stage/speaker at a time; consider CPU fallback for unstable CUDA stacks.
+- **CUDA workstation:** keep 10-minute defaults first; use stage-specific device overrides only when completion logs or result `device` show a real placement problem.
+- **Server/high-RAM box:** defaults are suitable for batch work, but still read `chunks[]`; provider errors are often data-specific rather than pure capacity issues.
+- **CPU-only:** supported but slow. Benchmark a 10-minute slice before scheduling a multi-hour corpus.
+
+Chunking helps when the risk is memory pressure, decoder state poisoning, or the need for visible progress. It adds overhead when files are already short, models are already stable, or the goal is a controlled old-path benchmark. That is why `0` disables duration chunking but is not the fieldwork default.
+
+## Debugging chunked jobs
+
+For long-file regressions, debug in this order:
+
+1. **Job state:** `GET /api/jobs/active`, `job_status`, or `compute_status` for terminal status and progress.
+2. **Stage result:** inspect `result.chunks[]` or `result.results.<stage>.chunks[]` for `span`, `status`, `error_code`, and `error`.
+3. **Logs:** use `job_logs` and backend logs to find the first failing chunk/stage. Nested subprocess failures should include traceback or crash-log tail data.
+4. **Device:** compare result `device` against `PARSE_{STAGE}_DEVICE`, `PARSE_COMPUTE_DEVICE`, config `device`, and CUDA availability.
+5. **Persistence:** remember that STT caches only flat merged `segments[]`; `chunks[]` is job-result-only.
+6. **Retry strategy:** lower chunk size before disabling chunking. Disable chunking only when reproducing old monolithic behavior is the experiment.
+
+User-facing recovery details live in [Processing long recordings](../user-guides/processing-long-recordings.md) and [Troubleshooting long files](../troubleshooting/long-files.md).
 
 ## Khan01 incident summary
 
 Khan01 is the motivating fieldwork failure: a 1.6 GB concatenated WAV, roughly 4.5 hours, killed the backend during full-file ORTH. Memory preflight passed at job start, but peak ORTH inference exceeded WSL memory headroom. IPA already had nested subprocess protection; ORTH did not.
 
-MC-384 Milestone A closes the incident by containing long ORTH work in isolated subprocesses and splitting Tier-1 transcribe into default 10-minute chunks. A chunk-level failure produces structured result data instead of taking down the parent server.
+The completed MC-384 architecture closes the incident by containing long ORTH work in isolated subprocesses and splitting Tier-1 transcribe into default 10-minute chunks. A chunk-level failure produces structured result data instead of taking down the parent server.
 
 ## Result contract
 
-Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema. Backward-compatible callers that only read the top-level `status`, `filled`, `total`, `segments`, and `ortho_words` fields continue to work.
+Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema and examples. Backward-compatible callers that only read top-level fields such as `status`, `filled`, `total`, `segments`, and `ortho_words` continue to work.
 
-STT preserves its cache contract: `_write_stt_cache()` receives the merged flat `segments` list only, while `chunks[]` remains a job-result diagnostic envelope.
+Important fields:
 
-PR #417 added two UI consumers of this same contract: the header job strip parses `ORTH chunk N/M (STARTs-ENDs)` progress messages into a live `Chunk N of M` pill, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
+| Field | Producers | Lifecycle |
+|---|---|---|
+| `chunks[]` | Full-file STT and full-mode ORTH job results | Present in job results for chunk-aware paths; empty for short/single-shot paths; not persisted to STT cache. |
+| `device` | STT, ORTH, IPA | Resolved/effective device. This is the shipped wire key for what PR notes may call `resolved_device`. |
+| `coverage_shrink_warning` | IPA overwrite runs | Optional warning object in IPA/full-pipeline results; not a hard failure. |
+| `duration_sec` | STT | Source audio duration used for chunking decisions. |
+
+STT preserves its cache contract: `_write_stt_cache()` receives the merged flat `segments` list only, while `chunks[]` remains a job-result diagnostic envelope. ORTH writes merged annotation tiers and returns chunk diagnostics in the job result rather than persisting a separate chunk cache.
+
+UI consumers parse the same contract: the header job strip recognizes `STT chunk N/M (...)` and `ORTH chunk N/M (...)` progress messages, and the batch report colors mixed `chunks[]` outcomes as partial rather than all-green/all-red.
 
 ## Maintenance rules
 
@@ -183,3 +522,5 @@ MC-384-I/L/O/P (PRs #423, #425, #426, #427) hardened the test surface around chu
 MC-384-N (PR #428) closed the full-file STT subprocess-isolation gap by wrapping `_run_stt_job()` in `_run_stt_job_in_subprocess()` and adding the `_run_stt_job_subprocess_entry()` child boundary plus a structured `[STT]` completion summary log. MC-384-S (PR #430) repaired integration-test drift caused by #428 and MC-384-Q (#429) merging in adjacent windows; #429 also added the compute.md drift guard that ties this document to the chunking env-var and top-level subprocess-wrap surface.
 
 MC-384-T (PR #431) added the Tier-2 fallback contract: when forced alignment raises, ORTH preserves the Tier-1 no-parrot pick rather than emitting raw Tier-1 text. MC-384-U (PR #432) fixed the root cause — a numpy ndarray reached a consumer that called `.numel()` — by restoring the torch-tensor contract at the Tier-2 boundary, adding an `isinstance` assertion, and shipping a sentinel test that catches future drift loudly rather than via a logged-and-swallowed `AttributeError`.
+
+MC-384-Z (PR #440) added the unified device resolver (`python/ai/device.py`) and per-stage device environment overrides for STT, ORTH, and IPA. This doc refresh reconciles architecture, environment, MCP/schema, user-guide, developer, and release-note references after #440.

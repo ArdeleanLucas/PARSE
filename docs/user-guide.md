@@ -1,6 +1,6 @@
 # User Guide
 
-> Last updated: 2026-05-07
+> Last updated: 2026-05-14
 >
 > This guide focuses on the current PARSE workstation as described in the latest repository README: the unified React shell, Annotate route `/`, Compare route `/compare`, CLEF, the AI chat dock, and processed-speaker workspace hydration.
 
@@ -80,7 +80,10 @@ The speaker-level STT job (`/api/stt`) provides:
 - progress and error reporting
 - language resolution from request payload first, then `annotation.metadata.language_code`, before Whisper auto-detect
 - tunable task / VAD / beam-size settings through config
-- nested word-level timestamps in `segments[].words[]`
+- nested word-level timestamps in `segments[].words[]` when word-level STT is selected
+- default 10-minute full-file chunking for long recordings (`PARSE_STT_DEFAULT_CHUNK_MINUTES`; `0` disables for controlled debugging)
+- nested subprocess isolation for full-file STT so provider crashes/OOMs return structured job errors instead of killing the backend
+- `chunks[]` diagnostics and `device` in the terminal job result; the persisted `coarse_transcripts/<speaker>.json` cache stays a flat merged `segments[]` list
 - an editable STT lane in Annotate mode: the first manual STT edit lazily migrates cached STT segments into `record.tiers.stt`, after which STT supports the same inline edit / split / merge / delete affordances as IPA and ORTH
 
 This is the main starting point for locating lexical material in long recordings.
@@ -97,7 +100,8 @@ Current runtime truth:
 - HF ORTH applies decode-level anti-cascade guards: `condition_on_previous_text=False`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and explicit prompt ids only when a caller opts in; legacy `compute_type`/VAD options are logged as ignored by HF.
 - Full-file, concept-window, and per-lexeme HF ORTH now suppress configured `ortho.initial_prompt` by default so short clips do not parrot the decoder prime. See [ORTH initial prompt suppression](./orth-initial-prompt-suppression.md) for the 2026-05-07 regression audit.
 - Concept-window STT/ORTH/IPA clips deliberately avoid English concept-ID/gloss seeding where Whisper-style decoding is involved; language resolves from payload first, then `annotation.metadata.language_code`, with a warning before auto-detect.
-- Long ORTH jobs observe backend cancellation cooperatively. When cancellation arrives after some windows were written, PARSE can persist partial ORTH output and return `status: partial_cancelled` with `cancelled_at_interval` metadata.
+- Full-mode ORTH uses the robust MC-384 path: nested subprocess isolation, default 10-minute Tier-1 chunks for long recordings (`PARSE_ORTH_DEFAULT_CHUNK_MINUTES`; `0` disables for controlled debugging), then one Tier-2 forced-alignment pass over the merged result.
+- Long ORTH jobs observe backend cancellation cooperatively. When cancellation arrives after some windows/chunks were written, PARSE can persist partial ORTH output and return `status: partial_cancelled` or `cancelled` with `cancelled_at_interval`/`chunks[]` metadata.
 
 #### Forced alignment
 
@@ -149,11 +153,12 @@ The current batch flow includes:
 - explicit **empty-step detection** for runs that technically completed but wrote no intervals
 - skip-breakdown counters and exception samples for steps that ran but still produced no usable output
 - preserved backend `jobId` + `errorPhase` metadata when a speaker started successfully but the UI later lost `/api` connectivity while polling
-- cancellation that immediately stops frontend polling, marks the current speaker cancelled and later speakers skipped, and fire-and-forget posts `POST /api/compute/{jobId}/cancel` so backend ORTH can exit cooperatively when it reaches a cancellation check
+- live chunk progress for long STT/ORTH jobs in the header strip (`Chunk N of M`) and partial/all-error chunk coloring in the final report
+- cancellation that immediately stops frontend polling, marks the current speaker cancelled and later speakers skipped, and fire-and-forget posts `POST /api/compute/{jobId}/cancel` so backend STT/ORTH can exit cooperatively when it reaches a cancellation check
 
 If a batch report row says **Lost contact after start**, PARSE is telling you that the backend job was created and the browser lost transport later. Use the preserved backend job id to reattach or reconcile before treating that row as a true speaker-level pipeline failure.
 
-If a batch is manually cancelled, treat the browser state as authoritative for queue control: the UI stops polling immediately and discards late success payloads, while backend ORTH may still finish its current chunk/window before returning `cancelled` or `partial_cancelled`. For full-pipeline runs, PARSE unloads HF ORTH before wav2vec2 IPA and checks available GPU memory before starting IPA, reducing the long-audio VRAM collision that previously crashed batches.
+If a batch is manually cancelled, treat the browser state as authoritative for queue control: the UI stops polling immediately and discards late success payloads, while backend STT/ORTH may still finish its current chunk/window before returning `cancelled` or `partial_cancelled`. For full-pipeline runs, PARSE unloads HF ORTH before wav2vec2 IPA and checks available GPU memory before starting IPA, reducing the long-audio VRAM collision that previously crashed batches.
 A key detail is that preflight distinguishes **"has intervals"** from **"full WAV coverage"** via fields such as:
 
 - `duration_sec`
@@ -163,6 +168,23 @@ A key detail is that preflight distinguishes **"has intervals"** from **"full WA
 - `full_coverage`
 
 That distinction matters in real fieldwork, where older runs may have seeded a tier without truly covering the full recording.
+
+### Processing Long Recordings
+
+Long recordings are first-class PARSE inputs. Current behavior is designed for recordings on the Khan01/Fail01 scale rather than just short elicitation clips.
+
+Default behavior in brief:
+
+- **Full-file STT** and **full-mode ORTH** chunk recordings longer than 10 minutes into adjacent spans.
+- Full-speaker/full-pipeline runs take the robust path; concept-window and edited-only reruns stay bounded and unchunked.
+- Full-file STT, full-mode ORTH, and full-mode IPA run inside isolated subprocesses so heavy model failures return structured job data rather than killing the backend.
+- IPA does not chunk by whole-audio duration because it runs over existing intervals.
+
+For the practical walkthrough, hardware guidance, chunk-progress interpretation, and recovery steps for partial runs, see [Processing long recordings](./user-guides/processing-long-recordings.md). For failure-specific recovery, see [Troubleshooting long files](./troubleshooting/long-files.md). Operator reference: [Environment variables](./environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
+
+![Simple mental model overview: PARSE treats a long file as one speaker timeline with chunked support jobs, merged outputs, and reviewable reports.](./user-guides/assets/simple-mental-model-overview.png)
+
+*Figure: PARSE keeps the user's mental model simple: one file becomes one speaker timeline, while the risky support jobs may be chunked underneath so progress, failures, and reruns are easier to understand.*
 
 #### Concept-scoped pipeline reruns
 
