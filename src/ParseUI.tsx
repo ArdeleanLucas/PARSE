@@ -1511,6 +1511,14 @@ export function ParseUI() {
     }
     setSelectedSpeakers(sel => sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s]);
   };
+  const selectAllSpeakers = () => {
+    if (currentMode !== 'compare') return;
+    setSelectedSpeakers(speakers);
+  };
+  const clearSpeakers = () => {
+    if (currentMode !== 'compare') return;
+    setSelectedSpeakers([]);
+  };
   const addSpeaker = () => {
     if (speakerPicker && !selectedSpeakers.includes(speakerPicker)) setSelectedSpeakers([...selectedSpeakers, speakerPicker]);
   };
@@ -2411,6 +2419,8 @@ export function ParseUI() {
           }}
           onAddSpeaker={addSpeaker}
           onToggleSpeaker={toggleSpeaker}
+          onSelectAllSpeakers={selectAllSpeakers}
+          onClearSpeakers={clearSpeakers}
           computeMode={computeMode}
           onComputeModeChange={setComputeMode}
           onComputeRun={handleComputeRun}

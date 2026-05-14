@@ -21,6 +21,8 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       onSpeakerSelect={vi.fn()}
       onAddSpeaker={vi.fn()}
       onToggleSpeaker={vi.fn()}
+      onSelectAllSpeakers={vi.fn()}
+      onClearSpeakers={vi.fn()}
       computeMode="cognates"
       onComputeModeChange={vi.fn()}
       onComputeRun={vi.fn()}
@@ -222,6 +224,8 @@ describe('RightPanel', () => {
         onSpeakerSelect={vi.fn()}
         onAddSpeaker={vi.fn()}
         onToggleSpeaker={vi.fn()}
+        onSelectAllSpeakers={vi.fn()}
+        onClearSpeakers={vi.fn()}
         computeMode="cognates"
         onComputeModeChange={vi.fn()}
         onComputeRun={vi.fn()}
@@ -338,10 +342,64 @@ describe('RightPanel', () => {
   it('collapses drawer sections when their headers are clicked', () => {
     renderRightPanel({ currentMode: 'annotate' });
 
-    fireEvent.click(screen.getByRole('button', { name: /Speakers/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Speakers SINGLE/i }));
 
     expect(screen.queryByText(/Concept list scoped to/i)).toBeNull();
     expect(screen.getByRole('button', { name: /Timestamp tools/i })).toBeTruthy();
+  });
+
+  it('renders speaker bulk actions disabled in annotate mode', () => {
+    const onSelectAllSpeakers = vi.fn();
+    const onClearSpeakers = vi.fn();
+
+    renderRightPanel({
+      currentMode: 'annotate',
+      speakers: ['Fail01', 'Fail02', 'Kalh01'],
+      selectedSpeakers: ['Fail01'],
+      onSelectAllSpeakers,
+      onClearSpeakers,
+    });
+
+    const selectAll = screen.getByTestId('speakers-select-all') as HTMLButtonElement;
+    const clear = screen.getByTestId('speakers-clear') as HTMLButtonElement;
+
+    expect(selectAll.disabled).toBe(true);
+    expect(clear.disabled).toBe(true);
+    expect(selectAll.getAttribute('aria-disabled')).toBe('true');
+    expect(clear.getAttribute('aria-disabled')).toBe('true');
+
+    fireEvent.click(selectAll);
+    fireEvent.click(clear);
+
+    expect(onSelectAllSpeakers).not.toHaveBeenCalled();
+    expect(onClearSpeakers).not.toHaveBeenCalled();
+  });
+
+  it('renders speaker bulk actions enabled in compare mode and fires handlers', () => {
+    const onSelectAllSpeakers = vi.fn();
+    const onClearSpeakers = vi.fn();
+
+    renderRightPanel({
+      currentMode: 'compare',
+      speakers: ['Fail01', 'Fail02', 'Kalh01'],
+      selectedSpeakers: ['Fail01'],
+      onSelectAllSpeakers,
+      onClearSpeakers,
+    });
+
+    const selectAll = screen.getByTestId('speakers-select-all') as HTMLButtonElement;
+    const clear = screen.getByTestId('speakers-clear') as HTMLButtonElement;
+
+    expect(selectAll.disabled).toBe(false);
+    expect(clear.disabled).toBe(false);
+    expect(selectAll.getAttribute('aria-disabled')).toBeNull();
+    expect(clear.getAttribute('aria-disabled')).toBeNull();
+
+    fireEvent.click(selectAll);
+    fireEvent.click(clear);
+
+    expect(onSelectAllSpeakers).toHaveBeenCalledOnce();
+    expect(onClearSpeakers).toHaveBeenCalledOnce();
   });
 
   it('preserves speaker-selection behavior in compare mode', () => {
@@ -440,6 +498,8 @@ describe('RightPanel', () => {
         onSpeakerSelect={vi.fn()}
         onAddSpeaker={vi.fn()}
         onToggleSpeaker={vi.fn()}
+        onSelectAllSpeakers={vi.fn()}
+        onClearSpeakers={vi.fn()}
         computeMode="contact-lexemes"
         onComputeModeChange={vi.fn()}
         onComputeRun={vi.fn()}
