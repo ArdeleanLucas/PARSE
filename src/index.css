@@ -290,6 +290,21 @@ html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-co
 html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: #66D396 !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: #3D6B4F !important; }
 
+/* Primary "save / create" action buttons — themed to the active theme accent.
+   Light mode keeps emerald green; dark themes get amber / violet / blue.
+   Affects: CreateLexemePanel "Create lexeme", AnnotateView "Confirm anchor" +
+   "Mark Done", AnnotateTabContent + CompareTabContent "Save". */
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-600 { background-color: var(--accent) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-700,
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-emerald-700:hover,
+html:is(.theme-amber, .theme-violet, .theme-blue) .hover\:bg-emerald-600:hover { background-color: var(--accent-deep) !important; }
+
+/* Disabled state for primary buttons — was unmapped, fell through to Tailwind
+   default light slate (#CBD5E1). Map to bg-elevated so disabled buttons sit
+   on a darker (but still distinguishable) surface vs the panel bg. Affects
+   every primary button using `disabled:bg-slate-300` (8+ usages app-wide). */
+html:is(.theme-amber, .theme-violet, .theme-blue) .disabled\:bg-slate-300:disabled { background-color: var(--bg-elevated) !important; }
+
 /* ============================================================
    MC-386-C — Class coverage gaps surfaced by visual QA after MC-386-B.
    ============================================================ */

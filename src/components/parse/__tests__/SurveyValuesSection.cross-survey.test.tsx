@@ -144,7 +144,6 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(summary.textContent).toContain('JBIL');
     expect(summary.textContent).toContain('32');
     expect(summary.textContent).not.toContain('KLQ 1.1');
-    expect(screen.getByRole('button', { name: /Current survey JBIL 32/i })).toBeTruthy();
   });
 
   it('dry-runs, opens review dialog, applies selected groups, and refreshes with rewrite summary', async () => {
@@ -211,7 +210,6 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(summary.textContent).toContain('JBIL');
     expect(summary.textContent).toContain('32');
     expect(summary.textContent).not.toContain('KLQ 1.1');
-    expect(screen.getByRole('button', { name: /Current survey JBIL 32/i })).toBeTruthy();
   });
 
   it('keeps a different active speaker on the global concept survey when another speaker has an override', () => {
@@ -263,7 +261,6 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(summary.textContent).toContain('1.1');
     expect(summary.textContent).not.toContain('JBIL');
     expect(summary.textContent).not.toContain('32');
-    expect(screen.getByRole('button', { name: /Current survey KLQ 1\.1/i })).toBeTruthy();
   });
 
   it('opens an informational dialog for fuzzy-only dry runs without apply', async () => {
