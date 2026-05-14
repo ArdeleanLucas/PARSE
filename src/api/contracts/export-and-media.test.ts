@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCanonicalLexemesReport } from "./export-and-media";
+import { getCanonicalLexemesReport, mediaUrlFromSourceWav, spectrogramUrl } from "./export-and-media";
 
 describe("export-and-media contracts", () => {
   beforeEach(() => {
@@ -18,5 +18,36 @@ describe("export-and-media contracts", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/exports/canonical-lexemes-report", { method: "GET" });
     expect(await blob.text()).toBe("concept_id\tspeaker\n");
+  });
+
+  it("omits basename-only audio hints from spectrogram URLs so the backend can use speaker fallback", () => {
+    expect(
+      spectrogramUrl({
+        speaker: "Saha01",
+        startSec: 1524.743,
+        endSec: 1525.583,
+        audio: "Saha01.wav",
+      }),
+    ).toBe("/api/spectrogram?speaker=Saha01&start=1524.743&end=1525.583");
+  });
+
+  it("keeps project-relative spectrogram audio hints and normalizes path separators", () => {
+    expect(
+      spectrogramUrl({
+        speaker: "Saha01",
+        startSec: 1524.743,
+        endSec: 1525.583,
+        audio: "\\audio\\working\\Saha01\\Saha01.wav",
+        force: true,
+      }),
+    ).toBe(
+      "/api/spectrogram?speaker=Saha01&start=1524.743&end=1525.583&audio=audio%2Fworking%2FSaha01%2FSaha01.wav&force=1",
+    );
+  });
+
+  it("can map basename-only source_wav values through the normalized working-audio convention when speaker is known", () => {
+    expect(mediaUrlFromSourceWav("Saha01.wav", { speaker: "Saha01" })).toBe(
+      "/audio/working/Saha01/Saha01.wav",
+    );
   });
 });

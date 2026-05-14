@@ -469,7 +469,7 @@ function ExpandedPanel({
         setPlayingVariantId(null);
         return;
       }
-      const desiredSrc = mediaUrlFromSourceWav(variant.source_wav);
+      const desiredSrc = mediaUrlFromSourceWav(variant.source_wav, { speaker });
       const endTime = variant.end_sec;
       const startTime = variant.start_sec;
       cancelRaf();
