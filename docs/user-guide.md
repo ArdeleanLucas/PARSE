@@ -29,6 +29,12 @@ A typical PARSE session moves through these stages:
 7. Consult **CLEF** when borrowing or contact influence is in question
 8. Export LingPy TSV or NEXUS for downstream analysis
 
+## PARSE Annotation Pipeline Mental Model
+
+![PARSE Annotation Pipeline Mental Model: evidence builds from raw audio through STT, BND, orthography, acoustic IPA, manual refinement, and concept anchoring.](./user-guides/assets/parse-annotation-pipeline-mental-model.svg)
+
+*Figure: PARSE treats annotation as evidence building. Raw audio seeds STT; STT word windows support BND/`tiers.ortho_words`; ORTH writes reviewed orthographic intervals to `tiers.ortho`; acoustic IPA writes `tiers.ipa`; and the researcher protects or retimes evidence before linking intervals to `tiers.concept` by `concept_id`.*
+
 ## Annotate Mode (`/`)
 
 Annotate mode is the per-speaker workstation for turning long recordings into time-aligned annotation data.
