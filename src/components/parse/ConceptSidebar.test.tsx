@@ -1227,11 +1227,8 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      const wrapper = screen.getByTestId('concept-row-3');
-      const parentButton = Array.from(wrapper.querySelectorAll('button[aria-label]'))
-        .find((button) => button.getAttribute('aria-label')?.includes('new 154')) as HTMLElement | undefined;
-      expect(parentButton).not.toBeUndefined();
-      expect(parentButton!.className).not.toContain('bg-indigo-50');
+      const parentButton = screen.getByTestId('concept-parent-button-3');
+      expect(parentButton.className).not.toContain('bg-indigo-50');
 
       const rowA = screen.getByTestId('concept-variant-row-365');
       expect(rowA.className).toContain('bg-indigo-50');
