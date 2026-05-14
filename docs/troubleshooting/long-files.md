@@ -20,6 +20,52 @@ Before changing settings, collect these facts:
 
 A long-file bug is much easier to fix when you know whether the failure is one chunk, one stage, one provider, or the whole server.
 
+## Triage map: where did the problem happen?
+
+Use this map before changing settings:
+
+```text
+Long-file problem
+      |
+      v
+Did the backend stay alive?
+      |
+      +-- no  -> collect backend logs; this is a crash-containment bug
+      |
+      +-- yes -> is there a job result or batch row?
+                    |
+                    +-- no  -> inspect active jobs / API connectivity
+                    |
+                    +-- yes -> does it include chunks[]?
+                                  |
+                                  +-- no  -> maybe short/scoped path, disabled chunking,
+                                  |         or wrong compute route
+                                  |
+                                  +-- yes -> inspect first non-ok chunk span,
+                                            error_code, and device
+```
+
+Quick interpretation:
+
+| What failed? | What it usually means | First useful action |
+|---|---|---|
+| One chunk | Local audio/model/provider issue in that span. | Inspect the `span`; rerun the stage with smaller chunks if memory/loop shaped. |
+| Many chunks with the same code | Machine, model, device, or config issue. | Check `device`, model paths, memory, and env vars before rerunning. |
+| Whole stage but backend alive | Stage-level provider/config failure or timeout. | Read `job_logs`; rerun only that stage after correcting the cause. |
+| Backend died | Isolation gap or parent-process failure. | Preserve logs and escalate; do not keep starting duplicate jobs. |
+| UI lost contact but backend alive | Browser/API polling issue or stale job strip. | Query job status directly and wait/cancel from the real job state. |
+
+## Common fixes in plain language
+
+| Symptom | Plain-language meaning | Try this first |
+|---|---|---|
+| "STT stopped early" | The transcription model got stuck or gave up in one region. | Keep chunking on; lower STT chunks to 5 minutes; rerun STT for that speaker. |
+| "ORTH failed around a long recording" | The rough transcription pass likely used too much memory or hit a bad slice. | Lower ORTH chunks to 5 minutes; rerun ORTH; inspect the failed span. |
+| "Chunk failed: oom_suspect" | A model probably ran out of RAM/VRAM or was killed. | Close heavy apps; run one speaker; use smaller chunks; consider CPU fallback. |
+| "Chunk failed: timeout" | A worker exceeded the timeout or stopped making progress. | Check logs first; smaller chunks are usually safer than a larger timeout. |
+| "Very slow" | The system may be on CPU, loading models, or doing many small chunks. | Check `device`; benchmark one chunk; avoid multi-speaker batches on laptops. |
+| "IPA got shorter" | IPA follows intervals; upstream coverage may have shrunk. | Inspect STT/ORTH/concept intervals before accepting the IPA rerun. |
+
 ## Symptom: STT or ORTH stopped early
 
 Likely causes:
@@ -107,6 +153,17 @@ Recovery:
 - Run one speaker/stage at a time on low-memory laptops.
 - Use CUDA only when the local stack is stable; failed GPU runs often waste more time than predictable CPU runs.
 - Benchmark a single 10-minute slice on the target machine before scheduling a whole corpus.
+
+Planning expectations, not promises:
+
+| Recording / machine | What is normal | When to worry |
+|---|---|---|
+| First 10-minute chunk on any machine | Slower than later chunks because models may load/import. | No logs, no job state, or backend unavailable. |
+| 1-hour CPU-only laptop run | Can take several hours. | Progress never advances past startup or all chunks fail with the same provider error. |
+| 2-3 hour CUDA workstation run | Long but practical; progress should advance by chunk. | Repeated OOM, device unexpectedly `cpu`, or coverage ends far before the audio end. |
+| 4+ hour field recording | Treat as unattended long work; inspect reports carefully. | Any all-green status with implausibly tiny coverage should be audited before export. |
+
+A useful rule of thumb: if one 10-minute chunk takes `X` minutes after warm-up, a three-hour file has about 18 chunks, so the stage may take roughly `18 × X` minutes plus merge/alignment overhead. IPA is harder to estimate because it follows interval count, not simple audio duration.
 
 ## Symptom: IPA coverage looks much smaller after rerun
 
@@ -215,6 +272,45 @@ Where it does **not** appear:
 
 - `coarse_transcripts/<speaker>.json` STT cache. That cache remains a flat merged `segments[]` list.
 - A separate ORTH chunk cache. ORTH writes merged annotation tiers.
+
+## Disabling chunking safely
+
+Disabling chunking returns STT/ORTH to the old single-shot style for that stage. This is useful for controlled debugging, not normal fieldwork.
+
+```text
+Default safe path
+long recording -> chunks -> partial/ok/error rows -> merged result
+
+Disabled chunking
+long recording -> one large provider call -> one answer or one large failure
+```
+
+Only disable chunking when:
+
+- You are comparing old and new behavior on a controlled recording.
+- A developer asks for a monolithic reproduction.
+- The file is short and you want to remove the chunking gate from a test.
+
+Commands:
+
+```bash
+# Disable STT duration chunking only
+PARSE_STT_DEFAULT_CHUNK_MINUTES=0 ./scripts/parse-run.sh
+
+# Disable ORTH duration chunking only
+PARSE_ORTH_DEFAULT_CHUNK_MINUTES=0 ./scripts/parse-run.sh
+
+# Disable both for a controlled benchmark
+PARSE_STT_DEFAULT_CHUNK_MINUTES=0 PARSE_ORTH_DEFAULT_CHUNK_MINUTES=0 ./scripts/parse-run.sh
+```
+
+Safety checklist before disabling chunking on a long recording:
+
+1. Save or note the current workspace state.
+2. Run only one speaker/stage, not a whole corpus batch.
+3. Watch memory/VRAM if possible.
+4. Keep the previous chunked report so you can compare coverage.
+5. Re-enable chunking for normal fieldwork after the experiment.
 
 ## When to ask for developer help
 

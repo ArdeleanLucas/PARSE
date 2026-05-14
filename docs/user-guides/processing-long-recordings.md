@@ -6,21 +6,85 @@ PARSE is designed to handle long elicitation recordings, but the safest workflow
 
 ## Quick answer: how to process a three-hour recording
 
-Use the default robust path unless you have a specific debugging reason not to.
+Use the default robust path unless you have a specific debugging reason not to. For most users, no environment changes are required: long-file STT and ORTH are already chunk-aware and run with extra crash protection.
+
+```text
+Fieldwork workflow
+
+Prepare workspace
+      |
+      v
+Import speaker + confirm waveform
+      |
+      v
+Normalize audio if needed
+      |
+      v
+Run full pipeline or STT -> ORTH -> IPA
+      |
+      v
+Watch chunk progress and job status
+      |
+      v
+Open batch report and inspect partial rows
+      |
+      v
+Review in Annotate mode before Compare/export
+```
+
+### Step-by-step field recipe
 
 1. **Launch PARSE with a real workspace root.** Keep fieldwork data outside the git checkout.
    ```bash
    PARSE_WORKSPACE_ROOT="/path/to/parse-workspace" ./scripts/parse-run.sh
    ```
-2. **Import or hydrate the speaker.** Confirm the waveform loads and the speaker appears in Annotate mode.
-3. **Normalize audio if the recording levels are uneven.** This creates a stable working WAV for repeatable STT/ORTH/IPA work.
-4. **Run the full speaker pipeline or run the stages explicitly in order:** STT → ORTH → IPA.
-5. **Watch the header job strip while it runs.** Long full-file STT and full-mode ORTH should show chunk progress such as `STT chunk 2/18` or `ORTH chunk 4/18` for a three-hour file with the default 10-minute chunk size.
-6. **Open the batch report when it finishes.** Expand any partial row, read the per-chunk outcome table, and note failed `span` values.
-7. **Review in Annotate mode.** Treat automation as candidate evidence: confirm boundaries, retime suspicious intervals, and rerun short concept windows where needed.
-8. **Move to Compare mode only after coverage is plausible.** Use `coverage_fraction` / `full_coverage` in pipeline state or the visible annotation tiers, not just the fact that a tier has at least one interval.
+2. **Import or hydrate the speaker.** Confirm that the speaker appears in the speaker list, the waveform loads, and the recording duration looks plausible.
+3. **Check the audio source.** If the speaker has both an original file and a normalized/working WAV, use the working WAV for repeatable compute runs.
+4. **Normalize audio when levels are uneven.** Normalization is not a linguistic decision; it creates a steadier technical input for STT/ORTH/IPA.
+5. **Run one long speaker first.** For a new dataset or machine, do not begin with a large unattended batch. Run one representative speaker and learn the speed/memory profile.
+6. **Run the full speaker pipeline, or run stages explicitly in order:** STT → ORTH → IPA. Use explicit stages when you want tighter control or when one stage has already succeeded.
+7. **Watch the header job strip while it runs.** Long full-file STT and full-mode ORTH should show chunk progress such as `STT chunk 2/18` or `ORTH chunk 4/18` for a three-hour file with the default 10-minute chunk size.
+8. **Open the batch report when it finishes.** Expand any partial row, read the per-chunk outcome table, and note failed `span` values.
+9. **Review in Annotate mode.** Treat automation as candidate evidence: confirm boundaries, retime suspicious intervals, and rerun short concept windows where needed.
+10. **Move to Compare mode only after coverage is plausible.** Use `coverage_fraction` / `full_coverage` in pipeline state or the visible annotation tiers, not just the fact that a tier has at least one interval.
 
-For most users, no environment changes are required. Default long-file behavior is already chunk-aware and subprocess-isolated.
+### What the chunks mean
+
+At the default 10-minute chunk size, a three-hour recording becomes about 18 work units:
+
+```text
+3-hour recording, default STT/ORTH chunks
+
+0:00                                                                  3:00:00
+|--------------------------------------------------------------------------|
+|  1  |  2  |  3  |  4  |  5  | ... |  16 |  17 |  18 |
+0:00 10:00 20:00 30:00 40:00 50:00     2:40 2:50 3:00
+```
+
+When the UI shows `STT chunk 7/18`, PARSE is working through one time slice of the original recording. When the job finishes, the successful slices are merged back onto the normal speaker timeline.
+
+### What to watch while it runs
+
+```text
+Healthy long run pattern
+
+startup/model load  ->  chunk 1/N  ->  chunk 2/N  ->  ...  ->  report
+      maybe slow          visible       visible              inspect
+```
+
+Expect the first chunk to take longer than later chunks if a model has to load or warm up. After that, progress should advance chunk by chunk. If nothing changes for a long time, check the job status and logs before starting another run.
+
+### What to do after it finishes
+
+Use the result category to decide the next action:
+
+| Result you see | Meaning | Next action |
+|---|---|---|
+| All chunks `ok` | The stage produced output for every chunk. | Review boundaries and text; do not skip linguistic review. |
+| Some chunks `error` | PARSE saved partial evidence and named failed spans. | Inspect failed spans, then rerun the stage with smaller chunks if needed. |
+| `cancelled` rows | The job stopped before those chunks ran. | Decide whether to restart the stage; completed chunks may still be useful evidence. |
+| Empty/low coverage | The job may have technically completed but not covered the recording. | Check coverage before Compare/export; rerun or repair upstream stages. |
+| IPA shrink warning | IPA would cover much less than the previous IPA tier. | Inspect STT/ORTH/concept intervals before accepting the IPA result. |
 
 ## What PARSE does by default
 

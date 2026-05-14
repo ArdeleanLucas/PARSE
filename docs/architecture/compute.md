@@ -6,12 +6,227 @@ For the process-level view of the worker/subprocess changes, see [Worker process
 
 ## Overview
 
-PARSE keeps one user-facing compute system but differentiates execution by intent:
+PARSE has to support two very different fieldwork moments:
 
-- Fast lexeme/concept-window path: scoped work uses `run_mode != 'full'` and/or `concept_ids`; it should avoid long-file chunking overhead and return quickly for interactive fieldwork.
-- Robust long-file path: full-speaker/full-pipeline work runs through the job system; after the completed MC-384 series, long Tier-1 ORTH/STT transcribe work is chunked so a Khan01/Fail01-scale recording cannot crash ORTH or silently truncate STT.
+- **Focused review:** you are fixing one word, one concept, or one short time window and need a quick answer.
+- **Long-recording processing:** you are asking PARSE to work through an entire speaker/session, sometimes for several hours of audio.
 
-The guiding rule is intent first, duration second. A full-pipeline request expresses robust intent; a concept-window request expresses fast intent. Duration only decides whether a robust Tier-1 ORTH/STT request needs chunking.
+The compute architecture now treats those moments differently. Short, scoped work stays fast. Long full-speaker work uses the safer path: PARSE divides risky STT/ORTH work into smaller pieces, processes those pieces independently, then stitches the useful results back into one speaker record.
+
+The guiding rule is **intent first, duration second**. A full-pipeline request means "be robust and preserve the whole recording." A concept-window request means "be fast and stay inside this small region." Duration only decides whether a robust STT/ORTH request should be split into chunks.
+
+## How it works (for linguists)
+
+Think of a long recording as a long reel of field tape. PARSE does **not** ask the speech model to hold the entire reel in its head at once. Instead, for the risky early transcription steps, PARSE cuts the reel into labelled slices, works on one slice at a time, and then puts the slices back on the original time ruler.
+
+```text
+A 3-hour recording
+0:00                                                               3:00:00
+|-----------------------------------------------------------------------|
+
+PARSE's safer long-file view, with the default 10-minute chunk size
+| 0-10 | 10-20 | 20-30 | 30-40 | ... | 160-170 | 170-180 |
+   1       2       3       4              17        18
+
+Each chunk is processed separately, but the final transcript keeps the
+original recording times, so review still happens on the full waveform.
+```
+
+The aim is simple: **one difficult passage should not ruin the whole recording**. If minute 40-50 causes a model problem, PARSE can still try minute 50-60, minute 60-70, and so on. The final report then tells you which slices were successful and which ones need attention.
+
+### Practical mental model
+
+Use this picture when deciding what PARSE is doing:
+
+```text
+You request: "Process this full speaker"
+              |
+              v
+        PARSE creates a job
+              |
+              v
+   Long STT/ORTH? split into chunks
+              |
+              v
+   Work chunk by chunk, with progress
+              |
+              v
+   Merge successful output back onto
+   the original speaker timeline
+              |
+              v
+   Show one result + a chunk report
+```
+
+The important consequences are:
+
+- **Review remains whole-speaker.** You still inspect the speaker in Annotate mode on the original waveform.
+- **Progress is more honest.** Instead of a silent multi-hour wait, you can see `STT chunk 7/18` or `ORTH chunk 3/18`.
+- **Failures are smaller.** A failed chunk is a region to inspect, not proof that the whole recording is unusable.
+- **Reruns become more targeted.** Use the failed chunk span to guide a smaller stage rerun, concept-window rerun, or manual review.
+
+### Why chunking helps
+
+Older long-file processing was closer to this:
+
+```text
+Old single-shot approach
+
+3-hour WAV  --->  one huge model call  --->  one answer or one failure
+                    |
+                    +-- high peak memory
+                    +-- one hallucination loop can poison the run
+                    +-- little visible progress
+                    +-- backend may die before saving a useful error
+```
+
+The new long-file path is closer to this:
+
+```text
+New chunked approach
+
+3-hour WAV
+   |
+   +--> chunk 1 ---> ok ---------+
+   +--> chunk 2 ---> ok ---------+
+   +--> chunk 3 ---> error ------+--> merged result + chunk report
+   +--> chunk 4 ---> ok ---------+
+   +--> ... ---------------------+
+
+The final tier/cache contains merged usable output. The report keeps the
+per-chunk evidence so you know exactly where review or rerun is needed.
+```
+
+Chunking does not make a three-hour recording short. It makes the work **bounded, inspectable, and recoverable**.
+
+### What subprocess isolation means, without jargon
+
+Some speech and phonetics models can fail badly: they can run out of memory, crash, or get stuck in a loop. Subprocess isolation means PARSE puts the riskiest model call in a separate "work room" instead of letting it run directly in the main backend room.
+
+```text
+Main PARSE backend
+  - keeps the app alive
+  - records job status
+  - collects progress and results
+          |
+          v
+Temporary worker room for one heavy stage
+  - loads the model
+  - processes STT, ORTH, or IPA
+  - writes back success or a structured error
+          |
+          v
+Main backend reads the result and continues/report fails cleanly
+```
+
+If the temporary worker room crashes, the goal is for the main backend to remain alive and tell you what happened. This is why some failures now appear as structured job errors such as `oom_suspect`, `timeout`, or `provider_error` instead of a frozen or dead server.
+
+### High-level data flow for long-file processing
+
+```text
+[User starts full speaker / full pipeline job]
+                    |
+                    v
+              [Job created]
+                    |
+                    v
+        [Audio duration inspected]
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+  [Short enough]       [Long STT/ORTH]
+  one provider call    split into chunks
+          |                   |
+          v                   v
+   [Stage output]      [Chunk 1] [Chunk 2] [Chunk 3] ...
+          |                   |       |       |
+          +-------------------+-------+-------+
+                              v
+                        [Merge output]
+                              |
+                              v
+                   [Annotation/cache/result]
+                              |
+                              v
+                 [UI report + logs + review]
+```
+
+### Tier-1 vs Tier-2, in fieldwork terms
+
+ORTH has two different jobs. They are easy to confuse because both are part of "orthographic transcription."
+
+```text
+Tier 1: rough listening pass
+  Audio slice  --->  model proposes words/text
+  Goal: get broad text coverage across the recording.
+  Long files: chunked, because this is the risky memory-heavy pass.
+
+Tier 2: alignment/refinement pass
+  Merged Tier-1 text + original audio  --->  word timing / ortho_words
+  Goal: place words back onto the time ruler.
+  Long files: runs after the Tier-1 chunks have been merged.
+```
+
+Visual version:
+
+```text
+Audio chunks:     [A] [B] [C] [D] [E]
+Tier-1 ORTH:       |   |   |   |   |      chunked transcription
+                  v   v   v   v   v
+Merged text:     -------- one transcript/tier --------
+                              |
+                              v
+Tier-2 ORTH:     word timing over the merged Tier-1 result
+```
+
+STT has a similar long-file chunking idea for full-file transcription. IPA is different: it works over existing intervals/windows, so it is not chunked by whole-recording duration.
+
+### Reading chunk progress
+
+A three-hour recording is 18 chunks at the default 10-minute setting. During a run, progress may look like this:
+
+```text
+STT chunk 1/18  |#####.............................................|  6%
+STT chunk 6/18  |#################.................................| 33%
+STT chunk 12/18 |#################################.................| 67%
+STT chunk 18/18 |##################################################|100%
+```
+
+If a row says `ORTH chunk 4/18 (1800s-2400s)`, that means PARSE is working on the audio region from 30:00 to 40:00. Those seconds are always **audio-global seconds**: they point back to the original recording, not to a temporary chunk file.
+
+### Partial results and error handling
+
+A partial run is not automatically a bad run. It means PARSE preserved more information than a single all-or-nothing failure would have preserved.
+
+```text
+Chunk results after a long STT run
+
+1  0:00-10:00      ok
+2 10:00-20:00      ok
+3 20:00-30:00      error: provider_error
+4 30:00-40:00      ok
+5 40:00-50:00      ok
+          |
+          v
+Merged transcript includes chunks 1, 2, 4, and 5.
+The report points you to 20:00-30:00 for review/rerun.
+```
+
+When you see a partial result:
+
+1. Note the failed chunk `span`.
+2. Inspect that time region in Annotate mode.
+3. Rerun the failed stage with a smaller chunk size if the problem is memory/loop shaped.
+4. Use concept-window or per-lexeme reruns when the problem is localized to a known lexical item.
+5. Do not sign off Compare/export work until the missing region is understood.
+
+### What this architecture does not promise
+
+- It does not make poor audio linguistically correct.
+- It does not remove the need to review boundaries, lexical intervals, and cognate decisions.
+- It does not persist chunk diagnostics inside every cache file; some chunk information lives in the job result/report.
+- It does not make GPU memory unlimited. Smaller chunks reduce peak risk, but models still need RAM/VRAM.
 
 ## Mental model for developers
 
