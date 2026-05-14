@@ -570,7 +570,7 @@ export function ConceptSidebar({
           const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';
           const parentButtonLabel = `${parentName}${noDataSuffix}${mergeCountSuffix} ${badge}`.trim();
           return (
-            <div key={concept.id} data-testid={`concept-row-${concept.id}`} className={`mb-0.5 rounded-md ${parentActive ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+            <div key={concept.id} data-testid={`concept-row-${concept.id}`} className="mb-0.5 rounded-md hover:bg-slate-50">
               <div className="flex items-center">
                 {hasVariants ? (
                   <button
