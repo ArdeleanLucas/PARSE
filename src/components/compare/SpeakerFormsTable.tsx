@@ -52,6 +52,9 @@ export interface SpeakerFormsTableVariant {
   source_wav: string | null;
   start_sec: number | null;
   end_sec: number | null;
+  /** concept_en pulled from the bucket variant, used to suppress ortho when it
+   *  collides with the English concept word (e.g. ortho="five" for concept "five"). */
+  concept_en?: string | null;
 }
 
 export interface SpeakerFormsTableProps {
@@ -98,6 +101,7 @@ function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsT
         source_wav: candidate?.source_wav ?? null,
         start_sec: candidate?.start_sec ?? null,
         end_sec: candidate?.end_sec ?? null,
+        concept_en: variant.concept_en ?? null,
       } satisfies SpeakerFormsTableVariant;
     });
 }
@@ -239,6 +243,7 @@ interface VariantCardProps {
   bundle: CompareBundle;
   variant: SpeakerFormsTableVariant;
   candidate: CompareCandidate | null;
+  conceptKey: string;
   isCanonical: boolean;
   isPlaying: boolean;
   playError?: string | null;
@@ -252,6 +257,7 @@ function VariantCard({
   bundle,
   variant,
   candidate,
+  conceptKey,
   isCanonical,
   isPlaying,
   playError,
@@ -295,21 +301,47 @@ function VariantCard({
               if (isCanonical) onCanonicalSelect(variant);
             }}
             className="h-3.5 w-3.5 accent-indigo-600"
-            aria-label={`Choose canonical lexeme ${variant.label} for ${speaker}`}
+            aria-label={`Choose canonical lexeme row ${variant.csv_row_id} for ${speaker}`}
           />
         </label>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2">
-            <span className="font-mono text-[10px] text-slate-400">{variant.csv_row_id}</span>
-            <span className="text-[13px] font-semibold text-slate-800">{variant.label}</span>
+            {/* Bug A (Lucas, MC-388-A round-2): the previous header rendered
+                variant.label — a concept-name fallback chain (variant_label ??
+                concept_en ?? label ?? csv_row_id). On production data with
+                e.g. concept "five", the chain resolved to "five" while
+                candidate.ortho was ALSO "five" and candidate.ipa was junk
+                that also rendered as "five" — producing the same word three
+                times in one row. Now: `row {csv_row_id} /{ipa}/ {ortho-if-distinct}`,
+                where ortho is suppressed when it equals the IPA OR matches
+                the concept identifier (conceptKey / variant.concept_en /
+                variant.label). The timestamp moved to the Metadata section
+                (see ExpandedPanel below). */}
+            <span className="font-mono text-[10px] text-slate-400">row {variant.csv_row_id}</span>
             {variant.ipa && (
               <span className="font-mono text-[13px] text-indigo-700">/{variant.ipa}/</span>
             )}
-            {variant.ortho && (
-              <span className="font-serif text-[14px] text-slate-700" dir="rtl">
-                {variant.ortho}
-              </span>
-            )}
+            {(() => {
+              const ortho = (variant.ortho ?? '').trim();
+              if (!ortho) return null;
+              const ipa = (variant.ipa ?? '').trim();
+              if (ortho === ipa) return null;
+              const concept = (conceptKey ?? '').trim();
+              if (concept && ortho.toLowerCase() === concept.toLowerCase()) return null;
+              const conceptEn = (variant.concept_en ?? '').trim();
+              if (conceptEn && ortho.toLowerCase() === conceptEn.toLowerCase()) return null;
+              const variantLabel = (variant.label ?? '').trim();
+              if (variantLabel && ortho.toLowerCase() === variantLabel.toLowerCase()) return null;
+              return (
+                <span
+                  className="font-serif text-[12px] text-slate-500"
+                  dir="rtl"
+                  data-testid={`variant-ortho-${speaker}-${variant.csv_row_id}`}
+                >
+                  {variant.ortho}
+                </span>
+              );
+            })()}
             {isCanonical && (
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100"
@@ -319,11 +351,6 @@ function VariantCard({
               </span>
             )}
           </div>
-          {typeof candidate?.start_sec === 'number' && typeof candidate?.end_sec === 'number' && (
-            <div className="mt-1 font-mono text-[10px] text-slate-400">
-              {candidate.start_sec.toFixed(2)}–{candidate.end_sec.toFixed(2)}s
-            </div>
-          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
@@ -601,6 +628,33 @@ function ExpandedPanel({
   const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
   const warnings = bundle.warnings ?? [];
 
+  // Bug B (Lucas, MC-388-A round-2): the recorded interval used to render
+  // beneath the radio+IPA row inside each VariantCard. Lucas wants the
+  // timestamp out of the variant card and shown ONCE in the Metadata block.
+  // Prefer the canonical variant; if no canonical is chosen, fall back to
+  // the active-bucket variant (any candidate whose csv_row_id belongs to a
+  // variant in the active bucket).
+  const recordedIntervalLabel = useMemo(() => {
+    const formatInterval = (start: unknown, end: unknown): string | null => {
+      if (typeof start !== 'number' || typeof end !== 'number') return null;
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+      return `${start.toFixed(2)}–${end.toFixed(2)}s`;
+    };
+    if (current) {
+      const cand = bundle.candidates?.[speaker]?.[current.csv_row_id];
+      const formatted = formatInterval(cand?.start_sec, cand?.end_sec);
+      if (formatted) return formatted;
+    }
+    if (activeBucket) {
+      for (const v of activeBucket.variants) {
+        const cand = bundle.candidates?.[speaker]?.[v.csv_row_id];
+        const formatted = formatInterval(cand?.start_sec, cand?.end_sec);
+        if (formatted) return formatted;
+      }
+    }
+    return null;
+  }, [current, activeBucket, bundle.candidates, speaker]);
+
   return (
     <div className="space-y-4 px-3 py-4">
       <div className="space-y-2" data-testid={`speaker-expanded-${speaker}`}>
@@ -654,6 +708,7 @@ function ExpandedPanel({
                 bundle={bundle}
                 variant={variant}
                 candidate={candidate}
+                conceptKey={conceptKey}
                 isCanonical={isCanonical}
                 isPlaying={playingVariantId === variant.csv_row_id}
                 playError={playErrorByVariant[variant.csv_row_id] ?? null}
@@ -700,6 +755,13 @@ function ExpandedPanel({
             <div className="flex gap-2">
               <dt className="w-24 text-slate-400">Variants</dt>
               <dd className="font-mono text-slate-700">{variants.length}</dd>
+            </div>
+            <div
+              className="flex gap-2"
+              data-testid={`speaker-metadata-recorded-interval-${speaker}`}
+            >
+              <dt className="w-24 text-slate-400">Recorded interval</dt>
+              <dd className="font-mono text-slate-700">{recordedIntervalLabel ?? '—'}</dd>
             </div>
           </dl>
         </div>
