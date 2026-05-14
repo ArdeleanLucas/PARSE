@@ -23,6 +23,7 @@ Fieldwork linguists, comparative and historical linguists, and language-document
 
 ## Table of Contents
 - [What PARSE Does](#what-parse-does)
+- [How PARSE compares to tools you already use](#how-parse-compares-to-tools-you-already-use)
 - [Quick Start](#quick-start)
 - [Annotate](#annotate)
 - [Compare](#compare)
@@ -39,6 +40,28 @@ Fieldwork linguists, comparative and historical linguists, and language-document
 - **Check borrowing evidence** — bring in contact-language comparison forms with source information and citations.
 - **Export clean datasets** — produce LingPy TSV and NEXUS files for downstream comparative and phylogenetic work.
 - **Automate repetitive work** — use the local API and MCP server when AI agents or scripts need to import speakers, run jobs, or prepare exports.
+
+## How PARSE compares to tools you already use
+
+PARSE does not replace ELAN, Praat, FLEx, or LingPy. It connects them and adds the connective tissue that fieldwork-to-phylogenetics workflows usually rebuild by hand. The honest picture for someone already using those tools:
+
+| Capability | ELAN | Praat | FLEx | LingPy | **PARSE** |
+|---|---|---|---|---|---|
+| Audio annotation | Unlimited hierarchical tiers | TextGrids + deep acoustics | Text-linked annotation | — | Wavesurfer.js 7 waveform + spectrogram view; 4 lexeme tiers (concept / IPA / ortho / ortho-words) plus sentence and speaker |
+| Cross-speaker comparison | Manual | Scripted | Lexicon-focused | LexStat cognate clustering | Dedicated Compare table over the same workspace; runs LingPy LexStat with a tunable threshold |
+| Borrowing evidence | Manual | Manual | Manual | Programmatic | Manual flag in Compare; CLEF (Contact Lexeme Fetcher) auto-fetches contact-language forms from Wiktionary, ASJP, and Lexibank so you have something to compare against — the borrowing decision is yours, not algorithmic |
+| Phylogenetic export | Custom scripts | Custom scripts | Limited | Native Wordlist | One-click LingPy TSV (ID / CONCEPT / DOCULECT / IPA / COGID / TOKENS / BORROWING) and NEXUS; downstream consumption is not yet covered by integration tests |
+| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Local `faster-whisper` STT (model is user-configured), optional forced alignment, and an MCP server exposing ~60 tools to Claude, Codex, and other agents |
+| End-to-end workflow | Annotation only | Acoustics only | Lexicon & glossing | Computation only | Audio → annotation → comparison → export in one workspace; multiple WAVs per speaker currently need manual coordination |
+| Reproducibility | Project files | Scripts | Project files | Scripts | Workspace files plus per-job logs; annotation edits are persisted but not yet audit-logged with user and timestamp |
+| Stack | Java desktop | C / Pascal desktop | C# desktop | Python library | React 18 + Vite browser UI; Python HTTP server (FastAPI / Pydantic); Zustand state |
+
+What this means in practice
+- **From ELAN or Praat.** You will recognise the waveform-and-tier loop. PARSE has fewer fixed tier types than ELAN (4 lexeme tiers, not unlimited custom tiers) but adds a dedicated Compare view and one-click export to LingPy and NEXUS. Spectrograms are there for review, but PARSE is not a phonetics lab — no formant or pitch extraction.
+- **From FLEx.** PARSE is lighter on morphology and lexicon analysis but stronger on long fieldwork audio, multi-speaker comparison, and phylogenetic export.
+- **From LingPy.** You no longer rebuild a Wordlist TSV by hand. PARSE writes one directly from fieldwork audio, with LexStat clustering already run inside the Compare view.
+
+PARSE's role is to be the connecting layer between annotation (ELAN / Praat) and phylogenetics (LingPy / BEAST), with a modern web UI and an agent-driven automation layer that the classic desktop tools do not currently provide.
 
 ## Quick Start
 ```bash
