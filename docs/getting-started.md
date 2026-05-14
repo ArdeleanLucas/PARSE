@@ -15,6 +15,8 @@ If you are new to the project, use this page in order:
 5. If you are upgrading an existing workspace, read [migration notes](./release-notes/mc-384-migration-notes.md)
 6. Use the [troubleshooting](#troubleshooting) section if startup or GPU inference fails
 
+![PARSE Launch & Workspace Mental Model](./user-guides/assets/parse-launch-workspace-mental-model.png)
+
 ## Requirements
 
 ### Runtime expectations
