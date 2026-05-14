@@ -699,7 +699,7 @@ export function SpeakerFormsTable({
   onResetCognate,
   onToggleSpeakerFlag,
   onOpenInAnnotate = () =>
-    console.warn('[SpeakerFormsTable] onOpenInAnnotate not wired — see MC-388-B'),
+    console.warn('[SpeakerFormsTable] onOpenInAnnotate not wired — see MC-388-G'),
 }: SpeakerFormsTableProps) {
   const formsBySpeaker = useMemo(
     () => new Map(speakerForms.map((form) => [form.speaker, form])),
