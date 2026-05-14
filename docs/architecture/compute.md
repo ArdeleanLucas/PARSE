@@ -2,7 +2,7 @@
 
 This page is the maintainable reference for PARSE compute execution after the MC-384 compute-architecture series (PRs #411-#440). The canonical design input was the local architecture specification at `/mnt/c/Users/Lucas/Desktop/parse/compute-architecture-differentiation-spec.md`; this page now records the shipped runtime contract in the repo.
 
-For the process-level view of the worker/subprocess changes, see [Worker process architecture](worker-processes.md). For operator knobs, see [Environment variables](../environment-variables.md).
+For the process-level view of the worker/subprocess changes, see [Worker process architecture](worker-processes.md). For operator knobs, see [Environment variables](../reference/environment-variables.md).
 
 ## Overview
 
@@ -392,7 +392,7 @@ Result observability uses the current wire key `device`. PR notes and user task 
 
 ## Environment variables
 
-The full operator reference is [Environment variables](../environment-variables.md). Compute-specific knobs are summarized here because they are part of the architecture contract:
+The full operator reference is [Environment variables](../reference/environment-variables.md). Compute-specific knobs are summarized here because they are part of the architecture contract:
 
 | Variable | Default | Contract |
 |---|---:|---|
@@ -484,7 +484,7 @@ The completed MC-384 architecture closes the incident by containing long ORTH wo
 
 ## Result contract
 
-Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp-schema.md` for the agent-facing schema and examples. Backward-compatible callers that only read top-level fields such as `status`, `filled`, `total`, `segments`, and `ortho_words` continue to work.
+Chunked compute results add a `chunks` array with per-chunk status. See `docs/mcp/schema.md` for the agent-facing schema and examples. Backward-compatible callers that only read top-level fields such as `status`, `filled`, `total`, `segments`, and `ortho_words` continue to work.
 
 Important fields:
 

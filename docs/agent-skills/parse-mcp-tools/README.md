@@ -77,6 +77,6 @@ The hand-curated skill docs in this directory should cover every tool listed by 
 ## Related docs
 
 - [MCP guide](../../mcp-guide.md)
-- [MCP schema](../../mcp-schema.md)
+- [MCP schema](../../mcp/schema.md)
 - [External agents quickstart](../../getting-started-external-agents.md)
 - [API reference](../../api-reference.md)

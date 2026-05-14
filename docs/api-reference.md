@@ -175,7 +175,7 @@ Stale-lock cleanup semantics: startup and `POST /api/locks/cleanup` scan direct 
 
 Full-pipeline OOM/restart semantics: before memory-heavy full-pipeline work, the backend checks host `MemAvailable` against `PARSE_FULL_PIPELINE_MIN_MEM_GB`; failures return structured job errors with `error_code: "oom_suspect"`, `mem_available_gb`, `required_gb`, and `swap_total_gb`. Job snapshots persist under `PARSE_JOB_SNAPSHOT_DIR` or the workspace `.parse/jobs` directory, and non-terminal snapshots recovered after server restart are marked `error_code: "server_restarted"` with `recovered_from_disk: true`. `GET /api/jobs/active` includes running jobs plus terminal complete/error/cancelled jobs inside `PARSE_ACTIVE_JOBS_TERMINAL_DWELL_SEC` (default 10s, clamped to 0-120s) so the React header can render completion/error/cancelled chips before local auto-dismiss. Backend progress remains a 0-100 number; the TypeScript `listActiveJobs()` contract normalizes it to a 0-1 fraction for UI consumers.
 
-Chunked compute result semantics: full-file STT and full-mode ORTH terminal results can include `chunks[]` with per-chunk `idx`, audio-global `span`, `status`, and optional `error_code` / `error`. Short/single-shot runs return `chunks: []`. STT persists only the merged flat `segments[]` cache, not chunk diagnostics. STT/ORTH/IPA stage results expose the resolved/effective device as `device` (called `resolved_device` in some PR notes), and IPA overwrite runs may add `coverage_shrink_warning` when new projected coverage is much shorter than existing IPA coverage. See [MCP schema](./mcp-schema.md#compute-job-result-shapes).
+Chunked compute result semantics: full-file STT and full-mode ORTH terminal results can include `chunks[]` with per-chunk `idx`, audio-global `span`, `status`, and optional `error_code` / `error`. Short/single-shot runs return `chunks: []`. STT persists only the merged flat `segments[]` cache, not chunk diagnostics. STT/ORTH/IPA stage results expose the resolved/effective device as `device` (called `resolved_device` in some PR notes), and IPA overwrite runs may add `coverage_shrink_warning` when new projected coverage is much shorter than existing IPA coverage. See [MCP schema](./mcp/schema.md#compute-job-result-shapes).
 
 ### Suggestions, chat, and auth
 
@@ -689,4 +689,4 @@ Operational rules that remain important:
 - Provider and model overview: [AI Integration](./ai-integration.md)
 - User-facing workflow context: [User Guide](./user-guide.md)
 - Data model and system design: [Architecture](./architecture.md)
-- Schema/auth details: [MCP Schema](./mcp-schema.md)
+- Schema/auth details: [MCP Schema](./mcp/schema.md)

@@ -180,7 +180,7 @@ The Khan01 failure class is closed at two levels: the parent server is insulated
 | Per-job subprocess logs | `/tmp/parse-compute-<job_id>.stderr.log` exists for crash tails and must tee, not replace, inherited stderr. |
 | Persistent worker logs | `/tmp/parse-compute-worker.stderr.log` is also tee-backed so `[WORKER]` lifecycle lines stay visible in the parent terminal. |
 | Chunk progress | STT emits `STT chunk N/M (STARTs–ENDs)` and ORTH emits `ORTH chunk N/M (STARTs-ENDs)`; the header job strip parses those messages into `Chunk N of M`. |
-| Chunk result schema | `chunks[]` entries use `idx`, `span`, `status`, optional `error_code`, and optional `error`; see [MCP schema](../mcp-schema.md#compute-job-result-shapes). |
+| Chunk result schema | `chunks[]` entries use `idx`, `span`, `status`, optional `error_code`, and optional `error`; see [MCP schema](../mcp/schema.md#compute-job-result-shapes). |
 | Resolved device | Stage result payloads expose the resolved/effective device as `device`; completion logs include `device=...`. |
 
 ## Maintenance invariants
@@ -191,8 +191,8 @@ The Khan01 failure class is closed at two levels: the parent server is insulated
 - Child log files must use `install_child_tee()` from `python/shared/subprocess_tee.py`; never replace `sys.stderr`/`sys.stdout` outright in a spawned compute child.
 - `status == "error"` is the nested subprocess sentinel. Successful application-level partial failures should use structured fields such as `chunks[].status`, `error_code`, `failure_reason`, or `partial_*`, not a successful payload with top-level `status: "error"`.
 - Chunk cancellation is between chunks. Completed chunks remain usable, remaining chunks report `cancelled`, and the top-level result can be `cancelled` or `partial_cancelled` depending on stage/path.
-- The UI, MCP/API docs, and TypeScript contracts are consumers of the same `chunks[]` schema; update `src/api/contracts/*`, `docs/mcp-schema.md`, and this page together when the schema changes.
-- Adding or renaming compute env vars requires updating [Compute architecture](compute.md), [Environment variables](../environment-variables.md), and the doc drift guard in `python/test_docs_compute_env_vars.py`.
+- The UI, MCP/API docs, and TypeScript contracts are consumers of the same `chunks[]` schema; update `src/api/contracts/*`, `docs/mcp/schema.md`, and this page together when the schema changes.
+- Adding or renaming compute env vars requires updating [Compute architecture](compute.md), [Environment variables](../reference/environment-variables.md), and the doc drift guard in `python/test_docs_compute_env_vars.py`.
 
 ## Regression gates for worker/process changes
 

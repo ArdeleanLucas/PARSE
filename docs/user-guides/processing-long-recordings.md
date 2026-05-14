@@ -247,7 +247,7 @@ Before using long-file output for comparison or publication:
 ## Related docs
 
 - [Troubleshooting long files](../troubleshooting/long-files.md)
-- [Environment variables](../environment-variables.md)
+- [Environment variables](../reference/environment-variables.md)
 - [Compute architecture](../architecture/compute.md)
-- [MC-384 migration notes](../getting-started/migration.md)
-- [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes)
+- [MC-384 migration notes](../release-notes/mc-384-migration-notes.md)
+- [MCP schema: compute job result shapes](../mcp/schema.md#compute-job-result-shapes)

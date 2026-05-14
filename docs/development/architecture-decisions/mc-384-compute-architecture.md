@@ -1,8 +1,8 @@
-# MC-384 compute architecture release notes
+# MC-384 compute architecture decision record
 
-> Last updated: 2026-05-14. Covers the MC-384 series that landed across PRs #411–#440.
+> Last updated: 2026-05-14. Internal architecture decision record for the MC-384 long-file compute series that landed across PRs #411–#440.
 
-## Summary
+## Decision summary
 
 MC-384 turns PARSE long-recording compute from monolithic best-effort model calls into an inspectable, chunk-aware, subprocess-isolated architecture. The fieldwork motivation was simple: Khan01/Fail01-scale recordings should not crash the parent backend, silently stop after a decoder loop, or leave users guessing which part of a file succeeded.
 
@@ -37,7 +37,7 @@ MC-384 turns PARSE long-recording compute from monolithic best-effort model call
 - `PARSE_STT_DEVICE`, `PARSE_ORTH_DEVICE`, `PARSE_IPA_DEVICE` — stage-specific device overrides.
 - `PARSE_STT_FORCE_CPU` — backwards-compatible STT CPU alias.
 
-Full reference: [Environment variables](../environment-variables.md).
+Full reference: [Environment variables](../../reference/environment-variables.md).
 
 ## Result schema updates
 
@@ -50,7 +50,7 @@ Job result payloads can now carry:
 
 `chunks[]` is intentionally diagnostic/job-result data. It is not persisted into the STT cache, and ORTH persists reviewed annotation tiers rather than a chunk cache.
 
-Schema reference: [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes).
+Schema reference: [MCP schema: compute job result shapes](../../mcp/schema.md#compute-job-result-shapes).
 
 ## PR lineage
 
@@ -86,10 +86,10 @@ Schema reference: [MCP schema: compute job result shapes](../mcp-schema.md#compu
 
 ## Related docs
 
-- [Compute architecture](../architecture/compute.md)
-- [Worker process architecture](../architecture/worker-processes.md)
-- [Environment variables](../environment-variables.md)
-- [Processing long recordings](../user-guides/processing-long-recordings.md)
-- [Troubleshooting long files](../troubleshooting/long-files.md)
-- [Migration notes](../getting-started/migration.md)
-- [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes)
+- [Compute architecture](../../architecture/compute.md)
+- [Worker process architecture](../../architecture/worker-processes.md)
+- [Environment variables](../../reference/environment-variables.md)
+- [Processing long recordings](../../user-guides/processing-long-recordings.md)
+- [Troubleshooting long files](../../troubleshooting/long-files.md)
+- [Migration notes](../../release-notes/mc-384-migration-notes.md)
+- [MCP schema: compute job result shapes](../../mcp/schema.md#compute-job-result-shapes)

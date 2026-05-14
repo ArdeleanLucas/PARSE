@@ -55,7 +55,7 @@ Code count check on current main/worktree: `REGISTRY=58`, `ParseChatTools=58`, `
 | `docs/api-reference.md` | Added full-pipeline OOM/restart job semantics and fixed legacy MCP 36/40 wording to 38/42. |
 | `docs/developer-guide.md` | Added `PARSE_FULL_PIPELINE_MIN_MEM_GB`, `PARSE_JOB_SNAPSHOT_DIR`, and launcher warning behavior to compute runtime notes. |
 | `docs/getting-started.md` | Added operator environment variables and runtime notes for full-pipeline memory preflight and durable job snapshots. |
-| `docs/mcp-schema.md` | Fixed default/all adapter totals from 61 to 62. |
+| `docs/mcp/schema.md` | Fixed default/all adapter totals from 61 to 62. |
 | `docs/mcp-guide.md` | Fixed default/all adapter totals from 61 to 62. |
 | `docs/mcp_agent_roadmap.md` | Fixed current-state totals from 61 to 62. |
 | `docs/runtime/audition-csv-import.md` | Added EXT alongside KLQ/JBIL source-survey examples. |

@@ -187,7 +187,7 @@ These are no longer prerequisites for PARSE agent integration; they are follow-o
 
 The historical roadmap in this file is **largely complete**. If you are looking for the current external-agent surface, treat the following as the primary live references instead:
 
-- `docs/mcp-schema.md`
+- `docs/mcp/schema.md`
 - `docs/api-reference.md`
 - `docs/getting-started-external-agents.md`
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)

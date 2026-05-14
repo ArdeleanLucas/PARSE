@@ -333,5 +333,5 @@ Include the speaker, job id, chunk settings, `chunks[]`, relevant `job_logs`, an
 
 - [Processing long recordings](../user-guides/processing-long-recordings.md)
 - [Compute architecture](../architecture/compute.md)
-- [Environment variables](../environment-variables.md)
-- [MCP schema: compute job result shapes](../mcp-schema.md#compute-job-result-shapes)
+- [Environment variables](../reference/environment-variables.md)
+- [MCP schema: compute job result shapes](../mcp/schema.md#compute-job-result-shapes)

@@ -180,7 +180,7 @@ Default behavior in brief:
 - Full-file STT, full-mode ORTH, and full-mode IPA run inside isolated subprocesses so heavy model failures return structured job data rather than killing the backend.
 - IPA does not chunk by whole-audio duration because it runs over existing intervals.
 
-For the practical walkthrough, hardware guidance, chunk-progress interpretation, and recovery steps for partial runs, see [Processing long recordings](./user-guides/processing-long-recordings.md). For failure-specific recovery, see [Troubleshooting long files](./troubleshooting/long-files.md). Operator reference: [Environment variables](./environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
+For the practical walkthrough, hardware guidance, chunk-progress interpretation, and recovery steps for partial runs, see [Processing long recordings](./user-guides/processing-long-recordings.md). For failure-specific recovery, see [Troubleshooting long files](./troubleshooting/long-files.md). Operator reference: [Environment variables](./reference/environment-variables.md). Architecture reference: [Compute architecture](./architecture/compute.md).
 
 ![Simple mental model overview: PARSE treats a long file as one speaker timeline with chunked support jobs, merged outputs, and reviewable reports.](./user-guides/assets/simple-mental-model-overview.png)
 
