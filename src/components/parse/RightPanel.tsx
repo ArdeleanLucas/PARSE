@@ -54,6 +54,8 @@ export function RightPanel(props: RightPanelProps) {
           onSpeakerSelect={props.onSpeakerSelect}
           onAddSpeaker={props.onAddSpeaker}
           onToggleSpeaker={props.onToggleSpeaker}
+          onSelectAllSpeakers={props.onSelectAllSpeakers}
+          onClearSpeakers={props.onClearSpeakers}
         />
 
         {currentMode === 'annotate' && (

@@ -11,7 +11,14 @@ export function SpeakersSection({
   onSpeakerSelect,
   onAddSpeaker,
   onToggleSpeaker,
+  onSelectAllSpeakers,
+  onClearSpeakers,
 }: SpeakersSectionProps) {
+  const bulkDisabled = currentMode === 'annotate';
+  const bulkButtonClass = bulkDisabled
+    ? 'cursor-not-allowed opacity-40'
+    : 'hover:bg-slate-200';
+
   return (
     <CollapsibleSection
       title={currentMode === 'annotate' ? 'Speakers SINGLE' : 'Speakers'}
@@ -36,6 +43,34 @@ export function SpeakersSection({
             <Plus className="h-3 w-3" />
           </button>
         )}
+      </div>
+      <div className="mb-2 flex gap-1">
+        <button
+          type="button"
+          data-testid="speakers-select-all"
+          aria-label="Select all speakers"
+          aria-disabled={bulkDisabled ? 'true' : undefined}
+          disabled={bulkDisabled}
+          onClick={() => {
+            if (!bulkDisabled) onSelectAllSpeakers();
+          }}
+          className={`rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200 ${bulkButtonClass}`}
+        >
+          Select all
+        </button>
+        <button
+          type="button"
+          data-testid="speakers-clear"
+          aria-label="Clear speaker selection"
+          aria-disabled={bulkDisabled ? 'true' : undefined}
+          disabled={bulkDisabled}
+          onClick={() => {
+            if (!bulkDisabled) onClearSpeakers();
+          }}
+          className={`rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200 ${bulkButtonClass}`}
+        >
+          Clear
+        </button>
       </div>
       <div className="flex flex-wrap gap-1">
         {speakers.map((speaker) => {
