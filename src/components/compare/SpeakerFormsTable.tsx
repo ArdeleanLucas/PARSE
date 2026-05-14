@@ -241,6 +241,7 @@ interface VariantCardProps {
   candidate: CompareCandidate | null;
   isCanonical: boolean;
   isPlaying: boolean;
+  playError?: string | null;
   onPlayToggle: (variant: SpeakerFormsTableVariant) => void;
   onCanonicalSelect: (variant: SpeakerFormsTableVariant) => void;
   onOpenInAnnotate: (variant: SpeakerFormsTableVariant) => void;
@@ -253,6 +254,7 @@ function VariantCard({
   candidate,
   isCanonical,
   isPlaying,
+  playError,
   onPlayToggle,
   onCanonicalSelect,
   onOpenInAnnotate,
@@ -369,6 +371,14 @@ function VariantCard({
           </button>
         </div>
       </div>
+      {playError && (
+        <div
+          className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
+          data-testid={`variant-play-error-${speaker}-${variant.csv_row_id}`}
+        >
+          Playback failed: {playError}
+        </div>
+      )}
       {showSpec && hasAudio && (
         <div className="mt-3" data-testid={`variant-spec-image-${speaker}-${variant.csv_row_id}`}>
           {specErrored ? (
@@ -410,6 +420,7 @@ function ExpandedPanel({
   const current = canonicalFor(bundle, speaker);
   const [error, setError] = useState<string | null>(null);
   const [playingVariantId, setPlayingVariantId] = useState<string | null>(null);
+  const [playErrorByVariant, setPlayErrorByVariant] = useState<Record<string, string>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const currentSrcRef = useRef<string>('');
@@ -444,6 +455,7 @@ function ExpandedPanel({
       let audio = audioRef.current;
       if (!audio) {
         audio = new Audio();
+        audio.preload = 'auto';
         audioRef.current = audio;
       }
       // Toggle off when the same variant is already playing.
@@ -466,18 +478,71 @@ function ExpandedPanel({
       } catch {
         /* noop */
       }
-      if (currentSrcRef.current !== desiredSrc) {
+      // Clear prior error for this variant when retrying.
+      setPlayErrorByVariant((prev) => {
+        if (!(variant.csv_row_id in prev)) return prev;
+        const next = { ...prev };
+        delete next[variant.csv_row_id];
+        return next;
+      });
+
+      // Bug 3 (Lucas, MC-388-A): the previous implementation set
+      // `audio.currentTime = startTime` synchronously before metadata had
+      // loaded, which throws InvalidStateError on a fresh src. The error
+      // was swallowed and `audio.play()` then began at 0 (silent) — making
+      // the button appear dead. Seek inside `loadedmetadata` and surface
+      // `play()` rejections to the user via per-variant error state.
+      const srcChanged = currentSrcRef.current !== desiredSrc;
+      if (srcChanged) {
         audio.src = desiredSrc;
         currentSrcRef.current = desiredSrc;
       }
-      try {
-        audio.currentTime = startTime;
-      } catch {
-        /* noop */
+      const seekAndPlay = () => {
+        const a = audioRef.current;
+        if (!a) return;
+        try {
+          a.currentTime = startTime;
+        } catch (err) {
+          // Final fallback — should never trigger after loadedmetadata.
+          console.warn('[SpeakerFormsTable] seek failed', err);
+        }
+        const playPromise = a.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err ?? 'play failed');
+            console.error('[SpeakerFormsTable] audio.play() rejected', err);
+            setPlayErrorByVariant((prev) => ({ ...prev, [variant.csv_row_id]: msg }));
+            setPlayingVariantId((id) => (id === variant.csv_row_id ? null : id));
+          });
+        }
+      };
+      if (srcChanged && audio.readyState < 1 /* HAVE_METADATA */) {
+        const onLoaded = () => {
+          audio?.removeEventListener('loadedmetadata', onLoaded);
+          audio?.removeEventListener('error', onError);
+          seekAndPlay();
+        };
+        const onError = () => {
+          audio?.removeEventListener('loadedmetadata', onLoaded);
+          audio?.removeEventListener('error', onError);
+          const err = audio?.error;
+          const msg = err
+            ? `audio load failed (code ${err.code})`
+            : `audio load failed for ${desiredSrc}`;
+          console.error('[SpeakerFormsTable] audio load error', err);
+          setPlayErrorByVariant((prev) => ({ ...prev, [variant.csv_row_id]: msg }));
+          setPlayingVariantId((id) => (id === variant.csv_row_id ? null : id));
+        };
+        audio.addEventListener('loadedmetadata', onLoaded);
+        audio.addEventListener('error', onError);
+        try {
+          audio.load();
+        } catch (err) {
+          console.warn('[SpeakerFormsTable] audio.load() threw', err);
+        }
+      } else {
+        seekAndPlay();
       }
-      void audio.play().catch(() => {
-        setPlayingVariantId(null);
-      });
       setPlayingVariantId(variant.csv_row_id);
       const tick = () => {
         const a = audioRef.current;
@@ -591,6 +656,7 @@ function ExpandedPanel({
                 candidate={candidate}
                 isCanonical={isCanonical}
                 isPlaying={playingVariantId === variant.csv_row_id}
+                playError={playErrorByVariant[variant.csv_row_id] ?? null}
                 onPlayToggle={handlePlayToggle}
                 onCanonicalSelect={handleCanonicalSelect}
                 onOpenInAnnotate={(v) => onOpenInAnnotate(speaker, v)}
@@ -944,17 +1010,14 @@ export function SpeakerFormsTable({
                       </div>
                     </td>
                     <td className="px-3 py-2.5" data-testid={`ipa-cell-${speaker}`}>
+                      {/* Bug 1 (Lucas, MC-388-A): collapsed IPA cell is strictly
+                          one-line `/ipa/` — no ortho subtitle, no concept-label,
+                          no utterance text. Pills row below stays informational
+                          only (no emerald canonical-chosen — that lives inside
+                          the expanded VariantCard). See Bug 2. */}
                       <div className="font-mono text-[13px] text-slate-800">
                         {form?.ipa ? `/${form.ipa}/` : '—'}
                       </div>
-                      {form?.ortho && (
-                        <div
-                          className="mt-0.5 font-serif text-[11px] text-slate-500"
-                          dir="rtl"
-                        >
-                          {form.ortho}
-                        </div>
-                      )}
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {variantCount > 1 && (
                           <span
@@ -962,14 +1025,6 @@ export function SpeakerFormsTable({
                             data-testid={`variant-count-${speaker}`}
                           >
                             +{variantCount - 1} variant{variantCount - 1 === 1 ? '' : 's'}
-                          </span>
-                        )}
-                        {canonicalChosen && (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100"
-                            data-testid={`canonical-chosen-${speaker}`}
-                          >
-                            <CheckCircle2 className="h-2.5 w-2.5" /> canonical
                           </span>
                         )}
                         {!canonicalChosen && variantCount > 1 && (
