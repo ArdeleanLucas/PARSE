@@ -105,6 +105,10 @@ Chunking is **intent-aware**:
 - Concept-window and edited-only reruns stay fast and bounded; they do not use duration chunking.
 - A short recording below the configured chunk duration uses one provider call and returns `chunks: []`.
 
+![Fast path versus robust path comparison: scoped lexeme work stays bounded and unchunked, while full long-file processing uses chunking and isolation.](assets/fast-path-vs-robust-path.png)
+
+*Figure: Use the fast path for short, intentional lexeme/concept-window work; use the robust path for full-speaker or full-pipeline long recordings where chunking, subprocess isolation, and partial-result reporting matter.*
+
 ## Monitoring progress in the UI
 
 During a long run, use three places:
