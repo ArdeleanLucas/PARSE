@@ -160,10 +160,33 @@ def test_local_whisper_uses_resolver_for_stt_and_ortho(monkeypatch: pytest.Monke
 
 
 def test_hf_ortho_uses_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HFWhisperProvider must route device selection through resolve_compute_device.
+
+    This test is intentionally hermetic against upstream test pollution. MC-384-Y/Z
+    exposed that resolver tests can pass in isolation while failing in the full
+    sweep if earlier tests leak a torch-CUDA stub or replace ``sys.modules['ai.device']``.
+    Three independent defenses keep this assertion about HF ORTH device routing
+    stable regardless of collection order:
+
+      1. ``sys.modules['torch']`` stub — forces lazy torch CUDA detection to a
+         known-False result even if a prior test installed a CUDA-available stub.
+      2. ``_torch_cuda_available`` monkeypatch — exercises the canonical resolver hook.
+      3. ``_resolve_auto`` monkeypatch — protects against stale module-dict references
+         if an earlier test reloaded/replaced ``ai.device``.
+    """
+    torch_stub = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: False,
+            device_count=lambda: 0,
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch_stub)
+
     from ai import device as device_module
     from ai.providers.hf_whisper import HFWhisperProvider
 
     monkeypatch.setattr(device_module, "_torch_cuda_available", lambda: False)
+    monkeypatch.setattr(device_module, "_resolve_auto", lambda: "cpu")
     provider = HFWhisperProvider(config={"ortho": {"model_path": "razhan/whisper-base-sdh"}})
 
     assert provider.device == "cpu"
