@@ -32,6 +32,10 @@ Open batch report and inspect partial rows
 Review in Annotate mode before Compare/export
 ```
 
+![Long-file processing flow: a five-stage diagram showing job creation, chunk planning, isolated chunk processing, merged output, and user review with partial-result recovery.](assets/parse-long-file-processing-flow.svg)
+
+*Figure: Long-file processing in PARSE. A full-file job becomes a chunk plan; each STT/ORTH chunk runs in a protected worker; successful chunks are merged back onto the original timeline; the UI shows progress, partial results, and the spans that need review or rerun.*
+
 ### Step-by-step field recipe
 
 1. **Launch PARSE with a real workspace root.** Keep fieldwork data outside the git checkout.
