@@ -342,7 +342,7 @@ describe('RightPanel', () => {
   it('collapses drawer sections when their headers are clicked', () => {
     renderRightPanel({ currentMode: 'annotate' });
 
-    fireEvent.click(screen.getByRole('button', { name: /^Speakers SINGLE/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Speakers/i }));
 
     expect(screen.queryByText(/Concept list scoped to/i)).toBeNull();
     expect(screen.getByRole('button', { name: /Timestamp tools/i })).toBeTruthy();
