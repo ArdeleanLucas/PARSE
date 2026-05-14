@@ -57,6 +57,55 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(screen.queryByRole('button', { name: /Set KLQ color to orange/i })).toBeNull();
   });
 
+  it('renders swatches with literal hex backgrounds instead of theme-remapped chip classes', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 527, key: '527', name: 'nose', tag: 'untagged' as never, surveys: { klq: '1.5', jbil: '34' } }}
+        activeSpeaker="Fail01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'amber' }, jbil: { display_label: 'JBIL', display_color: 'emerald' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const indigoSwatch = screen.getByRole('button', { name: /Set KLQ color to indigo/i });
+    expect(indigoSwatch.getAttribute('style')).toMatch(/background-color:\s*(#6366[fF]1|rgb\(99,\s*102,\s*241\))/);
+    expect(indigoSwatch.className).not.toContain('bg-indigo-50');
+    expect(indigoSwatch.className).not.toContain('ring-indigo-200');
+
+    const emeraldSwatch = screen.getByRole('button', { name: /Set KLQ color to emerald/i });
+    expect(emeraldSwatch.getAttribute('style')).toMatch(/background-color:\s*(#10[bB]981|rgb\(16,\s*185,\s*129\))/);
+    expect(emeraldSwatch.className).not.toContain('bg-emerald-50');
+    expect(emeraldSwatch.className).not.toContain('ring-emerald-200');
+  });
+
+  it('marks only the selected swatch with data-selected and the accent outline class', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 527, key: '527', name: 'nose', tag: 'untagged' as never, surveys: { klq: '1.5' } }}
+        activeSpeaker="Fail01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'amber' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const amberSwatch = screen.getByRole('button', { name: /Set KLQ color to amber/i });
+    expect(amberSwatch.getAttribute('data-selected')).toBe('true');
+    expect(amberSwatch.className).toContain('survey-swatch-selected');
+    expect(amberSwatch.className).not.toContain('outline-slate-400');
+
+    const roseSwatch = screen.getByRole('button', { name: /Set KLQ color to rose/i });
+    expect(roseSwatch.getAttribute('data-selected')).toBeNull();
+    expect(roseSwatch.className).not.toContain('survey-swatch-selected');
+  });
+
   it('renders speaker override survey IDs for merged/source-item active concepts using merged raw concept ids', () => {
     render(
       <SurveyValuesSection

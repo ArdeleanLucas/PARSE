@@ -27,37 +27,14 @@ export function Modal({ open, onClose, title, children, dismissible = true }: Mo
   return (
     <div
       onClick={dismissible ? onClose : undefined}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/50"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#fff",
-          borderRadius: "0.5rem",
-          padding: "1.5rem",
-          minWidth: "20rem",
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          overflow: "auto",
-        }}
+        className="max-h-[90vh] min-w-[20rem] max-w-[90vw] overflow-auto rounded-lg bg-white p-6 text-slate-900 shadow-xl ring-1 ring-slate-200"
       >
         {title && (
-          <div
-            style={{
-              fontWeight: 600,
-              marginBottom: "1rem",
-              fontSize: "1rem",
-              fontFamily: "monospace",
-            }}
-          >
+          <div className="mb-4 font-mono text-base font-semibold text-slate-900">
             {title}
           </div>
         )}
