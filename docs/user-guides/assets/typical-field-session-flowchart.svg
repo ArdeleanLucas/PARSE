@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="760" viewBox="0 0 1600 760" role="img" aria-labelledby="title desc">
+  <title id="title">Typical Field Session in PARSE</title>
+  <desc id="desc">A clean high-level numbered flowchart showing the mental model of a PARSE field session: import or hydrate a speaker, normalize audio, run the STT ORTH IPA pipeline with chunk awareness, review and edit in Annotate mode, search and confirm anchors, switch to Compare mode, adjudicate cognates and borrowing, and export LingPy or NEXUS.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f8fafc"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1e293b" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 2 2 L 10 6 L 2 10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font: 700 46px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 20px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .stage-title { font: 700 22px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .stage-detail { font: 500 15px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #64748b; }
+      .number { font: 800 20px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #ffffff; }
+      .lane { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .box { fill: url(#card); stroke: #cbd5e1; stroke-width: 2; rx: 26; filter: url(#shadow); }
+      .badge { fill: #4f46e5; }
+      .caption { font: 600 15px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; }
+      .caption-small { font: 500 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="760" fill="url(#bg)"/>
+  <path d="M 90 644 C 330 584 513 693 760 638 C 999 585 1121 517 1512 602" fill="none" stroke="#c7d2fe" stroke-width="80" stroke-linecap="round" opacity="0.35"/>
+  <path d="M 78 182 C 298 96 486 167 688 133 C 1014 78 1173 97 1510 144" fill="none" stroke="#bae6fd" stroke-width="70" stroke-linecap="round" opacity="0.38"/>
+
+  <text x="800" y="78" text-anchor="middle" class="title">Typical Field Session in PARSE</text>
+  <text x="800" y="115" text-anchor="middle" class="subtitle">One speaker timeline becomes reviewed annotations, cross-speaker decisions, and exportable comparative data.</text>
+
+  <!-- connection lanes -->
+  <path class="lane" d="M 345 235 L 405 235"/>
+  <path class="lane" d="M 695 235 L 755 235"/>
+  <path class="lane" d="M 1045 235 L 1105 235"/>
+  <path class="lane" d="M 1245 320 C 1245 365 1245 395 1245 440"/>
+  <path class="lane" d="M 1105 525 L 1045 525"/>
+  <path class="lane" d="M 755 525 L 695 525"/>
+  <path class="lane" d="M 405 525 L 345 525"/>
+
+  <!-- row 1 -->
+  <g transform="translate(85 165)">
+    <rect class="box" width="260" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">1</text>
+    <text class="stage-title" x="82" y="44">Import/Hydrate</text>
+    <text class="stage-title" x="82" y="72">Speaker</text>
+    <text class="stage-detail" x="32" y="108">Load the active workspace</text>
+    <text class="stage-detail" x="32" y="130">from raw or processed artifacts.</text>
+  </g>
+
+  <g transform="translate(405 165)">
+    <rect class="box" width="290" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">2</text>
+    <text class="stage-title" x="82" y="52">Normalize Audio</text>
+    <text class="stage-detail" x="32" y="98">Prepare a stable working WAV</text>
+    <text class="stage-detail" x="32" y="120">before transcription support jobs.</text>
+  </g>
+
+  <g transform="translate(755 165)">
+    <rect class="box" width="290" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">3</text>
+    <text class="stage-title" x="82" y="44">Run STT/ORTH/IPA</text>
+    <text class="stage-title" x="82" y="72">Pipeline</text>
+    <text class="stage-detail" x="32" y="108">Full STT/ORTH are chunk-aware;</text>
+    <text class="stage-detail" x="32" y="130">IPA follows reviewed intervals.</text>
+  </g>
+
+  <g transform="translate(1105 165)">
+    <rect class="box" width="310" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">4</text>
+    <text class="stage-title" x="82" y="44">Review &amp; Edit in</text>
+    <text class="stage-title" x="82" y="72">Annotate Mode</text>
+    <text class="stage-detail" x="32" y="108">Correct timestamps, IPA, ORTH,</text>
+    <text class="stage-detail" x="32" y="130">and concept boundaries.</text>
+  </g>
+
+  <!-- row 2, right to left -->
+  <g transform="translate(1105 455)">
+    <rect class="box" width="310" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">5</text>
+    <text class="stage-title" x="82" y="44">Search &amp; Confirm</text>
+    <text class="stage-title" x="82" y="72">Anchors</text>
+    <text class="stage-detail" x="32" y="108">Rank candidate lexeme spans,</text>
+    <text class="stage-detail" x="32" y="130">then persist confirmed anchors.</text>
+  </g>
+
+  <g transform="translate(755 455)">
+    <rect class="box" width="290" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">6</text>
+    <text class="stage-title" x="82" y="44">Switch to</text>
+    <text class="stage-title" x="82" y="72">Compare Mode</text>
+    <text class="stage-detail" x="32" y="108">Move from one speaker timeline</text>
+    <text class="stage-detail" x="32" y="130">to cross-speaker rows.</text>
+  </g>
+
+  <g transform="translate(405 455)">
+    <rect class="box" width="290" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">7</text>
+    <text class="stage-title" x="82" y="44">Adjudicate Cognates</text>
+    <text class="stage-title" x="82" y="72">&amp; Borrowing</text>
+    <text class="stage-detail" x="32" y="108">Review forms, variants, CLEF,</text>
+    <text class="stage-detail" x="32" y="130">tags, and manual decisions.</text>
+  </g>
+
+  <g transform="translate(85 455)">
+    <rect class="box" width="260" height="140"/>
+    <circle class="badge" cx="42" cy="42" r="22"/>
+    <text class="number" x="42" y="49" text-anchor="middle">8</text>
+    <text class="stage-title" x="82" y="52">Export</text>
+    <text class="stage-detail" x="32" y="98">Generate downstream outputs:</text>
+    <text class="stage-detail" x="32" y="120">LingPy TSV or NEXUS.</text>
+  </g>
+
+  <g transform="translate(420 664)">
+    <rect x="0" y="0" width="760" height="52" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" opacity="0.92"/>
+    <text class="caption" x="380" y="22" text-anchor="middle">Mental model: support jobs assist review; annotations and enrichments remain the research record.</text>
+    <text class="caption-small" x="380" y="42" text-anchor="middle">Frontend stores keep mode, speaker/concept selection, playback seeks, annotation edits, tags, config, and adjudication overlays synchronized.</text>
+  </g>
+</svg>

@@ -20,13 +20,15 @@ The same workspace, tag system, and backend data model support both.
 
 A typical PARSE session moves through these stages:
 
+![Typical Field Session in PARSE flowchart](./user-guides/assets/typical-field-session-flowchart.svg)
+
 1. Import or hydrate a speaker into the active workspace
 2. Normalize the audio if needed
-3. Run STT, ORTH, and acoustic IPA support jobs
-4. Review and correct boundaries in Annotate mode
-5. Use **Search & anchor lexeme** when concept locations are difficult to find
+3. Run the STT / ORTH / IPA support pipeline with chunk awareness for long STT/ORTH jobs
+4. Review and correct boundaries, IPA, and ORTH in Annotate mode
+5. Use **Search & anchor lexeme** when concept locations are difficult to find, then confirm the chosen anchor
 6. Switch to Compare mode for cross-speaker adjudication
-7. Consult **CLEF** when borrowing or contact influence is in question
+7. Adjudicate cognates, canonical realizations, tags, and borrowing evidence, consulting **CLEF** when contact influence is in question
 8. Export LingPy TSV or NEXUS for downstream analysis
 
 ## PARSE Annotation Pipeline Mental Model
