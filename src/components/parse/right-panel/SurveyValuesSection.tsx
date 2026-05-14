@@ -7,9 +7,7 @@ import {
   defaultSurveySettings,
   normalizeSurveyId,
   resolveConceptSurvey,
-  SURVEY_CHIP_CLASSES,
   SWATCH_HEX_BY_COLOR,
-  surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from '../../../lib/surveyLinksForSpeaker';
@@ -47,12 +45,6 @@ const SURVEY_COLOR_PALETTE = [
   'slate',
 ] as const;
 
-function chipClass(active: boolean, colorKey: string, colorCoding: boolean): string {
-  if (active && colorCoding) return SURVEY_CHIP_CLASSES[colorKey] ?? SURVEY_CHIP_CLASSES.slate;
-  if (active) return 'bg-slate-900 text-white ring-slate-900';
-  return 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50';
-}
-
 export function SurveyValuesSection({
   activeConcept,
   activeSpeaker,
@@ -86,14 +78,6 @@ export function SurveyValuesSection({
       return Object.entries(links ?? {}).some(([surveyId, sourceItem]) => normalizeSurveyId(surveyId) && String(sourceItem ?? '').trim());
     });
   }, [activeConcept, activeSpeaker, speakerConceptSurveyLinks]);
-  const bucketSourceItemBySurveyId = useMemo(
-    () => Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
-    [speakerBuckets],
-  );
-  const conceptChoices = useMemo(() => {
-    if (speakerBuckets.length > 0) return speakerBuckets.map((bucket) => bucket.surveyId);
-    return activeConcept ? surveyChoiceKeysForConcept(activeConcept) : [];
-  }, [activeConcept, speakerBuckets]);
   const resolved = useMemo<{ surveyId: string; sourceItem: string }>(() => {
     if (!activeConcept) return { surveyId: '', sourceItem: '' };
     if (speakerBuckets.length === 0) {
@@ -107,22 +91,6 @@ export function SurveyValuesSection({
     return { surveyId: bucket.surveyId, sourceItem: bucket.sourceItem };
   }, [activeConcept, activeSpeaker, hasSpeakerOverride, speakerBuckets, speakerSurveyChoices, surveySettings]);
   const hasWorkspaceSurveys = workspaceChoices.length > 0;
-  const conceptKey = activeConcept?.key ?? '';
-  const speaker = activeSpeaker ?? '';
-
-  const updateChoice = (surveyId: string) => {
-    if (!speaker || !conceptKey) return;
-    onSurveyOverlapUpdate({
-      speaker_choices: {
-        ...speakerSurveyChoices,
-        [speaker]: {
-          ...(speakerSurveyChoices[speaker] ?? {}),
-          [conceptKey]: surveyId,
-        },
-      },
-    });
-  };
-
   const updateLabel = (surveyId: string, label: string) => {
     const existing = surveySettings[surveyId] ?? defaultSurveySettings(surveyId);
     onSurveyOverlapUpdate({
@@ -234,28 +202,6 @@ export function SurveyValuesSection({
                     <span className="ml-1 font-mono text-slate-700">{resolved.sourceItem}</span>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
-
-            {activeConcept && conceptChoices.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {conceptChoices.map((surveyId) => {
-                const sourceItem = bucketSourceItemBySurveyId[surveyId] ?? activeConcept.surveys?.[surveyId] ?? '';
-                const label = surveyLabelFor(surveyId, surveySettings);
-                const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
-                const active = resolved.surveyId === surveyId;
-                return (
-                  <button
-                    key={surveyId}
-                    type="button"
-                    aria-label={active ? `Current survey ${label} ${sourceItem}` : `Switch ${activeConcept.name} to ${label} ${sourceItem}`}
-                    onClick={() => updateChoice(surveyId)}
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${chipClass(active, displayColor, surveyColorCodingEnabled)}`}
-                  >
-                    {label} <span className="font-mono">{sourceItem}</span>
-                  </button>
-                );
-                })}
               </div>
             ) : null}
 

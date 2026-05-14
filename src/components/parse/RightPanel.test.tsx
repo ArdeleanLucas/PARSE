@@ -106,8 +106,7 @@ describe('RightPanel', () => {
     expect(within(section as HTMLElement).getAllByRole('button')).toHaveLength(3);
   });
 
-  it('renders Survey Values between Speakers and Timestamp tools and persists per-speaker flips', () => {
-    const onSurveyOverlapUpdate = vi.fn();
+  it('renders Survey Values between Speakers and Timestamp tools with the active survey summary', () => {
     renderRightPanel({
       currentMode: 'annotate',
       selectedSpeakers: ['Fail01'],
@@ -126,7 +125,7 @@ describe('RightPanel', () => {
         jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
       },
       speakerSurveyChoices: { Fail01: { rain: 'jbil' } },
-      onSurveyOverlapUpdate,
+      onSurveyOverlapUpdate: vi.fn(),
     });
 
     const surveyHeader = screen.getByRole('button', { name: /Survey Values/i });
@@ -137,12 +136,6 @@ describe('RightPanel', () => {
     expect(summary.textContent ?? '').toContain('Jbil Modal');
     expect(summary.textContent ?? '').toContain('Source item');
     expect(summary.textContent ?? '').toContain('JBIL_100');
-
-    fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
-
-    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      speaker_choices: { Fail01: { rain: 'klq' } },
-    }));
   });
 
   it('supports Survey Values label edit save/cancel and keeps color coding toggle enabled for a single survey', () => {
@@ -296,8 +289,6 @@ describe('RightPanel', () => {
     expect(screen.getAllByText('Kurdish List').length).toBeGreaterThan(0);
     expect(screen.getByText('jbil')).toBeTruthy();
     expect(screen.getByText('WALS')).toBeTruthy();
-
-    expect(screen.getByRole('button', { name: /Current survey Kurdish List KLQ_1.10/i }).className).toContain('bg-teal-50');
 
     fireEvent.click(screen.getByRole('button', { name: 'Set Kurdish List color to rose' }));
     expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({
