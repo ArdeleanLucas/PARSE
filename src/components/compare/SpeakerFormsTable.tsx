@@ -47,6 +47,7 @@ function errorMessage(error: unknown): string {
 export interface SpeakerFormsTableVariant {
   csv_row_id: string;
   label: string;          // variant_label ?? concept_en ?? label ?? csv_row_id
+  letter: string;
   ipa: string | null;     // candidate.ipa
   ortho: string | null;   // candidate.ortho
   source_wav: string | null;
@@ -90,9 +91,12 @@ function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsT
     .map(({ variant }) => {
       const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
       const label = variant.variant_label ?? variant.concept_en ?? variant.label ?? variant.csv_row_id;
+      const letterFromLabel = variant.label?.match(/\(([A-Z])\)/)?.[1] ?? '';
+      const letter = letterFromLabel || (/^[A-Z]$/.test(variant.variant_label ?? '') ? variant.variant_label! : '');
       return {
         csv_row_id: variant.csv_row_id,
         label,
+        letter,
         ipa: candidate?.ipa ?? null,
         ortho: candidate?.ortho ?? null,
         source_wav: candidate?.source_wav ?? null,
@@ -299,9 +303,9 @@ function VariantCard({
           />
         </label>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-2">
+          <div className="flex flex-wrap items-baseline gap-2" data-testid={`variant-card-header-${speaker}-${variant.csv_row_id}`}>
             <span className="font-mono text-[10px] text-slate-400">{variant.csv_row_id}</span>
-            <span className="text-[13px] font-semibold text-slate-800">{variant.label}</span>
+            {variant.letter && <span className="text-[13px] font-semibold text-slate-800">{variant.letter}</span>}
             {variant.ipa && (
               <span className="font-mono text-[13px] text-indigo-700">/{variant.ipa}/</span>
             )}
@@ -319,11 +323,6 @@ function VariantCard({
               </span>
             )}
           </div>
-          {typeof candidate?.start_sec === 'number' && typeof candidate?.end_sec === 'number' && (
-            <div className="mt-1 font-mono text-[10px] text-slate-400">
-              {candidate.start_sec.toFixed(2)}–{candidate.end_sec.toFixed(2)}s
-            </div>
-          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
@@ -600,6 +599,12 @@ function ExpandedPanel({
 
   const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
   const warnings = bundle.warnings ?? [];
+  const timestampVariant = current
+    ? variants.find((variant) => variant.csv_row_id === current.csv_row_id) ?? variants[0]
+    : variants[0];
+  const timestampText = typeof timestampVariant?.start_sec === 'number' && typeof timestampVariant?.end_sec === 'number'
+    ? `${timestampVariant.start_sec.toFixed(2)}s – ${timestampVariant.end_sec.toFixed(2)}s`
+    : '—';
 
   return (
     <div className="space-y-4 px-3 py-4">
@@ -701,6 +706,12 @@ function ExpandedPanel({
               <dt className="w-24 text-slate-400">Variants</dt>
               <dd className="font-mono text-slate-700">{variants.length}</dd>
             </div>
+            <div className="flex gap-2">
+              <dt className="w-24 text-slate-400">Timestamp</dt>
+              <dd className="font-mono text-slate-700" data-testid={`metadata-timestamp-${speaker}`}>
+                {timestampText}
+              </dd>
+            </div>
           </dl>
         </div>
         {warnings.length > 0 && (
@@ -743,7 +754,7 @@ export function SpeakerFormsTable({
   onResetCognate,
   onToggleSpeakerFlag,
   onOpenInAnnotate = () =>
-    console.warn('[SpeakerFormsTable] onOpenInAnnotate not wired — see MC-388-B'),
+    console.warn('[SpeakerFormsTable] onOpenInAnnotate not wired — see MC-388-I'),
 }: SpeakerFormsTableProps) {
   const formsBySpeaker = useMemo(
     () => new Map(speakerForms.map((form) => [form.speaker, form])),
@@ -765,11 +776,15 @@ export function SpeakerFormsTable({
     setFilterMenuOpen(false);
   }, [conceptKey]);
 
-  // Reset expansion to the first speaker when the speaker list changes.
+  // Reset expansion to the restored speaker, or the first speaker when the speaker list changes.
   useEffect(() => {
     setExpanded((current) => {
+      if (initialExpandedSpeaker !== undefined) {
+        if (speakers.includes(initialExpandedSpeaker)) return initialExpandedSpeaker;
+        return current && speakers.includes(current) ? current : null;
+      }
       if (current && speakers.includes(current)) return current;
-      return initialExpandedSpeaker ?? speakers[0] ?? null;
+      return speakers[0] ?? null;
     });
   }, [initialExpandedSpeaker, speakers]);
 

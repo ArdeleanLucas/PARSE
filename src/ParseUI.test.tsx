@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
 import type { ActiveJobSnapshot } from "./api/contracts/job-observability";
 import { useTranscriptionLanesStore } from "./stores/transcriptionLanesStore";
+import { useCompareReturnStore } from "./stores/compareReturnStore";
+import { usePlaybackStore } from "./stores/playbackStore";
 
 const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
   mockGetAuthStatus: vi.fn(),
@@ -15,6 +17,8 @@ let mockConfig: ProjectConfig | null = null;
 let mockTags: Tag[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedRegion: { start: number; end: number } | null = { start: 1.25, end: 2.5 };
+let mockPlaybackActiveSpeaker: string | null = null;
+let mockPendingSeek: { targetSec: number; nonce: number } | null = null;
 let mockCurrentTime = 0;
 
 const mockLoadConfig = vi.fn().mockResolvedValue(undefined);
@@ -155,19 +159,38 @@ vi.mock("./stores/annotationStore", () => {
 });
 
 vi.mock("./stores/playbackStore", () => {
+  const setActiveSpeaker = (speaker: string) => {
+    mockPlaybackActiveSpeaker = speaker;
+    mockCurrentTime = 0;
+    mockSetActiveSpeaker(speaker);
+  };
+  const requestSeek = (targetSec: number) => {
+    mockPendingSeek = { targetSec, nonce: (mockPendingSeek?.nonce ?? 0) + 1 };
+  };
   const usePlaybackStore = (selector: (s: unknown) => unknown) =>
     selector({
-      activeSpeaker: null,
+      activeSpeaker: mockPlaybackActiveSpeaker,
       isPlaying: false,
       currentTime: mockCurrentTime,
       duration: 4,
       selectedRegion: mockSelectedRegion,
+      pendingSeek: mockPendingSeek,
+      setActiveSpeaker,
+      requestSeek,
       setSelectedRegion: mockSetSelectedRegion,
     });
   (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockPlaybackSetState(...args);
-  (usePlaybackStore as unknown as { getState: () => { currentTime: number } }).getState = () => ({
+  (usePlaybackStore as unknown as { getState: () => unknown }).getState = () => ({
+    activeSpeaker: mockPlaybackActiveSpeaker,
+    isPlaying: false,
     currentTime: mockCurrentTime,
+    duration: 4,
+    selectedRegion: mockSelectedRegion,
+    pendingSeek: mockPendingSeek,
+    setActiveSpeaker,
+    requestSeek,
+    setSelectedRegion: mockSetSelectedRegion,
   });
   return { usePlaybackStore };
 });
@@ -662,6 +685,8 @@ beforeEach(() => {
   mockGetCompareBundles.mockImplementation(() => Promise.resolve(makeFakeBundleMatchingConceptKey()));
   mockPatchCanonicalLexeme.mockClear();
   mockSelectedRegion = { start: 1.25, end: 2.5 };
+  mockPlaybackActiveSpeaker = null;
+  mockPendingSeek = null;
   mockCurrentTime = 0;
   mockChatMessages = [];
   mockChatSending = false;
@@ -752,6 +777,7 @@ beforeEach(() => {
     sttSourceBySpeaker: {},
     selectedInterval: null,
   });
+  useCompareReturnStore.getState().clear();
 });
 
 afterEach(() => {
@@ -2282,6 +2308,44 @@ describe("ParseUI", () => {
     // Kzn03 row has no similarity entry -- both columns fall back to "—".
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("opens a Speaker Forms variant in Annotate and restores its expanded compare row on return", async () => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    configureBigCompareWorkspace();
+    const bundlePayload = makeBeShapedBigCompareBundles();
+    bundlePayload.bundles[0].candidates.Fail01["53"] = {
+      csv_row_id: "53",
+      ipa: "gawra",
+      ortho: "big",
+      start_sec: 1524.743,
+      end_sec: 1525.584,
+      realization_index: 0,
+    };
+    mockGetCompareBundles.mockResolvedValue(bundlePayload);
+
+    render(<ParseUI />);
+
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
+    fireEvent.click(await screen.findByTestId("variant-open-annotate-Fail01-53"));
+
+    await waitFor(() => expect(window.localStorage.getItem("parse.currentMode")).toBe("annotate"));
+    const playbackState = usePlaybackStore.getState() as {
+      activeSpeaker: string | null;
+      pendingSeek: { targetSec: number; nonce: number } | null;
+    };
+    expect(playbackState.activeSpeaker).toBe("Fail01");
+    expect(playbackState.pendingSeek?.targetSec).toBe(1524.743);
+    expect(useCompareReturnStore.getState().snapshot).toMatchObject({
+      conceptId: 1,
+      conceptKey: "53",
+      expandedSpeaker: "Fail01",
+    });
+
+    await switchToCompareMode();
+
+    await waitFor(() => expect(useCompareReturnStore.getState().snapshot).toBeNull());
+    expect(await screen.findByTestId("speaker-expanded-Fail01")).toBeTruthy();
   });
 
   it("renders dynamic similarity columns based on CLEF primary_contact_languages (not hardcoded Arabic/Persian)", async () => {
