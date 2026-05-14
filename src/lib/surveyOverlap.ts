@@ -23,6 +23,18 @@ export const SURVEY_CHIP_CLASSES: Record<string, string> = {
   slate: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
 
+/** Literal hex values for the 5 user-pickable swatch colors. Used by the
+ * Survey Values swatch picker to render true colors regardless of theme;
+ * bypasses the dark-mode bg-X-50 overrides that would otherwise collapse
+ * every swatch to a similar dim grey. */
+export const SWATCH_HEX_BY_COLOR: Record<string, string> = {
+  indigo: '#6366F1',
+  emerald: '#10B981',
+  amber: '#F59E0B',
+  rose: '#F43F5E',
+  slate: '#64748B',
+};
+
 export const SURVEY_BADGE_TEXT_CLASSES: Record<string, string> = {
   indigo: 'text-indigo-500',
   violet: 'text-violet-500',

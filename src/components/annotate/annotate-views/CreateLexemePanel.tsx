@@ -64,8 +64,8 @@ export function CreateLexemePanel({
   }, [inFlightRegion]);
 
   return (
-    <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 px-4 py-3 text-[12px] text-slate-700">
-      <p className="mb-2 font-semibold text-slate-800">No lexeme interval yet for this variant.</p>
+    <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/60 px-4 py-3 text-[12px] text-slate-700">
+      <p className="mb-2 font-semibold text-indigo-700">No lexeme interval yet for this variant.</p>
       <p className="mb-3 text-slate-600">Drag on the waveform above to mark the audio span for this lexeme.</p>
       <div className="flex flex-wrap items-center gap-3">
         <div data-testid="create-lexeme-start" className="font-mono text-[11px] text-slate-700">

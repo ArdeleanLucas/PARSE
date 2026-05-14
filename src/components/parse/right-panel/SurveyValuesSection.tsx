@@ -8,6 +8,7 @@ import {
   normalizeSurveyId,
   resolveConceptSurvey,
   SURVEY_CHIP_CLASSES,
+  SWATCH_HEX_BY_COLOR,
   surveyChoiceKeysForConcept,
   surveyLabelFor,
 } from '../../../lib/surveyOverlap';
@@ -310,17 +311,23 @@ export function SurveyValuesSection({
                         </div>
                         {!surveyColorCodingEnabled ? <p className="text-[9px] text-slate-400">Turn on color-coding to apply.</p> : null}
                         <div className={`grid grid-cols-5 gap-1 ${surveyColorCodingEnabled ? '' : 'opacity-40'}`}>
-                          {SURVEY_COLOR_PALETTE.map((color) => (
-                            <button
-                              key={color}
-                              type="button"
-                              aria-label={`Set ${label} color to ${color}`}
-                              title={color}
-                              disabled={!surveyColorCodingEnabled}
-                              onClick={() => updateColor(surveyId, color)}
-                              className={`h-5 rounded-full ring-1 disabled:cursor-not-allowed ${SURVEY_CHIP_CLASSES[color] ?? SURVEY_CHIP_CLASSES.slate} ${displayColor === color ? 'outline outline-2 outline-offset-1 outline-slate-400' : ''}`}
-                            />
-                          ))}
+                          {SURVEY_COLOR_PALETTE.map((color) => {
+                            const hex = SWATCH_HEX_BY_COLOR[color] ?? SWATCH_HEX_BY_COLOR.slate;
+                            const isSelected = displayColor === color;
+                            return (
+                              <button
+                                key={color}
+                                type="button"
+                                aria-label={`Set ${label} color to ${color}`}
+                                title={color}
+                                disabled={!surveyColorCodingEnabled}
+                                onClick={() => updateColor(surveyId, color)}
+                                data-selected={isSelected ? 'true' : undefined}
+                                style={{ backgroundColor: hex }}
+                                className={`survey-swatch h-5 rounded-full disabled:cursor-not-allowed ${isSelected ? 'survey-swatch-selected' : ''}`}
+                              />
+                            );
+                          })}
                         </div>
                       </div>
                     )}

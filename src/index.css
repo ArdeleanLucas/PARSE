@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Survey color swatches — selected indicator. */
+.survey-swatch {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.survey-swatch-selected {
+  outline: 2px solid #6366F1;
+  outline-offset: 2px;
+}
+
+html:is(.theme-amber, .theme-violet, .theme-blue) .survey-swatch-selected {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+}
+
 /* ============================================================
    Dark themes — three approved palettes, cycled via the theme
    button. Toggled by adding `html.theme-amber`, `html.theme-violet`,
@@ -210,6 +225,7 @@ html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50 { background-col
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/30 { background-color: var(--accent-faint) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/40 { background-color: var(--accent-faint) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/50 { background-color: var(--accent-dim) !important; }
+html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-50\/60 { background-color: var(--accent-dim) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-100 { background-color: var(--accent-dim) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-600 { background-color: var(--accent) !important; color: var(--accent-text) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-indigo-700,
